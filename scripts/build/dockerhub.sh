@@ -4,6 +4,7 @@ cross build \
     --bin grandine \
     --target x86_64-unknown-linux-gnu \
     --features default-networks \
+    --features tracing          \
     --profile compact           \
     --workspace                 \
     --exclude zkvm_host         \
@@ -20,6 +21,7 @@ cross build \
     --bin grandine \
     --target aarch64-unknown-linux-gnu \
     --features default-networks \
+    --features tracing          \
     --profile compact           \
     --workspace                 \
     --exclude zkvm_host         \

@@ -792,6 +792,7 @@ where
 
     #[instrument(
         parent = None,
+        level = "debug",
         skip_all
         fields(origin = ?origin)
     )]
@@ -799,7 +800,7 @@ where
         self.spawn_block_task_with_wait_group(self.owned_wait_group(), block, origin)
     }
 
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     fn spawn_block_task_with_wait_group(
         &self,
         wait_group: W,

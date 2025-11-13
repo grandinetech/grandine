@@ -58,6 +58,7 @@ use ssz::Uint256;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
+use tracing::Level;
 use types::{
     bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
@@ -395,6 +396,10 @@ struct BeaconNodeOptions {
     #[clap(long)]
     remote_metrics_url: Option<RedactingUrl>,
 
+    /// The default tracing level controlling how detailed telemetry output will be.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
+    telemetry_level: Level,
+
     /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to
     #[clap(long)]
     telemetry_metrics_url: Option<RedactingUrl>,
@@ -566,6 +571,7 @@ impl BeaconNodeOptions {
             return Some(TelemetryConfig {
                 url,
                 service_name: self.telemetry_service_name.clone(),
+                trace_level: self.telemetry_level,
             });
         }
 
@@ -1884,12 +1890,17 @@ mod tests {
             telemetry_config
                 .as_ref()
                 .map(|config| config.url.to_string()),
-            Some("http://localhost:4317/".to_owned())
+            Some("http://localhost:4317/".to_owned()),
+        );
+
+        assert_eq!(
+            telemetry_config.as_ref().map(|config| config.trace_level),
+            Some(Level::INFO),
         );
 
         assert_eq!(
             telemetry_config.map(|config| config.service_name),
-            Some("Grandine".to_owned())
+            Some("Grandine".to_owned()),
         );
     }
 
@@ -1900,6 +1911,8 @@ mod tests {
             "http://localhost:4317",
             "--telemetry-service-name",
             "grandine-bn",
+            "--telemetry-level",
+            "debug",
         ]);
 
         let telemetry_config = config.telemetry_config;
@@ -1908,12 +1921,17 @@ mod tests {
             telemetry_config
                 .as_ref()
                 .map(|config| config.url.to_string()),
-            Some("http://localhost:4317/".to_owned())
+            Some("http://localhost:4317/".to_owned()),
+        );
+
+        assert_eq!(
+            telemetry_config.as_ref().map(|config| config.trace_level),
+            Some(Level::DEBUG),
         );
 
         assert_eq!(
             telemetry_config.map(|config| config.service_name),
-            Some("grandine-bn".to_owned())
+            Some("grandine-bn".to_owned()),
         );
     }
 
@@ -1922,6 +1940,12 @@ mod tests {
         try_config_from_args(["--telemetry-service-name", "grandine-bn"]).expect_err(
             "passing --telemetry-service-name without --telemetry-metrics-url should fail",
         );
+    }
+
+    #[test]
+    fn telemetry_level_without_url() {
+        try_config_from_args(["--telemetry-level", "debug"])
+            .expect_err("passing --telemetry-level without --telemetry-metrics-url should fail");
     }
 
     #[test]

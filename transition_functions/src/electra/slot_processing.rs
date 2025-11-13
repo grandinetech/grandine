@@ -9,7 +9,7 @@ use types::{
 use super::epoch_processing;
 use crate::unphased::{self, Error};
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_slots<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

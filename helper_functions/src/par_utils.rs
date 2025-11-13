@@ -30,14 +30,14 @@ macro_rules! into_par_iter {
     }};
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn join<T1: Send, T2: Send, F1: FnOnce() -> T1 + Send, F2: FnOnce() -> T2 + Send>(
     f1: F1,
     f2: F2,
 ) -> (T1, T2) {
     #[cfg(all(feature = "tracing", not(target_os = "zkvm")))]
     {
-        let span = tracing::Span::current();
+        let span = tracing::debug_span!("helper_functions::join");
 
         return rayon::join(
             || {

@@ -12,6 +12,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 use tokio::runtime::Runtime;
+use tracing::Level;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     filter::LevelFilter,
@@ -29,6 +30,7 @@ static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 pub struct TelemetryConfig {
     pub url: RedactingUrl,
     pub service_name: String,
+    pub trace_level: Level,
 }
 
 #[derive(Clone)]
@@ -104,16 +106,7 @@ pub fn initialize_tracing_logger(
         .add_directive("validator=info".parse()?)
         .add_directive("validator_key_cache=info".parse()?)
         .add_directive("validator_statistics=info".parse()?)
-        .add_directive("web3=info".parse()?);
-
-    #[cfg(feature = "tracing")]
-    {
-        filter = filter
-            .add_directive("helper_functions=info".parse()?)
-            .add_directive("transition_functions=info".parse()?);
-    }
-
-    filter = filter
+        .add_directive("web3=info".parse()?)
         .add_directive(format!("{module_path}=info").parse()?)
         .add_directive(format!("{}=info", module_path!()).parse()?);
 
@@ -123,7 +116,7 @@ pub fn initialize_tracing_logger(
         }
     }
 
-    let (filter_layer, handle) = reload::Layer::new(filter.clone());
+    let (filter_layer, handle) = reload::Layer::new(filter);
 
     let enable_ansi = always_write_style || io::stdout().is_terminal();
 
@@ -140,7 +133,63 @@ pub fn initialize_tracing_logger(
     let mut telemetry_runtime = None;
 
     if let Some(telemetry_config) = telemetry_config {
-        let TelemetryConfig { url, service_name } = telemetry_config;
+        let TelemetryConfig {
+            url,
+            service_name,
+            trace_level,
+        } = telemetry_config;
+
+        let mut telemetry_filter = EnvFilter::default()
+            .add_directive(LevelFilter::OFF.into())
+            .add_directive(format!("attestation_verifier={trace_level}").parse()?)
+            .add_directive(format!("block_producer={trace_level}").parse()?)
+            .add_directive(format!("builder_api={trace_level}").parse()?)
+            .add_directive(format!("data_dumper={trace_level}").parse()?)
+            .add_directive(format!("database={trace_level}").parse()?)
+            .add_directive(format!("dedicated_executor={trace_level}").parse()?)
+            .add_directive(format!("doppelganger_protection={trace_level}").parse()?)
+            .add_directive(format!("eth1={trace_level}").parse()?)
+            .add_directive(format!("eth1_api={trace_level}").parse()?)
+            .add_directive(format!("eth2_libp2p={trace_level}").parse()?)
+            .add_directive(format!("execution_engine={trace_level}").parse()?)
+            .add_directive(format!("features={trace_level}").parse()?)
+            .add_directive(format!("fork_choice_control={trace_level}").parse()?)
+            .add_directive(format!("fork_choice_store={trace_level}").parse()?)
+            .add_directive(format!("genesis={trace_level}").parse()?)
+            .add_directive(format!("helper_functions={trace_level}").parse()?)
+            .add_directive(format!("http_api={trace_level}").parse()?)
+            .add_directive(format!("http_api_utils={trace_level}").parse()?)
+            .add_directive(format!("keymanager={trace_level}").parse()?)
+            .add_directive(format!("liveness_tracker={trace_level}").parse()?)
+            .add_directive(format!("metrics={trace_level}").parse()?)
+            .add_directive(format!("operation_pools={trace_level}").parse()?)
+            .add_directive(format!("p2p={trace_level}").parse()?)
+            .add_directive(format!("prometheus_metrics={trace_level}").parse()?)
+            .add_directive(format!("pubkey_cache={trace_level}").parse()?)
+            .add_directive(format!("runtime={trace_level}").parse()?)
+            .add_directive(format!("signer={trace_level}").parse()?)
+            .add_directive(format!("slasher={trace_level}").parse()?)
+            .add_directive(format!("slashing_protection={trace_level}").parse()?)
+            .add_directive(format!("state_cache={trace_level}").parse()?)
+            .add_directive(format!("storage={trace_level}").parse()?)
+            .add_directive(format!("validator={trace_level}").parse()?)
+            .add_directive(format!("validator_key_cache={trace_level}").parse()?)
+            .add_directive(format!("validator_statistics={trace_level}").parse()?)
+            .add_directive(format!("{module_path}={trace_level}").parse()?)
+            .add_directive(format!("{}={trace_level}", module_path!()).parse()?);
+
+        #[cfg(feature = "tracing")]
+        {
+            telemetry_filter = telemetry_filter
+                .add_directive(format!("helper_functions={trace_level}").parse()?)
+                .add_directive(format!("transition_functions={trace_level}").parse()?)
+        }
+
+        if let Ok(env_filter) = EnvFilter::try_from_env("GRANDINE_TRACE_LOG") {
+            for directive in env_filter.to_string().split(',') {
+                telemetry_filter = telemetry_filter.add_directive(directive.parse()?)
+            }
+        }
 
         // A Tokio runtime is required for the gRPC exporter’s async operations.
         // This runtime persists across app restarts (since the logger isn’t reinitialized),
@@ -171,7 +220,7 @@ pub fn initialize_tracing_logger(
             let tracer = provider.tracer("grandine");
             let telemetry_layer = tracing_opentelemetry::layer()
                 .with_tracer(tracer)
-                .with_filter(filter);
+                .with_filter(telemetry_filter);
 
             layers.push(telemetry_layer.boxed());
 

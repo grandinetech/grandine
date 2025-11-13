@@ -28,7 +28,7 @@ impl ProcessSlots {
     }
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_slot<P: Preset>(state: &mut impl BeaconState<P>) {
     let slot = state.slot();
 

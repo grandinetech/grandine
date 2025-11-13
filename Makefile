@@ -8,8 +8,10 @@ ifeq ($(METRICS),1)
 endif
 
 # build with tracing support for core crates (transition_functions, helper_functions)
-# e.g. make TRACING=1
-ifeq ($(TRACING),1)
+# e.g. make DISABLE_TRACING=1
+DISABLE_TRACING ?= 0
+
+ifeq ($(DISABLE_TRACING),0)
 	FEATURES := $(FEATURES) --features tracing
 endif
 

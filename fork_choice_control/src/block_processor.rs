@@ -137,7 +137,7 @@ impl<P: Preset> BlockProcessor<P> {
     }
 
     #[expect(clippy::too_many_arguments)]
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     pub fn perform_state_transition(
         &self,
         mut state: Arc<BeaconState<P>>,
@@ -198,7 +198,7 @@ impl<P: Preset> BlockProcessor<P> {
         })
     }
 
-    #[instrument(ret, skip_all)]
+    #[instrument(ret(level = "debug"), level = "debug", skip_all)]
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
         store: &Store<P, Storage<P>>,

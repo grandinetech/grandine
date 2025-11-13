@@ -123,7 +123,7 @@ impl<P: Preset> StateCacheProcessor<P> {
     // - that could lead to excessive mem and CPU usage and result in DoS).
     // The exception is block sync - which should be allowed, because it's
     // the only way for the chain to progress in long periods without blocks.
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     pub fn try_state_at_slot_for_block_sync<S: Storage<P>>(
         &self,
         pubkey_cache: &PubkeyCache,
@@ -203,7 +203,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         self.state_cache.set_log_lock_timeouts(log_lock_timeouts);
     }
 
-    #[instrument(skip_all)]
+    #[instrument(level = "debug", skip_all)]
     fn try_get_state_at_slot<S: Storage<P>>(
         &self,
         pubkey_cache: &PubkeyCache,
@@ -246,7 +246,7 @@ impl<P: Preset> StateCacheProcessor<P> {
 }
 
 #[expect(clippy::too_many_arguments)]
-#[instrument(skip_all)]
+#[instrument(level = "debug", skip_all)]
 fn process_slots<P: Preset, S: Storage<P>>(
     pubkey_cache: &PubkeyCache,
     store: &Store<P, S>,
@@ -319,7 +319,7 @@ fn should_print_slot_processing_warning() -> bool {
     Feature::WarnOnStateCacheSlotProcessing.is_enabled()
 }
 
-#[instrument(skip_all)]
+#[instrument(level = "debug", skip_all)]
 fn store_state_before_or_at_slot<P: Preset, S: Storage<P>>(
     store: &Store<P, S>,
     block_root: H256,

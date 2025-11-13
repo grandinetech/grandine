@@ -244,7 +244,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_withdrawals<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     execution_payload: &impl PostCapellaExecutionPayload<P>,
@@ -506,7 +506,7 @@ fn process_execution_payload<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -642,7 +642,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_proposer_slashing<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -671,7 +671,7 @@ pub fn process_proposer_slashing<P: Preset>(
     )
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_attester_slashing<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -702,7 +702,7 @@ pub fn process_attester_slashing<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn apply_attestation<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
@@ -762,7 +762,7 @@ pub fn apply_attestation<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn validate_attestation_with_verifier<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -1022,7 +1022,7 @@ pub fn apply_deposits<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_voluntary_exit<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -1081,7 +1081,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_withdrawal_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
@@ -1171,7 +1171,7 @@ pub fn process_withdrawal_request<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_deposit_request<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     deposit_request: DepositRequest,
@@ -1202,7 +1202,7 @@ pub fn process_deposit_request<P: Preset>(
     Ok(())
 }
 
-#[cfg_attr(feature = "tracing", tracing::instrument(skip_all))]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_consolidation_request<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,

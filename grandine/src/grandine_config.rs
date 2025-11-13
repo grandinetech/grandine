@@ -154,8 +154,8 @@ impl GrandineConfig {
             );
         }
 
-        if let Some(TelemetryConfig { url, service_name }) = telemetry_config {
-            info!("telemetry metrics url: {url}, service_name: {service_name}");
+        if let Some(config) = telemetry_config {
+            info!("telemetry export configured with: {config:?}");
         } else {
             info!("telemetry metrics data export disabled");
         }
