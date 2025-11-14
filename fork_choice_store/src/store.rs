@@ -2218,7 +2218,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if let Some(fulu_data_column_sidecar) = data_column_sidecar.pre_gloas() {
                 // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
                 ensure!(
-                    verify_sidecar_inclusion_proof(&fulu_data_column_sidecar, metrics),
+                    verify_sidecar_inclusion_proof(fulu_data_column_sidecar, metrics),
                     Error::DataColumnSidecarInvalidInclusionProof {
                         data_column_sidecar
                     }
@@ -2276,13 +2276,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let block_root = data_column_sidecar.beacon_block_root;
         let column_index = data_column_sidecar.index;
         let slot = data_column_sidecar.slot;
+        let data_column_sidecar = Arc::new(data_column_sidecar.into());
 
         // Ignore non-sampling data column sidecars
         if !self.sampling_columns.contains(&column_index) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
-
-        let data_column_sidecar = Arc::new(data_column_sidecar.into());
 
         let Some(chain_link) = self.chain_link(block_root) else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
@@ -2302,7 +2301,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
         let Some(payload_bid) = self.accepted_payload_bids.get(&(slot, block_root)) else {
-            // TODO: (gloas): need another variant for delay until payload bid?
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
@@ -2353,11 +2351,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if !origin.is_from_el() {
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+            let verify_result =
+                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
+                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                        data_column_sidecar: data_column_sidecar.clone_arc(),
+                        error,
+                    })?;
+
+            ensure!(
+                verify_result,
+                Error::DataColumnSidecarInvalidKzgProofs {
                     data_column_sidecar: data_column_sidecar.clone_arc(),
-                    error,
-                })?;
+                    error: anyhow!("invalid KZG proofs verification result"),
+                }
+            );
         }
 
         Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
