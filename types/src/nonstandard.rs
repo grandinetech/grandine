@@ -143,7 +143,8 @@ pub type U64Vec = SmallVec<[u64; 2 * size_of::<usize>() / size_of::<u64>()]>;
 
 // It appears that `SmallVec` does not use `union` feature on `riscv32` arch,
 // so `SmallVecData` is `enum` type instead of `union`, and thus have a different size.
-#[cfg(not(target_arch = "riscv32"))]
+// `mips` arch exhibits similar `SmallVec` size variations
+#[cfg(all(not(target_arch = "riscv32"), not(target_arch = "mips")))]
 assert_eq_size!(U64Vec, Vec<u64>);
 
 pub type GweiVec = U64Vec;
