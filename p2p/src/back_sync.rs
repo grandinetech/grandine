@@ -28,6 +28,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{PayloadStatus, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
@@ -143,6 +144,17 @@ impl<P: Preset> BackSync<P> {
         }
     }
 
+    pub fn push_execution_payload_envelope(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+        let slot = envelope.message.slot;
+
+        if slot <= self.high_slot() && !self.is_finished() {
+            self.batch.push_execution_payload_envelope(envelope);
+        } else {
+            let block_root = envelope.message.beacon_block_root;
+            debug_with_peers!("ignoring execution payload envelope: block_root {block_root:?}, slot: {slot}");
+        }
+    }
+
     pub fn save(&self, database: &Database) -> Result<()> {
         self.sync_mode.save(database, self.data.low.slot)?;
         self.data.save(database)
@@ -207,21 +219,23 @@ impl<P: Preset> BackSync<P> {
     ) -> Result<()> {
         let last_block_checkpoint = self.data.current;
 
-        let (checkpoint, blocks, blob_sidecars, data_column_sidecars) = match &self.sync_mode {
-            SyncMode::Default => {
-                self.batch
-                    .verify_from_checkpoint(config, controller, last_block_checkpoint)?
-            }
-            SyncMode::DataColumnsOnly { column_indices, .. } => {
-                self.batch.verify_extra_data_columns_from_checkpoint(
+        let (checkpoint, blocks, blob_sidecars, data_column_sidecars, execution_payload_envelopes) =
+            match &self.sync_mode {
+                SyncMode::Default => self.batch.verify_from_checkpoint(
                     config,
                     controller,
                     last_block_checkpoint,
-                    column_indices,
-                    self.low_slot(),
-                )?
-            }
-        };
+                )?,
+                SyncMode::DataColumnsOnly { column_indices, .. } => {
+                    self.batch.verify_extra_data_columns_from_checkpoint(
+                        config,
+                        controller,
+                        last_block_checkpoint,
+                        column_indices,
+                        self.low_slot(),
+                    )?
+                }
+            };
 
         info_with_peers!("back-synced to {} slot", checkpoint.slot);
 
@@ -241,6 +255,7 @@ impl<P: Preset> BackSync<P> {
         controller.store_back_sync_blocks(blocks)?;
         controller.store_back_sync_blob_sidecars(blob_sidecars)?;
         controller.store_back_sync_data_column_sidecars(data_column_sidecars)?;
+        controller.store_back_sync_execution_payload_envelopes(execution_payload_envelopes)?;
 
         // Update back-sync progress in sync database.
         self.data.current = checkpoint;
@@ -257,6 +272,7 @@ struct Batch<P: Preset> {
     blocks: BTreeMap<Slot, Arc<SignedBeaconBlock<P>>>,
     blob_sidecars: HashMap<BlobIdentifier, Arc<BlobSidecar<P>>>,
     data_column_sidecars: HashMap<DataColumnIdentifier, Arc<DataColumnSidecar<P>>>,
+    execution_payload_envelopes: HashMap<H256, Arc<SignedExecutionPayloadEnvelope<P>>>,
 }
 
 impl<P: Preset> Batch<P> {
@@ -272,6 +288,12 @@ impl<P: Preset> Batch<P> {
     fn push_data_column_sidecar(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         self.data_column_sidecars
             .insert(data_column_sidecar.as_ref().into(), data_column_sidecar);
+    }
+
+    fn push_execution_payload_envelope(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+        let block_root = envelope.message.beacon_block_root;
+        self.execution_payload_envelopes
+            .insert(block_root, envelope);
     }
 
     pub fn valid_blob_sidecars_for(
@@ -414,6 +436,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<SignedBeaconBlock<P>>>,
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedExecutionPayloadEnvelope<P>>>,
     )> {
         debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
@@ -421,6 +444,7 @@ impl<P: Preset> Batch<P> {
         let mut verified_blob_sidecars = vec![];
         let mut verified_blocks = vec![];
         let mut verified_data_column_sidecars = vec![];
+        let mut verified_execution_payload_envelopes = vec![];
         let head_state = controller.head_state().value();
 
         let mut blocks = self
@@ -481,6 +505,12 @@ impl<P: Preset> Batch<P> {
 
                 verified_blocks.push(block.clone_arc());
 
+                // Collect execution payload envelope if present (already filtered for Gloas at request level)
+                let block_root = message.hash_tree_root();
+                if let Some(envelope) = self.execution_payload_envelopes.get(&block_root) {
+                    verified_execution_payload_envelopes.push(envelope.clone_arc());
+                }
+
                 next_parent_root = message.parent_root();
             }
         }
@@ -496,6 +526,7 @@ impl<P: Preset> Batch<P> {
             verified_blocks,
             verified_blob_sidecars,
             verified_data_column_sidecars,
+            verified_execution_payload_envelopes,
         ))
     }
 
@@ -512,6 +543,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<SignedBeaconBlock<P>>>,
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedExecutionPayloadEnvelope<P>>>,
     )> {
         debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
@@ -599,7 +631,13 @@ impl<P: Preset> Batch<P> {
 
         debug_with_peers!("next batch checkpoint: {checkpoint:?}");
 
-        Ok((checkpoint, vec![], vec![], verified_data_column_sidecars))
+        Ok((
+            checkpoint,
+            vec![],
+            vec![],
+            verified_data_column_sidecars,
+            vec![],
+        ))
     }
 }
 

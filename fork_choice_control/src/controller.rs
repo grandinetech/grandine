@@ -43,6 +43,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{containers::MatrixEntry, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::ValidationOutcome,
     phase0::primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
     preset::Preset,
@@ -616,6 +617,21 @@ where
         })
     }
 
+    pub fn on_requested_execution_payload_envelope(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        peer_id: PeerId,
+    ) {
+        // TODO(Phase 2): Spawn ExecutionPayloadEnvelopeTask when merging ad16f5c4a
+        // For now, just log receipt
+        debug_with_peers!(
+            "received execution payload envelope (block_root: {:?}, slot: {}, peer_id: {:?})",
+            envelope.message.beacon_block_root,
+            envelope.message.slot,
+            peer_id
+        );
+    }
+
     pub fn on_requested_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -678,6 +694,14 @@ where
     ) -> Result<()> {
         self.storage
             .store_back_sync_data_column_sidecars(data_column_sidecars)
+    }
+
+    pub fn store_back_sync_execution_payload_envelopes(
+        &self,
+        execution_payload_envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<()> {
+        self.storage
+            .store_back_sync_execution_payload_envelopes(execution_payload_envelopes)
     }
 
     pub fn store_back_sync_blocks(

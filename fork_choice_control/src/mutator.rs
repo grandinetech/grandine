@@ -85,7 +85,8 @@ use crate::{
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
         DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask,
+        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -297,6 +298,15 @@ where
                         wait_group,
                         persisted_data_column_ids,
                         slot,
+                    );
+                }
+                MutatorMessage::FinishedPersistingExecutionPayloadEnvelopes {
+                    wait_group,
+                    persisted_block_roots,
+                } => {
+                    self.handle_finish_persisting_execution_payload_envelopes(
+                        wait_group,
+                        persisted_block_roots,
                     );
                 }
                 MutatorMessage::PreprocessedBeaconState { state } => {
@@ -1832,6 +1842,27 @@ where
         self.store_mut().prune_persisted_data_columns(slot);
 
         self.update_store_snapshot();
+    }
+
+    fn handle_finish_persisting_execution_payload_envelopes(
+        &mut self,
+        wait_group: W,
+        persisted_block_roots: Vec<H256>,
+    ) {
+        self.store_mut()
+            .mark_persisted_envelopes(persisted_block_roots);
+
+        self.update_store_snapshot();
+
+        if self.store.has_unpersisted_envelopes() {
+            self.spawn(PersistExecutionPayloadEnvelopesTask {
+                store_snapshot: self.owned_store(),
+                storage: self.storage.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group,
+                metrics: self.metrics.clone(),
+            });
+        }
     }
 
     fn handle_reconstructed_missing_columns(
@@ -3436,6 +3467,19 @@ where
                         Err(error) => {
                             error_with_peers!("pruning old blob sidecars from storage failed: {error:?}")
                         }
+                    }
+                }
+
+                debug_with_peers!("pruning old execution payload envelopes from storage up to slot {blocks_up_to_slot}…");
+
+                match storage.prune_old_execution_payload_envelopes(blocks_up_to_slot) {
+                    Ok(()) => {
+                        debug_with_peers!(
+                            "pruned old execution payload envelopes from storage up to slot {blocks_up_to_slot}"
+                        );
+                    }
+                    Err(error) => {
+                        error_with_peers!("pruning old execution payload envelopes from storage failed: {error:?}")
                     }
                 }
 

@@ -149,6 +149,10 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
         slot: Slot,
     },
+    FinishedPersistingExecutionPayloadEnvelopes {
+        wait_group: W,
+        persisted_block_roots: Vec<H256>,
+    },
     PreprocessedBeaconState {
         state: Arc<BeaconState<P>>,
     },
