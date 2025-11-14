@@ -7,6 +7,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Grandine.Native;
 
@@ -66,6 +67,17 @@ public unsafe partial struct CExecutionRequests
 
 public unsafe partial struct CH256
 {
+    public static CH256 From(Hash256 hash) {
+        var output = new CH256{};
+
+        fixed (byte* sourcePtr = hash.Bytes) 
+        { 
+            Buffer.MemoryCopy(sourcePtr, output.Item1, 32, 32); 
+        }
+
+        return output;
+    }
+
     public unsafe Hash256 ToHash256()
     {
         return new Hash256(AsSpan());
@@ -109,6 +121,15 @@ public unsafe partial struct CH256
 
 public unsafe partial struct CH160
 {
+    public static CH160 From(Address address)
+    {
+        var output = new CH160 {};
+
+        fixed (byte* sourcePtr = address.Bytes) { Buffer.MemoryCopy(sourcePtr, output.Item1, 20, 20); }
+        
+        return output;
+    }
+
     public unsafe readonly Address ToAddress()
     {
         return new Address(AsSpan());
@@ -178,8 +199,17 @@ public unsafe partial struct COption<T>
     public static COption<T> Some(T value) => new() { is_something = true, value = value };
 }
 
-public unsafe partial struct CVec<T>
+public unsafe partial struct CVec<T> where T : unmanaged
 {
+    public CVec(nuint length)
+    {
+        IntPtr pointer;
+        unsafe { pointer = (IntPtr)NativeMethods.grandine_alloc(length * (nuint)Marshal.SizeOf<T>()); }
+
+        data = (T*)pointer.ToPointer();
+        data_len = length;
+    }
+
     public readonly ReadOnlySpan<T> AsSpan()
     {
         if (sizeof(nuint) > sizeof(int) && data_len > int.MaxValue)

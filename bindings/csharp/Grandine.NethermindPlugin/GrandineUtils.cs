@@ -73,6 +73,16 @@ public static class GrandineUtils
         return result;
     }
 
+    public static CVec<byte> ConvertLogsBloom(Bloom bloom)
+    {
+        var bytes = bloom.Bytes;
+        var result = new CVec<byte>((nuint)bytes.Length);
+
+        bytes.CopyTo(result.AsMutableSpan());
+        
+        return result;
+    }
+
     public static CPayloadValidationStatus ConvertPayloadValidationStatus(string status) =>
         status switch
         {

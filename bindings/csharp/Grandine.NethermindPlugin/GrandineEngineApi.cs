@@ -385,7 +385,7 @@ public class GrandineEngineApi
         };
     }
 
-    unsafe CResult<CExecutionPayloadV1> EngineGetPayloadV1(byte* payloadId)
+    unsafe CResult<CExecutionPayloadV1> EngineGetPayloadV1(CH64 payloadId)
     {
         _logger.Warn("================================================================= engine_getPayloadV1 =================================================================");
 
@@ -405,26 +405,19 @@ public class GrandineEngineApi
                 throw new Exception("unexpected failure");
             }
 
-            var exPayload = new CExecutionPayloadV1 { };
-
-            fixed (byte* sourcePtr = payloadData.ParentHash.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.parent_hash, 32, 32); }
-            fixed (byte* sourcePtr = payloadData.FeeRecipient.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.fee_recipient, 20, 20); }
-            fixed (byte* sourcePtr = payloadData.StateRoot.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.state_root, 32, 32); }
-            fixed (byte* sourcePtr = payloadData.ReceiptsRoot.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.receipts_root, 32, 32); }
-
+            var exPayload = new CExecutionPayloadV1
             {
-                var bloomLen = payloadData.LogsBloom.Bytes.Length;
-                IntPtr convBloom = Marshal.AllocHGlobal(bloomLen);
-                Marshal.Copy(payloadData.LogsBloom.Bytes.ToArray(), 0, convBloom, bloomLen);
-                exPayload.logs_bloom = (byte*)convBloom;
-                exPayload.logs_bloom_len = (ulong)bloomLen;
-            }
-
-            fixed (byte* sourcePtr = payloadData.PrevRandao.Bytes) { Buffer.MemoryCopy(sourcePtr, exPayload.prev_randao, 32, 32); }
-            exPayload.block_number = (ulong)payloadData.BlockNumber;
-            exPayload.gas_limit = (ulong)payloadData.GasLimit;
-            exPayload.gas_used = (ulong)payloadData.GasUsed;
-            exPayload.timestamp = payloadData.Timestamp;
+                parent_hash = CH256.From(payloadData.ParentHash),
+                fee_recipient = CH160.From(payloadData.FeeRecipient),
+                state_root = CH256.From(payloadData.StateRoot),
+                receipts_root = CH256.From(payloadData.ReceiptsRoot),
+                logs_bloom = GrandineUtils.ConvertLogsBloom(payloadData.LogsBloom),
+                prev_randao = CH256.From(payloadData.PrevRandao),
+                block_number = (ulong)payloadData.BlockNumber,
+                gas_limit = (ulong)payloadData.GasLimit,
+                gas_used = (ulong)payloadData.GasUsed,
+                timestamp = payloadData.Timestamp,
+            };
 
             {
                 var extraDataLen = payloadData.ExtraData.Length;

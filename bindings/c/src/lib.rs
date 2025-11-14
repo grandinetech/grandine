@@ -8,7 +8,7 @@ use execution_engine::{
     PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadStatusV1,
 };
 use runtime::{grandine_args::GrandineArgs, run};
-use std::ffi::{c_char, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use tracing::error;
 use types::{
     electra::containers::ExecutionRequests, phase0::primitives::ExecutionBlockNumber,
@@ -301,8 +301,8 @@ pub extern "C" fn grandine_set_execution_layer_adapter(adapter: CEmbedAdapter) {
 }
 
 #[no_mangle]
-pub extern "C" fn grandine_alloc(size: usize) -> *mut u8 {
-    Box::into_raw(vec![0u8; size].into_boxed_slice()) as *mut u8
+pub extern "C" fn grandine_alloc(size: usize) -> *mut c_void {
+    Box::into_raw(vec![0u8; size].into_boxed_slice()) as *mut c_void
 }
 
 #[no_mangle]

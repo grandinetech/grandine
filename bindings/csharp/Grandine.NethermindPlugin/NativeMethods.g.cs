@@ -22,7 +22,7 @@ namespace Grandine.Native
         public static extern void grandine_set_execution_layer_adapter(CEmbedAdapter adapter);
 
         [DllImport(__DllName, EntryPoint = "grandine_alloc", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern byte* grandine_alloc(System.UIntPtr size);
+        public static extern void* grandine_alloc(System.UIntPtr size);
 
         [DllImport(__DllName, EntryPoint = "grandine_shutdown", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void grandine_shutdown();
