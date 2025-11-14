@@ -337,6 +337,7 @@ impl<P: Preset> Context<P> {
         let subnet_service = SubnetService::new(
             attestation_agg_pool.clone_arc(),
             NodeId::ZERO,
+            None,
             subnet_service_to_p2p_tx,
             fc_to_subnet_rx,
             subnet_service_rx,

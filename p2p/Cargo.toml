@@ -15,6 +15,7 @@ cached = { workspace = true }
 dashmap = { workspace = true }
 data_dumper = { workspace = true }
 database = { workspace = true }
+debug_info = { workspace = true }
 dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
 enum-iterator = { workspace = true }

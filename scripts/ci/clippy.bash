@@ -26,6 +26,7 @@ options=(
     --package clock
     --package data_dumper
     --package database
+    --package debug_info
     --package deposit_tree
     --package directories
     --package doppelganger_protection

@@ -15,6 +15,7 @@ members = [
     'clock',
     'data_dumper',
     'database',
+    'debug_info',
     'deposit_tree',
     'directories',
     'doppelganger_protection',
@@ -482,6 +483,7 @@ builder_api = { path = 'builder_api' }
 clock = { path = 'clock' }
 data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
+debug_info = { path = 'debug_info' }
 deposit_tree = { path = 'deposit_tree' }
 directories = { path = 'directories' }
 doppelganger_protection = { path = 'doppelganger_protection' }
