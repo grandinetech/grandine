@@ -15,10 +15,11 @@ fn main() {
     let parent = path_to_bindings_folder();
     let path_to_output_file = parent.join(PATH_FOR_CSHARP_BINDINGS_FILE);
 
-    let path_to_c_crates_lib_file = path_to_c_crate().join("src/lib.rs");
-
     csbindgen::Builder::default()
-        .input_extern_file(path_to_c_crates_lib_file)
+        .input_extern_file(path_to_c_crate().join("src/lib.rs"))
+        .input_extern_file(path_to_c_crate().join("src/arrays.rs"))
+        .input_extern_file(path_to_c_crate().join("src/containers.rs"))
+        .input_extern_file(path_to_c_crate().join("src/generic.rs"))
         .csharp_namespace("Grandine.Native")
         .csharp_dll_name(package_name_of_c_crate)
         .csharp_class_name("NativeMethods")

@@ -1,13 +1,10 @@
-// SPDX-FileCopyrightText: 2024 Demerzel Solutions Limited
-// SPDX-License-Identifier: LGPL-3.0-only
-
 using System.Collections.Generic;
 
 namespace Grandine.NethermindPlugin;
 
 public class GrandineConfig : IGrandineConfig
 {
-    public bool? Enabled { get; set; }
+    public bool Enabled { get; set; }
 
     public string? Network { get; set; }
 

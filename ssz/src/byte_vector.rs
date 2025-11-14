@@ -51,9 +51,7 @@ impl<N: ArrayLength<u8>> From<&[u8]> for ByteVector<N> {
     fn from(value: &[u8]) -> Self {
         let bytes: &GenericArray<u8, N> = value.into();
         let bytes: ContiguousVector<u8, N> = bytes.clone().into();
-        Self {
-            bytes: bytes.clone(),
-        }
+        Self { bytes }
     }
 }
 

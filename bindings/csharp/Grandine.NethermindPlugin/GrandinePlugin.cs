@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: 2024 Demerzel Solutions Limited
-// SPDX-License-Identifier: LGPL-3.0-only
-
 using System;
 using System.IO;
 using System.Reflection;
@@ -50,10 +47,10 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
 
     private ILogger _logger;
 
-    #pragma warning disable CS8618 
+#pragma warning disable CS8618
     private INethermindApi _api;
 
-    public bool Enabled => grandineConfig.Enabled ?? throw new ArgumentNullException(nameof(grandineConfig.Enabled));
+    public bool Enabled => grandineConfig.Enabled;
 
     private List<string> _arguments = new List<string>();
 
@@ -67,12 +64,7 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
 
         var rpcConfig = nethermindApi.Config<IJsonRpcConfig>();
 
-        var configInterface = configType.GetInterface("IGrandineConfig");
-
-        if (configInterface == null)
-        {
-            throw new Exception("Unexpected exception occurred - IGrandineConfig interface not found");
-        }
+        var configInterface = typeof(IGrandineConfig);
 
         PropertyInfo[] properties = configInterface.GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
@@ -138,11 +130,12 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
         IEngineRpcModule engineRpcModule = _api.Context.Resolve<IEngineRpcModule>();
 
         var api = new GrandineEngineApi(_logger, engineRpcModule);
-        Task task = new Task(() =>
+
+        return Task.Run(() =>
         {
             try
             {
-                var client = new GrandineClient(api.getAdapter());
+                var client = new GrandineClient(api.GetAdapter());
                 client.Run(_arguments.ToArray());
             }
             catch (Exception e)
@@ -150,8 +143,6 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
                 _logger.Error($"Failed to start grandine: {e}");
             }
         });
-        task.Start();
-        return task;
     }
 
     public ValueTask DisposeAsync() { return ValueTask.CompletedTask; }

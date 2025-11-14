@@ -1,6 +1,3 @@
-// SPDX-FileCopyrightText: 2024 Demerzel Solutions Limited
-// SPDX-License-Identifier: LGPL-3.0-only
-
 using System;
 using System.Collections.Generic;
 using Nethermind.Config;
@@ -10,7 +7,7 @@ namespace Grandine.NethermindPlugin;
 public interface IGrandineConfig : IConfig
 {
     [ConfigItem(Description = "Whether to enable embedded grandine CL", DefaultValue = "false")]
-    public bool? Enabled { get; set; }
+    public bool Enabled { get; set; }
 
     [ConfigItem(Description = "Name of the Eth2 network to connect to", DefaultValue = "mainnet")]
     [GrandineConfigItem(Name = "--network")]

@@ -47,7 +47,6 @@ itertools = { workspace = true }
 keymanager = { workspace = true }
 kzg_utils = { workspace = true }
 liveness_tracker = { workspace = true }
-log = { workspace = true }
 logging = { workspace = true }
 metrics = { workspace = true }
 nonzero_ext = { workspace = true }
