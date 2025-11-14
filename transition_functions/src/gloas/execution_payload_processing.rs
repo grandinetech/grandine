@@ -325,16 +325,11 @@ mod spec_tests {
 
     fn run_execution_payload_case<P: Preset>(case: Case) {
         let mut state = case.ssz_default::<BeaconState<P>>("pre");
-        let signed_envelope_option = case.try_ssz_default("signed_envelope");
+        let signed_envelope = case.ssz_default("signed_envelope");
         let post_option = case.try_ssz_default("post");
         let Execution { execution_valid } = case.yaml("execution");
         let execution_engine = MockExecutionEngine::new(execution_valid, false, None);
         let pubkey_cache = PubkeyCache::default();
-
-        // TODO(gloas): check for invalid case
-        let Some(signed_envelope) = signed_envelope_option else {
-            return;
-        };
 
         let result = process_execution_payload(
             &P::default_config(),
