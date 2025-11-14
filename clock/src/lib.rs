@@ -618,10 +618,14 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn ticks_with_mainnet_config_iterate_through_every_tick_post_gloas() -> Result<()> {
-        let genesis_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs()
-            .add(1);
+        let genesis_time = u64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_millis()
+                .add(750)
+                .saturating_div(1000),
+        )
+        .expect("genesis time should fit in u64");
 
         let config = Config::mainnet().start_and_stay_in(Phase::Gloas);
         let tick_duration = Duration::from_millis(750); // tick_duration_at_slot(&config, GENESIS_SLOT);
@@ -630,7 +634,7 @@ mod tests {
 
         assert_eq!(next_tick()?, None);
 
-        tokio::time::advance(Duration::from_secs(1)).await;
+        tokio::time::advance(tick_duration).await;
 
         assert_eq!(next_tick()?, Some(Tick::new(0, TickKind::Propose)));
         assert_eq!(next_tick()?, None);
