@@ -6,6 +6,8 @@ members = [
     'attestation_verifier',
     'benches',
     'binary_utils',
+    'bindings/c',
+    'bindings/csharp',
     'block_producer',
     'bls',
     'bls/bls-blst',

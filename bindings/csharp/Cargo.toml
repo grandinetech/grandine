@@ -1,0 +1,10 @@
+[package]
+name = "csharp_grandine"
+edition = { workspace = true }
+
+[lib]
+path = "_stub.rs"
+
+[build-dependencies]
+csbindgen = { git = "https://github.com/ArtiomTr/csbindgen.git" }
+toml = "0.5"
