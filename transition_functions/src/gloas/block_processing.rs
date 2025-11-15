@@ -963,8 +963,7 @@ pub fn process_payload_attestation<P: Preset>(
     );
 
     // > Verify signature
-    let indexed_payload_attestation =
-        get_indexed_payload_attestation(state, data.slot, payload_attestation)?;
+    let indexed_payload_attestation = get_indexed_payload_attestation(state, payload_attestation)?;
 
     validate_constructed_indexed_payload_attestation(
         config,
