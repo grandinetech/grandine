@@ -1458,10 +1458,11 @@ impl<P: Preset> Network<P> {
 
         self.dedicated_executor
             .spawn(async move {
-
-                let block_roots = block_roots
-                    .into_iter()
-                    .take(MAX_FOR_DOS_PREVENTION.min(max_request_payloads).try_into()?);
+                let block_roots = block_roots.into_iter().take(
+                    MAX_FOR_DOS_PREVENTION
+                        .min(max_request_payloads)
+                        .try_into()?,
+                );
                 let envelopes = controller.execution_payload_envelopes_by_roots(block_roots)?;
 
                 for envelope in envelopes {

@@ -3,9 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use ssz::H256;
 use std_ext::ArcExt as _;
 use types::{
-    gloas::containers::SignedExecutionPayloadEnvelope,
-    phase0::primitives::Slot,
-    preset::Preset,
+    gloas::containers::SignedExecutionPayloadEnvelope, phase0::primitives::Slot, preset::Preset,
 };
 
 #[derive(Clone, Default)]
@@ -22,8 +20,7 @@ impl<P: Preset> ExecutionPayloadEnvelopeCache<P> {
         let slot = envelope.message.slot;
         let block_root = envelope.message.beacon_block_root;
 
-        self.envelopes
-            .insert(block_root, (envelope, slot, false));
+        self.envelopes.insert(block_root, (envelope, slot, false));
     }
 
     pub fn prune_finalized(&mut self, finalized_slot: Slot) {
@@ -39,7 +36,9 @@ impl<P: Preset> ExecutionPayloadEnvelopeCache<P> {
 
     pub fn mark_persisted_envelopes(&mut self, persisted_roots: Vec<H256>) {
         for root in persisted_roots {
-            self.envelopes.entry(root).and_modify(|entry| entry.2 = true);
+            self.envelopes
+                .entry(root)
+                .and_modify(|entry| entry.2 = true);
         }
     }
 

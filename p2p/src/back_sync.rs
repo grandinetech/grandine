@@ -144,14 +144,19 @@ impl<P: Preset> BackSync<P> {
         }
     }
 
-    pub fn push_execution_payload_envelope(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+    pub fn push_execution_payload_envelope(
+        &mut self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
         let slot = envelope.message.slot;
 
         if slot <= self.high_slot() && !self.is_finished() {
             self.batch.push_execution_payload_envelope(envelope);
         } else {
             let block_root = envelope.message.beacon_block_root;
-            debug_with_peers!("ignoring execution payload envelope: block_root {block_root:?}, slot: {slot}");
+            debug_with_peers!(
+                "ignoring execution payload envelope: block_root {block_root:?}, slot: {slot}"
+            );
         }
     }
 
@@ -289,7 +294,10 @@ impl<P: Preset> Batch<P> {
             .insert(data_column_sidecar.as_ref().into(), data_column_sidecar);
     }
 
-    fn push_execution_payload_envelope(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+    fn push_execution_payload_envelope(
+        &mut self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
         let block_root = envelope.message.beacon_block_root;
         self.execution_payload_envelopes
             .insert(block_root, envelope);

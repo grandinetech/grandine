@@ -998,7 +998,8 @@ impl Metrics {
             self.fc_data_column_sidecar_persist_task_times.clone(),
         ))?;
         default_registry.register(Box::new(
-            self.fc_execution_payload_envelope_persist_task_times.clone(),
+            self.fc_execution_payload_envelope_persist_task_times
+                .clone(),
         ))?;
         default_registry.register(Box::new(self.fc_block_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_attester_slashing_task_times.clone()))?;
