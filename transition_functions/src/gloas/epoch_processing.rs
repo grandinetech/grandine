@@ -75,6 +75,8 @@ pub fn process_epoch(
     unphased::process_eth1_data_reset(state);
     electra::process_pending_deposits(config, pubkey_cache, state)?;
     electra::process_pending_consolidations(state)?;
+
+    process_builder_pending_payments(config, state)?;
     electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
@@ -86,8 +88,6 @@ pub fn process_epoch(
     altair::process_sync_committee_updates(pubkey_cache, state)?;
 
     fulu::process_proposer_lookahead(config, state)?;
-
-    process_builder_pending_payments(config, state)?;
 
     state.cache.advance_epoch();
 

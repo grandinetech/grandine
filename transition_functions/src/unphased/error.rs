@@ -50,6 +50,8 @@ pub enum Error<P: Preset> {
     },
     #[error("bid parent block root ({in_bid:?}) does not match in block ({in_block:?})")]
     BidParentBlockRootMismatch { in_bid: H256, in_block: H256 },
+    #[error("bid prev randao ({in_bid:?}) does not match in state ({in_state:?})")]
+    BidPrevRandaoMismatch { in_bid: H256, in_state: H256 },
     #[error("block is not newer than latest block header ({block_slot} <= {block_header_slot})")]
     BlockNotNewerThanLatestBlockHeader {
         block_slot: Slot,

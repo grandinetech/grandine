@@ -95,6 +95,7 @@ pub struct ExecutionPayloadBid {
     pub parent_block_hash: ExecutionBlockHash,
     pub parent_block_root: H256,
     pub block_hash: ExecutionBlockHash,
+    pub prev_randao: H256,
     pub fee_recipient: ExecutionAddress,
     #[serde(with = "serde_utils::string_or_native")]
     pub gas_limit: Gas,
@@ -104,6 +105,8 @@ pub struct ExecutionPayloadBid {
     pub slot: Slot,
     #[serde(with = "serde_utils::string_or_native")]
     pub value: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub execution_payment: Gwei,
     pub blob_kzg_commitments_root: H256,
 }
 
