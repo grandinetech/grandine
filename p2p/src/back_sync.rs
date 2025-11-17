@@ -28,6 +28,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{PayloadStatus, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
@@ -143,6 +144,17 @@ impl<P: Preset> BackSync<P> {
         }
     }
 
+    pub fn push_execution_payload_envelope(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+        let slot = envelope.message.slot;
+
+        if slot <= self.high_slot() && !self.is_finished() {
+            self.batch.push_execution_payload_envelope(envelope);
+        } else {
+            let block_root = envelope.message.beacon_block_root;
+            debug_with_peers!("ignoring execution payload envelope: block_root {block_root:?}, slot: {slot}");
+        }
+    }
+
     pub fn save(&self, database: &Database) -> Result<()> {
         self.sync_mode.save(database, self.data.low.slot)?;
         self.data.save(database)
@@ -241,6 +253,8 @@ impl<P: Preset> BackSync<P> {
         controller.store_back_sync_blocks(blocks)?;
         controller.store_back_sync_blob_sidecars(blob_sidecars)?;
         controller.store_back_sync_data_column_sidecars(data_column_sidecars)?;
+        // TODO: Store execution payload envelopes from back-sync
+        // controller.store_back_sync_execution_payload_envelopes(execution_payload_envelopes)?;
 
         // Update back-sync progress in sync database.
         self.data.current = checkpoint;
@@ -257,6 +271,7 @@ struct Batch<P: Preset> {
     blocks: BTreeMap<Slot, Arc<SignedBeaconBlock<P>>>,
     blob_sidecars: HashMap<BlobIdentifier, Arc<BlobSidecar<P>>>,
     data_column_sidecars: HashMap<DataColumnIdentifier, Arc<DataColumnSidecar<P>>>,
+    execution_payload_envelopes: HashMap<H256, Arc<SignedExecutionPayloadEnvelope<P>>>,
 }
 
 impl<P: Preset> Batch<P> {
@@ -272,6 +287,12 @@ impl<P: Preset> Batch<P> {
     fn push_data_column_sidecar(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         self.data_column_sidecars
             .insert(data_column_sidecar.as_ref().into(), data_column_sidecar);
+    }
+
+    fn push_execution_payload_envelope(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+        let block_root = envelope.message.beacon_block_root;
+        self.execution_payload_envelopes
+            .insert(block_root, envelope);
     }
 
     pub fn valid_blob_sidecars_for(

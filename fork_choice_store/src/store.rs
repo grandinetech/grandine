@@ -52,7 +52,10 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
         primitives::ColumnIndex,
     },
-    gloas::containers::{DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid},
+    gloas::containers::{
+        DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
+        SignedExecutionPayloadEnvelope,
+    },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -68,6 +71,7 @@ use crate::{
     blob_cache::BlobCache,
     data_column_cache::DataColumnCache,
     error::Error,
+    execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
@@ -233,6 +237,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
     data_column_cache: DataColumnCache<P>,
+    execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache<P>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
@@ -324,6 +329,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             )),
             storage,
             data_column_cache: DataColumnCache::default(),
+            execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
@@ -389,6 +395,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         data_column_id: DataColumnIdentifier,
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         self.data_column_cache.get(data_column_id)
+    }
+
+    #[must_use]
+    pub fn cached_execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+        self.execution_payload_envelope_cache.get(block_root)
     }
 
     #[must_use]
@@ -3161,6 +3175,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let finalized_slot = self.finalized_slot();
 
+        self.execution_payload_envelope_cache
+            .prune_finalized(finalized_slot);
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
@@ -3951,6 +3967,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn unpersisted_blob_sidecars(&self) -> impl Iterator<Item = BlobSidecarWithId<P>> + '_ {
         self.blob_cache.unpersisted_blob_sidecars()
+    }
+
+    pub fn has_unpersisted_envelopes(&self) -> bool {
+        self.execution_payload_envelope_cache.has_unpersisted_envelopes()
+    }
+
+    pub fn mark_persisted_envelopes(&mut self, persisted_block_roots: Vec<H256>) {
+        self.execution_payload_envelope_cache.mark_persisted_envelopes(persisted_block_roots);
+    }
+
+    pub fn unpersisted_envelopes(&self) -> impl Iterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>> + '_ {
+        self.execution_payload_envelope_cache
+            .unpersisted_envelopes()
+            .map(|(_, envelope)| envelope)
     }
 
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {

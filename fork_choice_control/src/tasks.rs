@@ -552,6 +552,45 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
     }
 }
 
+pub struct PersistExecutionPayloadEnvelopesTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub storage: Arc<Storage<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            storage,
+            mutator_tx,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_execution_payload_envelope_persist_task_times.start_timer());
+
+        let envelopes = store_snapshot.unpersisted_envelopes();
+
+        match storage.append_execution_payload_envelopes(envelopes) {
+            Ok(persisted_block_roots) => {
+                MutatorMessage::FinishedPersistingExecutionPayloadEnvelopes {
+                    wait_group,
+                    persisted_block_roots,
+                }
+                .send(&mutator_tx);
+            }
+            Err(error) => {
+                warn_with_peers!("failed to persist execution payload envelopes to storage: {error:?}");
+            }
+        }
+    }
+}
+
 pub struct CheckpointStateTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub state_cache: Arc<StateCacheProcessor<P>>,

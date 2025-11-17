@@ -20,6 +20,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -513,6 +514,42 @@ where
                 });
 
         self.blob_sidecars_by_ids(blob_ids)
+    }
+
+    pub fn execution_payload_envelopes_by_range(
+        &self,
+        range: Range<Slot>,
+    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let canonical_chain_blocks = self.blocks_by_range(range)?;
+
+        let block_roots = canonical_chain_blocks
+            .into_iter()
+            .map(|BlockWithRoot { root, .. }| root);
+
+        self.execution_payload_envelopes_by_roots(block_roots)
+    }
+
+    pub fn execution_payload_envelopes_by_roots(
+        &self,
+        block_roots: impl IntoIterator<Item = H256> + Send,
+    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let snapshot = self.snapshot();
+        let storage = self.storage();
+
+        let envelopes = block_roots
+            .into_iter()
+            .filter_map(|block_root| {
+                // Check cache then fallback to database
+                match snapshot.cached_execution_payload_envelope(block_root) {
+                    Some(envelope) => Some(Ok(envelope)),
+                    None => storage
+                        .execution_payload_envelope_by_root(block_root)
+                        .transpose(),
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(envelopes)
     }
 
     pub fn blocks_by_root(
@@ -1149,6 +1186,15 @@ impl<P: Preset> Snapshot<'_, P> {
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         self.store_snapshot
             .cached_data_column_sidecar_by_id(data_column_id)
+    }
+
+    #[must_use]
+    pub(crate) fn cached_execution_payload_envelope(
+        &self,
+        block_root: H256,
+    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+        self.store_snapshot
+            .cached_execution_payload_envelope_by_root(block_root)
     }
 }
 
