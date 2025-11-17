@@ -841,6 +841,11 @@ pub fn upgrade_to_gloas<P: Preset>(
         epoch,
     };
 
+    let latest_execution_payload_bid = ExecutionPayloadBid {
+        block_hash: latest_execution_payload_header.block_hash,
+        ..Default::default()
+    };
+
     GloasBeaconState {
         // > Versioning
         genesis_time,
@@ -877,7 +882,7 @@ pub fn upgrade_to_gloas<P: Preset>(
         current_sync_committee,
         next_sync_committee,
         // > Execution
-        latest_execution_payload_bid: ExecutionPayloadBid::default(),
+        latest_execution_payload_bid,
         // > Withdrawals
         next_withdrawal_index,
         next_withdrawal_validator_index,

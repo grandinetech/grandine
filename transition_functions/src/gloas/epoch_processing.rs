@@ -76,6 +76,7 @@ pub fn process_epoch(
     // TODO(gloas): update `state` param to be compatible with GloasBeaconState
     // electra::process_pending_deposits(config, pubkey_cache, state)?;
     // electra::process_pending_consolidations(state)?;
+    process_builder_pending_payments(config, state)?;
     // electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
@@ -88,8 +89,6 @@ pub fn process_epoch(
 
     // TODO(gloas): update `state` param to be compatible with GloasBeaconState
     // fulu::process_proposer_lookahead(config, state)?;
-
-    process_builder_pending_payments(config, state)?;
 
     state.cache.advance_epoch();
 

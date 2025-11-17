@@ -7,7 +7,8 @@ use helper_functions::{
     accessors::{
         self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
         get_base_reward_per_increment, get_beacon_proposer_index, get_current_epoch,
-        get_indexed_payload_attestation, get_previous_epoch, initialize_shuffled_indices,
+        get_indexed_payload_attestation, get_previous_epoch, get_randao_mix,
+        initialize_shuffled_indices,
     },
     electra::{
         get_attesting_indices, get_indexed_attestation, is_fully_withdrawable_validator,
@@ -480,6 +481,7 @@ fn validate_execution_payload_bid<P: Preset>(
         slot,
         parent_block_hash,
         parent_block_root,
+        prev_randao,
         ..
     } = signed_bid.message;
     let builder = state.validators().get(builder_index)?;
@@ -509,6 +511,7 @@ fn validate_execution_payload_bid<P: Preset>(
         );
     }
 
+    // > Check that the builder is active, non-slashed
     let current_epoch = get_current_epoch(state);
     ensure!(
         is_active_validator(builder, current_epoch),
@@ -525,7 +528,7 @@ fn validate_execution_payload_bid<P: Preset>(
         }
     );
 
-    // > Check that the builder is active, non-slashed, and has funds to cover the bid
+    // > Check that builder has funds to cover the bid
     let builder_balance = *state.balances().get(builder_index)?;
     let pending_withdrawals = state
         .builder_pending_withdrawals()
@@ -577,6 +580,16 @@ fn validate_execution_payload_bid<P: Preset>(
         }
     );
 
+    // > Verify prev_randao
+    let in_state = get_randao_mix(state, current_epoch);
+    ensure!(
+        prev_randao == in_state,
+        Error::<P>::BidPrevRandaoMismatch {
+            in_bid: prev_randao,
+            in_state,
+        },
+    );
+
     Ok(())
 }
 
@@ -594,6 +607,7 @@ pub fn process_execution_payload_bid<P: Preset>(
         fee_recipient,
         ..
     } = signed_bid.message;
+
     validate_execution_payload_bid(config, pubkey_cache, state, block)?;
 
     // > Record the pending payment if there is some payment

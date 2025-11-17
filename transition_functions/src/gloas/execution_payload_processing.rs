@@ -1,7 +1,7 @@
 use anyhow::{ensure, Result};
 use execution_engine::ExecutionEngine;
 use helper_functions::{
-    accessors::{get_current_epoch, get_randao_mix},
+    accessors::get_current_epoch,
     error::SignatureKind,
     gloas::compute_exit_epoch_and_update_churn,
     misc::{self, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
@@ -129,6 +129,13 @@ pub fn validate_execution_payload<P: Preset>(
         }
     );
 
+    let in_state = committed_bid.prev_randao;
+    let in_block = payload.prev_randao;
+    ensure!(
+        in_state == in_block,
+        Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
+    );
+
     // > Verify the withdrawals root
     let in_payload = payload.withdrawals.hash_tree_root();
     let in_state = state.latest_withdrawals_root();
@@ -168,14 +175,6 @@ pub fn validate_execution_payload<P: Preset>(
     ensure!(
         in_state == in_block,
         Error::<P>::ExecutionPayloadParentHashMismatch { in_state, in_block },
-    );
-
-    // > Verify prev_randao
-    let in_state = get_randao_mix(state, get_current_epoch(state));
-    let in_block = payload.prev_randao;
-    ensure!(
-        in_state == in_block,
-        Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
     Ok(())
