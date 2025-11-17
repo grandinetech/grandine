@@ -253,6 +253,8 @@ impl<P: Preset> BackSync<P> {
         controller.store_back_sync_blocks(blocks)?;
         controller.store_back_sync_blob_sidecars(blob_sidecars)?;
         controller.store_back_sync_data_column_sidecars(data_column_sidecars)?;
+        // TODO: Store execution payload envelopes from back-sync
+        // controller.store_back_sync_execution_payload_envelopes(execution_payload_envelopes)?;
 
         // Update back-sync progress in sync database.
         self.data.current = checkpoint;
