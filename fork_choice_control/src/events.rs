@@ -15,6 +15,7 @@ use ssz::ContiguousList;
 use strum::{AsRefStr, EnumString};
 use tap::Pipe as _;
 use tokio::sync::broadcast::{self, Receiver, Sender};
+use tracing::warn;
 use types::{
     altair::containers::SignedContributionAndProof,
     capella::{containers::SignedBlsToExecutionChange, primitives::WithdrawalIndex},
@@ -24,6 +25,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -49,8 +51,10 @@ pub enum Topic {
     ChainReorg,
     ContributionAndProof,
     DataColumnSidecar,
+    ExecutionPayloadEnvelope,
     FinalizedCheckpoint,
     Head,
+    PayloadAttestation,
     PayloadAttributes,
     ProposerSlashing,
     VoluntaryExit,
@@ -66,8 +70,10 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
+    ExecutionPayloadEnvelope(ExecutionPayloadEnvelopeEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
+    PayloadAttestation(Arc<PayloadAttestationMessage>),
     PayloadAttributes(PayloadAttributesEvent),
     ProposerSlashing(Box<ProposerSlashing>),
     VoluntaryExit(Box<SignedVoluntaryExit>),
@@ -85,8 +91,10 @@ impl<P: Preset> Event<P> {
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
+            Self::ExecutionPayloadEnvelope(_) => Topic::ExecutionPayloadEnvelope,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
+            Self::PayloadAttestation(_) => Topic::PayloadAttestation,
             Self::PayloadAttributes(_) => Topic::PayloadAttributes,
             Self::ProposerSlashing(_) => Topic::ProposerSlashing,
             Self::VoluntaryExit(_) => Topic::VoluntaryExit,
@@ -105,8 +113,10 @@ pub struct EventChannels<P: Preset> {
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
+    pub execution_payload_envelopes: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
+    pub payload_attestations: Sender<Event<P>>,
     pub payload_attributes: Sender<Event<P>>,
     pub proposer_slashings: Sender<Event<P>>,
     pub voluntary_exits: Sender<Event<P>>,
@@ -132,8 +142,10 @@ impl<P: Preset> EventChannels<P> {
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
+            execution_payload_envelopes: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
+            payload_attestations: broadcast::channel(max_events).0,
             payload_attributes: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
             voluntary_exits: broadcast::channel(max_events).0,
@@ -152,8 +164,10 @@ impl<P: Preset> EventChannels<P> {
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
+            Topic::ExecutionPayloadEnvelope => &self.execution_payload_envelopes,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
+            Topic::PayloadAttestation => &self.payload_attestations,
             Topic::PayloadAttributes => &self.payload_attributes,
             Topic::ProposerSlashing => &self.proposer_slashings,
             Topic::VoluntaryExit => &self.voluntary_exits,
@@ -236,6 +250,21 @@ impl<P: Preset> EventChannels<P> {
             self.send_data_column_sidecar_event_internal(block_root, data_column_sidecar)
         {
             warn_with_peers!("unable to send data column sidecar event: {error}");
+        }
+    }
+
+    pub fn send_execution_payload_envelope_event(
+        &self,
+        envelope: &SignedExecutionPayloadEnvelope<P>,
+    ) {
+        if let Err(error) = self.send_execution_payload_envelope_event_internal(envelope) {
+            warn!("unable to send execution payload envelope event: {error}");
+        }
+    }
+
+    pub fn send_payload_attestation_event(&self, payload_attestation: Arc<PayloadAttestationMessage>) {
+        if let Err(error) = self.send_payload_attestation_event_internal(payload_attestation) {
+            warn!("unable to send payload attestation event: {error}");
         }
     }
 
@@ -433,6 +462,31 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_execution_payload_envelope_event_internal(
+        &self,
+        envelope: &SignedExecutionPayloadEnvelope<P>,
+    ) -> Result<()> {
+        if self.execution_payload_envelopes.receiver_count() > 0 {
+            let envelope_event = ExecutionPayloadEnvelopeEvent::new(envelope);
+            let event = Event::ExecutionPayloadEnvelope(envelope_event);
+            self.execution_payload_envelopes.send(event)?;
+        }
+
+        Ok(())
+    }
+
+    fn send_payload_attestation_event_internal(
+        &self,
+        payload_attestation: Arc<PayloadAttestationMessage>,
+    ) -> Result<()> {
+        if self.payload_attestations.receiver_count() > 0 {
+            let event = Event::PayloadAttestation(payload_attestation);
+            self.payload_attestations.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -582,6 +636,30 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
             index: data_column_sidecar.index(),
             slot: data_column_sidecar.slot(),
             kzg_commitments: data_column_sidecar.kzg_commitments().clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadEnvelopeEvent {
+    pub beacon_block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: ValidatorIndex,
+    pub block_hash: ExecutionBlockHash,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub block_number: ExecutionBlockNumber,
+}
+
+impl ExecutionPayloadEnvelopeEvent {
+    fn new<P: Preset>(envelope: &SignedExecutionPayloadEnvelope<P>) -> Self {
+        Self {
+            beacon_block_root: envelope.message.beacon_block_root,
+            slot: envelope.message.slot,
+            builder_index: envelope.message.builder_index,
+            block_hash: envelope.message.payload.block_hash,
+            block_number: envelope.message.payload.block_number,
         }
     }
 }

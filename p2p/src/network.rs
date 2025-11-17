@@ -46,6 +46,7 @@ use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio_stream::wrappers::IntervalStream;
+use tracing::debug;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
@@ -2134,6 +2135,26 @@ impl<P: Preset> Network<P> {
             }
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug_with_peers!("received light client optimistic update as gossip");
+            }
+            PubsubMessage::ExecutionPayload(execution_payload_envelope) => {
+                debug!("received execution payload envelope as gossip from {source}");
+                P2pToSync::GossipExecutionPayload(
+                    execution_payload_envelope,
+                    source,
+                    GossipId { source, message_id },
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            PubsubMessage::PayloadAttestationMessage(payload_attestation) => {
+                debug!("received payload attestation message as gossip from {source}");
+                P2pToSync::GossipPayloadAttestation(
+                    payload_attestation,
+                    GossipId { source, message_id },
+                )
+                .send(&self.channels.p2p_to_sync_tx);
+            }
+            eth2_libp2p::PubsubMessage::ExecutionPayloadBid(_) => {
+                // TODO: Implement ExecutionPayloadBid gossip handling
             }
         }
     }

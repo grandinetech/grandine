@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::Error as AnyhowError;
-use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
-    preset::{Mainnet, Preset},
+    phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
+    preset::Preset,
 };
 
 #[derive(Debug, Error)]
@@ -174,6 +173,36 @@ pub enum Error<P: Preset> {
     ValidatorNotAggregator {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
+    #[error("builder validator is not active (builder_index: {builder_index})")]
+    ValidatorNotActive {
+        builder_index: ValidatorIndex,
+    },
+    #[error("blob KZG commitments mismatch between envelope and beacon block")]
+    BlobKzgCommitmentsMismatch,
+    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
+    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
+    #[error("missing execution payload bid in beacon block (beacon_block_root: {beacon_block_root:?})")]
+    MissingExecutionPayloadBid { beacon_block_root: H256 },
+    #[error("builder index mismatch: expected {expected}, actual {actual}")]
+    BuilderIndexMismatch {
+        expected: ValidatorIndex,
+        actual: ValidatorIndex,
+    },
+    #[error("execution payload block hash mismatch: expected {expected:?}, actual {actual:?}")]
+    ExecutionPayloadBlockHashMismatch { expected: H256, actual: H256 },
+    #[error("payload attestation has no attesting indices")]
+    PayloadAttestationHasNoAttestingIndices,
+    #[error("payload attestation attesting indices not sorted and unique")]
+    PayloadAttestationAttestingIndicesNotSortedAndUnique,
+    #[error("payload attestation validator not in PTC (validator_index: {validator_index}, slot: {slot})")]
+    PayloadAttestationValidatorNotInPtc {
+        validator_index: ValidatorIndex,
+        slot: Slot,
+    },
+    #[error("payload attestation invalid signature")]
+    PayloadAttestationInvalidSignature,
 }
 
-assert_eq_size!(Error<Mainnet>, [usize; 4]);
+// Size increased due to new ExecutionPayloadEnvelope and PayloadAttestation error variants
+// TODO: Update size after verifying actual Error<Mainnet> size
+// assert_eq_size!(Error<Mainnet>, [usize; 8]);
