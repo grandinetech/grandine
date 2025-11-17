@@ -19,7 +19,7 @@ use types::{
     deneb::containers::BlobSidecar,
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{Slot, H256},
+        primitives::{H256, Slot},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,

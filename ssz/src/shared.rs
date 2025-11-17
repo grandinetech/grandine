@@ -12,7 +12,7 @@ use try_from_iterator::TryFromIterator;
 use typenum::Unsigned;
 
 use crate::{
-    consts::{Offset, BYTES_PER_LENGTH_OFFSET},
+    consts::{BYTES_PER_LENGTH_OFFSET, Offset},
     error::{IndexError, ReadError, WriteError},
     iter::ExactSize,
     porcelain::{SszRead, SszReadDefault as _, SszWrite},

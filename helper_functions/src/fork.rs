@@ -2,7 +2,7 @@ use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
 use anyhow::Result;
-use bls::{traits::SignatureBytes as _, SignatureBytes};
+use bls::{SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use ssz::{PersistentList, PersistentVector};
@@ -10,6 +10,7 @@ use std_ext::ArcExt as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
+    ProposerLookahead,
     altair::beacon_state::BeaconState as AltairBeaconState,
     bellatrix::{
         beacon_state::BeaconState as BellatrixBeaconState,
@@ -37,7 +38,6 @@ use types::{
     },
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState as _},
-    ProposerLookahead,
 };
 
 use crate::{accessors, misc, mutators, phase0, predicates};

@@ -14,7 +14,7 @@ use types::{
     },
     combined::BeaconState,
     nonstandard::ValidationOutcome,
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
+    phase0::primitives::{H256, Slot, SubnetId, ValidatorIndex},
     preset::Preset,
 };
 use validator_statistics::ValidatorStatistics;

@@ -6,12 +6,12 @@ use std::{
 
 use derive_more::From;
 use serde::{
-    de::{DeserializeOwned, IgnoredAny},
     Deserialize,
+    de::{DeserializeOwned, IgnoredAny},
 };
 use serde_repr::Deserialize_repr;
 use snap::raw::Decoder;
-use ssz::{SszRead, SszReadDefault, H256};
+use ssz::{H256, SszRead, SszReadDefault};
 
 #[derive(Clone, Copy, Default, Deserialize_repr)]
 #[repr(u8)]

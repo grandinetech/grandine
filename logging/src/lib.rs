@@ -97,7 +97,7 @@ macro_rules! trace_with_peers {
 mod tests {
     use std::sync::{LazyLock, Mutex};
 
-    use binary_utils::{initialize_tracing_logger, TracingHandle};
+    use binary_utils::{TracingHandle, initialize_tracing_logger};
     use serial_test::serial;
     use tempfile::TempDir;
 

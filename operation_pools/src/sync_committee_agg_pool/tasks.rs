@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use futures::channel::mpsc::UnboundedSender;

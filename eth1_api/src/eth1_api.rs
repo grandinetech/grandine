@@ -1,7 +1,7 @@
 use core::{ops::RangeInclusive, time::Duration};
 use std::{collections::BTreeMap, sync::Arc};
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use either::Either;
 use enum_iterator::Sequence as _;
 use ethereum_types::H64;
@@ -11,11 +11,11 @@ use execution_engine::{
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
     ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1, RawExecutionRequests,
 };
-use futures::{channel::mpsc::UnboundedSender, Future};
+use futures::{Future, channel::mpsc::UnboundedSender};
 use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
-use reqwest::{header::HeaderMap, Client};
-use serde::{de::DeserializeOwned, Deserialize};
+use reqwest::{Client, header::HeaderMap};
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use static_assertions::const_assert_eq;
 use std_ext::CopyExt;
@@ -30,19 +30,19 @@ use types::{
     redacting_url::RedactingUrl,
 };
 use web3::{
+    Error as Web3Error, Transport as _, Web3,
     api::{Eth, Namespace as _},
     helpers::CallFuture,
     transports::Http,
     types::{BlockId, BlockNumber, FilterBuilder, U64},
-    Error as Web3Error, Transport as _, Web3,
 };
 
 use crate::{
+    Eth1ApiToMetrics, Eth1ConnectionData, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
     endpoints::{Endpoint, Endpoints},
     eth1_block::Eth1Block,
-    Eth1ApiToMetrics, Eth1ConnectionData, WithClientVersions,
 };
 
 const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
@@ -163,10 +163,10 @@ impl Eth1Api {
             .await?
             .result;
 
-        if let Some(log) = logs.first() {
-            if let Some(block_number) = log.block_number {
-                return Ok(Some(block_number.as_u64()));
-            }
+        if let Some(log) = logs.first()
+            && let Some(block_number) = log.block_number
+        {
+            return Ok(Some(block_number.as_u64()));
         }
 
         Ok(None)

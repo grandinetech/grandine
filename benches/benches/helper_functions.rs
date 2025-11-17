@@ -9,7 +9,7 @@ use std::sync::Arc;
 use allocator as _;
 use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
-use eth2_cache_utils::{goerli, mainnet, medalla, LazyBeaconState};
+use eth2_cache_utils::{LazyBeaconState, goerli, mainnet, medalla};
 use helper_functions::accessors;
 use pubkey_cache::PubkeyCache;
 use ssz::Hc;

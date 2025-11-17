@@ -5,8 +5,8 @@ use core::{
 
 use generic_array::{ArrayLength, GenericArray};
 use serde::{
-    de::{Error, Visitor},
     Deserializer,
+    de::{Error, Visitor},
 };
 
 use crate::shared;

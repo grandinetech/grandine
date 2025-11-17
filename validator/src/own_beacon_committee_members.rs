@@ -9,7 +9,7 @@ use signer::{Signer, SigningMessage, SigningTriple};
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
 use tokio::sync::Mutex;
-use typenum::{assert_type, op, True, Unsigned as _, U1, U8};
+use typenum::{True, U1, U8, Unsigned as _, assert_type, op};
 use types::{
     combined::BeaconState,
     config::Config as ChainConfig,
@@ -85,10 +85,10 @@ impl OwnBeaconCommitteeMembers {
         let slot_index = slot_index_from_slot(slot);
         let mut slot_members_opt = self.slots[slot_index].lock().await;
 
-        if let Some(slot_members) = slot_members_opt.as_ref() {
-            if slot_members.slot == slot {
-                return Some(slot_members.members.clone_arc());
-            }
+        if let Some(slot_members) = slot_members_opt.as_ref()
+            && slot_members.slot == slot
+        {
+            return Some(slot_members.members.clone_arc());
         }
 
         *slot_members_opt = match self.compute_members_at_slot(state, slot).await {
@@ -109,10 +109,10 @@ impl OwnBeaconCommitteeMembers {
     pub async fn needs_to_compute_members_at_slot(&self, slot: Slot) -> bool {
         let slot_index = slot_index_from_slot(slot);
 
-        if let Some(slot_members) = self.slots[slot_index].lock().await.as_ref() {
-            if slot_members.slot == slot {
-                return false;
-            }
+        if let Some(slot_members) = self.slots[slot_index].lock().await.as_ref()
+            && slot_members.slot == slot
+        {
+            return false;
         }
 
         true

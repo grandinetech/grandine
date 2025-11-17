@@ -1,5 +1,5 @@
 pub use crate::{
-    server::{run_metrics_server, MetricsServerConfig},
+    server::{MetricsServerConfig, run_metrics_server},
     service::{MetricsChannels, MetricsService, MetricsServiceConfig},
 };
 

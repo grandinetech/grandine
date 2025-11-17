@@ -11,7 +11,7 @@ use helper_functions::{
     phase0::get_attesting_indices,
     predicates::{is_active_validator, is_eligible_for_penalties, is_in_inactivity_leak},
 };
-use itertools::{izip, Itertools as _};
+use itertools::{Itertools as _, izip};
 use num_integer::Roots as _;
 use serde::Serialize;
 #[cfg(target_arch = "x86_64")]
@@ -22,7 +22,7 @@ use types::{
         beacon_state::BeaconState,
         consts::BASE_REWARDS_PER_EPOCH,
         containers::{PendingAttestation, Validator},
-        primitives::{Epoch, Gwei, ValidatorIndex, H256},
+        primitives::{Epoch, Gwei, H256, ValidatorIndex},
     },
     preset::Preset,
 };

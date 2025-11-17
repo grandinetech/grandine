@@ -11,9 +11,9 @@ use bitvec::{bitbox, boxed::BitBox, vec::BitVec};
 use derivative::Derivative;
 use derive_more::{Deref, DerefMut};
 use ethereum_types::H256;
-use serde::{de::Error as _, ser::Error as _, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _, ser::Error as _};
 use static_assertions::assert_eq_size;
-use typenum::{Unsigned, U1, U2048};
+use typenum::{U1, U2048, Unsigned};
 
 use crate::{
     consts::BITS_PER_BYTE,

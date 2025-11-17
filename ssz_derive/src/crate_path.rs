@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use proc_macro2::Span;
 use proc_macro_crate::FoundCrate;
-use syn::{parse_quote, Error, Ident, Path};
+use proc_macro2::Span;
+use syn::{Error, Ident, Path, parse_quote};
 
 pub fn crate_path(original_name: &str) -> Result<Path, Error> {
     let call_site = Span::call_site();
