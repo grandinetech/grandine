@@ -34,6 +34,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    nonstandard::Phase,
     phase0::primitives::{Epoch, Slot, H256},
     preset::Preset,
 };
@@ -78,6 +79,7 @@ pub enum SyncTarget {
     BlobSidecar,
     Block,
     DataColumnSidecar,
+    ExecutionPayloadEnvelope,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +99,7 @@ pub struct SyncManager<P: Preset> {
     blob_requests: RangeAndRootRequests<BlobIdentifier, P>,
     block_requests: RangeAndRootRequests<H256, P>,
     data_column_requests: RangeAndRootRequests<DataColumnIdentifier, P>,
+    execution_payload_envelope_requests: RangeAndRootRequests<H256, P>,
     last_sync_head: Slot,
     last_sync_range: Range<Slot>,
     sequential_redownloads: usize,
@@ -122,6 +125,7 @@ impl<P: Preset> SyncManager<P> {
             blob_requests: RangeAndRootRequests::<BlobIdentifier, P>::default(),
             block_requests: RangeAndRootRequests::<H256, P>::default(),
             data_column_requests: RangeAndRootRequests::<DataColumnIdentifier, P>::default(),
+            execution_payload_envelope_requests: RangeAndRootRequests::<H256, P>::default(),
             last_sync_range: 0..0,
             last_sync_head: 0,
             sequential_redownloads: 0,
@@ -157,6 +161,16 @@ impl<P: Preset> SyncManager<P> {
             .record_received_response(&block_root, &peer_id, app_request_id);
     }
 
+    pub fn record_received_execution_payload_envelope_response(
+        &mut self,
+        block_root: H256,
+        peer_id: PeerId,
+        app_request_id: AppRequestId,
+    ) {
+        self.execution_payload_envelope_requests
+            .record_received_response(&block_root, &peer_id, app_request_id);
+    }
+
     pub fn record_received_data_column_sidecar_response(
         &mut self,
         data_column_identifier: DataColumnIdentifier,
@@ -175,6 +189,10 @@ impl<P: Preset> SyncManager<P> {
             .request_direction(app_request_id)
             .or_else(|| self.blob_requests.request_direction(app_request_id))
             .or_else(|| self.data_column_requests.request_direction(app_request_id))
+            .or_else(|| {
+                self.execution_payload_envelope_requests
+                    .request_direction(app_request_id)
+            })
     }
 
     pub fn add_peer(&mut self, peer_id: PeerId, status: StatusMessage) {
@@ -213,6 +231,10 @@ impl<P: Preset> SyncManager<P> {
             .remove_peer(peer_id)
             .chain(self.blob_requests.remove_peer(peer_id))
             .chain(self.data_column_requests.remove_peer(peer_id))
+            .chain(
+                self.execution_payload_envelope_requests
+                    .remove_peer(peer_id),
+            )
             .collect_vec()
     }
 
@@ -233,7 +255,12 @@ impl<P: Preset> SyncManager<P> {
     ) {
         match new_peer {
             Some(peer_id) => {
-                if matches!(batch.target, SyncTarget::Block | SyncTarget::BlobSidecar) {
+                if matches!(
+                    batch.target,
+                    SyncTarget::Block
+                        | SyncTarget::BlobSidecar
+                        | SyncTarget::ExecutionPayloadEnvelope
+                ) {
                     self.log(
                         Level::Debug,
                         format_args!("retrying batch {batch:?}, new peer: {peer_id}, app_request_id: {app_request_id:?}"),
@@ -259,6 +286,9 @@ impl<P: Preset> SyncManager<P> {
                         self.add_blob_request_by_range(app_request_id, batch)
                     }
                     SyncTarget::Block => self.add_block_request_by_range(app_request_id, batch),
+                    SyncTarget::ExecutionPayloadEnvelope => {
+                        self.add_execution_payload_envelope_request_by_range(app_request_id, batch)
+                    }
                 }
             }
             None => {
@@ -459,6 +489,30 @@ impl<P: Preset> SyncManager<P> {
                 }
             }
 
+            // Request execution payload envelopes for Gloas-activated slots
+            // Note: Unlike blobs/columns which use serve_range checks, envelopes are needed
+            // for all Gloas slots (similar to blocks) for state transition
+            //TODO: confirm this from hangleang
+            if sync_mode.is_default() && config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
+                let batch = SyncBatch {
+                    target: SyncTarget::ExecutionPayloadEnvelope,
+                    direction: SyncDirection::Back,
+                    peer_id: *peer,
+                    start_slot,
+                    count,
+                    response_received: false,
+                    retry_count: 0,
+                    data_columns: None,
+                };
+
+                self.log(
+                    Level::Debug,
+                    format_args!("back-sync batch built: {batch:?})"),
+                );
+
+                sync_batches.push(batch);
+            }
+
             if sync_mode.is_default() {
                 let batch = SyncBatch {
                     target: SyncTarget::Block,
@@ -654,6 +708,22 @@ impl<P: Preset> SyncManager<P> {
                     data_columns: None,
                 };
 
+                // Request execution payload envelopes for Gloas-activated slots
+                // Note: Similar to blocks, envelopes are needed for all Gloas slots (not just serve range)
+                // This must be checked before serve range checks to ensure envelopes are always requested
+                if config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
+                    sync_batches.push(SyncBatch {
+                        target: SyncTarget::ExecutionPayloadEnvelope,
+                        direction: SyncDirection::Forward,
+                        peer_id: block_peer_id,
+                        start_slot,
+                        count,
+                        response_received: false,
+                        retry_count: 0,
+                        data_columns: None,
+                    });
+                }
+
                 if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
                     && data_column_serve_range_slot < max_slot
                 {
@@ -731,6 +801,7 @@ impl<P: Preset> SyncManager<P> {
                 }
 
                 sync_batches.push(block_batch);
+
                 batch_index += 1;
             }
         }
@@ -755,6 +826,9 @@ impl<P: Preset> SyncManager<P> {
         self.block_requests.ready_to_request_by_range()
             && self.blob_requests.ready_to_request_by_range()
             && self.data_column_requests.ready_to_request_by_range()
+            && self
+                .execution_payload_envelope_requests
+                .ready_to_request_by_range()
     }
 
     pub fn ready_to_request_blob_by_root(
@@ -846,6 +920,27 @@ impl<P: Preset> SyncManager<P> {
         );
 
         self.block_requests.add_request_by_root(block_root, peer_id)
+    }
+
+    pub fn add_execution_payload_envelope_request_by_range(
+        &mut self,
+        app_request_id: AppRequestId,
+        batch: SyncBatch<P>,
+    ) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add execution payload envelope request by range (app_request_id: {:?}, peer_id: {}, \
+                range: {:?}, retries: {})",
+                app_request_id,
+                batch.peer_id,
+                (batch.start_slot..(batch.start_slot + batch.count)),
+                batch.retry_count,
+            ),
+        );
+
+        self.execution_payload_envelope_requests
+            .add_request_by_range(app_request_id, batch)
     }
 
     pub fn add_data_columns_request_by_range(
@@ -1021,6 +1116,45 @@ impl<P: Preset> SyncManager<P> {
                 } else {
                     self.retry_batch(app_request_id, sync_batch, None);
                 }
+            }
+        }
+    }
+
+    pub fn execution_payload_envelopes_by_range_request_finished(
+        &mut self,
+        controller: &RealController<P>,
+        peer_id: PeerId,
+        app_request_id: AppRequestId,
+        request_direction: Option<SyncDirection>,
+    ) {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "request execution payload envelopes by range finished (app_request_id: {app_request_id:?})"
+            ),
+        );
+
+        if let Some((sync_batch, _)) = self
+            .execution_payload_envelope_requests
+            .request_by_range_finished(app_request_id)
+        {
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "execution payload envelopes by range request stats: responses received: {}, count: {}, \
+                    direction {request_direction:?}, retries: {}",
+                    sync_batch.response_received, sync_batch.count, sync_batch.retry_count,
+                ),
+            );
+
+            if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
+                if misc::compute_epoch_at_slot::<P>(sync_batch.start_slot + sync_batch.count)
+                    < controller.min_checked_block_availability_epoch()
+                {
+                    self.add_peer_to_back_sync_black_list(peer_id);
+                }
+
+                self.retry_batch(app_request_id, sync_batch, self.random_peer(true));
             }
         }
     }
@@ -1324,10 +1458,18 @@ impl<P: Preset> SyncManager<P> {
         self.data_column_requests.expired_range_batches()
     }
 
+    pub fn expired_execution_payload_envelope_range_batches(
+        &mut self,
+    ) -> impl Iterator<Item = (SyncBatch<P>, Instant)> + '_ {
+        self.execution_payload_envelope_requests
+            .expired_range_batches()
+    }
+
     pub fn cache_clear(&mut self) {
         self.blob_requests.cache_clear();
         self.block_requests.cache_clear();
         self.data_column_requests.cache_clear();
+        self.execution_payload_envelope_requests.cache_clear();
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
@@ -1462,12 +1604,12 @@ mod tests {
         Slot::MAX,
         128,
         [
+            (112, 16, SyncTarget::ExecutionPayloadEnvelope),
             (112, 16, SyncTarget::Block),
+            (96, 16, SyncTarget::ExecutionPayloadEnvelope),
             (96, 16, SyncTarget::Block),
+            (80, 16, SyncTarget::ExecutionPayloadEnvelope),
             (80, 16, SyncTarget::Block),
-            (64, 16, SyncTarget::Block),
-            (48, 16, SyncTarget::Block),
-            (32, 16, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -1541,6 +1683,7 @@ mod tests {
     ) {
         let mut config = Config::minimal().rapid_upgrade();
         config.fulu_fork_epoch = 8;
+        config.gloas_fork_epoch = 9;
         let config = Arc::new(config);
         let sampling_columns = HashSet::new();
         let mut sync_manager = build_sync_manager::<Minimal>(config.clone_arc());
