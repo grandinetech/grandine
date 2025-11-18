@@ -1103,13 +1103,18 @@ fn build_ptc_cache<P: Preset>(state: &impl PostGloasBeaconState<P>, epoch: Epoch
         ptc_shuffling.extend(slot_ptc);
     }
 
-    // Build reverse index: validator_index → position in ptc_shuffling
+    // Build reverse index: validator_index → all (slot, position) assignments
+    // Stores ALL occurrences for validators that appear multiple times
     let validator_count = state.validators().len_usize();
-    let mut ptc_positions = vec![None; validator_count];
+    let mut ptc_positions: Vec<Vec<(Slot, usize)>> = vec![Vec::new(); validator_count];
 
     for (position, &validator_index) in ptc_shuffling.iter().enumerate() {
-        if let Some(slot) = ptc_positions.get_mut(validator_index as usize) {
-            *slot = Some(position);
+        let slot_offset = (position / ptc_size) as u64;
+        let slot = epoch_start_slot + slot_offset;
+        let position_in_slot = position % ptc_size;
+
+        if let Some(assignments) = ptc_positions.get_mut(validator_index as usize) {
+            assignments.push((slot, position_in_slot));
         }
     }
 

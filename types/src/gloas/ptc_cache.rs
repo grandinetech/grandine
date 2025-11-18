@@ -5,9 +5,9 @@ use once_cell::sync::OnceCell;
 
 use crate::phase0::primitives::{Epoch, Slot, ValidatorIndex};
 
-/// Equivalence function for `ptc_positions` that ignores trailing `None` entries.
+/// Equivalence function for `ptc_positions` that ignores trailing empty entries.
 /// Will be used in tests.
-fn compare_ptc_positions(xs: &Vec<Option<usize>>, ys: &Vec<Option<usize>>) -> bool {
+fn compare_ptc_positions(xs: &Vec<Vec<(Slot, usize)>>, ys: &Vec<Vec<(Slot, usize)>>) -> bool {
     use std::cmp::Ordering;
 
     let (shorter, longer) = match xs.len().cmp(&ys.len()) {
@@ -19,7 +19,7 @@ fn compare_ptc_positions(xs: &Vec<Option<usize>>, ys: &Vec<Option<usize>>) -> bo
     };
 
     shorter == &longer[..shorter.len()]
-        && longer[shorter.len()..].iter().all(|new| new.is_none())
+        && longer[shorter.len()..].iter().all(|new| new.is_empty())
 }
 
 /// Cache for Payload Timeliness Committee (PTC) assignments for an entire epoch.
@@ -30,9 +30,9 @@ pub struct PTCCache {
     pub initialized_epoch: Option<Epoch>,
     /// Flat shuffling for all slots in epoch
     pub ptc_shuffling: Vec<ValidatorIndex>,
-    /// Reverse index: validator_index → position in ptc_shuffling
+    /// Reverse index: validator_index → all (slot, position) assignments
     #[derivative(PartialEq(compare_with = "compare_ptc_positions"))]
-    pub ptc_positions: Vec<Option<usize>>,
+    pub ptc_positions: Vec<Vec<(Slot, usize)>>,
     /// PTC size per slot
     pub ptc_size: usize,
     /// Slots per epoch
@@ -45,7 +45,7 @@ impl PTCCache {
     pub fn from_parts(
         epoch: Epoch,
         ptc_shuffling: Vec<ValidatorIndex>,
-        ptc_positions: Vec<Option<usize>>,
+        ptc_positions: Vec<Vec<(Slot, usize)>>,
         ptc_size: usize,
         slots_per_epoch: u64,
     ) -> Self {
@@ -78,19 +78,13 @@ impl PTCCache {
         self.initialized_epoch == Some(epoch)
     }
 
-    /// Returns the slot where the validator is assigned to PTC, if any.
-    /// Uses reverse index lookup.
-    pub fn get_validator_ptc_slot(&self, validator_index: ValidatorIndex) -> Option<Slot> {
-        let epoch = self.initialized_epoch?;
-
-        // Lookup: get position in shuffling
-        let position = self.ptc_positions.get(validator_index as usize).and_then(|&pos| pos)?;
-
-        // Calculate which slot this position belongs to
-        let slot_offset = (position / self.ptc_size) as u64;
-        let slot = epoch * self.slots_per_epoch + slot_offset;
-
-        Some(slot)
+    /// Returns all (slot, position) assignments for a validator in this epoch.
+    /// Validators may appear multiple times due to balance-weighted selection.
+    pub fn get_validator_ptc_slots(&self, validator_index: ValidatorIndex) -> &[(Slot, usize)] {
+        self.ptc_positions
+            .get(validator_index as usize)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 }
 
