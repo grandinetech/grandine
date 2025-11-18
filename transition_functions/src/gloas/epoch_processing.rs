@@ -18,6 +18,7 @@ use types::{
     gloas::{
         beacon_state::BeaconState,
         containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
+        ptc_cache::advance_ptc_caches,
     },
     preset::{BuilderPendingPaymentsLength, Preset},
     traits::{BeaconState as _, PostGloasBeaconState},
@@ -92,6 +93,9 @@ pub fn process_epoch(
     process_builder_pending_payments(config, state)?;
 
     state.cache.advance_epoch();
+
+    // Advance PTC caches (rotate Previous <- Current <- Next)
+    advance_ptc_caches(&mut state.ptc_caches);
 
     Ok(())
 }
