@@ -1609,12 +1609,12 @@ mod tests {
         Slot::MAX,
         128,
         [
+            (112, 16, SyncTarget::ExecutionPayloadEnvelope),
             (112, 16, SyncTarget::Block),
+            (96, 16, SyncTarget::ExecutionPayloadEnvelope),
             (96, 16, SyncTarget::Block),
+            (80, 16, SyncTarget::ExecutionPayloadEnvelope),
             (80, 16, SyncTarget::Block),
-            (64, 16, SyncTarget::Block),
-            (48, 16, SyncTarget::Block),
-            (32, 16, SyncTarget::Block),
         ]
     )]
     #[test_case(
@@ -1688,6 +1688,7 @@ mod tests {
     ) {
         let mut config = Config::minimal().rapid_upgrade();
         config.fulu_fork_epoch = 8;
+        config.gloas_fork_epoch = 9;
         let config = Arc::new(config);
         let sampling_columns = HashSet::new();
         let mut sync_manager = build_sync_manager::<Minimal>(config.clone_arc());
