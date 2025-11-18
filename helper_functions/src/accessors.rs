@@ -12,6 +12,7 @@ use bls::{traits::PublicKey as _, AggregatePublicKey, PublicKeyBytes};
 #[cfg(not(target_os = "zkvm"))]
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
+use std::collections::HashMap as StdHashMap;
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
@@ -1103,22 +1104,52 @@ fn build_ptc_cache<P: Preset>(state: &impl PostGloasBeaconState<P>, epoch: Epoch
         ptc_shuffling.extend(slot_ptc);
     }
 
-    // Build reverse index: validator_index → all (slot, position) assignments
-    // Stores ALL occurrences for validators that appear multiple times
+    // Build reverse index with hybrid approach:
+    // - Single occurrences (most validators): stored in flat Vec
+    // - Multiple occurrences: stored in HashMap
     let validator_count = state.validators().len_usize();
-    let mut ptc_positions: Vec<Vec<(Slot, usize)>> = vec![Vec::new(); validator_count];
 
-    for (position, &validator_index) in ptc_shuffling.iter().enumerate() {
-        let slot_offset = (position / ptc_size) as u64;
-        let slot = epoch_start_slot + slot_offset;
-        let position_in_slot = position % ptc_size;
-
-        if let Some(assignments) = ptc_positions.get_mut(validator_index as usize) {
-            assignments.push((slot, position_in_slot));
+    // Pass 1: Count occurrences per validator
+    let mut occurrence_counts = vec![0u16; validator_count];
+    for &validator_index in ptc_shuffling.iter() {
+        if let Some(count) = occurrence_counts.get_mut(validator_index as usize) {
+            *count += 1;
         }
     }
 
-    Ok(PTCCache::from_parts(epoch, ptc_shuffling, ptc_positions, ptc_size, slots_per_epoch))
+    // Pass 2: Pre-allocate structures based on counts
+    let mut ptc_positions = vec![None; validator_count];
+    let multi_count = occurrence_counts.iter().filter(|&&c| c >= 2).count();
+    let mut multiple_positions = StdHashMap::with_capacity(multi_count);
+
+    // Pass 3: Fill positions based on occurrence count
+    for (position, &validator_index) in ptc_shuffling.iter().enumerate() {
+        let count = occurrence_counts[validator_index as usize];
+
+        if count == 1 {
+            // Single occurrence: store position in flat Vec
+            ptc_positions[validator_index as usize] = Some(position);
+        } else if count >= 2 {
+            // Multiple occurrences: store all (slot, position) pairs in HashMap
+            let slot_offset = (position / ptc_size) as u64;
+            let slot = epoch_start_slot + slot_offset;
+            let position_in_slot = position % ptc_size;
+
+            multiple_positions
+                .entry(validator_index)
+                .or_insert_with(|| Vec::with_capacity(count as usize))
+                .push((slot, position_in_slot));
+        }
+    }
+
+    Ok(PTCCache::from_parts(
+        epoch,
+        ptc_shuffling,
+        ptc_positions,
+        multiple_positions,
+        ptc_size,
+        slots_per_epoch,
+    ))
 }
 
 // Internal helper to compute PTC for one slot
