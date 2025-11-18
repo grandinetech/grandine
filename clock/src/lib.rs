@@ -341,7 +341,7 @@ pub enum ClockError {
 
 pub fn ticks<P: Preset>(
     config: &Config,
-    genesis_time: UnixSeconds,
+    genesis_time_in_ms: u64,
 ) -> Result<impl Stream<Item = Result<Tick>> + use<'_, P>> {
     // We assume the `Instant` and `SystemTime` obtained here correspond to the same point in time.
     // This is slightly inaccurate but the error will probably be negligible compared to clock
@@ -353,7 +353,7 @@ pub fn ticks<P: Preset>(
         config,
         now_instant,
         now_system_time,
-        genesis_time,
+        genesis_time_in_ms,
         false,
     )?;
 
@@ -384,11 +384,12 @@ pub fn next_interval_with_remaining_time<P: Preset>(
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
 
+    let genesis_time_in_ms = genesis_time.saturating_mul(1000);
     let (next_interval, next_instant) = next_tick_with_instant::<P, _, _>(
         config,
         now_instant,
         now_system_time,
-        genesis_time,
+        genesis_time_in_ms,
         true,
     )?;
 
@@ -401,11 +402,15 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
     config: &Config,
     now_instant: I,
     now_system_time: S,
-    genesis_time: UnixSeconds,
+    genesis_time_in_ms: u64,
     only_interval_ticks: bool,
 ) -> Result<(Tick, I)> {
     let unix_epoch_to_now = now_system_time.duration_since(S::UNIX_EPOCH)?;
-    let unix_epoch_to_genesis = Duration::from_secs(genesis_time);
+
+    // Tick is now operate in milliseconds, so to prevent precision loss by rounding down to unix seconds,
+    // We pass genesis time in milliseconds to prevent rounding error and precision calculation and
+    // comparision.
+    let unix_epoch_to_genesis = Duration::from_millis(genesis_time_in_ms);
 
     // Some platforms do not support negative `Instant`s. Operations that would produce an `Instant`
     // corresponding to time before the epoch will panic on those platforms. The epoch in question
@@ -462,14 +467,14 @@ fn tick_duration_at_slot<P: Preset>(config: &Config, slot: Slot) -> Duration {
     let ticks_per_slot_u128 = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))
         .expect("number of ticks per slot fits in u128");
 
-    let tick_duration_in_millis = u64::try_from(
+    let tick_duration_in_ms = u64::try_from(
         slot_duration
             .as_millis()
             .saturating_div(ticks_per_slot_u128),
     )
     .expect("tick duration in ms should fit in u64");
 
-    Duration::from_millis(tick_duration_in_millis)
+    Duration::from_millis(tick_duration_in_ms)
 }
 
 // TODO: Remove this function and update all usages throughout the app to work with slot duration
@@ -543,13 +548,16 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn ticks_with_mainnet_config_produces_a_tick_every_second_pre_gloas() -> Result<()> {
-        let genesis_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs()
-            .add(1);
+        let genesis_time_in_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_millis()
+                .add(1000),
+        )
+        .expect("genesis_time_in_ms should fit in u64");
 
         let config = Config::mainnet();
-        let mut ticks = ticks::<Mainnet>(&config, genesis_time)?;
+        let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
         let mut next_tick = || ticks.next().now_or_never().flatten().transpose();
 
         assert_eq!(next_tick()?, None);
@@ -618,23 +626,22 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn ticks_with_mainnet_config_iterate_through_every_tick_post_gloas() -> Result<()> {
-        let genesis_time = u64::try_from(
+        let genesis_time_in_ms = u64::try_from(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)?
                 .as_millis()
-                .add(750)
-                .saturating_div(1000),
+                .add(1000),
         )
-        .expect("genesis time should fit in u64");
+        .expect("genesis_time_in_ms should fit in u64");
 
         let config = Config::mainnet().start_and_stay_in(Phase::Gloas);
         let tick_duration = Duration::from_millis(750); // tick_duration_at_slot(&config, GENESIS_SLOT);
-        let mut ticks = ticks::<Mainnet>(&config, genesis_time)?;
+        let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
         let mut next_tick = || ticks.next().now_or_never().flatten().transpose();
 
         assert_eq!(next_tick()?, None);
 
-        tokio::time::advance(tick_duration).await;
+        tokio::time::advance(Duration::from_secs(1)).await;
 
         assert_eq!(next_tick()?, Some(Tick::new(0, TickKind::Propose)));
         assert_eq!(next_tick()?, None);
@@ -719,12 +726,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn ticks_starts_with_tick_at_end_of_interval_when_just_past_genesis() -> Result<()> {
-        let genesis_time = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs();
+        let genesis_time_in_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_millis(),
+        )
+        .expect("genesis_time_in_ms should fit in u64");
 
         let config = Config::mainnet();
-        let mut ticks = ticks::<Mainnet>(&config, genesis_time)?;
+        let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
         let mut next_tick = || ticks.next().now_or_never().flatten().transpose();
 
         assert_eq!(next_tick()?, None);
@@ -763,15 +773,15 @@ mod tests {
 
         let genesis_times = [
             UnixSeconds::MIN,
-            777,
+            777_000,
             UnixSeconds::MAX - 3,
             UnixSeconds::MAX - 2,
             UnixSeconds::MAX - 1,
             UnixSeconds::MAX,
         ];
 
-        for (config, genesis_time) in configs.iter().cartesian_product(genesis_times) {
-            ticks::<Mainnet>(config, genesis_time).ok();
+        for (config, genesis_time_in_ms) in configs.iter().cartesian_product(genesis_times) {
+            ticks::<Mainnet>(config, genesis_time_in_ms).ok();
         }
     }
 
@@ -788,15 +798,15 @@ mod tests {
 
         let genesis_times = [
             UnixSeconds::MIN,
-            777,
+            777_000,
             UnixSeconds::MAX - 3,
             UnixSeconds::MAX - 2,
             UnixSeconds::MAX - 1,
             UnixSeconds::MAX,
         ];
 
-        for (config, genesis_time) in configs.iter().cartesian_product(genesis_times) {
-            ticks::<Mainnet>(config, genesis_time).ok();
+        for (config, genesis_time_in_ms) in configs.iter().cartesian_product(genesis_times) {
+            ticks::<Mainnet>(config, genesis_time_in_ms).ok();
         }
     }
 
@@ -1062,14 +1072,14 @@ mod tests {
         time: UnixSeconds,
         only_interval_ticks: bool,
     ) -> (UnixSeconds, Tick) {
-        let genesis_time = 777;
+        let genesis_time_in_ms = 777_000;
         let timespec = Timespec::from_secs(time);
 
         let (actual_tick, actual_instant) = super::next_tick_with_instant::<P, _, _>(
             config,
             FakeInstant(timespec),
             FakeSystemTime(timespec),
-            genesis_time,
+            genesis_time_in_ms,
             only_interval_ticks,
         )
         .expect("FakeSystemTime cannot represent times before the Unix epoch");

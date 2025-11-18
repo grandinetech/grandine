@@ -794,7 +794,8 @@ async fn run_clock<P: Preset>(
     controller: RealController<P>,
     mut stop_clock_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
-    let mut ticks = clock::ticks::<P>(controller.chain_config(), controller.genesis_time())?.fuse();
+    let mut ticks =
+        clock::ticks::<P>(controller.chain_config(), controller.genesis_time_in_ms())?.fuse();
 
     loop {
         select! {
