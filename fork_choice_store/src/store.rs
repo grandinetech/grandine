@@ -2034,6 +2034,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[expect(clippy::too_many_arguments)]
     #[expect(clippy::too_many_lines)]
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_data_column_sidecar_with_state(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -2246,6 +2247,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,

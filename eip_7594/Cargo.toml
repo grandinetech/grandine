@@ -16,6 +16,7 @@ rayon = { workspace = true }
 ssz = { workspace = true}
 sha2 = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }

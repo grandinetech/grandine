@@ -58,6 +58,7 @@ impl<P: Preset> StateCache<P> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn before_or_at_slot(
         &self,
         block_root: H256,
