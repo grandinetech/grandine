@@ -170,12 +170,6 @@ pub struct Validator<P: Preset, W: Wait> {
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[expect(clippy::too_many_arguments)]
     #[must_use]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        name = "validator_duties",
-        skip_all
-    )]
     pub fn new(
         validator_config: Arc<ValidatorConfig>,
         block_producer: Arc<BlockProducer<P, W>>,
@@ -258,6 +252,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
+    #[expect(clippy::cognitive_complexity)]
     #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) {
         let mut health_check = HealthCheck::new("validator");
@@ -289,6 +284,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     }
                     ValidatorMessage::Head(wait_group, head) => {
+                        let span = tracing::debug_span!("ValidatorMessage::Head", service = "validator");
+                        let _enter = span.enter();
+
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             let state = self.controller.state_by_chain_link(&head);
                             ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
@@ -297,6 +295,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.attest_gossip_block(&wait_group, head).await;
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
+                        let span = tracing::debug_span!("ValidatorMessage::ValidAttestation", service = "validator");
+                        let _enter = span.enter();
+
                         self.attestation_agg_pool
                             .insert_attestation(wait_group, attestation.clone_arc(), None);
 
@@ -306,6 +307,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
+                        let span = tracing::debug_span!("ValidatorMessage::PrepareExecutionPayload", service = "validator");
+                        let _enter = span.enter();
                         let slot_head = self.safe_slot_head(slot).await;
 
                         if let Some(slot_head) = slot_head {
@@ -385,6 +388,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
+                        let span = tracing::debug_span!("P2pToValidator::AttesterSlashing", service = "validator");
+                        let _enter = span.enter();
+
                         let outcome = match self
                             .block_producer
                             .handle_external_attester_slashing(*slashing.clone())
@@ -403,6 +409,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
+                        let span = tracing::debug_span!("P2pToValidator::ProposerSlashing", service = "validator");
+                        let _enter = span.enter();
+
                         let outcome = match self
                             .block_producer
                             .handle_external_proposer_slashing(*slashing)
@@ -421,6 +430,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
+                        let span = tracing::debug_span!("P2pToValidator::VoluntaryExit", service = "validator");
+                        let _enter = span.enter();
+
                         let outcome = match self
                             .block_producer
                             .handle_external_voluntary_exit(*voluntary_exit)
@@ -443,6 +455,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 api_message = self.api_to_validator_rx.select_next_some() => {
                     let success = match api_message {
                         ApiToValidator::RegisteredValidators(sender) => {
+                            let span = tracing::debug_span!("ApiToValidator::RegisteredValidators", service = "validator");
+                            let _enter = span.enter();
+
                             let registered_pubkeys = self
                                 .registered_validators
                                 .values()
@@ -453,8 +468,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             sender.send(registered_pubkeys).is_ok()
                         },
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
+                            let span = tracing::debug_span!("ApiToValidator::SignedContributionAndProof", service = "validator");
+                            let _enter = span.enter();
                             let current_slot = self.controller.slot();
-
                             let slot_head = self.safe_slot_head(current_slot).await;
 
                             let failures = slot_head
@@ -470,6 +486,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             sender.send(failures).is_ok()
                         },
                         ApiToValidator::ValidatorRegistrations(validator_registrations) => {
+                            let span = tracing::debug_span!("ApiToValidator::ValidatorRegistration", service = "validator");
+                            let _enter = span.enter();
                             let current_slot = self.controller.slot();
                             let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
@@ -514,6 +532,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[instrument(
+        parent = None,
+        level = "debug",
+        fields(
+            service = "validator",
+            tick = ?tick,
+        ),
+        skip_all
+    )]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
         if let Some(metrics) = self.metrics.as_ref() {
             if tick.is_start_of_interval() {
@@ -698,6 +725,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip_all)]
     async fn safe_slot_head(&self, slot: Slot) -> Option<SlotHead<P>> {
         self.slot_head(slot)
             .await
@@ -708,6 +736,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     // The nested `Result` is inspired by `sled`:
     // <https://sled.rs/errors.html#making-unhandled-errors-unrepresentable>
+    #[instrument(level = "debug", skip_all)]
     async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
         let WithStatus {
             value: head,
@@ -749,16 +778,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator",
-            slot = slot_head.slot()
-        ),
-        name = "validator_duties",
-        skip_all,
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
         if slot_head.slot() == GENESIS_SLOT {
             // All peers should already have the genesis block.
@@ -1098,15 +1118,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attesting>
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attestation-aggregation>
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn attest_and_start_aggregating(
         &mut self,
         wait_group: &W,
@@ -1258,15 +1270,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
         if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn_with_peers!(
@@ -1406,15 +1410,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-message>
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn publish_sync_committee_messages(
         &mut self,
         wait_group: &W,
@@ -1488,15 +1484,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator"
-        ),
-        name = "validator_duties",
-        skip_all
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn publish_contributions_and_proofs(&self, slot_head: &SlotHead<P>) {
         if !self.controller.is_forward_synced() {
             return;
@@ -1553,6 +1541,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     async fn attest_gossip_block(&mut self, wait_group: &W, head: ChainLink<P>) {
         let Some(last_tick) = self.last_tick else {
             return;
@@ -2153,16 +2142,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         });
     }
 
-    #[instrument(
-        parent = None,
-        level = "trace",
-        fields(
-            service = "validator",
-            current_epoch = current_epoch
-        ),
-        name = "validator_duties",
-        skip_all,
-    )]
+    #[instrument(level = "debug", skip_all)]
     async fn register_validators(&mut self, current_epoch: Epoch) {
         if let Some(last_registration_epoch) = self.last_registration_epoch {
             let next_registration_epoch =

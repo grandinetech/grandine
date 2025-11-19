@@ -18,6 +18,7 @@ use rayon::iter::{
 };
 use sha2::{Digest as _, Sha256};
 use ssz::{ContiguousList, ContiguousVector, SszHash as _, Uint256};
+use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -144,6 +145,7 @@ pub fn compute_subnets_for_node<P: Preset>(
 }
 
 /// Verify if the data column sidecar is valid.
+#[instrument(level = "debug", skip_all)]
 pub fn verify_data_column_sidecar<P: Preset>(
     config: &Config,
     data_column_sidecar: &DataColumnSidecar<P>,
@@ -182,6 +184,7 @@ pub fn verify_data_column_sidecar<P: Preset>(
 }
 
 /// Verify if the KZG proofs are correct.
+#[instrument(level = "debug", skip_all)]
 pub fn verify_kzg_proofs<P: Preset>(
     data_column_sidecar: &DataColumnSidecar<P>,
     backend: KzgBackend,

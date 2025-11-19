@@ -14,6 +14,7 @@ use rust_kzg_mcl::eip_7594::MclBackend;
 #[cfg(feature = "zkcrypto")]
 use rust_kzg_zkcrypto::eip_7594::ZBackend;
 use ssz::{ByteVector, ContiguousVector};
+use tracing::instrument;
 use try_from_iterator::TryFromIterator;
 use types::{
     deneb::primitives::{Blob, KzgCommitment, KzgProof},
@@ -23,6 +24,7 @@ use types::{
 
 use crate::{error::KzgError, trusted_setup, KzgBackend};
 
+#[instrument(level = "debug", skip_all)]
 pub fn verify_cell_kzg_proof_batch<'a, P: Preset>(
     commitments: impl IntoIterator<Item = &'a KzgCommitment>,
     cell_indices: impl IntoIterator<Item = CellIndex>,
