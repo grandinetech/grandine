@@ -40,6 +40,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn before_or_at_slot<S: Storage<P>>(
         &self,
         store: &Store<P, S>,
@@ -50,6 +51,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             .or_else(|| store_state_before_or_at_slot(store, block_root, slot))
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn before_or_at_slot_in_cache_only(
         &self,
         block_root: H256,
@@ -62,6 +64,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             .map(|(state, _)| state)
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn existing_state_at_slot<S: Storage<P>>(
         &self,
         store: &Store<P, S>,

@@ -172,6 +172,14 @@ pub struct BlockVerifyForGossipTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for BlockVerifyForGossipTask<P, W> {
+    #[instrument(
+        skip_all,
+        name = "BlockVerifyForGossipTask::run",
+        level = "debug",
+        fields(
+            slot = self.block.message().slot()
+        ),
+    )]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -209,6 +217,7 @@ pub struct AggregateAndProofTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for AggregateAndProofTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "AggregateAndProofTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -244,6 +253,7 @@ pub struct AttestationTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for AttestationTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "AttestationTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -277,6 +287,7 @@ pub struct BlockAttestationsTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "BlockAttestationTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -325,6 +336,7 @@ pub struct AttesterSlashingTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for AttesterSlashingTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "AttesterSlashingTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -363,6 +375,7 @@ pub struct BlobSidecarTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for BlobSidecarTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "BlobSidecarTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -411,6 +424,7 @@ pub struct DataColumnSidecarTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "DataColumnSidecarTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -478,6 +492,7 @@ pub struct RetryDataColumnSidecarTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "RetryDataColumnSidecarTask::run")]
     fn run(self) {
         self.task.run()
     }
@@ -492,6 +507,7 @@ pub struct PersistBlobSidecarsTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PersistBlobSidecarTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -532,6 +548,7 @@ pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PersistDataColumnSidecarTask::run")]
     fn run(self) {
         let Self {
             slot,
@@ -577,6 +594,7 @@ pub struct CheckpointStateTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "CheckpointStateTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -629,6 +647,7 @@ pub struct PreprocessStateTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for PreprocessStateTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PreprocessStateTask::run")]
     fn run(self) {
         let Self {
             store_snapshot,
@@ -676,6 +695,7 @@ pub struct PersistPubkeyCacheTask<P: Preset, W> {
 }
 
 impl<P: Preset, W> Run for PersistPubkeyCacheTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PersistPubkeyCacheTask::run")]
     fn run(self) {
         let Self {
             pubkey_cache,
@@ -714,6 +734,7 @@ pub struct StateAtSlotCacheFlushTask<P: Preset> {
 }
 
 impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
+    #[instrument(skip_all, level = "debug", name = "StateAtSlotCacheFlushTask::run")]
     fn run(self) {
         let Self {
             state_at_slot_cache,

@@ -13,6 +13,7 @@ use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
+use tracing::instrument;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
@@ -149,6 +150,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn insert_attestation(
         &self,
         wait_group: W,
@@ -166,6 +168,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub async fn is_registered_validator(&self, validator_index: ValidatorIndex) -> bool {
         self.pool.is_registered_validator(validator_index).await
     }

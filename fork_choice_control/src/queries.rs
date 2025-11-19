@@ -15,6 +15,7 @@ use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use tracing::instrument;
 use typenum::Unsigned as _;
 use types::{
     combined::{BeaconState, SignedAggregateAndProof, SignedBeaconBlock},
@@ -299,6 +300,7 @@ where
     }
 
     #[must_use]
+    #[instrument(level = "debug", skip_all)]
     pub fn state_by_chain_link(&self, chain_link: &ChainLink<P>) -> Arc<BeaconState<P>> {
         chain_link.state(&self.store_snapshot())
     }
@@ -779,6 +781,7 @@ where
         )
     }
 
+    #[instrument(ret(level = "Debug"), level = "debug", skip_all)]
     pub fn validate_data_column_sidecar_with_state(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
