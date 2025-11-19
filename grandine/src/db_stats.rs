@@ -107,9 +107,8 @@ pub fn print<P: Preset>(
         }
     }
 
-    if let Some(db_stats) = storage_database.db_stats()? {
-        info!("{db_stats:?}");
-    }
+    info!("{:#?}", storage_database.db_stats());
+    info!("{:#?}", storage_database.env_info());
 
     let mut entries = [
         block_root_by_slot_entries,
