@@ -24,8 +24,8 @@ use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, StateCacheProcessor, Store,
-    StoreConfig,
+    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, PayloadAttestationOrigin,
+    StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -43,7 +43,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::primitives::ColumnIndex,
-    gloas::containers::SignedExecutionPayloadEnvelope,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::ValidationOutcome,
     phase0::primitives::{ExecutionBlockHash, Slot, SubnetId, H256},
     preset::Preset,
@@ -63,7 +63,8 @@ use crate::{
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
-        BlockVerifyForGossipTask, DataColumnSidecarTask, StateAtSlotCacheFlushTask,
+        BlockVerifyForGossipTask, DataColumnSidecarTask, PayloadAttestationTask,
+        StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -629,6 +630,32 @@ where
             block_seen,
             origin: DataColumnSidecarOrigin::Requested(peer_id),
             submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    pub fn on_own_payload_attestation(&self, payload_attestation: Arc<PayloadAttestationMessage>) {
+        self.spawn(PayloadAttestationTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            payload_attestation,
+            origin: PayloadAttestationOrigin::Own,
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    pub fn on_gossip_payload_attestation(
+        &self,
+        payload_attestation: Arc<PayloadAttestationMessage>,
+        gossip_id: GossipId,
+    ) {
+        self.spawn(PayloadAttestationTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            payload_attestation,
+            origin: PayloadAttestationOrigin::Gossip(gossip_id),
             metrics: self.metrics.clone(),
         })
     }

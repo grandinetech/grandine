@@ -542,6 +542,9 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
+                        ValidatorToP2p::PublishPayloadAttestation(_payload_attestation_message) => {
+                            // TODO: (gloas): publishing `payload_attestation_message` to `payload_attestation_message` gossipsub
+                        }
                         ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count) => {
                             self.update_data_column_subnets(custody_group_count);
                         }

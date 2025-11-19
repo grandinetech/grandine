@@ -89,6 +89,16 @@ where
     }
 
     #[must_use]
+    pub fn genesis_time_in_ms(&self) -> UnixSeconds {
+        let store = self.store_snapshot();
+        store
+            .last_finalized()
+            .state(&store)
+            .genesis_time()
+            .saturating_mul(1000)
+    }
+
+    #[must_use]
     pub fn anchor_block(&self) -> Arc<SignedBeaconBlock<P>> {
         self.store_snapshot().anchor().block.clone_arc()
     }

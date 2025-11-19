@@ -7,6 +7,7 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
+    gloas::containers::PayloadAttestationMessage,
     phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
@@ -151,6 +152,16 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("payload attestation's block is invalid: {payload_attestation:?}")]
+    PayloadAttestationInvalidBlock {
+        payload_attestation: Arc<PayloadAttestationMessage>,
+    },
+    #[error("validator {validator_index} is not a member of PTC at slot {slot}: {payload_attestation:?}")]
+    PayloadAttestationNotInCommittee {
+        payload_attestation: Arc<PayloadAttestationMessage>,
+        validator_index: ValidatorIndex,
+        slot: Slot,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

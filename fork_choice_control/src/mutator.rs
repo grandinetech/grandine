@@ -36,8 +36,9 @@ use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
-    DataColumnSidecarAction, DataColumnSidecarOrigin, Error, PayloadAction, StateCacheProcessor,
-    Store, ValidAttestation,
+    DataColumnSidecarAction, DataColumnSidecarOrigin, Error, PayloadAction,
+    PayloadAttestationAction, PayloadAttestationOrigin, StateCacheProcessor, Store,
+    ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -75,15 +76,16 @@ use crate::{
     misc::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
-        PendingChainLink, PendingDataColumnSidecar, ProcessingTimings, ReorgSource,
-        VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
+        PendingChainLink, PendingDataColumnSidecar, PendingPayloadAttestation, ProcessingTimings,
+        ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
+        WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
-        RetryDataColumnSidecarTask,
+        DataColumnSidecarTask, PayloadAttestationTask, PersistBlobSidecarsTask,
+        PersistDataColumnSidecarsTask, PersistExecutionPayloadEnvelopesTask,
+        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -312,6 +314,11 @@ where
                         persisted_block_roots,
                     );
                 }
+                MutatorMessage::PayloadAttestation {
+                    wait_group,
+                    result,
+                    origin,
+                } => self.handle_payload_attestation(&wait_group, result, origin)?,
                 MutatorMessage::PreprocessedBeaconState { state } => {
                     self.prepare_execution_payload_for_next_slot(&state);
                 }
@@ -1762,6 +1769,111 @@ where
         }
     }
 
+    #[expect(clippy::too_many_lines)]
+    fn handle_payload_attestation(
+        &mut self,
+        wait_group: &W,
+        result: Result<PayloadAttestationAction>,
+        origin: PayloadAttestationOrigin,
+    ) -> Result<()> {
+        match result {
+            Ok(PayloadAttestationAction::Accept(payload_attestation)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_payload_attestation(&["accepted"]);
+                }
+
+                trace_with_peers!(
+                    "payload attestation accepted (payload_attestation: {payload_attestation:?})"
+                );
+
+                if origin.should_generate_event() {
+                    self.event_channels
+                        .send_payload_attestation_event(payload_attestation.clone_arc());
+                }
+
+                if origin.send_to_validator() {
+                    self.send_to_validator(ValidatorMessage::ValidPayloadAttestation(
+                        wait_group.clone(),
+                        payload_attestation.clone_arc(),
+                    ));
+                }
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+
+                // TODO: (gloas): apply payload attestation into fork choice
+                // spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-on_payload_attestation_message
+                //
+                // let old_head = self.store_mut().apply_payload_attestation(payload_attestation, origin.is_from_block())?;
+                //
+                // self.update_store_snapshot();
+                //
+                // if let Some(old_head) = old_head {
+                //     self.notify_about_reorganization(
+                //         wait_group.clone(),
+                //         &old_head,
+                //         ReorgSource::Attestation,
+                //     );
+                //
+                //     self.spawn_preprocess_head_state_for_next_slot_task();
+                // }
+            }
+            Ok(PayloadAttestationAction::Ignore(publishable)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_payload_attestation(&["ignored"]);
+                }
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+            }
+            Ok(PayloadAttestationAction::DelayUntilBlock(payload_attestation, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_payload_attestation(&["delayed_until_block"]);
+                }
+
+                self.delay_payload_attestation_until_block(
+                    wait_group,
+                    PendingPayloadAttestation {
+                        payload_attestation,
+                        origin,
+                    },
+                    block_root,
+                );
+            }
+            Err(error) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_payload_attestation(&["rejected"]);
+                }
+
+                let source = error.to_string();
+                warn_with_peers!("payload attestation rejected (error: {error:?})",);
+
+                let (gossip_id, sender) = origin.split();
+
+                if gossip_id.is_some() {
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidPayloadAttestation,
+                    ));
+                }
+
+                reply_to_http_api(sender, Err(anyhow!(source)));
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_checkpoint_state(
         &mut self,
         wait_group: &W,
@@ -2723,6 +2835,41 @@ where
         }
     }
 
+    fn delay_payload_attestation_until_block(
+        &mut self,
+        wait_group: &W,
+        pending_payload_attestation: PendingPayloadAttestation,
+        block_root: H256,
+    ) {
+        if self.store.contains_block(block_root) {
+            self.retry_payload_attestation(wait_group.clone(), pending_payload_attestation);
+        } else {
+            trace_with_peers!(
+                "payload attestation delayed until block \
+                 (pending_payload_attestation: {pending_payload_attestation:?}, block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_payload_attestation
+                .origin
+                .gossip_id_ref()
+                .map(|gossid_id| gossid_id.source);
+
+            self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+
+            // Payload attestations produced by the application itself should never be delayed.
+            assert!(!matches!(
+                pending_payload_attestation.origin,
+                PayloadAttestationOrigin::Own,
+            ));
+
+            self.delayed_until_block
+                .entry(block_root)
+                .or_default()
+                .payload_attestations
+                .push(pending_payload_attestation);
+        }
+    }
+
     fn delay_payload_status_until_block(
         &mut self,
         beacon_block_root: H256,
@@ -2930,6 +3077,7 @@ where
             payload_status: _,
             aggregates,
             attestations,
+            payload_attestations,
             blob_sidecars,
             data_column_sidecars,
         } = delayed;
@@ -2944,6 +3092,10 @@ where
 
         for pending_attestation in attestations {
             self.retry_attestation(wait_group.clone(), pending_attestation);
+        }
+
+        for pending_payload_attestation in payload_attestations {
+            self.retry_payload_attestation(wait_group.clone(), pending_payload_attestation);
         }
 
         for pending_blob_sidecar in blob_sidecars {
@@ -3002,6 +3154,28 @@ where
                 metrics: self.metrics.clone(),
             });
         }
+    }
+
+    fn retry_payload_attestation(
+        &self,
+        wait_group: W,
+        pending_payload_attestation: PendingPayloadAttestation,
+    ) {
+        trace_with_peers!("retrying delayed payload attestation: {pending_payload_attestation:?}");
+
+        let PendingPayloadAttestation {
+            payload_attestation,
+            origin,
+        } = pending_payload_attestation;
+
+        self.spawn(PayloadAttestationTask {
+            store_snapshot: self.owned_store(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            payload_attestation,
+            origin,
+            metrics: self.metrics.clone(),
+        });
     }
 
     fn retry_tick(&mut self, wait_group: &W, tick: Tick) -> Result<()> {
@@ -3126,6 +3300,7 @@ where
                 payload_status,
                 aggregates,
                 attestations,
+                payload_attestations,
                 blob_sidecars,
                 data_column_sidecars,
             } = delayed;
@@ -3167,6 +3342,14 @@ where
                         let epoch = pending.data().target.epoch;
 
                         epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                payload_attestations
+                    .extract_if(.., |pending| {
+                        pending.payload_attestation.data.slot - 1 <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -3638,6 +3821,16 @@ where
                 self.delayed_until_block
                     .values()
                     .map(|delayed| delayed.aggregates.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_block_payload_attestations",
+                self.delayed_until_block
+                    .values()
+                    .map(|delayed| delayed.payload_attestations.len())
                     .sum(),
             );
 

@@ -338,6 +338,9 @@ impl Snapshot {
                         misc::compute_epoch_at_slot::<P>(slot),
                     ));
                 }
+                SigningMessage::PayloadAttestation(_payload_attestation) => {
+                    // TODO: (gloas): implement this
+                }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
                 | SigningMessage::RandaoReveal { .. }

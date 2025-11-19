@@ -685,7 +685,7 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn time_until_deadline_in_seconds(&self) -> Result<f64> {
         let (_, remaining_time) =
-            clock::next_interval_with_remaining_time(&self.config, self.state.genesis_time())?;
+            clock::next_interval_with_remaining_time::<P>(&self.config, self.state.genesis_time())?;
         if self.ignore_deadline {
             Ok(self.config.slot_duration_ms.as_secs_f64())
         } else if self.deadline_reached() {
@@ -700,7 +700,7 @@ impl<P: Preset> AttestationPacker<P> {
             return false;
         }
 
-        let result = Tick::current(&self.config, self.state.genesis_time());
+        let result = Tick::current::<P>(&self.config, self.state.genesis_time());
 
         let Ok(tick) = result else {
             return true;

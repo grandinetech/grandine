@@ -377,13 +377,11 @@ pub fn construct_data_column_sidecars<P: Preset>(
         | SignedBeaconBlock::Bellatrix(_)
         | SignedBeaconBlock::Capella(_)
         | SignedBeaconBlock::Deneb(_)
-        | SignedBeaconBlock::Electra(_) => {
-            return Err(Error::BlobsForPreFuluBlock {
-                root: signed_block.message().hash_tree_root(),
-                slot: signed_block.message().slot(),
-            }
-            .into());
+        | SignedBeaconBlock::Electra(_) => Err(Error::BlobsForPreFuluBlock {
+            root: signed_block.message().hash_tree_root(),
+            slot: signed_block.message().slot(),
         }
+        .into()),
     }
 }
 

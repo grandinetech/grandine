@@ -9,6 +9,7 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
+    PayloadAttestationOrigin,
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
@@ -20,6 +21,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::PayloadAttestationMessage,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -35,6 +37,7 @@ pub struct Delayed<P: Preset> {
     pub payload_status: Option<(PayloadStatusV1, Slot)>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
+    pub payload_attestations: Vec<PendingPayloadAttestation>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
 }
@@ -91,6 +94,7 @@ impl<P: Preset> Delayed<P> {
             payload_status,
             aggregates,
             attestations,
+            payload_attestations,
             blob_sidecars,
             data_column_sidecars,
         } = self;
@@ -99,6 +103,7 @@ impl<P: Preset> Delayed<P> {
             && payload_status.is_none()
             && aggregates.is_empty()
             && attestations.is_empty()
+            && payload_attestations.is_empty()
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
     }
@@ -154,6 +159,12 @@ pub struct PendingAggregateAndProof<P: Preset> {
 pub type PendingAttestation<P> = AttestationItem<P, GossipId>;
 
 #[derive(Debug)]
+pub struct PendingPayloadAttestation {
+    pub payload_attestation: Arc<PayloadAttestationMessage>,
+    pub origin: PayloadAttestationOrigin,
+}
+
+#[derive(Debug)]
 pub struct PendingBlobSidecar<P: Preset> {
     pub blob_sidecar: Arc<BlobSidecar<P>>,
     pub block_seen: bool,
@@ -192,6 +203,7 @@ pub enum MutatorRejectionReason {
     InvalidDataColumnSidecar {
         data_column_identifier: DataColumnIdentifier,
     },
+    InvalidPayloadAttestation,
 }
 
 #[derive(Clone, Copy, Debug)]
