@@ -39,4 +39,9 @@ serde_json = { workspace = true }
 cbindgen = { workspace = true }
 
 [features]
-default = ["bls/blst", "kzg_utils/blst"]
+default = ["blst"]
+arkworks = ["kzg_utils/arkworks"]
+blst = ["bls/blst", "kzg_utils/blst"]
+constantine = ["kzg_utils/constantine"]
+mcl = ["kzg_utils/mcl"]
+zkcrypto = ["bls/zkcrypto", "kzg_utils/zkcrypto"]

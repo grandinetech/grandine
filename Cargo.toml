@@ -486,7 +486,7 @@ bls-blst = { path = 'bls/bls-blst' }
 bls-core = { path = 'bls/bls-core' }
 bls-zkcrypto = { path = 'bls/bls-zkcrypto' }
 builder_api = { path = 'builder_api' }
-c_grandine = { path = 'bindings/c' }
+c_grandine = { path = 'bindings/c', default-features = false }
 clock = { path = 'clock' }
 csharp_grandine = { path = 'bindings/csharp' }
 data_dumper = { path = 'data_dumper' }

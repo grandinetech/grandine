@@ -7,9 +7,12 @@ pub use crate::{
         DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
     },
     misc::{MetricsConfig, StorageConfig},
-    runtime::{run, run_after_genesis, shutdown, RuntimeConfig},
+    runtime::{run, run_after_genesis, RuntimeConfig},
     schema::initialize as initialize_schema,
 };
+
+#[cfg(feature = "embed")]
+pub use crate::runtime::shutdown;
 
 pub mod commands;
 mod config_dir;
