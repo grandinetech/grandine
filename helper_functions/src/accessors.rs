@@ -1183,10 +1183,9 @@ pub fn get_ptc<P: Preset>(
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
-    let relative_epoch = relative_epoch(state, epoch)?;
 
-    // Get or initialize epoch PTC cache
-    let epoch_cache = state.ptc_caches()[relative_epoch].get_or_init(|| {
+    // Get or initialize current epoch PTC cache
+    let epoch_cache = state.ptc_cache().get_or_init(|| {
         Arc::new(build_ptc_cache(state, epoch).expect("PTC cache computation failed"))
     });
 

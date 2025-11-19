@@ -929,7 +929,7 @@ pub trait PostGloasBeaconState<P: Preset>: PostAltairBeaconState<P> {
     fn latest_withdrawals_root_mut(&mut self) -> &mut H256;
 
     // PTC caching (not in spec)
-    fn ptc_caches(&self) -> &crate::gloas::ptc_cache::PtcCaches;
+    fn ptc_cache(&self) -> &crate::gloas::ptc_cache::PtcCache;
 }
 
 #[duplicate_item(
@@ -971,8 +971,8 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         get_copy([field])
     }
 
-    fn ptc_caches(&self) -> &crate::gloas::ptc_cache::PtcCaches {
-        get_ref([ptc_caches])
+    fn ptc_cache(&self) -> &crate::gloas::ptc_cache::PtcCache {
+        get_ref([ptc_cache])
     }
 
     #[duplicate_item(

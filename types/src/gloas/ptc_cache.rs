@@ -145,17 +145,13 @@ impl PTCCache {
     }
 }
 
-/// Type alias for PTC caches stored in BeaconState
-/// Stores caches for Previous, Current, Next epochs
-pub type PtcCaches =
-    enum_map::EnumMap<crate::nonstandard::RelativeEpoch, OnceCell<Arc<PTCCache>>>;
+/// Type alias for PTC cache stored in BeaconState
+/// Only stores Current epoch cache (balances change every epoch, invalidating future caches)
+pub type PtcCache = OnceCell<Arc<PTCCache>>;
 
-/// Advance PTC caches to the next epoch (rotate Previous <- Current <- Next)
-pub fn advance_ptc_caches(caches: &mut PtcCaches) {
-    use crate::nonstandard::RelativeEpoch;
-
-    // Rotate: Previous <- Current <- Next
-    caches[RelativeEpoch::Previous] = core::mem::take(&mut caches[RelativeEpoch::Current]);
-    caches[RelativeEpoch::Current] = core::mem::take(&mut caches[RelativeEpoch::Next]);
-    // Next epoch cache will be lazily initialized when needed
+/// Clear PTC cache on epoch transition
+/// Unlike committee cache, PTC uses balance-weighted selection which changes every epoch
+pub fn clear_ptc_cache(cache: &mut PtcCache) {
+    // Clear the cache - balances have changed, making cached selection probabilities invalid
+    *cache = OnceCell::new();
 }
