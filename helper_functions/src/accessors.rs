@@ -1063,8 +1063,8 @@ pub fn get_beacon_proposer_indices<P: Preset>(
     )
 }
 
-pub fn get_ptc<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
+pub fn ptc_for_slot<P: Preset>(
+    state: &impl BeaconState<P>,
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
@@ -1072,17 +1072,11 @@ pub fn get_ptc<P: Preset>(
     let seed = hashing::hash_256_64(seed, slot);
 
     // > Concatenate all committees for this slot in order
-    let committees_per_slot = get_committee_count_per_slot(state, relative_epoch(state, epoch)?);
-    let indices = (0..committees_per_slot)
-        .map(|i| beacon_committee(state, slot, i))
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .flatten()
-        .collect_vec();
+    let indices = beacon_committees(state, slot)?.flatten();
 
     misc::compute_balance_weighted_selection::<P>(
         state,
-        &PackedIndices::U64(indices.into()),
+        &PackedIndices::U64(indices.into_iter().collect()),
         seed,
         P::PtcSize::USIZE,
         false,
@@ -1094,8 +1088,7 @@ pub fn get_ptc<P: Preset>(
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
-    slot: Slot,
+    state: &impl BeaconState<P>,
     payload_attestation: PayloadAttestation<P>,
 ) -> Result<IndexedPayloadAttestation<P>> {
     let PayloadAttestation {
@@ -1103,7 +1096,8 @@ pub fn get_indexed_payload_attestation<P: Preset>(
         data,
         signature,
     } = payload_attestation;
-    let ptc = get_ptc(state, slot)?;
+
+    let ptc = ptc_for_slot(state, data.slot)?;
     let attesting_indices =
         ContiguousList::try_from_iter(ptc.into_iter().zip(0..).filter_map(|(index, i)| {
             aggregation_bits
@@ -1118,10 +1112,9 @@ pub fn get_indexed_payload_attestation<P: Preset>(
     })
 }
 
-pub fn get_builder_payment_quorum_threshold<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
-) -> u64 {
+pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<P>) -> u64 {
     let active_balances = total_active_balance(state);
+
     // > get_total_active_balance(state) // SLOTS_PER_EPOCH * BUILDER_PAYMENT_THRESHOLD_NUMERATOR
     let quorum = active_balances
         .saturating_div(P::SlotsPerEpoch::U64)

@@ -138,7 +138,7 @@ pub struct IndexedPayloadAttestation<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Hash, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct PayloadAttestationData {
     pub beacon_block_root: H256,
@@ -156,7 +156,7 @@ pub struct PayloadAttestation<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Hash, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct PayloadAttestationMessage {
     #[serde(with = "serde_utils::string_or_native")]

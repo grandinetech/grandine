@@ -1,8 +1,13 @@
+use core::num::NonZeroUsize;
+
 use crate::{
     gloas::primitives::PayloadStatus,
     phase0::primitives::{DomainType, H32},
 };
 use hex_literal::hex;
+use nonzero_ext::nonzero;
+
+pub const INTERVALS_PER_SLOT_GLOAS: NonZeroUsize = nonzero!(4_usize);
 
 // Domain types
 pub const DOMAIN_BEACON_BUILDER: DomainType = H32(hex!("1B000000"));

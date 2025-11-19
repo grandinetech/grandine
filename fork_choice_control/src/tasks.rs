@@ -11,7 +11,7 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    StateCacheProcessor, Store,
+    PayloadAttestationOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -30,6 +30,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
+    gloas::containers::PayloadAttestationMessage,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -466,6 +467,45 @@ pub struct RetryDataColumnSidecarTask<P: Preset, W> {
 impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
     fn run(self) {
         self.task.run()
+    }
+}
+
+pub struct PayloadAttestationTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_attestation: Arc<PayloadAttestationMessage>,
+    pub origin: PayloadAttestationOrigin,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PayloadAttestationTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_attestation,
+            origin,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_payload_attestation_task_times,
+                origin.as_ref(),
+            )
+        });
+
+        let result =
+            store_snapshot.validate_payload_attestation(payload_attestation, &origin, false);
+
+        MutatorMessage::PayloadAttestation {
+            wait_group,
+            result,
+            origin,
+        }
+        .send(&mutator_tx);
     }
 }
 
