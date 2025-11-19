@@ -1,4 +1,5 @@
 use anyhow::Result;
+use core::ptr;
 use generic_array::ArrayLength;
 use ssz::ByteList;
 use std::{
@@ -8,7 +9,6 @@ use std::{
     ops::{Deref, DerefMut},
     os::raw::c_char,
 };
-use core::ptr;
 
 pub const GRANDINE_SUCCESS: u32 = 0;
 pub const GRANDINE_ERROR_GENERIC: u32 = 1;

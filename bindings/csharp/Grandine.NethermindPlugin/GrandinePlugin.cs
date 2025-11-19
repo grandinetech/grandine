@@ -66,9 +66,12 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
 
             Type type = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
 
-            if (type == typeof(bool) && (bool)value)
+            if (type == typeof(bool))
             {
-                this.arguments.Add(attribute.Name);
+                if ((bool)value)
+                {
+                    this.arguments.Add(attribute.Name);
+                }
             }
             else if (type == typeof(string))
             {

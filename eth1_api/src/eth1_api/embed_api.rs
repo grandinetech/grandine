@@ -35,7 +35,16 @@ use types::{
 use web3::types::{BlockId, BlockNumber, Filter, FilterBuilder, Log, U64};
 
 use crate::{
-    auth::Auth, deposit_event::DepositEvent, endpoints::Endpoint, eth1_block::Eth1Block,
+    auth::Auth,
+    deposit_event::DepositEvent,
+    endpoints::Endpoint,
+    eth1_api::{
+        ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
+        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
+        ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4, ENGINE_GET_PAYLOAD_V5,
+        ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+    },
+    eth1_block::Eth1Block,
     Eth1ApiToMetrics, WithClientVersions,
 };
 
@@ -135,6 +144,7 @@ pub fn set_adapter(adapter: Box<dyn EmbedAdapter>) -> Result<()> {
 
 pub struct Eth1Api {
     config: Arc<Config>,
+    pub(crate) metrics: Option<Arc<Metrics>>,
 }
 
 impl Eth1Api {
@@ -145,9 +155,9 @@ impl Eth1Api {
         _auth: Arc<Auth>,
         _eth1_rpc_urls: Vec<RedactingUrl>,
         _eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
-        _metrics: Option<Arc<Metrics>>,
+        metrics: Option<Arc<Metrics>>,
     ) -> Self {
-        Self { config }
+        Self { config, metrics }
     }
 
     fn get_adapter(&self) -> Result<&Box<dyn EmbedAdapter>> {
@@ -296,11 +306,25 @@ impl Eth1Api {
 
         match (payload, params) {
             (ExecutionPayload::Bellatrix(payload), None) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_NEW_PAYLOAD_V1,
+                    )
+                });
+
                 let payload_v1 = ExecutionPayloadV1::from(payload);
 
                 self.get_adapter()?.engine_new_payload_v1(payload_v1)
             }
             (ExecutionPayload::Capella(payload), None) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_NEW_PAYLOAD_V2,
+                    )
+                });
+
                 let payload_v2 = ExecutionPayloadV2::from(payload);
 
                 self.get_adapter()?.engine_new_payload_v2(payload_v2)
@@ -312,6 +336,13 @@ impl Eth1Api {
                     parent_beacon_block_root,
                 }),
             ) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_NEW_PAYLOAD_V3,
+                    )
+                });
+
                 let payload_v3 = ExecutionPayloadV3::from(payload);
 
                 self.get_adapter()?.engine_new_payload_v3(
@@ -328,6 +359,13 @@ impl Eth1Api {
                     execution_requests,
                 }),
             ) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_NEW_PAYLOAD_V4,
+                    )
+                });
+
                 let payload_v3 = ExecutionPayloadV3::from(payload);
 
                 self.get_adapter()?.engine_new_payload_v4(
@@ -382,6 +420,13 @@ impl Eth1Api {
             payload_status,
         } = match phase {
             Phase::Bellatrix => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_FORKCHOICE_UPDATED_V1,
+                    )
+                });
+
                 let payload_attributes = payload_attributes
                     .map(|value| {
                         if let PayloadAttributes::Bellatrix(value) = value {
@@ -397,6 +442,13 @@ impl Eth1Api {
                     .engine_forkchoice_updated_v1(fork_choice_state, payload_attributes)?
             }
             Phase::Capella => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_FORKCHOICE_UPDATED_V2,
+                    )
+                });
+
                 let payload_attributes = payload_attributes
                     .map(|value| {
                         if let PayloadAttributes::Capella(value) = value {
@@ -411,7 +463,14 @@ impl Eth1Api {
                 self.get_adapter()?
                     .engine_forkchoice_updated_v2(fork_choice_state, payload_attributes)?
             }
-            Phase::Deneb => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_FORKCHOICE_UPDATED_V3,
+                    )
+                });
+
                 let payload_attributes = payload_attributes
                     .map(|value| {
                         if let PayloadAttributes::Deneb(value) = value {
@@ -425,23 +484,6 @@ impl Eth1Api {
 
                 self.get_adapter()?
                     .engine_forkchoice_updated_v3(fork_choice_state, payload_attributes)?
-            }
-            Phase::Electra => {
-                let payload_attributes = payload_attributes
-                    .map(|value| {
-                        if let PayloadAttributes::Electra(value) = value {
-                            Ok(value)
-                        } else {
-                            Err(Error::InvalidParameters)
-                        }
-                    })
-                    .transpose()?
-                    .clone();
-
-                let v: Option<PayloadAttributesV3<Mainnet>> = payload_attributes;
-
-                self.get_adapter()?
-                    .engine_forkchoice_updated_v3(fork_choice_state, v)?
             }
             _ => {
                 // This match arm will silently match any new phases.
@@ -488,6 +530,13 @@ impl Eth1Api {
     ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         match payload_id {
             PayloadId::Bellatrix(payload_id) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_GET_PAYLOAD_V1,
+                    )
+                });
+
                 let value = self.get_adapter()?.engine_get_payload_v1(payload_id)?;
 
                 let value: &dyn std::any::Any = &value;
@@ -498,6 +547,13 @@ impl Eth1Api {
                 Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Capella(payload_id) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_GET_PAYLOAD_V2,
+                    )
+                });
+
                 let value = self.get_adapter()?.engine_get_payload_v2(payload_id)?;
 
                 let value: &dyn std::any::Any = &value;
@@ -508,6 +564,13 @@ impl Eth1Api {
                 Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Deneb(payload_id) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_GET_PAYLOAD_V3,
+                    )
+                });
+
                 let value = self.get_adapter()?.engine_get_payload_v3(payload_id)?;
 
                 let value: &dyn std::any::Any = &value;
@@ -518,6 +581,13 @@ impl Eth1Api {
                 Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Electra(payload_id) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_GET_PAYLOAD_V4,
+                    )
+                });
+
                 let value = self.get_adapter()?.engine_get_payload_v4(payload_id)?;
 
                 let value: &dyn std::any::Any = &value;
@@ -528,6 +598,13 @@ impl Eth1Api {
                 Ok(WithClientVersions::none(value).map(Into::into))
             }
             PayloadId::Fulu(payload_id) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_GET_PAYLOAD_V5,
+                    )
+                });
+
                 let value = self.get_adapter()?.engine_get_payload_v5(payload_id)?;
 
                 let value: &dyn std::any::Any = &value;
@@ -544,6 +621,13 @@ impl Eth1Api {
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Vec<Option<BlobAndProofV1<P>>>> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.eth1_api_request_times,
+                ENGINE_GET_EL_BLOBS_V1,
+            )
+        });
+
         let results = self.get_adapter()?.engine_get_blobs_v1(versioned_hashes)?;
         let results = results
             .into_iter()
@@ -566,6 +650,13 @@ impl Eth1Api {
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Option<Vec<BlobAndProofV2<P>>>> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.eth1_api_request_times,
+                ENGINE_GET_EL_BLOBS_V2,
+            )
+        });
+
         let results = self.get_adapter()?.engine_get_blobs_v2(versioned_hashes)?;
         let results = results
             .map(|value| {

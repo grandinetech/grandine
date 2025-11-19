@@ -1,5 +1,5 @@
 use allocator as _;
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use clap::{Error as ClapError, Parser};
 use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
