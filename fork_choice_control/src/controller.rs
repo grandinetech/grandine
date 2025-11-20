@@ -58,7 +58,10 @@ use crate::{
         AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
         SyncMessage, ValidatorMessage,
     },
-    misc::{ProcessingTimings, VerifyAggregateAndProofResult, VerifyAttestationResult},
+    misc::{
+        ProcessingTimings, SidecarsPendingReconstruction, VerifyAggregateAndProofResult,
+        VerifyAttestationResult,
+    },
     mutator::Mutator,
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
@@ -77,6 +80,7 @@ pub struct Controller<P: Preset, E, A, W: Wait> {
     block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
     pubkey_cache: Arc<PubkeyCache>,
+    sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
     state_at_slot_cache: Arc<StateAtSlotCache<P>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<Storage<P>>,
@@ -152,6 +156,8 @@ where
             state_cache.clone_arc(),
         ));
 
+        let sidecars_pending_reconstruction = Arc::new(DashMap::new());
+
         let mut mutator = Mutator::new(
             pubkey_cache.clone_arc(),
             store_snapshot.clone_arc(),
@@ -159,6 +165,7 @@ where
             block_processor.clone_arc(),
             event_channels,
             execution_engine.clone(),
+            sidecars_pending_reconstruction.clone_arc(),
             storage.clone_arc(),
             thread_pool.clone(),
             metrics.clone(),
@@ -192,6 +199,7 @@ where
             block_processor,
             execution_engine,
             pubkey_cache,
+            sidecars_pending_reconstruction,
             state_at_slot_cache,
             state_cache,
             storage,
@@ -208,6 +216,10 @@ where
         };
 
         Ok((controller, mutator_handle))
+    }
+
+    pub const fn sidecars_pending_reconstruction(&self) -> &SidecarsPendingReconstruction<P> {
+        &self.sidecars_pending_reconstruction
     }
 
     pub fn chain_config(&self) -> &Arc<ChainConfig> {
