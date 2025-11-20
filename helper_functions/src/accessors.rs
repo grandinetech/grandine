@@ -1161,11 +1161,7 @@ fn compute_ptc_for_slot_internal<P: Preset>(
     let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
     let seed = hashing::hash_256_64(seed, slot);
 
-    let committees_per_slot = get_committee_count_per_slot(state, relative_epoch(state, epoch)?);
-    let indices = (0..committees_per_slot)
-        .map(|i| beacon_committee(state, slot, i))
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
+    let indices = beacon_committees(state, slot)?
         .flatten()
         .collect_vec();
 
