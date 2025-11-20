@@ -6,7 +6,7 @@ use arithmetic::U64Ext as _;
 use deposit_tree::DepositTree;
 use helper_functions::{accessors, misc, mutators::increase_balance};
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentList, PersistentVector, SszHash as _};
+use ssz::{Hc, PersistentList, PersistentVector, SszHash as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use transition_functions::combined;
@@ -323,13 +323,13 @@ fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBea
 
     // Note that `BeaconBlock.body.eth1_data` is not set to `genesis_state.eth1_data()`.
     match phase {
-        Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock::default()),
-        Phase::Altair => BeaconBlock::from(AltairBeaconBlock::default()),
-        Phase::Bellatrix => BeaconBlock::from(BellatrixBeaconBlock::default()),
-        Phase::Capella => BeaconBlock::from(CapellaBeaconBlock::default()),
-        Phase::Deneb => BeaconBlock::from(DenebBeaconBlock::default()),
-        Phase::Electra => BeaconBlock::from(ElectraBeaconBlock::default()),
-        Phase::Fulu => BeaconBlock::from(FuluBeaconBlock::default()),
+        Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock::default())),
+        Phase::Altair => BeaconBlock::from(Hc::new(AltairBeaconBlock::default())),
+        Phase::Bellatrix => BeaconBlock::from(Hc::new(BellatrixBeaconBlock::default())),
+        Phase::Capella => BeaconBlock::from(Hc::new(CapellaBeaconBlock::default())),
+        Phase::Deneb => BeaconBlock::from(Hc::new(DenebBeaconBlock::default())),
+        Phase::Electra => BeaconBlock::from(Hc::new(ElectraBeaconBlock::default())),
+        Phase::Fulu => BeaconBlock::from(Hc::new(FuluBeaconBlock::default())),
     }
     .with_state_root(state_root)
     .with_zero_signature()

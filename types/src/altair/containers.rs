@@ -1,6 +1,6 @@
 use bls::{AggregatePublicKeyBytes, AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use serde::{Deserialize, Serialize};
-use ssz::{BitVector, ContiguousList, ContiguousVector, Ssz};
+use ssz::{BitVector, ContiguousList, ContiguousVector, Hc, Ssz};
 use typenum::Log2;
 
 use crate::{
@@ -103,7 +103,7 @@ pub struct LightClientUpdate<P: Preset> {
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct SignedBeaconBlock<P: Preset> {
-    pub message: BeaconBlock<P>,
+    pub message: Hc<BeaconBlock<P>>,
     pub signature: SignatureBytes,
 }
 

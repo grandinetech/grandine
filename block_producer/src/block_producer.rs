@@ -30,7 +30,7 @@ use operation_pools::{
 };
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use ssz::{BitList, BitVector, ContiguousList, SszHash};
+use ssz::{BitList, BitVector, ContiguousList, Hc, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
@@ -758,7 +758,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let state_root = H256::zero();
 
         match self.beacon_state.phase() {
-            Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
+            Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {
                 slot,
                 proposer_index,
                 parent_root,
@@ -773,8 +773,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     deposits,
                     voluntary_exits,
                 },
-            }),
-            Phase::Altair => BeaconBlock::from(AltairBeaconBlock {
+            })),
+            Phase::Altair => BeaconBlock::from(Hc::new(AltairBeaconBlock {
                 slot,
                 proposer_index,
                 parent_root,
@@ -790,8 +790,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     voluntary_exits,
                     sync_aggregate,
                 },
-            }),
-            Phase::Bellatrix => BeaconBlock::from(BellatrixBeaconBlock {
+            })),
+            Phase::Bellatrix => BeaconBlock::from(Hc::new(BellatrixBeaconBlock {
                 slot,
                 proposer_index,
                 parent_root,
@@ -808,8 +808,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     sync_aggregate,
                     execution_payload: BellatrixExecutionPayload::default(),
                 },
-            }),
-            Phase::Capella => BeaconBlock::from(CapellaBeaconBlock {
+            })),
+            Phase::Capella => BeaconBlock::from(Hc::new(CapellaBeaconBlock {
                 slot,
                 proposer_index,
                 parent_root,
@@ -827,8 +827,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     execution_payload: CapellaExecutionPayload::default(),
                     bls_to_execution_changes,
                 },
-            }),
-            Phase::Deneb => BeaconBlock::from(DenebBeaconBlock {
+            })),
+            Phase::Deneb => BeaconBlock::from(Hc::new(DenebBeaconBlock {
                 slot,
                 proposer_index,
                 parent_root,
@@ -847,7 +847,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     bls_to_execution_changes,
                     blob_kzg_commitments: ContiguousList::default(),
                 },
-            }),
+            })),
             Phase::Electra | Phase::Fulu => {
                 // Store results in a vec to preserve insertion order and thus the results of the packing algorithm
                 let mut results: Vec<(
@@ -903,7 +903,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let attestations = ContiguousList::try_from_iter(attestations)?;
 
                 if self.beacon_state.phase() == Phase::Electra {
-                    BeaconBlock::from(ElectraBeaconBlock {
+                    BeaconBlock::from(Hc::new(ElectraBeaconBlock {
                         slot,
                         proposer_index,
                         parent_root,
@@ -923,9 +923,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             blob_kzg_commitments: ContiguousList::default(),
                             execution_requests: ExecutionRequests::default(),
                         },
-                    })
+                    }))
                 } else {
-                    BeaconBlock::from(FuluBeaconBlock {
+                    BeaconBlock::from(Hc::new(FuluBeaconBlock {
                         slot,
                         proposer_index,
                         parent_root,
@@ -945,7 +945,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             blob_kzg_commitments: ContiguousList::default(),
                             execution_requests: ExecutionRequests::default(),
                         },
-                    })
+                    }))
                 }
             }
         }

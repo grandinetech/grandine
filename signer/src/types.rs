@@ -3,6 +3,7 @@ use core::marker::PhantomData;
 use bls::PublicKeyBytes;
 use builder_api::unphased::containers::ValidatorRegistrationV1;
 use serde::Serialize;
+use ssz::Hc;
 use types::{
     altair::containers::{
         BeaconBlock as AltairBeaconBlock, ContributionAndProof, SyncAggregatorSelectionData,
@@ -83,34 +84,34 @@ pub enum SigningMessage<'block, P: Preset> {
     VoluntaryExit(VoluntaryExit),
 }
 
-impl<'block, P: Preset> From<&'block Phase0BeaconBlock<P>> for SigningMessage<'block, P> {
-    fn from(block: &'block Phase0BeaconBlock<P>) -> Self {
+impl<'block, P: Preset> From<&'block Hc<Phase0BeaconBlock<P>>> for SigningMessage<'block, P> {
+    fn from(block: &'block Hc<Phase0BeaconBlock<P>>) -> Self {
         Self::BeaconBlock(SigningBlock::Phase0 { block })
     }
 }
 
-impl<'block, P: Preset> From<&'block AltairBeaconBlock<P>> for SigningMessage<'block, P> {
-    fn from(block: &'block AltairBeaconBlock<P>) -> Self {
+impl<'block, P: Preset> From<&'block Hc<AltairBeaconBlock<P>>> for SigningMessage<'block, P> {
+    fn from(block: &'block Hc<AltairBeaconBlock<P>>) -> Self {
         Self::BeaconBlock(SigningBlock::Altair { block })
     }
 }
 
-impl<P: Preset> From<&BellatrixBeaconBlock<P>> for SigningMessage<'_, P> {
-    fn from(block: &BellatrixBeaconBlock<P>) -> Self {
+impl<P: Preset> From<&Hc<BellatrixBeaconBlock<P>>> for SigningMessage<'_, P> {
+    fn from(block: &Hc<BellatrixBeaconBlock<P>>) -> Self {
         let block_header = block.to_header();
         Self::BeaconBlock(SigningBlock::Bellatrix { block_header })
     }
 }
 
-impl<P: Preset> From<&CapellaBeaconBlock<P>> for SigningMessage<'_, P> {
-    fn from(block: &CapellaBeaconBlock<P>) -> Self {
+impl<P: Preset> From<&Hc<CapellaBeaconBlock<P>>> for SigningMessage<'_, P> {
+    fn from(block: &Hc<CapellaBeaconBlock<P>>) -> Self {
         let block_header = block.to_header();
         Self::BeaconBlock(SigningBlock::Capella { block_header })
     }
 }
 
-impl<P: Preset> From<&DenebBeaconBlock<P>> for SigningMessage<'_, P> {
-    fn from(block: &DenebBeaconBlock<P>) -> Self {
+impl<P: Preset> From<&Hc<DenebBeaconBlock<P>>> for SigningMessage<'_, P> {
+    fn from(block: &Hc<DenebBeaconBlock<P>>) -> Self {
         let block_header = block.to_header();
         Self::BeaconBlock(SigningBlock::Deneb { block_header })
     }
@@ -123,8 +124,8 @@ impl<P: Preset> From<&DenebBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
     }
 }
 
-impl<P: Preset> From<&ElectraBeaconBlock<P>> for SigningMessage<'_, P> {
-    fn from(block: &ElectraBeaconBlock<P>) -> Self {
+impl<P: Preset> From<&Hc<ElectraBeaconBlock<P>>> for SigningMessage<'_, P> {
+    fn from(block: &Hc<ElectraBeaconBlock<P>>) -> Self {
         let block_header = block.to_header();
         Self::BeaconBlock(SigningBlock::Electra { block_header })
     }
@@ -137,8 +138,8 @@ impl<P: Preset> From<&ElectraBlindedBeaconBlock<P>> for SigningMessage<'_, P> {
     }
 }
 
-impl<P: Preset> From<&FuluBeaconBlock<P>> for SigningMessage<'_, P> {
-    fn from(block: &FuluBeaconBlock<P>) -> Self {
+impl<P: Preset> From<&Hc<FuluBeaconBlock<P>>> for SigningMessage<'_, P> {
+    fn from(block: &Hc<FuluBeaconBlock<P>>) -> Self {
         let block_header = block.to_header();
         Self::BeaconBlock(SigningBlock::Fulu { block_header })
     }
@@ -160,7 +161,7 @@ impl<'block, P: Preset> From<&'block CombinedBeaconBlock<P>> for SigningMessage<
             CombinedBeaconBlock::Capella(block) => block.into(),
             CombinedBeaconBlock::Deneb(block) => block.into(),
             CombinedBeaconBlock::Electra(block) => block.into(),
-            CombinedBeaconBlock::Fulu(block) => block.into(),
+            CombinedBeaconBlock::Fulu(block) => (block).into(),
         }
     }
 }
@@ -233,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_altair_block_serialization() -> Result<()> {
-        let altair_block = AltairBeaconBlock::<Minimal>::default();
+        let altair_block = Hc::new(AltairBeaconBlock::<Minimal>::default());
         let message = SigningMessage::from(&altair_block);
 
         assert_eq!(
@@ -281,7 +282,7 @@ mod tests {
 
     #[test]
     fn test_bellatrix_block_serialization() -> Result<()> {
-        let bellatrix_block = BellatrixBeaconBlock::<Minimal>::default();
+        let bellatrix_block = Hc::new(BellatrixBeaconBlock::<Minimal>::default());
         let message = SigningMessage::from(&bellatrix_block);
 
         assert_eq!(

@@ -13,7 +13,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::SszHash as _;
+use ssz::{Hc, SszHash as _};
 use typenum::Unsigned as _;
 use types::{
     bellatrix::{
@@ -53,7 +53,7 @@ pub fn process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
-    block: &BeaconBlock<P>,
+    block: &Hc<BeaconBlock<P>>,
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -107,7 +107,7 @@ pub fn custom_process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
-    block: &BeaconBlock<P>,
+    block: &Hc<BeaconBlock<P>>,
     execution_engine: impl ExecutionEngine<P>,
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
@@ -121,8 +121,7 @@ pub fn custom_process_block<P: Preset>(
         process_execution_payload(
             config,
             state,
-            // TODO(Grandine Team): Try caching `block.hash_tree_root()`.
-            //                      Also consider removing the parameter entirely.
+            // TODO(Grandine Team): Consider removing the parameter entirely.
             //                      It's only used for error reporting.
             //                      Perhaps it would be better to send the whole block?
             block.hash_tree_root(),
@@ -464,7 +463,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |config, _, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
+        |config, _, state, block: Hc<BeaconBlock<_>>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/bellatrix/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/bellatrix/operations/block_header/*/*",
