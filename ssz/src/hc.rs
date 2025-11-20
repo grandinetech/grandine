@@ -115,6 +115,14 @@ impl<T: SszHash> SszHash for Hc<T> {
 }
 
 impl<T> Hc<T> {
+    pub fn new(value: T) -> Self {
+        value.into()
+    }
+
+    pub fn into_inner(self) -> T {
+        self.value
+    }
+
     pub fn set_cached_root(&self, root: H256) {
         if let Err(old_root) = self.cached_root.set(Box::new(root)) {
             panic!("cached_root already set (old_root: {old_root:?}, root: {root:?})");

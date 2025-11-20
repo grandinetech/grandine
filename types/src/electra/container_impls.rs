@@ -1,5 +1,5 @@
 use anyhow::{ensure, Error as AnyhowError, Result};
-use ssz::{BitList, BitVector, ContiguousList, ReadError};
+use ssz::{BitList, BitVector, ContiguousList, Hc, ReadError};
 use thiserror::Error;
 use typenum::Unsigned as _;
 
@@ -82,7 +82,10 @@ impl<P: Preset> BeaconBlock<P> {
 }
 
 impl<P: Preset> BlindedBeaconBlock<P> {
-    pub fn with_execution_payload(self, execution_payload: ExecutionPayload<P>) -> BeaconBlock<P> {
+    pub fn with_execution_payload(
+        self,
+        execution_payload: ExecutionPayload<P>,
+    ) -> Hc<BeaconBlock<P>> {
         let Self {
             slot,
             proposer_index,
@@ -130,6 +133,7 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             state_root,
             body,
         }
+        .into()
     }
 
     #[must_use]
