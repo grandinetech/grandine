@@ -298,7 +298,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
-                            .insert_attestation(wait_group, &attestation, None);
+                            .insert_attestation(wait_group, attestation.clone_arc(), None);
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -593,7 +593,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
-        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref());
+        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref())
+            .await;
 
         if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
             self.refresh_signer_keys();
@@ -731,7 +732,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let controller = self.controller.clone_arc();
 
             tokio::task::spawn_blocking(move || {
-                controller.preprocessed_state_post_block(block_root, slot)
+                controller.preprocessed_state_post_block_blocking(block_root, slot)
             })
             .await??
         } else {
@@ -1204,7 +1205,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             self.attestation_agg_pool.insert_attestation(
                 wait_group.clone(),
-                &attestation,
+                attestation,
                 Some(*validator_index),
             );
         }
@@ -1398,7 +1399,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let aggregate_and_proof = Arc::new(aggregate_and_proof);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), &attestation, None);
+                .insert_attestation(wait_group.clone(), attestation, None);
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
         }
@@ -1991,6 +1992,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if chain_config.phase_at_slot::<P>(current_slot) != phase_at_slot {
                     beacon_state = match controller
                         .preprocessed_state_at_epoch(chain_config.fork_epoch(phase_at_slot))
+                        .await
                     {
                         Ok(with_status) => with_status.value,
                         Err(error) => {
@@ -2037,14 +2039,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn update_subnet_subscriptions(&mut self, wait_group: &W, slot_head: Option<&SlotHead<P>>) {
+    async fn update_subnet_subscriptions(
+        &mut self,
+        wait_group: &W,
+        slot_head: Option<&SlotHead<P>>,
+    ) {
         if !self.controller.is_forward_synced() {
             return;
         }
 
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
-            None => match self.controller.preprocessed_state_at_current_slot() {
+            None => match self.controller.preprocessed_state_at_current_slot().await {
                 Ok(state) => state,
                 Err(error) => {
                     let is_too_many_empty_slots = matches!(

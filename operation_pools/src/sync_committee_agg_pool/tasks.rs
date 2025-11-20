@@ -199,7 +199,7 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
             return Ok(ValidationOutcome::Ignore(false));
         }
 
-        let beacon_state = match controller.preprocessed_state_at_current_slot() {
+        let beacon_state = match controller.preprocessed_state_at_current_slot_blocking() {
             Ok(beacon_state) => beacon_state,
             Err(error) => {
                 debug_with_peers!("cannot validate sync committee contribution: {error:?}");
@@ -310,7 +310,7 @@ impl<P: Preset, W: Wait> HandleExternalMessageTask<P, W> {
             return Ok(ValidationOutcome::Ignore(false));
         }
 
-        let beacon_state = match controller.preprocessed_state_at_current_slot() {
+        let beacon_state = match controller.preprocessed_state_at_current_slot_blocking() {
             Ok(beacon_state) => beacon_state,
             Err(error) => {
                 debug_with_peers!("cannot validate sync committee message: {error:?}");

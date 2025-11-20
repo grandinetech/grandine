@@ -499,7 +499,9 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
     let state = (state.slot() > GENESIS_SLOT)
         .then(|| {
             let block_root = accessors::latest_block_root(&state);
-            controller.preprocessed_state_post_block(block_root, proposal_slot)
+            tokio::task::block_in_place(|| {
+                controller.preprocessed_state_post_block_blocking(block_root, proposal_slot)
+            })
         })
         .transpose()?
         .unwrap_or(state);
@@ -789,10 +791,14 @@ pub async fn state_committees<P: Preset, W: Wait>(
     {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        state = controller
-            .state_at_slot(start_slot)?
-            .ok_or(Error::StateNotFound)?
-            .value;
+        state = tokio::task::spawn_blocking(move || {
+            controller
+                .state_at_slot_blocking(start_slot)?
+                .ok_or(Error::StateNotFound)?
+                .value
+                .pipe(Ok::<_, AnyhowError>)
+        })
+        .await??;
     }
 
     let relative_epoch = accessors::relative_epoch(&state, epoch)?;
@@ -1666,13 +1672,16 @@ pub async fn block_rewards<P: Preset, W: Wait>(
 
     let block_rewards = (block_slot > GENESIS_SLOT)
         .then(|| {
-            let parent_root = block.parent_root();
+            tokio::task::block_in_place(|| {
+                let parent_root = block.parent_root();
 
-            let state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
+                let state =
+                    controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
 
-            controller
-                .block_processor()
-                .process_trusted_block_with_report(state, &block)
+                controller
+                    .block_processor()
+                    .process_trusted_block_with_report(state, &block)
+            })
         })
         .transpose()?
         .and_then(|(_, rewards)| rewards)
@@ -1724,15 +1733,21 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
 
     let parent_root = block.message().parent_root();
 
-    let mut state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
+    let (state, sync_committee_deltas) = tokio::task::spawn_blocking(move || {
+        let mut state =
+            controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
 
-    let sync_committee_deltas = transition_functions::combined::state_transition_for_report(
-        &chain_config,
-        controller.pubkey_cache(),
-        state.make_mut(),
-        &block,
-    )?
-    .sync_committee_deltas;
+        let sync_committee_deltas = transition_functions::combined::state_transition_for_report(
+            &chain_config,
+            controller.pubkey_cache(),
+            state.make_mut(),
+            &block,
+        )?
+        .sync_committee_deltas;
+
+        Ok::<_, AnyhowError>((state, sync_committee_deltas))
+    })
+    .await??;
 
     let response = if validator_ids.is_empty() {
         sync_committee_deltas.into_iter().pipe(Either::Left)
@@ -1998,7 +2013,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(json_vec): EthJson<Vec<Value>>,
 ) -> Result<(), Error> {
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot().await?;
 
     let Some(state) = state.post_altair() else {
         return Ok(());
@@ -2497,7 +2512,9 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
     let (state, status) = if start_slot >= head.value.slot() {
         let block_root = controller.head().value.block_root;
         // `state_id::state` allows only a limited range of empty slots to be processed
-        let state = controller.preprocessed_state_for_block_production(block_root, start_slot)?;
+        let state = controller
+            .preprocessed_state_for_block_production(block_root, start_slot)
+            .await?;
 
         (state, head.status)
     } else {
@@ -2742,7 +2759,9 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
     }
 
     let block_root = controller.head().value.block_root;
-    let beacon_state = controller.preprocessed_state_for_block_production(block_root, slot)?;
+    let beacon_state = controller
+        .preprocessed_state_for_block_production(block_root, slot)
+        .await?;
 
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
@@ -2821,7 +2840,9 @@ pub async fn validator_block<P: Preset, W: Wait>(
     }
 
     let block_root = controller.head().value.block_root;
-    let beacon_state = controller.preprocessed_state_for_block_production(block_root, slot)?;
+    let beacon_state = controller
+        .preprocessed_state_for_block_production(block_root, slot)
+        .await?;
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
 
     let block_build_context = block_producer.new_build_context(
@@ -2870,7 +2891,9 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     }
 
     let block_root = controller.head().value.block_root;
-    let beacon_state = controller.preprocessed_state_for_block_production(block_root, slot)?;
+    let beacon_state = controller
+        .preprocessed_state_for_block_production(block_root, slot)
+        .await?;
 
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
@@ -3043,7 +3066,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 
     if state.slot() < slot {
         state = tokio::task::spawn_blocking(move || {
-            controller.preprocessed_state_post_block(block_root, slot)
+            controller.preprocessed_state_post_block_blocking(block_root, slot)
         })
         .await?
         .map_err(Error::UnableToProduceAttestation)?;
@@ -3072,7 +3095,7 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
     State(subnet_service_tx): State<UnboundedSender<ToSubnetService>>,
     EthJson(subscriptions): EthJson<Vec<BeaconCommitteeSubscription>>,
 ) -> Result<(), Error> {
-    let current_state = controller.preprocessed_state_at_current_slot()?;
+    let current_state = controller.preprocessed_state_at_current_slot().await?;
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     subscriptions.iter().try_for_each(|subscription| {
@@ -3346,7 +3369,7 @@ pub async fn validator_liveness<P: Preset, W: Wait>(
     EthJson(validators): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorLivenessResponse>>, Error> {
     let api_to_liveness_tx = api_to_liveness_tx.ok_or(Error::LivenessTrackingNotEnabled)?;
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot().await?;
 
     accessors::attestation_epoch(&state, epoch).map_err(Error::InvalidEpoch)?;
 
@@ -4018,20 +4041,22 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     )
     .await?;
 
+    let state = controller.preprocessed_state_at_current_slot().await?;
+
     let (prevalidated, mut failures): (Vec<_>, Vec<_>) = targets
         .into_iter()
         .map(|target| {
-            if controller.head_block_root().value == target.root {
-                let state = controller.preprocessed_state_at_current_slot()?;
-
-                if accessors::get_current_epoch(&state) == target.epoch {
-                    return Ok(state);
-                }
+            if controller.head_block_root().value == target.root
+                && accessors::get_current_epoch(&state) == target.epoch
+            {
+                return Ok(state.clone_arc());
             }
 
-            controller
-                .checkpoint_state(target)?
-                .ok_or(Error::TargetStateNotFound)
+            tokio::task::block_in_place(|| {
+                controller
+                    .checkpoint_state_blocking(target)?
+                    .ok_or(Error::TargetStateNotFound)
+            })
         })
         .zip(target_attestations)
         .flat_map(|(target_state_result, attestations)| {
