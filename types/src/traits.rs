@@ -974,6 +974,7 @@ pub trait BeaconBlockBody<P: Preset>: SszHash<PackingFactor = U1> {
 
     fn with_sync_aggregate(&self) -> Option<&dyn BlockBodyWithSyncAggregate<P>>;
     fn with_execution_payload(&self) -> Option<&dyn BlockBodyWithExecutionPayload<P>>;
+    fn with_bls_to_execution_changes(&self) -> Option<&dyn BlockBodyWithBlsToExecutionChanges<P>>;
     fn with_blob_kzg_commitments(&self) -> Option<&dyn BlockBodyWithBlobKzgCommitments<P>>;
     fn with_electra_attestations(&self) -> Option<&dyn BlockBodyWithElectraAttestations<P>>;
     fn with_execution_requests(&self) -> Option<&dyn BlockBodyWithExecutionRequests<P>>;
@@ -989,23 +990,23 @@ pub trait BeaconBlockBody<P: Preset>: SszHash<PackingFactor = U1> {
 }
 
 #[duplicate_item(
-    implementor                          pre_electra_body body_with_sync_aggregate body_with_execution_payload body_with_blob_kzg_commitments body_with_electra_attestations body_with_execution_requests post_deneb_body post_electra_body post_fulu_body;
+    implementor                          pre_electra_body body_with_sync_aggregate body_with_execution_payload body_with_bls_to_execution_changes body_with_blob_kzg_commitments body_with_electra_attestations body_with_execution_requests post_deneb_body post_electra_body post_fulu_body;
 
-    [Phase0BeaconBlockBody<P>]           [Some(self)]     [None]           [None]              [None]           [None]             [None]          [None]             [None]            [None];
-    [AltairBeaconBlockBody<P>]           [Some(self)]     [Some(self)]     [None]              [None]           [None]             [None]          [None]             [None]            [None];
-    [BellatrixBeaconBlockBody<P>]        [Some(self)]     [Some(self)]     [Some(self)]        [None]           [None]             [None]          [None]             [None]            [None];
-    [CapellaBeaconBlockBody<P>]          [Some(self)]     [Some(self)]     [Some(self)]        [None]           [None]             [None]          [None]             [None]            [None];
-    [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]     [Some(self)]        [Some(self)]     [None]             [None]          [Some(self)]       [None]            [None];
-    [ElectraBeaconBlockBody<P>]          [None]           [Some(self)]     [Some(self)]        [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [None];
-    [FuluBeaconBlockBody<P>]             [None]           [Some(self)]     [Some(self)]        [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [Some(self)];
+    [Phase0BeaconBlockBody<P>]           [Some(self)]     [None]           [None]           [None]           [None]           [None]           [None]           [None]           [None]           [None];
+    [AltairBeaconBlockBody<P>]           [Some(self)]     [Some(self)]     [None]           [None]           [None]           [None]           [None]           [None]           [None]           [None];
+    [BellatrixBeaconBlockBody<P>]        [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None]           [None]           [None]           [None]           [None]           [None];
+    [CapellaBeaconBlockBody<P>]          [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None]           [None]           [None]           [None]           [None];
+    [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None]           [Some(self)]     [None]           [None];
+    [ElectraBeaconBlockBody<P>]          [None]           [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None];
+    [FuluBeaconBlockBody<P>]             [None]           [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)];
 
-    // `BlindedBeaconBlockBody` does not implement `BlockBodyWithExecutionPayload`
+    // `BellatrixBlindedBeaconBlockBody` does not implement `BlockBodyWithExecutionPayload`
     // because it does not have an `execution_payload` field.
-    [BellatrixBlindedBeaconBlockBody<P>] [Some(self)]     [Some(self)]     [None]              [None]           [None]             [None]          [None]             [None]            [None];
-    [CapellaBlindedBeaconBlockBody<P>]   [Some(self)]     [Some(self)]     [None]              [None]           [None]             [None]          [None]             [None]            [None];
-    [DenebBlindedBeaconBlockBody<P>]     [Some(self)]     [Some(self)]     [None]              [Some(self)]     [None]             [None]          [Some(self)]       [None]            [None];
-    [ElectraBlindedBeaconBlockBody<P>]   [None]           [Some(self)]     [None]              [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [None];
-    [FuluBlindedBeaconBlockBody<P>]      [None]           [Some(self)]     [None]              [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [Some(self)];
+    [BellatrixBlindedBeaconBlockBody<P>] [Some(self)]     [Some(self)]     [None]           [None]           [None]           [None]           [None]           [None]           [None]           [None];
+    [CapellaBlindedBeaconBlockBody<P>]   [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None]           [None]           [None]           [None]           [None];
+    [DenebBlindedBeaconBlockBody<P>]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None]           [Some(self)]     [None]           [None];
+    [ElectraBlindedBeaconBlockBody<P>]   [None]           [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None];
+    [FuluBlindedBeaconBlockBody<P>]      [None]           [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)];
 )]
 impl<P: Preset> BeaconBlockBody<P> for implementor {
     fn randao_reveal(&self) -> SignatureBytes {
@@ -1058,6 +1059,10 @@ impl<P: Preset> BeaconBlockBody<P> for implementor {
 
     fn with_execution_payload(&self) -> Option<&dyn BlockBodyWithExecutionPayload<P>> {
         body_with_execution_payload
+    }
+
+    fn with_bls_to_execution_changes(&self) -> Option<&dyn BlockBodyWithBlsToExecutionChanges<P>> {
+        body_with_bls_to_execution_changes
     }
 
     fn with_blob_kzg_commitments(&self) -> Option<&dyn BlockBodyWithBlobKzgCommitments<P>> {
