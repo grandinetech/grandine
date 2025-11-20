@@ -642,8 +642,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .as_ref()
             .map(|metrics| metrics.build_beacon_block_times.start_timer());
 
-        let block_without_state_root = self
-            .build_beacon_block_without_state_root(randao_reveal)
+        let block_without_state_root =
+            wait_for_result(self.spawn_job(|build_context| async move {
+                build_context
+                    .build_beacon_block_without_state_root(randao_reveal)
+                    .await
+            }))
             .await?;
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
@@ -666,8 +670,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Option<BlockRewards>,
         )>,
     > {
-        let block_without_state_root = self
-            .build_beacon_block_without_state_root(randao_reveal)
+        let block_without_state_root =
+            wait_for_result(self.spawn_job(|build_context| async move {
+                build_context
+                    .build_beacon_block_without_state_root(randao_reveal)
+                    .await
+            }))
             .await?;
 
         let block = block_without_state_root.clone();
@@ -952,7 +960,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         .pipe(Ok)
     }
 
-    pub fn compute_on_chain_aggregate(
+    fn compute_on_chain_aggregate(
         attestations: impl Iterator<Item = ElectraAttestation<P>>,
     ) -> Result<ElectraAttestation<P>> {
         let aggregates = attestations
@@ -1080,7 +1088,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Some((beacon_block, block_rewards))
     }
 
-    pub async fn produce_beacon_block(
+    async fn produce_beacon_block(
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
@@ -1146,7 +1154,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .pipe(Ok)
     }
 
-    pub async fn produce_blinded_block(
+    async fn produce_blinded_block(
         &self,
         mut block_without_state_root: BeaconBlock<P>,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,

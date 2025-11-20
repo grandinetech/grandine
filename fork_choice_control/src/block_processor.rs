@@ -38,6 +38,8 @@ pub struct BlockProcessor<P: Preset> {
     state_cache: Arc<StateCacheProcessor<P>>,
 }
 
+// NOTE: These functions are all potentially blocking due to state cache access.
+// They should be called within a blocking task only.
 impl<P: Preset> BlockProcessor<P> {
     pub fn process_untrusted_block_with_report(
         &self,
@@ -136,7 +138,7 @@ impl<P: Preset> BlockProcessor<P> {
     }
 
     #[expect(clippy::too_many_arguments)]
-    pub fn perform_state_transition(
+    fn perform_state_transition(
         &self,
         mut state: Arc<BeaconState<P>>,
         block: &SignedBeaconBlock<P>,

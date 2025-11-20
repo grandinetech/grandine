@@ -1670,9 +1670,11 @@ pub async fn block_rewards<P: Preset, W: Wait>(
 
             let state = controller.preprocessed_state_post_block(parent_root, block_slot)?;
 
-            controller
-                .block_processor()
-                .process_trusted_block_with_report(state, &block)
+            tokio::task::block_in_place(|| {
+                controller
+                    .block_processor()
+                    .process_trusted_block_with_report(state, &block)
+            })
         })
         .transpose()?
         .and_then(|(_, rewards)| rewards)
