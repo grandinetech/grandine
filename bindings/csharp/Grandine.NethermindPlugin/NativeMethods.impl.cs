@@ -540,7 +540,7 @@ public unsafe partial struct CVec_CBlobAndProofV2
         IntPtr pointer;
         unsafe
         {
-            pointer = (IntPtr)NativeMethods.grandine_alloc(length * (nuint)Marshal.SizeOf<CVec_CBlobAndProofV2>());
+            pointer = (IntPtr)NativeMethods.grandine_alloc(length * (nuint)Marshal.SizeOf<CBlobAndProofV2>());
         }
 
         this.data = (CBlobAndProofV2*)pointer.ToPointer();

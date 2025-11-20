@@ -78,6 +78,7 @@ impl RequestType {
         }
     }
 
+    #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
             Self::Deposits => "deposit",

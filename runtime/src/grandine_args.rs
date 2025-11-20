@@ -1425,6 +1425,7 @@ impl GrandineArgs {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
 
+    #[must_use]
     pub fn data_dir(&self) -> PathBuf {
         directories::data_directory(self.beacon_node_options.data_dir.as_ref())
     }

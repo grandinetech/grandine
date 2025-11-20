@@ -1,3 +1,8 @@
+#![allow(
+    unused_crate_dependencies,
+    reason = "bls and kzg_utils crates are required to pass BLS backend feature to them, but they're not directly used inside this crate."
+)]
+
 use std::process::ExitCode;
 
 use allocator as _;

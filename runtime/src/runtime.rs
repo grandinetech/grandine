@@ -2,11 +2,13 @@ use core::{
     convert::Infallible as Never, future::Future, net::SocketAddr, panic::AssertUnwindSafe,
     pin::pin,
 };
+#[cfg(feature = "embed")]
+use std::sync::LazyLock;
 use std::{
     collections::HashSet,
     net::{TcpListener, UdpSocket},
     path::PathBuf,
-    sync::{Arc, LazyLock},
+    sync::Arc,
 };
 
 use allocator as _;
@@ -66,6 +68,7 @@ use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::{runtime::Builder, select};
+#[cfg(feature = "embed")]
 use tokio_util::sync::CancellationToken;
 use types::{
     config::Config as ChainConfig,

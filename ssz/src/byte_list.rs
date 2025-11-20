@@ -28,6 +28,7 @@ pub struct ByteList<N> {
 }
 
 impl<N> ByteList<N> {
+    #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -37,7 +38,7 @@ impl<N: Unsigned> TryFrom<Vec<u8>> for ByteList<N> {
     type Error = ReadError;
 
     fn try_from(b: Vec<u8>) -> Result<Self, ReadError> {
-        ContiguousList::<u8, N>::try_from(b).map(|bytes| ByteList { bytes })
+        ContiguousList::<u8, N>::try_from(b).map(|bytes| Self { bytes })
     }
 }
 

@@ -1,3 +1,7 @@
+#![allow(
+    unused_crate_dependencies,
+    reason = "tokio_util is used only for embed feature, thus emits warning that it is unused, when compiling without embed"
+)]
 pub use crate::{
     defaults::{
         default_network_config, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,

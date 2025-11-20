@@ -5062,13 +5062,9 @@ dependencies = [
  "anyhow",
  "bls",
  "clap",
- "dirs 6.0.0",
- "http_api_utils",
  "kzg_utils",
  "logging",
  "runtime",
- "tempfile",
- "test-case",
  "tracing",
 ]
 

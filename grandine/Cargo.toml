@@ -11,16 +11,10 @@ allocator = { workspace = true }
 anyhow = { workspace = true }
 bls = { workspace = true }
 clap = { workspace = true }
-http_api_utils = { workspace = true }
 kzg_utils = { workspace = true }
 logging = { workspace = true }
 runtime = { workspace = true }
 tracing = { workspace = true }
-
-[dev-dependencies]
-dirs = { workspace = true }
-tempfile = { workspace = true }
-test-case = { workspace = true }
 
 [features]
 default = ["bls/blst", "kzg_utils/blst"]
