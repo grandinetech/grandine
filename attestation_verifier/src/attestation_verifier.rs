@@ -292,7 +292,10 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
             return snapshot.head_state();
         }
 
-        match self.controller.preprocessed_state_at_current_slot() {
+        match self
+            .controller
+            .preprocessed_state_at_current_slot_blocking()
+        {
             Ok(state) => state,
             Err(error) => {
                 debug_with_peers!(
@@ -484,7 +487,10 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
             return snapshot.head_state();
         }
 
-        match self.controller.preprocessed_state_at_current_slot() {
+        match self
+            .controller
+            .preprocessed_state_at_current_slot_blocking()
+        {
             Ok(state) => state,
             Err(error) => {
                 debug_with_peers!(

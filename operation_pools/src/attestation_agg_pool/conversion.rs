@@ -113,7 +113,7 @@ fn current_state<P: Preset, W: Wait>(controller: &ApiController<P, W>) -> Arc<Be
         return controller.head_state().value;
     }
 
-    match controller.preprocessed_state_at_current_slot() {
+    match controller.preprocessed_state_at_current_slot_blocking() {
         Ok(state) => state,
         Err(error) => {
             debug_with_peers!(

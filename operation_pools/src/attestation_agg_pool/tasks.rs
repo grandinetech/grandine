@@ -119,7 +119,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             metrics,
         } = self;
 
-        let beacon_state = controller.preprocessed_state_at_next_slot()?;
+        let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
         let slot = controller.slot() + 1;
 
         let mut attestation_packer = AttestationPacker::new(
@@ -175,7 +175,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             if attestation_packer.should_update_current_participation(head_block_root) {
                 attestation_packer.update_current_participation(
                     head_block_root,
-                    controller.preprocessed_state_at_next_slot()?,
+                    controller.preprocessed_state_at_next_slot_blocking()?,
                 )?;
             }
         }
@@ -336,7 +336,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
             validator_statistics,
         } = self;
 
-        let beacon_state = match controller.preprocessed_state_at_current_slot() {
+        let beacon_state = match controller.preprocessed_state_at_current_slot_blocking() {
             Ok(state) => state,
             Err(error) => {
                 if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {

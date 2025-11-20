@@ -55,7 +55,7 @@ impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
-    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>> + Sync,
     W: Wait,
 {
     #[must_use]
@@ -585,7 +585,18 @@ where
         self.data_column_sidecars_by_ids(data_column_ids)
     }
 
-    pub fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
+    pub async fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
+        let store = self.store_snapshot();
+        let pubkey_cache = self.pubkey_cache().clone_arc();
+        let state_cache = self.state_cache().clone_arc();
+
+        tokio::task::spawn_blocking(move || {
+            state_cache.state_at_slot(&pubkey_cache, &store, store.head().block_root, store.slot())
+        })
+        .await?
+    }
+
+    pub fn preprocessed_state_at_current_slot_blocking(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();
 
@@ -593,7 +604,7 @@ where
             .state_at_slot(self.pubkey_cache(), &store, head.block_root, store.slot())
     }
 
-    pub fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
+    pub fn preprocessed_state_at_next_slot_blocking(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();
 

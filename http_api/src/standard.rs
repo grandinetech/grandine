@@ -2000,7 +2000,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJson(json_vec): EthJson<Vec<Value>>,
 ) -> Result<(), Error> {
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot().await?;
 
     let Some(state) = state.post_altair() else {
         return Ok(());
@@ -3074,7 +3074,7 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
     State(subnet_service_tx): State<UnboundedSender<ToSubnetService>>,
     EthJson(subscriptions): EthJson<Vec<BeaconCommitteeSubscription>>,
 ) -> Result<(), Error> {
-    let current_state = controller.preprocessed_state_at_current_slot()?;
+    let current_state = controller.preprocessed_state_at_current_slot().await?;
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     subscriptions.iter().try_for_each(|subscription| {
@@ -3348,7 +3348,7 @@ pub async fn validator_liveness<P: Preset, W: Wait>(
     EthJson(validators): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorLivenessResponse>>, Error> {
     let api_to_liveness_tx = api_to_liveness_tx.ok_or(Error::LivenessTrackingNotEnabled)?;
-    let state = controller.preprocessed_state_at_current_slot()?;
+    let state = controller.preprocessed_state_at_current_slot().await?;
 
     accessors::attestation_epoch(&state, epoch).map_err(Error::InvalidEpoch)?;
 
@@ -4020,15 +4020,15 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     )
     .await?;
 
+    let state = controller.preprocessed_state_at_current_slot().await?;
+
     let (prevalidated, mut failures): (Vec<_>, Vec<_>) = targets
         .into_iter()
         .map(|target| {
-            if controller.head_block_root().value == target.root {
-                let state = controller.preprocessed_state_at_current_slot()?;
-
-                if accessors::get_current_epoch(&state) == target.epoch {
-                    return Ok(state);
-                }
+            if controller.head_block_root().value == target.root
+                && accessors::get_current_epoch(&state) == target.epoch
+            {
+                return Ok(state.clone_arc());
             }
 
             controller

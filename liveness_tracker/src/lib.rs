@@ -105,7 +105,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                         ValidatorToLiveness::ValidAttestation(attestation) => {
                             let result = self
                                 .controller
-                                .preprocessed_state_at_current_slot()
+                                .preprocessed_state_at_current_slot().await
                                 .map(|state| self.process_attestation(&attestation, &state));
 
                             if let Err(error) = result {

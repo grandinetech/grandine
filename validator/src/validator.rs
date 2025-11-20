@@ -593,7 +593,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
-        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref());
+        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref())
+            .await;
 
         if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
             self.refresh_signer_keys();
@@ -2037,14 +2038,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn update_subnet_subscriptions(&mut self, wait_group: &W, slot_head: Option<&SlotHead<P>>) {
+    async fn update_subnet_subscriptions(
+        &mut self,
+        wait_group: &W,
+        slot_head: Option<&SlotHead<P>>,
+    ) {
         if !self.controller.is_forward_synced() {
             return;
         }
 
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
-            None => match self.controller.preprocessed_state_at_current_slot() {
+            None => match self.controller.preprocessed_state_at_current_slot().await {
                 Ok(state) => state,
                 Err(error) => {
                     let is_too_many_empty_slots = matches!(
