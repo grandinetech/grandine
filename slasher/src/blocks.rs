@@ -150,6 +150,7 @@ impl Blocks {
 
 #[cfg(test)]
 mod tests {
+    use ssz::Hc;
     use types::{
         combined::BeaconBlock, phase0::containers::BeaconBlock as Phase0BeaconBlock,
         preset::Mainnet,
@@ -163,12 +164,12 @@ mod tests {
         slot: Slot,
         parent_root: H256,
     ) -> SignedBeaconBlock<P> {
-        BeaconBlock::from(Phase0BeaconBlock {
+        BeaconBlock::from(Hc::new(Phase0BeaconBlock {
             slot,
             proposer_index,
             parent_root,
             ..Phase0BeaconBlock::default()
-        })
+        }))
         .with_zero_signature()
     }
 

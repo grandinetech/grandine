@@ -19,7 +19,7 @@ use helper_functions::{
 };
 use itertools::{Either, Itertools as _};
 use pubkey_cache::PubkeyCache;
-use ssz::{BitList, BitVector, ContiguousList, SszHash as _};
+use ssz::{BitList, BitVector, ContiguousList, Hc, SszHash as _};
 use std_ext::ArcExt as _;
 use transition_functions::{capella, combined};
 use typenum::Unsigned as _;
@@ -472,7 +472,7 @@ fn block<P: Preset>(
     }
 
     let without_state_root = match advanced_state.phase() {
-        Phase::Phase0 => BeaconBlock::from(Phase0BeaconBlock {
+        Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -485,8 +485,8 @@ fn block<P: Preset>(
                 deposits,
                 ..Phase0BeaconBlockBody::default()
             },
-        }),
-        Phase::Altair => BeaconBlock::from(AltairBeaconBlock {
+        })),
+        Phase::Altair => BeaconBlock::from(Hc::new(AltairBeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -500,8 +500,8 @@ fn block<P: Preset>(
                 sync_aggregate,
                 ..AltairBeaconBlockBody::default()
             },
-        }),
-        Phase::Bellatrix => BeaconBlock::from(BellatrixBeaconBlock {
+        })),
+        Phase::Bellatrix => BeaconBlock::from(Hc::new(BellatrixBeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -515,8 +515,8 @@ fn block<P: Preset>(
                 sync_aggregate,
                 ..BellatrixBeaconBlockBody::default()
             },
-        }),
-        Phase::Capella => BeaconBlock::from(CapellaBeaconBlock {
+        })),
+        Phase::Capella => BeaconBlock::from(Hc::new(CapellaBeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -530,8 +530,8 @@ fn block<P: Preset>(
                 sync_aggregate,
                 ..CapellaBeaconBlockBody::default()
             },
-        }),
-        Phase::Deneb => BeaconBlock::from(DenebBeaconBlock {
+        })),
+        Phase::Deneb => BeaconBlock::from(Hc::new(DenebBeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -545,8 +545,8 @@ fn block<P: Preset>(
                 sync_aggregate,
                 ..DenebBeaconBlockBody::default()
             },
-        }),
-        Phase::Electra => BeaconBlock::from(ElectraBeaconBlock {
+        })),
+        Phase::Electra => BeaconBlock::from(Hc::new(ElectraBeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -560,8 +560,8 @@ fn block<P: Preset>(
                 sync_aggregate,
                 ..ElectraBeaconBlockBody::default()
             },
-        }),
-        Phase::Fulu => BeaconBlock::from(FuluBeaconBlock {
+        })),
+        Phase::Fulu => BeaconBlock::from(Hc::new(FuluBeaconBlock {
             slot,
             proposer_index,
             parent_root,
@@ -575,7 +575,7 @@ fn block<P: Preset>(
                 sync_aggregate,
                 ..FuluBeaconBlockBody::default()
             },
-        }),
+        })),
     }
     .with_execution_payload(execution_payload)?;
 

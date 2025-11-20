@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use bls::SignatureBytes;
 use serde::{Deserialize, Serialize};
-use ssz::{ByteList, ByteVector, ContiguousList, Ssz};
+use ssz::{ByteList, ByteVector, ContiguousList, Hc, Ssz};
 
 use crate::{
     altair::containers::SyncAggregate,
@@ -141,7 +141,7 @@ pub struct PowBlock {
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct SignedBeaconBlock<P: Preset> {
-    pub message: BeaconBlock<P>,
+    pub message: Hc<BeaconBlock<P>>,
     pub signature: SignatureBytes,
 }
 
