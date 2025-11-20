@@ -109,9 +109,9 @@ use crate::{
     preset::{Mainnet, Preset},
     traits::{
         BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
-        ExecutionPayload as ExecutionPayloadTrait, PostAltairBeaconState, PostBellatrixBeaconState,
-        PostCapellaBeaconState, PostElectraBeaconBlockBody, PostElectraBeaconState,
-        PostFuluBeaconState, SignedBeaconBlock as _,
+        BlockBodyWithExecutionRequests, ExecutionPayload as ExecutionPayloadTrait,
+        PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
+        PostElectraBeaconState, SignedBeaconBlock as _,
     },
 };
 
@@ -933,8 +933,8 @@ impl<P: Preset> TryFrom<BeaconBlock<P>> for BlindedBeaconBlock<P> {
 
         let execution_requests = block
             .body()
-            .post_electra()
-            .map(PostElectraBeaconBlockBody::execution_requests)
+            .with_execution_requests()
+            .map(BlockBodyWithExecutionRequests::execution_requests)
             .cloned();
 
         let payload_header = body.execution_payload().to_header();

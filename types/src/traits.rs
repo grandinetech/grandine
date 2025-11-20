@@ -975,6 +975,9 @@ pub trait BeaconBlockBody<P: Preset>: SszHash<PackingFactor = U1> {
     fn with_sync_aggregate(&self) -> Option<&dyn BlockBodyWithSyncAggregate<P>>;
     fn with_execution_payload(&self) -> Option<&dyn BlockBodyWithExecutionPayload<P>>;
     fn with_blob_kzg_commitments(&self) -> Option<&dyn BlockBodyWithBlobKzgCommitments<P>>;
+    fn with_electra_attestations(&self) -> Option<&dyn BlockBodyWithElectraAttestations<P>>;
+    fn with_execution_requests(&self) -> Option<&dyn BlockBodyWithExecutionRequests<P>>;
+    fn post_deneb(&self) -> Option<&dyn PostDenebBeaconBlockBody<P>>;
     fn post_electra(&self) -> Option<&dyn PostElectraBeaconBlockBody<P>>;
     fn post_fulu(&self) -> Option<&dyn PostFuluBeaconBlockBody<P>>;
 
@@ -986,23 +989,23 @@ pub trait BeaconBlockBody<P: Preset>: SszHash<PackingFactor = U1> {
 }
 
 #[duplicate_item(
-    implementor                          pre_electra_body body_with_sync_aggregate body_with_execution_payload body_with_blob_kzg_commitments post_electra_body post_fulu_body;
+    implementor                          pre_electra_body body_with_sync_aggregate body_with_execution_payload body_with_blob_kzg_commitments body_with_electra_attestations body_with_execution_requests post_deneb_body post_electra_body post_fulu_body;
 
-    [Phase0BeaconBlockBody<P>]           [Some(self)]     [None]           [None]              [None]          [None]            [None];
-    [AltairBeaconBlockBody<P>]           [Some(self)]     [Some(self)]     [None]              [None]          [None]            [None];
-    [BellatrixBeaconBlockBody<P>]        [Some(self)]     [Some(self)]     [Some(self)]        [None]          [None]            [None];
-    [CapellaBeaconBlockBody<P>]          [Some(self)]     [Some(self)]     [Some(self)]        [None]          [None]            [None];
-    [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]     [Some(self)]        [Some(self)]    [None]            [None];
-    [ElectraBeaconBlockBody<P>]          [None]           [Some(self)]     [Some(self)]        [Some(self)]    [Some(self)]      [None];
-    [FuluBeaconBlockBody<P>]             [None]           [Some(self)]     [Some(self)]        [Some(self)]    [Some(self)]      [Some(self)];
+    [Phase0BeaconBlockBody<P>]           [Some(self)]     [None]           [None]              [None]           [None]             [None]          [None]             [None]            [None];
+    [AltairBeaconBlockBody<P>]           [Some(self)]     [Some(self)]     [None]              [None]           [None]             [None]          [None]             [None]            [None];
+    [BellatrixBeaconBlockBody<P>]        [Some(self)]     [Some(self)]     [Some(self)]        [None]           [None]             [None]          [None]             [None]            [None];
+    [CapellaBeaconBlockBody<P>]          [Some(self)]     [Some(self)]     [Some(self)]        [None]           [None]             [None]          [None]             [None]            [None];
+    [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]     [Some(self)]        [Some(self)]     [None]             [None]          [Some(self)]       [None]            [None];
+    [ElectraBeaconBlockBody<P>]          [None]           [Some(self)]     [Some(self)]        [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [None];
+    [FuluBeaconBlockBody<P>]             [None]           [Some(self)]     [Some(self)]        [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [Some(self)];
 
     // `BlindedBeaconBlockBody` does not implement `BlockBodyWithExecutionPayload`
     // because it does not have an `execution_payload` field.
-    [BellatrixBlindedBeaconBlockBody<P>] [Some(self)]     [Some(self)]     [None]              [None]          [None]            [None];
-    [CapellaBlindedBeaconBlockBody<P>]   [Some(self)]     [Some(self)]     [None]              [None]          [None]            [None];
-    [DenebBlindedBeaconBlockBody<P>]     [Some(self)]     [Some(self)]     [None]              [Some(self)]    [None]            [None];
-    [ElectraBlindedBeaconBlockBody<P>]   [None]           [Some(self)]     [None]              [Some(self)]    [Some(self)]      [None];
-    [FuluBlindedBeaconBlockBody<P>]      [None]           [Some(self)]     [None]              [Some(self)]    [Some(self)]      [Some(self)];
+    [BellatrixBlindedBeaconBlockBody<P>] [Some(self)]     [Some(self)]     [None]              [None]           [None]             [None]          [None]             [None]            [None];
+    [CapellaBlindedBeaconBlockBody<P>]   [Some(self)]     [Some(self)]     [None]              [None]           [None]             [None]          [None]             [None]            [None];
+    [DenebBlindedBeaconBlockBody<P>]     [Some(self)]     [Some(self)]     [None]              [Some(self)]     [None]             [None]          [Some(self)]       [None]            [None];
+    [ElectraBlindedBeaconBlockBody<P>]   [None]           [Some(self)]     [None]              [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [None];
+    [FuluBlindedBeaconBlockBody<P>]      [None]           [Some(self)]     [None]              [Some(self)]     [Some(self)]       [Some(self)]    [Some(self)]       [Some(self)]      [Some(self)];
 )]
 impl<P: Preset> BeaconBlockBody<P> for implementor {
     fn randao_reveal(&self) -> SignatureBytes {
@@ -1059,6 +1062,18 @@ impl<P: Preset> BeaconBlockBody<P> for implementor {
 
     fn with_blob_kzg_commitments(&self) -> Option<&dyn BlockBodyWithBlobKzgCommitments<P>> {
         body_with_blob_kzg_commitments
+    }
+
+    fn with_electra_attestations(&self) -> Option<&dyn BlockBodyWithElectraAttestations<P>> {
+        body_with_electra_attestations
+    }
+
+    fn with_execution_requests(&self) -> Option<&dyn BlockBodyWithExecutionRequests<P>> {
+        body_with_execution_requests
+    }
+
+    fn post_deneb(&self) -> Option<&dyn PostDenebBeaconBlockBody<P>> {
+        post_deneb_body
     }
 
     fn post_electra(&self) -> Option<&dyn PostElectraBeaconBlockBody<P>> {
@@ -1440,6 +1455,91 @@ impl<P: Preset> BlockBodyWithBlobKzgCommitments<P> for FuluBlindedBeaconBlockBod
     }
 }
 
+// Previously in `PostElectraBeaconBlockBody`
+pub trait BlockBodyWithElectraAttestations<P: Preset>: BeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra>;
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
+}
+
+impl<P: Preset> BlockBodyWithElectraAttestations<P> for ElectraBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> BlockBodyWithElectraAttestations<P> for ElectraBlindedBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> BlockBodyWithElectraAttestations<P> for FuluBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        &self.attester_slashings
+    }
+}
+
+impl<P: Preset> BlockBodyWithElectraAttestations<P> for FuluBlindedBeaconBlockBody<P> {
+    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
+        &self.attestations
+    }
+
+    fn attester_slashings(
+        &self,
+    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        &self.attester_slashings
+    }
+}
+
+// Previously in `PostElectraBeaconBlockBody`
+pub trait BlockBodyWithExecutionRequests<P: Preset>: BeaconBlockBody<P> {
+    fn execution_requests(&self) -> &ExecutionRequests<P>;
+}
+
+impl<P: Preset> BlockBodyWithExecutionRequests<P> for ElectraBeaconBlockBody<P> {
+    fn execution_requests(&self) -> &ExecutionRequests<P> {
+        &self.execution_requests
+    }
+}
+
+impl<P: Preset> BlockBodyWithExecutionRequests<P> for ElectraBlindedBeaconBlockBody<P> {
+    fn execution_requests(&self) -> &ExecutionRequests<P> {
+        &self.execution_requests
+    }
+}
+
+impl<P: Preset> BlockBodyWithExecutionRequests<P> for FuluBeaconBlockBody<P> {
+    fn execution_requests(&self) -> &ExecutionRequests<P> {
+        &self.execution_requests
+    }
+}
+
+impl<P: Preset> BlockBodyWithExecutionRequests<P> for FuluBlindedBeaconBlockBody<P> {
+    fn execution_requests(&self) -> &ExecutionRequests<P> {
+        &self.execution_requests
+    }
+}
+
 pub trait PostDenebBeaconBlockBody<P: Preset>:
     BlockBodyWithSyncAggregate<P>
     + BlockBodyWithExecutionPayload<P>
@@ -1448,88 +1548,31 @@ pub trait PostDenebBeaconBlockBody<P: Preset>:
 {
 }
 
-// TODO(gloas): move `execution_requests` into its own trait
+impl<P: Preset> PostDenebBeaconBlockBody<P> for DenebBeaconBlockBody<P> {}
+impl<P: Preset> PostDenebBeaconBlockBody<P> for DenebBlindedBeaconBlockBody<P> {}
+impl<P: Preset> PostDenebBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {}
+impl<P: Preset> PostDenebBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {}
+impl<P: Preset> PostDenebBeaconBlockBody<P> for FuluBeaconBlockBody<P> {}
+impl<P: Preset> PostDenebBeaconBlockBody<P> for FuluBlindedBeaconBlockBody<P> {}
+
 pub trait PostElectraBeaconBlockBody<P: Preset>:
     BlockBodyWithSyncAggregate<P>
     + BlockBodyWithExecutionPayload<P>
     + BlockBodyWithBlsToExecutionChanges<P>
     + BlockBodyWithBlobKzgCommitments<P>
+    + BlockBodyWithElectraAttestations<P>
+    + BlockBodyWithExecutionRequests<P>
 {
-    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra>;
-    fn attester_slashings(
-        &self,
-    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
-    fn execution_requests(&self) -> &ExecutionRequests<P>;
 }
 
-impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {
-    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
-        &self.attestations
-    }
-
-    fn attester_slashings(
-        &self,
-    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
-        &self.attester_slashings
-    }
-
-    fn execution_requests(&self) -> &ExecutionRequests<P> {
-        &self.execution_requests
-    }
-}
-
-impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {
-    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
-        &self.attestations
-    }
-
-    fn attester_slashings(
-        &self,
-    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
-        &self.attester_slashings
-    }
-
-    fn execution_requests(&self) -> &ExecutionRequests<P> {
-        &self.execution_requests
-    }
-}
-
-impl<P: Preset> PostElectraBeaconBlockBody<P> for FuluBeaconBlockBody<P> {
-    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
-        &self.attestations
-    }
-
-    fn attester_slashings(
-        &self,
-    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
-        &self.attester_slashings
-    }
-
-    fn execution_requests(&self) -> &ExecutionRequests<P> {
-        &self.execution_requests
-    }
-}
-
-impl<P: Preset> PostElectraBeaconBlockBody<P> for FuluBlindedBeaconBlockBody<P> {
-    fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra> {
-        &self.attestations
-    }
-
-    fn attester_slashings(
-        &self,
-    ) -> &ContiguousList<ElectraAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
-        &self.attester_slashings
-    }
-
-    fn execution_requests(&self) -> &ExecutionRequests<P> {
-        &self.execution_requests
-    }
-}
+impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBeaconBlockBody<P> {}
+impl<P: Preset> PostElectraBeaconBlockBody<P> for ElectraBlindedBeaconBlockBody<P> {}
+impl<P: Preset> PostElectraBeaconBlockBody<P> for FuluBeaconBlockBody<P> {}
+impl<P: Preset> PostElectraBeaconBlockBody<P> for FuluBlindedBeaconBlockBody<P> {}
 
 pub trait PostFuluBeaconBlockBody<P: Preset>: PostElectraBeaconBlockBody<P> {}
 
 impl<P: Preset> PostFuluBeaconBlockBody<P> for FuluBeaconBlockBody<P> {}
-
 impl<P: Preset> PostFuluBeaconBlockBody<P> for FuluBlindedBeaconBlockBody<P> {}
 
 pub trait ExecutionPayload<P: Preset>: SszHash<PackingFactor = U1> {

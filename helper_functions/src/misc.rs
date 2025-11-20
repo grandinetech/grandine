@@ -710,7 +710,7 @@ pub fn construct_blob_sidecars<P: Preset>(
     blobs: impl IntoIterator<Item = Blob<P>>,
     proofs: impl IntoIterator<Item = KzgProof>,
 ) -> Result<Vec<BlobSidecar<P>>> {
-    let Some(body) = block.message().body().post_deneb() else {
+    let Some(body) = block.message().body().with_blob_kzg_commitments() else {
         return Ok(vec![]);
     };
 
