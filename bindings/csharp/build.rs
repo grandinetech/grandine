@@ -22,11 +22,11 @@ fn main() {
         })
         .generate()
         .expect("bindgen failed")
-        .write_to_file("./src/lib.rs")
+        .write_to_file("./src/generated.rs")
         .expect("failed to save bindgen output");
 
     csbindgen::Builder::default()
-        .input_bindgen_file("./src/lib.rs")
+        .input_bindgen_file("./src/generated.rs")
         .csharp_namespace("Grandine.Native")
         .csharp_dll_name(package_name_of_c_crate)
         .csharp_class_name("NativeMethods")

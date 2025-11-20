@@ -2,4 +2,4 @@
 **/obj
 nupkgs
 **/runtimes
-src/lib.rs
+src/generated.rs
