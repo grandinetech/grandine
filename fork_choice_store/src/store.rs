@@ -3746,7 +3746,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Vec<ColumnIndex> {
         let block = block.message();
 
-        let Some(body) = block.body().post_fulu() else {
+        // `block.phase` has already been checked
+        let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
         };
 

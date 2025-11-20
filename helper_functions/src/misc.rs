@@ -41,8 +41,9 @@ use types::{
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{
-        BeaconState, PostAltairBeaconState, PostDenebBeaconBlockBody, PostElectraBeaconBlockBody,
-        SignedBeaconBlock as _,
+        BeaconState, BlockBodyWithBlobKzgCommitments, BlockBodyWithBlsToExecutionChanges,
+        BlockBodyWithExecutionPayload, BlockBodyWithExecutionRequests, BlockBodyWithSyncAggregate,
+        PostAltairBeaconState, SignedBeaconBlock as _,
     },
 };
 
@@ -507,10 +508,17 @@ pub fn kzg_commitment_to_versioned_hash(kzg_commitment: KzgCommitment) -> Versio
     versioned_hash
 }
 
-pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
-    body: &(impl PostDenebBeaconBlockBody<P> + ?Sized),
+pub fn deneb_kzg_commitment_inclusion_proof<P: Preset, B>(
+    body: &B,
     commitment_index: BlobIndex,
-) -> Result<BlobCommitmentInclusionProof<P>> {
+) -> Result<BlobCommitmentInclusionProof<P>>
+where
+    B: BlockBodyWithBlobKzgCommitments<P>
+        + BlockBodyWithBlsToExecutionChanges<P>
+        + BlockBodyWithSyncAggregate<P>
+        + BlockBodyWithExecutionPayload<P>
+        + ?Sized,
+{
     let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
@@ -563,10 +571,18 @@ pub fn deneb_kzg_commitment_inclusion_proof<P: Preset>(
     Ok(proof)
 }
 
-pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
-    body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
+pub fn electra_kzg_commitment_inclusion_proof<P: Preset, B>(
+    body: &B,
     commitment_index: BlobIndex,
-) -> Result<BlobCommitmentInclusionProof<P>> {
+) -> Result<BlobCommitmentInclusionProof<P>>
+where
+    B: BlockBodyWithBlobKzgCommitments<P>
+        + BlockBodyWithBlsToExecutionChanges<P>
+        + BlockBodyWithSyncAggregate<P>
+        + BlockBodyWithExecutionPayload<P>
+        + BlockBodyWithExecutionRequests<P>
+        + ?Sized,
+{
     let depth = P::KzgCommitmentInclusionProofDepth::USIZE;
 
     let mut proof = ContiguousVector::default();
@@ -622,9 +638,14 @@ pub fn electra_kzg_commitment_inclusion_proof<P: Preset>(
     Ok(proof)
 }
 
-pub fn kzg_commitments_inclusion_proof<P: Preset>(
-    body: &(impl PostElectraBeaconBlockBody<P> + ?Sized),
-) -> BlobCommitmentsInclusionProof<P> {
+pub fn kzg_commitments_inclusion_proof<P: Preset, B>(body: &B) -> BlobCommitmentsInclusionProof<P>
+where
+    B: BlockBodyWithSyncAggregate<P>
+        + BlockBodyWithBlsToExecutionChanges<P>
+        + BlockBodyWithExecutionPayload<P>
+        + BlockBodyWithExecutionRequests<P>
+        + ?Sized,
+{
     let depth = P::KzgCommitmentsInclusionProofDepth::USIZE;
     let mut proof = BlobCommitmentsInclusionProof::<P>::default();
 
@@ -680,19 +701,28 @@ pub fn construct_blob_sidecar<P: Preset>(
     kzg_commitment: KzgCommitment,
     kzg_proof: KzgProof,
 ) -> Result<BlobSidecar<P>> {
-    let message = block.message();
-
-    let Some(body) = message.body().post_deneb() else {
-        return Err(Error::BlobsForPreDenebBlock {
-            root: message.hash_tree_root(),
-            slot: message.slot(),
+    let kzg_commitment_inclusion_proof = match block {
+        SignedBeaconBlock::Deneb(block) => {
+            deneb_kzg_commitment_inclusion_proof(&block.message.body, index)?
         }
-        .into());
-    };
+        SignedBeaconBlock::Electra(block) => {
+            electra_kzg_commitment_inclusion_proof(&block.message.body, index)?
+        }
+        SignedBeaconBlock::Fulu(block) => {
+            electra_kzg_commitment_inclusion_proof(&block.message.body, index)?
+        }
+        SignedBeaconBlock::Phase0(_)
+        | SignedBeaconBlock::Altair(_)
+        | SignedBeaconBlock::Bellatrix(_)
+        | SignedBeaconBlock::Capella(_) => {
+            let message = block.message();
 
-    let kzg_commitment_inclusion_proof = match message.body().post_electra() {
-        Some(body) => electra_kzg_commitment_inclusion_proof(body, index)?,
-        None => deneb_kzg_commitment_inclusion_proof(body, index)?,
+            return Err(Error::BlobsForPreDenebBlock {
+                root: message.hash_tree_root(),
+                slot: message.slot(),
+            }
+            .into());
+        }
     };
 
     Ok(BlobSidecar {

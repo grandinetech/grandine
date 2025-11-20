@@ -440,22 +440,7 @@ where
 
             if head.is_optimistic() {
                 if let Some(execution_payload) = head.block.as_ref().clone().execution_payload() {
-                    let mut params = None;
-
-                    if let Some(body) = head.block.message().body().post_electra() {
-                        let versioned_hashes = body
-                            .blob_kzg_commitments()
-                            .iter()
-                            .copied()
-                            .map(misc::kzg_commitment_to_versioned_hash)
-                            .collect();
-
-                        params = Some(ExecutionPayloadParams::Electra {
-                            versioned_hashes,
-                            parent_beacon_block_root: head.block.message().parent_root(),
-                            execution_requests: body.execution_requests().clone(),
-                        });
-                    } else if let Some(body) =
+                    let params = if let Some(body) =
                         head.block.message().body().with_blob_kzg_commitments()
                     {
                         let versioned_hashes = body
@@ -465,11 +450,21 @@ where
                             .map(misc::kzg_commitment_to_versioned_hash)
                             .collect();
 
-                        params = Some(ExecutionPayloadParams::Deneb {
-                            versioned_hashes,
-                            parent_beacon_block_root: head.block.message().parent_root(),
-                        });
-                    }
+                        if let Some(body) = body.with_execution_requests() {
+                            Some(ExecutionPayloadParams::Electra {
+                                versioned_hashes,
+                                parent_beacon_block_root: head.block.message().parent_root(),
+                                execution_requests: body.execution_requests().clone(),
+                            })
+                        } else {
+                            Some(ExecutionPayloadParams::Deneb {
+                                versioned_hashes,
+                                parent_beacon_block_root: head.block.message().parent_root(),
+                            })
+                        }
+                    } else {
+                        None
+                    };
 
                     self.execution_engine.notify_new_payload(
                         head.block_root,
@@ -3740,7 +3735,11 @@ where
         block: &SignedBeaconBlock<P>,
         mut pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
     ) -> BlockDataColumnAvailability {
-        let Some(body) = block.message().body().post_fulu() else {
+        if !block.phase().is_peerdas_activated() {
+            return BlockDataColumnAvailability::Irrelevant;
+        }
+
+        let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockDataColumnAvailability::Irrelevant;
         };
 

@@ -572,7 +572,7 @@ where
         let data_column_ids = canonical_chain_blocks
             .iter()
             .filter_map(|BlockWithRoot { block, root }| {
-                block.message().body().post_fulu().map(|_| {
+                block.phase().is_peerdas_activated().then_some({
                     columns.iter().copied().map(|index| DataColumnIdentifier {
                         index,
                         block_root: *root,
