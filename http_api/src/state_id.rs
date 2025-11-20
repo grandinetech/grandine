@@ -22,7 +22,9 @@ pub fn state<P: Preset, W: Wait>(
             .map(WithStatus::valid_and_finalized),
         StateId::Finalized => Some(controller.last_finalized_state()),
         StateId::Justified => Some(controller.justified_state()?),
-        StateId::Slot(slot) => controller.state_at_slot_cached(*slot)?,
+        StateId::Slot(slot) => {
+            tokio::task::block_in_place(|| controller.state_at_slot_cached_blocking(*slot))?
+        }
         StateId::Root(root) => controller.state_by_state_root(*root)?,
     }
     .ok_or(Error::StateNotFound)

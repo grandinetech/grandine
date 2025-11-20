@@ -162,7 +162,11 @@ impl<P: Preset, W: Wait> Service<P, W> {
         signed_bls_to_execution_change: SignedBlsToExecutionChange,
         origin: Origin,
     ) -> PoolAdditionOutcome {
-        match self.validate_signed_bls_to_execution_change(signed_bls_to_execution_change) {
+        let validation_outcome = tokio::task::block_in_place(|| {
+            self.validate_signed_bls_to_execution_change(signed_bls_to_execution_change)
+        });
+
+        match validation_outcome {
             Ok(outcome) => match outcome {
                 ValidationOutcome::Accept => {
                     match origin {
@@ -212,7 +216,9 @@ impl<P: Preset, W: Wait> Service<P, W> {
         &mut self,
         signed_bls_to_execution_change: SignedBlsToExecutionChange,
     ) -> Result<ValidationOutcome> {
-        let state = self.controller.preprocessed_state_at_current_slot()?;
+        let state = self
+            .controller
+            .preprocessed_state_at_current_slot_blocking()?;
 
         let Some(state) = state.post_capella() else {
             warn_with_peers!(

@@ -16,7 +16,7 @@ use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState,
+    combined::{Attestation as CombinedAttestation, BeaconState},
     phase0::containers::Attestation,
     phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex},
     preset::Preset,
@@ -27,6 +27,7 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     attestation_agg_pool::{
         attestation_packer::{AttestationPacker, PackOutcome},
+        conversion::{self, convert_attestation_for_pool},
         pool::Pool,
         types::Aggregate,
     },
@@ -118,7 +119,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             metrics,
         } = self;
 
-        let beacon_state = controller.preprocessed_state_at_next_slot()?;
+        let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
         let slot = controller.slot() + 1;
 
         let mut attestation_packer = AttestationPacker::new(
@@ -174,7 +175,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             if attestation_packer.should_update_current_participation(head_block_root) {
                 attestation_packer.update_current_participation(
                     head_block_root,
-                    controller.preprocessed_state_at_next_slot()?,
+                    controller.preprocessed_state_at_next_slot_blocking()?,
                 )?;
             }
         }
@@ -183,33 +184,50 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
     }
 }
 
-pub struct InsertAttestationTask<P: Preset, W> {
+pub struct InsertAttestationTask<P: Preset, W: Wait> {
     pub wait_group: W,
     pub pool: Arc<Pool<P>>,
-    pub attestation: Arc<Attestation<P>>,
+    pub controller: ApiController<P, W>,
+    pub attestation: Arc<CombinedAttestation<P>>,
     pub attester_index: Option<ValidatorIndex>,
     pub metrics: Option<Arc<Metrics>>,
     pub validator_statistics: Option<Arc<ValidatorStatistics>>,
 }
 
-impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
+impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
     type Output = ();
 
     async fn run(self) -> Result<Self::Output> {
         let Self {
             wait_group,
             pool,
+            controller,
             attestation,
-            attester_index,
+            mut attester_index,
             metrics,
             validator_statistics,
         } = self;
 
+        if let CombinedAttestation::Single(single_attestation) = attestation.as_ref() {
+            attester_index = Some(single_attestation.attester_index);
+        }
+
+        let attestation = match convert_attestation_for_pool(&controller, attestation) {
+            Ok(attestation) => attestation,
+            Err(error) => match error.downcast_ref::<conversion::Error<P>>() {
+                Some(conversion::Error::<P>::Irrelevant { .. }) => return Ok(()),
+                _ => {
+                    warn_with_peers!("Failed to convert attestation for pool: {error:?}");
+                    return Ok(());
+                }
+            },
+        };
+
         let Attestation {
-            ref aggregation_bits,
+            aggregation_bits,
             data,
             signature,
-        } = *attestation;
+        } = attestation;
 
         let is_singular = aggregation_bits.count_ones() == 1;
 
@@ -241,7 +259,7 @@ impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
 
         if !is_singular || aggregates.is_empty() {
             let mut aggregate = Aggregate {
-                aggregation_bits: aggregation_bits.clone(),
+                aggregation_bits,
                 signature: signature.try_into()?,
             };
 
@@ -251,16 +269,25 @@ impl<P: Preset, W: Send + 'static> PoolTask for InsertAttestationTask<P, W> {
 
             aggregates.push(aggregate);
         } else {
+            let attestation = Attestation {
+                aggregation_bits,
+                data,
+                signature,
+            };
+
             for aggregate in aggregates.iter_mut() {
                 aggregate_attestation(&attestation, aggregate)?;
+            }
+
+            if is_singular {
+                singular_attestations
+                    .write()
+                    .await
+                    .insert(Arc::new(attestation));
             }
         }
 
         pool.add_data_root_to_data_entry(data).await;
-
-        if is_singular {
-            singular_attestations.write().await.insert(attestation);
-        }
 
         drop(wait_group);
 
@@ -309,7 +336,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
             validator_statistics,
         } = self;
 
-        let beacon_state = match controller.preprocessed_state_at_current_slot() {
+        let beacon_state = match controller.preprocessed_state_at_current_slot_blocking() {
             Ok(state) => state,
             Err(error) => {
                 if let Some(StateCacheError::StateFarBehind { .. }) = error.downcast_ref() {

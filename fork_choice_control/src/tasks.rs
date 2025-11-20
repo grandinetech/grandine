@@ -582,14 +582,19 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        let checkpoint_state =
-            match state_cache.try_state_at_slot(&pubkey_cache, &store_snapshot, root, slot) {
-                Ok(state) => state,
-                Err(error) => {
-                    warn_with_peers!("failed to compute checkpoint state: {error:?}");
-                    return;
-                }
-            };
+        let checkpoint_state = match state_cache.try_state_at_slot(
+            &pubkey_cache,
+            &store_snapshot,
+            root,
+            slot,
+            store_snapshot.is_forward_synced(),
+        ) {
+            Ok(state) => state,
+            Err(error) => {
+                warn_with_peers!("failed to compute checkpoint state: {error:?}");
+                return;
+            }
+        };
 
         MutatorMessage::CheckpointState {
             wait_group,

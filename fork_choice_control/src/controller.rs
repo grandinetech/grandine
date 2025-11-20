@@ -876,6 +876,10 @@ where
         self.store_snapshot.load_full()
     }
 
+    pub(crate) fn owned_storage(&self) -> Arc<Storage<P>> {
+        self.storage.clone_arc()
+    }
+
     pub(crate) fn storage(&self) -> &Storage<P> {
         &self.storage
     }

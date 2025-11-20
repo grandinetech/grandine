@@ -349,9 +349,10 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
         let slot_before_previous_epoch = misc::previous_slot(start_slot);
 
-        state = match snapshot
-            .state_at_slot(slot_before_previous_epoch)?
-            .map(WithStatus::value)
+        state = match tokio::task::block_in_place(|| {
+            snapshot.state_at_slot_blocking(slot_before_previous_epoch)
+        })?
+        .map(WithStatus::value)
         {
             Some(state) => state,
             None => return Ok(None),
