@@ -463,30 +463,6 @@ public unsafe partial struct CVec_CVec_u8
         this.data_len = length;
     }
 
-    // public CVec(T[] input) : this((uint)input.Length)
-    //     {
-    //         if (input.Length == 0)
-    //         {
-    //             return;
-    //         }
-
-    // if (typeof(T) == typeof(byte))
-    //         {
-    //             // unsafe { Marshal.Copy((byte[])(object)input, 0, (IntPtr)data, input.Length); }
-    //             return;
-    //         }
-
-    // unsafe {
-    //             var ptr = (IntPtr)data;
-
-    // for (var i = 0; i < input.Length; ++i)
-    //             {
-    //                 // Marshal.StructureToPtr(input[i], IntPtr.Add(ptr, i * Marshal.SizeOf<T>()), false);
-    //             }
-    //         }
-    //     }
-
-    // public CVec(IEnumerable<T> source) : this(source?.ToArray() ?? Array.Empty<T>()) {}
     public static CVec_CVec_u8 Empty() => new (0);
 
     public readonly ReadOnlySpan<CVec_u8> AsSpan()
