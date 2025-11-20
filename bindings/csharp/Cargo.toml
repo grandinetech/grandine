@@ -9,13 +9,11 @@ path = "src/lib.rs"
 non_upper_case_globals = "allow"
 non_camel_case_types = "allow"
 
-[dependencies]
-c_grandine = { workspace = true, default-features = false }
-
 [build-dependencies]
 bindgen = { workspace = true }
 csbindgen = { workspace = true }
 toml = { workspace = true }
+c_grandine = { workspace = true, default-features = false }
 
 [features]
 default = ["blst"]
