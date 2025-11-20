@@ -22,20 +22,18 @@ pub enum Error<P: Preset> {
     #[error("invalid aggregation bits for conversion")]
     InvalidAggregationBits(#[source] ReadError),
     #[error("attestation is not relevant anymore: {attestation:?}")]
-    Irrelevant { attestation: Box<Attestation<P>> },
+    Irrelevant { attestation: Arc<Attestation<P>> },
 }
 
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
-    attestation: Attestation<P>,
+    attestation: Arc<Attestation<P>>,
 ) -> Result<Phase0Attestation<P>> {
     if attestation.data().slot + P::SlotsPerEpoch::U64 < controller.slot() {
-        bail!(Error::Irrelevant {
-            attestation: Box::new(attestation)
-        });
+        bail!(Error::Irrelevant { attestation });
     }
 
-    let attestation = match attestation {
+    let attestation = match Arc::unwrap_or_clone(attestation) {
         Attestation::Phase0(attestation) => attestation,
         Attestation::Electra(attestation) => {
             let ElectraAttestation {

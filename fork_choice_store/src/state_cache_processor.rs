@@ -106,6 +106,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         store: &Store<P, S>,
         block_root: H256,
         slot: Slot,
+        store_result_state: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         self.try_get_state_at_slot(
             pubkey_cache,
@@ -113,6 +114,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER,
+            store_result_state,
             should_print_slot_processing_warning(),
         )
     }
@@ -135,6 +137,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER_FOR_BLOCK_SYNC,
+            store.is_forward_synced(),
             should_print_slot_processing_warning(),
         )
     }
@@ -146,7 +149,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
     ) -> Result<Arc<BeaconState<P>>> {
-        self.try_state_at_slot(pubkey_cache, store, block_root, slot)?
+        self.try_state_at_slot(pubkey_cache, store, block_root, slot, true)?
             .ok_or(Error::StateNotFound { block_root })
             .map_err(Into::into)
     }
@@ -164,6 +167,7 @@ impl<P: Preset> StateCacheProcessor<P> {
             block_root,
             slot,
             ALLOWED_EMPTY_SLOTS_MULTIPLIER,
+            store.is_forward_synced(),
             false,
         )?
         .ok_or(Error::StateNotFound { block_root })
@@ -201,6 +205,7 @@ impl<P: Preset> StateCacheProcessor<P> {
         self.state_cache.set_log_lock_timeouts(log_lock_timeouts);
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn try_get_state_at_slot<S: Storage<P>>(
         &self,
         pubkey_cache: &PubkeyCache,
@@ -208,11 +213,12 @@ impl<P: Preset> StateCacheProcessor<P> {
         block_root: H256,
         slot: Slot,
         allowed_empty_slots_multiplier: u64,
+        store_result_state: bool,
         warn_on_slot_processing: bool,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         let options = QueryOptions {
             ignore_missing_rewards: true,
-            store_result_state: store.is_forward_synced(),
+            store_result_state,
         };
 
         self.state_cache

@@ -618,6 +618,7 @@ where
                 &self.store_snapshot(),
                 block_root,
                 slot,
+                true,
             )
         })
     }
@@ -974,8 +975,13 @@ impl<P: Preset> Snapshot<'_, P> {
         let Checkpoint { epoch, root } = checkpoint;
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        self.state_cache
-            .try_state_at_slot(&self.pubkey_cache, &self.store_snapshot, root, slot)
+        self.state_cache.try_state_at_slot(
+            &self.pubkey_cache,
+            &self.store_snapshot,
+            root,
+            slot,
+            self.is_forward_synced(),
+        )
     }
 
     #[must_use]

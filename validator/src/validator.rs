@@ -298,7 +298,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
-                            .insert_attestation(wait_group, &attestation, None);
+                            .insert_attestation(wait_group, attestation.clone_arc(), None);
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -1204,7 +1204,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             self.attestation_agg_pool.insert_attestation(
                 wait_group.clone(),
-                &attestation,
+                attestation,
                 Some(*validator_index),
             );
         }
@@ -1398,7 +1398,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let aggregate_and_proof = Arc::new(aggregate_and_proof);
 
             self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), &attestation, None);
+                .insert_attestation(wait_group.clone(), attestation, None);
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
         }
