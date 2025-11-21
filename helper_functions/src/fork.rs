@@ -906,6 +906,8 @@ pub fn upgrade_to_gloas<P: Preset>(
         latest_withdrawals_root: H256::zero(),
         // Cache
         cache,
+        // PTC cache
+        ptc_cache: Default::default(),
     }
 }
 

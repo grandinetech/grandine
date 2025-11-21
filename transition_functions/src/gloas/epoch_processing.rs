@@ -18,6 +18,7 @@ use types::{
     gloas::{
         beacon_state::BeaconState,
         containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
+        ptc_cache::clear_ptc_cache,
     },
     preset::{BuilderPendingPaymentsLength, Preset},
     traits::{BeaconState as _, PostGloasBeaconState},
@@ -91,6 +92,9 @@ pub fn process_epoch(
     // fulu::process_proposer_lookahead(config, state)?;
 
     state.cache.advance_epoch();
+
+    // Clear PTC cache (balance-weighted selection invalidated by balance changes)
+    clear_ptc_cache(&mut state.ptc_cache);
 
     Ok(())
 }

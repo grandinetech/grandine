@@ -5,13 +5,14 @@ use core::{
 };
 use std::sync::Arc;
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::{traits::PublicKey as _, AggregatePublicKey, PublicKeyBytes};
 #[cfg(not(target_os = "zkvm"))]
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
+use std::collections::HashMap as StdHashMap;
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
@@ -39,6 +40,7 @@ use types::{
             DOMAIN_PTC_ATTESTER,
         },
         containers::{IndexedPayloadAttestation, PayloadAttestation},
+        ptc_cache::PTCCache,
     },
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
@@ -1085,6 +1087,111 @@ pub fn ptc_for_slot<P: Preset>(
     .take(P::PtcSize::USIZE)
     .pipe(ContiguousVector::try_from_iter)
     .map_err(Into::into)
+}
+
+// Helper function to build epoch-wide PTC cache
+fn build_ptc_cache<P: Preset>(state: &impl PostGloasBeaconState<P>, epoch: Epoch) -> Result<PTCCache> {
+    let slots_per_epoch = P::SlotsPerEpoch::U64;
+    let ptc_size = P::PtcSize::USIZE;
+
+    let mut ptc_shuffling = Vec::with_capacity((slots_per_epoch as usize) * ptc_size);
+    let epoch_start_slot = epoch * slots_per_epoch;
+
+    // Build PTC for each slot in epoch
+    for slot_offset in 0..slots_per_epoch {
+        let slot = epoch_start_slot + slot_offset;
+        let slot_ptc = compute_ptc_for_slot_internal(state, slot)?;
+        ptc_shuffling.extend(slot_ptc);
+    }
+
+    // Build reverse index with hybrid approach:
+    // - Single occurrences (most validators): stored in flat Vec
+    // - Multiple occurrences: stored in HashMap
+    let validator_count = state.validators().len_usize();
+
+    // Pass 1: Count occurrences per validator
+    let mut occurrence_counts = vec![0u16; validator_count];
+    for &validator_index in ptc_shuffling.iter() {
+        if let Some(count) = occurrence_counts.get_mut(validator_index as usize) {
+            *count += 1;
+        }
+    }
+
+    // Pass 2: Pre-allocate structures based on counts
+    let mut ptc_positions = vec![None; validator_count];
+    let multi_count = occurrence_counts.iter().filter(|&&c| c >= 2).count();
+    let mut multiple_positions = StdHashMap::with_capacity(multi_count);
+
+    // Pass 3: Fill positions based on occurrence count
+    for (position, &validator_index) in ptc_shuffling.iter().enumerate() {
+        let count = occurrence_counts[validator_index as usize];
+
+        if count == 1 {
+            // Single occurrence: store position in flat Vec
+            ptc_positions[validator_index as usize] = Some(position);
+        } else if count >= 2 {
+            // Multiple occurrences: store all (slot, position) pairs in HashMap
+            let slot_offset = (position / ptc_size) as u64;
+            let slot = epoch_start_slot + slot_offset;
+            let position_in_slot = position % ptc_size;
+
+            multiple_positions
+                .entry(validator_index)
+                .or_insert_with(|| Vec::with_capacity(count as usize))
+                .push((slot, position_in_slot));
+        }
+    }
+
+    Ok(PTCCache::from_parts(
+        epoch,
+        ptc_shuffling,
+        ptc_positions,
+        multiple_positions,
+        ptc_size,
+        slots_per_epoch,
+    ))
+}
+
+// Internal helper to compute PTC for one slot
+fn compute_ptc_for_slot_internal<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    slot: Slot,
+) -> Result<Vec<ValidatorIndex>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
+    let seed = hashing::hash_256_64(seed, slot);
+
+    let indices = beacon_committees(state, slot)?
+        .flatten()
+        .collect_vec();
+
+    misc::compute_balance_weighted_selection::<P>(
+        state,
+        &PackedIndices::U64(indices.into_iter().collect()),
+        seed,
+        P::PtcSize::USIZE,
+        false,
+    )
+}
+
+pub fn get_ptc<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    slot: Slot,
+) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+    // Get or initialize current epoch PTC cache
+    let epoch_cache = state.ptc_cache().get_or_init(|| {
+        Arc::new(build_ptc_cache(state, epoch).expect("PTC cache computation failed"))
+    });
+
+    // Extract this slot's PTC from the epoch cache
+    epoch_cache
+        .get_ptc(slot, P::SlotsPerEpoch::U64, P::PtcSize::USIZE)?
+        .iter()
+        .copied()
+        .pipe(ContiguousVector::try_from_iter)
+        .map_err(Into::into)
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
