@@ -158,7 +158,8 @@ impl<P: Preset> Slasher<P> {
         let slot = misc::compute_start_slot_at_epoch::<P>(target.epoch);
 
         let target_state = if Feature::CacheTargetStates.is_enabled() {
-            self.controller.checkpoint_state(attestation.data.target)?
+            self.controller
+                .checkpoint_state_blocking(attestation.data.target)?
         } else {
             self.controller.state_before_or_at_slot(target.root, slot)
         };

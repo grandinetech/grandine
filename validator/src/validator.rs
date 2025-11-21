@@ -732,7 +732,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let controller = self.controller.clone_arc();
 
             tokio::task::spawn_blocking(move || {
-                controller.preprocessed_state_post_block(block_root, slot)
+                controller.preprocessed_state_post_block_blocking(block_root, slot)
             })
             .await??
         } else {
@@ -1992,6 +1992,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if chain_config.phase_at_slot::<P>(current_slot) != phase_at_slot {
                     beacon_state = match controller
                         .preprocessed_state_at_epoch(chain_config.fork_epoch(phase_at_slot))
+                        .await
                     {
                         Ok(with_status) => with_status.value,
                         Err(error) => {

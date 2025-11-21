@@ -185,7 +185,7 @@ impl AttestationVotes {
         let mut correct_votes = 0;
 
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-        let state = controller.preprocessed_state_at_epoch(epoch)?;
+        let state = controller.preprocessed_state_at_epoch(epoch).await?;
         let expected_target = accessors::get_block_root_at_slot::<P>(&state.value(), slot)?;
 
         for block_votes in validator_votes.values() {

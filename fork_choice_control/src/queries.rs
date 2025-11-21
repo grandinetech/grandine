@@ -171,8 +171,11 @@ where
         }
     }
 
-    pub fn checkpoint_state(&self, checkpoint: Checkpoint) -> Result<Option<Arc<BeaconState<P>>>> {
-        self.snapshot().checkpoint_state(checkpoint)
+    pub fn checkpoint_state_blocking(
+        &self,
+        checkpoint: Checkpoint,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
+        self.snapshot().checkpoint_state_blocking(checkpoint)
     }
 
     // The [Eth Beacon Node API specification] does not say if `GET /eth/v2/debug/beacon/heads`
@@ -618,64 +621,59 @@ where
 
     // The `block_root` and `state` parameters are needed
     // to avoid a race condition in `Validator::slot_head`.
-    pub fn preprocessed_state_post_block(
+    pub fn preprocessed_state_post_block_blocking(
         &self,
         block_root: H256,
         slot: Slot,
-    ) -> Result<Arc<BeaconState<P>>> {
-        self.preprocessed_state_post_block_with_cached_state(block_root, slot, || {
-            self.state_cache().try_state_at_slot(
-                self.pubkey_cache(),
-                &self.store_snapshot(),
-                block_root,
-                slot,
-                true,
-            )
-        })
-    }
-
-    // Modified `preprocessed_state_post_block` method to be used for block production.
-    pub fn preprocessed_state_for_block_production(
-        &self,
-        block_root: H256,
-        slot: Slot,
-    ) -> Result<Arc<BeaconState<P>>> {
-        self.preprocessed_state_post_block_with_cached_state(block_root, slot, || {
-            self.state_cache().try_state_at_slot_for_block_sync(
-                self.pubkey_cache(),
-                &self.store_snapshot(),
-                block_root,
-                slot,
-            )
-        })
-    }
-
-    pub fn preprocessed_state_post_block_with_cached_state(
-        &self,
-        block_root: H256,
-        slot: Slot,
-        cached_state: impl FnOnce() -> Result<Option<Arc<BeaconState<P>>>>,
     ) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
+        let pubkey_cache = self.pubkey_cache();
+        let state_cache = self.state_cache();
 
-        if let Some(state) = cached_state()? {
+        if let Some(state) =
+            state_cache.try_state_at_slot(pubkey_cache, &store, block_root, slot, true)?
+        {
             return Ok(state);
         }
 
         if let Some(state) = self.storage().state_post_block(block_root)? {
-            return self.state_cache().process_slots(
-                self.pubkey_cache(),
-                &store,
-                state,
-                block_root,
-                slot,
-            );
+            return state_cache.process_slots(pubkey_cache, &store, state, block_root, slot);
         }
 
         bail!(Error::StateNotFound { block_root })
     }
 
-    pub fn preprocessed_state_at_epoch(
+    // Modified `preprocessed_state_post_block` method to be used for block production.
+    pub async fn preprocessed_state_for_block_production(
+        &self,
+        block_root: H256,
+        slot: Slot,
+    ) -> Result<Arc<BeaconState<P>>> {
+        let store = self.store_snapshot();
+        let pubkey_cache = self.pubkey_cache().clone_arc();
+        let state_cache = self.state_cache().clone_arc();
+        let storage = self.owned_storage();
+
+        tokio::task::spawn_blocking(move || {
+            if let Some(state) = state_cache.try_state_at_slot_for_block_sync(
+                &pubkey_cache,
+                &store,
+                block_root,
+                slot,
+            )? {
+                return Ok(state);
+            }
+
+            if let Some(state) = storage.state_post_block(block_root)? {
+                return state_cache.process_slots(&pubkey_cache, &store, state, block_root, slot);
+            }
+
+            bail!(Error::StateNotFound { block_root })
+        })
+        .await?
+    }
+
+    pub async fn preprocessed_state_at_epoch(
         &self,
         requested_epoch: Epoch,
     ) -> Result<WithStatus<Arc<BeaconState<P>>>> {
@@ -695,13 +693,21 @@ where
             );
         }
 
-        let head = store.head();
         let requested_slot = misc::compute_start_slot_at_epoch::<P>(requested_epoch);
+        let pubkey_cache = self.pubkey_cache().clone_arc();
+        let state_cache = self.state_cache().clone_arc();
 
-        let state = self
-            .state_cache()
-            .state_at_slot(self.pubkey_cache(), &store, head.block_root, requested_slot)
-            .unwrap_or_else(|_| head.state(&store));
+        let state = tokio::task::spawn_blocking(move || {
+            let head = store.head();
+
+            state_cache
+                .state_at_slot(&pubkey_cache, &store, head.block_root, requested_slot)
+                .unwrap_or_else(|_| head.state(&store))
+        })
+        .await?;
+
+        let store = self.store_snapshot();
+        let head = store.head();
 
         Ok(WithStatus {
             value: state,
@@ -978,7 +984,10 @@ impl<P: Preset> Snapshot<'_, P> {
             .map(ChainLink::slot)
     }
 
-    pub fn checkpoint_state(&self, checkpoint: Checkpoint) -> Result<Option<Arc<BeaconState<P>>>> {
+    pub fn checkpoint_state_blocking(
+        &self,
+        checkpoint: Checkpoint,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
         if let Some(state) = self.store_snapshot.checkpoint_state(checkpoint) {
             return Ok(Some(state.clone_arc()));
         }
