@@ -79,7 +79,7 @@ jobs:
       # For debugging on window-specific error
       - name: Run tests
         if: runner.os != 'Macos'
-        run: cargo test --release --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
+        run: cargo test --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
         env:
           KZG_BACKEND: ${{ matrix.default_kzg_backend }}
       - name: Run other kzg backend tests
