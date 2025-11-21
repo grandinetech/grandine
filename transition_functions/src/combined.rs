@@ -111,6 +111,7 @@ pub fn state_transition_for_report<P: Preset>(
 }
 
 #[expect(clippy::too_many_arguments)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn custom_state_transition<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -292,6 +293,7 @@ pub fn verify_signatures<P: Preset>(
 }
 
 #[expect(clippy::too_many_lines)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_slots<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

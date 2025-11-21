@@ -12,6 +12,7 @@ use fork_choice_store::{
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
+use tracing::Span;
 use types::{
     combined::{SignedAggregateAndProof, SignedBeaconBlock},
     deneb::{
@@ -137,6 +138,7 @@ pub struct PendingBlock<P: Preset> {
     pub block: Arc<SignedBeaconBlock<P>>,
     pub origin: BlockOrigin,
     pub processing_timings: ProcessingTimings,
+    pub tracing_span: Span,
 }
 
 pub struct PendingChainLink<P: Preset> {

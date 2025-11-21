@@ -34,6 +34,7 @@ use ssz::{BitList, BitVector, ContiguousList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
+use tracing::instrument;
 use transition_functions::{capella, electra, unphased};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -1457,6 +1458,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             )
     }
 
+    #[instrument(skip_all, level = "debug")]
     pub async fn prepare_execution_payload_attributes(
         &self,
     ) -> Result<Option<PayloadAttributes<P>>> {
@@ -1553,6 +1555,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Ok(Some(payload_attributes))
     }
 
+    #[instrument(skip_all, level = "debug")]
     pub async fn prepare_execution_payload_for_slot(
         &self,
         slot: Slot,
@@ -1594,6 +1597,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
     }
 
+    #[instrument(skip_all, level = "debug")]
     async fn prepare_execution_payload(
         &self,
         safe_block_hash: ExecutionBlockHash,

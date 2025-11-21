@@ -358,9 +358,11 @@ fn try_main() -> Result<()> {
 
     let log_handle = binary_utils::initialize_tracing_logger(
         module_path!(),
-        &data_dir,
+        data_dir.as_deref(),
+        parsed_args.telemetry_config(),
         cfg!(feature = "logger-always-write-style"),
     )?;
+
     binary_utils::initialize_rayon()?;
 
     let config = parsed_args
@@ -419,6 +421,7 @@ fn try_main() -> Result<()> {
         backfill_custody_groups,
         disable_engine_getblobs,
         sync_without_reconstruction,
+        ..
     } = config;
 
     PEER_LOG_METRICS.set_target_peer_count(network_config.target_peers);

@@ -98,6 +98,7 @@ pub fn count_required_signatures<P: Preset>(block: &BeaconBlock<P>) -> usize {
     altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn custom_process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -196,6 +197,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     Ok(())
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 fn process_execution_payload<P: Preset>(
     config: &Config,
     state: &mut FuluBeaconState<P>,
