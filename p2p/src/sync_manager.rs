@@ -674,15 +674,6 @@ impl<P: Preset> SyncManager<P> {
                         continue;
                     }
 
-                    self.log(
-                        Level::Debug,
-                        format_args!(
-                            "requesting columns ({}): [{}] for slots: {start_slot}..={max_slot}",
-                            missing_column_indices.len(),
-                            missing_column_indices.iter().join(", "),
-                        ),
-                    );
-
                     let peer_custody_columns_mapping = match self.map_peer_custody_columns(
                         missing_column_indices,
                         start_slot,
@@ -694,6 +685,10 @@ impl<P: Preset> SyncManager<P> {
                                 Level::Debug,
                                 format_args!("build_forward_sync_batches: {error:?}"),
                             );
+
+                            // if no available peers to request for this batch, rollback the
+                            // `max_slot` to set the actual sync range.
+                            max_slot = start_slot - 1;
 
                             break 'outer;
                         }
