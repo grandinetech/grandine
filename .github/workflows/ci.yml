@@ -25,10 +25,23 @@ jobs:
     steps:
       - name: Maximize build space
         if: runner.os == 'Linux'
-        uses: easimon/maximize-build-space@master
+        uses: jlumbroso/free-disk-space@main
         with:
-          root-reserve-mb: 2048
-          swap-size-mb: 1024
+          tool-cache: true
+
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            ca-certificates \
+            libssl-dev \
+            clang \
+            cmake \
+            unzip \
+            protobuf-compiler \
+            libz-dev
+
       - name: Disable autocrlf (Windows)
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
@@ -50,7 +63,7 @@ jobs:
         with:
           submodules: true
       - name: Run cargo build
-        run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
+        run: cargo build --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
       - name: Check if code is formatted (Linux)
         if: runner.os == 'Linux'
         run: cargo fmt --check
@@ -62,11 +75,11 @@ jobs:
       # It's a known issue that networking tests randomly fails on Macos
       - name: Run tests
         if: runner.os == 'Macos'
-        run: cargo test --release --no-fail-fast --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- --skip behaviour --skip common
+        run: cargo test --release --no-fail-fast --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine -- --skip behaviour --skip common
       # For debugging on window-specific error
       - name: Run tests
         if: runner.os != 'Macos'
-        run: cargo test --release --no-default-features --features ${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
+        run: cargo test --release --no-default-features --features default-networks,${{ matrix.backend }} --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
         env:
           KZG_BACKEND: ${{ matrix.default_kzg_backend }}
       - name: Run other kzg backend tests

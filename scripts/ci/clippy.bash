@@ -9,6 +9,7 @@ options=(
 
     --features eth2-cache
     --features blst
+    --features default-networks
 
     # TODO(Grandine Team): Clean up `dedicated_executor` and `eth2_libp2p`.
     #                      Go back to linting all packages implicitly.

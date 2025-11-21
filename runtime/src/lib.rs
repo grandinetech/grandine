@@ -1,3 +1,7 @@
+#![allow(
+    unused_crate_dependencies,
+    reason = "tokio_util is used only for embed feature, thus emits warning that it is unused, when compiling without embed"
+)]
 pub use crate::{
     defaults::{
         default_network_config, DEFAULT_ETH1_DB_SIZE, DEFAULT_ETH2_DB_SIZE,
@@ -7,11 +11,23 @@ pub use crate::{
         DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT,
     },
     misc::{MetricsConfig, StorageConfig},
-    runtime::{run_after_genesis, RuntimeConfig},
+    runtime::{run, run_after_genesis, RuntimeConfig},
     schema::initialize as initialize_schema,
 };
 
+#[cfg(feature = "embed")]
+pub use crate::runtime::shutdown;
+
+pub mod commands;
+mod config_dir;
+mod consts;
+mod db_info;
+pub mod db_stats;
 mod defaults;
+pub mod grandine_args;
+pub mod grandine_config;
 mod misc;
+pub mod predefined_network;
 mod runtime;
 mod schema;
+mod validators;

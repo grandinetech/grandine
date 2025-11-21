@@ -27,6 +27,21 @@ pub struct ByteList<N> {
     bytes: ContiguousList<u8, N>,
 }
 
+impl<N> ByteList<N> {
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+impl<N: Unsigned> TryFrom<Vec<u8>> for ByteList<N> {
+    type Error = ReadError;
+
+    fn try_from(b: Vec<u8>) -> Result<Self, ReadError> {
+        ContiguousList::<u8, N>::try_from(b).map(|bytes| Self { bytes })
+    }
+}
+
 // This sort of code arguably belongs in an impl of `core::fmt::LowerHex` rather than `Debug`,
 // but we don't ever format byte lists directly and we need a `Debug` impl anyway.
 impl<N> Debug for ByteList<N> {
