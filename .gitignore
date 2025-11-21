@@ -1,7 +1,13 @@
 .idea/
 .vscode/
 
-/target/
+/**/target/
+
+# Omit zkvm guest compiled artifacts
+/zkvm/guest/elf
+/zkvm/guest/zisk/build
+/zkvm/**/proofs
+
 book/book
 book/deploy
 
