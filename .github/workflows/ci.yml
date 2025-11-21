@@ -2,6 +2,11 @@ name: CI Build
 
 on: [push]
 
+env:
+  TEST_CASES: |
+    consensus spec tests mainnet electra empty block transition
+    pectra-devnet-6 without epoch transition
+
 jobs:
   build:
     strategy:
@@ -23,12 +28,24 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Maximize build space
+      - name: Free Disk Space (Ubuntu)
         if: runner.os == 'Linux'
-        uses: easimon/maximize-build-space@master
+        uses: jlumbroso/free-disk-space@main
         with:
-          root-reserve-mb: 2048
-          swap-size-mb: 1024
+          # this might remove tools that are actually needed, if set to "true" but frees about 6 GB
+          tool-cache: false
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            ca-certificates \
+            libssl-dev \
+            clang \
+            cmake \
+            unzip \
+            protobuf-compiler \
+            libz-dev
       - name: Disable autocrlf (Windows)
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
@@ -75,3 +92,92 @@ jobs:
       - name: Check consensus-spec-tests coverage (Linux)
         if: runner.os == 'Linux'
         run: scripts/ci/consensus-spec-tests-coverage.rb
+
+  zkvm-test:
+    strategy:
+      matrix:
+        backend: [risc0, sp1, pico]
+        include:
+          # zkVM test - risc0 implementation
+          - backend: risc0
+            # Refer to docs:
+            # https://dev.risczero.com/api/zkvm/install#using-rzup-in-ci
+            install: |
+              curl -L https://risczero.com/install | bash
+              source /home/runner/.bashrc
+              export PATH="/home/runner/.risc0/bin:$PATH"
+              rzup install rust 1.88.0
+              rzup install cpp 2024.1.5
+              rzup install r0vm 3.0.1
+              rzup install cargo-risczero 3.0.1
+              cargo risczero --version
+            execute: RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "$TEST" execute
+
+          # zkVM test - SP1 implementation
+          - backend: sp1
+            install: |
+              curl -L https://sp1up.succinct.xyz | bash
+              /home/runner/.sp1/bin/sp1up -v 5.2.1
+            execute: RUST_LOG=info cargo run -p zkvm_host --features sp1 --release -- --test "$TEST" execute
+
+          # zkVM test - Brevis Pico implementation
+          - backend: pico
+            install: |
+              rustup install nightly-2025-08-04
+              rustup component add rust-src --toolchain nightly-2025-08-04
+              cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
+            execute: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST" execute
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        if: runner.os == 'Linux'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          # this might remove tools that are actually needed, if set to "true" but frees about 6 GB
+          tool-cache: false
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            ca-certificates \
+            libssl-dev \
+            clang \
+            cmake \
+            unzip \
+            protobuf-compiler \
+            libz-dev
+      - name: Setup nim for constantine backend
+        uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.0.2'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: ${{ runner.temp }}
+      - name: Install dependencies for constantine backend
+        shell: bash
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            libgmp-dev \
+            llvm
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          lfs: true
+      - name: Check out necessary submodules only
+        shell: bash
+        run: |
+          git submodule update --init dedicated_executor eth2_libp2p
+
+      - name: Installing ${{ matrix.backend }} zkVM
+        run: ${{ matrix.install }}
+
+      - name: Runing ${{ matrix.backend }} test
+        run: |
+          IFS=$'\n'
+          for TEST in $TEST_CASES; do
+            echo "Running test: $TEST"
+            ${{ matrix.execute }}
+          done

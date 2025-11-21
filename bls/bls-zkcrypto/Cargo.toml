@@ -24,3 +24,7 @@ zeroize = { workspace = true }
 
 [target.'cfg(target_os = "zkvm")'.dependencies]
 rand_chacha = { workspace = true }
+
+[features]
+zkvm-pico = ["bls12_381/zkvm-pico"]
+zkvm-risc0 = ["bls12_381/zkvm-risc0"]
