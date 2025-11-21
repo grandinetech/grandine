@@ -791,10 +791,14 @@ pub async fn state_committees<P: Preset, W: Wait>(
     {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
-        state = controller
-            .state_at_slot(start_slot)?
-            .ok_or(Error::StateNotFound)?
-            .value;
+        state = tokio::task::spawn_blocking(move || {
+            controller
+                .state_at_slot_blocking(start_slot)?
+                .ok_or(Error::StateNotFound)?
+                .value
+                .pipe(Ok::<_, AnyhowError>)
+        })
+        .await??;
     }
 
     let relative_epoch = accessors::relative_epoch(&state, epoch)?;

@@ -183,7 +183,7 @@ impl<P: Preset> MetricsService<P> {
                                 // Take state at last slot in epoch
                                 let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
 
-                                let state_opt = match self.controller.state_at_slot(slot) {
+                                let state_opt = match self.controller.state_at_slot_blocking(slot) {
                                     Ok(state_opt) => state_opt,
                                     Err(error) => {
                                         warn_with_peers!("unable to update epoch metrics: {error:?}");

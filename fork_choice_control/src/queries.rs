@@ -303,11 +303,14 @@ where
         chain_link.state(&self.store_snapshot())
     }
 
-    pub fn state_at_slot(&self, slot: Slot) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
-        self.snapshot().state_at_slot(slot)
+    pub fn state_at_slot_blocking(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        self.snapshot().state_at_slot_blocking(slot)
     }
 
-    pub fn state_at_slot_cached(
+    pub fn state_at_slot_cached_blocking(
         &self,
         slot: Slot,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
@@ -316,7 +319,7 @@ where
         if slot < store.finalized_slot() {
             let state_from_cache = self.state_at_slot_cache().get_or_try_init(slot, || {
                 Ok(self
-                    .state_at_slot(slot)?
+                    .state_at_slot_blocking(slot)?
                     .map(|with_status| with_status.value))
             })?;
 
@@ -341,7 +344,7 @@ where
             );
         }
 
-        self.state_at_slot(slot)
+        self.state_at_slot_blocking(slot)
     }
 
     pub fn state_before_or_at_slot(
@@ -1090,7 +1093,10 @@ impl<P: Preset> Snapshot<'_, P> {
     //                      Beacon Chain Explorer used at the time. Consider adding a check to prevent
     //                      this method for computing states for future slots. The Eth Beacon Node API
     //                      specification does not say if this is allowed.
-    pub fn state_at_slot(&self, slot: Slot) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+    pub fn state_at_slot_blocking(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
         let store = &self.store_snapshot;
 
         if let Some(chain_link) = store.chain_link_before_or_at(slot) {
@@ -1212,34 +1218,34 @@ mod tests {
             TestController::quiet(config, genesis_block, genesis_state);
 
         controller
-            .state_at_slot_cached(0)
+            .state_at_slot_cached_blocking(0)
             .expect("should get state at slot 0");
 
         controller.on_slot(6);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached(15)
+            .state_at_slot_cached_blocking(15)
             .expect("should get state at slot 15");
-        assert!(controller.state_at_slot_cached(16).is_err());
+        assert!(controller.state_at_slot_cached_blocking(16).is_err());
 
         controller.on_slot(7);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached(16)
+            .state_at_slot_cached_blocking(16)
             .expect("should get state at slot 16");
         controller
-            .state_at_slot_cached(23)
+            .state_at_slot_cached_blocking(23)
             .expect("should get state at slot 23");
-        assert!(controller.state_at_slot_cached(24).is_err());
+        assert!(controller.state_at_slot_cached_blocking(24).is_err());
 
         controller.on_slot(8);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached(23)
+            .state_at_slot_cached_blocking(23)
             .expect("should get state at slot 23");
-        assert!(controller.state_at_slot_cached(24).is_err());
+        assert!(controller.state_at_slot_cached_blocking(24).is_err());
     }
 }

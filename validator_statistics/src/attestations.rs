@@ -225,7 +225,9 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
         let slot = block_with_root.block.message().slot();
         let mut slot_report = RealSlotReport::default();
 
-        let Some(state) = snapshot.state_at_slot(slot)?.map(WithStatus::value) else {
+        let Some(state) = tokio::task::block_in_place(|| snapshot.state_at_slot_blocking(slot))?
+            .map(WithStatus::value)
+        else {
             return Err(Error::StateNotAvailable { slot }.into());
         };
 

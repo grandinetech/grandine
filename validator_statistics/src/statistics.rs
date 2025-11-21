@@ -232,7 +232,10 @@ impl ValidatorStatistics {
             let snapshot = controller.snapshot();
             let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch_before_previous);
 
-            let Some(state) = snapshot.state_at_slot(start_slot)?.map(WithStatus::value) else {
+            let Some(state) = snapshot
+                .state_at_slot_blocking(start_slot)?
+                .map(WithStatus::value)
+            else {
                 return Err(Error::StateNotAvailable { slot: start_slot }.into());
             };
 
@@ -305,7 +308,10 @@ impl ValidatorStatistics {
         let sync_committee_votes = self.sync_committee_votes.read().await;
 
         tokio::task::block_in_place(|| {
-            let Some(state) = snapshot.state_at_slot(start_slot)?.map(WithStatus::value) else {
+            let Some(state) = snapshot
+                .state_at_slot_blocking(start_slot)?
+                .map(WithStatus::value)
+            else {
                 return Err(Error::StateNotAvailable { slot: start_slot }.into());
             };
 
