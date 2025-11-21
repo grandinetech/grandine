@@ -23,7 +23,7 @@ use types::{
         primitives::{Slot, UnixSeconds, H256},
     },
     preset::{Mainnet, Minimal, Preset},
-    traits::{BeaconState as _, PostDenebBeaconBlockBody, SignedBeaconBlock as _},
+    traits::{BeaconState as _, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 use crate::helpers::Context;
@@ -239,8 +239,8 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
                 let expected_blob_count = block
                     .message()
                     .body()
-                    .post_deneb()
-                    .map(PostDenebBeaconBlockBody::blob_kzg_commitments)
+                    .with_blob_kzg_commitments()
+                    .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
                     .map(|contiguous_list| contiguous_list.len())
                     .unwrap_or_default();
 

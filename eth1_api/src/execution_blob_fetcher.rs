@@ -103,7 +103,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
-        if let Some(body) = block.message().body().post_deneb() {
+        if let Some(body) = block.message().body().with_blob_kzg_commitments() {
             let missing_blob_indices = blob_identifiers
                 .iter()
                 .filter(|identifier| !self.received_blob_sidecars.contains_key(identifier))

@@ -232,7 +232,7 @@ impl<P: Preset> BlockProcessor<P> {
                     if let Some(body) = block
                         .message()
                         .body()
-                        .post_bellatrix()
+                        .with_execution_payload()
                         .filter(|body| predicates::is_merge_transition_block(&state, *body))
                     {
                         match validate_merge_block(

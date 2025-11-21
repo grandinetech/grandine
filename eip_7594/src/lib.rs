@@ -305,17 +305,28 @@ pub fn construct_data_column_sidecars<P: Preset>(
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     let signed_block_header = signed_block.to_header();
-    let Some(post_electra_beacon_block_body) = signed_block.message().body().post_electra() else {
-        return Ok(vec![]);
+    let body = match signed_block {
+        SignedBeaconBlock::Fulu(block) => &block.message.body,
+        SignedBeaconBlock::Phase0(_)
+        | SignedBeaconBlock::Altair(_)
+        | SignedBeaconBlock::Bellatrix(_)
+        | SignedBeaconBlock::Capella(_)
+        | SignedBeaconBlock::Deneb(_)
+        | SignedBeaconBlock::Electra(_) => {
+            return Err(Error::BlobsForPreDenebBlock {
+                root: signed_block.message().hash_tree_root(),
+                slot: signed_block.message().slot(),
+            }
+            .into());
+        }
     };
 
-    let kzg_commitments = post_electra_beacon_block_body.blob_kzg_commitments();
+    let kzg_commitments = &body.blob_kzg_commitments;
     if kzg_commitments.is_empty() {
         return Ok(vec![]);
     }
 
-    let kzg_commitments_inclusion_proof =
-        misc::kzg_commitments_inclusion_proof(post_electra_beacon_block_body);
+    let kzg_commitments_inclusion_proof = misc::kzg_commitments_inclusion_proof(body);
 
     get_data_column_sidecars(
         signed_block_header,

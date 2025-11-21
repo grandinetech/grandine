@@ -229,7 +229,11 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
             return Err(Error::StateNotAvailable { slot }.into());
         };
 
-        if let Some(post_electra_block_body) = block_with_root.block.message().body().post_electra()
+        if let Some(post_electra_block_body) = block_with_root
+            .block
+            .message()
+            .body()
+            .with_electra_attestations()
         {
             for block_attestation in
                 post_electra_block_body

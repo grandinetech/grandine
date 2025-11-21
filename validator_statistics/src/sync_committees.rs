@@ -54,7 +54,11 @@ pub fn current_epoch_sync_committee_assignments<P: Preset>(
 pub fn sync_aggregate_with_root<P: Preset>(
     block: &SignedBeaconBlock<P>,
 ) -> Option<(SyncAggregate<P>, H256)> {
-    let sync_aggregate = block.message().body().post_altair()?.sync_aggregate();
+    let sync_aggregate = block
+        .message()
+        .body()
+        .with_sync_aggregate()?
+        .sync_aggregate();
     let parent_root = block.message().parent_root();
     Some((sync_aggregate, parent_root))
 }

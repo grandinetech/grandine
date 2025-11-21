@@ -68,8 +68,8 @@ use types::{
     },
     preset::Preset,
     traits::{
-        AttesterSlashing, BeaconState, PostCapellaExecutionPayload, PostElectraBeaconBlockBody,
-        PostElectraBeaconState,
+        AttesterSlashing, BeaconState, BlockBodyWithBlsToExecutionChanges,
+        BlockBodyWithElectraAttestations, PostCapellaExecutionPayload, PostElectraBeaconState,
     },
 };
 
@@ -505,14 +505,17 @@ fn process_execution_payload<P: Preset>(
     Ok(())
 }
 
-pub fn process_operations<P: Preset, V: Verifier>(
+pub fn process_operations<P: Preset, V: Verifier, B>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
-    body: &impl PostElectraBeaconBlockBody<P>,
+    body: &B,
     mut verifier: V,
     mut slot_report: impl SlotReport,
-) -> Result<()> {
+) -> Result<()>
+where
+    B: BlockBodyWithElectraAttestations<P> + BlockBodyWithBlsToExecutionChanges<P>,
+{
     // > [Modified in Electra:EIP6110]
     // > Disable former deposit mechanism once all prior deposits are processed
     let eth1_deposit_index_limit = state

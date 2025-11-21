@@ -78,7 +78,7 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
             return self;
         };
 
-        if block.body().post_bellatrix().is_none() {
+        if block.body().with_execution_payload().is_none() {
             return Self::BeaconBlock(block);
         }
 

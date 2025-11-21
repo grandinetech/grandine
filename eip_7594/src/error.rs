@@ -1,4 +1,6 @@
+use ssz::H256;
 use thiserror::Error;
+use types::phase0::primitives::Slot;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -24,4 +26,8 @@ pub enum Error {
         blob_count: usize,
         commitments_length: usize,
     },
+    #[error(
+        "attempted to construct a blob sidecar for pre-Deneb block: slot: {slot}, root: {root:?}"
+    )]
+    BlobsForPreDenebBlock { root: H256, slot: Slot },
 }

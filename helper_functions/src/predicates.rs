@@ -26,7 +26,7 @@ use types::{
     },
     preset::Preset,
     traits::{
-        BeaconState, IndexedAttestation, PostBellatrixBeaconBlockBody, PostBellatrixBeaconState,
+        BeaconState, BlockBodyWithExecutionPayload, IndexedAttestation, PostBellatrixBeaconState,
     },
 };
 
@@ -272,7 +272,7 @@ pub fn is_merge_transition_complete<P: Preset>(
 #[must_use]
 pub fn is_merge_transition_block<P: Preset>(
     state: &CombinedBeaconState<P>,
-    body: &(impl PostBellatrixBeaconBlockBody<P> + ?Sized),
+    body: &(impl BlockBodyWithExecutionPayload<P> + ?Sized),
 ) -> bool {
     state.post_bellatrix().is_some_and(|state| {
         !is_merge_transition_complete(state) && !body.execution_payload().is_default_payload()
@@ -289,7 +289,7 @@ pub fn is_merge_transition_block<P: Preset>(
 #[must_use]
 pub fn is_execution_enabled<P: Preset>(
     state: &(impl PostBellatrixBeaconState<P> + ?Sized),
-    body: &(impl PostBellatrixBeaconBlockBody<P> + ?Sized),
+    body: &(impl BlockBodyWithExecutionPayload<P> + ?Sized),
 ) -> bool {
     is_merge_transition_complete(state) || !body.execution_payload().is_default_payload()
 }
