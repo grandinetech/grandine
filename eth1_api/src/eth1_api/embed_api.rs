@@ -473,7 +473,10 @@ impl Eth1Api {
 
                 let payload_attributes = payload_attributes
                     .map(|value| {
-                        if let PayloadAttributes::Deneb(value) = value {
+                        if let PayloadAttributes::Deneb(value)
+                        | PayloadAttributes::Electra(value)
+                        | PayloadAttributes::Fulu(value) = value
+                        {
                             Ok(value)
                         } else {
                             Err(Error::InvalidParameters)

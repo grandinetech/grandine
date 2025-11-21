@@ -55,7 +55,7 @@ public unsafe partial struct CForkChoiceUpdatedResponse
     public CForkChoiceUpdatedResponse(ForkchoiceUpdatedV1Result result)
     {
         this.payload_status = new CPayloadStatusV1(result.PayloadStatus);
-        this.payload_id = CH64.FromOptinalHexString(result.PayloadId);
+        this.payload_id = CH64.FromOptionalHexString(result.PayloadId);
     }
 }
 
@@ -328,6 +328,11 @@ public unsafe partial struct CH64
 {
     public CH64(string value)
     {
+        if (value.StartsWith("0x"))
+        {
+            value = value[2..];
+        }
+
         var raw = Convert.FromHexString(value);
 
         if (raw.Length != 8)
@@ -342,7 +347,7 @@ public unsafe partial struct CH64
         }
     }
 
-    public static COption_CH64 FromOptinalHexString(string? value)
+    public static COption_CH64 FromOptionalHexString(string? value)
     {
         if (value == null)
         {
