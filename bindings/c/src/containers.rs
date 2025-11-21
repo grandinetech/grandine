@@ -598,7 +598,10 @@ pub struct CBlobAndProofV1 {
 
 impl Into<BlobAndProofV1<Mainnet>> for CBlobAndProofV1 {
     fn into(self) -> BlobAndProofV1<Mainnet> {
-        todo!()
+        BlobAndProofV1 {
+            blob: self.blob.into(),
+            proof: self.proof.into(),
+        }
     }
 }
 
@@ -615,7 +618,6 @@ impl TryInto<BlobsBundleV1<Mainnet>> for CBlobsBundleV1 {
 
     fn try_into(self) -> Result<BlobsBundleV1<Mainnet>, Self::Error> {
         Ok(BlobsBundleV1 {
-            // TODO: don't panic here
             commitments: ContiguousList::try_from_iter(
                 self.commitments.into_iter().map(Into::into),
             )?,
