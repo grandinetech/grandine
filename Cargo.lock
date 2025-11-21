@@ -10752,6 +10752,7 @@ dependencies = [
  "serde_json",
  "serde_utils",
  "slashing_protection",
+ "ssz",
  "std_ext",
  "thiserror 2.0.17",
  "tokio",

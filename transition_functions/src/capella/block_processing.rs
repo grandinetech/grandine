@@ -16,7 +16,7 @@ use itertools::izip;
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::SszHash as _;
+use ssz::{Hc, SszHash as _};
 use tap::Pipe as _;
 use typenum::{NonZero, Unsigned as _};
 use types::{
@@ -59,7 +59,7 @@ pub fn process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
-    block: &BeaconBlock<P>,
+    block: &Hc<BeaconBlock<P>>,
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -109,7 +109,7 @@ pub fn custom_process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
-    block: &BeaconBlock<P>,
+    block: &Hc<BeaconBlock<P>>,
     execution_engine: impl ExecutionEngine<P>,
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
@@ -127,8 +127,7 @@ pub fn custom_process_block<P: Preset>(
     process_execution_payload(
         config,
         state,
-        // TODO(Grandine Team): Try caching `block.hash_tree_root()`.
-        //                      Also consider removing the parameter entirely.
+        // TODO(Grandine Team): Consider removing the parameter entirely.
         //                      It's only used for error reporting.
         //                      Perhaps it would be better to send the whole block?
         block.hash_tree_root(),
@@ -159,7 +158,7 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-pub fn count_required_signatures<P: Preset>(block: &BeaconBlock<P>) -> usize {
+pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
     altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
 }
 
@@ -627,7 +626,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |config, _, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
+        |config, _, state, block: Hc<BeaconBlock<_>>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/capella/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/capella/operations/block_header/*/*",

@@ -877,13 +877,13 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
 #[duplicate_item(
     implementor                      get_copy(field) get_ref(field);
 
-    [Phase0BeaconBlock<P>]           [self.field]    [&self.field];
-    [AltairBeaconBlock<P>]           [self.field]    [&self.field];
-    [BellatrixBeaconBlock<P>]        [self.field]    [&self.field];
-    [CapellaBeaconBlock<P>]          [self.field]    [&self.field];
-    [DenebBeaconBlock<P>]            [self.field]    [&self.field];
-    [ElectraBeaconBlock<P>]          [self.field]    [&self.field];
-    [FuluBeaconBlock<P>]             [self.field]    [&self.field];
+    [Hc<Phase0BeaconBlock<P>>]       [self.field]    [&self.field];
+    [Hc<AltairBeaconBlock<P>>]       [self.field]    [&self.field];
+    [Hc<BellatrixBeaconBlock<P>>]    [self.field]    [&self.field];
+    [Hc<CapellaBeaconBlock<P>>]      [self.field]    [&self.field];
+    [Hc<DenebBeaconBlock<P>>]        [self.field]    [&self.field];
+    [Hc<ElectraBeaconBlock<P>>]      [self.field]    [&self.field];
+    [Hc<FuluBeaconBlock<P>>]         [self.field]    [&self.field];
 
     [BellatrixBlindedBeaconBlock<P>] [self.field]    [&self.field];
     [CapellaBlindedBeaconBlock<P>]   [self.field]    [&self.field];

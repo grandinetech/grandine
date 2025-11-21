@@ -38,7 +38,7 @@ use itertools::izip;
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::{PersistentList, SszHash as _};
+use ssz::{Hc, PersistentList, SszHash as _};
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::{NonZero, Unsigned as _};
@@ -96,7 +96,7 @@ pub fn process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut ElectraBeaconState<P>,
-    block: &BeaconBlock<P>,
+    block: &Hc<BeaconBlock<P>>,
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -145,7 +145,7 @@ pub fn process_block_for_gossip<P: Preset>(
 }
 
 // TODO(feature/electra): Reuse function from `transition_functions::capella::block_processing`.
-pub fn count_required_signatures<P: Preset>(block: &BeaconBlock<P>) -> usize {
+pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
     altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
 }
 
@@ -153,7 +153,7 @@ pub fn custom_process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut ElectraBeaconState<P>,
-    block: &BeaconBlock<P>,
+    block: &Hc<BeaconBlock<P>>,
     execution_engine: impl ExecutionEngine<P>,
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
@@ -169,8 +169,7 @@ pub fn custom_process_block<P: Preset>(
     process_execution_payload(
         config,
         state,
-        // TODO(Grandine Team): Try caching `block.hash_tree_root()`.
-        //                      Also consider removing the parameter entirely.
+        // TODO(Grandine Team): Consider removing the parameter entirely.
         //                      It's only used for error reporting.
         //                      Perhaps it would be better to send the whole block?
         block.hash_tree_root(),
@@ -1440,7 +1439,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |config, _, state, block: BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
+        |config, _, state, block: Hc<BeaconBlock<_>>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/electra/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/electra/operations/block_header/*/*",

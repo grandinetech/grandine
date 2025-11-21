@@ -23,6 +23,7 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 slashing_protection = { workspace = true }
+ssz = { workspace = true }
 std_ext = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
