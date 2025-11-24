@@ -200,6 +200,10 @@ struct ChainOptions {
 
 #[derive(Args)]
 struct HttpApiOptions {
+    /// Run Grandine without HTTP API server.
+    #[clap(long, default_value_t = false)]
+    disable_http_api: bool,
+
     /// HTTP API address
     #[clap(long, default_value_t = HttpApiConfig::default().address.ip())]
     http_address: IpAddr,
@@ -218,26 +222,31 @@ struct HttpApiOptions {
     timeout: u64,
 }
 
-impl From<HttpApiOptions> for HttpApiConfig {
+impl From<HttpApiOptions> for Option<HttpApiConfig> {
     fn from(http_api_options: HttpApiOptions) -> Self {
         let HttpApiOptions {
+            disable_http_api,
             http_address,
             http_port,
             http_allowed_origins,
             timeout,
         } = http_api_options;
 
-        let Self {
+        if disable_http_api {
+            return None;
+        }
+
+        let HttpApiConfig {
             address,
             allow_origin,
             ..
-        } = Self::with_address(http_address, http_port);
+        } = HttpApiConfig::with_address(http_address, http_port);
 
-        Self {
+        Some(HttpApiConfig {
             address,
             allow_origin: headers_to_allow_origin(http_allowed_origins).unwrap_or(allow_origin),
             timeout: Some(Duration::from_millis(timeout)),
-        }
+        })
     }
 }
 
@@ -1236,12 +1245,17 @@ impl GrandineArgs {
             timeout: request_timeout,
         });
 
-        let http_api_config = HttpApiConfig::from(http_api_options);
+        let mut services = vec![];
+
         let validator_api_config = validator_api_options
             .enable_validator_api
             .then(|| ValidatorApiConfig::from(validator_api_options));
 
-        let mut services = vec![(http_api_config.address, "HTTP API")];
+        let http_api_config = Option::<HttpApiConfig>::from(http_api_options);
+
+        if let Some(http_api_config) = http_api_config.as_ref() {
+            services.push((http_api_config.address, "HTTP API"));
+        }
 
         if let Some(metrics_server_config) = metrics_server_config.as_ref() {
             services.push((SocketAddr::from(metrics_server_config), "Metrics API"));
@@ -1774,12 +1788,18 @@ mod tests {
     }
 
     #[test]
+    fn http_api_disabled() {
+        let config = config_from_args(["--http-port", "1234", "--disable-http-api"]);
+        assert!(config.http_api_config.is_none());
+    }
+
+    #[test]
     fn http_port_option() {
         let config = config_from_args(["--http-port", "1234"]);
 
         assert_eq!(
-            config.http_api_config.address,
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234),
+            config.http_api_config.map(|config| config.address),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234)),
         );
     }
 
@@ -1789,8 +1809,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "List([\"http://127.0.0.1:5052\"])",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(List([\"http://127.0.0.1:5052\"]))",
         );
     }
 
@@ -1800,8 +1823,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "Const(\"*\")",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(Const(\"*\"))",
         );
     }
 
@@ -1816,8 +1842,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "List([\"http://localhost\", \"http://example.com\"])",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(List([\"http://localhost\", \"http://example.com\"]))",
         );
     }
 
@@ -1834,8 +1863,11 @@ mod tests {
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
-            format!("{:?}", config.http_api_config.allow_origin),
-            "Const(\"*\")",
+            format!(
+                "{:?}",
+                config.http_api_config.map(|config| config.allow_origin)
+            ),
+            "Some(Const(\"*\"))",
         );
     }
 

@@ -93,7 +93,7 @@ pub async fn run_after_genesis<P: Preset>(
     builder_config: Option<BuilderConfig>,
     signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
-    http_api_config: HttpApiConfig,
+    http_api_config: Option<HttpApiConfig>,
     metrics_config: MetricsConfig,
     blacklisted_blocks: HashSet<H256>,
     report_validator_performance: bool,
@@ -688,22 +688,29 @@ pub async fn run_after_genesis<P: Preset>(
         sync_to_api_rx,
     };
 
-    let http_api = HttpApi {
-        block_producer,
-        controller: controller.clone_arc(),
-        anchor_checkpoint_provider,
-        eth1_api,
-        event_channels,
-        validator_keys,
-        validator_config,
-        network_config,
-        http_api_config,
-        attestation_agg_pool,
-        sync_committee_agg_pool,
-        bls_to_execution_change_pool,
-        channels: http_api_channels,
-        metrics: metrics.clone(),
-        tracing_handle,
+    let run_http_api = match http_api_config {
+        Some(http_api_config) => {
+            let http_api = HttpApi {
+                block_producer,
+                controller: controller.clone_arc(),
+                anchor_checkpoint_provider,
+                eth1_api,
+                event_channels,
+                validator_keys,
+                validator_config,
+                network_config,
+                http_api_config,
+                attestation_agg_pool,
+                sync_committee_agg_pool,
+                bls_to_execution_change_pool,
+                channels: http_api_channels,
+                metrics: metrics.clone(),
+                tracing_handle,
+            };
+
+            Either::Left(http_api.run())
+        }
+        None => Either::Right(core::future::pending()),
     };
 
     let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
@@ -757,7 +764,7 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(attestation_verifier.run()) => result,
         result = spawn_fallible(block_sync_service.run()) => result,
         result = spawn_fallible(network.run()) => result,
-        result = spawn_fallible(http_api.run()) => result,
+        result = spawn_fallible(run_http_api) => result,
         result = spawn_fallible(run_clock) => result,
         result = spawn_fallible(run_slasher) => result.map(from_never),
         result = spawn_fallible(bls_to_execution_change_pool_service.run()) => result,
