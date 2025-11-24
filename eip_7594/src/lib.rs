@@ -313,7 +313,7 @@ pub fn construct_data_column_sidecars<P: Preset>(
         | SignedBeaconBlock::Capella(_)
         | SignedBeaconBlock::Deneb(_)
         | SignedBeaconBlock::Electra(_) => {
-            return Err(Error::BlobsForPreDenebBlock {
+            return Err(Error::BlobsForPreFuluBlock {
                 root: signed_block.message().hash_tree_root(),
                 slot: signed_block.message().slot(),
             }

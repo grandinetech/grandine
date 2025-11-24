@@ -27,7 +27,7 @@ pub enum Error {
         commitments_length: usize,
     },
     #[error(
-        "attempted to construct a blob sidecar for pre-Deneb block: slot: {slot}, root: {root:?}"
+        "attempted to construct data column sidecars for pre-Fulu block: slot: {slot}, root: {root:?}"
     )]
-    BlobsForPreDenebBlock { root: H256, slot: Slot },
+    BlobsForPreFuluBlock { root: H256, slot: Slot },
 }
