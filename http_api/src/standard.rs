@@ -2782,6 +2782,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
             randao_reveal,
             execution_payload_header_handle,
             local_execution_payload_handle,
+            None, // No Gloas data for HTTP API path yet
         )
         .await?
         .ok_or(Error::UnableToProduceBlindedBlock)?
@@ -2844,7 +2845,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
     let (beacon_block, _) = block_build_context
-        .build_beacon_block(randao_reveal, local_execution_payload_handle)
+        .build_beacon_block(randao_reveal, local_execution_payload_handle, None)
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -2914,6 +2915,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             randao_reveal,
             execution_payload_header_handle,
             local_execution_payload_handle,
+            None, // No Gloas data for HTTP API path
         )
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;

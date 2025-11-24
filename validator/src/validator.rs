@@ -63,14 +63,18 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{
-        AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
+        AggregateAndProof, Attestation, AttesterSlashing, BeaconState,
+        SignedAggregateAndProof,
     },
     config::Config as ChainConfig,
     electra::containers::{
         AggregateAndProof as ElectraAggregateAndProof,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
-    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
+    gloas::containers::{
+        ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    },
     nonstandard::{
         KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
     },
@@ -870,7 +874,49 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let execution_payload_header_handle =
             block_build_context.get_execution_payload_header(*public_key);
 
-        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+        // For Gloas self-build: Build and sign bid, fetch payload and cache envelope_data
+        // For non-Gloas: Get local execution payload handle normally
+        let (signed_bid, local_execution_payload_handle) = if slot_head.beacon_state.phase() >= Phase::Gloas {
+            match block_build_context.build_execution_payload_bid_and_cache_envelope_data().await {
+                Ok(Some(unsigned_bid)) => {
+                    // Sign the bid
+                    let bid_signing_root = unsigned_bid.signing_root(&self.chain_config, &slot_head.beacon_state);
+                    match signer_snapshot
+                        .sign_without_slashing_protection(
+                            SigningMessage::ExecutionPayloadBid(&unsigned_bid),
+                            bid_signing_root,
+                            Some(slot_head.beacon_state.as_ref().into()),
+                            *public_key,
+                        )
+                        .await
+                    {
+                        Ok(signature) => {
+                            let signed_bid = Some(SignedExecutionPayloadBid {
+                                message: unsigned_bid,
+                                signature: SignatureBytes::from(signature),
+                            });
+                            // Don't spawn local_execution_payload_handle for Gloas
+                            (signed_bid, None)
+                        }
+                        Err(error) => {
+                            warn_with_peers!(
+                                "failed to sign execution payload bid (slot: {}, public_key: {public_key}): {error:?}",
+                                slot_head.slot(),
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+                Ok(None) => (None, None),
+                Err(error) => {
+                    warn_with_peers!("failed to build execution payload bid: {error}");
+                    return Ok(());
+                }
+            }
+        } else {
+            // Pre-Gloas: spawn local execution payload handle normally
+            (None, block_build_context.get_local_execution_payload())
+        };
 
         let epoch = slot_head.current_epoch();
 
@@ -900,6 +946,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 randao_reveal,
                 execution_payload_header_handle,
                 local_execution_payload_handle,
+                signed_bid,
             )
             .await
         {
@@ -928,6 +975,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
+        // Bid already signed during build (if Gloas self-build)
         let beacon_block_or_root = match validator_blinded_block {
             ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
                 let Some(signature) = slot_head
@@ -1127,7 +1175,78 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.controller
                     .on_own_block(wait_group.clone(), block.clone_arc());
 
-                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
+                ValidatorToP2p::PublishBeaconBlock(block.clone_arc()).send(&self.p2p_tx);
+
+                // Handle Gloas execution payload envelope
+                if slot_head.beacon_state.phase() >= Phase::Gloas {
+                    // Get cached envelope data
+                    let envelope_data = match block_build_context.get_cached_envelope_data().await {
+                        Ok(data) => data,
+                        Err(error) => {
+                            warn_with_peers!(
+                                "failed to get cached envelope data (slot: {}): {error:?}",
+                                slot_head.slot(),
+                            );
+                            return Ok(());
+                        }
+                    };
+
+                    // Build execution payload envelope using cached envelope_data
+                    let beacon_block_root = block.message().hash_tree_root();
+                    let state_root = envelope_data.payload.state_root;
+                    let envelope = ExecutionPayloadEnvelope {
+                        payload: envelope_data.payload,
+                        execution_requests: envelope_data.execution_requests,
+                        builder_index: proposer_index,
+                        beacon_block_root,
+                        slot: slot_head.slot(),
+                        blob_kzg_commitments: envelope_data.blob_kzg_commitments,
+                        state_root,
+                    };
+
+                    // Sign the envelope
+                    let envelope_signing_root = envelope.signing_root(&self.chain_config, &slot_head.beacon_state);
+                    let envelope_sig = match signer_snapshot
+                        .sign_without_slashing_protection(
+                            SigningMessage::ExecutionPayloadEnvelope(&envelope),
+                            envelope_signing_root,
+                            Some(slot_head.beacon_state.as_ref().into()),
+                            *public_key,
+                        )
+                        .await
+                    {
+                        Ok(signature) => SignatureBytes::from(signature),
+                        Err(error) => {
+                            warn_with_peers!(
+                                "failed to sign execution payload envelope (slot: {}, public_key: {public_key}): \
+                                {error:?}",
+                                slot_head.slot(),
+                            );
+                            return Ok(());
+                        }
+                    };
+
+                    let signed_envelope = Arc::new(SignedExecutionPayloadEnvelope {
+                        message: envelope,
+                        signature: envelope_sig,
+                    });
+
+                    info_with_peers!(
+                        "validator {} publishing execution payload envelope for block {:?} in slot {}",
+                        proposer_index,
+                        signed_envelope.message.beacon_block_root,
+                        slot_head.slot(),
+                    );
+
+                    // Publish envelope to controller and P2P
+                    self.controller.on_own_execution_payload_envelope(
+                        wait_group.clone(),
+                        signed_envelope.clone_arc(),
+                    );
+
+                    ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope)
+                        .send(&self.p2p_tx);
+                }
             }
         }
 
@@ -2071,7 +2190,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let doppelganger_protection = self
                 .doppelganger_protection
-                .as_deref()
+                .as_deref() 
                 .map(DoppelgangerProtection::load);
 
             own_members

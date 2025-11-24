@@ -29,7 +29,7 @@ use fork_choice_store::{
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
-use logging::debug_with_peers;
+use logging::{debug_with_peers, info_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use std_ext::ArcExt as _;
@@ -342,6 +342,42 @@ where
             true,
             DataColumnSidecarOrigin::Own,
         )
+    }
+
+    pub fn on_own_execution_payload_envelope(
+        &self,
+        wait_group: W,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
+        // TODO (gloas): Implement direct task spawn (from commit ad16f5c4a3e6f2d4931ea92fa35e9c4d6564ca80)
+        //
+        // This should spawn ExecutionPayloadEnvelopeTask DIRECTLY with Origin::Own
+        //
+        //   self.spawn(ExecutionPayloadEnvelopeTask {
+        //       store_snapshot: self.owned_store_snapshot(),
+        //       mutator_tx: self.owned_mutator_tx(),
+        //       wait_group,
+        //       envelope,
+        //       beacon_block_seen: true,  // we published the block ourselves
+        //    - origin: ExecutionPayloadEnvelopeOrigin::Own
+        //    - submission_time: Instant::now()
+        //
+        // 2. Task validates envelope:
+        //    - Signature check (builder domain)
+        //    - Link to block via beacon_block_root
+        //    - Builder index matches block bid
+        //
+        // 3. Mutator processes result:
+        //    - Trigger fork choice update
+        //    - Process execution payload in state transition
+        //
+        // For now, just log until task changes is merged through ad16f5c4a
+        info_with_peers!(
+            "publishing own execution payload envelope (block_root: {:?}, slot: {}, builder_index: {})",
+            envelope.message.beacon_block_root,
+            envelope.message.slot,
+            envelope.message.builder_index,
+        );
     }
 
     pub fn on_api_data_column_sidecar(

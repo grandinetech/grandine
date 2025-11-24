@@ -73,7 +73,7 @@ use types::{
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     gloas::containers::{
         BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-        PayloadAttestation, SignedExecutionPayloadBid,
+        ExecutionPayloadBid, PayloadAttestation, SignedExecutionPayloadBid,
     },
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
     phase0::{
@@ -170,6 +170,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             head_block_root,
             proposer_index,
             options,
+            envelope_data: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -635,6 +636,14 @@ pub struct BlockBuildOptions {
     pub builder_boost_factor: Uint256,
 }
 
+/// Data needed to construct ExecutionPayloadEnvelope later (after signing block)
+#[derive(Clone)]
+pub struct EnvelopeData<P: Preset> {
+    pub payload: DenebExecutionPayload<P>,
+    pub execution_requests: ExecutionRequests<P>,
+    pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+}
+
 #[derive(Clone)]
 pub struct BlockBuildContext<P: Preset, W: Wait> {
     producer_context: Arc<ProducerContext<P, W>>,
@@ -642,6 +651,7 @@ pub struct BlockBuildContext<P: Preset, W: Wait> {
     head_block_root: H256,
     proposer_index: ValidatorIndex,
     options: BlockBuildOptions,
+    envelope_data: Arc<Mutex<Option<EnvelopeData<P>>>>,
 }
 
 impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
@@ -649,6 +659,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         randao_reveal: SignatureBytes,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+        signed_bid: Option<SignedExecutionPayloadBid>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         let _block_timer = self
             .producer_context
@@ -662,7 +673,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
             build_context
-                .produce_beacon_block(block_without_state_root, local_execution_payload_handle)
+                .produce_beacon_block(block_without_state_root, local_execution_payload_handle, signed_bid)
                 .await
         });
 
@@ -674,6 +685,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         randao_reveal: SignatureBytes,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+        signed_bid: Option<SignedExecutionPayloadBid>,
     ) -> Result<
         Option<(
             WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
@@ -688,7 +700,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
             build_context
-                .produce_beacon_block(block, local_execution_payload_handle)
+                .produce_beacon_block(block, local_execution_payload_handle, signed_bid)
                 .await
         });
 
@@ -962,6 +974,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     }),
                     // TODO: (gloas): prepare `signed_execution_payload_bid`
                     // * signed_execution_payload_bid: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#constructing-the-new-signed_execution_payload_bid-field-in-beaconblockbody
+                    // Bid creation and envelope handling is done in produce_beacon_block and validator
                     Phase::Gloas => {
                         let payload_attestations = self.prepare_payload_attestations().await?;
 
@@ -1129,6 +1142,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+        signed_bid: Option<SignedExecutionPayloadBid>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         let payload_with_data = if let Some(handle) = local_execution_payload_handle {
             handle
@@ -1162,10 +1176,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
-        let mut without_state_root_with_payload = block_without_state_root
-            .with_execution_payload(execution_payload)?
-            .with_blob_kzg_commitments(commitments)
-            .with_execution_requests(execution_requests);
+        let mut without_state_root_with_payload = if self.beacon_state.phase() >= Phase::Gloas
+            && signed_bid.is_some()
+        {
+            // Gloas self-build: Use cached envelope data (don't use execution_payload to avoid double fetch)
+            let signed_bid = signed_bid.expect("signed_bid checked above");
+            self.prepare_gloas_block_with_bid(block_without_state_root, signed_bid)
+                .await?
+        } else {
+            block_without_state_root
+                .with_execution_payload(execution_payload)?
+                .with_blob_kzg_commitments(commitments)
+                .with_execution_requests(execution_requests)
+        };
 
         if !self.options.disable_blockprint_graffiti {
             let graffiti = build_graffiti(self.options.graffiti, client_versions);
@@ -1381,6 +1404,42 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .aggregate_payload_attestations()
             .await
     }
+
+    fn prepare_execution_payload_bid(
+        &self,
+        payload: &DenebExecutionPayload<P>,
+        blob_kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    ) -> ExecutionPayloadBid {
+        ExecutionPayloadBid {
+            parent_block_hash: payload.parent_hash,
+            parent_block_root: self.head_block_root,
+            block_hash: payload.block_hash,
+            prev_randao: payload.prev_randao,
+            fee_recipient: payload.fee_recipient,
+            gas_limit: payload.gas_limit,
+            builder_index: self.proposer_index,
+            slot: self.beacon_state.slot(),
+            value: 0,  // Self-build
+            execution_payment: 0,  // Self-build
+            blob_kzg_commitments_root: blob_kzg_commitments.hash_tree_root(),
+        }
+    }
+
+    async fn prepare_gloas_block_with_bid(
+        &self,
+        mut block: BeaconBlock<P>,
+        signed_bid: SignedExecutionPayloadBid,
+    ) -> Result<BeaconBlock<P>> {
+        // Put signed bid in block body
+        // Note: envelope_data was already cached by build_execution_payload_bid_and_cache_envelope_data
+        // not re-fetching or re-caching here to avoid race unwanted problems. whole self build flow should have one EL call
+        if let BeaconBlock::Gloas(gloas_block) = &mut block {
+            gloas_block.body.signed_execution_payload_bid = signed_bid;
+        }
+
+        Ok(block)
+    }
+
 
     async fn prepare_voluntary_exits(
         &self,
@@ -1784,6 +1843,64 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             tokio::spawn(async move { builder_context.local_execution_payload_option().await });
 
         Some(handle)
+    }
+
+    /// Build ExecutionPayloadBid and cache envelope data (public API for validator)
+    /// Fetches payload from EL once, creates unsigned bid, and caches envelope data
+    /// Validator will sign the bid, then retrieve envelope data later via get_cached_envelope_data()
+    pub async fn build_execution_payload_bid_and_cache_envelope_data(
+        &self,
+    ) -> Result<Option<ExecutionPayloadBid>> {
+        // Only for Gloas
+        if self.beacon_state.phase() < Phase::Gloas {
+            return Ok(None);
+        }
+
+        // Fetch payload from EL once
+        let Some(payload_data) = self.local_execution_payload_result().await? else {
+            return Ok(None);
+        };
+
+        let WithClientVersions {
+            result: WithBlobsAndMev {
+                value: execution_payload,
+                commitments,
+                execution_requests,
+                ..
+            },
+            ..
+        } = &payload_data;
+
+        // Extract Deneb payload
+        let deneb_payload = match execution_payload {
+            ExecutionPayload::Deneb(p) => p,
+            _ => return Err(AnyhowError::msg("Gloas requires Deneb execution payload format")),
+        };
+
+        // Extract commitments and requests
+        let blob_kzg_commitments = commitments.as_ref().cloned().unwrap_or_default();
+        let execution_requests_data = execution_requests.as_ref().cloned().unwrap_or_default();
+
+        // Create unsigned bid
+        let bid = self.prepare_execution_payload_bid(deneb_payload, &blob_kzg_commitments);
+
+        // Cache envelope data for later retrieval
+        *self.envelope_data.lock().await = Some(EnvelopeData {
+            payload: deneb_payload.clone(),
+            execution_requests: execution_requests_data,
+            blob_kzg_commitments,
+        });
+
+        Ok(Some(bid))
+    }
+
+    /// Get cached envelope data (called by validator after signing block)
+    pub async fn get_cached_envelope_data(&self) -> Result<EnvelopeData<P>> {
+        self.envelope_data
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| AnyhowError::msg("envelope data not cached - call build_execution_payload_bid_and_cache_envelope_data first"))
     }
 
     async fn local_execution_payload_result(
