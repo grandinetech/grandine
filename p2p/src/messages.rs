@@ -214,6 +214,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
+    PublishExecutionPayloadEnvelope(Arc<SignedExecutionPayloadEnvelope<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
