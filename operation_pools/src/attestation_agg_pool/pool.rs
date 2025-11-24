@@ -322,6 +322,10 @@ impl<P: Preset> Pool<P> {
             .contains(&validator_index)
     }
 
+    pub async fn registered_validator_indices(&self) -> HashSet<ValidatorIndex> {
+        self.registered_validator_indices.read().await.clone()
+    }
+
     pub async fn set_best_proposable_attestations(
         &self,
         attestations: ContiguousList<Attestation<P>, P::MaxAttestations>,

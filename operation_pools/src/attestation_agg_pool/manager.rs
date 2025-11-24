@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
 };
 
@@ -179,6 +179,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             controller: self.controller.clone_arc(),
             metrics: self.metrics.clone(),
         });
+    }
+
+    pub async fn registered_validator_indices(&self) -> HashSet<ValidatorIndex> {
+        self.pool.registered_validator_indices().await
     }
 
     pub fn set_committees_with_aggregators(
