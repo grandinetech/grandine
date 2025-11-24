@@ -1,4 +1,6 @@
+use ssz::H256;
 use thiserror::Error;
+use types::phase0::primitives::Slot;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -24,4 +26,8 @@ pub enum Error {
         blob_count: usize,
         commitments_length: usize,
     },
+    #[error(
+        "attempted to construct data column sidecars for pre-Fulu block: slot: {slot}, root: {root:?}"
+    )]
+    BlobsForPreFuluBlock { root: H256, slot: Slot },
 }

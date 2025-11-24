@@ -31,7 +31,8 @@ use types::{
     },
     preset::Preset,
     traits::{
-        BeaconState, PostCapellaBeaconBlockBody, PostCapellaBeaconState, PreElectraBeaconBlockBody,
+        BeaconState, BlockBodyWithBlsToExecutionChanges, PostCapellaBeaconState,
+        PreElectraBeaconBlockBody,
     },
 };
 
@@ -244,7 +245,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostCapellaBeaconState<P>,
-    body: &(impl PostCapellaBeaconBlockBody<P> + PreElectraBeaconBlockBody<P>),
+    body: &(impl BlockBodyWithBlsToExecutionChanges<P> + PreElectraBeaconBlockBody<P>),
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {

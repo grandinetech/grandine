@@ -89,7 +89,7 @@ impl<P: Preset> ChainLink<P> {
     //                      - <https://github.com/ethereum/consensus-specs/pull/3232>
     //                      - <https://github.com/ethereum/consensus-specs/pull/3350>
     // fn is_post_deneb(&self) -> bool {
-    //     self.block.message().body().post_deneb().is_some()
+    //     self.block.message().body().with_blob_kzg_commitments().is_some()
     // }
 }
 
