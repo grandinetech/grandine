@@ -552,21 +552,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Tick { slot, kind } = tick;
 
+        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        if self.last_registration_epoch != Some(current_epoch) {
+            self.register_validators(current_epoch).await;
+        }
+
         let no_validators = self.signer.load().no_keys()
             && self.registered_validators.is_empty()
             && self.block_producer.no_prepared_proposers().await;
 
         debug_with_peers!("{kind:?} tick in slot {slot}");
 
-        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-
         if tick.is_start_of_epoch::<P>() {
             let _timer = self
                 .metrics
                 .as_ref()
                 .map(|metrics| metrics.validator_epoch_processing_times.start_timer());
-
-            self.register_validators(current_epoch).await;
 
             if let Some(validator_to_slasher_tx) = &self.validator_to_slasher_tx {
                 ValidatorToSlasher::Epoch(current_epoch).send(validator_to_slasher_tx);
@@ -597,16 +599,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
 
-        if self.last_registration_epoch.is_none() {
-            self.register_validators(current_epoch).await;
-        }
+        let own_validator_indices = self
+            .attestation_agg_pool
+            .registered_validator_indices()
+            .await;
 
         if self.last_cgc_update_epoch != Some(current_epoch)
             && !self.subscribe_to_all_data_column_subnets
             && self.chain_config.is_peerdas_scheduled()
-            && !self.signer.load().no_keys()
+            && !own_validator_indices.is_empty()
         {
-            self.handle_custody_requirements_update(slot);
+            self.handle_custody_requirements_update(slot, &own_validator_indices);
         }
 
         self.track_collection_metrics().await;
@@ -1603,13 +1606,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.signer.load().keys().copied().collect::<HashSet<_>>()
     }
 
-    fn own_validator_indices(&self, state: &BeaconState<P>) -> HashSet<ValidatorIndex> {
-        self.own_public_keys()
-            .into_iter()
-            .filter_map(|public_key| accessors::index_of_public_key(state, &public_key))
-            .collect()
-    }
-
     #[expect(clippy::too_many_lines)]
     async fn own_singular_attestations(
         &self,
@@ -2060,14 +2056,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.update_sync_committee_subscriptions(&beacon_state);
     }
 
-    fn handle_custody_requirements_update(&mut self, current_slot: Slot) {
+    fn handle_custody_requirements_update(
+        &mut self,
+        current_slot: Slot,
+        own_validator_indices: &HashSet<ValidatorIndex>,
+    ) {
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
         let last_finalized_state = self.controller.last_finalized_state().value;
-        let own_validator_indices = self.own_validator_indices(&last_finalized_state);
         let validator_custody_requirement = eip_7594::get_validator_custody_requirement(
             &self.chain_config,
             &last_finalized_state,
-            &own_validator_indices,
+            own_validator_indices,
         );
 
         let current_sampling_size: u64 = self
