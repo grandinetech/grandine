@@ -183,12 +183,15 @@ impl<P: Preset> Network<P> {
             libp2p_registry,
         };
 
+        let local_keypair = eth2_libp2p::load_private_key(&network_config);
+
         // Box the future to pass `clippy::large_futures`.
         let (mut service, network_globals) = Box::pin(Service::new(
             chain_config.clone_arc(),
             executor,
             context,
             custody_group_count,
+            local_keypair,
         ))
         .await?;
 
