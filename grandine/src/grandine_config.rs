@@ -60,7 +60,7 @@ pub struct GrandineConfig {
     pub auth_options: AuthOptions,
     pub builder_config: Option<BuilderConfig>,
     pub web3signer_config: Web3SignerConfig,
-    pub http_api_config: HttpApiConfig,
+    pub http_api_config: Option<HttpApiConfig>,
     pub max_events: usize,
     pub metrics_config: MetricsConfig,
     pub track_liveness: bool,
@@ -136,7 +136,11 @@ impl GrandineConfig {
             info_with_peers!("blockprint graffiti disabled");
         }
 
-        info_with_peers!("HTTP API address: {}", http_api_config.address);
+        if let Some(http_api_config) = http_api_config {
+            info_with_peers!("HTTP API address: {}", http_api_config.address);
+        } else {
+            info_with_peers!("HTTP API disabled");
+        }
 
         if let Some(metrics_server_config) = &metrics_config.metrics_server_config {
             info_with_peers!(
