@@ -7,7 +7,6 @@ use std::{
 use anyhow::{bail, Result};
 use bit_field::BitField as _;
 use clock::Tick;
-use conv::ValueFrom as _;
 use good_lp::{
     solvers::highs::highs, solvers::highs::HighsParallelType, variable, variables, Expression,
     Solution, SolverModel,
@@ -468,7 +467,7 @@ impl<P: Preset> AttestationPacker<P> {
             } else {
                 // here conversion to i32 is needed, since `good_lp` only support i32 integers
                 objective +=
-                    is_validator_included_variables[i] * i32::value_from(*validator_weights[i])?;
+                    is_validator_included_variables[i] * i32::try_from(*validator_weights[i])?;
             }
         }
 
@@ -688,7 +687,7 @@ impl<P: Preset> AttestationPacker<P> {
         let (_, remaining_time) =
             clock::next_interval_with_remaining_time(&self.config, self.state.genesis_time())?;
         if self.ignore_deadline {
-            Ok(f64::value_from(self.config.slot_duration_ms.as_secs())?)
+            Ok(self.config.slot_duration_ms.as_secs_f64())
         } else if self.deadline_reached() {
             Ok(0.0)
         } else {

@@ -11,7 +11,6 @@ anyhow = { workspace = true }
 bit_field = { workspace = true }
 bls = { workspace = true }
 clock = { workspace = true }
-conv = { workspace = true }
 dedicated_executor = { workspace = true }
 eip_7594 = { workspace = true }
 eth1_api = { workspace = true }
