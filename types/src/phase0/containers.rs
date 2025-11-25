@@ -1,6 +1,6 @@
 use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use serde::{Deserialize, Serialize};
-use ssz::{BitList, ContiguousList, ProofWithLength, Ssz};
+use ssz::{BitList, ContiguousList, Hc, ProofWithLength, Ssz};
 
 use crate::{
     collections::RecentRoots,
@@ -198,7 +198,7 @@ pub struct SignedAggregateAndProof<P: Preset> {
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct SignedBeaconBlock<P: Preset> {
-    pub message: BeaconBlock<P>,
+    pub message: Hc<BeaconBlock<P>>,
     pub signature: SignatureBytes,
 }
 

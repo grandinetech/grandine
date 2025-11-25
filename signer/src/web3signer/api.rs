@@ -144,6 +144,7 @@ mod tests {
     use hex_literal::hex;
     use httpmock::{Method, MockServer};
     use serde_json::json;
+    use ssz::Hc;
     use types::{
         altair::containers::BeaconBlock as AltairBeaconBlock, config::Config,
         phase0::beacon_state::BeaconState, preset::Minimal,
@@ -277,7 +278,7 @@ mod tests {
         let web3signer = Web3Signer::new(Client::new(), config, None);
 
         let beacon_state = BeaconState::<Minimal>::default();
-        let altair_block = AltairBeaconBlock::default();
+        let altair_block = Hc::new(AltairBeaconBlock::default());
         let message = SigningMessage::from(&altair_block);
         let signing_root = altair_block.signing_root(&Config::minimal(), &beacon_state);
         let fork_info = ForkInfo::from(&beacon_state);
