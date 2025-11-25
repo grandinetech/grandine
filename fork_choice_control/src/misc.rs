@@ -3,6 +3,7 @@ use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 use clock::Tick;
+use dashmap::DashMap;
 use derivative::Derivative;
 use eth2_libp2p::GossipId;
 use execution_engine::PayloadStatusV1;
@@ -12,6 +13,7 @@ use fork_choice_store::{
 };
 use serde::Serialize;
 use strum::IntoStaticStr;
+use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
     combined::{SignedAggregateAndProof, SignedBeaconBlock},
@@ -237,8 +239,11 @@ pub enum ReorgSource {
 #[derive(Debug)]
 pub enum BlockDataColumnAvailability {
     Complete,
-    CompleteWithReconstruction,
+    CompleteWithReconstruction { import_block: bool },
     AnyPending,
     Missing(Vec<ColumnIndex>),
     Irrelevant,
 }
+
+pub type SidecarsPendingReconstruction<P> =
+    Arc<DashMap<DataColumnIdentifier, (Slot, Sender<Arc<DataColumnSidecar<P>>>)>>;

@@ -33,9 +33,10 @@ use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
     select,
-    stream::StreamExt as _,
+    stream::{FuturesOrdered, FuturesUnordered, StreamExt as _},
 };
 use helper_functions::{accessors, misc};
+use itertools::Itertools as _;
 use logging::{
     debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
     PEER_LOG_METRICS,
@@ -1479,44 +1480,70 @@ impl<P: Preset> Network<P> {
 
         let controller = self.controller.clone_arc();
         let network_to_service_tx = self.network_to_service_tx.clone();
+
         let max_request_data_column_sidecars: usize = self
             .controller
             .chain_config()
             .max_request_data_column_sidecars
             .try_into()?;
 
+        // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
+        let columns = Arc::unwrap_or_clone(columns)
+            .into_iter()
+            .sorted()
+            .collect::<Vec<_>>();
+
         self.dedicated_executor
             .spawn(async move {
                 // > Clients MAY limit the number of data column sidecars in the response.
-                let mut data_column_sidecars = controller.data_column_sidecars_by_range(
-                    start_slot..end_slot,
-                    &columns,
-                    max_request_data_column_sidecars,
-                )?;
+                let mut data_column_sidecars = controller
+                    .data_column_sidecars_by_range(
+                        start_slot..end_slot,
+                        &columns,
+                        max_request_data_column_sidecars,
+                    )?
+                    .collect::<FuturesOrdered<_>>();
 
-                // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
-                data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+                while let Some(result) = data_column_sidecars.next().await {
+                    match result {
+                        Ok(Some(data_column_sidecar)) => {
+                            let data_column_identifier: DataColumnIdentifier =
+                                data_column_sidecar.as_ref().into();
 
-                for data_column_sidecar in data_column_sidecars {
-                    let data_column_identifier: DataColumnIdentifier =
-                        data_column_sidecar.as_ref().into();
+                            debug_with_peers!(
+                                "sending DataColumnsSidecarsByRange response chunk \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                                slot: {}, id: {data_column_identifier:?})",
+                                data_column_sidecar.slot(),
+                            );
 
-                    debug_with_peers!(
-                        "sending DataColumnsSidecarsByRange response chunk \
-                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
-                        slot: {}, id: {data_column_identifier:?})",
-                        data_column_sidecar.slot(),
-                    );
-
-                    ServiceInboundMessage::SendResponse(
-                        peer_id,
-                        inbound_request_id,
-                        Box::new(Response::DataColumnsByRange(Some(data_column_sidecar))),
-                    )
-                    .send(&network_to_service_tx);
+                            ServiceInboundMessage::SendResponse(
+                                peer_id,
+                                inbound_request_id,
+                                Box::new(Response::DataColumnsByRange(Some(data_column_sidecar))),
+                            )
+                            .send(&network_to_service_tx);
+                        }
+                        Ok(None) => {
+                            trace_with_peers!(
+                                "skipping requested data column sidecar for \
+                                DataColumnsByRange request (peer_id: {peer_id}, \
+                                inbound_request_id: {inbound_request_id:?})",
+                            );
+                        }
+                        Err(error) => {
+                            debug_with_peers!(
+                                "error trying to fetch requested data column sidecar for \
+                                DataColumnsByRange request (peer_id: {peer_id}, \
+                                inbound_request_id: {inbound_request_id:?}): {error:?}",
+                            );
+                        }
+                    }
                 }
 
-                debug_with_peers!("terminating DataColumnsByRange response stream");
+                debug_with_peers!(
+                    "terminating DataColumnsByRange response stream: {inbound_request_id:?}"
+                );
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,
@@ -1675,29 +1702,51 @@ impl<P: Preset> Network<P> {
                     .flat_map(Into::<Vec<DataColumnIdentifier>>::into)
                     .take(max_request_data_column_sidecars.try_into()?);
 
-                let data_column_sidecars =
-                    controller.data_column_sidecars_by_ids(data_column_ids)?;
+                let mut data_column_sidecars = controller
+                    .data_column_sidecars_by_ids(data_column_ids)
+                    .collect::<FuturesUnordered<_>>();
 
-                for data_column_sidecar in data_column_sidecars {
-                    let data_column_identifier: DataColumnIdentifier =
-                        data_column_sidecar.as_ref().into();
+                while let Some(result) = data_column_sidecars.next().await {
+                    match result {
+                        Ok(Some(data_column_sidecar)) => {
+                            let data_column_identifier: DataColumnIdentifier =
+                                data_column_sidecar.as_ref().into();
 
-                    debug_with_peers!(
-                        "sending DataColumnsSidecarsByRoot response chunk \
-                        (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
-                        slot: {}, id: {data_column_identifier:?})",
-                        data_column_sidecar.slot(),
-                    );
+                            debug_with_peers!(
+                                "sending DataColumnsSidecarsByRoot response chunk \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
+                                slot: {}, id: {data_column_identifier:?})",
+                                data_column_sidecar.slot(),
+                            );
 
-                    ServiceInboundMessage::SendResponse(
-                        peer_id,
-                        inbound_request_id,
-                        Box::new(Response::DataColumnsByRoot(Some(data_column_sidecar))),
-                    )
-                    .send(&network_to_service_tx);
+                            ServiceInboundMessage::SendResponse(
+                                peer_id,
+                                inbound_request_id,
+                                Box::new(Response::DataColumnsByRoot(Some(data_column_sidecar))),
+                            )
+                            .send(&network_to_service_tx);
+                        }
+                        Ok(None) => {
+                            trace_with_peers!(
+                                "skipping requested data column sidecar for \
+                                DataColumnsByRoot request (peer_id: {peer_id}, \
+                                inbound_request_id: {inbound_request_id:?})",
+                            );
+                        }
+                        Err(error) => {
+                            debug_with_peers!(
+                                "error trying to fetch requested data column sidecar for \
+                                DataColumnsByRoot request (peer_id: {peer_id}, \
+                                inbound_request_id: {inbound_request_id:?}): {error:?}",
+                            );
+                        }
+                    }
                 }
 
-                debug_with_peers!("terminating DataColumnsByRoot response stream");
+                debug_with_peers!(
+                    "terminating DataColumnsByRoot response stream: \
+                    {inbound_request_id:?}"
+                );
 
                 ServiceInboundMessage::SendResponse(
                     peer_id,

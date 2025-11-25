@@ -9,6 +9,7 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, StateCacheProcessor, Store,
 };
+use futures::Future;
 use helper_functions::misc;
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
@@ -537,7 +538,40 @@ where
             .collect()
     }
 
-    pub fn data_column_sidecars_by_ids(
+    pub fn data_column_sidecars_by_ids<'a>(
+        &'a self,
+        data_column_ids: impl IntoIterator<Item = DataColumnIdentifier> + Send + 'a,
+    ) -> impl Iterator<Item = impl Future<Output = Result<Option<Arc<DataColumnSidecar<P>>>>> + 'a> + 'a
+    {
+        let snapshot = Arc::new(self.snapshot());
+
+        data_column_ids.into_iter().map(move |data_column_id| {
+            let snapshot = snapshot.clone_arc();
+            let sidecars_pending_reconstruction =
+                self.sidecars_pending_reconstruction().clone_arc();
+
+            async move {
+                match snapshot.cached_data_column_sidecar_by_id(data_column_id) {
+                    Some(data_column_sidecar) => Ok(Some(data_column_sidecar)),
+                    None => {
+                        if let Some(mut receiver) = sidecars_pending_reconstruction
+                            .get(&data_column_id)
+                            .map(|entry| {
+                                let (_, sender) = entry.value();
+                                sender.subscribe()
+                            })
+                        {
+                            Ok(Some(receiver.recv().await?))
+                        } else {
+                            snapshot.storage.data_column_sidecar_by_id(data_column_id)
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    pub fn accepted_data_column_sidecars_by_ids(
         &self,
         data_column_ids: impl IntoIterator<Item = DataColumnIdentifier> + Send,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
@@ -564,7 +598,7 @@ where
         &self,
         block_root: H256,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
-        self.data_column_sidecars_by_ids(
+        self.accepted_data_column_sidecars_by_ids(
             (0..P::NumberOfColumns::U64).map(|index| DataColumnIdentifier { block_root, index }),
         )
     }
@@ -574,7 +608,9 @@ where
         range: Range<Slot>,
         columns: &[ColumnIndex],
         max_request_data_column_sidecars: usize,
-    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    ) -> Result<
+        impl Iterator<Item = impl Future<Output = Result<Option<Arc<DataColumnSidecar<P>>>>> + '_> + '_,
+    > {
         let canonical_chain_blocks = self.blocks_by_range(range)?;
 
         let data_column_ids = canonical_chain_blocks
@@ -588,9 +624,10 @@ where
                 })
             })
             .flatten()
-            .take(max_request_data_column_sidecars);
+            .take(max_request_data_column_sidecars)
+            .collect_vec();
 
-        self.data_column_sidecars_by_ids(data_column_ids)
+        Ok(self.data_column_sidecars_by_ids(data_column_ids))
     }
 
     pub async fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
