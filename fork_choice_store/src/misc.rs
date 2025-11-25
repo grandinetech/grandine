@@ -23,7 +23,7 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
@@ -800,6 +800,72 @@ pub enum PartialAttestationAction {
     Ignore,
     DelayUntilBlock(H256),
     DelayUntilSlot,
+}
+
+#[derive(Debug)]
+pub enum ExecutionPayloadEnvelopeOrigin {
+    Gossip(GossipId),
+    Requested(PeerId),
+    Own,
+}
+
+impl ExecutionPayloadEnvelopeOrigin {
+    #[must_use]
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        match self {
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Requested(_) => (None, None),
+            Self::Own => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Requested(_) => None,
+            Self::Own => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Requested(_) => None,
+            Self::Own => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_block(&self) -> bool {
+        false
+    }
+
+    #[must_use]
+    pub const fn should_generate_event(&self) -> bool {
+        matches!(self, Self::Gossip(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
+    Accept(Arc<SignedExecutionPayloadEnvelope<P>>),
+    Ignore(Publishable),
+    DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
+    DelayUntilSlot(Arc<SignedExecutionPayloadEnvelope<P>>),
+}
+
+impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
+    #[must_use]
+    pub const fn accepted(&self) -> bool {
+        matches!(self, Self::Accept(_))
+    }
 }
 
 #[derive(Clone)]

@@ -24,7 +24,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -50,6 +50,7 @@ pub enum Topic {
     ChainReorg,
     ContributionAndProof,
     DataColumnSidecar,
+    ExecutionPayloadEnvelope,
     FinalizedCheckpoint,
     Head,
     PayloadAttestation,
@@ -68,6 +69,7 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
+    ExecutionPayloadEnvelope(ExecutionPayloadEnvelopeEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttestation(Arc<PayloadAttestationMessage>),
@@ -88,6 +90,7 @@ impl<P: Preset> Event<P> {
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
+            Self::ExecutionPayloadEnvelope(_) => Topic::ExecutionPayloadEnvelope,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::PayloadAttestation(_) => Topic::PayloadAttestation,
@@ -109,6 +112,7 @@ pub struct EventChannels<P: Preset> {
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
+    pub execution_payload_envelopes: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub payload_attestations: Sender<Event<P>>,
@@ -137,6 +141,7 @@ impl<P: Preset> EventChannels<P> {
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
+            execution_payload_envelopes: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attestations: broadcast::channel(max_events).0,
@@ -158,6 +163,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
+            Topic::ExecutionPayloadEnvelope => &self.execution_payload_envelopes,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttestation => &self.payload_attestations,
@@ -281,6 +287,15 @@ impl<P: Preset> EventChannels<P> {
                     warn_with_peers!("unable to send chain reorg event: {error}");
                 }
             }
+        }
+    }
+
+    pub fn send_execution_payload_envelope_event(
+        &self,
+        envelope: &SignedExecutionPayloadEnvelope<P>,
+    ) {
+        if let Err(error) = self.send_execution_payload_envelope_event_internal(envelope) {
+            warn_with_peers!("unable to send execution payload envelope event: {error}");
         }
     }
 
@@ -486,6 +501,19 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_execution_payload_envelope_event_internal(
+        &self,
+        envelope: &SignedExecutionPayloadEnvelope<P>,
+    ) -> Result<()> {
+        if self.execution_payload_envelopes.receiver_count() > 0 {
+            let envelope_event = ExecutionPayloadEnvelopeEvent::new(envelope);
+            let event = Event::ExecutionPayloadEnvelope(envelope_event);
+            self.execution_payload_envelopes.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_payload_attestation_event_internal(
         &self,
         payload_attestation: Arc<PayloadAttestationMessage>,
@@ -610,6 +638,30 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
             index: data_column_sidecar.index(),
             slot: data_column_sidecar.slot(),
             kzg_commitments: data_column_sidecar.kzg_commitments().clone(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadEnvelopeEvent {
+    pub beacon_block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: ValidatorIndex,
+    pub block_hash: ExecutionBlockHash,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub block_number: ExecutionBlockNumber,
+}
+
+impl ExecutionPayloadEnvelopeEvent {
+    fn new<P: Preset>(envelope: &SignedExecutionPayloadEnvelope<P>) -> Self {
+        Self {
+            beacon_block_root: envelope.message.beacon_block_root,
+            slot: envelope.message.slot,
+            builder_index: envelope.message.builder_index,
+            block_hash: envelope.message.payload.block_hash,
+            block_number: envelope.message.payload.block_number,
         }
     }
 }

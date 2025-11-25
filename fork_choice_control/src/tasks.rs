@@ -11,7 +11,7 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    PayloadAttestationOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadEnvelopeOrigin, PayloadAttestationOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -30,7 +30,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -467,6 +467,51 @@ pub struct RetryDataColumnSidecarTask<P: Preset, W> {
 impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
     fn run(self) {
         self.task.run()
+    }
+}
+
+pub struct ExecutionPayloadEnvelopeTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub beacon_block_seen: bool,
+    pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            execution_payload_envelope,
+            beacon_block_seen,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_execution_payload_envelope_task_times.start_timer());
+
+        let result = store_snapshot.validate_execution_payload_envelope(
+            execution_payload_envelope,
+            beacon_block_seen,
+            &origin,
+        );
+
+        MutatorMessage::ExecutionPayloadEnvelope {
+            wait_group,
+            result,
+            origin,
+            beacon_block_seen,
+            submission_time,
+        }
+        .send(&mutator_tx);
     }
 }
 

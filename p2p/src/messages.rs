@@ -83,6 +83,8 @@ pub enum P2pToSync<P: Preset> {
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
+    GossipExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>, PeerId, GossipId),
+    GossipPayloadAttestation(Arc<PayloadAttestationMessage>, GossipId),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
     Stop,
