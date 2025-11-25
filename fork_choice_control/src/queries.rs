@@ -1,7 +1,7 @@
 use core::{fmt::Debug, ops::Range};
 use std::sync::Arc;
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
@@ -26,7 +26,7 @@ use types::{
     nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         containers::Checkpoint,
-        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, H256},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -441,17 +441,17 @@ where
     pub fn block_by_slot(&self, slot: Slot) -> Result<Option<WithStatus<BlockWithRoot<P>>>> {
         let store = self.store_snapshot();
 
-        if let Some(chain_link) = store.chain_link_before_or_at(slot) {
-            if chain_link.slot() == slot {
-                let block = chain_link.block.clone_arc();
-                let root = chain_link.block_root;
+        if let Some(chain_link) = store.chain_link_before_or_at(slot)
+            && chain_link.slot() == slot
+        {
+            let block = chain_link.block.clone_arc();
+            let root = chain_link.block_root;
 
-                return Ok(Some(WithStatus {
-                    value: BlockWithRoot { block, root },
-                    status: chain_link.payload_status,
-                    finalized: store.is_slot_finalized(chain_link.slot()),
-                }));
-            }
+            return Ok(Some(WithStatus {
+                value: BlockWithRoot { block, root },
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(chain_link.slot()),
+            }));
         }
 
         if let Some((block, root)) = self.storage().finalized_block_by_slot(slot)? {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, bail};
 use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};

@@ -2,7 +2,7 @@ use core::{hash::Hash, time::Duration};
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use cached::{Cached as _, SizedCache, TimedSizedCache};
-use eth2_libp2p::{service::api_types::AppRequestId, PeerId};
+use eth2_libp2p::{PeerId, service::api_types::AppRequestId};
 use itertools::Itertools as _;
 use prometheus_metrics::Metrics;
 use types::preset::Preset;

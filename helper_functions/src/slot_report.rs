@@ -13,7 +13,7 @@ use types::{
     nonstandard::{AttestationEpoch, AttestationOutcome, GweiVec, Outcome as _, SlashingKind},
     phase0::{
         containers::AttestationData,
-        primitives::{Gwei, ValidatorIndex, H256},
+        primitives::{Gwei, H256, ValidatorIndex},
     },
     preset::Preset,
     traits::BeaconState,

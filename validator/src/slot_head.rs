@@ -24,7 +24,7 @@ use types::{
     combined::BeaconState,
     config::Config,
     nonstandard::{Phase, RelativeEpoch},
-    phase0::primitives::{CommitteeIndex, Epoch, Slot, SubnetId, ValidatorIndex, H256},
+    phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, SubnetId, ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
 };
@@ -102,7 +102,7 @@ impl<P: Preset> SlotHead<P> {
         slot: Slot,
         validator_indices_with_pubkeys: I,
         signer: &Signer,
-    ) -> Result<impl Iterator<Item = SyncCommitteeMessage> + '_>
+    ) -> Result<Vec<SyncCommitteeMessage>>
     where
         I: IntoIterator<Item = (ValidatorIndex, PublicKeyBytes)> + Send,
     {
@@ -126,8 +126,9 @@ impl<P: Preset> SlotHead<P> {
             })
             .unzip();
 
-        let messages = signer
-            .load()
+        let signer_snapshot = signer.load();
+
+        let messages = signer_snapshot
             .sign_triples_without_slashing_protection(
                 triples,
                 Some(self.beacon_state.as_ref().into()),
@@ -139,7 +140,8 @@ impl<P: Preset> SlotHead<P> {
                 beacon_block_root: self.beacon_block_root,
                 validator_index,
                 signature: signature.into(),
-            });
+            })
+            .collect();
 
         Ok(messages)
     }
@@ -148,7 +150,7 @@ impl<P: Preset> SlotHead<P> {
     pub async fn sync_committee_selection_proofs(
         &self,
         subcommittee_indices_with_pubkeys: impl Iterator<Item = (SubcommitteeIndex, PublicKeyBytes)>
-            + Send,
+        + Send,
         signer: &Signer,
     ) -> Result<Vec<Option<SignatureBytes>>> {
         let triples = subcommittee_indices_with_pubkeys.map(|(subcommittee_index, public_key)| {
@@ -200,24 +202,24 @@ impl<P: Preset> SlotHead<P> {
             )
             .await
         {
-            Ok(signatures) => {
-                match signatures.into_iter().exactly_one() {
-                    Ok(signature_option) => match signature_option {
-                        Some(signature) => Some(signature.into()),
-                        None => {
-                            warn_with_peers!(
-                                "failed to sign beacon block due to slashing protection \
+            Ok(signatures) => match signatures.into_iter().exactly_one() {
+                Ok(signature_option) => match signature_option {
+                    Some(signature) => Some(signature.into()),
+                    None => {
+                        warn_with_peers!(
+                            "failed to sign beacon block due to slashing protection \
                                 (block: {block:?}, public_key: {public_key:?})",
-                            );
-                            None
-                        }
-                    },
-                    Err(_) => {
-                        warn_with_peers!("Slashing protection returned iterator with different number of elements",);
+                        );
                         None
                     }
+                },
+                Err(_) => {
+                    warn_with_peers!(
+                        "Slashing protection returned iterator with different number of elements",
+                    );
+                    None
                 }
-            }
+            },
             Err(error) => {
                 warn_with_peers!(
                     "error while signing beacon block \

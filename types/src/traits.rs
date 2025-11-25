@@ -103,8 +103,8 @@ use crate::{
             SignedVoluntaryExit,
         },
         primitives::{
-            DepositIndex, Epoch, ExecutionBlockHash, ExecutionBlockNumber, Gwei, Slot, UnixSeconds,
-            ValidatorIndex, H256,
+            DepositIndex, Epoch, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
+            UnixSeconds, ValidatorIndex,
         },
     },
     preset::Preset,
@@ -1394,7 +1394,7 @@ impl<P: Preset> BlockBodyWithBlsToExecutionChanges<P> for FuluBlindedBeaconBlock
 pub trait BlockBodyWithBlobKzgCommitments<P: Preset>: BeaconBlockBody<P> {
     // TODO(feature/deneb): method for state is_post_deneb
     fn blob_kzg_commitments(&self)
-        -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>;
+    -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>;
 }
 
 impl<P: Preset> BlockBodyWithBlobKzgCommitments<P> for DenebBeaconBlockBody<P> {

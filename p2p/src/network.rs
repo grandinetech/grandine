@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use data_dumper::DataDumper;
 use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
@@ -13,19 +13,19 @@ use eip_7594::{compute_columns_for_custody_group, get_custody_groups};
 use enum_iterator::Sequence as _;
 use eth1_api::{BlobFetcherToP2p, RealController};
 use eth2_libp2p::{
+    Context, GossipId, GossipTopic, MessageAcceptance, MessageId, NetworkConfig, NetworkEvent,
+    NetworkGlobals, PeerAction, PeerId, PubsubMessage, ReportSource, Response, ShutdownReason,
+    Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
     rpc::{
+        GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
         methods::{
             BlobsByRangeRequest, BlobsByRootRequest, BlocksByRootRequest,
             DataColumnsByRangeRequest, DataColumnsByRootRequest, OldBlocksByRangeRequest,
             RpcErrorResponse, RpcResponse,
         },
-        GoodbyeReason, InboundRequestId, RequestType, StatusMessage, StatusMessageV2,
     },
-    service::{api_types::AppRequestId, Network as Service},
-    types::{core_topics_to_subscribe, EnrForkId, ForkContext, GossipEncoding},
-    Context, GossipId, GossipTopic, MessageAcceptance, MessageId, NetworkConfig, NetworkEvent,
-    NetworkGlobals, PeerAction, PeerId, PubsubMessage, ReportSource, Response, ShutdownReason,
-    Subnet, SubnetDiscovery, SyncInfo, SyncStatus, TaskExecutor,
+    service::{Network as Service, api_types::AppRequestId},
+    types::{EnrForkId, ForkContext, GossipEncoding, core_topics_to_subscribe},
 };
 use features::Feature;
 use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage};
@@ -37,8 +37,8 @@ use futures::{
 };
 use helper_functions::{accessors, misc};
 use logging::{
-    debug_with_peers, error_with_peers, info_with_peers, trace_with_peers, warn_with_peers,
-    PEER_LOG_METRICS,
+    PEER_LOG_METRICS, debug_with_peers, error_with_peers, info_with_peers, trace_with_peers,
+    warn_with_peers,
 };
 use operation_pools::{BlsToExecutionChangePool, Origin, PoolToP2pMessage, SyncCommitteeAggPool};
 use prometheus_client::registry::Registry;
@@ -61,7 +61,7 @@ use types::{
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, NodeId, Slot, SubnetId, H256},
+        primitives::{Epoch, H256, NodeId, Slot, SubnetId},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},

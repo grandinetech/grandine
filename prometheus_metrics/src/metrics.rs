@@ -5,8 +5,8 @@ use anyhow::Result;
 use logging::warn_with_peers;
 use once_cell::sync::OnceCell;
 use prometheus::{
-    histogram_opts, opts, Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec,
+    Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    histogram_opts, opts,
 };
 use types::{
     nonstandard::SystemStats,
@@ -239,7 +239,7 @@ impl Metrics {
 
             total_cpu_seconds: IntGauge::new(
                 "GRANDINE_TOTAL_CPU_SECONDS",
-                "Grandine CPU load usage measured in seconds"
+                "Grandine CPU load usage measured in seconds",
             )?,
 
             grandine_thread_count: IntGauge::new("GRANDINE_THREAD_COUNT", "Grandine task count")?,
@@ -306,29 +306,32 @@ impl Metrics {
 
             received_sync_contribution_subsets: IntCounter::new(
                 "RECEIVED_SYNC_CONTRIBUTION_SUBSETS",
-                "Number of received sync contributions that are subsets of already known aggregates"
+                "Number of received sync contributions that are subsets of already known aggregates",
             )?,
 
             received_aggregated_attestation_subsets: IntCounter::new(
                 "RECEIVED_AGGREGATED_ATTESTATION_SUBSETS",
                 "Number of received aggregated attestations that are subsets of \
-                 already known aggregates"
+                 already known aggregates",
             )?,
 
             // Custody Subnets / PeerDAS
             column_subnet_peers: IntGaugeVec::new(
-                opts!("PEERS_PER_COLUMN_SUBNET", "Number of connected peers per column subnet"),
+                opts!(
+                    "PEERS_PER_COLUMN_SUBNET",
+                    "Number of connected peers per column subnet"
+                ),
                 &["subnet_id"],
             )?,
 
             data_column_sidecars_submitted_for_processing: IntCounter::new(
-                "beacon_data_column_sidecar_processing_requests_total", 
-                "Number of data column sidecars submitted for processing"
+                "beacon_data_column_sidecar_processing_requests_total",
+                "Number of data column sidecars submitted for processing",
             )?,
 
             verified_gossip_data_column_sidecar: IntCounter::new(
-                "beacon_data_column_sidecar_processing_successes_total", 
-                "Number of data column sidecars verified for gossip"
+                "beacon_data_column_sidecar_processing_successes_total",
+                "Number of data column sidecars verified for gossip",
             )?,
 
             data_column_sidecar_verification_times: Histogram::with_opts(histogram_opts!(
@@ -337,8 +340,8 @@ impl Metrics {
             ))?,
 
             reconstructed_columns: IntCounter::new(
-                "beacon_data_availability_reconstructed_columns_total", 
-                "Total count of reconstructed columns"
+                "beacon_data_availability_reconstructed_columns_total",
+                "Total count of reconstructed columns",
             )?,
 
             columns_reconstruction_time: Histogram::with_opts(histogram_opts!(
@@ -351,10 +354,12 @@ impl Metrics {
                 "Time taken to compute data column sidecar, including cells, proofs and inclusion proof"
             ))?,
 
-            data_column_sidecar_inclusion_proof_verification: Histogram::with_opts(histogram_opts!(
-                "beacon_data_column_sidecar_inclusion_proof_verification_seconds",
-                "Time taken to verify data column sidecar inclusion proof"
-            ))?,
+            data_column_sidecar_inclusion_proof_verification: Histogram::with_opts(
+                histogram_opts!(
+                    "beacon_data_column_sidecar_inclusion_proof_verification_seconds",
+                    "Time taken to verify data column sidecar inclusion proof"
+                ),
+            )?,
 
             data_column_sidecar_kzg_verification_batch: Histogram::with_opts(histogram_opts!(
                 "beacon_kzg_verification_data_column_batch_seconds",
@@ -363,22 +368,22 @@ impl Metrics {
 
             beacon_custody_groups: IntGauge::new(
                 "beacon_custody_groups",
-                "Total number of custody groups within a node"
+                "Total number of custody groups within a node",
             )?,
 
             beacon_custody_groups_backfilled: IntGauge::new(
                 "beacon_custody_groups_backfilled",
-                "Total number of custody groups backfilled by a node"
+                "Total number of custody groups backfilled by a node",
             )?,
 
             engine_get_blobs_v2_requests_count: IntCounter::new(
                 "beacon_engine_getBlobsV2_requests_total",
-                "Total number of engine_getBlobsV2 requests sent"
+                "Total number of engine_getBlobsV2 requests sent",
             )?,
 
             engine_get_blobs_v2_responses_count: IntCounter::new(
                 "beacon_engine_getBlobsV2_responses_total",
-                "Total number of engine_getBlobsV2 successful responses received"
+                "Total number of engine_getBlobsV2 successful responses received",
             )?,
 
             engine_get_blobs_v2_request_time: Histogram::with_opts(histogram_opts!(
@@ -435,21 +440,21 @@ impl Metrics {
                 histogram_opts!(
                     "ATTESTATION_VERIFIER_PROCESS_ATTESTATION_BATCH_TIMES",
                     "Attestation verifier process attestation batch task times",
-                )
+                ),
             )?,
 
             attestation_verifier_process_aggregate_batch_times: Histogram::with_opts(
                 histogram_opts!(
                     "ATTESTATION_VERIFIER_PROCESS_AGGREGATE_BATCH_TIMES",
                     "Attestation verifier process aggregate batch task times",
-                )
+                ),
             )?,
 
             attestation_verifier_verify_agg_batch_signature_times: Histogram::with_opts(
                 histogram_opts!(
                     "ATTESTATION_VERIFIER_VERIFY_AGG_BATCH_SIGNATURES_TIMES",
                     "Attestation verifier verify aggregate batch signature times",
-                )
+                ),
             )?,
 
             // Validator ticks + Epoch processing
@@ -506,12 +511,10 @@ impl Metrics {
                 "Number of validator propose duties successes",
             )?,
 
-            validator_proposal_slashing_protector_times: Histogram::with_opts(
-                histogram_opts!(
-                    "VALIDATOR_PROPOSAL_SLASHING_PROTECTOR_TIMES",
-                    "Slashing protection times when checking block proposal",
-                )
-            )?,
+            validator_proposal_slashing_protector_times: Histogram::with_opts(histogram_opts!(
+                "VALIDATOR_PROPOSAL_SLASHING_PROTECTOR_TIMES",
+                "Slashing protection times when checking block proposal",
+            ))?,
 
             // Build beacon block times
             build_beacon_block_times: Histogram::with_opts(histogram_opts!(
@@ -612,10 +615,7 @@ impl Metrics {
 
             // Fork choice tasks
             fc_block_task_times: HistogramVec::new(
-                histogram_opts!(
-                    "FC_BLOCK_TASK_TIMES",
-                    "Forkchoice BlockTask times",
-                ),
+                histogram_opts!("FC_BLOCK_TASK_TIMES", "Forkchoice BlockTask times",),
                 &["origin"],
             )?,
 
@@ -728,10 +728,7 @@ impl Metrics {
             ))?,
 
             // EF interop metrics
-            beacon_head_slot: IntGauge::new(
-                "beacon_head_slot",
-                "Latest slot of the beacon chain",
-            )?,
+            beacon_head_slot: IntGauge::new("beacon_head_slot", "Latest slot of the beacon chain")?,
 
             beacon_finalized_epoch: IntGauge::new(
                 "beacon_finalized_epoch",
@@ -774,10 +771,7 @@ impl Metrics {
                 "Total effective balance of previous epoch attesters",
             )?,
 
-            validator_count: IntGauge::new(
-                "validator_count",
-                "Number of total validators",
-            )?,
+            validator_count: IntGauge::new("validator_count", "Number of total validators")?,
 
             // Builder API
             builder_register_validator_times: Histogram::with_opts(histogram_opts!(
@@ -808,11 +802,8 @@ impl Metrics {
 
             // Eth1 API
             eth1_api_request_times: HistogramVec::new(
-                histogram_opts!(
-                    "ETH1_API_REQUEST_TIMES",
-                    "Times for ETH1 API calls",
-                ),
-                &["method"]
+                histogram_opts!("ETH1_API_REQUEST_TIMES", "Times for ETH1 API calls",),
+                &["method"],
             )?,
 
             eth1_api_errors_count: IntCounter::new(

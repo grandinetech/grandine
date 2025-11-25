@@ -21,7 +21,7 @@ use types::{
     preset::Preset,
 };
 
-use crate::{error::KzgError, trusted_setup, KzgBackend};
+use crate::{KzgBackend, error::KzgError, trusted_setup};
 
 pub fn verify_cell_kzg_proof_batch<'a, P: Preset>(
     commitments: impl IntoIterator<Item = &'a KzgCommitment>,

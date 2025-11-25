@@ -5,9 +5,9 @@ use core::{fmt::Debug, hash::Hash, marker::PhantomData};
 use derivative::Derivative;
 use derive_more::{Deref, DerefMut};
 use ethereum_types::H256;
-use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use try_from_iterator::TryFromIterator;
-use typenum::{Unsigned, U1};
+use typenum::{U1, Unsigned};
 
 use crate::{
     error::{ReadError, WriteError},

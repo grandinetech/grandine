@@ -5,10 +5,10 @@ use core::{
 };
 use std::sync::Arc;
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{traits::PublicKey as _, AggregatePublicKey, PublicKeyBytes};
+use bls::{AggregatePublicKey, PublicKeyBytes, traits::PublicKey as _};
 #[cfg(not(target_os = "zkvm"))]
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
@@ -38,7 +38,7 @@ use types::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
         primitives::{
-            CommitteeIndex, DomainType, Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H128, H256,
+            CommitteeIndex, DomainType, Epoch, Gwei, H128, H256, Slot, SubnetId, ValidatorIndex,
         },
     },
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},

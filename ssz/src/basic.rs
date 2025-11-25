@@ -1,6 +1,6 @@
 use byteorder::ByteOrder as _;
 use ethereum_types::H256;
-use typenum::{U2, U32, U4, U8};
+use typenum::{U2, U4, U8, U32};
 
 use crate::{
     consts::Endianness,

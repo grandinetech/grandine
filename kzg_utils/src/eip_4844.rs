@@ -1,17 +1,17 @@
 use anyhow::Result;
 use kzg::{
+    Fr, G1,
     eip_4844::{
         blob_to_kzg_commitment_raw, compute_blob_kzg_proof_raw, compute_kzg_proof_raw,
         verify_blob_kzg_proof_batch_raw, verify_blob_kzg_proof_raw, verify_kzg_proof_raw,
     },
-    Fr, G1,
 };
 use types::{
     deneb::primitives::{Blob, KzgCommitment, KzgProof},
     preset::Preset,
 };
 
-use crate::{error::KzgError, trusted_setup, KzgBackend};
+use crate::{KzgBackend, error::KzgError, trusted_setup};
 
 pub fn blob_to_kzg_commitment<P: Preset>(
     blob: &Blob<P>,

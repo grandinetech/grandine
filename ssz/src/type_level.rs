@@ -5,8 +5,8 @@ use core::ops::{Add, Shr, Sub};
 use ethereum_types::H256;
 use generic_array::ArrayLength;
 use typenum::{
-    op, Diff, IsGreaterOrEqual, IsLess, Len, Length, Log2, Min, Minimum, NonZero, PowerOfTwo,
-    Shleft, Sub1, Sum, True, Unsigned, B1, U1, U3, U31, U5, U64, U7,
+    B1, Diff, IsGreaterOrEqual, IsLess, Len, Length, Log2, Min, Minimum, NonZero, PowerOfTwo,
+    Shleft, Sub1, Sum, True, U1, U3, U5, U7, U31, U64, Unsigned, op,
 };
 
 use crate::porcelain::SszHash;

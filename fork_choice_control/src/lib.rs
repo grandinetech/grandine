@@ -14,7 +14,7 @@
 
 pub use crate::{
     controller::Controller,
-    events::{Event, EventChannels, Topic, DEFAULT_MAX_EVENTS},
+    events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
         ValidatorMessage,
@@ -25,10 +25,10 @@ pub use crate::{
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
     storage::{
-        get, save, BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot,
+        BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
         DataColumnSidecarByColumnId, FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot,
         SlotColumnId, StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage,
-        UnfinalizedBlockByRoot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+        UnfinalizedBlockByRoot, get, save,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},
     wait::Wait,

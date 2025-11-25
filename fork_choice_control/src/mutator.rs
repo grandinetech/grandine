@@ -17,14 +17,14 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{
-        mpsc::{Receiver, Sender},
         Arc,
+        mpsc::{Receiver, Sender},
     },
     thread::Builder,
     time::Instant,
 };
 
-use anyhow::{anyhow, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, anyhow};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
 use eth2_libp2p::GossipId;
@@ -62,7 +62,7 @@ use types::{
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
-        primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
+        primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -438,11 +438,11 @@ where
         if tick.is_end_of_interval() {
             let head = self.store.head();
 
-            if head.is_optimistic() {
-                if let Some(execution_payload) = head.block.as_ref().clone().execution_payload() {
-                    let params = if let Some(body) =
-                        head.block.message().body().with_blob_kzg_commitments()
-                    {
+            if head.is_optimistic()
+                && let Some(execution_payload) = head.block.as_ref().clone().execution_payload()
+            {
+                let params =
+                    if let Some(body) = head.block.message().body().with_blob_kzg_commitments() {
                         let versioned_hashes = body
                             .blob_kzg_commitments()
                             .iter()
@@ -466,13 +466,12 @@ where
                         None
                     };
 
-                    self.execution_engine.notify_new_payload(
-                        head.block_root,
-                        execution_payload,
-                        params,
-                        None,
-                    )?;
-                }
+                self.execution_engine.notify_new_payload(
+                    head.block_root,
+                    execution_payload,
+                    params,
+                    None,
+                )?;
             }
         }
 
@@ -612,39 +611,36 @@ where
                 let block_root = chain_link.block_root;
                 let parent_root = chain_link.block.message().parent_root();
 
-                if let Some(delayed) = self.delayed_until_block.get_mut(&block_root) {
-                    if let Some((payload_status, _)) = delayed.payload_status.take() {
-                        debug_with_peers!(
-                            "applying delayed payload status \
+                if let Some(delayed) = self.delayed_until_block.get_mut(&block_root)
+                    && let Some((payload_status, _)) = delayed.payload_status.take()
+                {
+                    debug_with_peers!(
+                        "applying delayed payload status \
                             (payload_status: {payload_status:?}, beacon_block_root: {block_root:?})",
+                    );
+
+                    if let Some(valid_hash) = payload_status.latest_valid_hash
+                        && let Some(parent) = self.store.chain_link(parent_root)
+                    {
+                        let parent_execution_block_hash = parent.block.execution_block_hash();
+
+                        self.store_mut()
+                            .update_chain_payload_statuses(valid_hash, parent_execution_block_hash);
+
+                        self.update_store_snapshot();
+                    }
+
+                    if payload_status.status.is_valid() {
+                        chain_link.payload_status = PayloadStatus::Valid;
+                    }
+
+                    if payload_status.status.is_invalid() {
+                        self.reject_block(
+                            Error::<P>::InvalidExecutionPayload.into(),
+                            block_root,
+                            origin,
                         );
-
-                        if let Some(valid_hash) = payload_status.latest_valid_hash {
-                            if let Some(parent) = self.store.chain_link(parent_root) {
-                                let parent_execution_block_hash =
-                                    parent.block.execution_block_hash();
-
-                                self.store_mut().update_chain_payload_statuses(
-                                    valid_hash,
-                                    parent_execution_block_hash,
-                                );
-
-                                self.update_store_snapshot();
-                            }
-                        }
-
-                        if payload_status.status.is_valid() {
-                            chain_link.payload_status = PayloadStatus::Valid;
-                        }
-
-                        if payload_status.status.is_invalid() {
-                            self.reject_block(
-                                Error::<P>::InvalidExecutionPayload.into(),
-                                block_root,
-                                origin,
-                            );
-                            return Ok(());
-                        }
+                        return Ok(());
                     }
                 }
 
@@ -1960,14 +1956,10 @@ where
         if let Some(chain_link) = self
             .store
             .unfinalized_chain_link_by_execution_block_hash(execution_block_hash)
+            && chain_link.is_valid()
         {
-            if chain_link.is_valid() {
-                self.event_channels.send_block_event(
-                    chain_link.slot(),
-                    chain_link.block_root,
-                    false,
-                );
-            }
+            self.event_channels
+                .send_block_event(chain_link.slot(), chain_link.block_root, false);
         }
 
         self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
@@ -2119,16 +2111,16 @@ where
 
         let block_slot = chain_link.slot();
 
-        if let Some(existing_link) = self.store.chain_link_before_or_at(block_slot) {
-            if block_slot == existing_link.slot() {
-                warn_with_peers!(
-                    "the store accepted a new block at slot {block_slot}, \
+        if let Some(existing_link) = self.store.chain_link_before_or_at(block_slot)
+            && block_slot == existing_link.slot()
+        {
+            warn_with_peers!(
+                "the store accepted a new block at slot {block_slot}, \
                     although it already contains one at the same slot on the canonical chain \
                     (existing canonical block: {:?}, new block: {:?})",
-                    existing_link.block,
-                    chain_link.block,
-                );
-            }
+                existing_link.block,
+                chain_link.block,
+            );
         }
 
         let block = block.clone_arc();
@@ -2213,11 +2205,11 @@ where
                 .observe(processing_duration.as_secs_f64());
         }
 
-        if let Some(hash) = block.execution_block_hash() {
-            if let Some(payload_statuses) = self.delayed_until_payload.remove(&hash) {
-                for (payload_status, _) in payload_statuses {
-                    self.handle_notified_new_payload(wait_group, block_root, hash, payload_status);
-                }
+        if let Some(hash) = block.execution_block_hash()
+            && let Some(payload_statuses) = self.delayed_until_payload.remove(&hash)
+        {
+            for (payload_status, _) in payload_statuses {
+                self.handle_notified_new_payload(wait_group, block_root, hash, payload_status);
             }
         }
 
@@ -2486,10 +2478,9 @@ where
 
         // During syncing, if we retry everytime when receiving a sidecar, this might spamming the
         // queue, leading to delaying other data column sidecar tasks
-        if should_retry_block {
-            if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
-                self.retry_block(wait_group.clone(), pending_block);
-            }
+        if should_retry_block && let Some(pending_block) = self.take_delayed_until_blobs(block_root)
+        {
+            self.retry_block(wait_group.clone(), pending_block);
         }
 
         self.event_channels
@@ -2895,7 +2886,10 @@ where
         self.delayed_until_block.remove(&block_root)
     }
 
-    fn take_delayed_until_slot(&mut self, slot: Slot) -> impl Iterator<Item = Delayed<P>> {
+    fn take_delayed_until_slot(
+        &mut self,
+        slot: Slot,
+    ) -> impl Iterator<Item = Delayed<P>> + use<P, E, W, TS, PS, LS, NS, SS, VS> {
         match slot.checked_add(1) {
             Some(next_slot) => {
                 let later = self.delayed_until_slot.split_off(&next_slot);
@@ -3125,10 +3119,10 @@ where
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
 
-            if let Some((_, slot)) = payload_status {
-                if *slot <= finalized_slot {
-                    payload_status.take();
-                }
+            if let Some((_, slot)) = payload_status
+                && *slot <= finalized_slot
+            {
+                payload_status.take();
             }
 
             gossip_ids.extend(
@@ -3778,12 +3772,10 @@ fn reply_to_http_api(
     sender: Option<OneshotSender<Result<ValidationOutcome>>>,
     reply: Result<ValidationOutcome>,
 ) {
-    if let Some(sender) = sender {
-        if let Err(reply) = sender.send(reply) {
-            debug_with_peers!(
-                "reply to HTTP API failed because the receiver was dropped: {reply:?}"
-            );
-        }
+    if let Some(sender) = sender
+        && let Err(reply) = sender.send(reply)
+    {
+        debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
     }
 }
 
@@ -3791,12 +3783,10 @@ fn reply_block_validation_result_to_http_api(
     sender: Option<MultiSender<Result<ValidationOutcome>>>,
     reply: Result<ValidationOutcome>,
 ) {
-    if let Some(mut sender) = sender {
-        if let Err(reply) = sender.try_send(reply) {
-            debug_with_peers!(
-                "reply to HTTP API failed because the receiver was dropped: {reply:?}"
-            );
-        }
+    if let Some(mut sender) = sender
+        && let Err(reply) = sender.try_send(reply)
+    {
+        debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
     }
 }
 

@@ -11,7 +11,7 @@ use crate::{
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
-        primitives::{DepositIndex, Slot, UnixSeconds, H256},
+        primitives::{DepositIndex, H256, Slot, UnixSeconds},
     },
     preset::Preset,
 };

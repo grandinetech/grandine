@@ -8,8 +8,8 @@ use block_producer::ValidatorBlindedBlock;
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use serde::{
-    de::{DeserializeSeed, Error as _},
     Deserialize, Serialize,
+    de::{DeserializeSeed, Error as _},
 };
 use ssz::{
     ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize, SszWrite,

@@ -17,8 +17,8 @@ use crate::{
             Attestation, AttesterSlashing, Deposit, Eth1Data, ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Slot, UnixSeconds,
-            ValidatorIndex, H256,
+            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot, UnixSeconds,
+            ValidatorIndex,
         },
     },
     preset::Preset,

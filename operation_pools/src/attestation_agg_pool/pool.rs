@@ -16,7 +16,7 @@ use types::{
     config::Config as ChainConfig,
     phase0::{
         containers::{Attestation, AttestationData},
-        primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::BeaconState,

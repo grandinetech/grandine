@@ -1,6 +1,6 @@
 use core::panic::AssertUnwindSafe;
 use std::{
-    sync::{mpsc::Sender, Arc},
+    sync::{Arc, mpsc::Sender},
     time::Instant,
 };
 
@@ -33,7 +33,7 @@ use types::{
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
-        primitives::{Slot, H256},
+        primitives::{H256, Slot},
     },
     preset::Preset,
     traits::{BeaconState, SignedBeaconBlock as _},
@@ -435,17 +435,17 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             metrics.as_ref(),
         );
 
-        if result.is_err() {
-            if let Some(metrics) = metrics.as_ref() {
-                metrics.data_column_sidecars_submitted_for_processing.inc();
-            }
+        if result.is_err()
+            && let Some(metrics) = metrics.as_ref()
+        {
+            metrics.data_column_sidecars_submitted_for_processing.inc();
         }
 
-        if let Ok(DataColumnSidecarAction::Accept(_)) = result {
-            if let Some(metrics) = metrics.as_ref() {
-                metrics.data_column_sidecars_submitted_for_processing.inc();
-                metrics.verified_gossip_data_column_sidecar.inc();
-            }
+        if let Ok(DataColumnSidecarAction::Accept(_)) = result
+            && let Some(metrics) = metrics.as_ref()
+        {
+            metrics.data_column_sidecars_submitted_for_processing.inc();
+            metrics.verified_gossip_data_column_sidecar.inc();
         }
 
         MutatorMessage::DataColumnSidecar {

@@ -8,7 +8,7 @@ use std::{
 };
 
 use allocator as _;
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use binary_utils::TracingHandle;
 use builder_api::BuilderConfig;
 use clap::{Error as ClapError, Parser as _};
@@ -22,7 +22,7 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use http_api::HttpApiConfig;
-use logging::{error_with_peers, info_with_peers, warn_with_peers, PEER_LOG_METRICS};
+use logging::{PEER_LOG_METRICS, error_with_peers, info_with_peers, warn_with_peers};
 use metrics::MetricsServerConfig;
 use p2p::{ListenAddr, NetworkConfig};
 use pubkey_cache::PubkeyCache;
@@ -30,14 +30,14 @@ use reqwest::{Client, ClientBuilder};
 use runtime::{MetricsConfig, RuntimeConfig, StorageConfig};
 use signer::{KeyOrigin, Signer};
 use slasher::SlasherConfig;
-use slashing_protection::{interchange_format::InterchangeData, SlashingProtector};
+use slashing_protection::{SlashingProtector, interchange_format::InterchangeData};
 use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::runtime::Builder;
 use types::{
     config::Config as ChainConfig,
-    phase0::primitives::{ExecutionBlockNumber, Slot, H256},
+    phase0::primitives::{ExecutionBlockNumber, H256, Slot},
     preset::{Preset, PresetName},
     redacting_url::RedactingUrl,
     traits::BeaconState as _,
@@ -536,10 +536,10 @@ fn try_main() -> Result<()> {
         metrics.clone(),
     ));
 
-    if let Some(cache) = cache {
-        if let Err(error) = cache.save() {
-            warn_with_peers!("Unable to save validator key cache: {error:?}");
-        }
+    if let Some(cache) = cache
+        && let Err(error) = cache.save()
+    {
+        warn_with_peers!("Unable to save validator key cache: {error:?}");
     }
 
     let slasher_config = slashing_enabled.then_some(SlasherConfig {

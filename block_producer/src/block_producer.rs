@@ -5,8 +5,8 @@ use std::{
 };
 
 use anyhow::{Context as _, Error as AnyhowError, Result};
-use bls::{traits::Signature as _, AggregateSignature, PublicKeyBytes, SignatureBytes};
-use builder_api::{combined::SignedBuilderBid, BuilderApi};
+use bls::{AggregateSignature, PublicKeyBytes, SignatureBytes, traits::Signature as _};
+use builder_api::{BuilderApi, combined::SignedBuilderBid};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
 use eth1_api::{ApiController, Eth1ExecutionEngine, WithClientVersions};
@@ -80,15 +80,15 @@ use types::{
             ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
-            ValidatorIndex, H256,
+            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, H256, Slot, Uint256,
+            ValidatorIndex,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{BeaconState as _, PostBellatrixBeaconState},
 };
 
-use crate::misc::{build_graffiti, PayloadIdEntry, ProposerData, ValidatorBlindedBlock};
+use crate::misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock, build_graffiti};
 
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
@@ -319,10 +319,10 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             attester_slashings
                 .iter()
                 .flat_map(|attester_slashing| match attester_slashing {
-                    AttesterSlashing::Phase0(ref attester_slashing) => {
+                    AttesterSlashing::Phase0(attester_slashing) => {
                         accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
                     }
-                    AttesterSlashing::Electra(ref attester_slashing) => {
+                    AttesterSlashing::Electra(attester_slashing) => {
                         accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
                     }
                 });
@@ -1590,7 +1590,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                              for head {head_root:?} at slot {slot}",
                         );
 
-                        self.producer_context.payload_id_cache.lock().await.cache_set((head_root, slot), payload_id);
+                        self.producer_context
+                            .payload_id_cache
+                            .lock()
+                            .await
+                            .cache_set((head_root, slot), payload_id);
                     }
                     // If we have no block at 4th-second mark, we preprocess new state without the block.
                     // In such case, after the state is preprocessed, we attempt to prepare the execution payload for the next slot with
@@ -1675,39 +1679,32 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         public_key: PublicKeyBytes,
     ) -> Option<ExecutionPayloadHeaderJoinHandle<P>> {
-        if let Some(state) = self.beacon_state.post_bellatrix() {
-            if let Some(builder_api) = self.producer_context.builder_api.clone() {
-                let slot = self.beacon_state.slot();
+        if let Some(state) = self.beacon_state.post_bellatrix()
+            && let Some(builder_api) = self.producer_context.builder_api.clone()
+        {
+            let slot = self.beacon_state.slot();
 
-                if let Err(error) = builder_api.can_use_builder_api::<P>(
-                    slot,
-                    self.producer_context
-                        .controller
-                        .snapshot()
-                        .nonempty_slots(self.head_block_root),
-                ) {
-                    warn_with_peers!(
-                        "cannot use Builder API for execution payload header: {error}"
-                    );
-                    return None;
-                }
-
-                let chain_config = self.producer_context.chain_config.clone_arc();
-                let parent_hash = state.latest_execution_payload_header().block_hash();
-
-                let handle = tokio::spawn(async move {
-                    builder_api
-                        .get_execution_payload_header::<P>(
-                            &chain_config,
-                            slot,
-                            parent_hash,
-                            public_key,
-                        )
-                        .await
-                });
-
-                return Some(handle);
+            if let Err(error) = builder_api.can_use_builder_api::<P>(
+                slot,
+                self.producer_context
+                    .controller
+                    .snapshot()
+                    .nonempty_slots(self.head_block_root),
+            ) {
+                warn_with_peers!("cannot use Builder API for execution payload header: {error}");
+                return None;
             }
+
+            let chain_config = self.producer_context.chain_config.clone_arc();
+            let parent_hash = state.latest_execution_payload_header().block_hash();
+
+            let handle = tokio::spawn(async move {
+                builder_api
+                    .get_execution_payload_header::<P>(&chain_config, slot, parent_hash, public_key)
+                    .await
+            });
+
+            return Some(handle);
         }
 
         None
@@ -1850,7 +1847,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     Ok(payload) => {
                         return Some(WithClientVersions::none(WithBlobsAndMev::with_default(
                             payload,
-                        )))
+                        )));
                     }
                     Err(error) => panic!("failed to produce fake payload: {error:?}"),
                 };

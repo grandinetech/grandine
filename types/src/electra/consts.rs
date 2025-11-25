@@ -1,5 +1,5 @@
 use hex_literal::hex;
-use typenum::{assert_type_eq, U1, U169, U2, U20, U22, U23, U37, U86, U87};
+use typenum::{U1, U2, U20, U22, U23, U37, U86, U87, U169, assert_type_eq};
 
 use crate::unphased::consts::{ConcatGeneralizedIndices, GeneralizedIndexInContainer};
 

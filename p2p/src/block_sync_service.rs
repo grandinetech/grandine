@@ -15,13 +15,13 @@ use database::{Database, PrefixableKey as _};
 use debug_info::HealthCheck;
 use eth1_api::RealController;
 use eth2_libp2p::{
-    service::api_types::AppRequestId, NetworkGlobals, PeerAction, PeerId, ReportSource,
+    NetworkGlobals, PeerAction, PeerId, ReportSource, service::api_types::AppRequestId,
 };
 use fork_choice_control::{StorageMode, SyncMessage};
 use futures::{
+    StreamExt as _,
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future::Either,
-    StreamExt as _,
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
@@ -40,7 +40,7 @@ use types::{
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{Slot, H256},
+        primitives::{H256, Slot},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -277,11 +277,10 @@ impl<P: Preset> BlockSyncService<P> {
                 _ = interval.select_next_some() => {
                     self.request_blobs_and_blocks_if_ready();
 
-                    if self.sync_direction == SyncDirection::Back {
-                        if let Some(back_sync) = &self.back_sync {
+                    if self.sync_direction == SyncDirection::Back
+                        && let Some(back_sync) = &self.back_sync {
                             SyncToP2p::UpdateEarliestAvailableSlot(back_sync.current_slot())
                                 .send(&self.sync_to_p2p_tx);
-                        }
                     }
                 },
 
@@ -1247,7 +1246,9 @@ impl<P: Preset> BlockSyncService<P> {
                 .sync_manager
                 .add_data_columns_request_by_root(data_columns_by_root, peer_id)
             {
-                debug_with_peers!("add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})");
+                debug_with_peers!(
+                    "add data column request by root (data_columns_by_root: {data_columns_by_root:?}, peer_id: {peer_id})"
+                );
 
                 SyncToP2p::RequestDataColumnsByRoot(
                     request_id,
@@ -1337,7 +1338,10 @@ impl<P: Preset> BlockSyncService<P> {
                 debug_with_peers!(
                     "sending batched DataColumnsByRoot request to {peer_id}: {} blocks, {} total columns",
                     by_roots_request.len(),
-                    by_roots_request.iter().map(|r| r.columns.len()).sum::<usize>()
+                    by_roots_request
+                        .iter()
+                        .map(|r| r.columns.len())
+                        .sum::<usize>()
                 );
 
                 SyncToP2p::RequestDataColumnsByRoot(request_id, peer_id, by_roots_request)

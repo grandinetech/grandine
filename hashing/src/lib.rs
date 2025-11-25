@@ -2,8 +2,8 @@ use ethereum_types::H256;
 use generic_array::GenericArray;
 use hex_literal::hex;
 use sha2::{
-    digest::{core_api::BlockSizeUser, generic_array::typenum::Unsigned as _},
     Sha256,
+    digest::{core_api::BlockSizeUser, generic_array::typenum::Unsigned as _},
 };
 
 #[rustfmt::skip]

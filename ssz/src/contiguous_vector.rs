@@ -10,11 +10,11 @@ use derive_more::{AsRef, Deref, DerefMut};
 use ethereum_types::H256;
 use generic_array::{ArrayLength, GenericArray};
 use serde::{
-    de::{Error as _, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize,
+    de::{Error as _, SeqAccess, Visitor},
 };
 use try_from_iterator::TryFromIterator;
-use typenum::{Unsigned as _, U1};
+use typenum::{U1, Unsigned as _};
 
 use crate::{
     error::{ReadError, WriteError},

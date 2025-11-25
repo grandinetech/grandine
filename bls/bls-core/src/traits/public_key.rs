@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use std::sync::Arc;
 
-use crate::{error::Error, DECOMPRESSED_SIZE};
+use crate::{DECOMPRESSED_SIZE, error::Error};
 
 use super::PublicKeyBytes as PublicKeyBytesTrait;
 

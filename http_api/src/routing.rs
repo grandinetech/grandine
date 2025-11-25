@@ -2,9 +2,9 @@ use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Error as AnyhowError;
 use axum::{
+    Json, Router,
     extract::{DefaultBodyLimit, FromRef, State},
     routing::{get, post},
-    Json, Router,
 };
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;

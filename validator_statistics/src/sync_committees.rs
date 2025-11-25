@@ -7,7 +7,7 @@ use types::{
     altair::containers::SyncAggregate,
     combined::{BeaconState, SignedBeaconBlock},
     nonstandard::UsizeVec,
-    phase0::primitives::{Slot, ValidatorIndex, H256},
+    phase0::primitives::{H256, Slot, ValidatorIndex},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };

@@ -8,19 +8,19 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{anyhow, ensure, Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
 use axum::{
+    Json,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{
-        sse::{Event as ServerSentEvent, KeepAlive},
         IntoResponse, Response, Sse,
+        sse::{Event as ServerSentEvent, KeepAlive},
     },
-    Json,
 };
 use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
-use bls::{traits::SignatureBytes as _, PublicKeyBytes, SignatureBytes};
+use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, Eth1Api};
@@ -34,13 +34,13 @@ use futures::{
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use http_api_utils::{BlockId, StateId};
-use itertools::{izip, Either, Itertools as _};
+use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
-    convert_to_electra_attestation, AttestationAggPool, BlsToExecutionChangePool, Origin,
-    PoolAdditionOutcome, SyncCommitteeAggPool,
+    AttestationAggPool, BlsToExecutionChangePool, Origin, PoolAdditionOutcome,
+    SyncCommitteeAggPool, convert_to_electra_attestation,
 };
 use p2p::{
     ApiToP2p, BeaconCommitteeSubscription, NetworkConfig, NodeIdentity, NodePeer, NodePeerCount,
@@ -82,18 +82,18 @@ use types::{
         primitives::ColumnIndex,
     },
     nonstandard::{
-        BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev,
-        WithStatus, WEI_IN_GWEI,
+        BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WEI_IN_GWEI,
+        WithBlobsAndMev, WithStatus,
     },
     phase0::{
-        consts::{TargetAggregatorsPerCommittee, GENESIS_SLOT},
+        consts::{GENESIS_SLOT, TargetAggregatorsPerCommittee},
         containers::{
             AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint, Fork,
             ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
         },
         primitives::{
-            ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, Slot, SubnetId, Uint256,
-            UnixSeconds, ValidatorIndex, Version, H256,
+            ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, Uint256,
+            UnixSeconds, ValidatorIndex, Version,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
@@ -1029,10 +1029,10 @@ pub async fn block_headers<P: Preset, W: Wait>(
     EthQuery(query): EthQuery<BlockHeadersQuery>,
 ) -> Result<EthResponse<[BlockHeadersResponse; 1]>, Error> {
     let opt_block_by_slot = |slot| -> Result<_> {
-        if let Some(root) = controller.block_root_by_slot(slot)? {
-            if let Some(with_status) = controller.block_by_root(root)? {
-                return Ok(Some((root, with_status)));
-            }
+        if let Some(root) = controller.block_root_by_slot(slot)?
+            && let Some(with_status) = controller.block_by_root(root)?
+        {
+            return Ok(Some((root, with_status)));
         }
 
         Ok(None)
@@ -2184,25 +2184,25 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
         match block_id::block(block_id, &controller, &anchor_checkpoint_provider) {
             Ok(block) => block,
             Err(error) => {
-                if matches!(error, Error::BlockNotFound) {
-                    if let BlockId::Root(block_root) = block_id {
-                        // For debug purposes return any data column sidecars by block root
-                        // even if block does not exist in fork choice
-                        let data_column_sidecars =
-                            controller.data_column_sidecars_by_root(block_root)?;
+                if matches!(error, Error::BlockNotFound)
+                    && let BlockId::Root(block_root) = block_id
+                {
+                    // For debug purposes return any data column sidecars by block root
+                    // even if block does not exist in fork choice
+                    let data_column_sidecars =
+                        controller.data_column_sidecars_by_root(block_root)?;
 
-                        if data_column_sidecars.is_empty() {
-                            return Err(Error::BlockNotFound);
-                        }
-
-                        let data_column_sidecars =
-                            DynamicList::from_vec(data_column_sidecars, P::NumberOfColumns::USIZE)
-                                .map_err(AnyhowError::new)?;
-
-                        return Ok(EthResponse::json_or_ssz(data_column_sidecars, &headers)?
-                            .execution_optimistic(true)
-                            .finalized(false));
+                    if data_column_sidecars.is_empty() {
+                        return Err(Error::BlockNotFound);
                     }
+
+                    let data_column_sidecars =
+                        DynamicList::from_vec(data_column_sidecars, P::NumberOfColumns::USIZE)
+                            .map_err(AnyhowError::new)?;
+
+                    return Ok(EthResponse::json_or_ssz(data_column_sidecars, &headers)?
+                        .execution_optimistic(true)
+                        .finalized(false));
                 }
 
                 return Err(error);
@@ -3040,8 +3040,8 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         status.is_optimistic()
     };
 
-    if is_optimistic {
-        if let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+    if is_optimistic
+        && let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
             loop {
                 let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
                     Ok(Event::Block(block_event)) => block_event,
@@ -3058,10 +3058,9 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
             }
         })
         .await
-        {
-            debug_with_peers!("timeout while waiting for block event: {error:?}");
-            return Err(Error::HeadIsOptimistic);
-        }
+    {
+        debug_with_peers!("timeout while waiting for block event: {error:?}");
+        return Err(Error::HeadIsOptimistic);
     }
 
     if state.slot() < slot {
@@ -3723,17 +3722,16 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
     let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
     let blob_sidecars = submit_blob_sidecars(controller.clone_arc(), blob_sidecars).await?;
 
-    if broadcast_validation == BroadcastValidation::Gossip {
-        if let Some(status_code) = publish_beacon_block_with_gossip_checks(
+    if broadcast_validation == BroadcastValidation::Gossip
+        && let Some(status_code) = publish_beacon_block_with_gossip_checks(
             controller.clone_arc(),
             block.clone_arc(),
             &blob_sidecars,
             &api_to_p2p_tx,
         )
         .await?
-        {
-            return Ok(status_code);
-        }
+    {
+        return Ok(status_code);
     }
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
@@ -3816,17 +3814,16 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     let data_column_sidecars =
         submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars).await?;
 
-    if broadcast_validation == BroadcastValidation::Gossip {
-        if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
+    if broadcast_validation == BroadcastValidation::Gossip
+        && let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
             controller.clone_arc(),
             block.clone_arc(),
             &data_column_sidecars,
             &api_to_p2p_tx,
         )
         .await?
-        {
-            return Ok(status_code);
-        }
+    {
+        return Ok(status_code);
     }
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
@@ -4213,8 +4210,8 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
                 .collect::<HashSet<_>>()
         })?;
 
-    if !missing_blocks.is_empty() {
-        if let Err(error) = timeout(wait_duration, async {
+    if !missing_blocks.is_empty()
+        && let Err(error) = timeout(wait_duration, async {
             loop {
                 if missing_blocks.is_empty() {
                     break;
@@ -4233,9 +4230,8 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
             }
         })
         .await
-        {
-            debug_with_peers!("timeout while waiting for block events: {error:?}");
-        }
+    {
+        debug_with_peers!("timeout while waiting for block events: {error:?}");
     }
 
     Ok(())
@@ -4369,9 +4365,9 @@ mod tests {
     use core::fmt::Display;
 
     use axum::{
-        extract::Query,
-        http::{header::CONTENT_TYPE, Request},
         Json, RequestExt as _, RequestPartsExt as _,
+        extract::Query,
+        http::{Request, header::CONTENT_TYPE},
     };
     use hex_literal::hex;
     use mime::APPLICATION_JSON;
@@ -4415,8 +4411,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_deserialize_for_state_validators_query() -> Result<()> {
-        let pubkey1 = PublicKeyBytes(hex!("a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7e"));
-        let pubkey2 = PublicKeyBytes(hex!("a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7a"));
+        let pubkey1 = PublicKeyBytes(hex!(
+            "a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7e"
+        ));
+        let pubkey2 = PublicKeyBytes(hex!(
+            "a6d2572f1f4b50f644cd2629e608edc049145df1e646dfb5f9c18b903efe4b5e78bb9c88ce53ff23819ce83a94735a7a"
+        ));
 
         let index1 = 123;
         let index2 = 456;

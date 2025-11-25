@@ -13,7 +13,7 @@ use crate::{
             Attestation, AttesterSlashing, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
             SignedVoluntaryExit,
         },
-        primitives::{Slot, ValidatorIndex, H256},
+        primitives::{H256, Slot, ValidatorIndex},
     },
     preset::{Preset, SyncSubcommitteeSize},
 };

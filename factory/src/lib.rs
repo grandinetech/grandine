@@ -6,10 +6,10 @@
 use core::ops::Range;
 use std::sync::Arc;
 
-use anyhow::{bail, ensure, Result};
+use anyhow::{Result, bail, ensure};
 use bls::{
-    traits::{SecretKey as _, Signature as _},
     AggregateSignature,
+    traits::{SecretKey as _, Signature as _},
 };
 use deposit_tree::DepositTree;
 use helper_functions::{
@@ -53,7 +53,7 @@ use types::{
             Attestation as Phase0Attestation, AttestationData, BeaconBlock as Phase0BeaconBlock,
             BeaconBlockBody as Phase0BeaconBlockBody, Checkpoint, Deposit, Eth1Data,
         },
-        primitives::{Epoch, ExecutionBlockHash, Slot, SubnetId, ValidatorIndex, H256},
+        primitives::{Epoch, ExecutionBlockHash, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
     traits::BeaconState as _,

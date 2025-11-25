@@ -19,9 +19,9 @@ use ssz::{
 };
 use strum::{Display, EnumString};
 use typenum::{
-    IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, Sum, True, Unsigned, B1, U1, U1048576,
-    U1073741824, U1099511627776, U128, U134217728, U16, U16777216, U17, U2, U2048, U256, U262144,
-    U32, U4, U4096, U512, U64, U65536, U8, U8192,
+    B1, IsGreaterOrEqual, NonZero, Prod, Quot, Sub1, Sum, True, U1, U2, U4, U8, U16, U17, U32, U64,
+    U128, U256, U512, U2048, U4096, U8192, U65536, U262144, U1048576, U16777216, U134217728,
+    U1073741824, U1099511627776, Unsigned,
 };
 
 use crate::{
@@ -43,7 +43,7 @@ use crate::{
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
         },
-        primitives::{Gwei, ValidatorIndex, H256},
+        primitives::{Gwei, H256, ValidatorIndex},
     },
 };
 

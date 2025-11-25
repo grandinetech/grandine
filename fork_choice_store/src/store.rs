@@ -2,13 +2,13 @@ use core::ops::{AddAssign as _, Bound, SubAssign as _};
 use std::{
     backtrace::Backtrace,
     collections::{
-        binary_heap::{BinaryHeap, PeekMut},
         HashSet as StdHashSet,
+        binary_heap::{BinaryHeap, PeekMut},
     },
     sync::{Arc, OnceLock},
 };
 
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
 use clock::Tick;
 use dashmap::DashMap;
@@ -24,8 +24,8 @@ use helper_functions::{
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier},
 };
-use im::{hashmap, hashmap::HashMap, ordmap, vector, HashSet, OrdMap, Vector};
-use itertools::{izip, Either, EitherOrBoth, Itertools as _};
+use im::{HashSet, OrdMap, Vector, hashmap, hashmap::HashMap, ordmap, vector};
+use itertools::{Either, EitherOrBoth, Itertools as _, izip};
 use logging::{error_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
@@ -56,7 +56,7 @@ use types::{
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, BeaconBlockHeader, Checkpoint},
-        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -64,6 +64,7 @@ use types::{
 use unwrap_none::UnwrapNone as _;
 
 use crate::{
+    AttestationOrigin,
     blob_cache::BlobCache,
     data_column_cache::DataColumnCache,
     error::Error,
@@ -81,7 +82,6 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
-    AttestationOrigin,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -1439,7 +1439,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 return Err(AttestationValidationError::Other {
                     attestation: Box::new(attestation),
                     source,
-                })
+                });
             }
         }
 
@@ -1495,14 +1495,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .state_cache
                 .before_or_at_slot_in_cache_only(target.root, slot);
 
-            if let AttestationOrigin::Block(block_root) = attestation.origin {
-                if target_state.is_none() {
-                    // During state transition, all block attestations are validated against block state.
-                    // Same logic applies here.
-                    target_state = self
-                        .chain_link(block_root)
-                        .map(|chain_link| chain_link.state(self));
-                }
+            if let AttestationOrigin::Block(block_root) = attestation.origin
+                && target_state.is_none()
+            {
+                // During state transition, all block attestations are validated against block state.
+                // Same logic applies here.
+                target_state = self
+                    .chain_link(block_root)
+                    .map(|chain_link| chain_link.state(self));
             }
 
             let Some(state) = target_state.or_else(|| {
@@ -1532,7 +1532,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         return Err(AttestationValidationError::Other {
                             attestation: Box::new(attestation),
                             source,
-                        })
+                        });
                     }
                 };
 
@@ -1558,7 +1558,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 return Err(AttestationValidationError::Other {
                     source,
                     attestation: Box::new(attestation),
-                })
+                });
             }
         };
 
@@ -2433,17 +2433,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .message()
                 .body()
                 .with_blob_kzg_commitments()
+                && self.should_check_data_availability_at_slot(chain_link.slot())
             {
-                if self.should_check_data_availability_at_slot(chain_link.slot()) {
-                    let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
+                let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
 
-                    info_with_peers!(
-                        "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
-                        chain_link.slot(),
-                    );
+                info_with_peers!(
+                    "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
+                    chain_link.slot(),
+                );
 
-                    return;
-                }
+                return;
             }
 
             info_with_peers!(
@@ -2928,13 +2927,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // (as long as the justified block is not orphaned, which is possible according to
                 // the Fork Choice specification). It is not sufficient because it does not prevent
                 // `ChainLink`s with unloaded states from becoming justified or finalized later.
-                if let Some(state) = chain_link.state.take() {
-                    if misc::is_epoch_start::<P>(chain_link.slot()) {
-                        to_persist.push(ChainLink {
-                            state: Some(state),
-                            ..chain_link.clone()
-                        });
-                    }
+                if let Some(state) = chain_link.state.take()
+                    && misc::is_epoch_start::<P>(chain_link.slot())
+                {
+                    to_persist.push(ChainLink {
+                        state: Some(state),
+                        ..chain_link.clone()
+                    });
                 }
             }
         }
@@ -3676,32 +3675,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if self.set_block_payload_status(latest_valid_hash, PayloadStatus::Valid) {
             self.set_block_ancestor_payload_statuses(latest_valid_hash, PayloadStatus::Valid);
 
-            if let Some(block_hash) = block_hash {
-                if block_hash != latest_valid_hash {
-                    if let Some(location) = self.execution_payload_locations.get(&block_hash) {
-                        let Location {
-                            segment_id,
-                            position,
-                        } = location;
+            if let Some(block_hash) = block_hash
+                && block_hash != latest_valid_hash
+            {
+                if let Some(location) = self.execution_payload_locations.get(&block_hash) {
+                    let Location {
+                        segment_id,
+                        position,
+                    } = location;
 
-                        let segment = &self.unfinalized[segment_id];
+                    let segment = &self.unfinalized[segment_id];
 
-                        let descendant_chain_hashes = self.unfinalized_execution_chain_hashes(
-                            latest_valid_hash,
-                            segment,
-                            *position,
-                        );
+                    let descendant_chain_hashes = self.unfinalized_execution_chain_hashes(
+                        latest_valid_hash,
+                        segment,
+                        *position,
+                    );
 
-                        if let Some(hash) = descendant_chain_hashes.last() {
-                            self.set_block_payload_status(*hash, PayloadStatus::Invalid);
-                            self.set_block_descendant_payload_statuses(
-                                *hash,
-                                PayloadStatus::Invalid,
-                            );
-                        }
-                    } else {
-                        return PayloadAction::DelayUntilBlock(block_hash);
+                    if let Some(hash) = descendant_chain_hashes.last() {
+                        self.set_block_payload_status(*hash, PayloadStatus::Invalid);
+                        self.set_block_descendant_payload_statuses(*hash, PayloadStatus::Invalid);
                     }
+                } else {
+                    return PayloadAction::DelayUntilBlock(block_hash);
                 }
             }
 

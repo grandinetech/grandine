@@ -18,8 +18,8 @@ use core::{
 };
 
 use serde::{
-    de::{Error, IntoDeserializer as _, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{Error, IntoDeserializer as _, Visitor},
 };
 
 pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>

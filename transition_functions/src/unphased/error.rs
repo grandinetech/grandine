@@ -4,7 +4,7 @@ use types::{
     combined::Attestation,
     phase0::{
         containers::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, Validator},
-        primitives::{Epoch, Slot, UnixSeconds, ValidatorIndex, H256},
+        primitives::{Epoch, H256, Slot, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
 };

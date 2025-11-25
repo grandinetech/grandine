@@ -302,12 +302,16 @@ mod spec_tests {
 
     // We do not honor `bls_setting` in epoch processing tests because none of them customize it.
 
-    #[test_resources("consensus-spec-tests/tests/mainnet/altair/epoch_processing/justification_and_finalization/*/*")]
+    #[test_resources(
+        "consensus-spec-tests/tests/mainnet/altair/epoch_processing/justification_and_finalization/*/*"
+    )]
     fn mainnet_justification_and_finalization(case: Case) {
         run_justification_and_finalization_case::<Mainnet>(case);
     }
 
-    #[test_resources("consensus-spec-tests/tests/minimal/altair/epoch_processing/justification_and_finalization/*/*")]
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/altair/epoch_processing/justification_and_finalization/*/*"
+    )]
     fn minimal_justification_and_finalization(case: Case) {
         run_justification_and_finalization_case::<Minimal>(case);
     }

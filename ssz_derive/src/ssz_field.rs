@@ -1,5 +1,5 @@
 use darling::FromField;
-use syn::{parse_quote, ExprPath, Ident, Path, Type};
+use syn::{ExprPath, Ident, Path, Type, parse_quote};
 
 #[derive(FromField)]
 #[darling(attributes(ssz))]

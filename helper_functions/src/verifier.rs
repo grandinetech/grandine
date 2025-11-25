@@ -1,10 +1,10 @@
 #![expect(clippy::module_name_repetitions)]
 use std::sync::Arc;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use bls::{
-    traits::{PublicKey as _, Signature as _, SignatureBytes as _},
     AggregatePublicKey, AggregateSignature, PublicKey, Signature, SignatureBytes,
+    traits::{PublicKey as _, Signature as _, SignatureBytes as _},
 };
 use derive_more::Constructor;
 use enumset::{EnumSet, EnumSetType};
@@ -447,7 +447,7 @@ pub enum VerifierOption {
 
 #[cfg(test)]
 mod tests {
-    use bls::{traits::SecretKey as _, SecretKey, SecretKeyBytes};
+    use bls::{SecretKey, SecretKeyBytes, traits::SecretKey as _};
     use std_ext::CopyExt as _;
     use tap::{Conv as _, TryConv as _};
 

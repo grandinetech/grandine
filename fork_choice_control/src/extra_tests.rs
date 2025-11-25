@@ -33,7 +33,7 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
-use crate::helpers::{epoch_at_slot, is_at_start_of_epoch, start_of_epoch, Context, Status};
+use crate::helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch};
 
 #[cfg(feature = "eth2-cache")]
 use crate::specialized::TestController;

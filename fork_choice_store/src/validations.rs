@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use execution_engine::ExecutionEngine;
 use helper_functions::misc;
 use std_ext::ArcExt as _;

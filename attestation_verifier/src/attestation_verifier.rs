@@ -13,8 +13,9 @@ use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
 };
 use futures::{
+    StreamExt,
     channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    select, StreamExt,
+    select,
 };
 use helper_functions::{
     accessors, electra,
@@ -396,13 +397,10 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
         let mut messages = vec![];
 
         for aggregate in aggregates {
-            let VerifyAggregateAndProofResult {
-                ref result,
-                origin: _,
-            } = aggregate;
+            let VerifyAggregateAndProofResult { result, origin: _ } = aggregate;
 
             if let Ok(AggregateAndProofAction::Accept {
-                ref aggregate_and_proof,
+                aggregate_and_proof,
                 ..
             }) = result
             {
@@ -568,10 +566,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
             self.controller.chain_config(),
             self.controller.pubkey_cache(),
             results.iter().filter_map(|result| {
-                if let Ok(AttestationAction::Accept {
-                    ref attestation, ..
-                }) = result
-                {
+                if let Ok(AttestationAction::Accept { attestation, .. }) = result {
                     Some(attestation.item.as_ref())
                 } else {
                     None

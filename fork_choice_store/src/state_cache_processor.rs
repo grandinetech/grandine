@@ -4,7 +4,7 @@ use core::{
 };
 use std::{backtrace::Backtrace, collections::HashSet, sync::Arc};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use features::Feature;
 use logging::{info_with_peers, warn_with_peers};
 use pubkey_cache::PubkeyCache;
@@ -15,7 +15,7 @@ use thiserror::Error;
 use transition_functions::combined;
 use types::{
     combined::BeaconState,
-    phase0::primitives::{Slot, H256},
+    phase0::primitives::{H256, Slot},
     preset::Preset,
     traits::BeaconState as _,
 };

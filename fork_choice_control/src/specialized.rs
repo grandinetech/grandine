@@ -20,12 +20,12 @@ use types::{
 };
 
 use crate::{
+    StorageMode,
     controller::{Controller, MutatorHandle},
     events::EventChannels,
     messages::{AttestationVerifierMessage, P2pMessage},
-    storage::{Storage, DEFAULT_ARCHIVAL_EPOCH_INTERVAL},
+    storage::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage},
     unbounded_sink::UnboundedSink,
-    StorageMode,
 };
 
 #[cfg(test)]

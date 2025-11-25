@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bls::PublicKeyBytes;
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
