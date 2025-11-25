@@ -15,13 +15,20 @@ use crate::{
     },
     phase0::{
         containers::{Attestation as Phase0Attestation, AttestationData},
-        primitives::H256,
+        primitives::{CommitteeIndex, ValidatorIndex, H256},
     },
     preset::Preset,
 };
 
 #[derive(Debug, Error)]
 pub enum AttestationError {
+    #[error("{attester_index} not in committee (committee index: {committee_index}, attestation data: {attestation_data:?}, committee: {committee:?})")]
+    AttesterNotInCommittee {
+        attester_index: ValidatorIndex,
+        committee_index: CommitteeIndex,
+        attestation_data: AttestationData,
+        committee: Vec<ValidatorIndex>,
+    },
     #[error("invalid aggregation bits for conversion")]
     InvalidAggregationBits(#[source] ReadError),
 }
@@ -189,43 +196,6 @@ impl<P: Preset> TryFrom<SingleAttestation> for IndexedAttestation<P> {
 }
 
 impl SingleAttestation {
-    pub fn try_into_electra_attestation<P: Preset>(
-        self,
-        beacon_committee: IndexSlice,
-    ) -> Result<Attestation<P>> {
-        let Self {
-            committee_index,
-            attester_index,
-            data,
-            signature,
-        } = self;
-
-        ensure!(
-            committee_index < P::MaxCommitteesPerSlot::U64,
-            AnyhowError::msg(format!("invalid committee_index: {committee_index}"))
-        );
-
-        let mut committee_bits = BitVector::default();
-        let index = committee_index.try_into()?;
-        committee_bits.set(index, true);
-
-        let mut aggregation_bits = BitList::with_length(beacon_committee.len());
-
-        let position = beacon_committee
-            .into_iter()
-            .position(|index| index == attester_index)
-            .ok_or_else(|| AnyhowError::msg(format!("{attester_index} not in committee")))?;
-
-        aggregation_bits.set(position, true);
-
-        Ok(Attestation {
-            aggregation_bits,
-            data,
-            signature,
-            committee_bits,
-        })
-    }
-
     pub fn try_into_phase0_attestation<P: Preset>(
         self,
         beacon_committee: IndexSlice,
@@ -252,7 +222,12 @@ impl SingleAttestation {
         let position = beacon_committee
             .into_iter()
             .position(|index| index == attester_index)
-            .ok_or_else(|| AnyhowError::msg(format!("{attester_index} not in committee")))?;
+            .ok_or_else(|| AttestationError::AttesterNotInCommittee {
+                attester_index,
+                committee_index,
+                attestation_data: data,
+                committee: beacon_committee.into_iter().collect(),
+            })?;
 
         aggregation_bits.set(position, true);
 
