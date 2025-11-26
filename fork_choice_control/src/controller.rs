@@ -24,8 +24,8 @@ use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, PayloadAttestationOrigin,
-    StateCacheProcessor, Store, StoreConfig,
+    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeOrigin,
+    PayloadAttestationOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -63,8 +63,8 @@ use crate::{
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
-        BlockVerifyForGossipTask, DataColumnSidecarTask, PayloadAttestationTask,
-        StateAtSlotCacheFlushTask,
+        BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadEnvelopeTask,
+        PayloadAttestationTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -386,6 +386,24 @@ where
         .send(&self.mutator_tx);
     }
 
+    pub fn on_gossip_execution_payload(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        gossip_id: GossipId,
+        beacon_block_seen: bool,
+    ) {
+        self.spawn(ExecutionPayloadEnvelopeTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            execution_payload_envelope,
+            beacon_block_seen,
+            origin: ExecutionPayloadEnvelopeOrigin::Gossip(gossip_id),
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
+        })
+    }
+
     pub fn on_notified_new_payload(
         &self,
         beacon_block_root: H256,
@@ -623,14 +641,16 @@ where
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         peer_id: PeerId,
     ) {
-        // TODO(Phase 2): Spawn ExecutionPayloadEnvelopeTask when merging ad16f5c4a
-        // For now, just log receipt
-        debug_with_peers!(
-            "received execution payload envelope (block_root: {:?}, slot: {}, peer_id: {:?})",
-            envelope.message.beacon_block_root,
-            envelope.message.slot,
-            peer_id
-        );
+        self.spawn(ExecutionPayloadEnvelopeTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            execution_payload_envelope: envelope,
+            beacon_block_seen: true, // RPC envelopes arrive after block is requested
+            origin: ExecutionPayloadEnvelopeOrigin::Requested(peer_id),
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
+        })
     }
 
     pub fn on_requested_data_column_sidecar(

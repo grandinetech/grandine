@@ -82,6 +82,7 @@ pub struct Metrics {
     mutator_attestations: IntCounterVec,
     mutator_aggregate_and_proofs: IntCounterVec,
     mutator_payload_attestations: IntCounterVec,
+    mutator_execution_payload_envelopes: IntCounterVec,
 
     pub block_insertion_times: Histogram,
     pub block_processing_times: Histogram,
@@ -155,6 +156,7 @@ pub struct Metrics {
 
     pub fc_blob_sidecar_task_times: Histogram,
     pub fc_data_column_sidecar_task_times: Histogram,
+    pub fc_execution_payload_envelope_task_times: Histogram,
     pub fc_blob_sidecar_persist_task_times: Histogram,
     pub fc_data_column_sidecar_persist_task_times: Histogram,
     pub fc_execution_payload_envelope_persist_task_times: Histogram,
@@ -425,6 +427,14 @@ impl Metrics {
                 opts!(
                     "MUTATOR_PAYLOAD_ATTESTATIONS",
                     "Counter for different payload attestations (delayed/ignored etc) for Mutator",
+                ),
+                &["type"],
+            )?,
+
+            mutator_execution_payload_envelopes: IntCounterVec::new(
+                opts!(
+                    "MUTATOR_EXECUTION_PAYLOAD_ENVELOPES",
+                    "Counter for different execution payload envelopes (delayed/ignored etc) for Mutator",
                 ),
                 &["type"],
             )?,
@@ -703,6 +713,11 @@ impl Metrics {
                 "Forkchoice DataColumnSidecar times",
             ))?,
 
+            fc_execution_payload_envelope_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_EXECUTION_PAYLOAD_ENVELOPE_TASK_TIMES",
+                "Forkchoice ExecutionPayloadEnvelopeTask times",
+            ))?,
+
             fc_data_column_sidecar_persist_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_DATA_COLUMN_SIDECAR_PERSIST_TASK_TIMES",
                 "Forkchoice DataColumnSidecar persist task times",
@@ -977,6 +992,7 @@ impl Metrics {
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
         default_registry.register(Box::new(self.mutator_payload_attestations.clone()))?;
+        default_registry.register(Box::new(self.mutator_execution_payload_envelopes.clone()))?;
         default_registry.register(Box::new(self.block_insertion_times.clone()))?;
         default_registry.register(Box::new(self.block_processing_times.clone()))?;
         default_registry.register(Box::new(self.block_post_processing_times.clone()))?;
@@ -1055,6 +1071,7 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_payload_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_task_times.clone()))?;
+        default_registry.register(Box::new(self.fc_execution_payload_envelope_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_persist_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_data_column_sidecar_task_times.clone()))?;
         default_registry.register(Box::new(
@@ -1338,6 +1355,20 @@ impl Metrics {
             Err(error) => {
                 warn_with_peers!(
                     "unable to register mutator payload attestation for {labels:?}: {error:?}"
+                )
+            }
+        }
+    }
+
+    pub fn register_mutator_execution_payload_envelope(&self, labels: &[&str]) {
+        match self
+            .mutator_execution_payload_envelopes
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register mutator execution payload envelope for {labels:?}: {error:?}"
                 )
             }
         }

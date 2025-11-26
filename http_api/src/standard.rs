@@ -2294,6 +2294,7 @@ pub async fn beacon_events<P: Preset>(
                 Event::ChainReorg(data) => ssevent.json_data(data),
                 Event::ContributionAndProof(data) => ssevent.json_data(data),
                 Event::DataColumnSidecar(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadEnvelope(data) => ssevent.json_data(data),
                 Event::FinalizedCheckpoint(data) => ssevent.json_data(data),
                 Event::Head(data) => ssevent.json_data(data),
                 Event::PayloadAttestation(data) => ssevent.json_data(data),

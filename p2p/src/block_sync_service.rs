@@ -6,6 +6,7 @@ use core::{
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::SystemTime,
 };
 
 use anyhow::Result;
@@ -31,6 +32,7 @@ use ssz::{ContiguousList, SszReadDefault};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
+use tracing::debug;
 use tokio_stream::wrappers::IntervalStream;
 use try_from_iterator::TryFromIterator as _;
 use types::{
@@ -39,7 +41,7 @@ use types::{
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{Slot, H256},
+        primitives::{Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -98,7 +100,7 @@ pub struct BlockSyncService<P: Preset> {
     received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
-    received_envelope_roots: HashMap<H256, Slot>,
+    received_envelopes: HashMap<(H256, ValidatorIndex), Slot>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
@@ -242,7 +244,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_blob_sidecars,
             received_block_roots: HashMap::new(),
             received_data_column_sidecars,
-            received_envelope_roots: HashMap::new(),
+            received_envelopes: HashMap::new(),
             data_dumper,
             network_globals,
             fork_choice_to_sync_rx,
@@ -577,8 +579,9 @@ impl<P: Preset> BlockSyncService<P> {
                             match request_direction {
                                 SyncDirection::Forward => {
                                     let envelope_slot = envelope.message.slot;
+                                    let builder_index = envelope.message.builder_index;
 
-                                    if self.register_new_received_envelope(block_root, envelope_slot) {
+                                    if self.register_new_received_envelope(block_root, builder_index, envelope_slot) {
                                         self.controller.on_requested_execution_payload_envelope(envelope, peer_id);
 
                                         debug_with_peers!(
@@ -624,7 +627,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
                             }
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
-                            self.received_envelope_roots.retain(|_, slot| *slot >= start_of_epoch);
+                            self.received_envelopes.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
@@ -645,6 +648,54 @@ impl<P: Preset> BlockSyncService<P> {
                                 warn_with_peers!("failed to start data column backfill: {error}");
                             }
                         }
+                        P2pToSync::GossipExecutionPayload(execution_payload_envelope, peer_id, gossip_id) => {
+                            let payload_slot = execution_payload_envelope.message.slot;
+                            let beacon_block_root = execution_payload_envelope.message.beacon_block_root;
+                            let builder_index = execution_payload_envelope.message.builder_index;
+
+                            // Early validation: deduplication check (per block_root and builder_index)
+                            if self.register_new_received_envelope(beacon_block_root, builder_index, payload_slot) {
+                                // Early validation: timing check (3/4 into slot)
+                                let slot_start = misc::compute_timestamp_at_slot(
+                                    self.config.as_ref(),
+                                    &self.controller.head_state().value(),
+                                    payload_slot,
+                                );
+                                let slot_start_time = SystemTime::UNIX_EPOCH + Duration::from_secs(slot_start);
+                                let three_fourths_slot = slot_start_time + Duration::from_millis(
+                                    3 * self.config.seconds_per_slot.get() * 1000 / 4
+                                );
+
+                                if SystemTime::now() >= three_fourths_slot {
+                                    // Check if beacon block has been seen
+                                    let beacon_block_seen = self.received_block_roots.contains_key(&beacon_block_root);
+
+                                    debug!(
+                                        "received execution payload as gossip (slot: {payload_slot}, \
+                                        beacon_block_root: {beacon_block_root:?}, peer_id: {peer_id}, \
+                                        beacon_block_seen: {beacon_block_seen})"
+                                    );
+
+                                    self.controller.on_gossip_execution_payload(
+                                        execution_payload_envelope,
+                                        gossip_id,
+                                        beacon_block_seen,
+                                    );
+                                } else {
+                                    debug!(
+                                        "execution payload too early (slot: {payload_slot}, \
+                                        beacon_block_root: {beacon_block_root:?})"
+                                    );
+                                }
+                            }
+                        }
+                        P2pToSync::GossipPayloadAttestation(payload_attestation, gossip_id) => {
+                            debug!("received payload attestation as gossip");
+                            self.controller.on_gossip_payload_attestation(
+                                payload_attestation,
+                                gossip_id,
+                            );
+                        }                        
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
 
@@ -1486,7 +1537,7 @@ impl<P: Preset> BlockSyncService<P> {
                 self.received_block_roots = HashMap::new();
                 self.received_blob_sidecars.clear();
                 self.received_data_column_sidecars.clear();
-                self.received_envelope_roots = HashMap::new();
+                self.received_envelopes = HashMap::new();
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready();
@@ -1531,9 +1582,9 @@ impl<P: Preset> BlockSyncService<P> {
             .is_none()
     }
 
-    fn register_new_received_envelope(&mut self, block_root: H256, slot: Slot) -> bool {
-        self.received_envelope_roots
-            .insert(block_root, slot)
+    fn register_new_received_envelope(&mut self, block_root: H256, builder_index: ValidatorIndex, slot: Slot) -> bool {
+        self.received_envelopes
+            .insert((block_root, builder_index), slot)
             .is_none()
     }
 
@@ -1565,8 +1616,8 @@ impl<P: Preset> BlockSyncService<P> {
             metrics.set_collection_length(
                 module_path!(),
                 &type_name,
-                "received_envelope_roots",
-                self.received_envelope_roots.len(),
+                "received_envelopes",
+                self.received_envelopes.len(),
             );
         }
     }

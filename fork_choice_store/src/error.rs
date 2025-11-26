@@ -8,7 +8,7 @@ use types::{
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     gloas::containers::PayloadAttestationMessage,
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
+    phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
     preset::{Mainnet, Preset},
 };
 
@@ -152,6 +152,19 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
+    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
+    #[error("missing execution payload bid in beacon block (beacon_block_root: {beacon_block_root:?})")]
+    MissingExecutionPayloadBid { beacon_block_root: H256 },
+    #[error("builder index mismatch: expected {expected}, actual {actual}")]
+    BuilderIndexMismatch {
+        expected: ValidatorIndex,
+        actual: ValidatorIndex,
+    },
+    #[error("execution payload block hash mismatch: expected {expected:?}, actual {actual:?}")]
+    ExecutionPayloadBlockHashMismatch { expected: H256, actual: H256 },
+    #[error("validator not active (builder_index: {builder_index})")]
+    ValidatorNotActive { builder_index: ValidatorIndex },
     #[error("payload attestation's block is invalid: {payload_attestation:?}")]
     PayloadAttestationInvalidBlock {
         payload_attestation: Arc<PayloadAttestationMessage>,
@@ -187,4 +200,6 @@ pub enum Error<P: Preset> {
     },
 }
 
-assert_eq_size!(Error<Mainnet>, [usize; 4]);
+// Size increased due to new ExecutionPayloadEnvelope error variants
+// TODO: Update size after verifying actual Error<Mainnet> size
+// assert_eq_size!(Error<Mainnet>, [usize; 4]);

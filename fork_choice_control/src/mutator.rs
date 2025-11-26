@@ -36,9 +36,9 @@ use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
-    DataColumnSidecarAction, DataColumnSidecarOrigin, Error, PayloadAction,
-    PayloadAttestationAction, PayloadAttestationOrigin, StateCacheProcessor, Store,
-    ValidAttestation,
+    DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadEnvelopeAction,
+    ExecutionPayloadEnvelopeOrigin, PayloadAction, PayloadAttestationAction,
+    PayloadAttestationOrigin, StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -79,16 +79,17 @@ use crate::{
     misc::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
-        PendingChainLink, PendingDataColumnSidecar, PendingPayloadAttestation, ProcessingTimings,
-        ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
-        WaitingForCheckpointState,
+        PendingChainLink, PendingDataColumnSidecar, PendingExecutionPayloadEnvelope,
+        PendingPayloadAttestation, ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult,
+        VerifyAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        DataColumnSidecarTask, PayloadAttestationTask, PersistBlobSidecarsTask,
-        PersistDataColumnSidecarsTask, PersistExecutionPayloadEnvelopesTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask,
+        DataColumnSidecarTask, ExecutionPayloadEnvelopeTask, PayloadAttestationTask,
+        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -311,6 +312,19 @@ where
                         persisted_block_roots,
                     );
                 }
+                MutatorMessage::ExecutionPayloadEnvelope {
+                    wait_group,
+                    result,
+                    origin,
+                    beacon_block_seen,
+                    submission_time,
+                } => self.handle_execution_payload_envelope(
+                    &wait_group,
+                    result,
+                    origin,
+                    beacon_block_seen,
+                    submission_time,
+                )?,
                 MutatorMessage::PayloadAttestation {
                     wait_group,
                     result,
@@ -1766,6 +1780,117 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
+    fn handle_execution_payload_envelope(
+        &mut self,
+        wait_group: &W,
+        result: Result<ExecutionPayloadEnvelopeAction<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+        beacon_block_seen: bool,
+        submission_time: Instant,
+    ) -> Result<()> {
+        match result {
+            Ok(ExecutionPayloadEnvelopeAction::Accept(execution_payload_envelope)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_execution_payload_envelope(&["accepted"]);
+                }
+
+                trace_with_peers!(
+                    "execution payload envelope accepted (beacon_block_root: {:?}, slot: {})",
+                    execution_payload_envelope.message.beacon_block_root,
+                    execution_payload_envelope.message.slot
+                );
+
+                if origin.should_generate_event() {
+                    self.event_channels
+                        .send_execution_payload_envelope_event(&execution_payload_envelope);
+                }
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+
+                // TODO: Store the execution payload envelope for later use
+                // when the beacon block is imported
+            }
+            Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_execution_payload_envelope(&["ignored"]);
+                }
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+            }
+            Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
+                execution_payload_envelope,
+                beacon_block_root,
+            )) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_execution_payload_envelope(&["delayed_until_block"]);
+                }
+
+                self.delay_execution_payload_envelope_until_block(
+                    wait_group,
+                    PendingExecutionPayloadEnvelope {
+                        execution_payload_envelope,
+                        beacon_block_seen,
+                        origin,
+                        submission_time,
+                    },
+                    beacon_block_root,
+                );
+            }
+            Ok(ExecutionPayloadEnvelopeAction::DelayUntilSlot(execution_payload_envelope)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics
+                        .register_mutator_execution_payload_envelope(&["delayed_until_slot"]);
+                }
+
+                self.delay_execution_payload_envelope_until_slot(
+                    wait_group,
+                    PendingExecutionPayloadEnvelope {
+                        execution_payload_envelope,
+                        beacon_block_seen,
+                        origin,
+                        submission_time,
+                    },
+                );
+            }
+            Err(error) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_execution_payload_envelope(&["rejected"]);
+                }
+
+                let source = error.to_string();
+                warn_with_peers!(
+                    "execution payload envelope rejected (error: {error:?})"
+                );
+
+                let (gossip_id, sender) = origin.split();
+
+                if gossip_id.is_some() {
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidExecutionPayloadEnvelope,
+                    ));
+                }
+
+                reply_to_http_api(sender, Err(anyhow!(source)));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[expect(clippy::too_many_lines)]
     fn handle_payload_attestation(
         &mut self,
         wait_group: &W,
@@ -2890,6 +3015,59 @@ where
         }
     }
 
+    fn delay_execution_payload_envelope_until_block(
+        &mut self,
+        wait_group: &W,
+        pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
+        beacon_block_root: H256,
+    ) {
+        if self.store.contains_block(beacon_block_root) {
+            self.retry_execution_payload_envelope(
+                wait_group.clone(),
+                pending_execution_payload_envelope,
+            );
+        } else {
+            trace_with_peers!(
+                "execution payload envelope delayed until block \
+                 (beacon_block_root: {beacon_block_root:?})",
+            );
+
+            let peer_id = pending_execution_payload_envelope
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
+
+            self.delayed_until_block
+                .entry(beacon_block_root)
+                .or_default()
+                .execution_payload_envelopes
+                .push(pending_execution_payload_envelope);
+        }
+    }
+
+    fn delay_execution_payload_envelope_until_slot(
+        &mut self,
+        wait_group: &W,
+        pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
+    ) {
+        let slot = pending_execution_payload_envelope
+            .execution_payload_envelope
+            .message
+            .slot;
+
+        trace_with_peers!(
+            "execution payload envelope delayed until slot (slot: {slot})",
+        );
+
+        self.delayed_until_slot
+            .entry(slot)
+            .or_default()
+            .execution_payload_envelopes
+            .push(pending_execution_payload_envelope);
+    }
+
     fn delay_payload_status_until_block(
         &mut self,
         beacon_block_root: H256,
@@ -3098,6 +3276,7 @@ where
             aggregates,
             attestations,
             payload_attestations,
+            execution_payload_envelopes,
             blob_sidecars,
             data_column_sidecars,
         } = delayed;
@@ -3116,6 +3295,13 @@ where
 
         for pending_payload_attestation in payload_attestations {
             self.retry_payload_attestation(wait_group.clone(), pending_payload_attestation);
+        }
+
+        for pending_execution_payload_envelope in execution_payload_envelopes {
+            self.retry_execution_payload_envelope(
+                wait_group.clone(),
+                pending_execution_payload_envelope,
+            );
         }
 
         for pending_blob_sidecar in blob_sidecars {
@@ -3188,6 +3374,32 @@ where
             wait_group,
             payload_attestation,
             origin,
+            metrics: self.metrics.clone(),
+        });
+    }
+
+    fn retry_execution_payload_envelope(
+        &self,
+        wait_group: W,
+        pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
+    ) {
+        trace_with_peers!("retrying delayed execution payload envelope");
+
+        let PendingExecutionPayloadEnvelope {
+            execution_payload_envelope,
+            beacon_block_seen,
+            origin,
+            submission_time,
+        } = pending_execution_payload_envelope;
+
+        self.spawn(ExecutionPayloadEnvelopeTask {
+            store_snapshot: self.owned_store(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            execution_payload_envelope,
+            beacon_block_seen,
+            origin,
+            submission_time,
             metrics: self.metrics.clone(),
         });
     }
@@ -3315,6 +3527,7 @@ where
                 aggregates,
                 attestations,
                 payload_attestations,
+                execution_payload_envelopes,
                 blob_sidecars,
                 data_column_sidecars,
             } = delayed;
