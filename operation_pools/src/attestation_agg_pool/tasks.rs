@@ -11,12 +11,13 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
 use helper_functions::accessors;
-use logging::warn_with_peers;
+use logging::{exception, warn_with_peers};
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
+    electra::error::AttestationConversionError,
     phase0::containers::Attestation,
     phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex},
     preset::Preset,
@@ -27,7 +28,7 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     attestation_agg_pool::{
         attestation_packer::{AttestationPacker, PackOutcome},
-        conversion::{self, convert_attestation_for_pool},
+        conversion::convert_attestation_for_pool,
         pool::Pool,
         types::Aggregate,
     },
@@ -214,13 +215,19 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
 
         let attestation = match convert_attestation_for_pool(&controller, attestation) {
             Ok(attestation) => attestation,
-            Err(error) => match error.downcast_ref::<conversion::Error<P>>() {
-                Some(conversion::Error::<P>::Irrelevant { .. }) => return Ok(()),
-                _ => {
-                    warn_with_peers!("Failed to convert attestation for pool: {error:?}");
-                    return Ok(());
+            Err(error) => {
+                match error.downcast_ref::<AttestationConversionError>() {
+                    Some(AttestationConversionError::Irrelevant) => {}
+                    Some(AttestationConversionError::AttesterNotInCommittee { .. }) => {
+                        exception!("failed to convert attestation for pool: {error:?}");
+                    }
+                    _ => {
+                        warn_with_peers!("failed to convert attestation for pool: {error:?}");
+                    }
                 }
-            },
+
+                return Ok(());
+            }
         };
 
         let Attestation {
