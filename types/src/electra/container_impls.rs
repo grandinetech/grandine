@@ -1,6 +1,5 @@
 use anyhow::{ensure, Error as AnyhowError, Result};
-use ssz::{BitList, BitVector, ContiguousList, ReadError};
-use thiserror::Error;
+use ssz::{BitList, BitVector, ContiguousList};
 use typenum::Unsigned as _;
 
 use crate::{
@@ -9,29 +8,19 @@ use crate::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
         primitives::KzgCommitment,
     },
-    electra::containers::{
-        Attestation, BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
-        ExecutionRequests, IndexedAttestation, SingleAttestation,
+    electra::{
+        containers::{
+            Attestation, BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
+            ExecutionRequests, IndexedAttestation, SingleAttestation,
+        },
+        error::AttestationConversionError,
     },
     phase0::{
         containers::{Attestation as Phase0Attestation, AttestationData},
-        primitives::{CommitteeIndex, ValidatorIndex, H256},
+        primitives::H256,
     },
     preset::Preset,
 };
-
-#[derive(Debug, Error)]
-pub enum AttestationError {
-    #[error("{attester_index} not in committee (committee index: {committee_index}, attestation data: {attestation_data:?}, committee: {committee:?})")]
-    AttesterNotInCommittee {
-        attester_index: ValidatorIndex,
-        committee_index: CommitteeIndex,
-        attestation_data: AttestationData,
-        committee: Vec<ValidatorIndex>,
-    },
-    #[error("invalid aggregation bits for conversion")]
-    InvalidAggregationBits(#[source] ReadError),
-}
 
 impl<P: Preset> BeaconBlock<P> {
     pub fn with_execution_payload_header_and_kzg_commitments(
@@ -163,7 +152,7 @@ impl<P: Preset> TryFrom<Phase0Attestation<P>> for Attestation<P> {
         Ok(Self {
             aggregation_bits: aggregation_bits
                 .try_into()
-                .map_err(AttestationError::InvalidAggregationBits)?,
+                .map_err(AttestationConversionError::InvalidAggregationBits)?,
             data: AttestationData { index: 0, ..data },
             committee_bits,
             signature,
@@ -222,7 +211,7 @@ impl SingleAttestation {
         let position = beacon_committee
             .into_iter()
             .position(|index| index == attester_index)
-            .ok_or_else(|| AttestationError::AttesterNotInCommittee {
+            .ok_or_else(|| AttestationConversionError::AttesterNotInCommittee {
                 attester_index,
                 committee_index,
                 attestation_data: data,
