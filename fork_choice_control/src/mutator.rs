@@ -451,7 +451,9 @@ where
             let head = self.store.head();
 
             if head.is_optimistic() {
+                // TODO: (gloas): get `execution_payload` from post-gloas payload envelope
                 if let Some(execution_payload) = head.block.as_ref().clone().execution_payload() {
+                    // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
                     let params = if let Some(body) =
                         head.block.message().body().with_blob_kzg_commitments()
                     {
@@ -462,6 +464,7 @@ where
                             .map(misc::kzg_commitment_to_versioned_hash)
                             .collect();
 
+                        // TODO: (gloas): get `execution_requests` from post-gloas payload envelope
                         if let Some(body) = body.with_execution_requests() {
                             Some(ExecutionPayloadParams::Electra {
                                 versioned_hashes,
@@ -1705,6 +1708,7 @@ where
                     submission_time,
                 };
 
+                // TODO: (gloas): gloas block can be imported without sidecars
                 if self.store.contains_block(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
@@ -3958,6 +3962,7 @@ where
             return BlockDataColumnAvailability::Irrelevant;
         }
 
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockDataColumnAvailability::Irrelevant;
         };

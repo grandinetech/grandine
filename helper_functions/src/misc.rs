@@ -760,6 +760,8 @@ pub fn construct_blob_sidecars<P: Preset>(
     blobs: impl IntoIterator<Item = Blob<P>>,
     proofs: impl IntoIterator<Item = KzgProof>,
 ) -> Result<Vec<BlobSidecar<P>>> {
+    // it is being used in `blob_sidecars` beacon API, which deprecated in Fulu, and no longer
+    // supported start from Gloas
     let Some(body) = block.message().body().with_blob_kzg_commitments() else {
         return Ok(vec![]);
     };

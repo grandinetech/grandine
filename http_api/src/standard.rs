@@ -1337,6 +1337,7 @@ pub async fn blobs<P: Preset, W: Wait>(
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
     let requested_indices = if let Some(versioned_hashes) = query.versioned_hashes {
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(kzg_commitments) = block
             .message()
             .body()
@@ -1623,6 +1624,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
 
+    // TODO: (gloas): handle publish gloas block only
     if controller
         .chain_config()
         .phase_at_slot::<P>(slot)
@@ -2900,6 +2902,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     if skip_randao_verification && !randao_reveal.is_empty() {
         return Err(Error::InvalidRandaoReveal);
     }
+
+    // TODO: (gloas): no longer supported from gloas phase
 
     let block_root = controller.head().value.block_root;
     let beacon_state = controller
@@ -4306,6 +4310,10 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
             return Ok(vec![]);
         }
 
+        let first_column = data_column_sidecars
+            .first()
+            .expect("this cannot happen unless NumberOfColumns is zero");
+
         let half_columns = P::NumberOfColumns::U64.saturating_div(2);
 
         if (0..half_columns).any(|index| {
@@ -4333,8 +4341,10 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
 
             let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
-            data_column_sidecars =
-                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
+            data_column_sidecars = eip_7594::construct_data_column_sidecars_from_sidecar(
+                first_column,
+                &cells_and_kzg_proofs,
+            )?;
         }
 
         let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
@@ -4393,6 +4403,14 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
     proofs: Option<KzgProofs<P>>,
     metrics: Option<Arc<Metrics>>,
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    ensure!(
+        signed_beacon_block.phase() == Phase::Fulu,
+        Error::InvalidPhase {
+            expected: Phase::Fulu,
+            got: signed_beacon_block.phase()
+        }
+    );
+
     tokio::task::spawn_blocking(move || {
         let timer = metrics
             .as_ref()
@@ -4404,8 +4422,10 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
             controller.store_config().kzg_backend,
         )?;
 
-        let data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
+        let data_column_sidecars = eip_7594::construct_fulu_data_column_sidecars(
+            &signed_beacon_block,
+            &cells_and_kzg_proofs,
+        )?;
 
         prometheus_metrics::stop_and_record(timer);
 

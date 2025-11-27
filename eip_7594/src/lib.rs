@@ -30,6 +30,7 @@ use types::{
         primitives::{BlobCommitmentsInclusionProof, CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
     gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
+    nonstandard::Phase,
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, NodeId, Slot, SubnetId, ValidatorIndex},
@@ -257,7 +258,7 @@ pub fn recover_matrix<P: Preset>(
         .map(construct_full_matrix)
 }
 
-fn get_data_column_sidecars_pre_gloas<P: Preset>(
+fn get_fulu_data_column_sidecars<P: Preset>(
     signed_block_header: SignedBeaconBlockHeader,
     kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof<P>,
@@ -343,7 +344,23 @@ fn get_data_column_sidecars_post_gloas<P: Preset>(
     Ok(sidecars)
 }
 
-pub fn construct_data_column_sidecars<P: Preset>(
+pub fn construct_data_column_sidecars_post_gloas<P: Preset>(
+    signed_block: &SignedBeaconBlock<P>,
+    kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    let root = signed_block.message().hash_tree_root();
+    let slot = signed_block.message().slot();
+
+    ensure!(
+        signed_block.phase() >= Phase::Gloas,
+        Error::GloasDataColumnSidecarsForPreGloasBlock { root, slot }
+    );
+
+    get_data_column_sidecars_post_gloas(root, slot, kzg_commitments, cells_and_kzg_proofs)
+}
+
+pub fn construct_fulu_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
@@ -357,27 +374,24 @@ pub fn construct_data_column_sidecars<P: Preset>(
 
             let kzg_commitments_inclusion_proof = misc::kzg_commitments_inclusion_proof(body);
 
-            get_data_column_sidecars_pre_gloas(
+            get_fulu_data_column_sidecars(
                 signed_block.to_header(),
                 kzg_commitments,
                 kzg_commitments_inclusion_proof,
                 cells_and_kzg_proofs,
             )
         }
-        SignedBeaconBlock::Gloas(_block) => get_data_column_sidecars_post_gloas(
-            signed_block.hash_tree_root(),
-            signed_block.message().slot(),
-            // TODO: (gloas): pass commitments through parameters
-            // spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/builder.md#modified-get_data_column_sidecars_from_block
-            &ContiguousList::default(),
-            cells_and_kzg_proofs,
-        ),
+        SignedBeaconBlock::Gloas(_block) => Err(Error::FuluDataColumnSidecarsForPostGloasBlock {
+            root: signed_block.message().hash_tree_root(),
+            slot: signed_block.message().slot(),
+        }
+        .into()),
         SignedBeaconBlock::Phase0(_)
         | SignedBeaconBlock::Altair(_)
         | SignedBeaconBlock::Bellatrix(_)
         | SignedBeaconBlock::Capella(_)
         | SignedBeaconBlock::Deneb(_)
-        | SignedBeaconBlock::Electra(_) => Err(Error::BlobsForPreFuluBlock {
+        | SignedBeaconBlock::Electra(_) => Err(Error::DataColumnSidecarsForPreFuluBlock {
             root: signed_block.message().hash_tree_root(),
             slot: signed_block.message().slot(),
         }
@@ -397,7 +411,7 @@ pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
             ..
         } = data_column_sidecar;
 
-        get_data_column_sidecars_pre_gloas(
+        get_fulu_data_column_sidecars(
             *signed_block_header,
             kzg_commitments,
             *kzg_commitments_inclusion_proof,

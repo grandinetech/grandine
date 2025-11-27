@@ -24,6 +24,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    nonstandard::Phase,
     phase0::primitives::Slot,
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -218,6 +219,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         let slot = block_or_sidecar.slot();
         let block_root = block_or_sidecar.block_root();
 
+        // TODO: (gloas): block can be imported before data available
         if self.controller.contains_block(block_root)
             || self
                 .controller
@@ -229,6 +231,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() else {
             return;
         };
@@ -299,6 +302,8 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             let received_data_column_sidecars =
                                 self.received_data_column_sidecars.clone_arc();
 
+                            let kzg_commitments = kzg_commitments.clone();
+
                             let reconstruction_result = tokio::task::spawn_blocking(move || {
                                 let mut data_column_sidecars = vec![];
 
@@ -309,10 +314,14 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                 ) {
                                     Ok(cells_and_kzg_proofs) => {
                                         let result = match block_or_sidecar {
-                                            BlockOrDataColumnSidecar::Block(block) => eip_7594::construct_data_column_sidecars(
-                                                &block,
-                                                &cells_and_kzg_proofs,
-                                            ),
+                                            BlockOrDataColumnSidecar::Block(block) => if block.phase() >= Phase::Gloas {
+                                                eip_7594::construct_data_column_sidecars_post_gloas(&block, &kzg_commitments, &cells_and_kzg_proofs)
+                                            } else {
+                                                eip_7594::construct_fulu_data_column_sidecars(
+                                                    &block,
+                                                    &cells_and_kzg_proofs,
+                                                )
+                                            },
                                             BlockOrDataColumnSidecar::Sidecar(sidecar) => eip_7594::construct_data_column_sidecars_from_sidecar(
                                                 &sidecar,
                                                 &cells_and_kzg_proofs,

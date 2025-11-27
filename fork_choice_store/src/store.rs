@@ -2667,6 +2667,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
         let log_imported_block_info = || {
+            // TODO: (gloas): glaas block can be imported without sidecars, so it would not know
+            // about the blob count from the block, but later when `on_execution_payload` called
             if let Some(post_deneb_block_body) = chain_link
                 .block
                 .message()
@@ -4021,6 +4023,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let phase = block.phase();
         let block = block.message();
 
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
+        //
         // `block.phase` has already been checked
         let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];

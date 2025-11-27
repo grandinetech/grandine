@@ -375,6 +375,8 @@ impl<P: Preset> Batch<P> {
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let block = block.message();
 
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
+        //
         // `block.phase` has already been checked
         let Some(body) = block.body().with_blob_kzg_commitments() else {
             return Ok(vec![]);
@@ -610,6 +612,7 @@ impl<P: Preset> Batch<P> {
                 if let Some(parent) = controller.block_by_root(parent_root)? {
                     let parent = parent.value;
 
+                    // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
                     if let Some(body) = parent.message().body().with_blob_kzg_commitments() {
                         if parent.message().slot() >= low_slot
                             && body.blob_kzg_commitments().is_empty()

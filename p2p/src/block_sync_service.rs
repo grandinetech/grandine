@@ -501,6 +501,8 @@ impl<P: Preset> BlockSyncService<P> {
                                 SyncDirection::Forward => {
                                     let data_column_sidecar_slot = data_column_sidecar.slot();
 
+                                    // TODO: (gloas): gloas block can be imported without the
+                                    // sidecars, this should change to `contains_block_and_sidecars`
                                     if !self.controller.contains_block(data_column_identifier.block_root)
                                         && self.register_new_received_data_column_sidecar(
                                             data_column_identifier,
@@ -1281,6 +1283,7 @@ impl<P: Preset> BlockSyncService<P> {
             columns: indices,
         } = data_columns_by_root;
 
+        // TODO: (gloas): gloas block can be imported without the sidecars
         if self.controller.contains_block(block_root) {
             debug_with_peers!("block {block_root:?} already imported into the fork choice");
             return Ok(());
@@ -1360,6 +1363,7 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         };
 
+        // TODO: (gloas): gloas block can be imported without consider data availability
         let missing_column_by_indices = missing_column_indices_by_root
             .into_iter()
             .filter(|(block_root, _)| !self.controller.contains_block(*block_root))

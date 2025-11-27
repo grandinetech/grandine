@@ -1802,7 +1802,7 @@ pub trait BlockBodyWithPayloadAttestations<P: Preset>: BeaconBlockBody<P> {
 impl<P: Preset> BlockBodyWithPayloadAttestations<P> for GloasBeaconBlockBody<P> {
     fn payload_attestations(
         &self,
-    ) -> &ContiguousList<PayloadAttestation<P>, <P as Preset>::MaxPayloadAttestation> {
+    ) -> &ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation> {
         &self.payload_attestations
     }
 }
@@ -1954,7 +1954,7 @@ impl<P: Preset> ExecutionPayload<P> for ExecutionPayloadBid {
     }
 
     fn block_number(&self) -> ExecutionBlockNumber {
-        // TODO: (gloas): set optional
+        // TODO: (gloas): there is no `block_number` field in payload bid
         ExecutionBlockNumber::default()
     }
 
