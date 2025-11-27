@@ -67,6 +67,7 @@ members = [
     'validator_key_cache',
     'validator_statistics',
     'zkvm/guest/risc0',
+    "zkvm/guest/ziren",
     'zkvm/host',
 ]
 # Feature resolver version 2 is the default starting with Rust 2021, but that does not apply in
@@ -297,7 +298,7 @@ base64 = '0.22'
 bincode = '1'
 bit_field = '0.10'
 bitvec = '1'
-bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }
 blst = { version = '0.3', features = ['portable'] }
 bonsai-sdk = '1.4'
 borsh = '1.5'
@@ -429,7 +430,11 @@ serde_with = '3'
 serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0', features = ['compress'] }
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1', features = ['compress'] }
+slog = { version = '2', features = ['max_level_trace'] }
+slog-async = '2'
+slog-stdlog = '4'
+slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
 sp1-helper = '5.2.1'
@@ -471,6 +476,10 @@ web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
+zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.1.2' }
+zkm-primitives = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.1.2' }
+zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.1.2' }
+zkm-zkvm = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.1.2' }
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
@@ -540,6 +549,7 @@ validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
 validator_statistics = { path = 'validator_statistics' }
 zkvm_guest_risc0 = { path = 'zkvm/guest/risc0' }
+zkvm_guest_ziren = { path = 'zkvm/guest/ziren' }
 zkvm_host = { path = 'zkvm/host' }
 
 # Banned crates
@@ -601,7 +611,7 @@ lto = false
 # We had to fork `jsonrpc` because it does not allow nonstandard members.
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '681f413312404ab6e51f0b46f39b0075c6f4ebfd' }
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.0' }
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.1' }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
-bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.0' }
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.1' }

@@ -24,9 +24,12 @@ transition_functions = { workspace = true }
 types = { workspace = true }
 xz2 = { workspace = true }
 zkvm_guest_risc0 = { workspace = true, optional = true }
+zkm-sdk = { workspace = true, optional = true }
+zkvm_guest_ziren = { workspace = true, optional = true }
 
 [build-dependencies]
 sp1-helper = { workspace = true, optional = true }
+zkm-build = { workspace = true, optional = true }
 
 [features]
 risc0 = [
@@ -38,4 +41,9 @@ risc0 = [
 sp1 = [
     "dep:sp1-helper",
     "dep:sp1-sdk"
+]
+ziren = [
+    "dep:zkm-build",
+    "dep:zkm-sdk",
+    "dep:zkvm_guest_ziren"
 ]
