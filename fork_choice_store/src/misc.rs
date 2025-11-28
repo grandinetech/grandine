@@ -279,12 +279,12 @@ impl<I> AggregateAndProofOrigin<I> {
 }
 
 #[derive(Debug, AsRefStr)]
-pub enum ExecutionPayloadBidOrigin<I> {
-    Gossip(I),
+pub enum ExecutionPayloadBidOrigin {
+    Gossip(GossipId),
     Api(OneshotSender<Result<ValidationOutcome>>),
 }
 
-impl Serialize for ExecutionPayloadBidOrigin<GossipId> {
+impl Serialize for ExecutionPayloadBidOrigin {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -293,9 +293,14 @@ impl Serialize for ExecutionPayloadBidOrigin<GossipId> {
     }
 }
 
-impl<I> ExecutionPayloadBidOrigin<I> {
+impl ExecutionPayloadBidOrigin {
     #[must_use]
-    pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, Some(sender)),
@@ -303,7 +308,7 @@ impl<I> ExecutionPayloadBidOrigin<I> {
     }
 
     #[must_use]
-    pub fn gossip_id(self) -> Option<I> {
+    pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,
@@ -311,7 +316,7 @@ impl<I> ExecutionPayloadBidOrigin<I> {
     }
 
     #[must_use]
-    pub const fn gossip_id_ref(&self) -> Option<&I> {
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,

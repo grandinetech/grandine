@@ -36,9 +36,9 @@ use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
-    DataColumnSidecarAction, DataColumnSidecarOrigin, Error, PayloadAction,
-    PayloadAttestationAction, PayloadAttestationOrigin, StateCacheProcessor, Store,
-    ValidAttestation,
+    DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
+    ExecutionPayloadBidOrigin, PayloadAction, PayloadAttestationAction, PayloadAttestationOrigin,
+    StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -319,6 +319,11 @@ where
                     result,
                     origin,
                 } => self.handle_payload_attestation(&wait_group, result, origin)?,
+                MutatorMessage::PayloadBid {
+                    wait_group,
+                    result,
+                    origin,
+                } => self.handle_payload_bid(&wait_group, result, origin),
                 MutatorMessage::PreprocessedBeaconState { state } => {
                     self.prepare_execution_payload_for_next_slot(&state);
                 }
@@ -1876,6 +1881,59 @@ where
         }
 
         Ok(())
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn handle_payload_bid(
+        &mut self,
+        wait_group: &W,
+        result: Result<ExecutionPayloadBidAction>,
+        origin: ExecutionPayloadBidOrigin,
+    ) {
+        match result {
+            Ok(ExecutionPayloadBidAction::Accept(payload_bid)) => {
+                trace_with_peers!("payload bid accepted (payload_bid: {payload_bid:?})");
+
+                self.event_channels
+                    .send_execution_payload_bid_event(payload_bid.clone_arc());
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+
+                self.store_mut().apply_execution_payload_bid(payload_bid);
+
+                self.update_store_snapshot();
+            }
+            Ok(ExecutionPayloadBidAction::Ignore(publishable)) => {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+            }
+            Err(error) => {
+                let source = error.to_string();
+                warn_with_peers!("payload bid rejected (error: {error:?})",);
+
+                let (gossip_id, sender) = origin.split();
+
+                if gossip_id.is_some() {
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidPayloadBid,
+                    ));
+                }
+
+                reply_to_http_api(sender, Err(anyhow!(source)));
+            }
+        }
     }
 
     fn handle_checkpoint_state(

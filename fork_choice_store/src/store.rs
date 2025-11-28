@@ -1279,10 +1279,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
-    pub fn validate_execution_payload_bid<I>(
+    pub fn validate_execution_payload_bid(
         &self,
         payload_bid: Arc<SignedExecutionPayloadBid>,
-        origin: &ExecutionPayloadBidOrigin<I>,
+        origin: &ExecutionPayloadBidOrigin,
     ) -> Result<ExecutionPayloadBidAction> {
         let bid = payload_bid.message;
         let builder_index = bid.builder_index;
@@ -1363,7 +1363,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if let Some(highest_bid) = payload_bids.values().max_by_key(|bid| bid.value) {
                 if bid.value <= highest_bid.value {
                     // This bid doesn't have a higher value than the existing bid
-                    return Ok(ExecutionPayloadBidAction::Ignore(false));
+                    return Ok(ExecutionPayloadBidAction::Ignore(true));
                 }
             }
         }
@@ -2962,6 +2962,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         commitments.insert(block_root, blob_sidecar.kzg_commitment);
 
         self.blob_cache.insert(blob_sidecar);
+    }
+
+    pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid>) {
+        let builder_index = payload_bid.message.builder_index;
+        let slot = payload_bid.message.slot;
+        let parent_block_root = payload_bid.message.parent_block_root;
+
+        let bids = self
+            .accepted_payload_bids
+            .entry((slot, parent_block_root))
+            .or_default();
+
+        bids.insert(builder_index, payload_bid.message);
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
