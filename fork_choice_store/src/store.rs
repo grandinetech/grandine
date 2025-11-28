@@ -234,7 +234,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, H256, ColumnIndex),
         ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     >,
-    accepted_payload_bids: HashMap<(Slot, H256), HashMap<ValidatorIndex, ExecutionPayloadBid>>,
+    accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, ExecutionPayloadBid>>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -1350,17 +1350,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        if let Some(payload_bids) = self
-            .accepted_payload_bids
-            .get(&(bid.slot, bid.parent_block_root))
-        {
+        if let Some(payload_bids) = self.accepted_payload_bids.get(&bid.slot) {
             // > this is the first signed bid seen from the given builder for this slot
             if payload_bids.contains_key(&builder_index) {
                 return Ok(ExecutionPayloadBidAction::Ignore(true));
             }
 
             // > this bid is the highest value bid seen for the corresponding slot and the given parent block hash.
-            if let Some(highest_bid) = payload_bids.values().max_by_key(|bid| bid.value) {
+            if let Some(highest_bid) = payload_bids
+                .values()
+                .filter(|b| b.parent_block_hash == bid.parent_block_hash)
+                .max_by_key(|bid| bid.value)
+            {
                 if bid.value <= highest_bid.value {
                     // This bid doesn't have a higher value than the existing bid
                     return Ok(ExecutionPayloadBidAction::Ignore(true));
@@ -2434,11 +2435,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
-        let Some(payload_bid) = self
-            .accepted_payload_bids
-            .get(&(slot, block_root))
-            .and_then(|bids| bids.values().max_by_key(|bid| bid.value))
-        else {
+        let Some(payload_bid) = self.accepted_payload_bids.get(&slot).and_then(|bids| {
+            bids.values()
+                .filter(|bid| bid.parent_block_root == block_root)
+                .max_by_key(|bid| bid.value)
+        }) else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
@@ -3001,16 +3002,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid>) {
-        let builder_index = payload_bid.message.builder_index;
-        let slot = payload_bid.message.slot;
-        let parent_block_root = payload_bid.message.parent_block_root;
+        let bid = payload_bid.message;
+        let accepted_bids = self.accepted_payload_bids.entry(bid.slot).or_default();
 
-        let bids = self
-            .accepted_payload_bids
-            .entry((slot, parent_block_root))
-            .or_default();
-
-        bids.insert(builder_index, payload_bid.message);
+        accepted_bids.insert(bid.builder_index, payload_bid.message);
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
@@ -3432,8 +3427,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_gloas_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        // TODO: (gloas): prune after block imported, as it's no longer relevant
         self.accepted_payload_bids
-            .retain(|(slot, _), _| finalized_slot <= *slot);
+            .retain(|slot, _| finalized_slot <= *slot);
         self.sidecars_construction_started
             .retain(|_, slot| finalized_slot <= *slot);
         self.requested_blobs_from_el

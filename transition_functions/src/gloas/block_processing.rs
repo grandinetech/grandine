@@ -470,6 +470,7 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
     )
 }
 
+#[expect(clippy::too_many_lines)]
 fn validate_execution_payload_bid<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
