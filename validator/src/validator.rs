@@ -1580,6 +1580,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[instrument(level = "debug", skip_all)]
     async fn attest_payload(&mut self, wait_group: &W, slot_head: &SlotHead<P>) -> Result<()> {
         if self.wait_for_fully_validated_head(slot_head).await.is_err() {
             warn_with_peers!(
