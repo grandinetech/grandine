@@ -81,6 +81,7 @@ use types::{
         containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{
         BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev,
         WithStatus, WEI_IN_GWEI,
@@ -112,7 +113,8 @@ use crate::{
     misc::{
         APIBlock, BroadcastValidation, SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
         SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
-        SingleApiAttestation, SingleApiAttestationListPhaseDeserializer, SyncedStatus,
+        SignedExecutionPaylodBidPhaseDeserializer, SingleApiAttestation,
+        SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
     response::{EthResponse, JsonOrSsz},
     state_id,
@@ -1623,13 +1625,9 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
+    let phase = controller.chain_config().phase_at_slot::<P>(slot);
 
-    // TODO: (gloas): handle publish gloas block only
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if phase == Phase::Fulu {
         let signed_beacon_block = Arc::new(signed_beacon_block);
 
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
@@ -1650,6 +1648,8 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         )
         .await
     } else {
+        // This will return empty for pre-Deneb and post-Gloas block, so only block will be
+        // published
         let blob_sidecars = misc::construct_blob_sidecars(
             &signed_beacon_block,
             blobs.unwrap_or_default().into_iter(),
@@ -1664,6 +1664,35 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
             api_to_p2p_tx,
         )
         .await
+    }
+}
+
+/// `POST /eth/v1/beacon/execution_payload/bid`
+pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthJsonOrSsz(signed_payload_bid, _): EthJsonOrSsz<
+        Arc<SignedExecutionPayloadBid>,
+        SignedExecutionPaylodBidPhaseDeserializer<P>,
+    >,
+) -> Result<StatusCode, Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    controller.on_api_execution_payload_bid(signed_payload_bid.clone_arc(), sender);
+
+    let result = receiver.await?;
+
+    match result {
+        Ok(ValidationOutcome::Accept | ValidationOutcome::Ignore(true)) => {
+            ApiToP2p::PublishPayloadBid(signed_payload_bid).send(&api_to_p2p_tx);
+
+            return Ok(StatusCode::OK);
+        }
+        Ok(ValidationOutcome::Ignore(false)) => {
+            // Ignore the bid, do not forward
+            return Ok(StatusCode::NO_CONTENT);
+        }
+        Err(error) => return Err(Error::InvalidPayloadBid(error)),
     }
 }
 

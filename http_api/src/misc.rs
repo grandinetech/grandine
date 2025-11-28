@@ -45,7 +45,7 @@ use types::{
         SignedBeaconBlock as FuluSignedBeaconBlock,
         SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
     },
-    gloas::containers::SignedBeaconBlock as GloasSignedBeaconBlock,
+    gloas::containers::{SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid},
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
         consts::TargetAggregatorsPerCommittee,
@@ -330,6 +330,35 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SingleApiAttestationListPhaseDeser
         };
 
         Ok(result)
+    }
+}
+
+pub struct SignedExecutionPaylodBidPhaseDeserializer<P> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for SignedExecutionPaylodBidPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de> for SignedExecutionPaylodBidPhaseDeserializer<P> {
+    type Value = Arc<SignedExecutionPayloadBid>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if self.phase >= Phase::Gloas {
+            SignedExecutionPayloadBid::deserialize(deserializer).map(Arc::new)
+        } else {
+            Err(D::Error::custom("invalid phase"))
+        }
     }
 }
 

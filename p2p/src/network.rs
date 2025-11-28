@@ -62,6 +62,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -369,6 +370,10 @@ impl<P: Preset> Network<P> {
                         }
                         ApiToP2p::PublishSyncCommitteeMessage(message) => {
                             self.publish_sync_committee_message(message);
+                            true
+                        }
+                        ApiToP2p::PublishPayloadBid(payload_bid) => {
+                            self.publish_execution_payload_bid(payload_bid);
                             true
                         }
                         ApiToP2p::PublishProposerSlashing(proposer_slashing) => {
@@ -761,6 +766,17 @@ impl<P: Preset> Network<P> {
             subnet_id,
             blob_sidecar,
         ))));
+    }
+
+    fn publish_execution_payload_bid(&self, payload_bid: Arc<SignedExecutionPayloadBid>) {
+        debug_with_peers!(
+            "publishing signed execution payload bid (slot: {}, parent_block_root: {:?}, parent block hash: {:?})",
+            payload_bid.message.slot,
+            payload_bid.message.parent_block_root,
+            payload_bid.message.parent_block_hash
+        );
+
+        self.publish(PubsubMessage::ExecutionPayloadBid(payload_bid));
     }
 
     fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
