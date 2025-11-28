@@ -284,7 +284,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     }
                     ValidatorMessage::Head(wait_group, head) => {
-                        let span = tracing::debug_span!("ValidatorMessage::Head", service = "validator");
+                        let span = tracing::debug_span!(parent: None, "ValidatorMessage::Head", service = "validator");
                         let _enter = span.enter();
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
@@ -295,7 +295,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.attest_gossip_block(&wait_group, head).await;
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
-                        let span = tracing::debug_span!("ValidatorMessage::ValidAttestation", service = "validator");
+                        let span = tracing::debug_span!(parent: None, "ValidatorMessage::ValidAttestation", service = "validator");
                         let _enter = span.enter();
 
                         self.attestation_agg_pool
@@ -307,7 +307,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
-                        let span = tracing::debug_span!("ValidatorMessage::PrepareExecutionPayload", service = "validator");
+                        let span = tracing::debug_span!(parent: None, "ValidatorMessage::PrepareExecutionPayload", service = "validator");
                         let _enter = span.enter();
                         let slot_head = self.safe_slot_head(slot).await;
 
@@ -388,7 +388,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
-                        let span = tracing::debug_span!("P2pToValidator::AttesterSlashing", service = "validator");
+                        let span = tracing::debug_span!(parent: None, "P2pToValidator::AttesterSlashing", service = "validator");
                         let _enter = span.enter();
 
                         let outcome = match self
@@ -409,7 +409,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
-                        let span = tracing::debug_span!("P2pToValidator::ProposerSlashing", service = "validator");
+                        let span = tracing::debug_span!(parent: None, "P2pToValidator::ProposerSlashing", service = "validator");
                         let _enter = span.enter();
 
                         let outcome = match self
@@ -430,7 +430,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
-                        let span = tracing::debug_span!("P2pToValidator::VoluntaryExit", service = "validator");
+                        let span = tracing::debug_span!(parent: None, "P2pToValidator::VoluntaryExit", service = "validator");
                         let _enter = span.enter();
 
                         let outcome = match self
@@ -455,7 +455,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 api_message = self.api_to_validator_rx.select_next_some() => {
                     let success = match api_message {
                         ApiToValidator::RegisteredValidators(sender) => {
-                            let span = tracing::debug_span!("ApiToValidator::RegisteredValidators", service = "validator");
+                            let span = tracing::debug_span!(parent: None, "ApiToValidator::RegisteredValidators", service = "validator");
                             let _enter = span.enter();
 
                             let registered_pubkeys = self
@@ -468,7 +468,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             sender.send(registered_pubkeys).is_ok()
                         },
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
-                            let span = tracing::debug_span!("ApiToValidator::SignedContributionAndProof", service = "validator");
+                            let span = tracing::debug_span!(parent: None, "ApiToValidator::SignedContributionAndProof", service = "validator");
                             let _enter = span.enter();
                             let current_slot = self.controller.slot();
                             let slot_head = self.safe_slot_head(current_slot).await;
@@ -486,7 +486,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             sender.send(failures).is_ok()
                         },
                         ApiToValidator::ValidatorRegistrations(validator_registrations) => {
-                            let span = tracing::debug_span!("ApiToValidator::ValidatorRegistration", service = "validator");
+                            let span = tracing::debug_span!(parent: None, "ApiToValidator::ValidatorRegistration", service = "validator");
                             let _enter = span.enter();
                             let current_slot = self.controller.slot();
                             let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
@@ -739,7 +739,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     // The nested `Result` is inspired by `sled`:
     // <https://sled.rs/errors.html#making-unhandled-errors-unrepresentable>
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(level = "debug", skip_all, fields(slot = slot))]
     async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
         let WithStatus {
             value: head,
@@ -1182,7 +1182,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_singular_attestations
                 .iter()
                 .map(|a| a.validator_index)
-                .format(", "),
+                .join(", "),
             slot_head.slot(),
         );
 
@@ -1397,7 +1397,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             aggregates_and_proofs
                 .iter()
                 .map(SignedAggregateAndProof::aggregator_index)
-                .format(", "),
+                .join(", "),
             aggregate_and_proof.slot(),
         );
 
@@ -1451,7 +1451,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             if !messages.is_empty() {
                 info_with_peers!(
                     "validators [{}] participating in sync subcommittee {subcommittee_index} in slot {}",
-                    messages.iter().map(|m| m.validator_index).format(", "),
+                    messages.iter().map(|m| m.validator_index).join(", "),
                     slot_head.slot(),
                 );
             }
@@ -1522,7 +1522,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             contributions
                 .iter()
                 .map(|c| c.message.aggregator_index)
-                .format(", "),
+                .join(", "),
             slot_head.slot(),
         );
 
