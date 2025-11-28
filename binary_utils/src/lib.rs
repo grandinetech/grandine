@@ -214,8 +214,6 @@ pub fn initialize_tracing_logger(
         // See `grandine::block_on` for details.
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .thread_name("grandine-telemetry-exporter")
-            .worker_threads(2)
-            .max_blocking_threads(32)
             .enable_all()
             .build()?;
 

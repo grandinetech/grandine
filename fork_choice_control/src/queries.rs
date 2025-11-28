@@ -781,7 +781,7 @@ where
         )
     }
 
-    #[instrument(ret(level = "Debug"), level = "debug", skip_all)]
+    #[instrument(ret(level = "debug"), level = "debug", skip_all)]
     pub fn validate_data_column_sidecar_with_state(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,

@@ -163,7 +163,9 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
 
             if deadline_reached {
                 if let Some(metrics) = metrics.as_ref() {
-                    metrics.set_attestation_packer_iteration_count(iteration.saturating_sub(1));
+                    metrics
+                        .att_pool_pack_iterations
+                        .inc_by(iteration.saturating_sub(1).into());
                 }
 
                 break;

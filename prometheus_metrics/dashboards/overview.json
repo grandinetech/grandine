@@ -1795,7 +1795,7 @@
           "editorMode": "code",
           "expr": "COLLECTION_LENGTHS{instance=~\"$Instance\"}",
           "instant": false,
-          "legendFormat": "{{name}} ({{type}})",
+          "legendFormat": "{{name}} ({{type}} {{instance}})",
           "range": true,
           "refId": "A"
         }

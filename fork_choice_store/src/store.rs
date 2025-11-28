@@ -537,7 +537,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             })
     }
 
-    #[instrument(level = "debug", skip_all)]
     pub fn state_by_block_root(&self, block_root: H256) -> Option<Arc<BeaconState<P>>> {
         self.chain_link(block_root)
             .map(|chain_link| chain_link.state(self))

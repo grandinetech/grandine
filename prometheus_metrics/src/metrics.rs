@@ -125,7 +125,7 @@ pub struct Metrics {
     pub prepare_voluntary_exits_times: Histogram,
 
     // Pools
-    att_pool_pack_iterations: Gauge,
+    pub att_pool_pack_iterations: IntCounter,
     pub att_pool_insert_attestation_task_times: Histogram,
     pub att_pool_attestation_tracking_times: Histogram,
 
@@ -322,12 +322,12 @@ impl Metrics {
             )?,
 
             data_column_sidecars_submitted_for_processing: IntCounter::new(
-                "beacon_data_column_sidecar_processing_requests_total", 
+                "beacon_data_column_sidecar_processing_requests_total",
                 "Number of data column sidecars submitted for processing"
             )?,
 
             verified_gossip_data_column_sidecar: IntCounter::new(
-                "beacon_data_column_sidecar_processing_successes_total", 
+                "beacon_data_column_sidecar_processing_successes_total",
                 "Number of data column sidecars verified for gossip"
             )?,
 
@@ -337,7 +337,7 @@ impl Metrics {
             ))?,
 
             reconstructed_columns: IntCounter::new(
-                "beacon_data_availability_reconstructed_columns_total", 
+                "beacon_data_availability_reconstructed_columns_total",
                 "Total count of reconstructed columns"
             )?,
 
@@ -560,7 +560,7 @@ impl Metrics {
             ))?,
 
             // Pools
-            att_pool_pack_iterations: Gauge::new(
+            att_pool_pack_iterations: IntCounter::new(
                 "ATT_POOL_PACK_ITERATIONS",
                 "Attestation packer iteration count per slog",
             )?,
@@ -1337,10 +1337,5 @@ impl Metrics {
                  of labels that tick_delay_times was created with",
             )
             .set(delay.as_secs_f64())
-    }
-
-    // Pool
-    pub fn set_attestation_packer_iteration_count(&self, iterations: u32) {
-        self.att_pool_pack_iterations.set(iterations as f64)
     }
 }

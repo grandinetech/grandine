@@ -150,7 +150,6 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
-    #[instrument(level = "debug", skip_all)]
     pub fn insert_attestation(
         &self,
         wait_group: W,
