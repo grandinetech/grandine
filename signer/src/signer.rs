@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Result;
+use anyhow::{Error as AnyhowError, Result};
 use arc_swap::{ArcSwap, Guard};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey, Signature};
 use doppelganger_protection::DoppelgangerProtection;
@@ -21,6 +21,7 @@ use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tracing::instrument;
 use types::{
     combined::BeaconState,
     phase0::primitives::{Slot, H256},
@@ -269,6 +270,7 @@ impl Snapshot {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[instrument(level = "debug", skip_all)]
     pub async fn sign_triples<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
@@ -360,44 +362,52 @@ impl Snapshot {
 
         let mut protector = slashing_protector.lock().await;
 
-        let slashing_outcome =
-            protector.validate_and_store_own_attestations(beacon_state, attestations)?;
+        tokio::task::block_in_place(|| {
+            let slashing_outcome =
+                protector.validate_and_store_own_attestations(&beacon_state, attestations)?;
 
-        for (outcome, data, index) in izip!(
-            slashing_outcome.iter(),
-            attestation_triples,
-            attestation_indices
-        ) {
-            let (message, signing_root, public_key) = data;
+            for (outcome, data, index) in izip!(
+                slashing_outcome.iter(),
+                attestation_triples,
+                attestation_indices
+            ) {
+                let (message, signing_root, public_key) = data;
 
-            if outcome.is_some() {
-                signable_messages.push(SigningTriple {
-                    message,
-                    signing_root,
-                    public_key,
-                });
-                message_indices.push(index);
+                if outcome.is_some() {
+                    signable_messages.push(SigningTriple {
+                        message,
+                        signing_root,
+                        public_key,
+                    });
+
+                    message_indices.push(index);
+                }
             }
-        }
 
-        for ((proposal, pubkey, current_epoch), (message, signing_root, public_key), index) in izip!(
-            block_proposals.into_iter(),
-            block_messages,
-            block_proposal_indices
-        ) {
-            let control_flow =
-                protector.validate_and_store_own_block_proposal(proposal, pubkey, current_epoch)?;
+            for ((proposal, pubkey, current_epoch), (message, signing_root, public_key), index) in izip!(
+                block_proposals.into_iter(),
+                block_messages,
+                block_proposal_indices
+            ) {
+                let control_flow = protector.validate_and_store_own_block_proposal(
+                    proposal,
+                    pubkey,
+                    current_epoch,
+                )?;
 
-            if control_flow.is_continue() {
-                signable_messages.push(SigningTriple {
-                    message,
-                    signing_root,
-                    public_key,
-                });
+                if control_flow.is_continue() {
+                    signable_messages.push(SigningTriple {
+                        message,
+                        signing_root,
+                        public_key,
+                    });
 
-                message_indices.push(index);
+                    message_indices.push(index);
+                }
             }
-        }
+
+            Ok::<_, AnyhowError>(())
+        })?;
 
         let signed_messages = self
             .sign_triples_without_slashing_protection(signable_messages, Some(fork_info))

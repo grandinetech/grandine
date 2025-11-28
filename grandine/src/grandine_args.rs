@@ -409,7 +409,8 @@ struct BeaconNodeOptions {
     #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
     telemetry_level: Level,
 
-    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to
+    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to.
+    /// WARNING: This feature is experimental, unstable, and subject to change. Use with caution.
     #[clap(long)]
     telemetry_metrics_url: Option<RedactingUrl>,
 

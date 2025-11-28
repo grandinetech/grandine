@@ -18,9 +18,115 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 11,
+  "id": 0,
   "links": [],
   "panels": [
+    {
+      "datasource": {
+        "type": "tempo"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Trace ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 289
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo"
+          },
+          "filters": [
+            {
+              "id": "d4d6b08d",
+              "operator": "=",
+              "scope": "span"
+            },
+            {
+              "id": "service-name",
+              "isCustomValue": false,
+              "operator": "=",
+              "scope": "resource",
+              "tag": "service.name",
+              "value": [
+                "grandine-web3signer"
+              ],
+              "valueType": "string"
+            }
+          ],
+          "limit": 20,
+          "metricsQueryType": "range",
+          "query": "{resource.service.name=\"$service_name\" && span.service = \"validator\" && traceDuration > 50ms} with (most_recent=true)",
+          "queryType": "traceql",
+          "refId": "A",
+          "serviceMapUseNativeHistograms": false,
+          "tableType": "traces"
+        }
+      ],
+      "title": "service = \"validator\" ",
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Duration"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
     {
       "datasource": {
         "type": "tempo"
@@ -86,7 +192,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 9
       },
       "id": 4,
       "options": {
@@ -102,7 +208,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.2.1",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "datasource": {
@@ -185,7 +291,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 17
       },
       "id": 3,
       "options": {
@@ -201,7 +307,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.2.1",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "datasource": {
@@ -284,7 +390,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 25
       },
       "id": 2,
       "options": {
@@ -300,7 +406,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.2.1",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "datasource": {
@@ -355,7 +461,7 @@
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 34
       },
       "id": 1,
       "options": {
@@ -363,7 +469,7 @@
         "showHeader": true,
         "sortBy": []
       },
-      "pluginVersion": "12.2.1",
+      "pluginVersion": "12.3.0",
       "targets": [
         {
           "datasource": {
@@ -403,8 +509,8 @@
     "list": [
       {
         "current": {
-          "text": "Grandine",
-          "value": "Grandine"
+          "text": "grandine-web3signer",
+          "value": "grandine-web3signer"
         },
         "datasource": {
           "type": "tempo"
@@ -425,8 +531,8 @@
       {
         "allValue": ".*",
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": "",
+          "value": ""
         },
         "datasource": {
           "type": "tempo"
@@ -455,5 +561,5 @@
   "timezone": "browser",
   "title": "Traces & Spans",
   "uid": "adbjsxp",
-  "version": 44
+  "version": 48
 }

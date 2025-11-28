@@ -26,7 +26,10 @@ use features::Feature;
 use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin, ChainLink, StateCacheError};
 use futures::{
-    channel::mpsc::{UnboundedReceiver, UnboundedSender},
+    channel::{
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        oneshot::Sender,
+    },
     future::{Either as EitherFuture, OptionFuture},
     lock::Mutex,
     select,
@@ -75,9 +78,10 @@ use types::{
         consts::GENESIS_SLOT,
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
-            AttestationData, Checkpoint, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
+            AttestationData, Checkpoint, ProposerSlashing,
+            SignedAggregateAndProof as Phase0SignedAggregateAndProof, SignedVoluntaryExit,
         },
-        primitives::{Epoch, Slot, ValidatorIndex, H256},
+        primitives::{Epoch, ExecutionBlockHash, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
@@ -252,8 +256,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(())
     }
 
-    #[expect(clippy::cognitive_complexity)]
-    #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) {
         let mut health_check = HealthCheck::new("validator");
 
@@ -284,20 +286,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     }
                     ValidatorMessage::Head(wait_group, head) => {
-                        let span = tracing::debug_span!("ValidatorMessage::Head", service = "validator");
-                        let _enter = span.enter();
-
-                        if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
-                            let state = self.controller.state_by_chain_link(&head);
-                            ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
-                        }
-
-                        self.attest_gossip_block(&wait_group, head).await;
+                        self.handle_head_message(wait_group, head).await
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
-                        let span = tracing::debug_span!("ValidatorMessage::ValidAttestation", service = "validator");
-                        let _enter = span.enter();
-
                         self.attestation_agg_pool
                             .insert_attestation(wait_group, attestation.clone_arc(), None);
 
@@ -307,66 +298,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
-                        let span = tracing::debug_span!("ValidatorMessage::PrepareExecutionPayload", service = "validator");
-                        let _enter = span.enter();
-                        let slot_head = self.safe_slot_head(slot).await;
-
-                        if let Some(slot_head) = slot_head {
-                            let proposer_index = match slot_head.proposer_index() {
-                                Ok(proposer_index) => proposer_index,
-                                Err(error) => {
-                                    error_with_peers!("failed to compute proposer index while preparing execution payload: {error:?}");
-                                    continue;
-                                }
-                            };
-
-                            let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload.is_enabled()
-                                || self.attestation_agg_pool.is_registered_validator(proposer_index).await;
-
-                            if !should_prepare_execution_payload {
-                                continue;
-                            }
-
-                            let block_build_context = self.block_producer.new_build_context(
-                                slot_head.beacon_state.clone_arc(),
-                                slot_head.beacon_block_root,
-                                proposer_index,
-                                BlockBuildOptions::default(),
-                            );
-
-                            let payload_attributes = match block_build_context.prepare_execution_payload_attributes().await {
-                                Ok(Some(attributes)) => attributes,
-                                Ok(None) => {
-                                    debug_with_peers!("no payload attributes prepared");
-                                    continue;
-                                },
-                                Err(error) => {
-                                    warn_with_peers!("failed to prepare execution payload attributes: {error:?}");
-                                    continue
-                                },
-                            };
-
-                            if let Some(state) = slot_head.beacon_state.post_bellatrix() {
-                                let payload = state.latest_execution_payload_header();
-
-                                self.event_channels.send_payload_attributes_event(
-                                    slot_head.beacon_state.phase(),
-                                    proposer_index,
-                                    slot,
-                                    slot_head.beacon_block_root,
-                                    &payload_attributes,
-                                    payload.block_number(),
-                                    payload.block_hash(),
-                                );
-                            }
-
-                            block_build_context.prepare_execution_payload_for_slot(
-                                slot,
-                                safe_execution_payload_hash,
-                                finalized_execution_payload_hash,
-                                payload_attributes,
-                            ).await;
-                        }
+                        self.prepare_execution_payload(slot, safe_execution_payload_hash, finalized_execution_payload_hash).await
                     }
                     ValidatorMessage::Stop => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
@@ -388,120 +320,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
                     P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
-                        let span = tracing::debug_span!("P2pToValidator::AttesterSlashing", service = "validator");
-                        let _enter = span.enter();
-
-                        let outcome = match self
-                            .block_producer
-                            .handle_external_attester_slashing(*slashing.clone())
-                            .await {
-                                Ok(outcome) => outcome,
-                                Err(error) => {
-                                    warn_with_peers!("failed to handle attester slashing: {error}");
-                                    continue;
-                                }
-                            };
-
-                        if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_attester_slashing_event(slashing);
-                        }
-
-                        self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+                        self.handle_attester_slashing(slashing, gossip_id).await
                     }
                     P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
-                        let span = tracing::debug_span!("P2pToValidator::ProposerSlashing", service = "validator");
-                        let _enter = span.enter();
-
-                        let outcome = match self
-                            .block_producer
-                            .handle_external_proposer_slashing(*slashing)
-                            .await {
-                                Ok(outcome) => outcome,
-                                Err(error) => {
-                                    warn_with_peers!("failed to handle proposer slashing: {error}");
-                                    continue;
-                                }
-                            };
-
-                        if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_proposer_slashing_event(*slashing);
-                        }
-
-                        self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+                        self.handle_propser_slashing(*slashing, gossip_id).await
                     }
                     P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
-                        let span = tracing::debug_span!("P2pToValidator::VoluntaryExit", service = "validator");
-                        let _enter = span.enter();
-
-                        let outcome = match self
-                            .block_producer
-                            .handle_external_voluntary_exit(*voluntary_exit)
-                            .await {
-                                Ok(outcome) => outcome,
-                                Err(error) => {
-                                    warn_with_peers!("failed to handle voluntary exit: {error}");
-                                    continue;
-                                }
-                            };
-
-                        if matches!(outcome, PoolAdditionOutcome::Accept) {
-                            self.event_channels.send_voluntary_exit_event(*voluntary_exit);
-                        }
-
-                        self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+                        self.handle_voluntary_exit(*voluntary_exit, gossip_id).await
                     }
                 },
 
                 api_message = self.api_to_validator_rx.select_next_some() => {
                     let success = match api_message {
                         ApiToValidator::RegisteredValidators(sender) => {
-                            let span = tracing::debug_span!("ApiToValidator::RegisteredValidators", service = "validator");
-                            let _enter = span.enter();
-
-                            let registered_pubkeys = self
-                                .registered_validators
-                                .values()
-                                .flat_map(BTreeMap::keys)
-                                .copied()
-                                .collect();
-
-                            sender.send(registered_pubkeys).is_ok()
+                            self.handle_registered_validators(sender)
                         },
                         ApiToValidator::SignedContributionsAndProofs(sender, contributions_and_proofs) => {
-                            let span = tracing::debug_span!("ApiToValidator::SignedContributionAndProof", service = "validator");
-                            let _enter = span.enter();
-                            let current_slot = self.controller.slot();
-                            let slot_head = self.safe_slot_head(current_slot).await;
-
-                            let failures = slot_head
-                                .map(|slot_head| {
-                                    self.handle_external_contributions_and_proofs(
-                                        slot_head,
-                                        contributions_and_proofs,
-                                    )
-                                })
-                                .conv::<OptionFuture<_>>()
-                                .await;
-
-                            sender.send(failures).is_ok()
+                            self.handle_signed_contributions_and_proofs(sender, contributions_and_proofs).await
                         },
                         ApiToValidator::ValidatorRegistrations(validator_registrations) => {
-                            let span = tracing::debug_span!("ApiToValidator::ValidatorRegistration", service = "validator");
-                            let _enter = span.enter();
-                            let current_slot = self.controller.slot();
-                            let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
-
-                            let registrations = validator_registrations
-                                .into_iter()
-                                .map(|registration| (registration.0.pubkey, registration))
-                                .collect();
-
-                            self.registered_validators
-                                .entry(current_epoch)
-                                .and_modify(|map| map.extend(&registrations))
-                                .or_insert(registrations);
-
-                            true
+                            self.handle_validator_registrations(validator_registrations)
                         }
                     };
 
@@ -512,6 +350,224 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 complete => break,
             }
+        }
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    fn handle_registered_validators(&self, sender: Sender<HashSet<PublicKeyBytes>>) -> bool {
+        let registered_pubkeys = self
+            .registered_validators
+            .values()
+            .flat_map(BTreeMap::keys)
+            .copied()
+            .collect();
+
+        sender.send(registered_pubkeys).is_ok()
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    fn handle_validator_registrations(
+        &mut self,
+        validator_registrations: Vec<(ValidatorRegistrationV1, Signature)>,
+    ) -> bool {
+        let current_slot = self.controller.slot();
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+
+        let registrations = validator_registrations
+            .into_iter()
+            .map(|registration| (registration.0.pubkey, registration))
+            .collect();
+
+        self.registered_validators
+            .entry(current_epoch)
+            .and_modify(|map| map.extend(&registrations))
+            .or_insert(registrations);
+
+        true
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    async fn handle_signed_contributions_and_proofs(
+        &self,
+        sender: Sender<Option<Vec<(usize, AnyhowError)>>>,
+        contributions_and_proofs: Vec<SignedContributionAndProof<P>>,
+    ) -> bool {
+        let current_slot = self.controller.slot();
+        let slot_head = self.safe_slot_head(current_slot).await;
+
+        let failures = slot_head
+            .map(|slot_head| {
+                self.handle_external_contributions_and_proofs(slot_head, contributions_and_proofs)
+            })
+            .conv::<OptionFuture<_>>()
+            .await;
+
+        sender.send(failures).is_ok()
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    async fn handle_propser_slashing(&self, slashing: ProposerSlashing, gossip_id: GossipId) {
+        let outcome = match self
+            .block_producer
+            .handle_external_proposer_slashing(slashing)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                warn_with_peers!("failed to handle proposer slashing: {error}");
+                return;
+            }
+        };
+
+        if matches!(outcome, PoolAdditionOutcome::Accept) {
+            self.event_channels.send_proposer_slashing_event(slashing);
+        }
+
+        self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    async fn handle_attester_slashing(
+        &self,
+        slashing: Box<AttesterSlashing<P>>,
+        gossip_id: GossipId,
+    ) {
+        let outcome = match self
+            .block_producer
+            .handle_external_attester_slashing(*slashing.clone())
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                warn_with_peers!("failed to handle attester slashing: {error}");
+                return;
+            }
+        };
+
+        if matches!(outcome, PoolAdditionOutcome::Accept) {
+            self.event_channels.send_attester_slashing_event(slashing);
+        }
+
+        self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    async fn handle_voluntary_exit(
+        &self,
+        voluntary_exit: SignedVoluntaryExit,
+        gossip_id: GossipId,
+    ) {
+        let outcome = match self
+            .block_producer
+            .handle_external_voluntary_exit(voluntary_exit)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                warn_with_peers!("failed to handle voluntary exit: {error}");
+                return;
+            }
+        };
+
+        if matches!(outcome, PoolAdditionOutcome::Accept) {
+            self.event_channels
+                .send_voluntary_exit_event(voluntary_exit);
+        }
+
+        self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
+    }
+
+    #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
+    async fn handle_head_message(&mut self, wait_group: W, head: ChainLink<P>) {
+        if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
+            let state = self.controller.state_by_chain_link(&head);
+            ValidatorToLiveness::Head(head.block.clone_arc(), state).send(validator_to_liveness_tx);
+        }
+
+        self.attest_gossip_block(&wait_group, head).await;
+    }
+
+    #[instrument(
+        parent = None,
+        level = "debug",
+        fields(
+            service = "validator",
+            slot = %slot,
+        ),
+        skip_all
+    )]
+    async fn prepare_execution_payload(
+        &self,
+        slot: Slot,
+        safe_execution_payload_hash: ExecutionBlockHash,
+        finalized_execution_payload_hash: ExecutionBlockHash,
+    ) {
+        let slot_head = self.safe_slot_head(slot).await;
+
+        if let Some(slot_head) = slot_head {
+            let proposer_index = match slot_head.proposer_index() {
+                Ok(proposer_index) => proposer_index,
+                Err(error) => {
+                    error_with_peers!("failed to compute proposer index while preparing execution payload: {error:?}");
+                    return;
+                }
+            };
+
+            let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload
+                .is_enabled()
+                || self
+                    .attestation_agg_pool
+                    .is_registered_validator(proposer_index)
+                    .await;
+
+            if !should_prepare_execution_payload {
+                return;
+            }
+
+            let block_build_context = self.block_producer.new_build_context(
+                slot_head.beacon_state.clone_arc(),
+                slot_head.beacon_block_root,
+                proposer_index,
+                BlockBuildOptions::default(),
+            );
+
+            let payload_attributes = match block_build_context
+                .prepare_execution_payload_attributes()
+                .await
+            {
+                Ok(Some(attributes)) => attributes,
+                Ok(None) => {
+                    debug_with_peers!("no payload attributes prepared");
+                    return;
+                }
+                Err(error) => {
+                    warn_with_peers!("failed to prepare execution payload attributes: {error:?}");
+                    return;
+                }
+            };
+
+            if let Some(state) = slot_head.beacon_state.post_bellatrix() {
+                let payload = state.latest_execution_payload_header();
+
+                self.event_channels.send_payload_attributes_event(
+                    slot_head.beacon_state.phase(),
+                    proposer_index,
+                    slot,
+                    slot_head.beacon_block_root,
+                    &payload_attributes,
+                    payload.block_number(),
+                    payload.block_hash(),
+                );
+            }
+
+            block_build_context
+                .prepare_execution_payload_for_slot(
+                    slot,
+                    safe_execution_payload_hash,
+                    finalized_execution_payload_hash,
+                    payload_attributes,
+                )
+                .await;
         }
     }
 
@@ -739,7 +795,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     // The nested `Result` is inspired by `sled`:
     // <https://sled.rs/errors.html#making-unhandled-errors-unrepresentable>
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(level = "debug", skip_all, fields(slot = slot))]
     async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
         let WithStatus {
             value: head,
@@ -1182,7 +1238,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_singular_attestations
                 .iter()
                 .map(|a| a.validator_index)
-                .format(", "),
+                .join(", "),
             slot_head.slot(),
         );
 
@@ -1397,7 +1453,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             aggregates_and_proofs
                 .iter()
                 .map(SignedAggregateAndProof::aggregator_index)
-                .format(", "),
+                .join(", "),
             aggregate_and_proof.slot(),
         );
 
@@ -1451,7 +1507,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             if !messages.is_empty() {
                 info_with_peers!(
                     "validators [{}] participating in sync subcommittee {subcommittee_index} in slot {}",
-                    messages.iter().map(|m| m.validator_index).format(", "),
+                    messages.iter().map(|m| m.validator_index).join(", "),
                     slot_head.slot(),
                 );
             }
@@ -1522,7 +1578,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             contributions
                 .iter()
                 .map(|c| c.message.aggregator_index)
-                .format(", "),
+                .join(", "),
             slot_head.slot(),
         );
 
@@ -1607,6 +1663,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[instrument(level = "debug", skip_all)]
     async fn own_singular_attestations(
         &self,
         slot_head: &SlotHead<P>,
@@ -1737,6 +1794,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(Vec::as_slice)
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn own_sync_committee_members_for_epoch(
         &self,
         relative_epoch: SyncCommitteeEpoch,
@@ -1785,6 +1843,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         })
     }
 
+    #[instrument(level = "debug", skip_all)]
     async fn own_sync_committee_messages(
         &self,
         slot_head: &SlotHead<P>,
@@ -2056,6 +2115,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.update_sync_committee_subscriptions(&beacon_state);
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn handle_custody_requirements_update(
         &mut self,
         current_slot: Slot,
@@ -2129,6 +2189,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn refresh_signer_keys(&self) {
         let signer = self.signer.clone_arc();
         let head_state = self.controller.head_state().value;
@@ -2136,7 +2197,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         tokio::spawn(async move {
             signer.load_keys_from_web3signer().await;
-
             signer.update_doppelganger_protection_pubkeys(&head_state, current_slot);
         });
     }
@@ -2261,6 +2321,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     async fn wait_for_fully_validated_head(&self, slot_head: &SlotHead<P>) -> Result<()> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
