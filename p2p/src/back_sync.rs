@@ -465,7 +465,7 @@ impl<P: Preset> Batch<P> {
                         block,
                         parent,
                         &controller.sampling_columns(),
-                        true,
+                        false,
                     )?;
 
                     verified_data_column_sidecars.append(&mut data_columns);

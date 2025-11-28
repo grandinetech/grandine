@@ -4,8 +4,9 @@ use core::{
     time::Duration,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
+    time::Instant,
 };
 
 use anyhow::Result;
@@ -34,6 +35,7 @@ use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -101,6 +103,7 @@ pub struct BlockSyncService<P: Preset> {
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
+    delayed_batches: BTreeMap<Instant, Vec<SyncBatch<P>>>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
     sync_to_p2p_tx: UnboundedSender<SyncToP2p<P>>,
@@ -244,6 +247,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_data_column_sidecars,
             data_dumper,
             network_globals,
+            delayed_batches: BTreeMap::new(),
             fork_choice_to_sync_rx,
             p2p_to_sync_rx,
             sync_to_p2p_tx,
@@ -275,6 +279,10 @@ impl<P: Preset> BlockSyncService<P> {
                 },
 
                 _ = interval.select_next_some() => {
+                    let mut batches = self.delayed_batches.split_off(&Instant::now());
+                    core::mem::swap(&mut self.delayed_batches, &mut batches);
+
+                    self.request_batches(batches.into_values().flatten().collect())?;
                     self.request_blobs_and_blocks_if_ready();
 
                     if self.sync_direction == SyncDirection::Back {
@@ -625,7 +633,7 @@ impl<P: Preset> BlockSyncService<P> {
         self.request_expired_data_column_range_requests()?;
 
         // Check if batch has finished
-        if !self.sync_manager.ready_to_request_by_range() {
+        if !self.sync_manager.ready_to_request_by_range() || !self.delayed_batches.is_empty() {
             return Ok(());
         }
 
@@ -846,6 +854,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 retry_count: batch.retry_count + 1,
                                 response_received: batch.response_received,
                                 data_columns: Some(columns.clone_arc()),
+                                is_delayed: false,
                             };
 
                             SyncToP2p::RequestDataColumnsByRange(
@@ -945,6 +954,10 @@ impl<P: Preset> BlockSyncService<P> {
                 )
             }
             SyncDirection::Back => {
+                if !self.delayed_batches.is_empty() {
+                    return Ok(());
+                }
+
                 let data_availability_serve_range_slot = if is_peerdas_activated {
                     misc::data_column_serve_range_slot::<P>(
                         self.controller.chain_config(),
@@ -976,15 +989,31 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn request_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
-        for batch in batches {
+        let now = Instant::now();
+
+        for (batch_index, batch) in (1..).zip(batches) {
             let request_id = self.request_id()?;
             let SyncBatch {
                 target,
+                direction,
                 peer_id,
                 start_slot,
                 count,
+                is_delayed,
                 ..
             } = batch;
+
+            if direction == SyncDirection::Back && !is_delayed {
+                self.delayed_batches
+                    .entry(now + Duration::from_secs(batch_index * 5))
+                    .or_default()
+                    .push(SyncBatch {
+                        is_delayed: true,
+                        ..batch
+                    });
+
+                continue;
+            }
 
             match target {
                 SyncTarget::DataColumnSidecar => {
@@ -1029,12 +1058,6 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
-        // +1 to include head slot into backfill range
-        let current = SyncCheckpoint {
-            slot: current.slot + 1,
-            ..current
-        };
-
         let high = current;
 
         let low = match &self.back_sync {
@@ -1053,13 +1076,22 @@ impl<P: Preset> BlockSyncService<P> {
             }
         };
 
-        let back_sync_process = BackSync::<P>::new(
-            BackSyncData { current, high, low },
+        let no_blocks = self
+            .controller
+            .blocks_by_range(low.slot.saturating_sub(P::SlotsPerEpoch::U64)..low.slot + 1)?
+            .is_empty();
+
+        let back_sync_mode = if no_blocks {
+            BackSyncMode::Default
+        } else {
             BackSyncMode::DataColumnsOnly {
                 column_indices,
                 previous_earliest_available_slot,
-            },
-        );
+            }
+        };
+
+        let back_sync_process =
+            BackSync::<P>::new(BackSyncData { current, high, low }, back_sync_mode);
 
         if !back_sync_process.is_finished() {
             back_sync_process.save(&self.database)?;

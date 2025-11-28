@@ -90,6 +90,7 @@ pub struct SyncBatch<P: Preset> {
     pub retry_count: usize,
     pub response_received: bool,
     pub data_columns: Option<Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>>,
+    pub is_delayed: bool,
 }
 
 pub struct SyncManager<P: Preset> {
@@ -248,6 +249,7 @@ impl<P: Preset> SyncManager<P> {
                         retry_count: batch.retry_count + 1,
                         response_received: false,
                         data_columns: batch.data_columns,
+                        is_delayed: false,
                     };
                 }
 
@@ -425,7 +427,8 @@ impl<P: Preset> SyncManager<P> {
                                         .inspect_err(|e| self.log(
                                             Level::Error, format_args!("failed to parse data_columns in SyncBatch, this should not happen {e:?}"),
                                         ))
-                                        .ok()
+                                        .ok(),
+                                        is_delayed: false,
                                     };
 
                                     self.log(
@@ -445,6 +448,7 @@ impl<P: Preset> SyncManager<P> {
                                 response_received: false,
                                 retry_count: 0,
                                 data_columns: None,
+                                is_delayed: false,
                             };
 
                             self.log(
@@ -469,6 +473,7 @@ impl<P: Preset> SyncManager<P> {
                     response_received: false,
                     retry_count: 0,
                     data_columns: None,
+                    is_delayed: false,
                 };
 
                 self.log(
@@ -652,6 +657,7 @@ impl<P: Preset> SyncManager<P> {
                     response_received: false,
                     retry_count: 0,
                     data_columns: None,
+                    is_delayed: false,
                 };
 
                 if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
@@ -706,6 +712,7 @@ impl<P: Preset> SyncManager<P> {
                                     response_received: false,
                                     retry_count: 0,
                                     data_columns: Some(columns.into()),
+                                    is_delayed: false,
                                 });
                             }
                             Err(error) => self.log(
@@ -727,6 +734,7 @@ impl<P: Preset> SyncManager<P> {
                         response_received: false,
                         retry_count: 0,
                         data_columns: None,
+                        is_delayed: false,
                     });
                 }
 
@@ -1368,6 +1376,7 @@ impl<P: Preset> SyncManager<P> {
                 retry_count: 0,
                 response_received: false,
                 data_columns: None,
+                is_delayed: false,
             },
         );
     }
@@ -1394,6 +1403,7 @@ impl<P: Preset> SyncManager<P> {
                 retry_count: 0,
                 response_received: false,
                 data_columns: None,
+                is_delayed: false,
             },
         );
     }
@@ -1415,6 +1425,7 @@ impl<P: Preset> SyncManager<P> {
                 retry_count: 0,
                 response_received: false,
                 data_columns: ContiguousList::try_from(vec![0]).map(Arc::new).ok(),
+                is_delayed: false,
             },
         )
     }
