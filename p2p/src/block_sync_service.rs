@@ -4,8 +4,9 @@ use core::{
     time::Duration,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
+    time::Instant,
 };
 
 use anyhow::Result;
@@ -101,6 +102,7 @@ pub struct BlockSyncService<P: Preset> {
     received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
+    delayed_batches: BTreeMap<Instant, Vec<SyncBatch<P>>>,
     fork_choice_to_sync_rx: Option<UnboundedReceiver<SyncMessage<P>>>,
     p2p_to_sync_rx: UnboundedReceiver<P2pToSync<P>>,
     sync_to_p2p_tx: UnboundedSender<SyncToP2p<P>>,
@@ -244,6 +246,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_data_column_sidecars,
             data_dumper,
             network_globals,
+            delayed_batches: BTreeMap::new(),
             fork_choice_to_sync_rx,
             p2p_to_sync_rx,
             sync_to_p2p_tx,
@@ -275,6 +278,10 @@ impl<P: Preset> BlockSyncService<P> {
                 },
 
                 _ = interval.select_next_some() => {
+                    let mut retry_batches = self.delayed_batches.split_off(&Instant::now());
+                    core::mem::swap(&mut self.delayed_batches, &mut retry_batches);
+
+                    self.retry_sync_batches(retry_batches.into_values().flatten().collect())?;
                     self.request_blobs_and_blocks_if_ready();
 
                     if self.sync_direction == SyncDirection::Back {
@@ -712,6 +719,7 @@ impl<P: Preset> BlockSyncService<P> {
     pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
         let sampling_columns = self.controller.sampling_columns();
+        let now = Instant::now();
 
         for batch in batches {
             let SyncBatch {
@@ -720,6 +728,7 @@ impl<P: Preset> BlockSyncService<P> {
                 peer_id,
                 mut start_slot,
                 mut count,
+                is_delayed,
                 ..
             } = batch;
 
@@ -743,6 +752,18 @@ impl<P: Preset> BlockSyncService<P> {
                         "skipping batch retry: blob back-sync batch is no longer relevant: \
                          {start_slot} + {count} < {data_serve_range_slot}"
                     );
+
+                    continue;
+                }
+
+                if !is_delayed {
+                    self.delayed_batches
+                        .entry(now + Duration::from_secs(1))
+                        .or_default()
+                        .push(SyncBatch {
+                            is_delayed: true,
+                            ..batch
+                        });
 
                     continue;
                 }
@@ -846,6 +867,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 retry_count: batch.retry_count + 1,
                                 response_received: batch.response_received,
                                 data_columns: Some(columns.clone_arc()),
+                                is_delayed: false,
                             };
 
                             SyncToP2p::RequestDataColumnsByRange(
