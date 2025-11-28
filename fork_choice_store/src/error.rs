@@ -154,6 +154,8 @@ pub enum Error<P: Preset> {
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
         payload_bid: Arc<SignedExecutionPayloadBid>,
     },
+    #[error("gloas beacon block body without signed execution payload bid: {block:?}")]
+    GloasBlockWithoutPayloadBid { block: Arc<SignedBeaconBlock<P>> },
     #[error("execution payload bid has invalid signature: {payload_bid:?}")]
     InvalidExecutionPayloadBidSignature {
         payload_bid: Arc<SignedExecutionPayloadBid>,
