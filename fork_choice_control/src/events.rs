@@ -24,7 +24,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -50,6 +50,7 @@ pub enum Topic {
     ChainReorg,
     ContributionAndProof,
     DataColumnSidecar,
+    ExecutionPayloadBid,
     FinalizedCheckpoint,
     Head,
     PayloadAttestation,
@@ -68,6 +69,7 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
+    ExecutionPayloadBid(Arc<SignedExecutionPayloadBid>),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttestation(Arc<PayloadAttestationMessage>),
@@ -88,6 +90,7 @@ impl<P: Preset> Event<P> {
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
+            Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::PayloadAttestation(_) => Topic::PayloadAttestation,
@@ -109,6 +112,7 @@ pub struct EventChannels<P: Preset> {
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
+    pub execution_payload_bids: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub payload_attestations: Sender<Event<P>>,
@@ -137,6 +141,7 @@ impl<P: Preset> EventChannels<P> {
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
+            execution_payload_bids: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attestations: broadcast::channel(max_events).0,
@@ -158,6 +163,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
+            Topic::ExecutionPayloadBid => &self.execution_payload_bids,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttestation => &self.payload_attestations,
@@ -314,6 +320,15 @@ impl<P: Preset> EventChannels<P> {
             parent_block_hash,
         ) {
             warn_with_peers!("unable to send payload attributes event: {error}");
+        }
+    }
+
+    pub fn send_execution_payload_bid_event(&self, payload_bid: Arc<SignedExecutionPayloadBid>) {
+        if self.execution_payload_bids.receiver_count() > 0 {
+            let event = Event::ExecutionPayloadBid(payload_bid);
+            if let Err(error) = self.execution_payload_bids.send(event) {
+                warn_with_peers!("unable to send execution payload bid event: {error}");
+            }
         }
     }
 
