@@ -2,10 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use database::DatabaseMode;
-use runtime::StorageConfig;
 
 use crate::commands::AppDatabase;
-
+use crate::StorageConfig;
 pub fn print(
     storage_config: &StorageConfig,
     database: AppDatabase,

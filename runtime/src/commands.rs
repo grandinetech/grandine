@@ -10,8 +10,8 @@ pub enum AppDatabase {
     Sync,
 }
 
-#[derive(Clone, Subcommand)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+#[derive(Debug, Clone, Subcommand)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum GrandineCommand {
     /// Show information about database records
     /// (example: grandine db-info --database sync)
@@ -71,8 +71,8 @@ pub enum GrandineCommand {
     Interchange(InterchangeCommand),
 }
 
-#[derive(Clone, Subcommand)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
+#[derive(Debug, Clone, Subcommand)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum InterchangeCommand {
     /// Import slashing protection interchange file
     /// (example: grandine interchange import file.json)
