@@ -99,6 +99,8 @@ pub enum Error {
     InvalidJsonBody(#[source] JsonRejection),
     #[error("invalid JSON body")]
     InvalidJsonValue(#[source] serde_json::Error),
+    #[error("invalid signed execution payload bid")]
+    InvalidPayloadBid(#[source] AnyhowError),
     #[error("invalid peer ID")]
     InvalidPeerId(#[source] AnyhowError),
     #[error(
@@ -242,6 +244,7 @@ impl Error {
             | Self::InvalidEpoch(_)
             | Self::InvalidJsonValue(_)
             | Self::InvalidQuery(_)
+            | Self::InvalidPayloadBid(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidProposerSlashing(_)
             | Self::InvalidSignedVoluntaryExit(_)

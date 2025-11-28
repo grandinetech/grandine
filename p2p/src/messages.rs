@@ -28,6 +28,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -98,6 +99,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
+    PublishPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
