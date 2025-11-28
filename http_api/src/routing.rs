@@ -38,9 +38,9 @@ use crate::{
         pool_bls_to_execution_changes, pool_proposer_slashings, pool_voluntary_exits,
         post_log_level, post_state_validator_balances, post_state_validators, post_trace_level,
         publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
-        state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
-        state_randao, state_root, state_sync_committees, state_validator,
+        publish_execution_payload_bid, state_committees, state_finality_checkpoints, state_fork,
+        state_pending_consolidations, state_pending_deposits, state_pending_partial_withdrawals,
+        state_proposer_lookahead, state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_pool_attestations, submit_pool_attestations_v2,
         submit_pool_attester_slashing, submit_pool_attester_slashing_v2,
         submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
@@ -389,6 +389,11 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         )
         .route("/eth/v1/beacon/blocks", post(publish_block));
 
+    let execution_payload_routes = Router::new().route(
+        "/eth/v1/beacon/execution_payload/bid",
+        post(publish_execution_payload_bid),
+    );
+
     let block_v2_routes = Router::new().route(
         "/eth/v2/beacon/blocks/{block_id}/attestations",
         get(block_attestations_v2),
@@ -454,6 +459,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route("/eth/v1/beacon/genesis", get(genesis))
         .merge(state_routes)
         .merge(header_routes)
+        .merge(execution_payload_routes)
         .merge(block_v1_routes)
         .merge(block_v2_routes)
         .merge(pool_v1_routes)

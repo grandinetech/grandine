@@ -7,7 +7,7 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
     phase0::primitives::{Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
@@ -137,6 +137,28 @@ pub enum Error<P: Preset> {
     DataColumnSidecarProposerIndexMismatch {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
+    },
+    #[error("execution payload bid's builder is not active: {payload_bid:?}")]
+    ExecutionPayloadBidBuilderInactive {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("execution payload bid's builder has been slashed: {payload_bid:?}")]
+    ExecutionPayloadBidBuilderSlashed {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("execution payload bid's builder has invalid withdrawal credentials: {payload_bid:?}")]
+    ExecutionPayloadBidBuilderInvalid {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
+    ExecutionPayloadBidOffProtocolPaymentDisallowed {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("gloas beacon block body without signed execution payload bid: {block:?}")]
+    GloasBlockWithoutPayloadBid { block: Arc<SignedBeaconBlock<P>> },
+    #[error("execution payload bid has invalid signature: {payload_bid:?}")]
+    InvalidExecutionPayloadBidSignature {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
     },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {

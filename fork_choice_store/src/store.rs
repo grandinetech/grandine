@@ -55,7 +55,7 @@ use types::{
     },
     gloas::containers::{
         DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
-        PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
+        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -64,7 +64,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, ValidatorIndex, H256},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconState as _, BlockBodyWithPayloadBid, SignedBeaconBlock as _},
 };
 use unwrap_none::UnwrapNone as _;
 
@@ -87,7 +87,8 @@ use crate::{
     store_config::StoreConfig,
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
-    AttestationOrigin, PayloadAttestationAction, PayloadAttestationOrigin,
+    AttestationOrigin, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
+    PayloadAttestationAction, PayloadAttestationOrigin,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -233,7 +234,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, H256, ColumnIndex),
         ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     >,
-    accepted_payload_bids: HashMap<(Slot, H256), ExecutionPayloadBid>,
+    accepted_payload_bids:
+        HashMap<(Slot, ExecutionBlockHash), HashMap<ValidatorIndex, ExecutionPayloadBid>>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -1278,6 +1280,98 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
+    pub fn validate_execution_payload_bid(
+        &self,
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+        origin: &ExecutionPayloadBidOrigin,
+    ) -> Result<ExecutionPayloadBidAction> {
+        let bid = payload_bid.message;
+        let builder_index = bid.builder_index;
+
+        // > off-protocol payment is disallowed in gossip, the `bid.execution_payment` MUST be zero
+        if origin.is_from_gossip() {
+            ensure!(
+                bid.execution_payment == 0,
+                Error::<P>::ExecutionPayloadBidOffProtocolPaymentDisallowed { payload_bid }
+            );
+        }
+
+        // > the `bid.slot` is the current slot or the next slot
+        if bid.slot > self.slot() + 1 {
+            return Ok(ExecutionPayloadBidAction::Ignore(false));
+        }
+
+        // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
+        if !self
+            .execution_payload_locations
+            .contains_key(&bid.parent_block_hash)
+        {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        }
+
+        // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
+        let Some(state) = self.state_by_block_root(bid.parent_block_root) else {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        };
+
+        // > the builder is active, and non-slashed builder.
+        let current_epoch = accessors::get_current_epoch(&state);
+        let builder = state.validators().get(builder_index)?;
+        ensure!(
+            !builder.slashed,
+            Error::<P>::ExecutionPayloadBidBuilderSlashed { payload_bid }
+        );
+        ensure!(
+            predicates::is_active_validator(builder, current_epoch),
+            Error::<P>::ExecutionPayloadBidBuilderInactive { payload_bid }
+        );
+
+        // > the builder's withdrawal credentials' prefix is BUILDER_WITHDRAWAL_PREFIX
+        ensure!(
+            predicates::has_builder_withdrawal_credential(builder),
+            Error::<P>::ExecutionPayloadBidBuilderInvalid { payload_bid }
+        );
+
+        // > the `bid.value` is less or equal than the builder's excess balance
+        let builder_balance = *state.balances().get(builder_index)?;
+        if bid.value + P::MIN_ACTIVATION_BALANCE > builder_balance {
+            return Ok(ExecutionPayloadBidAction::Ignore(false));
+        }
+
+        if origin.verify_signatures() {
+            let pubkey = self.pubkey_cache.get_or_insert(builder.pubkey)?;
+
+            // > `signed_execution_payload_bid.signature` is valid builder's signature
+            if let Err(error) =
+                bid.verify(&self.chain_config, &state, payload_bid.signature, pubkey)
+            {
+                bail!(
+                    error.context(Error::<P>::InvalidExecutionPayloadBidSignature { payload_bid })
+                );
+            }
+        }
+
+        if let Some(payload_bids) = self
+            .accepted_payload_bids
+            .get(&(bid.slot, bid.parent_block_hash))
+        {
+            // > this is the first signed bid seen from the given builder for this slot
+            if payload_bids.contains_key(&builder_index) {
+                return Ok(ExecutionPayloadBidAction::Ignore(true));
+            }
+
+            // > this bid is the highest value bid seen for the corresponding slot and the given parent block hash.
+            if let Some(highest_bid) = payload_bids.values().max_by_key(|bid| bid.value) {
+                if bid.value <= highest_bid.value {
+                    // This bid doesn't have a higher value than the existing bid
+                    return Ok(ExecutionPayloadBidAction::Ignore(true));
+                }
+            }
+        }
+
+        Ok(ExecutionPayloadBidAction::Accept(payload_bid))
+    }
+
     #[expect(clippy::too_many_lines)]
     pub fn validate_aggregate_and_proof<I>(
         &self,
@@ -2295,7 +2389,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_root = data_column_sidecar.beacon_block_root;
         let column_index = data_column_sidecar.index;
-        let slot = data_column_sidecar.slot;
         let data_column_sidecar = Arc::new(data_column_sidecar.into());
 
         // Ignore non-sampling data column sidecars
@@ -2303,6 +2396,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
+        // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
         let Some(chain_link) = self.chain_link(block_root) else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
@@ -2319,18 +2413,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         );
 
-        // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
-        let Some(payload_bid) = self.accepted_payload_bids.get(&(slot, block_root)) else {
-            return Ok(DataColumnSidecarAction::DelayUntilState(
-                data_column_sidecar,
-                block_root,
-            ));
-        };
+        let blob_kzg_commitments_matches = chain_link
+            .block
+            .message()
+            .body()
+            .with_payload_bid()
+            .map(|body| {
+                body.signed_execution_payload_bid()
+                    .message
+                    .blob_kzg_commitments_root
+                    == data_column_sidecar.kzg_commitments().hash_tree_root()
+            })
+            .ok_or(Error::GloasBlockWithoutPayloadBid {
+                block: chain_link.block.clone_arc(),
+            })?;
 
         // [REJECT] The hash of the sidecar's kzg_commitments matches the blob_kzg_commitments_root in the corresponding builder's bid for sidecar.beacon_block_root.
         ensure!(
-            data_column_sidecar.kzg_commitments().hash_tree_root()
-                == payload_bid.blob_kzg_commitments_root,
+            blob_kzg_commitments_matches,
             Error::DataColumnSidecarInvalidKzgCommitments {
                 data_column_sidecar
             }
@@ -2867,6 +2967,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.blob_cache.insert(blob_sidecar);
     }
 
+    pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid>) {
+        let ExecutionPayloadBid {
+            slot,
+            parent_block_hash,
+            parent_block_root,
+            builder_index,
+            blob_kzg_commitments_root,
+            ..
+        } = payload_bid.message;
+
+        let bids = self
+            .accepted_payload_bids
+            .entry((slot, parent_block_hash))
+            .or_default();
+
+        bids.insert(builder_index, payload_bid.message);
+    }
+
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
         if let Some(data_sidecar) = data_sidecar.pre_gloas() {
             let block_header = data_sidecar.signed_block_header.message;
@@ -3286,6 +3404,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_gloas_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        // TODO: (gloas): prune after block imported, as it's no longer relevant
         self.accepted_payload_bids
             .retain(|(slot, _), _| finalized_slot <= *slot);
         self.sidecars_construction_started

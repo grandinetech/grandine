@@ -23,7 +23,7 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
@@ -252,6 +252,80 @@ impl<I> AggregateAndProofOrigin<I> {
             Self::Gossip(gossip_id) => Some(gossip_id),
             Self::Api(_) => None,
         }
+    }
+
+    #[must_use]
+    pub const fn verify_signatures(&self) -> bool {
+        match self {
+            Self::Gossip(_) | Self::Api(_) => true,
+        }
+    }
+
+    #[must_use]
+    pub const fn send_to_validator(&self) -> bool {
+        match self {
+            Self::Gossip(_) | Self::Api(_) => true,
+        }
+    }
+
+    // TODO: use Debug instead
+    #[must_use]
+    pub const fn metrics_label(&self) -> &str {
+        match self {
+            Self::Gossip(_) => "Gossip",
+            Self::Api(_) => "Api",
+        }
+    }
+}
+
+#[derive(Debug, AsRefStr)]
+pub enum ExecutionPayloadBidOrigin {
+    Gossip(GossipId),
+    Api(OneshotSender<Result<ValidationOutcome>>),
+}
+
+impl Serialize for ExecutionPayloadBidOrigin {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
+}
+
+impl ExecutionPayloadBidOrigin {
+    #[must_use]
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        match self {
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, Some(sender)),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_gossip(&self) -> bool {
+        matches!(self, Self::Gossip(_))
     }
 
     #[must_use]
@@ -801,6 +875,11 @@ pub enum PayloadAttestationAction {
     Accept(Arc<PayloadAttestationMessage>),
     Ignore(Publishable),
     DelayUntilBlock(Arc<PayloadAttestationMessage>, H256),
+}
+
+pub enum ExecutionPayloadBidAction {
+    Accept(Arc<SignedExecutionPayloadBid>),
+    Ignore(Publishable),
 }
 
 pub enum PartialBlockAction {
