@@ -3,8 +3,9 @@
 
 /**/target/
 
-# Omit zkvm guest compiled artifacts
-/zkvm/guest/elf
+# Omit zkvm artifacts
+/zkvm/guest/zisk/artifacts
+/zkvm/host/proof.bin
 
 book/book
 book/deploy

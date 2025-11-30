@@ -404,7 +404,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "serde",
  "serde_utils",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.2)",
  "ssz",
  "static_assertions",
  "typenum",
@@ -427,7 +427,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.1#673d417a78d34473f503972efb224b97b588d762"
+source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=bls12_381-6bb9695-up.2#ae7f8574a370f4e9af93c9ec4aadb6d696f657d4"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -440,6 +440,7 @@ dependencies = [
  "rand_core 0.6.4",
  "sp1-lib",
  "subtle",
+ "ziskos",
  "zkm-lib",
 ]
 
@@ -1704,7 +1705,7 @@ dependencies = [
  "ethereum-types",
  "generic-array",
  "hex-literal",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.2)",
 ]
 
 [[package]]
@@ -1733,7 +1734,7 @@ dependencies = [
  "rayon",
  "rc-box",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.2)",
  "shuffling",
  "ssz",
  "static_assertions",
@@ -2158,6 +2159,11 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
  "spin",
 ]
+
+[[package]]
+name = "lib-c"
+version = "0.13.0"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.13.0#ea1ed4c518992a170fc59ec19f1228eb4829a9e1"
 
 [[package]]
 name = "libc"
@@ -4115,11 +4121,12 @@ dependencies = [
 [[package]]
 name = "sha2"
 version = "0.10.9"
-source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1#dab12204de2e6a40f7a4c93b59347f60174c6953"
+source = "git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.2#7d57ea01cd5fe5f6458142ce6ac269cc44b425bd"
 dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+ "ziskos",
 ]
 
 [[package]]
@@ -5442,6 +5449,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ziskos"
+version = "0.13.0"
+source = "git+https://github.com/0xPolygonHermez/zisk.git?tag=v0.13.0#ea1ed4c518992a170fc59ec19f1228eb4829a9e1"
+dependencies = [
+ "cfg-if",
+ "getrandom 0.2.16",
+ "lazy_static",
+ "lib-c",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "rand 0.8.5",
+ "static_assertions",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "zkhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5509,7 +5532,7 @@ dependencies = [
  "pico-sdk",
  "pubkey_cache",
  "serde",
- "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.1)",
+ "sha2 0.10.9 (git+https://github.com/grandinetech/universal-precompiles.git?tag=sha2-v0.10.9-up.2)",
  "ssz",
  "transition_functions",
  "types",

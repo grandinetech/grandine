@@ -96,15 +96,14 @@ jobs:
   zkvm-test:
     strategy:
       matrix:
-        backend: [risc0, sp1, pico, ziren]
+        backend: [risc0, sp1, pico, ziren, zisk]
         include:
           # zkVM test - risc0 implementation
           - backend: risc0
-            # Refer to docs:
-            # https://dev.risczero.com/api/zkvm/install#using-rzup-in-ci
+            # Refer to docs: https://dev.risczero.com/api/zkvm/install#using-rzup-in-ci
             install: |
               curl -L https://risczero.com/install | bash
-              source /home/runner/.bashrc
+              echo "/home/runner/.risc0/bin" >> $GITHUB_PATH
               export PATH="/home/runner/.risc0/bin:$PATH"
               rzup install rust 1.88.0
               rzup install cpp 2024.1.5
@@ -117,7 +116,10 @@ jobs:
           - backend: sp1
             install: |
               curl -L https://sp1up.succinct.xyz | bash
-              /home/runner/.sp1/bin/sp1up -v 5.2.1
+              echo "/home/runner/.sp1/bin" >> $GITHUB_PATH
+              export PATH="/home/runner/.sp1/bin:$PATH"
+              sp1up -v 5.2.1
+              cargo prove --version
             execute: RUST_LOG=info cargo run -p zkvm_host --features sp1 --release -- --test "$TEST" execute
 
           # zkVM test - Brevis Pico implementation
@@ -126,7 +128,19 @@ jobs:
               rustup install nightly-2025-08-04
               rustup component add rust-src --toolchain nightly-2025-08-04
               cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
+              cargo pico --version
             execute: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST" execute
+
+          # zkVM test - ZiskOS implementation
+          - backend: zisk
+            install: |
+              sudo DEBIAN_FRONTEND='noninteractive' apt-get update
+              sudo DEBIAN_FRONTEND='noninteractive' apt-get install -y xz-utils jq curl build-essential qemu-system libomp-dev libgmp-dev nlohmann-json3-dev protobuf-compiler uuid-dev libgrpc++-dev libsecp256k1-dev libsodium-dev libpqxx-dev nasm libopenmpi-dev openmpi-bin openmpi-common libclang-dev clang gcc-riscv64-unknown-elf
+              curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | GH_RUNNER=true bash
+              echo "/home/runner/.config/.zisk/bin" >> $GITHUB_PATH
+              export PATH="/home/runner/.config/.zisk/bin:$PATH"
+              cargo-zisk -V
+            execute: RUST_LOG=info cargo run -p zkvm_host --features zisk --release -- --test "$TEST" execute
 
           # zkVM test - ZKM implementation
           - backend: ziren

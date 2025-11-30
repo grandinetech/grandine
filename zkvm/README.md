@@ -94,6 +94,30 @@
 
    Again, replace `<test_case>` with one of the four test cases mentioned above.
 
+## ZiskVM implementation
+
+1. **Execute without proving:**
+
+   Install Zisk with proving key. Refer to [the docs](https://0xpolygonhermez.github.io/zisk/getting_started/installation.html#installing-zisk) for steps.
+
+   Then run:
+
+   ```sh
+   cargo run -p zkvm_host --features zisk --release -- --test <test_case> execute
+   ```
+   Replace `<test_case>` with one of the four test cases mentioned above.
+
+2. **Prove using local prover:**
+
+   In addition to what's needed in step 1, also generate the program setup files. Refer to [the docs](https://0xpolygonhermez.github.io/zisk/getting_started/quickstart.html#prove) on steps for both generating and verifying the proof.
+
+   Then run:
+
+   ```sh
+   cargo run -p zkvm_host --features zisk --release -- --test <test_case> prove
+   ```
+   Again, replace `<test_case>` with one of the four test cases mentioned above.
+
 ## Adding new zkvm
 
 To add new zkvm, you need to:

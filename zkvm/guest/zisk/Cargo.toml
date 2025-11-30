@@ -1,0 +1,24 @@
+[package]
+name = "zkvm_guest_zisk"
+edition = "2024"
+version = "0.1.0"
+authors = ["Grandine <info@grandine.io>"]
+
+[workspace]
+
+[dependencies]
+anyhow = { version = '1', features = ['backtrace'] }
+bls = { path = '../../../bls', features = ['zkcrypto'], default-features = false }
+byteorder = '1'
+enum-iterator = '2'
+pubkey_cache = { path = "../../../pubkey_cache" }
+ssz = { path = "../../../ssz" }
+transition_functions = { path = "../../../transition_functions" }
+types = { path = "../../../types" }
+ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
+
+[patch.crates-io]
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
+
+[patch.'https://github.com/zkcrypto/bls12_381.git']
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }

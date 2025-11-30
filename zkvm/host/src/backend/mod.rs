@@ -21,6 +21,11 @@ mod ziren;
 #[cfg(feature = "ziren")]
 pub use ziren::*;
 
+#[cfg(feature = "zisk")]
+mod zisk;
+#[cfg(feature = "zisk")]
+pub use zisk::*;
+
 #[derive(Clone, Copy, Debug)]
 pub enum ConfigKind {
     Mainnet = 0,

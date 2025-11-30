@@ -22,6 +22,7 @@ serde_json = { workspace = true, optional = true  }
 snap = { workspace = true }
 sp1-sdk = { workspace = true, optional = true }
 ssz = { workspace = true }
+tempfile = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 transition_functions = { workspace = true }
 types = { workspace = true }
@@ -58,4 +59,6 @@ pico = [
 ziren = [
     "dep:zkm-build",
     "dep:zkm-sdk",
+
 ]
+zisk = []
