@@ -1,0 +1,20 @@
+[package]
+name = "zkvm_guest_zisk"
+version = "0.1.0"
+edition = "2024"
+default-run = "zkvm_guest_zisk"
+authors = ["Grandine <info@grandine.io>"]
+
+[dependencies]
+anyhow = { version = '1', features = ['backtrace'] }
+bincode = '1'
+bls = { path = '../../../bls', features = ['zkcrypto'], default-features = false }
+byteorder = '1'
+enum-iterator = '2'
+pubkey_cache = { path = "../../../pubkey_cache" }
+snap = '1'
+ssz = { path = "../../../ssz" }
+transition_functions = { path = "../../../transition_functions" }
+types = { path = "../../../types" }
+ziskos = { git = "https://github.com/0xPolygonHermez/zisk.git", tag = "v0.13.0" }
+serde = { version = '1', features = ['derive', 'rc'] }
