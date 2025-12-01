@@ -38,8 +38,8 @@ use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, PayloadAction, PayloadAttestationAction, PayloadAttestationItem,
-    PayloadAttestationOrigin, StateCacheProcessor, Store,
-    ValidAttestation, ValidPayloadAttestation,
+    PayloadAttestationOrigin, StateCacheProcessor, Store, ValidAttestation,
+    ValidPayloadAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};

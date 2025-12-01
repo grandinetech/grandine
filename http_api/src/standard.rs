@@ -40,8 +40,8 @@ use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
-    AttestationAggPool, BlsToExecutionChangePool, Origin, PoolAdditionOutcome,
-    SyncCommitteeAggPool, convert_to_electra_attestation,
+    AttestationAggPool, BlsToExecutionChangePool, Origin, PayloadAttestationAggPool,
+    PoolAdditionOutcome, SyncCommitteeAggPool, convert_to_electra_attestation,
 };
 use p2p::{
     ApiToP2p, BeaconCommitteeSubscription, NetworkConfig, NodeIdentity, NodePeer, NodePeerCount,
@@ -83,7 +83,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::{
-        containers::{ExecutionPayloadBid, SignedExecutionPayloadBid},
+        containers::{ExecutionPayloadBid, PayloadAttestation, SignedExecutionPayloadBid},
         primitives::BuilderIndex,
     },
     nonstandard::{
@@ -178,6 +178,12 @@ pub struct BlockHeadersQuery {
 pub struct PoolAttestationQuery {
     slot: Slot,
     committee_index: CommitteeIndex,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolPayloadAttestationsQuery {
+    slot: Option<Slot>,
 }
 
 #[derive(Deserialize)]
@@ -2299,6 +2305,23 @@ pub async fn submit_pool_bls_to_execution_change(
     }
 
     Ok(())
+}
+
+/// `GET /eth/v1/beacon/pool/payload_attestations`
+pub async fn pool_payload_attestations<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(payload_attestation_agg_pool): State<Arc<PayloadAttestationAggPool<P, W>>>,
+    EthQuery(query): EthQuery<PoolPayloadAttestationsQuery>,
+) -> Result<EthResponse<Vec<PayloadAttestation<P>>>, Error> {
+    let slot = query.slot.unwrap_or_else(|| controller.slot());
+    let phase = controller.chain_config().phase_at_slot::<P>(slot);
+
+    let data = payload_attestation_agg_pool
+        .aggregate_payload_attestations(slot)
+        .await?
+        .to_vec();
+
+    Ok(EthResponse::json(data).version(phase))
 }
 
 /// `GET /eth/v1/config/fork_schedule`
