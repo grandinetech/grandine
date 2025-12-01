@@ -278,10 +278,10 @@ impl<P: Preset> BlockSyncService<P> {
                 },
 
                 _ = interval.select_next_some() => {
-                    let mut retry_batches = self.delayed_batches.split_off(&Instant::now());
-                    core::mem::swap(&mut self.delayed_batches, &mut retry_batches);
+                    let mut batches = self.delayed_batches.split_off(&Instant::now());
+                    core::mem::swap(&mut self.delayed_batches, &mut batches);
 
-                    self.retry_sync_batches(retry_batches.into_values().flatten().collect())?;
+                    self.request_batches(batches.into_values().flatten().collect())?;
                     self.request_blobs_and_blocks_if_ready();
 
                     if self.sync_direction == SyncDirection::Back {
@@ -719,7 +719,6 @@ impl<P: Preset> BlockSyncService<P> {
     pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
         let sampling_columns = self.controller.sampling_columns();
-        let now = Instant::now();
 
         for batch in batches {
             let SyncBatch {
@@ -728,7 +727,6 @@ impl<P: Preset> BlockSyncService<P> {
                 peer_id,
                 mut start_slot,
                 mut count,
-                is_delayed,
                 ..
             } = batch;
 
@@ -752,18 +750,6 @@ impl<P: Preset> BlockSyncService<P> {
                         "skipping batch retry: blob back-sync batch is no longer relevant: \
                          {start_slot} + {count} < {data_serve_range_slot}"
                     );
-
-                    continue;
-                }
-
-                if !is_delayed {
-                    self.delayed_batches
-                        .entry(now + Duration::from_secs(1))
-                        .or_default()
-                        .push(SyncBatch {
-                            is_delayed: true,
-                            ..batch
-                        });
 
                     continue;
                 }
@@ -998,15 +984,31 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     fn request_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
+        let now = Instant::now();
+
         for batch in batches {
             let request_id = self.request_id()?;
             let SyncBatch {
                 target,
+                direction,
                 peer_id,
                 start_slot,
                 count,
+                is_delayed,
                 ..
             } = batch;
+
+            if direction == SyncDirection::Back && !is_delayed {
+                self.delayed_batches
+                    .entry(now + Duration::from_secs(1))
+                    .or_default()
+                    .push(SyncBatch {
+                        is_delayed: true,
+                        ..batch
+                    });
+
+                continue;
+            }
 
             match target {
                 SyncTarget::DataColumnSidecar => {
