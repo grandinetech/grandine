@@ -16,7 +16,9 @@ use fork_choice_control::{EventChannels, Wait};
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use liveness_tracker::ApiToLiveness;
-use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
+use operation_pools::{
+    AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
+};
 use p2p::{ApiToP2p, NetworkConfig, ToSubnetService};
 use prometheus_metrics::Metrics;
 use serde_qs::axum::QsQuery;
@@ -36,13 +38,13 @@ use crate::{
         get_state_validator_balances, get_state_validators, node_health, node_identity, node_peer,
         node_peer_count, node_peers, node_syncing_status, node_version, node_version_v2,
         pool_attestations, pool_attestations_v2, pool_attester_slashings,
-        pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_proposer_slashings,
-        pool_voluntary_exits, post_log_level, post_state_validator_balances, post_state_validators,
-        post_trace_level, publish_blinded_block, publish_blinded_block_v2, publish_block,
-        publish_block_v2, publish_execution_payload_bid, state_committees,
-        state_finality_checkpoints, state_fork, state_pending_consolidations,
-        state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
-        state_randao, state_root, state_sync_committees, state_validator,
+        pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_payload_attestations,
+        pool_proposer_slashings, pool_voluntary_exits, post_log_level,
+        post_state_validator_balances, post_state_validators, post_trace_level,
+        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
+        publish_execution_payload_bid, state_committees, state_finality_checkpoints, state_fork,
+        state_pending_consolidations, state_pending_deposits, state_pending_partial_withdrawals,
+        state_proposer_lookahead, state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_pool_attestations, submit_pool_attestations_v2,
         submit_pool_attester_slashing, submit_pool_attester_slashing_v2,
         submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
@@ -86,6 +88,7 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     pub sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
+    pub payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
     pub is_synced: Arc<SyncedStatus>,
     pub event_channels: Arc<EventChannels<P>>,
     pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
@@ -167,6 +170,12 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<SyncCommitteeAggPool
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<BlsToExecutionChangePool> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.bls_to_execution_change_pool.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<PayloadAttestationAggPool<P, W>> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.payload_attestation_agg_pool.clone_arc()
     }
 }
 
@@ -440,6 +449,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route(
             "/eth/v1/beacon/pool/sync_committees",
             post(submit_pool_sync_committees),
+        )
+        .route(
+            "/eth/v1/beacon/pool/payload_attestations",
+            get(pool_payload_attestations),
         );
 
     let pool_v2_routes = Router::new()

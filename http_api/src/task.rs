@@ -19,7 +19,9 @@ use genesis::AnchorCheckpointProvider;
 use http_api_utils::ApiMetrics;
 use liveness_tracker::ApiToLiveness;
 use logging::info_with_peers;
-use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
+use operation_pools::{
+    AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
+};
 use p2p::{ApiToP2p, NetworkConfig, SyncToApi, ToSubnetService};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
@@ -56,6 +58,7 @@ pub struct HttpApi<P: Preset, W: Wait> {
     pub attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     pub sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
+    pub payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
     pub channels: Channels<P>,
     pub metrics: Option<Arc<Metrics>>,
     pub tracing_handle: Option<TracingHandle>,
@@ -90,6 +93,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             attestation_agg_pool,
             sync_committee_agg_pool,
             bls_to_execution_change_pool,
+            payload_attestation_agg_pool,
             channels,
             metrics,
             tracing_handle,
@@ -125,6 +129,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             attestation_agg_pool,
             sync_committee_agg_pool,
             bls_to_execution_change_pool,
+            payload_attestation_agg_pool,
             is_synced: is_synced.clone_arc(),
             event_channels,
             api_to_liveness_tx,
