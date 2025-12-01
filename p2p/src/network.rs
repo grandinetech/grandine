@@ -80,6 +80,7 @@ use crate::{
 
 const GOSSIPSUB_PARAMETER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
 const NETWORK_METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
+const PEER_COUNT_UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 
 // > Clients MAY limit the number of blocks and sidecars in the response.
 const MAX_FOR_DOS_PREVENTION: u64 = 64;
@@ -291,6 +292,9 @@ impl<P: Preset> Network<P> {
         let mut gossipsub_parameter_update_interval =
             IntervalStream::new(tokio::time::interval(GOSSIPSUB_PARAMETER_UPDATE_INTERVAL)).fuse();
 
+        let mut peer_count_update_interval =
+            IntervalStream::new(tokio::time::interval(PEER_COUNT_UPDATE_INTERVAL)).fuse();
+
         loop {
             select! {
                 _ = health_check.interval.select_next_some() => {
@@ -301,6 +305,14 @@ impl<P: Preset> Network<P> {
                     let debug_info = message_debug_info("update_gossipsub_parameters");
 
                     self.update_gossipsub_parameters();
+
+                    debug_info.handle();
+                },
+
+                _ = peer_count_update_interval.select_next_some() => {
+                    let debug_info = message_debug_info("peer_count_update_interval");
+
+                    self.update_peer_count();
 
                     debug_info.handle();
                 },
