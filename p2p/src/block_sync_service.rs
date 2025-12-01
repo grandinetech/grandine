@@ -632,7 +632,7 @@ impl<P: Preset> BlockSyncService<P> {
         self.request_expired_data_column_range_requests()?;
 
         // Check if batch has finished
-        if !self.sync_manager.ready_to_request_by_range() {
+        if !self.sync_manager.ready_to_request_by_range() || !self.delayed_batches.is_empty() {
             return Ok(());
         }
 
@@ -953,6 +953,10 @@ impl<P: Preset> BlockSyncService<P> {
                 )
             }
             SyncDirection::Back => {
+                if !self.delayed_batches.is_empty() {
+                    return Ok(());
+                }
+
                 let data_availability_serve_range_slot = if is_peerdas_activated {
                     misc::data_column_serve_range_slot::<P>(
                         self.controller.chain_config(),
@@ -986,7 +990,7 @@ impl<P: Preset> BlockSyncService<P> {
     fn request_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         let now = Instant::now();
 
-        for batch in batches {
+        for (batch_index, batch) in (1..).zip(batches) {
             let request_id = self.request_id()?;
             let SyncBatch {
                 target,
@@ -1000,7 +1004,7 @@ impl<P: Preset> BlockSyncService<P> {
 
             if direction == SyncDirection::Back && !is_delayed {
                 self.delayed_batches
-                    .entry(now + Duration::from_secs(1))
+                    .entry(now + Duration::from_secs(batch_index * 5))
                     .or_default()
                     .push(SyncBatch {
                         is_delayed: true,
