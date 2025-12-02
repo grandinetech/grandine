@@ -2108,11 +2108,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
         // Adjustment: Ignore data column sidecars for unseen blocks only
-        if self.accepted_data_column_sidecars.contains_key(&(
-            block_header.slot,
-            block_header.proposer_index,
-            data_column_sidecar.index,
-        )) && !block_seen
+        if self
+            .accepted_data_column_sidecars
+            .get(&(
+                block_header.slot,
+                block_header.proposer_index,
+                data_column_sidecar.index,
+            ))
+            .is_some_and(|commitments| commitments.contains_key(&block_root))
+            && !block_seen
         {
             return Ok(DataColumnSidecarAction::Ignore(true));
         }
