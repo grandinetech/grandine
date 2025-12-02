@@ -35,6 +35,7 @@ use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
 use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
@@ -1057,12 +1058,6 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
-        // +1 to include head slot into backfill range
-        let current = SyncCheckpoint {
-            slot: current.slot + 1,
-            ..current
-        };
-
         let high = current;
 
         let low = match &self.back_sync {
@@ -1081,13 +1076,22 @@ impl<P: Preset> BlockSyncService<P> {
             }
         };
 
-        let back_sync_process = BackSync::<P>::new(
-            BackSyncData { current, high, low },
+        let no_blocks = self
+            .controller
+            .blocks_by_range(low.slot.saturating_sub(P::SlotsPerEpoch::U64)..low.slot + 1)?
+            .is_empty();
+
+        let back_sync_mode = if no_blocks {
+            BackSyncMode::Default
+        } else {
             BackSyncMode::DataColumnsOnly {
                 column_indices,
                 previous_earliest_available_slot,
-            },
-        );
+            }
+        };
+
+        let back_sync_process =
+            BackSync::<P>::new(BackSyncData { current, high, low }, back_sync_mode);
 
         if !back_sync_process.is_finished() {
             back_sync_process.save(&self.database)?;
