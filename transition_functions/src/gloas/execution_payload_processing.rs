@@ -137,9 +137,9 @@ pub fn validate_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
-    // > Verify the withdrawals root
+    // > Verify the consistency with expected withdrawals
     let in_payload = payload.withdrawals.hash_tree_root();
-    let in_state = state.latest_withdrawals_root();
+    let in_state = state.payload_expected_withdrawals().hash_tree_root();
     ensure!(
         in_payload == in_state,
         Error::<P>::PayloadWithdrawalsMismatch {

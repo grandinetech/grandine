@@ -11,7 +11,7 @@ use ssz::{PersistentList, PersistentVector, UnhashedBundleSize};
 
 use crate::{
     altair::primitives::ParticipationFlags,
-    capella::containers::HistoricalSummary,
+    capella::containers::{HistoricalSummary, Withdrawal},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     gloas::containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
     phase0::{
@@ -79,3 +79,6 @@ pub type BuilderPendingPayments<P> = PersistentVector<
 
 pub type BuilderPendingWithdrawals<P> =
     PersistentList<BuilderPendingWithdrawal, <P as Preset>::BuilderPendingWithdrawalsLimit>;
+
+pub type PayloadExpectedWithdrawals<P> =
+    PersistentList<Withdrawal, <P as Preset>::MaxWithdrawalsPerPayload>;
