@@ -45,12 +45,12 @@ use crate::{
         publish_execution_payload_bid, state_committees, state_finality_checkpoints, state_fork,
         state_pending_consolidations, state_pending_deposits, state_pending_partial_withdrawals,
         state_proposer_lookahead, state_randao, state_root, state_sync_committees, state_validator,
-        state_validator_identities, submit_pool_attestations, submit_pool_attestations_v2,
-        submit_pool_attester_slashing, submit_pool_attester_slashing_v2,
-        submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
-        submit_pool_sync_committees, submit_pool_voluntary_exit, sync_committee_rewards,
-        validator_aggregate_attestation, validator_aggregate_attestation_v2,
-        validator_attestation_data, validator_attester_duties,
+        state_validator_identities, submit_payload_attestation_messages, submit_pool_attestations,
+        submit_pool_attestations_v2, submit_pool_attester_slashing,
+        submit_pool_attester_slashing_v2, submit_pool_bls_to_execution_change,
+        submit_pool_proposer_slashing, submit_pool_sync_committees, submit_pool_voluntary_exit,
+        sync_committee_rewards, validator_aggregate_attestation,
+        validator_aggregate_attestation_v2, validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
         validator_block_v3, validator_execution_payload_bid, validator_liveness,
         validator_prepare_beacon_proposer, validator_proposer_duties, validator_proposer_duties_v2,
@@ -451,7 +451,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         )
         .route(
             "/eth/v1/beacon/pool/payload_attestations",
-            get(pool_payload_attestations),
+            get(pool_payload_attestations).post(submit_payload_attestation_messages),
         );
 
     let pool_v2_routes = Router::new()

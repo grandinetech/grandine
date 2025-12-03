@@ -45,7 +45,10 @@ use types::{
         SignedBeaconBlock as FuluSignedBeaconBlock,
         SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
     },
-    gloas::containers::{SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid},
+    gloas::containers::{
+        PayloadAttestationMessage, SignedBeaconBlock as GloasSignedBeaconBlock,
+        SignedExecutionPayloadBid,
+    },
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
         consts::TargetAggregatorsPerCommittee,
@@ -401,6 +404,45 @@ impl<P: Preset> From<Phase> for SignedBlindedBeaconPhaseDeserializer<P> {
             phase,
             phantom: PhantomData,
         }
+    }
+}
+
+pub struct PayloadAttestationMessageListPhaseDeserializer<P: Preset> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for PayloadAttestationMessageListPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de> for PayloadAttestationMessageListPhaseDeserializer<P> {
+    type Value = ContiguousList<Arc<PayloadAttestationMessage>, P::PtcSize>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let result = match self.phase {
+            Phase::Phase0
+            | Phase::Altair
+            | Phase::Bellatrix
+            | Phase::Capella
+            | Phase::Deneb
+            | Phase::Electra
+            | Phase::Fulu => return Err(D::Error::custom("invalid phase")),
+            Phase::Gloas => {
+                ContiguousList::<PayloadAttestationMessage, P::PtcSize>::deserialize(deserializer)?
+                    .map(Arc::new)
+            }
+        };
+
+        Ok(result)
     }
 }
 
