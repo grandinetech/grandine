@@ -27,7 +27,9 @@ use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{Event, EventChannels, ForkChoiceContext, ForkTip, Topic, Wait};
-use fork_choice_store::{AttestationItem, AttestationOrigin};
+use fork_choice_store::{
+    AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+};
 use futures::{
     channel::{mpsc::UnboundedSender, oneshot::Receiver as OneshotReceiver},
     stream::{FuturesOrdered, Stream, StreamExt as _},
@@ -85,7 +87,7 @@ use types::{
     gloas::{
         containers::{
             ExecutionPayloadBid, PayloadAttestation, PayloadAttestationData,
-            SignedExecutionPayloadBid,
+            PayloadAttestationMessage, SignedExecutionPayloadBid,
         },
         primitives::BuilderIndex,
     },
@@ -118,7 +120,8 @@ use crate::{
     extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{
-        APIBlock, BroadcastValidation, SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
+        APIBlock, BroadcastValidation, PayloadAttestationMessageListPhaseDeserializer,
+        SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
         SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
         SignedExecutionPayloadBidPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
@@ -2332,6 +2335,25 @@ pub async fn pool_payload_attestations<P: Preset, W: Wait>(
         .to_vec();
 
     Ok(EthResponse::json(data).version(phase))
+}
+
+/// `POST /eth/v1/beacon/pool/payload_attestations`
+pub async fn submit_payload_attestation_messages<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthJsonOrSsz(payload_attestations, _): EthJsonOrSsz<
+        ContiguousList<Arc<PayloadAttestationMessage>, P::PtcSize>,
+        PayloadAttestationMessageListPhaseDeserializer<P>,
+    >,
+) -> Result<(), Error> {
+    submit_payload_attestation_messages_to_pool(
+        controller,
+        event_channels,
+        api_to_p2p_tx,
+        payload_attestations.into_iter(),
+    )
+    .await
 }
 
 /// `GET /eth/v1/config/fork_schedule`
@@ -4742,6 +4764,144 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
 }
 
 #[instrument(skip_all, level = "debug")]
+fn build_payload_attestation_item<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    index: usize,
+    attestation: Arc<PayloadAttestationMessage>,
+    state: &Arc<BeaconState<P>>,
+) -> Result<(
+    PayloadAttestationItem<P>,
+    usize,
+    OneshotReceiver<Result<ValidationOutcome>>,
+)> {
+    let PayloadAttestationData {
+        slot,
+        beacon_block_root,
+        ..
+    } = attestation.data;
+    let validator_index = attestation.validator_index;
+
+    ensure!(
+        controller.block_by_root(beacon_block_root)?.is_some(),
+        Error::MatchingPayloadAttestationHeadBlockNotFound,
+    );
+
+    ensure!(
+        slot == controller.slot(),
+        Error::PayloadAttestationNotForCurrentSlot
+    );
+
+    let ptc = accessors::get_ptc(state, slot)?;
+    ensure!(
+        ptc.contains(&validator_index),
+        Error::ValidatorNotInPTC { validator_index }
+    );
+
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    Ok((
+        PayloadAttestationItem::unverified(
+            Arc::new(attestation.into()),
+            PayloadAttestationOrigin::Api(sender),
+        ),
+        index,
+        receiver,
+    ))
+}
+
+async fn wait_for_payload_attestation_validation(
+    payload_attestation: Arc<PayloadAttestationMessage>,
+    index: usize,
+    receiver: OneshotReceiver<Result<ValidationOutcome>>,
+) -> Result<(Arc<PayloadAttestationMessage>, ValidationOutcome), IndexedError> {
+    let run = async {
+        let validation_outcome = receiver.await??;
+        Ok((payload_attestation, validation_outcome))
+    };
+
+    run.await.map_err(|error| IndexedError { index, error })
+}
+
+async fn submit_payload_attestation_messages_to_pool<P: Preset, W: Wait>(
+    controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
+    api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
+    payload_attestations: impl Iterator<Item = Arc<PayloadAttestationMessage>>,
+) -> Result<(), Error> {
+    const MISSING_BLOCKS_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+    let (data, payload_attestations): (Vec<_>, Vec<_>) = payload_attestations
+        .chunk_by(|attestation| attestation.data)
+        .into_iter()
+        .map(|(data, attestations)| (data, attestations.collect_vec()))
+        .unzip();
+
+    wait_for_missing_blocks_with_timeout(
+        &controller,
+        &event_channels,
+        data.iter().map(|data| data.beacon_block_root),
+        MISSING_BLOCKS_WAIT_TIMEOUT,
+    )
+    .await?;
+
+    let state = controller.preprocessed_state_at_current_slot().await?;
+
+    let (prevalidated, mut failures): (Vec<_>, Vec<_>) = payload_attestations
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .map(|(index, payload_attestation)| {
+            build_payload_attestation_item(
+                &controller,
+                index,
+                payload_attestation.clone_arc(),
+                &state,
+            )
+            .map(|(payload_attestation_item, index, receiver)| {
+                (
+                    payload_attestation_item,
+                    wait_for_payload_attestation_validation(payload_attestation, index, receiver),
+                )
+            })
+            .map_err(|error| IndexedError { index, error })
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .partition_result();
+
+    let (payload_attestation_items, receivers): (Vec<_>, Vec<_>) = prevalidated.into_iter().unzip();
+
+    controller.on_api_payload_attestation_batch(payload_attestation_items);
+
+    let (successes, mut validation_failures): (Vec<_>, Vec<_>) = receivers
+        .into_iter()
+        .collect::<FuturesOrdered<_>>()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .partition_result();
+
+    // Send messages after validating all payload attestations to make their order deterministic.
+    // Doing it above wouldn't work because `FuturesOrdered` polls futures concurrently.
+    //
+    // Send messages before reporting failures to be consistent with `submit_pool_sync_committees`.
+    // By this point votes from accepted payload attestations have already been included in fork choice.
+    for (payload_attestation, validation_outcome) in successes {
+        if validation_outcome == ValidationOutcome::Accept {
+            ApiToP2p::PublishPayloadAttestation(payload_attestation).send(&api_to_p2p_tx);
+        }
+    }
+
+    // extend prevalidation failures with received failed validations
+    failures.append(&mut validation_failures);
+
+    if !failures.is_empty() {
+        return Err(Error::InvalidPayloadAttestions(failures));
+    }
+
+    Ok(())
+}
+
 async fn submit_blob_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     blob_sidecar: Arc<BlobSidecar<P>>,
