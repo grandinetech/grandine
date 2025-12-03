@@ -13,7 +13,7 @@ use p2p::SyncToMetrics;
 use prometheus_metrics::Metrics;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
-use sysinfo::System;
+use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
 use tokio_stream::wrappers::IntervalStream;
 use transition_functions::combined::Statistics;
 use types::{
@@ -29,7 +29,7 @@ use crate::{
     helpers,
 };
 
-const MIN_TIME_BETWEEN_SYSTEM_STATS_REFRESH: Duration = Duration::from_secs(1);
+const MIN_TIME_BETWEEN_SYSTEM_STATS_REFRESH: Duration = Duration::from_millis(500);
 const REMOTE_METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
 const REMOTE_METRICS_UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -88,7 +88,7 @@ impl<P: Preset> MetricsService<P> {
             ref remote_metrics_url,
         } = self.config;
 
-        let mut system = System::new_all();
+        let mut system = System::new();
         let mut system_refresh_time = Instant::now();
         let mut epoch_with_metrics = None;
 
@@ -96,7 +96,7 @@ impl<P: Preset> MetricsService<P> {
 
         // Refresh is required for CPU usage stats.
         // See <https://github.com/GuillaumeGomez/sysinfo/blob/4b863fe1daf4d7482ea4b19078890ce84f875d97/src/traits.rs#L292>.
-        system.refresh_all();
+        refresh_system_stats(&mut system, &mut system_refresh_time, true, grandine_pid);
 
         let mut interval = if remote_metrics_url.is_some() {
             Either::Left(
@@ -130,7 +130,7 @@ impl<P: Preset> MetricsService<P> {
                     self.metrics.metrics_requests_since_last_update.reset();
 
                     tokio::task::block_in_place(|| {
-                        refresh_system_stats(&mut system, &mut system_refresh_time);
+                        refresh_system_stats(&mut system, &mut system_refresh_time, false, grandine_pid);
 
                         let grandine = system
                             .process(grandine_pid)
@@ -206,7 +206,7 @@ impl<P: Preset> MetricsService<P> {
                     debug_with_peers!("sending metrics to external service");
 
                     if let Some(url) = remote_metrics_url.clone() {
-                        refresh_system_stats(&mut system, &mut system_refresh_time);
+                        refresh_system_stats(&mut system, &mut system_refresh_time, false, grandine_pid);
 
                         let process_metrics = ProcessMetrics::get();
 
@@ -338,10 +338,21 @@ fn update_jemalloc_metrics(metrics: &Arc<Metrics>) -> Result<()> {
     Ok(())
 }
 
-fn refresh_system_stats(system: &mut System, time: &mut Instant) {
-    if time.elapsed() >= MIN_TIME_BETWEEN_SYSTEM_STATS_REFRESH {
+fn refresh_system_stats(
+    system: &mut System,
+    time: &mut Instant,
+    skip_check: bool,
+    grandine_pid: Pid,
+) {
+    if skip_check || time.elapsed() >= MIN_TIME_BETWEEN_SYSTEM_STATS_REFRESH {
         *time = Instant::now();
-        system.refresh_all();
+
+        system.refresh_specifics(RefreshKind::everything().without_processes());
+        system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[grandine_pid]),
+            true,
+            ProcessRefreshKind::nothing().with_memory().with_cpu(),
+        );
     }
 }
 
