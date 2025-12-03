@@ -10,7 +10,7 @@ use nonzero_ext::nonzero;
 pub const INTERVALS_PER_SLOT_GLOAS: NonZeroUsize = nonzero!(4_usize);
 
 // Domain types
-pub const DOMAIN_BEACON_BUILDER: DomainType = H32(hex!("1B000000"));
+pub const DOMAIN_BEACON_BUILDER: DomainType = H32(hex!("0B000000"));
 pub const DOMAIN_PTC_ATTESTER: DomainType = H32(hex!("0C000000"));
 
 // Payload status
