@@ -40,7 +40,7 @@ impl ClientCode {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Besu => "BS",
+            Self::Besu => "BU",
             Self::EthereumJS => "EJ",
             Self::Erigon => "EG",
             Self::GoEthereum => "GE",
@@ -86,7 +86,7 @@ impl<'de> Deserialize<'de> for ClientCode {
                 E: serde::de::Error,
             {
                 Ok(match value {
-                    "BS" => ClientCode::Besu,
+                    "BU" => ClientCode::Besu,
                     "EJ" => ClientCode::EthereumJS,
                     "EG" => ClientCode::Erigon,
                     "GE" => ClientCode::GoEthereum,
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn test_known_client_version() {
         let known_client = ClientVersionV1 {
-            code: ClientCode::Unknown("BS".to_owned()),
+            code: ClientCode::Unknown("BU".to_owned()),
             name: "Besu".to_owned(),
             version: "25.7.0".to_owned(),
             commit: H32(hex!("4e2efab6")),
@@ -285,7 +285,7 @@ mod tests {
 
         let graffiti_string = known_client.graffiti_string();
 
-        assert!(graffiti_string.contains("BS4e2eGR"));
+        assert!(graffiti_string.contains("BU4e2eGR"));
         assert_eq!(graffiti_string.len(), 12);
     }
 
