@@ -23,7 +23,7 @@ use types::{
     fulu::primitives::ColumnIndex,
     gloas::primitives::BuilderIndex,
     nonstandard::Phase,
-    phase0::primitives::Slot,
+    phase0::primitives::{Slot, ValidatorIndex},
 };
 
 #[derive(Debug, Error)]
@@ -107,6 +107,8 @@ pub enum Error {
     InvalidJsonValue(#[source] serde_json::Error),
     #[error("invalid signed execution payload bid")]
     InvalidPayloadBid(#[source] AnyhowError),
+    #[error("invalid payload attestations")]
+    InvalidPayloadAttestions(Vec<IndexedError>),
     #[error("invalid peer ID")]
     InvalidPeerId(#[source] AnyhowError),
     #[error("invalid phase (expected: {expected}, got: {got})")]
@@ -140,8 +142,12 @@ pub enum Error {
     LivenessTrackingNotEnabled,
     #[error("matching head block for attestation is not found")]
     MatchingAttestationHeadBlockNotFound,
+    #[error("matching head block for payload attestation is not found")]
+    MatchingPayloadAttestationHeadBlockNotFound,
     #[error("beacon node is currently syncing and not serving requests on this endpoint")]
     NodeIsSyncing,
+    #[error("payload attestation message is not for current slot")]
+    PayloadAttestationNotForCurrentSlot,
     #[error("peer not found")]
     PeerNotFound,
     #[error("proposal slot is not later than parent state slot")]
@@ -179,6 +185,8 @@ pub enum Error {
     UnableToProduceBlindedBlock,
     #[error("validator not found")]
     ValidatorNotFound,
+    #[error("validator {validator_index} is not in payload timeliness committee")]
+    ValidatorNotInPTC { validator_index: ValidatorIndex },
     #[error("versioned hash not in block: {versioned_hash:?}")]
     VersionedHashNotInBlock { versioned_hash: VersionedHash },
     // TODO(Grandine Team): Some API clients do not set `validator_index`.
@@ -231,6 +239,7 @@ impl Error {
             | Self::BlockNotFound
             | Self::ExecutionPayloadBidNotFound
             | Self::MatchingAttestationHeadBlockNotFound
+            | Self::MatchingPayloadAttestationHeadBlockNotFound
             | Self::PeerNotFound
             | Self::StateNotFound
             | Self::TargetStateNotFound
@@ -259,6 +268,7 @@ impl Error {
             | Self::InvalidJsonValue(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPayloadBid(_)
+            | Self::InvalidPayloadAttestions(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidPhase { .. }
             | Self::InvalidProposerSlashing(_)
@@ -271,6 +281,7 @@ impl Error {
             | Self::InvalidValidatorId(_)
             | Self::InvalidValidatorSignatures(_)
             | Self::InvalidSlot(_)
+            | Self::PayloadAttestationNotForCurrentSlot
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
             | Self::StatePreCapella
@@ -279,6 +290,7 @@ impl Error {
             | Self::StatePreGloas
             | Self::SubcommitteeIndexNotInRange { .. }
             | Self::UnableToPublishBlock
+            | Self::ValidatorNotInPTC { .. }
             | Self::VersionedHashNotInBlock { .. } => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
             Self::Internal(_)
