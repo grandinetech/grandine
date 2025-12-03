@@ -12,7 +12,7 @@ use types::{
         containers::{Attestation as ElectraAttestation, SingleAttestation},
         error::AttestationConversionError,
     },
-    phase0::containers::{Attestation as Phase0Attestation, AttestationData},
+    phase0::containers::{Attestation as Phase0Attestation, AttestationData, Checkpoint},
     preset::Preset,
 };
 
@@ -50,7 +50,7 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
         }
         Attestation::Single(attestation) => {
             let slot = attestation.data.slot;
-            let state = current_state(controller);
+            let state = current_state(controller, attestation.data.target);
             let committee = accessors::beacon_committee(&state, slot, attestation.committee_index)?;
 
             attestation.try_into_phase0_attestation(committee)?
@@ -82,7 +82,7 @@ pub fn try_convert_to_single_attestation<P: Preset>(
         .next()
         .unwrap_or_default();
 
-    let state = current_state(controller);
+    let state = current_state(controller, data.target);
     let committee = accessors::beacon_committee(&state, data.slot, committee_index)?;
 
     let attester_index = aggregation_bits
@@ -99,9 +99,21 @@ pub fn try_convert_to_single_attestation<P: Preset>(
     })
 }
 
-fn current_state<P: Preset, W: Wait>(controller: &ApiController<P, W>) -> Arc<BeaconState<P>> {
+fn current_state<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    target: Checkpoint,
+) -> Arc<BeaconState<P>> {
     if !controller.is_forward_synced() {
         return controller.head_state().value;
+    }
+
+    if let Some(state) = controller.state_before_or_at_slot(
+        target.root,
+        misc::compute_start_slot_at_epoch::<P>(target.epoch),
+    ) {
+        if accessors::get_current_epoch(&state) == target.epoch {
+            return state;
+        }
     }
 
     match controller.preprocessed_state_at_current_slot_blocking() {
