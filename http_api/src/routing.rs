@@ -52,11 +52,11 @@ use crate::{
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
         validator_block_v3, validator_execution_payload_bid, validator_liveness,
         validator_prepare_beacon_proposer, validator_proposer_duties, validator_proposer_duties_v2,
-        validator_publish_aggregate_and_proofs_v1, validator_publish_aggregate_and_proofs_v2,
-        validator_publish_contributions_and_proofs, validator_register_validator,
-        validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
-        validator_sync_committee_contribution, validator_sync_committee_duties,
-        validator_sync_committee_selections,
+        validator_ptc_duties, validator_publish_aggregate_and_proofs_v1,
+        validator_publish_aggregate_and_proofs_v2, validator_publish_contributions_and_proofs,
+        validator_register_validator, validator_subscribe_to_beacon_committee,
+        validator_subscribe_to_sync_committees, validator_sync_committee_contribution,
+        validator_sync_committee_duties, validator_sync_committee_selections,
     },
 };
 
@@ -550,6 +550,10 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
         .route(
             "/eth/v1/validator/duties/sync/{epoch}",
             post(validator_sync_committee_duties),
+        )
+        .route(
+            "/eth/v1/validator/duties/ptc/{epoch}",
+            post(validator_ptc_duties),
         )
         .route(
             "/eth/v1/validator/blinded_blocks/{slot}",
