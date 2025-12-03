@@ -1,5 +1,5 @@
 use core::{error::Error as StdError, ops::Range};
-use std::sync::Arc;
+use std::{ops::RangeInclusive, sync::Arc};
 
 use anyhow::Error as AnyhowError;
 use axum::{
@@ -165,6 +165,11 @@ pub enum Error {
     UnableToProduceBeaconBlock,
     #[error("unable to produce blinded block")]
     UnableToProduceBlindedBlock,
+    #[error("unsupported phase (got: {got}, expected: from {} to {})", expected.start().as_ref(), expected.end().as_ref())]
+    UnsupportedPhase {
+        got: Phase,
+        expected: RangeInclusive<Phase>,
+    },
     #[error("validator not found")]
     ValidatorNotFound,
     #[error("versioned hash not in block: {versioned_hash:?}")]
@@ -261,6 +266,7 @@ impl Error {
             | Self::StatePreFulu
             | Self::SubcommitteeIndexNotInRange { .. }
             | Self::UnableToPublishBlock
+            | Self::UnsupportedPhase { .. }
             | Self::VersionedHashNotInBlock { .. } => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }
             Self::Internal(_)

@@ -2903,7 +2903,13 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
-    // TODO: (gloas): no longer supported from gloas phase
+    let phase_at_slot = chain_config.phase_at_slot::<P>(slot);
+    if phase_at_slot > Phase::Fulu {
+        return Err(Error::UnsupportedPhase {
+            got: phase_at_slot,
+            expected: (Phase::Phase0..=Phase::Fulu),
+        });
+    }
 
     let block_root = controller.head().value.block_root;
     let beacon_state = controller
@@ -3004,7 +3010,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 
     let phase_at_slot = controller.chain_config().phase_at_slot::<P>(slot);
 
-    let committee_index = if phase_at_slot < Phase::Electra {
+    let committee_index = if phase_at_slot < Phase::Electra || phase_at_slot > Phase::Fulu {
         committee_index
     } else {
         0
