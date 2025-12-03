@@ -453,6 +453,15 @@ pub struct ValidatorAttesterDutyResponse {
 }
 
 #[derive(Serialize)]
+pub struct ValidatorPTCDutyResponse {
+    pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    slot: Slot,
+}
+
+#[derive(Serialize)]
 pub struct ValidatorProposerDutyResponse {
     pubkey: PublicKeyBytes,
     #[serde(with = "serde_utils::string_or_native")]
@@ -2734,6 +2743,68 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
                                 validator_index,
                             })
                         })
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .flatten_ok()
+        .try_collect()
+        .map_err(Error::Internal)?;
+
+    Ok(EthResponse::json(response)
+        .dependent_root(dependent_root)
+        .execution_optimistic(status.is_optimistic()))
+}
+
+/// `POST /eth/v1/validator/duties/ptc/{epoch}`
+pub async fn validator_ptc_duties<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(epoch): EthPath<Epoch>,
+    EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
+) -> Result<EthResponse<Vec<ValidatorPTCDutyResponse>>, Error> {
+    let head_state = controller.head_state();
+
+    let state = match accessors::relative_epoch(&head_state.value, epoch) {
+        Ok(_) => head_state,
+        Err(_) => {
+            let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+            state_id::state(
+                &StateId::Slot(start_slot),
+                &controller,
+                &anchor_checkpoint_provider,
+            )?
+        }
+    };
+
+    let WithStatus {
+        value: state,
+        status,
+        // `duties` responses are not supposed to contain a `finalized` field.
+        finalized: _,
+    } = state;
+
+    // Unlike `GET /eth/v1/validator/duties/proposer/{epoch}`,
+    // this endpoint is supposed to return the dependent root for the previous epoch.
+    let previous_epoch = misc::previous_epoch(epoch);
+    let dependent_root = controller.dependent_root(&state, previous_epoch)?;
+
+    let indices = validator_indices
+        .into_iter()
+        .collect::<HashSet<ValidatorIndex>>();
+
+    let response = misc::slots_in_epoch::<P>(epoch)
+        .map(|slot| {
+            accessors::get_ptc(&state, slot)?
+                .into_iter()
+                .filter(|validator_index| indices.contains(validator_index))
+                .map(|validator_index| {
+                    let pubkey = *accessors::public_key(&state, validator_index)?;
+
+                    Ok(ValidatorPTCDutyResponse {
+                        pubkey,
+                        validator_index,
+                        slot,
+                    })
                 })
                 .collect::<Result<Vec<_>>>()
         })
