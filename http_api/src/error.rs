@@ -21,6 +21,7 @@ use types::{
     altair::primitives::SubcommitteeIndex,
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
+    gloas::primitives::BuilderIndex,
     phase0::primitives::Slot,
 };
 
@@ -55,6 +56,8 @@ pub enum Error {
     EpochNotInSyncCommitteePeriod,
     #[error("epoch is out of range for the randao_mixes of the state")]
     EpochOutOfRangeForStateRandao,
+    #[error("execution payload bid not available for slot and builder")]
+    ExecutionPayloadBidNotFound,
     #[error("execution payload not available")]
     ExecutionPayloadNotAvailable,
     #[error("no event topics specified")]
@@ -83,6 +86,8 @@ pub enum Error {
     InvalidBlockId(#[source] AnyhowError),
     #[error("invalid block")]
     InvalidBlock(#[source] AnyhowError),
+    #[error("builder index {0} does not correspond to a registered builder")]
+    InvalidBuilderIndex(BuilderIndex),
     #[error("invalid bytes body")]
     InvalidBytesBody(#[source] BytesRejection),
     #[error("invalid data column sidecar")]
@@ -148,6 +153,8 @@ pub enum Error {
     StatePreElectra,
     #[error("state is pre-Fulu")]
     StatePreFulu,
+    #[error("state is pre-Gloas")]
+    StatePreGloas,
     #[error("subcommittee index: {subcommittee_index} is not in allowed range: {range:?}")]
     SubcommitteeIndexNotInRange {
         subcommittee_index: SubcommitteeIndex,
@@ -217,6 +224,7 @@ impl Error {
             Self::InvalidBytesBody(rejection) => rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
+            | Self::ExecutionPayloadBidNotFound
             | Self::MatchingAttestationHeadBlockNotFound
             | Self::PeerNotFound
             | Self::StateNotFound
@@ -237,6 +245,7 @@ impl Error {
             | Self::InvalidBlock(_)
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
+            | Self::InvalidBuilderIndex(_)
             | Self::InvalidColumnIndex(_)
             | Self::InvalidDataColumnSidecar(_)
             | Self::InvalidRequestConsensusHeader(_)
@@ -260,6 +269,7 @@ impl Error {
             | Self::StatePreCapella
             | Self::StatePreElectra
             | Self::StatePreFulu
+            | Self::StatePreGloas
             | Self::SubcommitteeIndexNotInRange { .. }
             | Self::UnableToPublishBlock
             | Self::VersionedHashNotInBlock { .. } => StatusCode::BAD_REQUEST,

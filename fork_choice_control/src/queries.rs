@@ -22,7 +22,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadBid,
+    gloas::{containers::SignedExecutionPayloadBid, primitives::BuilderIndex},
     nonstandard::{PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -830,6 +830,17 @@ where
     ) -> Option<Arc<SignedExecutionPayloadBid<P>>> {
         self.store_snapshot()
             .accepted_payload_bid_at_slot(slot)
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn get_payload_bid_from(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+    ) -> Option<Arc<SignedExecutionPayloadBid<P>>> {
+        self.store_snapshot()
+            .get_payload_bid_from(slot, builder_index)
             .cloned()
     }
 
