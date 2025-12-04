@@ -853,6 +853,8 @@ where
                     data_column_sidecar,
                     block_seen,
                     origin,
+                    validate_block_presence,
+                    state_fn,
                     None,
                 ),
         }
