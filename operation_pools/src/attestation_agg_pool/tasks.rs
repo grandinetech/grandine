@@ -10,7 +10,7 @@ use bls::{traits::Signature as _, PublicKeyBytes};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
-use helper_functions::accessors;
+use helper_functions::{accessors, misc};
 use logging::{exception, warn_with_peers};
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
@@ -30,7 +30,7 @@ use crate::{
         attestation_packer::{AttestationPacker, PackOutcome},
         conversion::convert_attestation_for_pool,
         pool::Pool,
-        types::Aggregate,
+        types::{Aggregate, AttestationPrePool},
     },
     misc::PoolTask,
 };
@@ -213,6 +213,16 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             attester_index = Some(single_attestation.attester_index);
         }
 
+        let attestation_pre_pool = match attestation_pre_pool_data(attestation.as_ref()) {
+            Ok(attestation_pre_pool) => attestation_pre_pool,
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to collect pre-pool attestation data: {error:?}"
+                );
+                return Ok(());
+            }
+        };
+
         let attestation = match convert_attestation_for_pool(&controller, attestation) {
             Ok(attestation) => attestation,
             Err(error) => {
@@ -295,11 +305,34 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
         }
 
         pool.add_data_root_to_data_entry(data).await;
+        pool.add_data_to_attestation_pre_pool_entry(data, attestation_pre_pool)
+            .await;
 
         drop(wait_group);
 
         Ok(())
     }
+}
+
+fn attestation_pre_pool_data<P: Preset>(
+    attestation: &CombinedAttestation<P>,
+) -> core::result::Result<AttestationPrePool, AttestationConversionError> {
+    let data = attestation.data();
+
+    let committee_index = match attestation {
+        CombinedAttestation::Phase0(attestation) => attestation.data.index,
+        CombinedAttestation::Electra(attestation) => {
+            misc::get_committee_indices::<P>(attestation.committee_bits)
+                .next()
+                .ok_or(AttestationConversionError::InvalidCommitteeIndex)?
+        }
+        CombinedAttestation::Single(attestation) => attestation.committee_index,
+    };
+
+    Ok(AttestationPrePool {
+        committee_index,
+        original_payload_index: data.index,
+    })
 }
 
 pub struct SetCommitteesWithAggregatorsTask<P: Preset> {

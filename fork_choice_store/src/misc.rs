@@ -30,7 +30,7 @@ use types::{
     nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
-        primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
+        primitives::{ExecutionBlockHash, Gwei, Slot, SubnetId, ValidatorIndex, H256},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -44,8 +44,16 @@ pub struct ChainLink<P: Preset> {
     pub block_root: H256,
     #[derivative(Debug(format_with = "fmt_block_concisely"))]
     pub block: Arc<SignedBeaconBlock<P>>,
+
+    // Pre-execution state (after beacon block processing, before execution payload).
     #[derivative(Debug(format_with = "fmt_as_wildcard"))]
-    pub state: Option<Arc<BeaconState<P>>>,
+    pub block_state: Option<Arc<BeaconState<P>>>,
+
+    // Post-execution state. None for pre-Gloas and empty variants.
+    // Some for Gloas full variant (execution payload processed).
+    #[derivative(Debug(format_with = "fmt_as_wildcard"))]
+    pub execution_payload_state: Option<Arc<BeaconState<P>>>,
+
     pub current_justified_checkpoint: Checkpoint,
     pub finalized_checkpoint: Checkpoint,
     pub unrealized_justified_checkpoint: Checkpoint,
@@ -86,7 +94,20 @@ impl<P: Preset> ChainLink<P> {
 
     #[must_use]
     pub fn state<S: Storage<P>>(&self, store: &Store<P, S>) -> Arc<BeaconState<P>> {
-        store.load_beacon_state(self.block_root, self.slot(), self.state.as_ref())
+        store.load_beacon_state(self.block_root, self.slot(), self.block_state.as_ref())
+    }
+
+    /// Post-execution state (after execution payload processing).
+    /// Returns `Some` only for Gloas full variants; `None` otherwise.
+    /// Use instead of `state()` when post-execution state is needed.
+    #[must_use]
+    pub fn execution_state<S: Storage<P>>(
+        &self,
+        store: &Store<P, S>,
+    ) -> Option<Arc<BeaconState<P>>> {
+        self.execution_payload_state.as_ref().map(|state_ref| {
+            store.load_beacon_state(self.block_root, self.slot(), Some(state_ref))
+        })
     }
 
     // TODO(feature/deneb): Confirm that post-Deneb states are always post-Merge. See:
@@ -839,6 +860,7 @@ pub enum BlockAction<P: Preset> {
     Ignore(Publishable),
     DelayUntilBlobs(Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>),
     DelayUntilParent(Arc<SignedBeaconBlock<P>>),
+    DelayUntilParentEnvelope(Arc<SignedBeaconBlock<P>>, H256),
     DelayUntilSlot(Arc<SignedBeaconBlock<P>>),
     WaitForJustifiedState(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>, Checkpoint),
 }
@@ -850,6 +872,7 @@ impl<P: Preset> FmtDebug for BlockAction<P> {
             Self::Ignore(_) => f.write_str("ignore"),
             Self::DelayUntilBlobs(_, _) => f.write_str("delay_until_blobs"),
             Self::DelayUntilParent(_) => f.write_str("delay_until_parent"),
+            Self::DelayUntilParentEnvelope(_, _) => f.write_str("delay_until_parent_envelope"),
             Self::DelayUntilSlot(_) => f.write_str("delay_until_slot"),
             Self::WaitForJustifiedState(_, _, _) => f.write_str("wait_for_justified_state"),
         }
@@ -1190,6 +1213,32 @@ pub type Difference = i64;
 /// [`consensus-specs` pull request #3250]: https://github.com/ethereum/consensus-specs/pull/3250
 pub type Score = (Gwei, H256);
 
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.2/specs/gloas/fork-choice.md#constants
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum ForkChoicePayloadStatus {
+    Pending = 0,
+    Empty = 1,
+    Full = 2,
+}
+
+impl ForkChoicePayloadStatus {
+    #[must_use]
+    pub const fn is_pending(self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    #[must_use]
+    pub const fn is_full(self) -> bool {
+        matches!(self, Self::Full)
+    }
+}
+
 #[derive(Clone, Copy, Derivative)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub struct DifferenceAtLocation {
@@ -1233,14 +1282,19 @@ pub struct BranchPoint {
     pub best_descendant: SegmentId,
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
     pub score: Score,
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    pub root_location: Location,
 }
 
 /// [`LatestMessage`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#latestmessage)
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.2/specs/gloas/fork-choice.md#modified-latestmessage
 pub struct LatestMessage {
-    pub epoch: Epoch,
+    pub slot: Slot,
     // This is named differently than in `consensus-specs` to avoid confusion with FFG vote roots.
     // This is the LMD GHOST vote root and it corresponds to `AttestationData.beacon_block_root`.
     pub beacon_block_root: H256,
+    pub payload_present: bool,
 }
 
 #[derive(Error, Debug)]

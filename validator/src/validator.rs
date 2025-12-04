@@ -55,6 +55,7 @@ use ssz::{BitList, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use typenum::Unsigned as _;
 use tokio::time::timeout;
 use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
@@ -86,7 +87,7 @@ use types::{
         },
         primitives::{Epoch, Slot, ValidatorIndex, H256},
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerHistoricalRoot},
     traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
 };
 use validator_statistics::ValidatorStatistics;
@@ -787,7 +788,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         } = self.controller.head();
 
         let block_root = head.block_root;
-        let state = self.controller.state_by_chain_link(&head);
         let head_slot = head.slot();
         let max_empty_slots = self.validator_config.max_empty_slots;
 
@@ -799,15 +799,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }));
         }
 
-        let beacon_state = if state.slot() < slot {
+        // ePBS (Gloas): use execution_payload_state when head is FULL variant,
+        // falling back to block_state for EMPTY/PENDING/pre-Gloas.
+        // Spec: https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L614
+        let beacon_state = {
             let controller = self.controller.clone_arc();
 
             tokio::task::spawn_blocking(move || {
-                controller.preprocessed_state_post_block_blocking(block_root, slot)
+                // Controller handles pre/post-Gloas state selection and advancing to `slot`.
+                controller.proposer_head_state_at_slot(&head, slot)
             })
             .await??
-        } else {
-            state
         };
 
         Ok(Ok(SlotHead {
@@ -937,6 +939,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             },
             _block_rewards,
+            post_state_opt,
         )) = beacon_block_option
         else {
             warn_with_peers!(
@@ -1074,6 +1077,46 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 debug_with_peers!("beacon block: {beacon_block:?}");
 
                 let block = Arc::new(*beacon_block);
+                let envelope_opt = if block.phase() < Phase::Gloas {
+                    None
+                } else if let Some(state) = post_state_opt.clone() {
+                    block_build_context
+                        .compute_execution_payload_envelope(beacon_block_root, state)
+                        .await?
+                } else {
+                    if self.validator_config.enable_payload_build {
+                        warn_with_peers!(
+                            "missing post-block state for envelope computation \
+                             (slot: {}, root: {:?})",
+                            block.message().slot(),
+                            block.message().hash_tree_root(),
+                        );
+                    } else {
+                        debug_with_peers!(
+                            "self-build disabled; skipping envelope computation \
+                             (slot: {}, root: {:?})",
+                            block.message().slot(),
+                            block.message().hash_tree_root(),
+                        );
+                    }
+                    None
+                };
+                let envelope_commitments = envelope_opt
+                    .as_ref()
+                    .map(|envelope| envelope.blob_kzg_commitments.clone());
+                if block.phase() >= Phase::Gloas
+                    && self.validator_config.enable_payload_build
+                    && post_state_opt.is_some()
+                    && envelope_opt.is_none()
+                {
+                    // this path is useful even though there is a debug at selfbuild and post state=some but that dosent cover compute_execution_payload_envelope returning None without a Err(when get_gloas_envelope_data()return s none)
+                    warn_with_peers!(
+                        "missing execution payload envelope during self-build \
+                         (slot: {}, root: {:?})",
+                        block.message().slot(),
+                        block.message().hash_tree_root(),
+                    );
+                }
 
                 if let Some(blobs) = block_blobs {
                     if !blobs.is_empty() {
@@ -1088,40 +1131,68 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             let block = block.clone_arc();
                             let kzg_backend = self.controller.store_config().kzg_backend;
+                            //clone as they are used inside spawn_blocking(move || ) closuree 
+                            let commitments_opt = envelope_commitments.clone();
+                            let block_proofs_for_columns = block_proofs.clone();
 
-                            let data_column_sidecars = tokio::task::spawn_blocking(move || {
-                                let cells_and_kzg_proofs =
-                                    eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                                        blobs.as_ref(),
-                                        block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-                                        kzg_backend,
-                                    )?;
-
-                                eip_7594::construct_fulu_data_column_sidecars(
-                                    &block,
-                                    &cells_and_kzg_proofs,
-                                )
-                            })
-                            .await??;
-
-                            prometheus_metrics::stop_and_record(timer);
-
-                            for data_column_sidecar in data_column_sidecars {
-                                if self
-                                    .controller
-                                    .sampling_columns()
-                                    .into_iter()
-                                    .contains(&data_column_sidecar.index())
+                            if block.phase() >= Phase::Gloas && commitments_opt.is_none() {
+                                if self.validator_config.enable_payload_build
+                                    && post_state_opt.is_some()
                                 {
-                                    self.controller.on_own_data_column_sidecar(
-                                        wait_group.clone(),
-                                        data_column_sidecar.clone_arc(),
+                                    warn_with_peers!(
+                                        "missing execution payload envelope for data column sidecars \
+                                         (slot: {}, root: {:?})",
+                                        block.message().slot(),
+                                        block.message().hash_tree_root(),
                                     );
                                 }
+                            } else {
+                                let data_column_sidecars = tokio::task::spawn_blocking(move || {
+                                    let cells_and_kzg_proofs =
+                                        eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                            blobs.as_ref(),
+                                            block_proofs_for_columns
+                                                .unwrap_or_else(KzgProofs::empty_fulu)
+                                                .as_ref(),
+                                            kzg_backend,
+                                        )?;
 
-                                if !self.validator_config.withhold_data_columns_publishing {
-                                    ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
-                                        .send(&self.p2p_tx);
+                                    if block.phase() >= Phase::Gloas {
+                                        let commitments = commitments_opt
+                                            .expect("checked commitments_opt is Some above");
+                                        eip_7594::construct_data_column_sidecars_post_gloas(
+                                            &block,
+                                            &commitments,
+                                            &cells_and_kzg_proofs,
+                                        )
+                                    } else {
+                                        eip_7594::construct_fulu_data_column_sidecars(
+                                            &block,
+                                            &cells_and_kzg_proofs,
+                                        )
+                                    }
+                                })
+                                .await??;
+
+                                prometheus_metrics::stop_and_record(timer);
+
+                                for data_column_sidecar in data_column_sidecars {
+                                    if self
+                                        .controller
+                                        .sampling_columns()
+                                        .into_iter()
+                                        .contains(&data_column_sidecar.index())
+                                    {
+                                        self.controller.on_own_data_column_sidecar(
+                                            wait_group.clone(),
+                                            data_column_sidecar.clone_arc(),
+                                        );
+                                    }
+
+                                    if !self.validator_config.withhold_data_columns_publishing {
+                                        ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                                            .send(&self.p2p_tx);
+                                    }
                                 }
                             }
                         } else {
@@ -1145,11 +1216,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                 }
 
+                // Import block first so state.latest_block_header is updated
+                // before envelope validation
+                self.controller
+                    .on_own_block(wait_group.clone(), block.clone_arc());
+
+                ValidatorToP2p::PublishBeaconBlock(block.clone_arc()).send(&self.p2p_tx);
+
                 // Handle Gloas execution payload envelope (only for self-build)
-                if let Some(envelope) = block_build_context
-                    .compute_execution_payload_envelope(beacon_block_root)
-                    .await?
-                {
+                // Pass the proposed block's header with real state_root so that
+                // process_execution_payload's beacon_block_root check passes:
+                // it fills in latest_block_header.state_root only if zero,
+                // so a non-zero state_root keeps the header hash correct.
+                if let Some(envelope) = envelope_opt {
                     self.publish_execution_payload_envelope(
                         &wait_group,
                         slot_head,
@@ -1161,11 +1240,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     )
                     .await?;
                 }
-
-                self.controller
-                    .on_own_block(wait_group.clone(), block.clone_arc());
-
-                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
             }
         }
 
@@ -1374,12 +1448,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     selection_proof,
                 })?;
 
-                let data = AttestationData {
+                // Pool stores data.index = committee_index for all Electra+.
+                let pool_data = AttestationData {
                     index: committee_index,
                     ..own_attestation.attestation.data()
                 };
-
-                Some((data, aggregator))
+                Some((pool_data, aggregator))
             })
             .pipe(group_into_btreemap);
 
@@ -1404,11 +1478,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .own_aggregators
             .iter()
             .map(|(data, aggregators)| async {
-                self.attestation_agg_pool
-                    .best_aggregate_attestation(*data)
-                    .await
+                let aggregate_opt = self.attestation_agg_pool.best_aggregate_attestation(*data).await;
+                let electra_aggregate_opt = match (phase >= Phase::Electra, aggregate_opt.as_ref())
+                {
+                    (true, Some(aggregate)) => {
+                        self.attestation_agg_pool
+                            .electra_aggregate_for_publish(aggregate.clone(), phase)
+                            .await
+                    }
+                    (true, None) => None,
+                    (false, _) => None,
+                };
+
+                aggregate_opt
                     .into_iter()
                     .flat_map(|aggregate| {
+                        let electra_aggregate_opt = electra_aggregate_opt.clone();
                         aggregators.iter().filter_map(move |aggregator| {
                             let Aggregator {
                                 aggregator_index,
@@ -1428,10 +1513,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     selection_proof,
                                 })
                             } else {
-                                let aggregate = operation_pools::convert_to_electra_attestation(
-                                    aggregate.clone(),
-                                )
-                                .ok()?;
+                                let aggregate = electra_aggregate_opt.clone()?;
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
                                     aggregator_index,
@@ -1862,8 +1944,38 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                     // TODO: (gloas): update `index` field to signal payload status
                     // see spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#attestation
+                    // Electra: index is always 0 (committee index is encoded elsewhere)
+                    // Gloas: https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/validator.md?plain=1#L102
                     if phase >= Phase::Electra {
                         data.index = 0;
+                        if phase >= Phase::Gloas {
+                            // - Same-slot attestation (is_attestation_same_slot): data.index = 0
+                            // - Previous-slot: data.index = execution_payload_availability[slot]
+                            let head_block_slot = self.controller.block_slot(slot_head.beacon_block_root);
+                            let is_same_slot = head_block_slot == Some(data.slot);
+                            if is_same_slot {
+                                data.index = 0;
+                            } else {
+                                let payload_status_bit = slot_head.beacon_state.post_gloas()
+                                    .and_then(|s| {
+                                        let slot = usize::try_from(
+                                            head_block_slot.unwrap_or(data.slot),
+                                        ).ok()?;
+                                        s.execution_payload_availability()
+                                            .get(slot % SlotsPerHistoricalRoot::<P>::USIZE)
+                                    });
+                                let Some(payload_status_bit) = payload_status_bit else {
+                                    warn_with_peers!(
+                                        "missing execution_payload_availability bit for slot {}, \
+                                         skipping attestation (block_root: {:?})",
+                                        head_block_slot.unwrap_or(data.slot),
+                                        slot_head.beacon_block_root,
+                                    );
+                                    return None;
+                                };
+                                data.index = u64::from(payload_status_bit);
+                            }
+                        }
                     }
 
                     let triple = SigningTriple {
@@ -2104,14 +2216,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_payload_attestations);
         }
 
+        // Query fork choice for envelope and data availability status
+        let payload_present = self.controller.has_envelope(slot_head.beacon_block_root);
+        let blob_data_available = self.controller.is_data_available(slot_head.beacon_block_root);
+
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let data = PayloadAttestationData {
                 slot: slot_head.slot(),
                 beacon_block_root: slot_head.beacon_block_root,
-                // TODO: (gloas): set to `true` if signed envelope reference by `block_root` has been seen in fork choice
-                payload_present: true,
-                // TODO: (gloas): set to `true` if blob data is available defined by fork choice
-                blob_data_available: true,
+                payload_present,
+                blob_data_available,
             };
 
             let doppelganger_protection = self

@@ -10,6 +10,7 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use features::Feature;
 use fork_choice_control::Wait;
+use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
@@ -17,6 +18,8 @@ use tracing::instrument;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
+    electra::containers::Attestation as ElectraAttestation,
+    nonstandard::Phase,
     phase0::{
         containers::{Attestation, AttestationData},
         primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex, H256},
@@ -27,12 +30,14 @@ use validator_statistics::ValidatorStatistics;
 
 use crate::{
     attestation_agg_pool::{
+        convert_to_electra_attestation, convert_to_electra_attestation_use_pre_pool,
         pool::Pool,
         tasks::{
             BestProposableAttestationsTask, ComputeProposerIndicesTask, InsertAttestationTask,
             PackProposableAttestationsTask, SetCommitteesWithAggregatorsTask,
             SetRegisteredValidatorsTask,
         },
+        types::AttestationPrePool,
     },
     misc::PoolTask,
 };
@@ -46,6 +51,32 @@ pub struct Manager<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> Manager<P, W> {
+    async fn electra_attestation_with_pre_pool(
+        &self,
+        attestation: Attestation<P>,
+    ) -> Option<(ElectraAttestation<P>, AttestationPrePool)> {
+        let data = attestation.data;
+        let Some(pre_pool) = self.attestation_pre_pool_by_data(data).await else {
+            warn_with_peers!(
+                "missing pre-pool attestation data for attestation data (slot {}, committee {})",
+                data.slot,
+                data.index
+            );
+            return None;
+        };
+
+        let electra_attestation =
+            match convert_to_electra_attestation_use_pre_pool(attestation, pre_pool) {
+                Ok(electra_attestation) => electra_attestation,
+                Err(error) => {
+                    warn_with_peers!("unable to convert to electra attestation: {error:?}");
+                    return None;
+                }
+            };
+
+        Some((electra_attestation, pre_pool))
+    }
+
     #[must_use]
     pub fn new(
         controller: ApiController<P, W>,
@@ -129,6 +160,49 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                 committee_index,
             )
             .await
+    }
+
+    pub async fn attestation_pre_pool_by_data(
+        &self,
+        data: AttestationData,
+    ) -> Option<AttestationPrePool> {
+        self.pool.attestation_pre_pool_by_data(data).await
+    }
+
+    pub async fn electra_aggregate_for_publish(
+        &self,
+        phase0_aggregate: Attestation<P>,
+        phase: Phase,
+    ) -> Option<ElectraAttestation<P>> {
+        if phase < Phase::Gloas {
+            return convert_to_electra_attestation(phase0_aggregate).ok();
+        }
+        self.electra_attestation_with_committee_for_block(phase0_aggregate, phase)
+            .await
+            .map(|(electra_attestation, _)| electra_attestation)
+    }
+
+    pub async fn electra_attestation_with_committee_for_block(
+        &self,
+        attestation: Attestation<P>,
+        phase: Phase,
+    ) -> Option<(ElectraAttestation<P>, CommitteeIndex)> {
+        if phase < Phase::Gloas {
+            let committee_index = attestation.data.index;
+            return match convert_to_electra_attestation(attestation) {
+                Ok(electra_attestation) => Some((electra_attestation, committee_index)),
+                Err(error) => {
+                    warn_with_peers!("unable to convert to electra attestation: {error:?}");
+                    None
+                }
+            };
+        }
+
+        self.electra_attestation_with_pre_pool(attestation)
+            .await
+            .map(|(electra_attestation, pre_pool)| {
+                (electra_attestation, pre_pool.committee_index)
+            })
     }
 
     pub async fn best_proposable_attestations(

@@ -1567,6 +1567,11 @@ pub enum ExecutionPayloadParams<P: Preset> {
         parent_beacon_block_root: H256,
         execution_requests: ExecutionRequests<P>,
     },
+    Gloas {
+        versioned_hashes: Vec<VersionedHash>,
+        parent_beacon_block_root: H256,
+        execution_requests: ExecutionRequests<P>,
+    },
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

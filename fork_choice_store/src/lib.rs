@@ -86,6 +86,7 @@ pub use crate::{
         ExecutionPayloadEnvelopeOrigin, PartialBlockAction, PayloadAction,
         PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationOrigin,
         PayloadAttestationValidationError, Storage, ValidAttestation, ValidPayloadAttestation,
+        ForkChoicePayloadStatus,
     },
     segment::Segment,
     state_cache_processor::{Error as StateCacheError, StateCacheProcessor},

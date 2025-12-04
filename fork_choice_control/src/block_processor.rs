@@ -214,16 +214,30 @@ impl<P: Preset> BlockProcessor<P> {
             block,
             data_availability_policy,
             |block_root, parent| {
+                // For Gloas, choose state based on parent variant (full vs empty).
+                // spec(gloas): https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#modified-on_block
+                let use_execution_state = block.phase() >= Phase::Gloas
+                    && parent.block.phase() >= Phase::Gloas
+                    && store.is_parent_node_full_for_block(block)
+                    && parent.execution_payload_state.is_some();
+
                 // > Make a copy of the state to avoid mutability issues
-                let state = self
-                    .state_cache
-                    .try_state_at_slot_for_block_sync(
-                        &self.pubkey_cache,
-                        store,
-                        parent.block_root,
-                        block.message().slot(),
-                    )?
-                    .unwrap_or_else(|| parent.state(store));
+                let state = if use_execution_state {
+                    // For ePBS full parent, use execution_payload_states which has latest_block_hash set
+                    // TBD: try_execution_state_at_slot_for_block_sync. currently uses ProcessSlots::ifNeeded
+                    parent
+                        .execution_state(store)
+                        .expect("parent is full variant but has no execution_payload_state")
+                } else {
+                    self.state_cache
+                        .try_state_at_slot_for_block_sync(
+                            &self.pubkey_cache,
+                            store,
+                            parent.block_root,
+                            block.message().slot(),
+                        )?
+                        .unwrap_or_else(|| parent.state(store))
+                };
 
                 // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
                 // See <https://github.com/ethereum/consensus-specs/pull/3232>.

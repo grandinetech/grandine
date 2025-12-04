@@ -8,6 +8,7 @@ use ssz::BitList;
 use tokio::sync::{Mutex, RwLock};
 use types::{
     phase0::containers::{Attestation, AttestationData},
+    phase0::primitives::CommitteeIndex,
     preset::Preset,
 };
 
@@ -21,6 +22,12 @@ pub type AttestationMap<P> = HashMap<AttestationData, Arc<RwLock<AttestationSet<
 // Use `BTreeSet` to make attestation packing deterministic for snapshot testing.
 // This does not affect performance in our benchmarks.
 pub type AttestationSet<P> = BTreeSet<Arc<Attestation<P>>>;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AttestationPrePool {
+    pub committee_index: CommitteeIndex,
+    pub original_payload_index: u64,
+}
 
 #[derive(Default, Clone)]
 pub struct Aggregate<P: Preset> {

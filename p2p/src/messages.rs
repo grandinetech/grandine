@@ -168,7 +168,7 @@ pub enum SyncToP2p<P: Preset> {
         Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
     ),
     RequestExecutionPayloadEnvelopesByRange(AppRequestId, PeerId, Slot, u64),
-    RequestExecutionPayloadEnvelopesByRoot(AppRequestId, PeerId, Vec<H256>),
+    RequestExecutionPayloadEnvelopeByRoot(AppRequestId, PeerId, H256),
     RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnsByRootIdentifier<P>>),
     RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,
