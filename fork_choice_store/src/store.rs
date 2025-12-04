@@ -2074,7 +2074,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[instrument(level = "debug", skip_all)]
     pub fn validate_fulu_data_column_sidecar_with_state(
         &self,
-        fulu_data_column_sidecar: FuluDataColumnSidecar<P>,
+        data_column_sidecar: FuluDataColumnSidecar<P>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         validate_block_presence: bool,
@@ -2082,12 +2082,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        let block_header = fulu_data_column_sidecar.signed_block_header.message;
-        let block_signature = fulu_data_column_sidecar.signed_block_header.signature;
+        let column_index = data_column_sidecar.index;
+        let block_header = data_column_sidecar.signed_block_header.message;
+        let block_signature = data_column_sidecar.signed_block_header.signature;
         let block_root = block_header.hash_tree_root();
-        let data_column_sidecar: Arc<DataColumnSidecar<P>> =
-            Arc::new(fulu_data_column_sidecar.into());
-        let column_index = data_column_sidecar.index();
+        let data_column_sidecar = Arc::new(data_column_sidecar.into());
 
         // No need to validate and import data column sidecars for blocks that are already in fork choice,
         // i.e. already have all the data columns validated
@@ -2104,7 +2103,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // Ignore non-sampling data column sidecars unless they are submitted to beacon API
         // for publishing after proposal
-        if !self.sampling_columns.contains(&data_column_sidecar.index()) {
+        if !self.sampling_columns.contains(&column_index) {
             if origin.is_from_api() {
                 is_non_sampled_with_full_validation = true;
             } else {
@@ -2255,7 +2254,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ensure!(
                 verify_result,
                 Error::DataColumnSidecarInvalidKzgProofs {
-                    data_column_sidecar: data_column_sidecar.clone_arc(),
+                    data_column_sidecar,
                     error: anyhow!("invalid KZG proofs verification result"),
                 }
             );
@@ -2291,6 +2290,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         data_column_sidecar: GloasDataColumnSidecar<P>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
+        validate_block_presence: bool,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_root = data_column_sidecar.beacon_block_root;
@@ -2298,12 +2299,32 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let slot = data_column_sidecar.slot;
         let data_column_sidecar = Arc::new(data_column_sidecar.into());
 
-        // Ignore non-sampling data column sidecars
-        if !self.sampling_columns.contains(&column_index) {
+        // No need to validate and import data column sidecars for blocks that are already in fork choice,
+        // i.e. already have all the data columns validated
+        // The exception to this is data column sidecars from custody group column backfill,
+        // where additional columns are being downloaded for blocks already in fork choice.
+        // TODO: (gloas): gloas block can be imported without sidecars, change this to
+        // `contains_block_and_sidecars` new function
+        if validate_block_presence && self.contains_block(block_root) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
-        let Some(chain_link) = self.chain_link(block_root) else {
+        // Validate data column sidecars submitted via beacon API even
+        // if they are not part of the sampling group.
+        // This ensures that correct data columns are published to the network.
+        let mut is_non_sampled_with_full_validation = false;
+
+        // Ignore non-sampling data column sidecars unless they are submitted to beacon API
+        // for publishing after proposal
+        if !self.sampling_columns.contains(&column_index) {
+            if origin.is_from_api() {
+                is_non_sampled_with_full_validation = true;
+            } else {
+                return Ok(DataColumnSidecarAction::Ignore(false));
+            }
+        }
+
+        let Some(state) = state_fn() else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
@@ -2312,10 +2333,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecars's `slot` matches the slot of the block with root `beacon_block_root`.
         ensure!(
-            data_column_sidecar.slot() == chain_link.slot(),
+            slot == state.slot(),
             Error::DataColumnSidecarSlotMismatch {
                 data_column_sidecar,
-                block_slot: chain_link.slot(),
+                block_slot: state.slot(),
             }
         );
 
@@ -2381,10 +2402,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ensure!(
                 verify_result,
                 Error::DataColumnSidecarInvalidKzgProofs {
-                    data_column_sidecar: data_column_sidecar.clone_arc(),
+                    data_column_sidecar,
                     error: anyhow!("invalid KZG proofs verification result"),
                 }
             );
+        }
+
+        if is_non_sampled_with_full_validation {
+            return Ok(DataColumnSidecarAction::Ignore(true));
         }
 
         Ok(DataColumnSidecarAction::Accept(data_column_sidecar))
@@ -2426,13 +2451,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     metrics,
                 )
             }
-            DataColumnSidecar::Gloas(data_column_sidecar) => self
-                .validate_gloas_data_column_sidecar_with_state(
+            DataColumnSidecar::Gloas(data_column_sidecar) => {
+                let slot = data_column_sidecar.slot;
+                let block_root = data_column_sidecar.beacon_block_root;
+
+                self.validate_gloas_data_column_sidecar_with_state(
                     data_column_sidecar,
                     block_seen,
                     origin,
+                    true,
+                    || {
+                        state.or_else(|| {
+                            self.state_cache
+                                .existing_state_at_slot(self, block_root, slot)
+                        })
+                    },
                     metrics,
-                ),
+                )
+            }
         }
     }
 
