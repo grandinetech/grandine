@@ -74,6 +74,8 @@ impl Meta {
 
 #[derive(Clone, Copy, Serialize)]
 pub struct ProcessMetrics {
+    #[serde(skip)]
+    pub cpu_percentage: f32,
     pub cpu_process_seconds_total: u64,
     pub memory_process_bytes: u64,
     pub client_name: &'static str,
@@ -88,6 +90,7 @@ pub struct ProcessMetrics {
 impl ProcessMetrics {
     pub fn get() -> Self {
         let Ok(crate::metric_sys::ProcessCpuMetric {
+            cpu_percentage,
             cpu_process_seconds_total,
             memory_process_bytes,
         }) = crate::metric_sys::get_process_cpu_metric()
@@ -100,6 +103,7 @@ impl ProcessMetrics {
             .timestamp();
 
         Self {
+            cpu_percentage,
             cpu_process_seconds_total,
             memory_process_bytes,
             client_name: APPLICATION_NAME,
@@ -376,6 +380,7 @@ mod tests {
 
     const fn example_metrics() -> [Metrics; 3] {
         let general = ProcessMetrics {
+            cpu_percentage: 99.0,
             cpu_process_seconds_total: 1_234_567,
             memory_process_bytes: 654_321,
             client_name: APPLICATION_NAME,

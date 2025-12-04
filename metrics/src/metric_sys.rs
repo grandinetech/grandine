@@ -2,6 +2,7 @@ use anyhow::Result;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use {
     anyhow::bail,
+    logging::exception,
     psutil::{cpu, process::Process},
 };
 #[cfg(target_os = "windows")]
@@ -12,6 +13,7 @@ use {
 
 #[derive(Default)]
 pub struct ProcessCpuMetric {
+    pub cpu_percentage: f32,
     pub cpu_process_seconds_total: u64,
     pub memory_process_bytes: u64,
 }
@@ -28,11 +30,21 @@ pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
     #[expect(unused_assignments)]
+    let mut cpu_percentage = 0.0;
+    #[expect(unused_assignments)]
     let mut cpu_process_seconds_total = 0;
     #[expect(unused_assignments)]
     let mut memory_process_bytes = 0;
+
     match Process::current() {
-        Ok(process) => {
+        Ok(mut process) => {
+            cpu_percentage = process
+                .cpu_percent()
+                .inspect_err(|error| {
+                    exception!("unable to get current process CPU percent usage: {error:?}")
+                })
+                .unwrap_or_default();
+
             match process.cpu_times() {
                 Ok(cpu_times) => {
                     cpu_process_seconds_total = cpu_times.busy().as_secs()
@@ -51,7 +63,9 @@ pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
         }
         Err(error) => bail!("unable to get current process: {error:?}"),
     }
+
     Ok(ProcessCpuMetric {
+        cpu_percentage,
         cpu_process_seconds_total,
         memory_process_bytes,
     })

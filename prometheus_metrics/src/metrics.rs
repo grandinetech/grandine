@@ -34,6 +34,7 @@ pub struct Metrics {
     system_used_memory: IntGauge,
     system_total_memory: IntGauge,
     total_cpu_percentage: Gauge,
+    total_cpu_percentage_ps: Gauge,
     total_cpu_seconds: IntGauge,
     grandine_thread_count: IntGauge,
 
@@ -235,6 +236,11 @@ impl Metrics {
             total_cpu_percentage: Gauge::new(
                 "GRANDINE_TOTAL_CPU_PERCENTAGE",
                 "Grandine CPU load usage measured in percentage",
+            )?,
+
+            total_cpu_percentage_ps: Gauge::new(
+                "GRANDINE_TOTAL_CPU_PERCENTAGE_PS",
+                "Grandine CPU load usage measured in percentage (psutils)",
             )?,
 
             total_cpu_seconds: IntGauge::new(
@@ -879,6 +885,7 @@ impl Metrics {
         default_registry.register(Box::new(self.system_used_memory.clone()))?;
         default_registry.register(Box::new(self.system_total_memory.clone()))?;
         default_registry.register(Box::new(self.total_cpu_percentage.clone()))?;
+        default_registry.register(Box::new(self.total_cpu_percentage_ps.clone()))?;
         default_registry.register(Box::new(self.total_cpu_seconds.clone()))?;
         default_registry.register(Box::new(self.grandine_thread_count.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
@@ -1095,6 +1102,10 @@ impl Metrics {
 
     pub fn set_total_cpu_percentage(&self, cpu_percentage: f32) {
         self.total_cpu_percentage.set(cpu_percentage as f64)
+    }
+
+    pub fn set_total_cpu_percentage_ps(&self, cpu_percentage: f32) {
+        self.total_cpu_percentage_ps.set(cpu_percentage as f64)
     }
 
     pub fn set_total_cpu_seconds(&self, total_cpu_seconds: u64) {

@@ -150,6 +150,7 @@ impl<P: Preset> MetricsService<P> {
                         let process_metrics = ProcessMetrics::get();
 
                         self.metrics.set_grandine_thread_count(process_metrics.thread_count);
+                        self.metrics.set_total_cpu_percentage_ps(process_metrics.cpu_percentage);
                         self.metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
 
                         // Update disk usage
