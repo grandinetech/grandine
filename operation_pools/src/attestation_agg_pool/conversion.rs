@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Error as AnyhowError, Result};
+use anyhow::{bail, ensure, Error as AnyhowError, Result};
 use eth1_api::{ApiController, RealController};
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
 use logging::debug_with_peers;
+use ssz::BitVector;
 use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, BeaconState},
@@ -15,6 +16,8 @@ use types::{
     phase0::containers::{Attestation as Phase0Attestation, AttestationData},
     preset::Preset,
 };
+
+use crate::attestation_agg_pool::types::AttestationPrePool;
 
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
@@ -64,6 +67,45 @@ pub fn convert_to_electra_attestation<P: Preset>(
     attestation: Phase0Attestation<P>,
 ) -> Result<ElectraAttestation<P>> {
     attestation.try_into()
+}
+pub fn convert_to_electra_attestation_use_pre_pool<P: Preset>(
+    attestation: Phase0Attestation<P>,
+    attestation_pre_pool: AttestationPrePool,
+) -> Result<ElectraAttestation<P>> {
+    let Phase0Attestation {
+        aggregation_bits,
+        data,
+        signature,
+    } = attestation;
+
+    let committee_index = attestation_pre_pool.committee_index;
+    let restored_index = attestation_pre_pool.original_payload_index;
+
+    ensure!(
+        committee_index < P::MaxCommitteesPerSlot::U64,
+        AttestationConversionError::InvalidCommitteeIndex
+    );
+
+    let aggregation_bits: Vec<u8> = aggregation_bits.into();
+    let mut committee_bits = BitVector::default();
+    committee_bits.set(committee_index.try_into()?, true);
+
+    // Restore the correct data.index for the Electra attestation.
+    // In the pool, data.index = committee_index. The caller provides the correct
+    // restored_index: 0 for pre-Gloas Electra, payload_status for Gloas.
+    let data = AttestationData {
+        index: restored_index,
+        ..data
+    };
+
+    Ok(ElectraAttestation {
+        aggregation_bits: aggregation_bits
+            .try_into()
+            .map_err(AttestationConversionError::InvalidAggregationBits)?,
+        data,
+        committee_bits,
+        signature,
+    })
 }
 
 // TODO(feature/electra): properly refactor attestations

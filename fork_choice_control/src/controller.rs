@@ -332,34 +332,17 @@ where
         wait_group: W,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
-        // TODO (gloas): Implement direct task spawn (from commit ad16f5c4a3e6f2d4931ea92fa35e9c4d6564ca80)
-        //
-        // This should spawn ExecutionPayloadEnvelopeTask DIRECTLY with Origin::Own
-        //
-        //   self.spawn(ExecutionPayloadEnvelopeTask {
-        //       store_snapshot: self.owned_store_snapshot(),
-        //       mutator_tx: self.owned_mutator_tx(),
-        //       wait_group,
-        //       envelope,
-        //       beacon_block_seen: true,  // we published the block ourselves
-        //    - origin: ExecutionPayloadEnvelopeOrigin::Own
-        //    - submission_time: Instant::now()
-        //
-        // 2. Task validates envelope:
-        //    - Signature check (builder domain)
-        //    - Link to block via beacon_block_root
-        //    - Builder index matches block bid
-        //
-        // 3. Mutator processes result:
-        //    - Trigger fork choice update
-        //    - Process execution payload in state transition
-        //
-        // For now, just log until task changes is merged through ad16f5c4a
         info_with_peers!(
             "publishing own execution payload envelope (block_root: {:?}, slot: {}, builder_index: {})",
             envelope.message.beacon_block_root,
             envelope.message.slot,
             envelope.message.builder_index,
+        );
+
+        self.spawn_execution_payload_envelope_task_with_wait_group(
+            wait_group,
+            envelope,
+            ExecutionPayloadEnvelopeOrigin::Own,
         );
     }
 
@@ -934,10 +917,23 @@ where
         execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
     ) {
+        self.spawn_execution_payload_envelope_task_with_wait_group(
+            self.owned_wait_group(),
+            execution_payload_envelope,
+            origin,
+        )
+    }
+
+    fn spawn_execution_payload_envelope_task_with_wait_group(
+        &self,
+        wait_group: W,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+    ) {
         self.spawn(ExecutionPayloadEnvelopeTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
+            wait_group,
             execution_payload_envelope,
             state: None,
             origin,
@@ -981,6 +977,21 @@ where
 
     pub fn sampling_columns_count(&self) -> usize {
         self.store_snapshot().sampling_columns_count()
+    }
+
+    /// Check if execution payload envelope has been seen for block_root.
+    pub fn has_envelope(&self, block_root: H256) -> bool {
+        self.store_snapshot().has_envelope(block_root)
+    }
+
+    /// Check if blob data is available for block_root.
+    pub fn is_data_available(&self, block_root: H256) -> bool {
+        self.store_snapshot().is_data_available(block_root)
+    }
+
+    /// Get the slot of a block by its root.
+    pub fn block_slot(&self, block_root: H256) -> Option<Slot> {
+        self.store_snapshot().block_slot(block_root)
     }
 
     pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P, Storage<P>>>> {

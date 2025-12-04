@@ -59,7 +59,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::CombinedPayloadAttestation,
+    gloas::containers::{CombinedPayloadAttestation, SignedExecutionPayloadEnvelope},
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -109,6 +109,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
+    delayed_until_envelope: HashMap<H256, Delayed<P>>,
     delayed_until_data: HashMap<H256, PendingExecutionPayloadEnvelope<P>>,
     // We previously ignored objects that would have to be delayed more than one slot. This was
     // based on the assumption that one slot is enough to account for clock differences between
@@ -188,6 +189,7 @@ where
             execution_engine,
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
+            delayed_until_envelope: HashMap::new(),
             delayed_until_data: HashMap::new(),
             delayed_until_slot: BTreeMap::new(),
             delayed_until_payload: HashMap::new(),
@@ -663,7 +665,7 @@ where
                         );
 
                         if let Some(valid_hash) = payload_status.latest_valid_hash {
-                            if let Some(parent) = self.store.chain_link(parent_root) {
+                            if let Some(parent) = self.store.chain_link_full(parent_root) {
                                 let parent_execution_block_hash =
                                     parent.block.execution_block_hash();
 
@@ -924,6 +926,29 @@ where
                     self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
 
                     self.delay_block_until_parent(pending_block);
+                }
+            }
+            Ok(BlockAction::DelayUntilParentEnvelope(block, parent_root)) => {
+                let processing_timings = processing_timings.delayed();
+
+                let pending_block = PendingBlock {
+                    block,
+                    origin,
+                    processing_timings,
+                    tracing_span,
+                };
+
+                if self.store.has_envelope(parent_root) {
+                    self.retry_block(wait_group, pending_block);
+                } else {
+                    let pending_block = reply_delayed_block_validation_result(
+                        pending_block,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
+                    debug_with_peers!("block delayed until parent envelope: {block_root:?}");
+
+                    self.delay_block_until_envelope(pending_block, parent_root);
                 }
             }
             Ok(BlockAction::DelayUntilSlot(block)) => {
@@ -1867,6 +1892,9 @@ where
                     );
                 }
 
+                // Apply envelope to fork choice store (sets execution_payload_state)
+                self.accept_execution_payload_envelope(wait_group, &execution_payload_envelope)?;
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -2000,6 +2028,39 @@ where
         Ok(())
     }
 
+    fn accept_execution_payload_envelope(
+        &mut self,
+        wait_group: &W,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) -> Result<()> {
+        let beacon_block_root = envelope.message.beacon_block_root;
+        let slot = envelope.message.slot;
+
+        debug_with_peers!(
+            "accepted execution payload envelope for beacon_block_root: {beacon_block_root:?}, \
+             slot: {slot}, builder_index: {}",
+            envelope.message.builder_index
+        );
+
+        // Apply to store (calls process_execution_payload internally)
+        let execution_engine = self.execution_engine.clone();
+        self.store_mut()
+            .apply_execution_payload_envelope(envelope.clone_arc(), execution_engine)?;
+
+        self.update_store_snapshot();
+
+        // Retry blocks that were waiting for this envelope
+        if let Some(objects) = self.take_delayed_until_envelope(beacon_block_root) {
+            trace_with_peers!(
+                "retrying {} blocks delayed until envelope {beacon_block_root:?}",
+                objects.blocks.len()
+            );
+            self.retry_delayed(objects, wait_group);
+        }
+
+        Ok(())
+    }
+
     #[expect(clippy::too_many_lines)]
     fn handle_payload_attestation(
         &mut self,
@@ -2062,6 +2123,8 @@ where
                     .apply_payload_attestation(valid_payload_attestation)?;
 
                 self.update_store_snapshot();
+
+                // TODO(gloas): handle reorg from payload attestation when store returns old_head
             }
             Ok(PayloadAttestationAction::Ignore(payload_attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -2579,7 +2642,7 @@ where
         let block_epoch = misc::compute_epoch_at_slot::<P>(block_slot);
         let parent_epoch = self
             .store
-            .chain_link(block.message().parent_root())
+            .chain_link_full(block.message().parent_root())
             .map(|chain_link| misc::compute_epoch_at_slot::<P>(chain_link.slot()));
 
         if parent_epoch
@@ -2681,7 +2744,7 @@ where
         // >     (including execution node verification of the `block.body.execution_payload`).
         if self
             .store
-            .chain_link(block_root)
+            .chain_link_full(block_root)
             .is_some_and(ChainLink::is_invalid)
         {
             let (gossip_id, sender) = origin.split();
@@ -2751,6 +2814,13 @@ where
             debug_with_peers!(
                 "retrying {} pending data column sidecars after block {block_root:?} imported",
                 objects.data_column_sidecars.len(),
+            );
+            self.retry_delayed(objects, wait_group);
+        }
+
+        if let Some(objects) = self.take_delayed_until_state(block_root, block_slot) {
+            debug_with_peers!(
+                "retrying objects delayed until state ({block_root:?}, {block_slot})",
             );
             self.retry_delayed(objects, wait_group);
         }
@@ -3039,7 +3109,11 @@ where
         let safe_block_hash = self.store.safe_execution_payload_hash();
         let finalized_block_hash = self.store.finalized_execution_payload_hash();
 
-        let head_block_hash = state.latest_execution_payload_header().block_hash();
+        let head_block_hash = if let Some(gloas_state) = new_head_state.post_gloas() {
+            gloas_state.latest_block_hash()
+        } else {
+            state.latest_execution_payload_header().block_hash()
+        };
 
         self.execution_engine.notify_forkchoice_updated(
             head_block_hash,
@@ -3082,6 +3156,17 @@ where
 
         self.delayed_until_block
             .entry(pending_block.block.message().parent_root())
+            .or_default()
+            .blocks
+            .push(pending_block);
+    }
+
+    fn delay_block_until_envelope(&mut self, pending_block: PendingBlock<P>, parent_root: H256) {
+        // Blocks produced by the application itself should never be delayed.
+        assert!(!matches!(pending_block.origin, BlockOrigin::Own));
+
+        self.delayed_until_envelope
+            .entry(parent_root)
             .or_default()
             .blocks
             .push(pending_block);
@@ -3409,6 +3494,10 @@ where
 
     fn take_delayed_until_block(&mut self, block_root: H256) -> Option<Delayed<P>> {
         self.delayed_until_block.remove(&block_root)
+    }
+
+    fn take_delayed_until_envelope(&mut self, block_root: H256) -> Option<Delayed<P>> {
+        self.delayed_until_envelope.remove(&block_root)
     }
 
     fn take_delayed_until_data(

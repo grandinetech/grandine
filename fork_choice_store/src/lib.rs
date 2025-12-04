@@ -83,7 +83,7 @@ pub use crate::{
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
         ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
         ExecutionPayloadBidAction, ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction,
-        ExecutionPayloadEnvelopeOrigin, PartialBlockAction, PayloadAction,
+        ExecutionPayloadEnvelopeOrigin, ForkChoicePayloadStatus, PartialBlockAction, PayloadAction,
         PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationOrigin,
         PayloadAttestationValidationError, Storage, ValidAttestation, ValidPayloadAttestation,
     },

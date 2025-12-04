@@ -594,8 +594,8 @@ impl<P: Preset> Network<P> {
                         SyncToP2p::RequestExecutionPayloadEnvelopesByRange(request_id, peer_id, start_slot, count) => {
                             self.request_execution_payload_envelopes_by_range(request_id, peer_id, start_slot, count);
                         }
-                        SyncToP2p::RequestExecutionPayloadEnvelopesByRoot(request_id, peer_id, identifiers) => {
-                            self.request_execution_payload_envelopes_by_root(request_id, peer_id, identifiers);
+                        SyncToP2p::RequestExecutionPayloadEnvelopeByRoot(request_id, peer_id, block_root) => {
+                            self.request_execution_payload_envelope_by_root(request_id, peer_id, block_root);
                         }
                         SyncToP2p::RequestPeerStatus(request_id, peer_id) => {
                             self.request_peer_status(request_id, peer_id);
@@ -2635,15 +2635,15 @@ impl<P: Preset> Network<P> {
         );
     }
 
-    fn request_execution_payload_envelopes_by_root(
+    fn request_execution_payload_envelope_by_root(
         &self,
         app_request_id: AppRequestId,
         peer_id: PeerId,
-        block_roots: Vec<H256>,
+        block_root: H256,
     ) {
         let request = ExecutionPayloadEnvelopesByRootRequest::new(
             self.controller.chain_config(),
-            block_roots.into_iter(),
+            core::iter::once(block_root),
         );
 
         debug_with_peers!(

@@ -314,6 +314,33 @@ where
         chain_link.state(&self.store_snapshot())
     }
 
+    /// For Gloas proposer: return execution_payload_state (post-execution) when the head
+    /// is a FULL variant with processed payload, advancing to slot as given by the caller.
+    ///
+    /// Spec ref: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#modified-on_block
+    pub fn proposer_head_state_at_slot(
+        &self,
+        chain_link: &ChainLink<P>,
+        slot: Slot,
+    ) -> Result<Arc<BeaconState<P>>> {
+        let store = self.store_snapshot();
+
+        if let Some(exec_state) = chain_link.execution_state(&store) {
+            if exec_state.slot() >= slot {
+                return Ok(exec_state);
+            }
+            return self.state_cache().process_slots(
+                self.pubkey_cache(),
+                &store,
+                exec_state,
+                chain_link.block_root,
+                slot,
+            );
+        }
+
+        self.preprocessed_state_post_block_blocking(chain_link.block_root, slot)
+    }
+
     pub fn state_at_slot_blocking(
         &self,
         slot: Slot,
@@ -407,7 +434,7 @@ where
     pub fn check_block_root(&self, block_root: H256) -> Result<Option<WithStatus<H256>>> {
         let store = self.store_snapshot();
 
-        if let Some(chain_link) = store.chain_link(block_root) {
+        if let Some(chain_link) = store.chain_link_full(block_root) {
             return Ok(Some(WithStatus {
                 value: block_root,
                 status: chain_link.payload_status,
@@ -974,7 +1001,7 @@ where
     #[must_use]
     pub fn payload_status(&self, block_root: H256) -> Option<PayloadStatus> {
         self.store_snapshot()
-            .chain_link(block_root)
+            .chain_link_full(block_root)
             .map(|chain_link| chain_link.payload_status)
     }
 }

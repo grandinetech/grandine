@@ -339,7 +339,13 @@ impl Snapshot {
                     ));
                 }
                 SigningMessage::PayloadAttestation(_payload_attestation) => {
-                    // TODO: (gloas): implement this
+                    //no slashing protection for payload atttestations. directly push to signalbe messgaes
+                    signable_messages.push(SigningTriple {
+                        message,
+                        signing_root,
+                        public_key,
+                    });
+                    message_indices.push(index);
                 }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
