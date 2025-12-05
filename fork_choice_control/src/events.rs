@@ -24,7 +24,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
+    gloas::containers::{ExecutionPayloadBid, PayloadAttestationData, PayloadAttestationMessage},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -69,10 +69,10 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
-    ExecutionPayloadBid(Arc<SignedExecutionPayloadBid>),
+    ExecutionPayloadBid(ExecutionPayloadBidEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
-    PayloadAttestation(Arc<PayloadAttestationMessage>),
+    PayloadAttestation(PayloadAttestationEvent),
     PayloadAttributes(PayloadAttributesEvent),
     ProposerSlashing(Box<ProposerSlashing>),
     VoluntaryExit(Box<SignedVoluntaryExit>),
@@ -252,6 +252,12 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
+    pub fn send_execution_payload_bid_event(&self, payload_bid: ExecutionPayloadBid) {
+        if let Err(error) = self.send_execution_payload_bid_event_internal(payload_bid) {
+            warn_with_peers!("unable to send execution payload bid event: {error}");
+        }
+    }
+
     pub fn send_finalized_checkpoint_event(
         &self,
         block_root: H256,
@@ -320,15 +326,6 @@ impl<P: Preset> EventChannels<P> {
             parent_block_hash,
         ) {
             warn_with_peers!("unable to send payload attributes event: {error}");
-        }
-    }
-
-    pub fn send_execution_payload_bid_event(&self, payload_bid: Arc<SignedExecutionPayloadBid>) {
-        if self.execution_payload_bids.receiver_count() > 0 {
-            let event = Event::ExecutionPayloadBid(payload_bid);
-            if let Err(error) = self.execution_payload_bids.send(event) {
-                warn_with_peers!("unable to send execution payload bid event: {error}");
-            }
         }
     }
 
@@ -464,6 +461,19 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_execution_payload_bid_event_internal(
+        &self,
+        payload_bid: ExecutionPayloadBid,
+    ) -> Result<()> {
+        if self.execution_payload_bids.receiver_count() > 0 {
+            let payload_bid_event = ExecutionPayloadBidEvent::new(payload_bid);
+            let event = Event::ExecutionPayloadBid(payload_bid_event);
+            self.execution_payload_bids.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -506,7 +516,8 @@ impl<P: Preset> EventChannels<P> {
         payload_attestation: Arc<PayloadAttestationMessage>,
     ) -> Result<()> {
         if self.payload_attestations.receiver_count() > 0 {
-            let event = Event::PayloadAttestation(payload_attestation);
+            let payload_attestation_event = PayloadAttestationEvent::new(payload_attestation);
+            let event = Event::PayloadAttestation(payload_attestation_event);
             self.payload_attestations.send(event)?;
         }
 
@@ -684,6 +695,30 @@ impl ChainReorgEvent {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadBidEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: ValidatorIndex,
+    pub parent_block_root: H256,
+    pub block_hash: ExecutionBlockHash,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub value: Gwei,
+}
+
+impl ExecutionPayloadBidEvent {
+    fn new(payload_bid: ExecutionPayloadBid) -> Self {
+        Self {
+            slot: payload_bid.slot,
+            builder_index: payload_bid.builder_index,
+            parent_block_root: payload_bid.parent_block_root,
+            block_hash: payload_bid.block_hash,
+            value: payload_bid.value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct FinalizedCheckpointEvent {
     pub block: H256,
     pub state: H256,
@@ -721,6 +756,23 @@ impl HeadEvent {
             previous_duty_dependent_root,
             current_duty_dependent_root,
             execution_optimistic: head.is_optimistic(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PayloadAttestationEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(flatten)]
+    pub data: PayloadAttestationData,
+}
+
+impl PayloadAttestationEvent {
+    fn new(payload_attestation: Arc<PayloadAttestationMessage>) -> Self {
+        Self {
+            validator_index: payload_attestation.validator_index,
+            data: payload_attestation.data,
         }
     }
 }
