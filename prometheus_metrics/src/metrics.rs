@@ -110,6 +110,9 @@ pub struct Metrics {
     // eth/v1/validator/attestation_data
     pub validator_api_attestation_data_times: Histogram,
 
+    // eth/v1/validator/payload_attestation_data
+    pub validator_api_payload_attestation_data_times: Histogram,
+
     // Blocks
     pub validator_propose_times: Histogram,
     pub validator_propose_successes: IntCounter,
@@ -515,6 +518,12 @@ impl Metrics {
             validator_api_attestation_data_times: Histogram::with_opts(histogram_opts!(
                 "VALIDATOR_API_ATTESTATION_DATA_TIMES",
                 "Singular attestation data production times in HTTP API",
+            ))?,
+
+            // eth/v1/validator/payload_attestation_data
+            validator_api_payload_attestation_data_times: Histogram::with_opts(histogram_opts!(
+                "VALIDATOR_API_PAYLOAD_ATTESTATION_DATA_TIMES",
+                "Payload attestation data production times in HTTP API",
             ))?,
 
             // Blocks
@@ -960,6 +969,9 @@ impl Metrics {
             self.validator_attest_slashing_protector_times.clone(),
         ))?;
         default_registry.register(Box::new(self.validator_api_attestation_data_times.clone()))?;
+        default_registry.register(Box::new(
+            self.validator_api_payload_attestation_data_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.validator_propose_times.clone()))?;
         default_registry.register(Box::new(self.validator_propose_successes.clone()))?;
         default_registry.register(Box::new(
