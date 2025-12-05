@@ -7,9 +7,11 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
+enum-iterator = { workspace = true }
 log = { workspace = true }
 logging = { workspace = true }
 parse-display = { workspace = true }
+serde = { workspace = true }
 tracing = { workspace = true }
 variant_count = { workspace = true }
 

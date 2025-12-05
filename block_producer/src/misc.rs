@@ -198,11 +198,11 @@ mod tests {
     )]
     #[test_case(
         Some(misc::parse_graffiti("test").expect("user graffiti is valid")),
-        Some(vec![known_client_version()].into()) => "test BS4e2eGR6a37 Grandine/1.2.3"
+        Some(vec![known_client_version()].into()) => "test BU4e2eGR6a37 Grandine/1.2.3"
     )]
     #[test_case(
         Some(misc::parse_graffiti("test1").expect("user graffiti is valid")),
-        Some(vec![known_client_version()].into()) => "test1 BS4e2eGR6a37\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+        Some(vec![known_client_version()].into()) => "test1 BU4e2eGR6a37\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
     )]
     fn test_build_graffiti(
         user_graffiti: Option<H256>,

@@ -1207,9 +1207,11 @@ dependencies = [
 name = "features"
 version = "0.0.0"
 dependencies = [
+ "enum-iterator",
  "log",
  "logging",
  "parse-display",
+ "serde",
  "tracing",
  "variant_count",
 ]

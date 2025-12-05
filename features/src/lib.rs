@@ -6,13 +6,29 @@
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use enum_iterator::Sequence;
 use parse_display::{Display, FromStr};
+use serde::{Deserialize, Serialize};
 use variant_count::VariantCount;
 
 static FEATURES: [AtomicBool; Feature::VARIANT_COUNT] =
     [const { AtomicBool::new(false) }; Feature::VARIANT_COUNT];
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, FromStr, VariantCount)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Sequence,
+    Display,
+    FromStr,
+    VariantCount,
+    Deserialize,
+    Serialize,
+)]
 pub enum Feature {
     AggregateAllAttestations,
     AlwaysPrepackAttestations,
@@ -69,7 +85,12 @@ impl Feature {
 
     #[inline]
     pub fn enable(self) {
-        FEATURES[self as usize].store(true, Self::ORDERING)
+        self.set_enabled(true)
+    }
+
+    #[inline]
+    pub fn set_enabled(self, value: bool) {
+        FEATURES[self as usize].store(value, Self::ORDERING)
     }
 
     // Functions (`log` and `warn`) can be used, but can't be tested.

@@ -4495,10 +4495,12 @@ dependencies = [
 name = "features"
 version = "0.0.0"
 dependencies = [
+ "enum-iterator",
  "itertools 0.14.0",
  "log",
  "logging",
  "parse-display",
+ "serde",
  "tracing",
  "tracing-test",
  "variant_count",

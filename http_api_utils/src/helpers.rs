@@ -32,22 +32,15 @@ pub fn extend_router_with_middleware<E: ApiError + Send + Sync + 'static>(
 
     router = router.layer(CorsLayer::new().allow_origin(allowed_origins).vary([]));
 
-    if Feature::LogHttpRequests.is_enabled() || api_metrics.is_some() {
-        router = router.layer(axum::middleware::from_fn(
-            middleware::insert_response_extensions,
-        ));
-    }
+    router = router.layer(axum::middleware::from_fn(
+        middleware::insert_response_extensions,
+    ));
 
-    if Feature::LogHttpRequests.is_enabled()
-        || Feature::LogHttpHeaders.is_enabled()
-        || Feature::PrometheusMetrics.is_enabled()
-    {
-        router = router.layer(
-            TraceLayer::new_for_http()
-                .on_request(logging::log_request)
-                .on_response(logging::log_response::<E>(api_metrics)),
-        );
-    }
+    router = router.layer(
+        TraceLayer::new_for_http()
+            .on_request(logging::log_request)
+            .on_response(logging::log_response::<E>(api_metrics)),
+    );
 
     if Feature::LogHttpBodies.is_enabled() {
         router = router.layer(axum::middleware::from_fn(

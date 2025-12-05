@@ -7,6 +7,7 @@ mod block_id;
 mod error;
 mod extractors;
 mod full_config;
+mod global;
 mod gui;
 mod http_api_config;
 mod middleware;

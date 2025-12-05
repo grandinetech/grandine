@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use anyhow::Error as AnyhowError;
 use axum::{
     extract::{DefaultBodyLimit, FromRef, State},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use binary_utils::TracingHandle;
@@ -25,7 +25,7 @@ use validator::{ApiToValidator, ValidatorConfig};
 
 use crate::{
     error::Error,
-    gui, middleware,
+    global, gui, middleware,
     misc::SyncedStatus,
     standard::{
         beacon_events, beacon_heads, beacon_state, blinded_block, blob_sidecars, blobs, block,
@@ -298,6 +298,11 @@ fn gui_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
                 Feature::ServeCostlyEndpoints,
                 middleware::feature_is_enabled,
             )),
+        )
+        .route("/features", get(|| async { Json(global::get_features()) }))
+        .route(
+            "/features",
+            patch(|Json(features)| async { global::patch_features(features) }),
         )
         .route(
             "/system/stats",
