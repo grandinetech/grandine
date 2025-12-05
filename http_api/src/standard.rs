@@ -83,7 +83,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::{
-        containers::{ExecutionPayloadBid, SignedExecutionPayloadBid},
+        containers::{ExecutionPayloadBid, PayloadAttestationData, SignedExecutionPayloadBid},
         primitives::BuilderIndex,
     },
     nonstandard::{
@@ -3629,6 +3629,123 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
         .ok_or(Error::ExecutionPayloadBidNotFound)?;
 
     Ok(EthResponse::json_or_ssz(signed_bid.message, &headers)?.version(version))
+}
+
+/// `GET /eth/v1/validator/payload_attestation_data/{slot}`
+#[instrument(
+    parent = None,
+    level = "trace",
+    fields(
+        service = "http_api",
+        slot = %slot,
+    ),
+    name = "http_api",
+    skip_all,
+)]
+pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
+    State(validator_config): State<Arc<ValidatorConfig>>,
+    EthPath(slot): EthPath<Slot>,
+    headers: HeaderMap,
+) -> Result<EthResponse<PayloadAttestationData, (), JsonOrSsz>, Error> {
+    const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+    let _timer = metrics.map(|metrics| {
+        metrics
+            .validator_api_payload_attestation_data_times
+            .start_timer()
+    });
+
+    let WithStatus {
+        value: head,
+        status,
+        ..
+    } = controller.head();
+
+    let head_slot = head.slot();
+    let max_empty_slots = validator_config.max_empty_slots;
+
+    if head_slot + max_empty_slots < slot {
+        return Err(Error::HeadFarBehind {
+            head_slot,
+            max_empty_slots,
+            slot,
+        });
+    }
+
+    let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let previous_epoch = misc::previous_epoch(misc::compute_epoch_at_slot::<P>(head_slot));
+
+    // Prevent DoS attacks by limiting how far in the past the attested block can be searched.
+    if requested_epoch < previous_epoch {
+        return Err(Error::EpochBeforePrevious);
+    }
+
+    let block_root;
+    let mut state;
+
+    let is_optimistic = if slot < head_slot {
+        // Search for the latest canonical block before or at slot.
+        let block = controller
+            .block_by_slot(slot)?
+            .ok_or(Error::BlockNotFound)?;
+
+        block_root = block.value.root;
+        state = controller
+            .state_before_or_at_slot(block_root, slot)
+            .ok_or(Error::StateNotFound)?;
+        block.status.is_optimistic()
+    } else {
+        block_root = head.block_root;
+        state = controller.state_by_chain_link(&head);
+        status.is_optimistic()
+    };
+
+    if is_optimistic {
+        if let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+            loop {
+                let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
+                    Ok(Event::Block(block_event)) => block_event,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        debug_with_peers!("error receiving block event: {error:?}");
+                        continue;
+                    }
+                };
+
+                if block_event.block == block_root && !block_event.execution_optimistic {
+                    break;
+                }
+            }
+        })
+        .await
+        {
+            debug_with_peers!("timeout while waiting for block event: {error:?}");
+            return Err(Error::HeadIsOptimistic);
+        }
+    }
+
+    if state.slot() < slot {
+        state = tokio::task::spawn_blocking(move || {
+            controller.preprocessed_state_post_block_blocking(block_root, slot)
+        })
+        .await?
+        .map_err(Error::UnableToProduceAttestation)?;
+    }
+
+    let version = state.phase();
+    let payload_attestation_data = PayloadAttestationData {
+        slot,
+        beacon_block_root: block_root,
+        // TODO: (gloas): set to `true` if signed envelope reference by `block_root` has been seen in fork choice
+        payload_present: true,
+        // TODO: (gloas): set to `true` if blob data is available defined by fork choice
+        blob_data_available: true,
+    };
+
+    Ok(EthResponse::json_or_ssz(payload_attestation_data, &headers)?.version(version))
 }
 
 /// `POST /eth/v1/validator/aggregate_and_proofs`
