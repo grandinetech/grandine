@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
 use eth1_api::ApiController;
@@ -41,8 +41,22 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             return Ok(());
         };
 
-        if available_columns.len() == P::NumberOfColumns::USIZE {
-            debug_with_peers!("no need to reconstruct data columns: {block_root:?}");
+        let sampling_column_indices = controller.sampling_columns();
+        let available_column_indices = available_columns
+            .iter()
+            .map(|sidecar| sidecar.index)
+            .collect::<HashSet<_>>();
+
+        if sampling_column_indices
+            .difference(&available_column_indices)
+            .count()
+            == 0
+        {
+            debug_with_peers!(
+                "no need to reconstruct data columns: {block_root:?} \
+                (available columns: {available_column_indices:?}, sampling columns: {sampling_column_indices:?})",
+            );
+
             return Ok(());
         }
 

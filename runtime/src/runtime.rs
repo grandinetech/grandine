@@ -183,7 +183,7 @@ pub async fn run_after_genesis<P: Preset>(
     ));
 
     let dedicated_executor_for_reconstruction =
-        DedicatedExecutor::new("de-reconstruct", 1, None, metrics.clone());
+        DedicatedExecutor::new("de-reconstruct", 1, Some(19), metrics.clone());
 
     let eth1_api = Arc::new(Eth1Api::new(
         chain_config.clone_arc(),
