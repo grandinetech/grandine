@@ -774,9 +774,11 @@ impl<P: Preset> ApplyBlockChanges<P> {
 pub enum ApplyTickChanges<P: Preset> {
     TickUpdated,
     SlotUpdated {
+        epoch_updated: bool,
         finalized_checkpoint_updated: bool,
     },
     Reorganized {
+        epoch_updated: bool,
         finalized_checkpoint_updated: bool,
         old_head: Box<ChainLink<P>>,
     },
@@ -789,6 +791,7 @@ impl<P: Preset> ApplyTickChanges<P> {
             Self::TickUpdated => false,
             Self::SlotUpdated {
                 finalized_checkpoint_updated,
+                ..
             }
             | Self::Reorganized {
                 finalized_checkpoint_updated,
@@ -802,6 +805,16 @@ impl<P: Preset> ApplyTickChanges<P> {
         match self {
             Self::TickUpdated => false,
             Self::SlotUpdated { .. } | Self::Reorganized { .. } => true,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_epoch_updated(&self) -> bool {
+        match self {
+            Self::TickUpdated => false,
+            Self::SlotUpdated { epoch_updated, .. } | Self::Reorganized { epoch_updated, .. } => {
+                *epoch_updated
+            }
         }
     }
 }

@@ -85,7 +85,8 @@ use crate::{
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
         DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask,
+        PersistPubkeyCacheTask, PreprocessStateTask, PruneStateCacheTask,
+        RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -478,6 +479,12 @@ where
             return Ok(());
         };
 
+        self.spawn_state_cache_prune_task(
+            // preserve unfinalized fork tips if not finalized or epoch did not change
+            !changes.is_finalized_checkpoint_updated() || !changes.is_epoch_updated(),
+            wait_group.clone(),
+        );
+
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
@@ -569,6 +576,14 @@ where
         }
 
         drop(wait_group);
+    }
+
+    fn spawn_state_cache_prune_task(&self, preserve_unfinalized_fork_tips: bool, wait_group: W) {
+        self.spawn(PruneStateCacheTask {
+            store_snapshot: self.owned_store(),
+            preserve_unfinalized_fork_tips,
+            wait_group,
+        });
     }
 
     fn try_spawn_persist_data_columns_task(&mut self, slot: Slot, wait_group: W) {
@@ -2142,7 +2157,9 @@ where
             .map(|epoch| epoch < block_epoch)
             .unwrap_or(true)
         {
-            self.store.prune_state_cache(true);
+            if !changes.is_finalized_checkpoint_updated() {
+                self.spawn_state_cache_prune_task(true, wait_group.clone());
+            }
 
             info_with_peers!("unloading old beacon states (head slot: {head_slot})");
 
@@ -2263,6 +2280,7 @@ where
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
+            self.spawn_state_cache_prune_task(false, wait_group.clone());
 
             let finalized_slot = self.store.finalized_slot();
 

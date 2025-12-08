@@ -538,6 +538,27 @@ impl<P: Preset, W> Run for PersistBlobSidecarsTask<P, W> {
     }
 }
 
+pub struct PruneStateCacheTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub preserve_unfinalized_fork_tips: bool,
+    pub wait_group: W,
+}
+
+impl<P: Preset, W> Run for PruneStateCacheTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PruneStateCacheTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            preserve_unfinalized_fork_tips,
+            wait_group,
+        } = self;
+
+        store_snapshot.prune_state_cache(preserve_unfinalized_fork_tips);
+
+        drop(wait_group);
+    }
+}
+
 pub struct PersistDataColumnSidecarsTask<P: Preset, W> {
     pub slot: Slot,
     pub store_snapshot: Arc<Store<P, Storage<P>>>,

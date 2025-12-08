@@ -2321,9 +2321,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut finalized_checkpoint_updated = false;
 
         // > If a new epoch, pull-up justification and finalization from previous epoch
-        let is_new_epoch = new_tick.epoch::<P>() > old_tick.epoch::<P>();
+        let epoch_updated = new_tick.epoch::<P>() > old_tick.epoch::<P>();
 
-        if is_new_epoch {
+        if epoch_updated {
             let old_justified_checkpoint = self.justified_checkpoint;
             let old_finalized_checkpoint = self.finalized_checkpoint;
 
@@ -2355,20 +2355,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Pruning the state cache requires the head slot, which depends on head_segment_id
         // pointing to the correct head. Therefore, prune state cache after the head_segment_id
         // is updated.
-        if is_new_epoch && finalized_checkpoint_updated {
+        if epoch_updated && finalized_checkpoint_updated {
             self.prune_after_finalization();
         }
 
         self.blob_cache.on_slot(new_tick.slot);
-        self.prune_state_cache(true);
 
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
+                epoch_updated,
                 finalized_checkpoint_updated,
                 old_head: Box::new(old_head),
             }
         } else {
             ApplyTickChanges::SlotUpdated {
+                epoch_updated,
                 finalized_checkpoint_updated,
             }
         };
@@ -3026,7 +3027,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.requested_blobs_from_el
             .retain(|_, slot| finalized_slot <= *slot);
         self.prune_checkpoint_states();
-        self.prune_state_cache(false);
         self.aggregate_and_proof_supersets
             .prune(self.finalized_epoch());
     }

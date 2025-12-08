@@ -27,8 +27,8 @@ use crate::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
         DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, RetryDataColumnSidecarTask, Run,
-        StateAtSlotCacheFlushTask,
+        PersistPubkeyCacheTask, PreprocessStateTask, PruneStateCacheTask,
+        RetryDataColumnSidecarTask, Run, StateAtSlotCacheFlushTask,
     },
     wait::Wait,
 };
@@ -148,6 +148,7 @@ enum LowPriorityTask<P: Preset, W> {
     AttesterSlashing(AttesterSlashingTask<P, W>),
     PersistBlobSidecarsTask(PersistBlobSidecarsTask<P, W>),
     PersistPubkeyCacheTask(PersistPubkeyCacheTask<P, W>),
+    PruneStateCacheTask(PruneStateCacheTask<P, W>),
     StateAtSlotCacheFlush(StateAtSlotCacheFlushTask<P>),
     PersistDataColumnSidecarsTask(PersistDataColumnSidecarsTask<P, W>),
 }
@@ -161,6 +162,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::AttesterSlashing(task) => task.run(),
             Self::PersistBlobSidecarsTask(task) => task.run(),
             Self::PersistPubkeyCacheTask(task) => task.run(),
+            Self::PruneStateCacheTask(task) => task.run(),
             Self::StateAtSlotCacheFlush(task) => task.run(),
             Self::PersistDataColumnSidecarsTask(task) => task.run(),
         }
@@ -238,6 +240,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PersistBlobSidecarsTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for PersistPubkeyCacheTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for PruneStateCacheTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
     }
