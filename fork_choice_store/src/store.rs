@@ -54,8 +54,8 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::containers::{
-        DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayloadBid,
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        DataColumnSidecar as GloasDataColumnSidecar, PayloadAttestationMessage,
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -234,7 +234,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, H256, ColumnIndex),
         ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     >,
-    accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, ExecutionPayloadBid>>,
+    accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, SignedExecutionPayloadBid>>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -1359,10 +1359,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // > this bid is the highest value bid seen for the corresponding slot and the given parent block hash.
             if let Some(highest_bid) = payload_bids
                 .values()
-                .filter(|b| b.parent_block_hash == bid.parent_block_hash)
-                .max_by_key(|bid| bid.value)
+                .filter(|b| b.message.parent_block_hash == bid.parent_block_hash)
+                .max_by_key(|b| b.message.value)
             {
-                if bid.value <= highest_bid.value {
+                if bid.value <= highest_bid.message.value {
                     // This bid doesn't have a higher value than the existing bid
                     return Ok(ExecutionPayloadBidAction::Ignore(true));
                 }
@@ -2437,8 +2437,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
         let Some(payload_bid) = self.accepted_payload_bids.get(&slot).and_then(|bids| {
             bids.values()
-                .filter(|bid| bid.parent_block_root == block_root)
-                .max_by_key(|bid| bid.value)
+                .filter(|bid| bid.message.parent_block_root == block_root)
+                .max_by_key(|bid| bid.message.value)
         }) else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
@@ -2449,7 +2449,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // [REJECT] The hash of the sidecar's kzg_commitments matches the blob_kzg_commitments_root in the corresponding builder's bid for sidecar.beacon_block_root.
         ensure!(
             data_column_sidecar.kzg_commitments().hash_tree_root()
-                == payload_bid.blob_kzg_commitments_root,
+                == payload_bid.message.blob_kzg_commitments_root,
             Error::DataColumnSidecarInvalidKzgCommitments {
                 data_column_sidecar
             }
@@ -3005,7 +3005,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let bid = payload_bid.message;
         let accepted_bids = self.accepted_payload_bids.entry(bid.slot).or_default();
 
-        accepted_bids.insert(bid.builder_index, payload_bid.message);
+        accepted_bids.insert(bid.builder_index, *payload_bid);
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
