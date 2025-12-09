@@ -39,6 +39,7 @@ pub mod checkpoint_sync;
 
 mod block_processor;
 mod controller;
+mod delta;
 mod events;
 mod messages;
 mod misc;
