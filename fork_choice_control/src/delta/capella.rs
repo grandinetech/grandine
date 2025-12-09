@@ -319,9 +319,6 @@ pub fn historical_summaries_delta<P: Preset>(
     )
 }
 
-// lots would change to handle HistoricalSummariesLimit
-// perhaps there would be a reset
-// ALSO: to use length consistently in code
 pub fn apply_historical_summaries<P: Preset>(
     mut base_historical_summaries: HistoricalSummaries<P>,
     delta_historical_summaries: Option<Vec<HistoricalSummary>>,
