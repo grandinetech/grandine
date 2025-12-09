@@ -32,6 +32,7 @@ use crate::{
             SignedBeaconBlock as BellatrixSignedBeaconBlock,
             SignedBlindedBeaconBlock as BellatrixSignedBlindedBeaconBlock,
         },
+        primitives::Gas,
     },
     capella::{
         beacon_state::BeaconState as CapellaBeaconState,
@@ -101,7 +102,7 @@ use crate::{
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate,
-            SignedBeaconBlock as GloasSignedBeaconBlock,
+            SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         },
     },
     nonstandard::Phase,
@@ -955,6 +956,27 @@ impl<P: Preset> BeaconBlock<P> {
         self
     }
 
+    #[must_use]
+    pub const fn with_signed_execution_payload_bid(
+        mut self,
+        payload_bid: Option<SignedExecutionPayloadBid>,
+    ) -> Self {
+        let Some(payload_bid) = payload_bid else {
+            return self;
+        };
+
+        match &mut self {
+            Self::Gloas(block) => block.body.signed_execution_payload_bid = payload_bid,
+            _ => {
+                // This match arm will silently match any new phases.
+                // Cause a compilation error if a new phase is added.
+                const_assert_eq!(Phase::CARDINALITY, 8);
+            }
+        }
+
+        self
+    }
+
     pub fn into_blinded(
         self,
         execution_payload_header: ExecutionPayloadHeader<P>,
@@ -1489,6 +1511,22 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.block_hash,
             Self::Capella(payload) => payload.block_hash,
             Self::Deneb(payload) => payload.block_hash,
+        }
+    }
+
+    pub const fn gas_limit(&self) -> Gas {
+        match self {
+            Self::Bellatrix(payload) => payload.gas_limit,
+            Self::Capella(payload) => payload.gas_limit,
+            Self::Deneb(payload) => payload.gas_limit,
+        }
+    }
+
+    pub const fn prev_randao(&self) -> H256 {
+        match self {
+            Self::Bellatrix(payload) => payload.prev_randao,
+            Self::Capella(payload) => payload.prev_randao,
+            Self::Deneb(payload) => payload.prev_randao,
         }
     }
 }

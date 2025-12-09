@@ -9,7 +9,7 @@ use bls::{traits::Signature as _, AggregateSignature, PublicKeyBytes, SignatureB
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
-use eth1_api::{ApiController, Eth1ExecutionEngine, WithClientVersions};
+use eth1_api::{ApiController, ClientVersionV1, Eth1ExecutionEngine, WithClientVersions};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
     PayloadAttributesV3, PayloadId,
@@ -46,9 +46,12 @@ use types::{
             SyncAggregate,
         },
     },
-    bellatrix::containers::{
-        BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
-        ExecutionPayload as BellatrixExecutionPayload,
+    bellatrix::{
+        containers::{
+            BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
+            ExecutionPayload as BellatrixExecutionPayload,
+        },
+        primitives::Wei,
     },
     capella::containers::{
         BeaconBlock as CapellaBeaconBlock, BeaconBlockBody as CapellaBeaconBlockBody,
@@ -74,15 +77,15 @@ use types::{
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     gloas::containers::{
         BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-        PayloadAttestation, SignedExecutionPayloadBid,
+        ExecutionPayloadBid, PayloadAttestation, SignedExecutionPayloadBid,
     },
-    nonstandard::{BlockRewards, Phase, WithBlobsAndMev},
+    nonstandard::{BlockRewards, Phase, WithBlobsAndMev, WEI_IN_GWEI},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
             Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
-            ProposerSlashing, SignedVoluntaryExit,
+            ProposerSlashing, SignedVoluntaryExit, Validator,
         },
         primitives::{
             CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
@@ -90,7 +93,7 @@ use types::{
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
-    traits::{BeaconState as _, PostBellatrixBeaconState},
+    traits::{BeaconState as _, PostBellatrixBeaconState, PostGloasBeaconState},
 };
 
 use crate::misc::{build_graffiti, PayloadIdEntry, ProposerData, ValidatorBlindedBlock};
@@ -1141,12 +1144,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
-        let payload_with_data = if let Some(handle) = local_execution_payload_handle {
-            handle
-                .await?
-                .map(|value| value.map(|value| value.map(Some)))
+        // Proposer have to call `engine_getPayload` only if they are also a builder
+        // for post-Gloas
+        let can_self_build = !self.beacon_state.is_post_gloas()
+            || predicates::has_builder_withdrawal_credential(self.proposer()?);
+
+        let payload_with_data = if can_self_build {
+            if let Some(handle) = local_execution_payload_handle {
+                handle
+                    .await?
+                    .map(|value| value.map(|value| value.map(Some)))
+            } else {
+                None
+            }
         } else {
-            None
+            // To prevent return error in payload_with_data check
+            Some(WithClientVersions {
+                client_versions: Some(vec![ClientVersionV1::own()].into()),
+                result: WithBlobsAndMev::with_default(None),
+            })
         };
 
         let WithClientVersions {
@@ -1157,7 +1173,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     commitments,
                     proofs,
                     blobs,
-                    mev,
+                    mev: mut block_mev,
                     execution_requests,
                 },
         } = match payload_with_data {
@@ -1173,17 +1189,38 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
-        let mut without_state_root_with_payload = block_without_state_root
-            .with_execution_payload(execution_payload)?
-            .with_blob_kzg_commitments(commitments)
-            .with_execution_requests(execution_requests);
+        let mut without_state_root = if let Some(state) = self.beacon_state.post_gloas() {
+            let signed_payload_bid = if can_self_build {
+                self.construct_self_payload_bid(state, execution_payload, commitments)
+                    .await?
+            } else {
+                // TODO: (gloas): select from received bids based on proposer preference
+                let selected_bid = self
+                    .producer_context
+                    .controller
+                    .accepted_payload_bid_at_slot(state.slot());
+
+                // Set block_mev value to the in-protocol builder bid value to be compare with
+                // boosted_builder_mev in case we still want to support the off-protocol builders
+                block_mev = selected_bid.map(|bid| Wei::from_u64(bid.message.value) * WEI_IN_GWEI);
+
+                selected_bid
+            };
+
+            block_without_state_root.with_signed_execution_payload_bid(signed_payload_bid)
+        } else {
+            block_without_state_root
+                .with_execution_payload(execution_payload)?
+                .with_blob_kzg_commitments(commitments)
+                .with_execution_requests(execution_requests)
+        };
 
         if !self.options.disable_blockprint_graffiti {
             let graffiti = build_graffiti(self.options.graffiti, client_versions);
-            without_state_root_with_payload.set_graffiti(graffiti);
+            without_state_root.set_graffiti(graffiti);
         }
 
-        self.process_beacon_block(without_state_root_with_payload)
+        self.process_beacon_block(without_state_root)
             .map(|(beacon_block, block_rewards)| {
                 (
                     WithBlobsAndMev::new(
@@ -1192,7 +1229,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         None,
                         proofs,
                         blobs,
-                        mev,
+                        block_mev,
                         // Execution requests are moved to block.
                         None,
                     ),
@@ -1520,6 +1557,42 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 "the call to Iterator::take limits the number of \
                  BlsToExecutionChange to P::MaxBlsToExecutionChanges::USIZE",
             )
+    }
+
+    async fn construct_self_payload_bid(
+        &self,
+        state: &dyn PostGloasBeaconState<P>,
+        execution_payload_opt: Option<ExecutionPayload<P>>,
+        blob_kzg_commitments_opt: Option<
+            ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+        >,
+    ) -> Result<Option<SignedExecutionPayloadBid>> {
+        let Some(payload) = execution_payload_opt else {
+            return Ok(None);
+        };
+
+        let fee_recipient = self.fee_recipient().await?;
+
+        let payload_bid = ExecutionPayloadBid {
+            parent_block_hash: state.latest_block_hash(),
+            parent_block_root: state.latest_block_header().hash_tree_root(),
+            block_hash: payload.block_hash(),
+            prev_randao: payload.prev_randao(),
+            fee_recipient,
+            gas_limit: payload.gas_limit(),
+            builder_index: self.proposer_index,
+            slot: state.slot(),
+            value: 0,
+            execution_payment: 0,
+            blob_kzg_commitments_root: blob_kzg_commitments_opt
+                .map(|commitments| commitments.hash_tree_root())
+                .unwrap_or(H256::zero()),
+        };
+
+        Ok(Some(SignedExecutionPayloadBid {
+            message: payload_bid,
+            signature: SignatureBytes::zero(),
+        }))
     }
 
     #[instrument(skip_all, level = "debug")]
@@ -1964,6 +2037,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     .proposer_configs
                     .fee_recipient(*proposer_pubkey)
             })
+    }
+
+    fn proposer(&self) -> Result<&Validator> {
+        self.beacon_state
+            .validators()
+            .get(self.proposer_index)
+            .map_err(Into::into)
     }
 
     fn spawn_job<T, F>(&self, task: T) -> Job<F::Output>

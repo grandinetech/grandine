@@ -408,6 +408,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid> {
+        Some(
+            self.accepted_payload_bids
+                .get(&slot)?
+                .values()
+                .max_by_key(|bid| bid.message.value)?
+                .clone(),
+        )
+    }
+
+    #[must_use]
     pub const fn justified_checkpoint(&self) -> Checkpoint {
         self.justified_checkpoint
     }
