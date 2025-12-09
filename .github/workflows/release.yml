@@ -193,10 +193,12 @@ jobs:
         run: |
           mkdir -p ./target/x86_64-unknown-linux-gnu/compact/
           mv ./artifacts/grandine-${{ env.GRANDINE_VERSION }}-linux-x64/grandine-${{ env.GRANDINE_VERSION }}-linux-x64 ./target/x86_64-unknown-linux-gnu/compact/grandine
+          chmod +x ./target/x86_64-unknown-linux-gnu/compact/grandine
           mv ./artifacts/lib-linux-x64/libgrandine.so ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so
           
           mkdir -p ./target/aarch64-unknown-linux-gnu/compact
           mv ./artifacts/grandine-${{ env.GRANDINE_VERSION }}-linux-arm64/grandine-${{ env.GRANDINE_VERSION }}-linux-arm64 ./target/aarch64-unknown-linux-gnu/compact/grandine
+          chmod +x ./target/aarch64-unknown-linux-gnu/compact/grandine
           mv ./artifacts/lib-linux-arm64/libgrandine.so ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so
           
           mkdir -p ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
