@@ -90,7 +90,7 @@ pub mod fulu {
 
 pub use collections::ProposerLookahead;
 
-mod collections;
+pub mod collections;
 
 mod unphased {
     pub mod consts;
