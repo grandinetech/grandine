@@ -430,7 +430,7 @@ impl<P: Preset> BlockSyncService<P> {
 
                                 debug_with_peers!(
                                     "received beacon block as gossip (slot: {block_slot}, root: {block_root:?}, \
-                                    peer_id: {peer_id})"
+                                    peer_id: {peer_id}, phase: {})", beacon_block.phase(),
                                 );
 
                                 self.controller

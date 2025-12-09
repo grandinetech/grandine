@@ -212,12 +212,19 @@ pub fn custom_state_transition<P: Preset>(
             verifier,
             slot_report,
         ),
-        _ => {
+        (state, block) => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
             const_assert_eq!(Phase::CARDINALITY, 7);
 
-            unreachable!("successful slot processing ensures that phases match")
+            unreachable!(
+                "successful slot processing ensures that phases match: state with phase: {} \
+                at slot: {} vs block with phase: {} at slot: {}",
+                state.phase(),
+                state.slot(),
+                block.phase(),
+                block.message().slot(),
+            )
         }
     }
 }
