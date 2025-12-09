@@ -19,7 +19,6 @@ use block_producer::BlockProducer;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
-use dashmap::DashMap;
 use data_dumper::DataDumper;
 use database::{Database, DatabaseMode, RestartMessage};
 use dedicated_executor::DedicatedExecutor;
@@ -63,6 +62,7 @@ use p2p::{
 };
 use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder};
+use scc::HashMap as SccHashMap;
 use signer::{KeyOrigin, Signer};
 use slasher::{Databases, Slasher, SlasherConfig};
 use slashing_protection::{interchange_format::InterchangeData, SlashingProtector};
@@ -298,7 +298,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let event_channels = Arc::new(EventChannels::new(max_events));
 
-    let sidecars_construction_started = Arc::new(DashMap::new());
+    let sidecars_construction_started = Arc::new(SccHashMap::new());
 
     let (controller, mutator_handle) = Controller::new(
         chain_config.clone_arc(),
@@ -323,8 +323,8 @@ pub async fn run_after_genesis<P: Preset>(
         sidecars_construction_started.clone_arc(),
     )?;
 
-    let received_blob_sidecars = Arc::new(DashMap::new());
-    let received_data_column_sidecars = Arc::new(DashMap::new());
+    let received_blob_sidecars = Arc::new(SccHashMap::new());
+    let received_data_column_sidecars = Arc::new(SccHashMap::new());
 
     let execution_service = ExecutionService::new(
         eth1_api.clone_arc(),

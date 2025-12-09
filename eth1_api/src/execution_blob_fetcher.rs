@@ -1,7 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
-use dashmap::DashMap;
 use eth2_libp2p::PeerId;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, BlockOrDataColumnSidecar, EngineGetBlobsParams,
@@ -15,6 +14,7 @@ use futures::{
 use helper_functions::misc;
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
+use scc::HashMap as SccHashMap;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
@@ -37,8 +37,8 @@ use crate::{
 pub struct ExecutionBlobFetcher<P: Preset, W: Wait> {
     api: Arc<Eth1Api>,
     controller: ApiController<P, W>,
-    received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
-    received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+    received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, Slot>>,
+    received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
     metrics: Option<Arc<Metrics>>,
     p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
     rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
@@ -48,8 +48,8 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
     pub const fn new(
         api: Arc<Eth1Api>,
         controller: ApiController<P, W>,
-        received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
-        received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+        received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, Slot>>,
+        received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
         rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
@@ -106,7 +106,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         if let Some(body) = block.message().body().with_blob_kzg_commitments() {
             let missing_blob_indices = blob_identifiers
                 .iter()
-                .filter(|identifier| !self.received_blob_sidecars.contains_key(identifier))
+                .filter(|identifier| !self.received_blob_sidecars.contains_sync(*identifier))
                 .map(|identifier| identifier.index)
                 .collect::<HashSet<BlobIndex>>();
 
@@ -150,7 +150,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             let BlobAndProofV1 { blob, proof } = blob_and_proof;
                             let blob_identifier = BlobIdentifier { block_root, index };
 
-                            if self.received_blob_sidecars.contains_key(&blob_identifier) {
+                            if self.received_blob_sidecars.contains_sync(&blob_identifier) {
                                 debug_with_peers!(
                                     "received blob from EL is already known: {blob_identifier:?}, \
                                      slot: {slot}"
@@ -172,7 +172,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                                         // Record all blob_sidecars as received first and push to controller
                                         // on a second pass to avoid spawning extra `engine_getBlobs` calls.
-                                        self.received_blob_sidecars.insert(blob_identifier, slot);
+                                        self.received_blob_sidecars
+                                            .upsert_async(blob_identifier, slot)
+                                            .await;
+
                                         blob_sidecars.push(Arc::new(blob_sidecar));
                                     }
                                     Err(error) => warn_with_peers!(
@@ -196,7 +199,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .into_iter()
                 .filter_map(|index| {
                     let identifier = BlobIdentifier { block_root, index };
-                    (!self.received_blob_sidecars.contains_key(&identifier)).then_some(identifier)
+                    (!self.received_blob_sidecars.contains_sync(&identifier)).then_some(identifier)
                 })
                 .collect::<Vec<_>>();
 
@@ -235,7 +238,11 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
         let missing_columns_indices = data_column_identifiers
             .iter()
-            .filter(|identifier| !self.received_data_column_sidecars.contains_key(identifier))
+            .filter(|identifier| {
+                !self
+                    .received_data_column_sidecars
+                    .contains_sync(*identifier)
+            })
             .map(|identifier| identifier.index)
             .collect::<HashSet<ColumnIndex>>();
 
@@ -337,7 +344,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                                         index: data_column_sidecar.index,
                                                     };
 
-                                                    received_data_column_sidecars.insert(identifier, slot);
+                                                    received_data_column_sidecars.upsert_sync(identifier, slot);
                                                     data_column_sidecars.push(data_column_sidecar);
                                                 }
                                             }
@@ -395,7 +402,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .filter(|index| {
                     !self
                         .received_data_column_sidecars
-                        .contains_key(&DataColumnIdentifier {
+                        .contains_sync(&DataColumnIdentifier {
                             block_root,
                             index: *index,
                         })

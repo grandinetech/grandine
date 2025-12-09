@@ -11,7 +11,6 @@ use allocator as _;
 use anyhow::Result;
 use clock::Tick;
 use criterion::{BatchSize, Criterion, Throughput};
-use dashmap::DashMap;
 use database::Database;
 use easy_ext::ext;
 use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
@@ -24,6 +23,7 @@ use fork_choice_store::{
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
+use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
@@ -86,7 +86,7 @@ impl Criterion {
                     false,
                     false,
                     [].into(),
-                    Arc::new(DashMap::new()),
+                    Arc::new(SccHashMap::new()),
                 );
 
                 for slot in (anchor_slot + 1)..=last_attestation_slot {

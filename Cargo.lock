@@ -1904,7 +1904,6 @@ dependencies = [
  "bls",
  "clock",
  "criterion",
- "dashmap",
  "database",
  "easy-ext",
  "eth2_cache_utils",
@@ -1923,6 +1922,7 @@ dependencies = [
  "openssl",
  "operation_pools",
  "pubkey_cache",
+ "scc 3.4.6",
  "serde",
  "serde_json",
  "serde_utils",
@@ -4558,7 +4558,6 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "bls",
- "dashmap",
  "dedicated_executor",
  "derive_more 2.1.0",
  "eip_7594",
@@ -4583,6 +4582,7 @@ dependencies = [
  "panics",
  "prometheus_metrics",
  "reqwest 0.12.25",
+ "scc 3.4.6",
  "serde",
  "serde_json",
  "serde_utils",
@@ -5258,7 +5258,6 @@ dependencies = [
  "cached",
  "clock",
  "crossbeam-utils",
- "dashmap",
  "database",
  "derivative",
  "derive_more 2.1.0",
@@ -5285,6 +5284,7 @@ dependencies = [
  "prometheus_metrics",
  "pubkey_cache",
  "reqwest 0.12.25",
+ "scc 3.4.6",
  "serde",
  "serde-aux",
  "serde_utils",
@@ -5315,7 +5315,6 @@ dependencies = [
  "arithmetic",
  "clock",
  "crossbeam-skiplist",
- "dashmap",
  "derivative",
  "derive_more 2.1.0",
  "eip_7594",
@@ -5331,6 +5330,7 @@ dependencies = [
  "logging",
  "prometheus_metrics",
  "pubkey_cache",
+ "scc 3.4.6",
  "serde",
  "ssz",
  "state_cache",
@@ -6325,7 +6325,6 @@ dependencies = [
  "byteorder",
  "clock",
  "crossbeam-utils",
- "dashmap",
  "database",
  "dedicated_executor",
  "deposit_tree",
@@ -6363,6 +6362,7 @@ dependencies = [
  "prometheus_metrics",
  "pubkey_cache",
  "reqwest 0.12.25",
+ "scc 3.4.6",
  "serde",
  "serde-aux",
  "serde_json",
@@ -9036,7 +9036,6 @@ dependencies = [
  "bincode",
  "bls",
  "cached",
- "dashmap",
  "data_dumper",
  "database",
  "debug_info",
@@ -9061,6 +9060,7 @@ dependencies = [
  "prometheus-client",
  "prometheus_metrics",
  "rand 0.8.5",
+ "scc 3.4.6",
  "serde",
  "serde_utils",
  "serde_with",
@@ -11031,12 +11031,12 @@ dependencies = [
  "anyhow",
  "bls",
  "bytesize",
- "dashmap",
  "database",
  "eth2_cache_utils",
  "hex-literal 1.1.0",
  "logging",
  "prometheus_metrics",
+ "scc 3.4.6",
  "ssz",
  "std_ext",
  "tempfile",
@@ -12014,7 +12014,6 @@ dependencies = [
  "bytesize",
  "clap",
  "clock",
- "dashmap",
  "data_dumper",
  "database",
  "dedicated_executor",
@@ -12058,6 +12057,7 @@ dependencies = [
  "rayon",
  "reqwest 0.12.25",
  "reth-libmdbx",
+ "scc 3.4.6",
  "semver 1.0.27",
  "serde",
  "serde_json",
@@ -12426,6 +12426,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "saa"
+version = "5.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3192d99ee2f69effeacef86c9fa80e75b6604e2a5d3ade6856d206b519521e53"
+
+[[package]]
 name = "salsa20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12473,7 +12479,17 @@ version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46e6f046b7fef48e2660c57ed794263155d713de679057f2d0c169bfc6e756cc"
 dependencies = [
- "sdd",
+ "sdd 3.0.10",
+]
+
+[[package]]
+name = "scc"
+version = "3.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b6f8686af8563182fc6b63ab7bd7b5cad8f40fbe660675627caedc6c073eca8"
+dependencies = [
+ "saa",
+ "sdd 4.5.0",
 ]
 
 [[package]]
@@ -12554,6 +12570,12 @@ name = "sdd"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
+
+[[package]]
+name = "sdd"
+version = "4.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7168ecf885fdd3920ade15d50189593b076e1d060b60406a745766380195d65a"
 
 [[package]]
 name = "sec1"
@@ -12921,7 +12943,7 @@ dependencies = [
  "log",
  "once_cell",
  "parking_lot",
- "scc",
+ "scc 2.4.0",
  "serial_test_derive",
 ]
 

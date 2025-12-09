@@ -323,7 +323,6 @@ crossbeam-utils = '0.8'
 csbindgen = '1.9'
 ctr = { version = '0.9', features = ['zeroize'] }
 darling = '0.21'
-dashmap = '6.1'
 dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.4'
 derivative = '2'
@@ -421,6 +420,7 @@ rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-constantine = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-mcl = { git = 'https://github.com/grandinetech/rust-kzg.git' }
 rust-kzg-zkcrypto = { git = 'https://github.com/grandinetech/rust-kzg.git' }
+scc = '3.4'
 scrypt = '0.11'
 semver = '1'
 serial_test = '3'

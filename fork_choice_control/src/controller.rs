@@ -19,7 +19,6 @@ use std::{
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
 use clock::Tick;
-use dashmap::DashMap;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
@@ -32,6 +31,7 @@ use genesis::AnchorCheckpointProvider;
 use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::{instrument, Span};
@@ -122,7 +122,7 @@ where
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
         finished_back_sync: bool,
         blacklisted_blocks: HashSet<H256>,
-        sidecars_construction_started: Arc<DashMap<H256, Slot>>,
+        sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
 

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use dashmap::DashMap;
 use execution_engine::{
     PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, WithdrawalV1,
 };
@@ -9,6 +8,7 @@ use fork_choice_store::{ChainLink, Storage, Store};
 use helper_functions::misc;
 use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
+use scc::HashMap as SccHashMap;
 use serde::Serialize;
 use serde_with::DeserializeFromStr;
 use ssz::ContiguousList;
@@ -111,7 +111,7 @@ pub struct EventChannels<P: Preset> {
     pub proposer_slashings: Sender<Event<P>>,
     pub voluntary_exits: Sender<Event<P>>,
     // See <https://github.com/grandinetech/grandine/issues/254> for rationale
-    optimistic_reorgs: DashMap<(H256, Slot), ChainReorgEvent>,
+    optimistic_reorgs: SccHashMap<(H256, Slot), ChainReorgEvent>,
 }
 
 impl<P: Preset> Default for EventChannels<P> {
@@ -137,7 +137,7 @@ impl<P: Preset> EventChannels<P> {
             payload_attributes: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
             voluntary_exits: broadcast::channel(max_events).0,
-            optimistic_reorgs: DashMap::default(),
+            optimistic_reorgs: SccHashMap::default(),
         }
     }
 
@@ -213,7 +213,7 @@ impl<P: Preset> EventChannels<P> {
         }
 
         self.optimistic_reorgs
-            .insert((new_head.block_root, new_head.slot()), chain_reorg_event);
+            .upsert_sync((new_head.block_root, new_head.slot()), chain_reorg_event);
     }
 
     pub fn send_contribution_and_proof_event(
@@ -266,7 +266,7 @@ impl<P: Preset> EventChannels<P> {
         if head.is_valid() {
             if let Some((_, mut chain_reorg_event)) = self
                 .optimistic_reorgs
-                .remove(&(head.block_root, head.slot()))
+                .remove_sync(&(head.block_root, head.slot()))
             {
                 chain_reorg_event.execution_optimistic = head.is_optimistic();
 
@@ -315,7 +315,7 @@ impl<P: Preset> EventChannels<P> {
 
     pub fn prune_after_finalization(&self, finalized_slot: Slot) {
         self.optimistic_reorgs
-            .retain(|(_, slot), _| *slot > finalized_slot);
+            .retain_sync(|(_, slot), _| *slot > finalized_slot);
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {

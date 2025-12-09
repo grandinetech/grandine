@@ -10,7 +10,6 @@ use std::{
 };
 
 use anyhow::Result;
-use dashmap::DashMap;
 use data_dumper::DataDumper;
 use database::{Database, PrefixableKey as _};
 use debug_info::HealthCheck;
@@ -29,6 +28,7 @@ use helper_functions::misc;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
+use scc::HashMap as SccHashMap;
 use ssz::{ContiguousList, SszReadDefault};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -98,9 +98,9 @@ pub struct BlockSyncService<P: Preset> {
     is_back_synced: bool,
     is_forward_synced: bool,
     is_exiting: Arc<AtomicBool>,
-    received_blob_sidecars: Arc<DashMap<BlobIdentifier, Slot>>,
+    received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
-    received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+    received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
     delayed_batches: BTreeMap<Instant, Vec<SyncBatch<P>>>,
@@ -135,8 +135,8 @@ impl<P: Preset> BlockSyncService<P> {
         loaded_from_remote: bool,
         storage_mode: StorageMode,
         target_peers: usize,
-        received_blob_sidecars: Arc<DashMap<BlobIdentifier, u64>>,
-        received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+        received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, u64>>,
+        received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
         data_dumper: Arc<DataDumper>,
         network_globals: Arc<NetworkGlobals>,
     ) -> Result<Self> {
@@ -360,7 +360,7 @@ impl<P: Preset> BlockSyncService<P> {
                             let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
                             let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
 
-                            self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot);
+                            self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot).await;
 
                             let block_seen = self
                                 .received_block_roots
@@ -392,7 +392,7 @@ impl<P: Preset> BlockSyncService<P> {
                                     let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
 
                                     if !self.controller.contains_block(blob_identifier.block_root)
-                                        && self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot)
+                                        && self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot).await
                                     {
                                         self.data_dumper.dump_blob_sidecar(blob_sidecar.clone_arc());
 
@@ -472,7 +472,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.register_new_received_data_column_sidecar(
                                 data_column_identifier,
                                 data_column_sidecar_slot,
-                            );
+                            ).await;
 
                             let block_seen = self
                                 .received_block_roots
@@ -511,7 +511,7 @@ impl<P: Preset> BlockSyncService<P> {
                                         && self.register_new_received_data_column_sidecar(
                                             data_column_identifier,
                                             data_column_sidecar_slot,
-                                        )
+                                        ).await
                                     {
                                         let block_seen = self
                                             .received_block_roots
@@ -575,19 +575,19 @@ impl<P: Preset> BlockSyncService<P> {
                                 finalized_checkpoint.epoch);
 
                             if self.controller.chain_config().fulu_fork_epoch <= finalized_checkpoint.epoch {
-                                self.received_data_column_sidecars.retain(|_, slot| *slot >= start_of_epoch);
+                                self.received_data_column_sidecars.retain_async(|_, slot| *slot >= start_of_epoch).await;
                             } else {
-                                self.received_blob_sidecars.retain(|_, slot| *slot >= start_of_epoch);
+                                self.received_blob_sidecars.retain_async(|_, slot| *slot >= start_of_epoch).await;
                             }
                             self.received_block_roots.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
                             // Grandine should not dismiss newer valid blob sidecars with the same blob identifier
-                            self.received_blob_sidecars.remove(&blob_identifier);
+                            self.received_blob_sidecars.remove_async(&blob_identifier).await;
                         }
                         P2pToSync::DataColumnSidecarRejected(data_column_identifier) => {
-                            self.received_data_column_sidecars.remove(&data_column_identifier);
+                            self.received_data_column_sidecars.remove_async(&data_column_identifier).await;
                         }
                         P2pToSync::PeerCgcUpdated(peer_id) => {
                             self.sync_manager.update_peer_cgc(peer_id);
@@ -1130,7 +1130,7 @@ impl<P: Preset> BlockSyncService<P> {
         let identifiers = identifiers
             .into_iter()
             .filter(|blob_identifier| {
-                !self.received_blob_sidecars.contains_key(blob_identifier)
+                !self.received_blob_sidecars.contains_sync(blob_identifier)
                     && !self.controller.contains_block(blob_identifier.block_root)
                     && self
                         .sync_manager
@@ -1238,7 +1238,9 @@ impl<P: Preset> BlockSyncService<P> {
                     index: *index,
                 };
 
-                !self.received_data_column_sidecars.contains_key(&identifier)
+                !self
+                    .received_data_column_sidecars
+                    .contains_sync(&identifier)
                     && self
                         .sync_manager
                         .ready_to_request_data_column_by_root(&identifier, None)
@@ -1435,8 +1437,8 @@ impl<P: Preset> BlockSyncService<P> {
 
             if self.back_sync.is_some() {
                 self.received_block_roots = HashMap::new();
-                self.received_blob_sidecars.clear();
-                self.received_data_column_sidecars.clear();
+                self.received_blob_sidecars.clear_sync();
+                self.received_data_column_sidecars.clear_sync();
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready();
@@ -1461,23 +1463,25 @@ impl<P: Preset> BlockSyncService<P> {
         self.received_block_roots.insert(block_root, slot).is_none()
     }
 
-    fn register_new_received_blob_sidecar(
+    async fn register_new_received_blob_sidecar(
         &self,
         blob_identifier: BlobIdentifier,
         slot: Slot,
     ) -> bool {
         self.received_blob_sidecars
-            .insert(blob_identifier, slot)
+            .upsert_async(blob_identifier, slot)
+            .await
             .is_none()
     }
 
-    fn register_new_received_data_column_sidecar(
+    async fn register_new_received_data_column_sidecar(
         &self,
         data_column_identifier: DataColumnIdentifier,
         slot: Slot,
     ) -> bool {
         self.received_data_column_sidecars
-            .insert(data_column_identifier, slot)
+            .upsert_async(data_column_identifier, slot)
+            .await
             .is_none()
     }
 

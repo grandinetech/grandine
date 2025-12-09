@@ -11,7 +11,6 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 clock = { workspace = true }
 crossbeam-skiplist = { workspace = true }
-dashmap = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 eip_7594 = { workspace = true }
@@ -27,6 +26,7 @@ kzg_utils = { workspace = true }
 logging = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
+scc = { workspace = true }
 serde = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }

@@ -11,7 +11,6 @@ use std::{
 use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::NonZeroExt as _;
 use clock::Tick;
-use dashmap::DashMap;
 use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
@@ -29,6 +28,7 @@ use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use logging::{error_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use scc::HashMap as SccHashMap;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -233,7 +233,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     finished_back_sync: bool,
     blacklisted_blocks: StdHashSet<H256>,
     sampling_columns: StdHashSet<ColumnIndex>,
-    sidecars_construction_started: Arc<DashMap<H256, Slot>>,
+    sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     delayed_block_at_slot: HashMap<Slot, H256>,
     requested_blobs_from_el: HashMap<H256, Slot>,
 }
@@ -252,7 +252,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
         mut blacklisted_blocks: StdHashSet<H256>,
-        sidecars_construction_started: Arc<DashMap<H256, Slot>>,
+        sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     ) -> Self {
         let block_root = anchor_block.message().hash_tree_root();
         let state_root = anchor_state.hash_tree_root();
@@ -3021,7 +3021,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.accepted_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.sidecars_construction_started
-            .retain(|_, slot| finalized_slot <= *slot);
+            .retain_sync(|_, slot| finalized_slot <= *slot);
         self.delayed_block_at_slot
             .retain(|slot, _| finalized_slot <= *slot);
         self.requested_blobs_from_el
@@ -3879,15 +3879,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn is_sidecars_construction_started(&self, block_root: &H256) -> bool {
-        self.sidecars_construction_started.contains_key(block_root)
+        self.sidecars_construction_started.contains_sync(block_root)
     }
 
     pub fn mark_sidecar_construction_started(&self, block_root: H256, slot: Slot) {
-        self.sidecars_construction_started.insert(block_root, slot);
+        self.sidecars_construction_started
+            .upsert_sync(block_root, slot);
     }
 
     pub fn mark_sidecar_construction_failed(&self, block_root: &H256) {
-        self.sidecars_construction_started.remove(block_root);
+        self.sidecars_construction_started.remove_sync(block_root);
     }
 
     pub fn delay_block_at_slot(&mut self, slot: Slot, block_root: H256) {

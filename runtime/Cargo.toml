@@ -17,7 +17,6 @@ builder_api = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
 clock = { workspace = true }
-dashmap = { workspace = true }
 data_dumper = { workspace = true }
 database = { workspace = true }
 dedicated_executor = { workspace = true }
@@ -60,6 +59,7 @@ prometheus-client = { workspace = true }
 pubkey_cache = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
+scc = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

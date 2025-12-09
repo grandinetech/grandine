@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
-use dashmap::DashMap;
 use database::Database;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use fork_choice_store::StoreConfig;
 use futures::sink::Drain;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use types::{
@@ -134,7 +134,7 @@ where
             core::iter::empty(),
             true,
             [].into(),
-            Arc::new(DashMap::new()),
+            Arc::new(SccHashMap::new()),
         )
         .expect("Controller::new should not fail in tests and benchmarks")
     }

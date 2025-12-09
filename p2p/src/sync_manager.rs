@@ -13,7 +13,6 @@ use std::{
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use cached::{Cached as _, TimedSizedCache};
-use dashmap::DashMap;
 use eth1_api::RealController;
 use eth2_libp2p::{rpc::StatusMessage, service::api_types::AppRequestId, NetworkGlobals, PeerId};
 use helper_functions::misc;
@@ -22,6 +21,7 @@ use log::{log, Level};
 use lru::LruCache;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
+use scc::HashMap as SccHashMap;
 use ssz::ContiguousList;
 use tap::Pipe as _;
 use thiserror::Error;
@@ -108,7 +108,7 @@ pub struct SyncManager<P: Preset> {
     // so that we can filter them when back-syncing
     back_sync_black_list: LruCache<PeerId, ()>,
     network_globals: Arc<NetworkGlobals>,
-    received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+    received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
     peers_custodial: HashMap<PeerId, HashSet<ColumnIndex>>,
 }
 
@@ -116,7 +116,7 @@ impl<P: Preset> SyncManager<P> {
     pub fn new(
         network_globals: Arc<NetworkGlobals>,
         target_peers: usize,
-        received_data_column_sidecars: Arc<DashMap<DataColumnIdentifier, Slot>>,
+        received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
     ) -> Self {
         Self {
             peers: HashMap::new(),
@@ -1194,21 +1194,23 @@ impl<P: Preset> SyncManager<P> {
     ) -> Option<HashMap<H256, HashSet<ColumnIndex>>> {
         let sampling_count = controller.sampling_columns_count();
         let max_slot_ahead = MAX_COLUMNS_BY_ROOT.checked_div(sampling_count as u64)?;
+        let mut received = HashMap::new();
 
         self.received_data_column_sidecars
-            .iter()
-            .filter_map(|entry| {
-                (*entry.value() > local_head_slot
-                    && *entry.value() < local_head_slot + max_slot_ahead)
-                    .then_some((entry.key().block_root, entry.key().index))
-            })
-            .fold(HashMap::new(), |mut acc, (block_root, index)| {
-                acc.entry(block_root)
-                    .or_insert_with(HashSet::new)
-                    .insert(index);
+            .iter_sync(|identifier, slot| {
+                if *slot > local_head_slot && *slot < local_head_slot + max_slot_ahead {
+                    let DataColumnIdentifier { block_root, index } = *identifier;
 
-                acc
-            })
+                    received
+                        .entry(block_root)
+                        .or_insert_with(HashSet::new)
+                        .insert(index);
+                }
+
+                true
+            });
+
+        received
             .into_iter()
             .filter_map(|(block_root, indices)| {
                 (indices.len() != sampling_count).then(|| {
@@ -1234,11 +1236,16 @@ impl<P: Preset> SyncManager<P> {
         let mut missing_indices = HashSet::new();
 
         for slot in start_slot..start_slot.saturating_add(count) {
-            let received_indices = self
-                .received_data_column_sidecars
-                .iter()
-                .filter_map(|entry| (slot == *entry.value()).then_some(entry.key().index))
-                .collect();
+            let mut received_indices = HashSet::new();
+
+            self.received_data_column_sidecars
+                .iter_sync(|identifier, entry_slot| {
+                    if *entry_slot == slot {
+                        received_indices.insert(identifier.index);
+                    }
+
+                    true
+                });
 
             missing_indices.extend(sampling_columns.difference(&received_indices));
         }
@@ -1462,7 +1469,7 @@ mod tests {
         let network_config = Arc::new(NetworkConfig::default());
         let network_globals =
             NetworkGlobals::new_test_globals::<P>(chain_config, vec![], network_config);
-        let received_data_column_sidecars = Arc::new(DashMap::new());
+        let received_data_column_sidecars = Arc::new(SccHashMap::new());
         SyncManager::new(network_globals.into(), 100, received_data_column_sidecars)
     }
 
@@ -1771,7 +1778,7 @@ mod tests {
         let network_config = Arc::new(NetworkConfig::default());
         let network_globals =
             NetworkGlobals::new_test_globals::<Minimal>(chain_config, vec![], network_config);
-        let received_data_column_sidecars = Arc::new(DashMap::new());
+        let received_data_column_sidecars = Arc::new(SccHashMap::new());
         let mut sync_manager =
             SyncManager::new(network_globals.into(), 100, received_data_column_sidecars);
         sync_manager.peers_custodial = peers_custodial;

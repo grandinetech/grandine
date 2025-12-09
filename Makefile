@@ -1,6 +1,6 @@
 EXCLUDES = --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
 FEATURES = --features default-networks
-TARGET ?= 
+TARGET ?=
 
 # build with metrics collection for core crates (transition_functions, helper_functions)
 # e.g. make METRICS=1

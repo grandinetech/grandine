@@ -65,7 +65,6 @@ validator_statistics = { workspace = true }
 attestation_verifier = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
-dashmap = { workspace = true }
 database = { workspace = true }
 dedicated_executor = { workspace = true }
 deposit_tree = { workspace = true }
@@ -82,6 +81,7 @@ once_cell = { workspace = true }
 predefined_chains = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
+scc = { workspace = true }
 signer = { workspace = true }
 slashing_protection = { workspace = true }
 snapshot_test_utils = { workspace = true }

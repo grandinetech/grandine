@@ -6,7 +6,6 @@ use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use bls::{traits::SecretKey as _, PublicKeyBytes, SecretKey};
 use clock::Tick;
-use dashmap::DashMap;
 use database::Database;
 use dedicated_executor::DedicatedExecutor;
 use deposit_tree::DepositTree;
@@ -30,6 +29,7 @@ use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitte
 use p2p::{NetworkConfig, SubnetService, SyncToApi};
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
+use scc::HashMap as SccHashMap;
 use signer::{KeyOrigin, Signer, Web3SignerConfig};
 use slashing_protection::{SlashingProtector, DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT};
 use snapshot_test_utils::Case;
@@ -168,7 +168,7 @@ impl<P: Preset> Context<P> {
 
         let event_channels = Arc::new(EventChannels::default());
 
-        let sidecars_construction_started = Arc::new(DashMap::new());
+        let sidecars_construction_started = Arc::new(SccHashMap::new());
 
         let (controller, mutator_handle) = Controller::new(
             chain_config,

@@ -10,7 +10,6 @@ workspace = true
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 bls = { workspace = true }
-dashmap = { workspace = true }
 dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
 eip_7594 = { workspace = true }
@@ -34,6 +33,7 @@ memoffset = { workspace = true }
 panics = { workspace = true }
 prometheus_metrics = { workspace = true }
 reqwest = { workspace = true }
+scc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_utils = { workspace = true }

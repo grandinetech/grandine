@@ -3,23 +3,23 @@ use std::sync::Arc;
 use anyhow::Result;
 use bls::{traits::PublicKey as _, PublicKey, PublicKeyBytes, COMPRESSED_SIZE, DECOMPRESSED_SIZE};
 use core::ops::RangeFrom;
-use dashmap::{DashMap, DashSet};
 use database::{Database, InMemoryMap, PrefixableKey};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 #[cfg(not(target_os = "zkvm"))]
 use prometheus_metrics::Metrics;
+use scc::{HashMap as SccHashMap, HashSet as SccHashSet};
 use ssz::{ContiguousList, Size, Ssz, SszRead, SszSize, SszWrite};
 use std_ext::ArcExt;
 use typenum::U65536;
 use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
 
-type CachedKeys = DashMap<PublicKeyBytes, Arc<PublicKey>>;
+type CachedKeys = SccHashMap<PublicKeyBytes, Arc<PublicKey>>;
 
 #[derive(Default)]
 pub struct PubkeyCache {
     database: Option<Database>,
     keys: CachedKeys,
-    unpersisted: DashSet<PublicKeyBytes>,
+    unpersisted: SccHashSet<PublicKeyBytes>,
 }
 
 impl SszSize for PubkeyCache {
@@ -93,7 +93,7 @@ impl PubkeyCache {
         Self {
             database: Some(database),
             keys,
-            unpersisted: DashSet::default(),
+            unpersisted: SccHashSet::default(),
         }
     }
 
@@ -111,7 +111,7 @@ impl PubkeyCache {
         for validator in state.validators() {
             let decompressed = self.get_or_insert(validator.pubkey)?;
 
-            if let Some(pubkey) = self.unpersisted.remove(&validator.pubkey) {
+            if let Some(pubkey) = self.unpersisted.remove_sync(&validator.pubkey) {
                 batch.push(serialize(&PublicKeyDbKey(pubkey), &decompressed));
             }
         }
@@ -140,8 +140,8 @@ impl PubkeyCache {
         // persist decompressed bytes to disk only for finalized validators,
         // avoiding storage of validator pubkeys from invalid deposits.
         for validator in state.validators() {
-            if let Some(pubkey) = self.unpersisted.remove(&validator.pubkey) {
-                if let Some(decompressed) = self.keys.get(&pubkey) {
+            if let Some(pubkey) = self.unpersisted.remove_sync(&validator.pubkey) {
+                if let Some(decompressed) = self.keys.get_sync(&pubkey) {
                     batch.push(serialize(&PublicKeyDbKey(pubkey), &decompressed));
                 }
             }
@@ -150,12 +150,13 @@ impl PubkeyCache {
         let entries = batch.len();
         database.put_batch(batch)?;
 
-        for pubkey in self.unpersisted.iter() {
+        self.unpersisted.iter_sync(|pubkey| {
             debug_with_peers!("pubkey {:?} unpersisted: removing from cache", *pubkey);
-            self.keys.remove(&*pubkey);
-        }
+            self.keys.remove_sync(pubkey);
+            true
+        });
 
-        self.unpersisted.clear();
+        self.unpersisted.clear_sync();
 
         debug_with_peers!("persisted {entries} validator pubkeys to pubkey cache db");
 
@@ -163,14 +164,14 @@ impl PubkeyCache {
     }
 
     pub fn get_or_insert(&self, public_key_bytes: PublicKeyBytes) -> Result<Arc<PublicKey>> {
-        if let Some(pubkey) = self.keys.get(&public_key_bytes) {
+        if let Some(pubkey) = self.keys.get_sync(&public_key_bytes) {
             return Ok(pubkey.clone_arc());
         }
 
         let pubkey: Arc<PublicKey> = Arc::new(public_key_bytes.try_into()?);
 
-        self.keys.insert(public_key_bytes, pubkey.clone_arc());
-        self.unpersisted.insert(public_key_bytes);
+        self.keys.upsert_sync(public_key_bytes, pubkey.clone_arc());
+        self.unpersisted.insert_sync(public_key_bytes).ok();
 
         Ok(pubkey)
     }
@@ -190,7 +191,7 @@ impl PubkeyCache {
     }
 
     fn load_all_keys_from_db(database: &Database) -> Result<CachedKeys> {
-        let map = DashMap::new();
+        let map = SccHashMap::new();
         let results = database
             .iterator_ascending(serialize_key(&PublicKeyDbKey(PublicKeyBytes::zero()))..)?;
 
@@ -206,7 +207,7 @@ impl PubkeyCache {
                 &value_bytes,
             )?);
 
-            map.insert(pubkey_bytes, pubkey);
+            map.upsert_sync(pubkey_bytes, pubkey);
         }
 
         debug_with_peers!("loaded {} cached public keys from the database", map.len());
@@ -291,7 +292,10 @@ mod tests {
         )?;
 
         assert_eq!(map.len(), 21_063);
-        assert_eq!(map.get(&pubkey_bytes).map(|value| **value), Some(*pubkey));
+        assert_eq!(
+            map.get_sync(&pubkey_bytes).map(|value| **value),
+            Some(*pubkey)
+        );
 
         Ok(())
     }
