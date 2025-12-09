@@ -41,7 +41,7 @@ download-spec-tests:
 
 .PHONY: test
 test: download-spec-tests
-	cargo test --release --features stub-grandine-version $(EXCLUDES)
+	cargo test --release --features default-networks,stub-grandine-version $(EXCLUDES)
 
 .PHONY: release
 release:
