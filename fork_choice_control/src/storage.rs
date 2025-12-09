@@ -1,5 +1,8 @@
 use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
-use std::{borrow::Cow, sync::Arc};
+use std::{
+    borrow::Cow,
+    sync::{Arc, RwLock},
+};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
 use database::{Database, PrefixableKey};
@@ -37,9 +40,18 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
+<<<<<<< HEAD
 use crate::{StorageMode, checkpoint_sync};
+=======
+use crate::{
+    checkpoint_sync,
+    delta::{apply_delta, delta, BeaconStateDelta},
+    StorageMode,
+};
+>>>>>>> 5e586ec2 (feat: integrate delta-based state storage)
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
+pub const DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(256_u64);
 
 pub enum StateLoadStrategy<P: Preset> {
     Auto {
@@ -58,10 +70,12 @@ pub enum StateLoadStrategy<P: Preset> {
 
 #[expect(clippy::struct_field_names)]
 #[derive(Clone)]
-pub struct Storage<P> {
+pub struct Storage<P: Preset> {
     config: Arc<Config>,
     pub(crate) database: Arc<Database>,
     pub(crate) archival_epoch_interval: NonZeroU64,
+    pub(crate) state_archival_epoch_interval: NonZeroU64,
+    pub(crate) base_state_cache: Arc<RwLock<Option<(H256, Arc<BeaconState<P>>)>>>,
     storage_mode: StorageMode,
     pub(crate) pubkey_cache: Arc<PubkeyCache>,
     phantom: PhantomData<P>,
@@ -81,6 +95,8 @@ impl<P: Preset> Storage<P> {
             pubkey_cache,
             database: Arc::new(database),
             archival_epoch_interval,
+            state_archival_epoch_interval: DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL,
+            base_state_cache: Arc::new(RwLock::new(None)),
             storage_mode,
             phantom: PhantomData,
         }
@@ -331,15 +347,81 @@ impl<P: Preset> Storage<P> {
                 if !archival_state_appended && !self.prune_storage_enabled() {
                     let state_epoch = Self::epoch_at_slot(state_slot);
                     let append_state = misc::is_epoch_start::<P>(state_slot)
-                        && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
+                        && state_epoch.is_multiple_of(self.state_archival_epoch_interval.into());
+                    let append_delta = misc::is_epoch_start::<P>(state_slot)
+                        && state_epoch.is_multiple_of(self.archival_epoch_interval.into())
+                        && !append_state;
 
                     if append_state {
                         info_with_peers!("saving state in slot {state_slot}");
+                        let current_state = state.get_or_init(|| chain_link.state(store));
 
-                        batch.push(serialize(
-                            StateByBlockRoot(block_root),
-                            state.get_or_init(|| chain_link.state(store)),
-                        )?);
+                        batch.push(serialize(StateByBlockRoot(block_root), current_state)?);
+
+                        if let Ok(mut base_state) = self.base_state_cache.write() {
+                            *base_state = Some((block_root, current_state.clone_arc()));
+                        }
+
+                        archival_state_appended = true;
+                    }
+
+                    if append_delta {
+                        info_with_peers!("saving state delta in slot {state_slot}");
+
+                        let base_epoch = (state_epoch / self.state_archival_epoch_interval.get())
+                            * self.state_archival_epoch_interval.get();
+                        let base_slot = misc::compute_start_slot_at_epoch::<P>(base_epoch);
+
+                        let base_root = self.block_root_by_slot(base_slot)?;
+
+                        let base_state = if let Some(base_root_value) = base_root {
+                            let cached_state = if let Ok(cache) = self.base_state_cache.read() {
+                                if let Some((cached_root, cached_state)) = cache.as_ref() {
+                                    if *cached_root == base_root_value {
+                                        Some(cached_state.clone())
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+
+                            // If not in cache, load from disk
+                            if let Some(state) = cached_state {
+                                Some((base_root_value, state))
+                            } else if let Some(state) = self.state_by_block_root(base_root_value)? {
+                                if let Ok(mut cache) = self.base_state_cache.write() {
+                                    *cache = Some((base_root_value, state.clone()))
+                                }
+                                Some((base_root_value, state))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        if let Some((_, base_state)) = base_state {
+                            let delta = delta(
+                                base_state,
+                                state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                            );
+
+                            batch.push((
+                                StateDeltaByBlockRoot(block_root).to_string(),
+                                bincode::serialize(&delta)?,
+                            ));
+                        } else {
+                            warn_with_peers!("base state not found at slot {base_slot}, storing full state instead at slot {state_slot}");
+
+                            batch.push(serialize(
+                                StateByBlockRoot(block_root),
+                                state.get_or_init(|| chain_link.state(store)),
+                            )?);
+                        }
 
                         archival_state_appended = true;
                     }
@@ -471,6 +553,9 @@ impl<P: Preset> Storage<P> {
             self.database.delete(key)?;
 
             let key = StateByBlockRoot(block_root).to_string();
+            self.database.delete(key)?;
+
+            let key = StateDeltaByBlockRoot(block_root).to_string();
             self.database.delete(key)?;
         }
 
@@ -670,7 +755,54 @@ impl<P: Preset> Storage<P> {
     }
 
     fn state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
-        self.get(StateByBlockRoot(block_root))
+        if let Some(state) = self.get(StateByBlockRoot(block_root))? {
+            return Ok(Some(state));
+        }
+
+        self.load_state_from_delta(block_root)
+    }
+
+    fn load_state_from_delta(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
+        let delta_key = StateDeltaByBlockRoot(block_root).to_string();
+        let Some(delta_bytes) = self.database.get(delta_key)? else {
+            return Ok(None);
+        };
+        let delta: BeaconStateDelta<P> =
+            bincode::deserialize(&delta_bytes).context("failed to deserialize delta")?;
+
+        let slot = delta.slot();
+        let epoch = Self::epoch_at_slot(slot);
+
+        let base_epoch = (epoch / DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL.get())
+            * DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL.get();
+        let base_slot = misc::compute_start_slot_at_epoch::<P>(base_epoch);
+
+        let base_root = self
+            .block_root_by_slot(base_slot)?
+            .ok_or(Error::DependentRootLookupFailed)?;
+
+        if let Ok(cache) = self.base_state_cache.read() {
+            if let Some((cached_root, cached_state)) = cache.as_ref() {
+                if *cached_root == base_root {
+                    let reconstructed = apply_delta(cached_state.as_ref().clone(), delta);
+                    return Ok(Some(Arc::new(reconstructed)));
+                }
+            }
+        }
+
+        let base_state = self
+            .get::<BeaconState<P>>(StateByBlockRoot(base_root))?
+            .ok_or(Error::StateNotFound {
+                state_slot: base_slot,
+            })?;
+
+        if let Ok(mut cache) = self.base_state_cache.write() {
+            *cache = Some((base_root, base_state.clone().into()));
+        }
+
+        let reconstructed = apply_delta(base_state, delta);
+
+        Ok(Some(Arc::new(reconstructed)))
     }
 
     pub(crate) fn slot_by_state_root(&self, state_root: H256) -> Result<Option<Slot>> {
@@ -889,7 +1021,9 @@ impl<P: Preset> Storage<P> {
 
             let block_root = H256::from_ssz_default(value_bytes)?;
 
-            if self.contains_key(StateByBlockRoot(block_root))? {
+            if self.contains_key(StateByBlockRoot(block_root))?
+                || self.contains_key(StateDeltaByBlockRoot(block_root))?
+            {
                 let Some(block) = self.finalized_block_by_root(block_root)? else {
                     // States are also persisted from unfinalized chain
                     continue;
@@ -1175,6 +1309,14 @@ pub struct StateByBlockRoot(pub H256);
 
 impl PrefixableKey for StateByBlockRoot {
     const PREFIX: &'static str = "s";
+}
+
+#[derive(Display)]
+#[display("{}{_0:x}", Self::PREFIX)]
+pub struct StateDeltaByBlockRoot(pub H256);
+
+impl PrefixableKey for StateDeltaByBlockRoot {
+    const PREFIX: &'static str = "s_d";
 }
 
 #[derive(Display)]
