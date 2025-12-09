@@ -749,6 +749,7 @@ where
                                         wait_group,
                                         block_root,
                                         block: pending_block.block.clone_arc(),
+                                        origin: pending_block.origin.clone(),
                                         slot: pending_block.block.message().slot(),
                                     })
                                 }

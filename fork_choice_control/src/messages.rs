@@ -231,6 +231,7 @@ pub enum PoolMessage<P: Preset, W> {
         wait_group: W,
         block_root: H256,
         block: Arc<SignedBeaconBlock<P>>,
+        origin: BlockOrigin,
         slot: Slot,
     },
 }

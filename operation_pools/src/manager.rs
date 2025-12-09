@@ -1,8 +1,11 @@
+use core::time::Duration;
 use std::sync::Arc;
 
 use anyhow::Result;
 use fork_choice_control::{PoolMessage, Wait};
 use futures::{channel::mpsc::UnboundedReceiver, StreamExt as _};
+use tokio::select;
+use tokio_stream::wrappers::IntervalStream;
 use types::preset::Preset;
 
 use crate::{
@@ -36,30 +39,49 @@ impl<P: Preset, W: Wait> Manager<P, W> {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        while let Some(message) = self.fork_choice_to_pool_rx.next().await {
-            match message {
-                PoolMessage::Slot(slot) => self.sync_committee_agg_pool.on_slot(slot),
-                PoolMessage::Tick(tick) => {
-                    if tick.is_start_of_epoch::<P>() {
-                        self.bls_to_execution_change_pool
-                            .discard_old_bls_to_execution_changes();
+        let mut interval =
+            IntervalStream::new(tokio::time::interval(Duration::from_millis(100))).fuse();
+
+        loop {
+            select! {
+                _ = interval.select_next_some() => {
+                    self.blob_reconstruction_pool.perform_scheduled_reconstructions();
+                },
+
+                message = self.fork_choice_to_pool_rx.select_next_some() => {
+                    match message {
+                        PoolMessage::Slot(slot) => self.sync_committee_agg_pool.on_slot(slot),
+                        PoolMessage::Tick(tick) => {
+                            if tick.is_start_of_epoch::<P>() {
+                                self.bls_to_execution_change_pool
+                                    .discard_old_bls_to_execution_changes();
+                            }
+
+                            self.attestation_agg_pool.on_tick(tick).await
+                        }
+                        PoolMessage::Stop => {
+                            self.bls_to_execution_change_pool.stop();
+
+                            break;
+                        }
+                        PoolMessage::ReconstructDataColumns {
+                            wait_group,
+                            block_root,
+                            block,
+                            origin,
+                            slot,
+                        } => {
+                            // We don't want to reconstruct blobs on each block during sync
+                            // if it downloads data columns relatively fast
+                            if origin.is_requested() {
+                                self.blob_reconstruction_pool
+                                    .schedule_reconstruction(wait_group, block_root, block, slot);
+                            } else {
+                                self.blob_reconstruction_pool
+                                    .spawn_reconstruction(wait_group, block_root, block, slot);
+                            }
+                        }
                     }
-
-                    self.attestation_agg_pool.on_tick(tick).await
-                }
-                PoolMessage::Stop => {
-                    self.bls_to_execution_change_pool.stop();
-
-                    break;
-                }
-                PoolMessage::ReconstructDataColumns {
-                    wait_group,
-                    block_root,
-                    block,
-                    slot,
-                } => {
-                    self.blob_reconstruction_pool
-                        .spawn_reconstruction(wait_group, block_root, block, slot);
                 }
             }
         }

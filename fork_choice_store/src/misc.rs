@@ -211,6 +211,11 @@ impl BlockOrigin {
             Self::Api(_) => "Api",
         }
     }
+
+    #[must_use]
+    pub const fn is_requested(&self) -> bool {
+        matches!(self, Self::Requested(..))
+    }
 }
 
 #[derive(Debug, AsRefStr)]
