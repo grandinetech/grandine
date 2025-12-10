@@ -43,6 +43,10 @@ download-spec-tests:
 test: download-spec-tests
 	cargo test --release --features stub-grandine-version $(EXCLUDES)
 
+.PHONY: minimal
+minimal:
+	cargo build --profile compact --bin grandine --features preset-minimal $(FEATURES) $(EXCLUDES)
+
 .PHONY: release
 release:
 ifeq ($(TARGET),)
