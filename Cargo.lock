@@ -1246,9 +1246,9 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "aws-config"
-version = "1.8.11"
+version = "1.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0149602eeaf915158e14029ba0c78dedb8c08d554b024d54c8f239aab46511d"
+checksum = "96571e6996817bf3d58f6b569e4b9fd2e9d2fcf9f7424eed07b2ce9bb87535e5"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1276,9 +1276,9 @@ dependencies = [
 
 [[package]]
 name = "aws-credential-types"
-version = "1.2.10"
+version = "1.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b01c9521fa01558f750d183c8c68c81b0155b9d193a4ba7f84c36bd1b6d04a06"
+checksum = "3cd362783681b15d136480ad555a099e82ecd8e2d10a841e14dfd0078d67fee3"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
@@ -1311,9 +1311,9 @@ dependencies = [
 
 [[package]]
 name = "aws-runtime"
-version = "1.5.16"
+version = "1.5.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ce527fb7e53ba9626fc47824f25e256250556c40d8f81d27dd92aa38239d632"
+checksum = "d81b5b2898f6798ad58f484856768bca817e3cd9de0974c24ae0f1113fe88f1b"
 dependencies = [
  "aws-credential-types",
  "aws-sigv4",
@@ -1335,9 +1335,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-kms"
-version = "1.96.0"
+version = "1.97.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "995d40070271994fb774137aa603c10e7d29c4567a9605c6b801dff199c3d221"
+checksum = "b35a6be02a6fd3618c701a49a4dac4282658d18ccfcdcc8ac3b6c2fb4317e4fa"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1357,9 +1357,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sso"
-version = "1.90.0"
+version = "1.91.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f18e53542c522459e757f81e274783a78f8c81acdfc8d1522ee8a18b5fb1c66"
+checksum = "8ee6402a36f27b52fe67661c6732d684b2635152b676aa2babbfb5204f99115d"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1379,9 +1379,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-ssooidc"
-version = "1.92.0"
+version = "1.93.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "532f4d866012ffa724a4385c82e8dd0e59f0ca0e600f3f22d4c03b6824b34e4a"
+checksum = "a45a7f750bbd170ee3677671ad782d90b894548f4e4ae168302c57ec9de5cb3e"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1401,9 +1401,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sts"
-version = "1.94.0"
+version = "1.95.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1be6fbbfa1a57724788853a623378223fe828fc4c09b146c992f0c95b6256174"
+checksum = "55542378e419558e6b1f398ca70adb0b2088077e79ad9f14eb09441f2f7b2164"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1424,9 +1424,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sigv4"
-version = "1.3.6"
+version = "1.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c35452ec3f001e1f2f6db107b6373f1f48f05ec63ba2c5c9fa91f07dad32af11"
+checksum = "69e523e1c4e8e7e8ff219d732988e22bfeae8a1cafdbe6d9eca1546fa080be7c"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-http",
@@ -1612,9 +1612,9 @@ dependencies = [
 
 [[package]]
 name = "aws-types"
-version = "1.3.10"
+version = "1.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d79fb68e3d7fe5d4833ea34dc87d2e97d26d3086cb3da660bb6b1f76d98680b6"
+checksum = "1d980627d2dd7bfc32a3c025685a033eeab8d365cc840c631ef59d1b8f428164"
 dependencies = [
  "aws-credential-types",
  "aws-smithy-async",
@@ -2345,13 +2345,13 @@ dependencies = [
  "risc0-bigint2",
  "sp1-lib",
  "subtle",
- "zkm-lib 1.2.3",
+ "zkm-lib 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git)",
 ]
 
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "ff 0.13.1",
  "group 0.13.0",
@@ -5173,6 +5173,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
 name = "flate2"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6683,9 +6689,9 @@ checksum = "7aedcccd01fc5fe81e6b489c15b247b8b0690feb23304303a9e560f37efc560a"
 
 [[package]]
 name = "icu_properties"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e93fcd3157766c0c8da2f8cff6ce651a31f0810eaa1c51ec363ef790bbb5fb99"
+checksum = "020bfc02fe870ec3a66d93e677ccca0562506e5872c650f893269e08615d74ec"
 dependencies = [
  "icu_collections",
  "icu_locale_core",
@@ -6697,9 +6703,9 @@ dependencies = [
 
 [[package]]
 name = "icu_properties_data"
-version = "2.1.1"
+version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02845b3647bb045f1100ecd6480ff52f34c35f82d9880e029d329c21d1054899"
+checksum = "616c294cf8d725c6afcd8f55abc17c56464ef6211f9ed59cccffe534129c77af"
 
 [[package]]
 name = "icu_provider"
@@ -7217,11 +7223,12 @@ dependencies = [
 [[package]]
 name = "kzg"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "arbitrary",
  "dirs 6.0.0",
  "hashbrown 0.15.5",
+ "hex",
  "sha2",
  "siphasher",
 ]
@@ -7260,7 +7267,7 @@ dependencies = [
  "ena",
  "itertools 0.11.0",
  "lalrpop-util",
- "petgraph",
+ "petgraph 0.6.5",
  "regex",
  "regex-syntax",
  "string_cache",
@@ -8261,6 +8268,12 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+
+[[package]]
+name = "multimap"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "multistream-select"
@@ -10252,7 +10265,17 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
- "fixedbitset",
+ "fixedbitset 0.4.2",
+ "indexmap 2.12.1",
+]
+
+[[package]]
+name = "petgraph"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
+dependencies = [
+ "fixedbitset 0.5.7",
  "indexmap 2.12.1",
 ]
 
@@ -10874,8 +10897,8 @@ dependencies = [
  "itertools 0.10.5",
  "lazy_static",
  "log",
- "multimap",
- "petgraph",
+ "multimap 0.8.3",
+ "petgraph 0.6.5",
  "prettyplease 0.1.25",
  "prost 0.11.9",
  "prost-types 0.11.9",
@@ -10891,12 +10914,12 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
- "itertools 0.10.5",
+ "heck 0.5.0",
+ "itertools 0.14.0",
  "log",
- "multimap",
+ "multimap 0.10.1",
  "once_cell",
- "petgraph",
+ "petgraph 0.7.1",
  "prettyplease 0.2.37",
  "prost 0.13.5",
  "prost-types 0.13.5",
@@ -12077,7 +12100,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-arkworks5"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "arbitrary",
  "ark-bls12-381",
@@ -12095,7 +12118,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-blst"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "arbitrary",
  "blst",
@@ -12110,7 +12133,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-constantine"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "arbitrary",
  "blst",
@@ -12128,7 +12151,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-mcl"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "arbitrary",
  "blst",
@@ -12144,7 +12167,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-zkcrypto"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#8770bcfdd2f0d2f71d085feb1a54a4a25ee37d4a"
+source = "git+https://github.com/grandinetech/rust-kzg.git#b742bc111cccd04b429911d091519ee6af35ffbe"
 dependencies = [
  "arbitrary",
  "bls12_381 0.8.0 (git+https://github.com/grandinetech/rust-kzg.git)",
@@ -16624,8 +16647,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-build"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.18.1",
@@ -16636,8 +16659,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-executor"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "anyhow",
  "bincode",
@@ -16671,14 +16694,14 @@ dependencies = [
  "typenum",
  "vec_map",
  "zkm-curves",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-core-machine"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "cbindgen 0.27.0",
@@ -16727,14 +16750,14 @@ dependencies = [
  "zkm-core-executor",
  "zkm-curves",
  "zkm-derive",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-cuda"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "ctrlc",
@@ -16751,8 +16774,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-curves"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "cfg-if",
  "curve25519-dalek",
@@ -16767,14 +16790,14 @@ dependencies = [
  "serde",
  "snowbridge-amcl",
  "typenum",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-derive"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "quote 1.0.42",
  "syn 1.0.109",
@@ -16782,15 +16805,15 @@ dependencies = [
 
 [[package]]
 name = "zkm-lib"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "cfg-if",
  "elliptic-curve",
  "serde",
  "sha2",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
 ]
 
 [[package]]
@@ -16802,13 +16825,13 @@ dependencies = [
  "cfg-if",
  "serde",
  "sha2",
- "zkm-primitives 1.2.3",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git)",
 ]
 
 [[package]]
 name = "zkm-primitives"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "hex",
@@ -16843,8 +16866,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-prover"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "anyhow",
  "bincode",
@@ -16872,7 +16895,7 @@ dependencies = [
  "tracing-subscriber 0.3.22",
  "zkm-core-executor",
  "zkm-core-machine",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-recursion-circuit",
  "zkm-recursion-compiler",
  "zkm-recursion-core",
@@ -16882,8 +16905,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-circuit"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "hashbrown 0.14.5",
  "itertools 0.13.0",
@@ -16906,7 +16929,7 @@ dependencies = [
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-derive",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
@@ -16915,8 +16938,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-compiler"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "backtrace",
  "itertools 0.13.0",
@@ -16928,7 +16951,7 @@ dependencies = [
  "tracing",
  "vec_map",
  "zkm-core-machine",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-recursion-core",
  "zkm-recursion-derive",
  "zkm-stark",
@@ -16936,8 +16959,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-core"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "backtrace",
  "cbindgen 0.27.0",
@@ -16971,14 +16994,14 @@ dependencies = [
  "zkhash",
  "zkm-core-machine",
  "zkm-derive",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-recursion-derive"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "quote 1.0.42",
  "syn 1.0.109",
@@ -16986,8 +17009,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-gnark-ffi"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "anyhow",
  "bincode",
@@ -17011,8 +17034,8 @@ dependencies = [
 
 [[package]]
 name = "zkm-sdk"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "alloy-signer",
  "alloy-signer-local",
@@ -17052,15 +17075,15 @@ dependencies = [
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-cuda",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-prover",
  "zkm-stark",
 ]
 
 [[package]]
 name = "zkm-stark"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "arrayref",
  "hashbrown 0.14.5",
@@ -17095,25 +17118,24 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.22",
  "zkm-derive",
- "zkm-primitives 1.2.2",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
  "zkm-zkvm",
 ]
 
 [[package]]
 name = "zkm-zkvm"
-version = "1.2.2"
-source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.2#2aa1d4cc79d76c36e62a6317234308b03e3ecf7d"
+version = "1.2.3"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3#be43a854e4be21c11fb87304f9794dc9137b492d"
 dependencies = [
  "bincode",
  "cfg-if",
  "getrandom 0.2.16",
  "lazy_static",
- "libm",
  "rand 0.8.5",
  "serde",
  "sha2",
- "zkm-lib 1.2.2",
- "zkm-primitives 1.2.2",
+ "zkm-lib 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
+ "zkm-primitives 1.2.3 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.3)",
 ]
 
 [[package]]
@@ -17121,21 +17143,6 @@ name = "zkvm_guest_risc0"
 version = "0.0.0"
 dependencies = [
  "risc0-build",
-]
-
-[[package]]
-name = "zkvm_guest_ziren"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "bls",
- "enum-iterator",
- "pubkey_cache",
- "ssz",
- "transition_functions",
- "types",
- "zkm-primitives 1.2.2",
- "zkm-zkvm",
 ]
 
 [[package]]
@@ -17166,7 +17173,6 @@ dependencies = [
  "zkm-build",
  "zkm-sdk",
  "zkvm_guest_risc0",
- "zkvm_guest_ziren",
 ]
 
 [[package]]

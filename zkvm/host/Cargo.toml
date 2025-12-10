@@ -28,7 +28,6 @@ types = { workspace = true }
 xz2 = { workspace = true }
 zkvm_guest_risc0 = { workspace = true, optional = true }
 zkm-sdk = { workspace = true, optional = true }
-zkvm_guest_ziren = { workspace = true, optional = true }
 
 # For pico zkvm
 pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" , optional = true }
@@ -59,5 +58,4 @@ pico = [
 ziren = [
     "dep:zkm-build",
     "dep:zkm-sdk",
-    "dep:zkvm_guest_ziren"
 ]

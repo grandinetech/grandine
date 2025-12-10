@@ -7,7 +7,7 @@ fn main() {
 
     #[cfg(feature = "pico")]
     build_program("../guest/pico").expect("building zkvm-guest-pico failed");
-    
+
     #[cfg(feature = "ziren")]
     zkm_build::build_program("../guest/ziren");
 }
