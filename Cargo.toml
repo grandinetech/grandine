@@ -224,7 +224,6 @@ str_to_string                     = 'warn'
 string_add                        = 'warn'
 string_lit_chars_any              = 'warn'
 string_slice                      = 'warn'
-string_to_string                  = 'warn'
 todo                              = 'warn'
 # Enable `clippy::undocumented_unsafe_blocks` in case we ever change our stance on unsafe code.
 undocumented_unsafe_blocks        = 'warn'

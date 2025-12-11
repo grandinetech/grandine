@@ -302,6 +302,7 @@ impl<P: Preset> AttestationPacker<P> {
         (choices, values)
     }
 
+    #[expect(clippy::needless_range_loop, reason = "the intent becomes less clear")]
     pub fn pack_proposable_attestations_optimally<'a>(
         &self,
         previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
