@@ -329,6 +329,13 @@ impl ExecutionPayloadBidOrigin {
     }
 
     #[must_use]
+    pub const fn off_protocol_bid_disallowed(&self) -> bool {
+        match self {
+            Self::Gossip(_) | Self::Api(_) => true,
+        }
+    }
+
+    #[must_use]
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,

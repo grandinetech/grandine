@@ -1288,7 +1288,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let builder_index = bid.builder_index;
 
         // > off-protocol payment is disallowed in gossip, the `bid.execution_payment` MUST be zero
-        if origin.is_from_gossip() {
+        if origin.off_protocol_bid_disallowed() {
             ensure!(
                 bid.execution_payment == 0,
                 Error::<P>::ExecutionPayloadBidOffProtocolPaymentDisallowed { payload_bid }

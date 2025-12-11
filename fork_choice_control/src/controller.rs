@@ -825,23 +825,10 @@ where
         payload_bid: Arc<SignedExecutionPayloadBid>,
         origin: ExecutionPayloadBidOrigin,
     ) {
-        self.spawn_execution_payload_bid_task_with_wait_group(
-            self.owned_wait_group(),
-            payload_bid,
-            origin,
-        )
-    }
-
-    fn spawn_execution_payload_bid_task_with_wait_group(
-        &self,
-        wait_group: W,
-        payload_bid: Arc<SignedExecutionPayloadBid>,
-        origin: ExecutionPayloadBidOrigin,
-    ) {
         self.spawn(ExecutionPayloadBidTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
-            wait_group,
+            wait_group: self.owned_wait_group(),
             payload_bid,
             origin,
         })

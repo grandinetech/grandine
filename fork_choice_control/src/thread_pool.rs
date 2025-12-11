@@ -148,6 +148,7 @@ enum LowPriorityTask<P: Preset, W> {
     BlockAttestations(BlockAttestationsTask<P, W>),
     AttesterSlashing(AttesterSlashingTask<P, W>),
     PayloadAttestation(PayloadAttestationTask<P, W>),
+    // TODO: (gloas): figure out whether it should be low or mid priority
     PayloadBid(ExecutionPayloadBidTask<P, W>),
     PersistBlobSidecarsTask(PersistBlobSidecarsTask<P, W>),
     PersistPubkeyCacheTask(PersistPubkeyCacheTask<P, W>),
