@@ -974,8 +974,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             execution_requests: ExecutionRequests::default(),
                         },
                     }),
-                    // TODO: (gloas): prepare `signed_execution_payload_bid`
-                    // * signed_execution_payload_bid: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#constructing-the-new-signed_execution_payload_bid-field-in-beaconblockbody
                     Phase::Gloas => {
                         let payload_attestations = self.prepare_payload_attestations().await?;
 
