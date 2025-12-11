@@ -11,7 +11,7 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    PayloadAttestationOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, PayloadAttestationOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -31,7 +31,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -529,6 +529,35 @@ impl<P: Preset, W> Run for PayloadAttestationTask<P, W> {
             store_snapshot.validate_payload_attestation(payload_attestation, &origin, false);
 
         MutatorMessage::PayloadAttestation {
+            wait_group,
+            result,
+            origin,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+pub struct ExecutionPayloadBidTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_bid: Arc<SignedExecutionPayloadBid>,
+    pub origin: ExecutionPayloadBidOrigin,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadBidTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_bid,
+            origin,
+        } = self;
+
+        let result = store_snapshot.validate_execution_payload_bid(payload_bid, &origin);
+
+        MutatorMessage::PayloadBid {
             wait_group,
             result,
             origin,

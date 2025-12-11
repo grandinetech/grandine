@@ -24,7 +24,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{ExecutionPayloadBid, PayloadAttestationData, PayloadAttestationMessage},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -50,6 +50,7 @@ pub enum Topic {
     ChainReorg,
     ContributionAndProof,
     DataColumnSidecar,
+    ExecutionPayloadBid,
     FinalizedCheckpoint,
     Head,
     PayloadAttestation,
@@ -68,9 +69,10 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
+    ExecutionPayloadBid(ExecutionPayloadBidEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
-    PayloadAttestation(Arc<PayloadAttestationMessage>),
+    PayloadAttestation(PayloadAttestationEvent),
     PayloadAttributes(PayloadAttributesEvent),
     ProposerSlashing(Box<ProposerSlashing>),
     VoluntaryExit(Box<SignedVoluntaryExit>),
@@ -88,6 +90,7 @@ impl<P: Preset> Event<P> {
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
+            Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::PayloadAttestation(_) => Topic::PayloadAttestation,
@@ -109,6 +112,7 @@ pub struct EventChannels<P: Preset> {
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
+    pub execution_payload_bids: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub payload_attestations: Sender<Event<P>>,
@@ -137,6 +141,7 @@ impl<P: Preset> EventChannels<P> {
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
+            execution_payload_bids: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attestations: broadcast::channel(max_events).0,
@@ -158,6 +163,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
+            Topic::ExecutionPayloadBid => &self.execution_payload_bids,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttestation => &self.payload_attestations,
@@ -243,6 +249,12 @@ impl<P: Preset> EventChannels<P> {
             self.send_data_column_sidecar_event_internal(block_root, data_column_sidecar)
         {
             warn_with_peers!("unable to send data column sidecar event: {error}");
+        }
+    }
+
+    pub fn send_execution_payload_bid_event(&self, payload_bid: ExecutionPayloadBid) {
+        if let Err(error) = self.send_execution_payload_bid_event_internal(payload_bid) {
+            warn_with_peers!("unable to send execution payload bid event: {error}");
         }
     }
 
@@ -449,6 +461,19 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_execution_payload_bid_event_internal(
+        &self,
+        payload_bid: ExecutionPayloadBid,
+    ) -> Result<()> {
+        if self.execution_payload_bids.receiver_count() > 0 {
+            let payload_bid_event = ExecutionPayloadBidEvent::new(payload_bid);
+            let event = Event::ExecutionPayloadBid(payload_bid_event);
+            self.execution_payload_bids.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -491,7 +516,8 @@ impl<P: Preset> EventChannels<P> {
         payload_attestation: Arc<PayloadAttestationMessage>,
     ) -> Result<()> {
         if self.payload_attestations.receiver_count() > 0 {
-            let event = Event::PayloadAttestation(payload_attestation);
+            let payload_attestation_event = PayloadAttestationEvent::new(payload_attestation);
+            let event = Event::PayloadAttestation(payload_attestation_event);
             self.payload_attestations.send(event)?;
         }
 
@@ -669,6 +695,30 @@ impl ChainReorgEvent {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadBidEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: ValidatorIndex,
+    pub parent_block_root: H256,
+    pub block_hash: ExecutionBlockHash,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub value: Gwei,
+}
+
+impl ExecutionPayloadBidEvent {
+    fn new(payload_bid: ExecutionPayloadBid) -> Self {
+        Self {
+            slot: payload_bid.slot,
+            builder_index: payload_bid.builder_index,
+            parent_block_root: payload_bid.parent_block_root,
+            block_hash: payload_bid.block_hash,
+            value: payload_bid.value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct FinalizedCheckpointEvent {
     pub block: H256,
     pub state: H256,
@@ -706,6 +756,23 @@ impl HeadEvent {
             previous_duty_dependent_root,
             current_duty_dependent_root,
             execution_optimistic: head.is_optimistic(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PayloadAttestationEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(flatten)]
+    pub data: PayloadAttestationData,
+}
+
+impl PayloadAttestationEvent {
+    fn new(payload_attestation: Arc<PayloadAttestationMessage>) -> Self {
+        Self {
+            validator_index: payload_attestation.validator_index,
+            data: payload_attestation.data,
         }
     }
 }

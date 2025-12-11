@@ -11,8 +11,8 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
-    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, PayloadAttestationAction,
-    PayloadAttestationOrigin,
+    ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
+    ExecutionPayloadBidOrigin, PayloadAttestationAction, PayloadAttestationOrigin,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -158,6 +158,11 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         result: Result<PayloadAttestationAction>,
         origin: PayloadAttestationOrigin,
+    },
+    PayloadBid {
+        wait_group: W,
+        result: Result<ExecutionPayloadBidAction>,
+        origin: ExecutionPayloadBidOrigin,
     },
     PreprocessedBeaconState {
         state: Arc<BeaconState<P>>,
