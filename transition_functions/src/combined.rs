@@ -10,6 +10,7 @@ use helper_functions::{
     verifier::{MultiVerifier, NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
 use pubkey_cache::PubkeyCache;
+use ssz::{SszHash as _, H256};
 use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{
@@ -22,7 +23,7 @@ use types::{
         primitives::{Slot, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 
 use crate::{
@@ -212,12 +213,18 @@ pub fn custom_state_transition<P: Preset>(
             verifier,
             slot_report,
         ),
-        _ => {
+        (state, block) => {
             // This match arm will silently match any new phases.
             // Cause a compilation error if a new phase is added.
             const_assert_eq!(Phase::CARDINALITY, 7);
 
-            unreachable!("successful slot processing ensures that phases match")
+            bail!(PhaseError {
+                block_phase: block.phase(),
+                block_root: block.message().hash_tree_root(),
+                block_slot: block.message().slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
+            });
         }
     }
 }
@@ -285,8 +292,11 @@ pub fn verify_signatures<P: Preset>(
             const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
-                state_phase: state.phase(),
                 block_phase: block.phase(),
+                block_root: block.message().hash_tree_root(),
+                block_slot: block.message().slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
             });
         }
     }
@@ -718,8 +728,11 @@ fn process_block<P: Preset>(
             const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
-                state_phase: state.phase(),
                 block_phase: block.phase(),
+                block_root: block.hash_tree_root(),
+                block_slot: block.slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
             });
         }
     }
@@ -759,8 +772,11 @@ pub fn process_block_for_gossip<P: Preset>(
             const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
-                state_phase: state.phase(),
                 block_phase: block.phase(),
+                block_root: block.message().hash_tree_root(),
+                block_slot: block.message().slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
             });
         }
     }
@@ -865,8 +881,11 @@ fn process_blinded_block<P: Preset>(
             const_assert_eq!(Phase::CARDINALITY, 7);
 
             bail!(PhaseError {
-                state_phase: state.phase(),
                 block_phase: block.phase(),
+                block_root: block.hash_tree_root(),
+                block_slot: block.slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
             });
         }
     }
@@ -947,10 +966,16 @@ pub fn statistics<P: Preset>(state: &BeaconState<P>) -> Result<Statistics> {
 // Slots would provide more information, but they're not the direct cause of this error.
 // The purpose of this error is to reveal bugs, so phases are more appropriate.
 #[derive(Debug, Error)]
-#[error("state and block phases do not match (state: {state_phase}, block: {block_phase})")]
+#[error(
+    "state and block phases do not match (state: {state_phase} at slot: {state_slot}, \
+    block: {block_root:?}, {block_phase} at slot: {block_slot})"
+)]
 pub struct PhaseError {
-    state_phase: Phase,
     block_phase: Phase,
+    block_root: H256,
+    block_slot: Slot,
+    state_phase: Phase,
+    state_slot: Slot,
 }
 
 #[cfg(test)]
