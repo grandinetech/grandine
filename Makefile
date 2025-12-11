@@ -113,6 +113,8 @@ aarch64-apple-darwin: ./target/aarch64-apple-darwin/compact/grandine ./target/aa
 # ------ GRANDINE-NETHERMIND INTEGRATION ------
 
 NETHERMIND_VERSION ?=
+# If empty, public authentication will happen. Public auth rate limits by ip address, so may fail unexpectedly.
+GITHUB_TOKEN ?=
 
 .PHONY: nethermind-plugin
 nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
@@ -120,12 +122,16 @@ nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.
 	cd ./bindings/csharp && \
 	dotnet publish -c Release
 
+ifneq ($(GITHUB_TOKEN),)
+NETHERMIND_DOWNLOAD_EXTRA_ARGS = --header "Authorization: Bearer $(GITHUB_TOKEN)"
+endif
+
 .PHONY: download-nethermind
 download-nethermind:
 	@mkdir -p build
-	@curl -s "https://api.github.com/repos/NethermindEth/nethermind/releases/tags/$(NETHERMIND_VERSION)" | \
+	curl $(NETHERMIND_DOWNLOAD_EXTRA_ARGS) -s "https://api.github.com/repos/NethermindEth/nethermind/releases/tags/$(NETHERMIND_VERSION)" | \
 	jq -r --arg rid "$(RID)" '.assets[] | select(.name | endswith($$rid + ".zip")) | .browser_download_url' | \
-	xargs -r -n1 curl -L -o "build/nethermind-$(NETHERMIND_VERSION)-$(TARGET).zip"
+	xargs -r -n1 curl $(NETHERMIND_DOWNLOAD_EXTRA_ARGS) -L -o "build/nethermind-$(NETHERMIND_VERSION)-$(TARGET).zip"
 
 .PHONY: pack-grandine-nethermind
 pack-grandine-nethermind: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64.zip

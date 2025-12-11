@@ -272,7 +272,8 @@ jobs:
         run: |
           make ./build/grandine-${{ env.GRANDINE_VERSION }}-nethermind-${{ env.NETHERMIND_VERSION }}-${{ matrix.alias || matrix.rid }} \
             GRANDINE_VERSION=${{ env.GRANDINE_VERSION }} \
-            NETHERMIND_VERSION=${{ env.NETHERMIND_VERSION }}
+            NETHERMIND_VERSION=${{ env.NETHERMIND_VERSION }} \
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload nethermind
         uses: actions/upload-artifact@v4
