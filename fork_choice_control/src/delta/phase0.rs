@@ -118,7 +118,7 @@ const SET_TO_TARGET_VALUE: u8 = 0b01;
 
 impl BitTagVec {
     pub fn new(len: usize) -> Self {
-        let bytes = (len + 3) / 4;
+        let bytes = len.div_ceil(4);
         Self {
             data: vec![0; bytes],
             len,
@@ -141,7 +141,7 @@ impl BitTagVec {
     }
 }
 
-pub fn delta<P: Preset>(base: BeaconState<P>, target: BeaconState<P>) -> BeaconStateDelta<P> {
+pub fn delta<P: Preset>(base: &BeaconState<P>, target: BeaconState<P>) -> BeaconStateDelta<P> {
     let base_slot = base.slot;
     let target_slot = target.slot;
 
@@ -153,34 +153,32 @@ pub fn delta<P: Preset>(base: BeaconState<P>, target: BeaconState<P>) -> BeaconS
     let latest_block_header = target.latest_block_header;
 
     let target_block_roots = target.block_roots;
-    let block_roots = roots_delta::<P>(base_slot, target_slot, target_block_roots);
+    let block_roots = roots_delta::<P>(base_slot, target_slot, &target_block_roots);
 
     let target_state_roots = target.state_roots;
-    let state_roots = roots_delta::<P>(base_slot, target_slot, target_state_roots);
+    let state_roots = roots_delta::<P>(base_slot, target_slot, &target_state_roots);
 
-    let mut historical_roots = None;
-    if target.historical_roots != base.historical_roots {
-        historical_roots = Some(target.historical_roots);
-    }
+    let historical_roots =
+        (target.historical_roots != base.historical_roots).then_some(target.historical_roots);
 
     let eth1_data = target.eth1_data;
     let eth1_data_votes = target.eth1_data_votes;
     let eth1_deposit_index = target.eth1_deposit_index;
 
-    let validators = validators_delta::<P>(base.validators, target.validators);
-    let balances = balances_delta::<P>(base.balances, target.balances);
+    let validators = validators_delta::<P>(&base.validators, &target.validators);
+    let balances = balances_delta::<P>(&base.balances, &target.balances);
 
-    let randao_mixes = randao_delta::<P>(base_slot, target_slot, target.randao_mixes);
+    let randao_mixes = randao_delta::<P>(base_slot, target_slot, &target.randao_mixes);
 
-    let slashings = slashings_delta::<P>(base_slot, base.slashings, target_slot, target.slashings);
+    let slashings =
+        slashings_delta::<P>(base_slot, &base.slashings, target_slot, &target.slashings);
 
     let previous_epoch_attestations = target.previous_epoch_attestations;
     let current_epoch_attestations = target.current_epoch_attestations;
 
-    let mut justification_bits = None;
-    if target.justification_bits != base.justification_bits {
-        justification_bits = Some(target.justification_bits);
-    }
+    let justification_bits =
+        (target.justification_bits != base.justification_bits).then_some(target.justification_bits);
+
     let previous_justified_checkpoint = target.previous_justified_checkpoint;
     let current_justified_checkpoint = target.current_justified_checkpoint;
     let finalized_checkpoint = target.finalized_checkpoint;
@@ -220,8 +218,8 @@ pub fn apply_delta<P: Preset>(base: BeaconState<P>, delta: BeaconStateDelta<P>) 
     let slot = delta.slot;
 
     let latest_block_header = delta.latest_block_header;
-    let block_roots = apply_roots_delta::<P>(base.slot, base.block_roots, delta.block_roots);
-    let state_roots = apply_roots_delta::<P>(base.slot, base.state_roots, delta.state_roots);
+    let block_roots = apply_roots_delta::<P>(base.slot, base.block_roots, &delta.block_roots);
+    let state_roots = apply_roots_delta::<P>(base.slot, base.state_roots, &delta.state_roots);
 
     let historical_roots = match delta.historical_roots {
         Some(historical_roots) => historical_roots,
@@ -235,7 +233,7 @@ pub fn apply_delta<P: Preset>(base: BeaconState<P>, delta: BeaconStateDelta<P>) 
     let validators = apply_validators_delta::<P>(base.validators, delta.validators);
     let balances = apply_balances_delta::<P>(base.balances, delta.balances);
 
-    let randao_mixes = apply_randao::<P>(base.randao_mixes, delta.randao_mixes);
+    let randao_mixes = apply_randao::<P>(base.randao_mixes, &delta.randao_mixes);
 
     let slashings = apply_slashings::<P>(base.slashings, delta.slashings);
 
@@ -282,12 +280,16 @@ pub fn apply_delta<P: Preset>(base: BeaconState<P>, delta: BeaconStateDelta<P>) 
 pub(super) fn roots_delta<P: Preset>(
     base_slot: Slot,
     target_slot: Slot,
-    target_roots: RecentRoots<P>,
+    target_roots: &RecentRoots<P>,
 ) -> Vec<H256> {
     let inputs = target_slot - base_slot;
 
     let roots: Vec<_> = (0..inputs)
-        .map(|i| *target_roots.get((base_slot + i) % 8192).unwrap())
+        .map(|i| {
+            *target_roots
+                .get((base_slot + i) % 8192)
+                .expect("Failed to index recent roots")
+        })
         .collect();
 
     roots
@@ -296,7 +298,7 @@ pub(super) fn roots_delta<P: Preset>(
 pub(super) fn apply_roots_delta<P: Preset>(
     base_slot: Slot,
     mut base_roots: RecentRoots<P>,
-    delta: Vec<H256>,
+    delta: &[H256],
 ) -> RecentRoots<P> {
     for (i, change) in delta.iter().enumerate() {
         *base_roots.mod_index_mut((base_slot + i as u64) % 8192) = *change;
@@ -306,11 +308,13 @@ pub(super) fn apply_roots_delta<P: Preset>(
 }
 
 pub(super) fn validators_delta<P: Preset>(
-    base_validators: Validators<P>,
-    target_validators: Validators<P>,
+    base_validators: &Validators<P>,
+    target_validators: &Validators<P>,
 ) -> ValidatorsChange {
     let len1 = base_validators.len_usize();
-    let rem_len = target_validators.len_u64() as i64 - base_validators.len_u64() as i64;
+    let rem_len = i64::try_from(target_validators.len_u64())
+        .expect("target_validators length too large")
+        - i64::try_from(base_validators.len_u64()).expect("base_validators length too large");
 
     let mut validators = vec![];
     for (i, (v1, v2)) in base_validators
@@ -338,20 +342,27 @@ pub(super) fn apply_validators_delta<P: Preset>(
 ) -> Validators<P> {
     let base_len = base_validators.len_usize();
 
-    for (_, (i, v)) in vc.validators.iter().enumerate() {
-        *base_validators.get_mut(*i).unwrap() = v.clone();
+    for (i, v) in &vc.validators {
+        *base_validators
+            .get_mut(*i)
+            .expect("Failed to get mut index in base_validators") = v.clone();
     }
 
     if vc.rem.len < 0 {
         // List got shorter - rebuild with only the first N elements
-        let new_len = (base_len as i64 + vc.rem.len) as usize;
+        let new_len = usize::try_from(
+            i64::try_from(base_len).expect("base_len exceeds i64::MAX") + vc.rem.len,
+        )
+        .expect("Exceeds usize");
         base_validators =
             PersistentList::try_from_iter(base_validators.into_iter().take(new_len).cloned())
-                .unwrap();
+                .expect("Failed to build persistent list from base_validators iter");
     } else if vc.rem.len > 0 {
         // List got longer - add new elements
         for val in vc.rem.val {
-            base_validators.push(val).unwrap();
+            base_validators
+                .push(val)
+                .expect("Failed to push to base_validators");
         }
     }
 
@@ -359,12 +370,15 @@ pub(super) fn apply_validators_delta<P: Preset>(
 }
 
 pub(super) fn balances_delta<P: Preset>(
-    base_balances: Balances<P>,
-    target_balances: Balances<P>,
+    base_balances: &Balances<P>,
+    target_balances: &Balances<P>,
 ) -> BalanceDiffs {
     let len1 = base_balances.len_usize();
 
-    let rem_len = target_balances.len_usize() as i64 - len1 as i64;
+    let rem_len = i64::try_from(target_balances.len_usize())
+        .expect("target_balances length exceeds i64::MAX")
+        - i64::try_from(len1).expect("len1 exceeds i64::MAX");
+
     let rem_values: Vec<Gwei> = target_balances.into_iter().skip(len1).copied().collect();
 
     let mut tags = BitTagVec::new(len1);
@@ -378,17 +392,21 @@ pub(super) fn balances_delta<P: Preset>(
         if v1 == v2 {
             // Tag stays 0b00 for same value
             continue;
-        } else if v2 == 0 {
+        }
+
+        if v2 == 0 {
             tags.set(i, SET_TO_ZERO);
         } else if v1 == 0 {
             tags.set(i, SET_TO_TARGET_VALUE);
             target_values.push(v2);
         } else {
             // v1 != v2 and both are non-zero
-            let diff = (v2 as i64) - (v1 as i64);
-            if diff >= i32::MIN as i64 && diff <= i32::MAX as i64 {
+            let diff = i64::try_from(v2).expect("v2 exceeds i64::MAX")
+                - i64::try_from(v1).expect("v1 exceeds i64::MAX");
+
+            if i32::try_from(diff).is_ok() {
                 tags.set(i, SET_TO_DIFF);
-                small_diffs.push(diff as i32);
+                small_diffs.push(i32::try_from(diff).expect("Exceeds i32"));
             } else {
                 tags.set(i, SET_TO_TARGET_VALUE);
                 target_values.push(v2);
@@ -418,21 +436,34 @@ pub(super) fn apply_balances_delta<P: Preset>(
     for i in 0..len1 {
         let tag = bd.tags.get(i);
         match tag {
-            SET_NO_CHANGE => {
-                continue;
-            }
+            SET_NO_CHANGE => {}
             SET_TO_TARGET_VALUE => {
                 let new_val = bd.target_values[target_val_idx];
-                *base_balances.get_mut(i as u64).unwrap() = new_val;
+                *base_balances
+                    .get_mut(i as u64)
+                    .expect("Failed to get mut value at index for base_balances") = new_val;
                 target_val_idx += 1;
             }
             SET_TO_ZERO => {
-                *base_balances.get_mut(i as u64).unwrap() = 0;
+                *base_balances
+                    .get_mut(i as u64)
+                    .expect("Failed to get mut value at index for base_balances") = 0;
             }
             SET_TO_DIFF => {
-                let initial = *base_balances.get(i as u64).unwrap() as i64;
-                let diff = bd.small_diffs[small_diff_idx] as i64;
-                *base_balances.get_mut(i as u64).unwrap() = (initial + diff) as u64;
+                let initial = i64::try_from(
+                    *base_balances
+                        .get(i as u64)
+                        .expect("Failed to get mut value at index for base_balances"),
+                )
+                .expect("balance exceeds i64::MAX");
+
+                let diff = i64::from(bd.small_diffs[small_diff_idx]);
+                *base_balances
+                    .get_mut(i as u64)
+                    .expect("Failed to get mut value at index for base_balances") =
+                    u64::try_from(initial + diff)
+                        .expect("balance calculation resulted in negative or overflow");
+
                 small_diff_idx += 1;
             }
             _ => unreachable!("processed as two bits"),
@@ -441,14 +472,19 @@ pub(super) fn apply_balances_delta<P: Preset>(
 
     if bd.rem.len < 0 {
         // List got shorter - rebuild with only the first N elements
-        let new_len = (len1 as i64 + bd.rem.len) as usize;
+        let new_len =
+            usize::try_from(i64::try_from(len1).expect("len1 exceeds i64::MAX") + bd.rem.len)
+                .expect("usize overflow");
+
         base_balances =
-            PersistentList::try_from_iter(base_balances.into_iter().take(new_len).cloned())
-                .unwrap();
+            PersistentList::try_from_iter(base_balances.into_iter().take(new_len).copied())
+                .expect("Failed to rebuild persistent list from base_balances with new length");
     } else if bd.rem.len > 0 {
         // List got longer - add new elements
         for val in bd.rem.val {
-            base_balances.push(val).unwrap();
+            base_balances
+                .push(val)
+                .expect("Failed to push to base_balances");
         }
     }
 
@@ -458,14 +494,18 @@ pub(super) fn apply_balances_delta<P: Preset>(
 pub(super) fn randao_delta<P: Preset>(
     base_slot: Slot,
     target_slot: Slot,
-    target_randao: RandaoMixes<P>,
+    target_randao: &RandaoMixes<P>,
 ) -> RandaoChange {
     let diff_len = (target_slot - base_slot) / 32;
-    let end_idx = (target_slot / 32) % 65536;
+    let end_idx = (target_slot / 32) % 0x0001_0000;
     let start_idx = end_idx - diff_len - 1;
 
     let new_mixes: Vec<_> = (start_idx..=end_idx)
-        .map(|i| *target_randao.get(i).unwrap())
+        .map(|i| {
+            *target_randao
+                .get(i)
+                .expect("Failed to get value at index in target_randao")
+        })
         .collect();
 
     RandaoChange {
@@ -477,7 +517,7 @@ pub(super) fn randao_delta<P: Preset>(
 
 pub(super) fn apply_randao<P: Preset>(
     mut base_randao_mixes: RandaoMixes<P>,
-    randao_changes: RandaoChange,
+    randao_changes: &RandaoChange,
 ) -> RandaoMixes<P> {
     for (i, change) in randao_changes.new_mixes.iter().enumerate() {
         *base_randao_mixes.mod_index_mut(randao_changes.start_idx + i as u64) = *change;
@@ -488,9 +528,9 @@ pub(super) fn apply_randao<P: Preset>(
 
 pub(super) fn slashings_delta<P: Preset>(
     base_slot: Slot,
-    base_slashings: Slashings<P>,
+    base_slashings: &Slashings<P>,
     target_slot: Slot,
-    target_slashings: Slashings<P>,
+    target_slashings: &Slashings<P>,
 ) -> Option<Vec<SlashingChange>> {
     if base_slashings == target_slashings {
         return None;
@@ -502,16 +542,20 @@ pub(super) fn slashings_delta<P: Preset>(
 
     let slashing_changes: Vec<_> = (start_idx..=end_idx)
         .filter_map(|i| {
-            let base_val = base_slashings.get(i).unwrap();
-            let target_val = target_slashings.get(i).unwrap();
+            let base_val = base_slashings
+                .get(i)
+                .expect("Failed to get value at index in base_slashings");
+            let target_val = target_slashings
+                .get(i)
+                .expect("Failed to get value at index in target_slashings");
 
-            if base_val != target_val {
+            if base_val == target_val {
+                None
+            } else {
                 Some(SlashingChange {
                     index: i,
                     new_slashing: *target_val,
                 })
-            } else {
-                None
             }
         })
         .collect();
@@ -529,8 +573,8 @@ pub(super) fn apply_slashings<P: Preset>(
                 *base_slashings.mod_index_mut(change.index) = change.new_slashing;
             }
 
-            return base_slashings;
+            base_slashings
         }
-        None => return base_slashings,
+        None => base_slashings,
     }
 }

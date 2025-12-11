@@ -53,6 +53,8 @@ use crate::{
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 pub const DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(256_u64);
 
+type BaseStateCache<P> = Arc<RwLock<Option<(H256, Arc<BeaconState<P>>)>>>;
+
 pub enum StateLoadStrategy<P: Preset> {
     Auto {
         state_slot: Option<Slot>,
@@ -75,7 +77,7 @@ pub struct Storage<P: Preset> {
     pub(crate) database: Arc<Database>,
     pub(crate) archival_epoch_interval: NonZeroU64,
     pub(crate) state_archival_epoch_interval: NonZeroU64,
-    pub(crate) base_state_cache: Arc<RwLock<Option<(H256, Arc<BeaconState<P>>)>>>,
+    pub(crate) base_state_cache: BaseStateCache<P>,
     storage_mode: StorageMode,
     pub(crate) pubkey_cache: Arc<PubkeyCache>,
     phantom: PhantomData<P>,
@@ -345,86 +347,9 @@ impl<P: Preset> Storage<P> {
                 }
 
                 if !archival_state_appended && !self.prune_storage_enabled() {
-                    let state_epoch = Self::epoch_at_slot(state_slot);
-                    let append_state = misc::is_epoch_start::<P>(state_slot)
-                        && state_epoch.is_multiple_of(self.state_archival_epoch_interval.into());
-                    let append_delta = misc::is_epoch_start::<P>(state_slot)
-                        && state_epoch.is_multiple_of(self.archival_epoch_interval.into())
-                        && !append_state;
-
-                    if append_state {
-                        info_with_peers!("saving state in slot {state_slot}");
-                        let current_state = state.get_or_init(|| chain_link.state(store));
-
-                        batch.push(serialize(StateByBlockRoot(block_root), current_state)?);
-
-                        if let Ok(mut base_state) = self.base_state_cache.write() {
-                            *base_state = Some((block_root, current_state.clone_arc()));
-                        }
-
-                        archival_state_appended = true;
-                    }
-
-                    if append_delta {
-                        info_with_peers!("saving state delta in slot {state_slot}");
-
-                        let base_epoch = (state_epoch / self.state_archival_epoch_interval.get())
-                            * self.state_archival_epoch_interval.get();
-                        let base_slot = misc::compute_start_slot_at_epoch::<P>(base_epoch);
-
-                        let base_root = self.block_root_by_slot(base_slot)?;
-
-                        let base_state = if let Some(base_root_value) = base_root {
-                            let cached_state = if let Ok(cache) = self.base_state_cache.read() {
-                                if let Some((cached_root, cached_state)) = cache.as_ref() {
-                                    if *cached_root == base_root_value {
-                                        Some(cached_state.clone())
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
-
-                            // If not in cache, load from disk
-                            if let Some(state) = cached_state {
-                                Some((base_root_value, state))
-                            } else if let Some(state) = self.state_by_block_root(base_root_value)? {
-                                if let Ok(mut cache) = self.base_state_cache.write() {
-                                    *cache = Some((base_root_value, state.clone()))
-                                }
-                                Some((base_root_value, state))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-
-                        if let Some((_, base_state)) = base_state {
-                            let delta = delta(
-                                base_state,
-                                state.get_or_init(|| chain_link.state(store)).clone_arc(),
-                            );
-
-                            batch.push((
-                                StateDeltaByBlockRoot(block_root).to_string(),
-                                bincode::serialize(&delta)?,
-                            ));
-                        } else {
-                            warn_with_peers!("base state not found at slot {base_slot}, storing full state instead at slot {state_slot}");
-
-                            batch.push(serialize(
-                                StateByBlockRoot(block_root),
-                                state.get_or_init(|| chain_link.state(store)),
-                            )?);
-                        }
-
-                        archival_state_appended = true;
-                    }
+                    archival_state_appended = self.handle_archival_state(
+                        &mut batch, chain_link, block_root, state_slot, &state, store,
+                    )?;
                 }
             }
         }
@@ -432,6 +357,86 @@ impl<P: Preset> Storage<P> {
         self.database.put_batch(batch)?;
 
         Ok(slots)
+    }
+
+    fn handle_archival_state(
+        &self,
+        batch: &mut Vec<(String, Vec<u8>)>,
+        chain_link: &ChainLink<P>,
+        block_root: H256,
+        state_slot: Slot,
+        state: &OnceCell<Arc<BeaconState<P>>>,
+        store: &Store<P, Self>,
+    ) -> Result<bool> {
+        let state_epoch = Self::epoch_at_slot(state_slot);
+        let append_state = misc::is_epoch_start::<P>(state_slot)
+            && state_epoch.is_multiple_of(self.state_archival_epoch_interval.into());
+        let append_delta = misc::is_epoch_start::<P>(state_slot)
+            && state_epoch.is_multiple_of(self.archival_epoch_interval.into())
+            && !append_state;
+
+        if append_state {
+            info_with_peers!("saving state in slot {state_slot}");
+            let current_state = state.get_or_init(|| chain_link.state(store));
+            batch.push(serialize(StateByBlockRoot(block_root), current_state)?);
+            if let Ok(mut base_state) = self.base_state_cache.write() {
+                *base_state = Some((block_root, Arc::clone(current_state)));
+            }
+            return Ok(true);
+        }
+
+        if append_delta {
+            info_with_peers!("saving state delta in slot {state_slot}");
+            let base_epoch = (state_epoch / self.state_archival_epoch_interval.get())
+                * self.state_archival_epoch_interval.get();
+            let base_slot = misc::compute_start_slot_at_epoch::<P>(base_epoch);
+            let base_root = self.block_root_by_slot(base_slot)?;
+
+            let base_state = if let Some(base_root_value) = base_root {
+                let cached_state = if let Ok(cache) = self.base_state_cache.read() {
+                    if let Some((cached_root, cached_state)) = cache.as_ref() {
+                        (*cached_root == base_root_value).then(|| Arc::clone(cached_state))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(state) = cached_state {
+                    Some((base_root_value, state))
+                } else if let Some(state) = self.state_by_block_root(base_root_value)? {
+                    if let Ok(mut cache) = self.base_state_cache.write() {
+                        *cache = Some((base_root_value, Arc::clone(&state)))
+                    }
+                    Some((base_root_value, state))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((_, base_state)) = base_state {
+                let delta = delta(
+                    &base_state,
+                    &Arc::clone(state.get_or_init(|| chain_link.state(store))),
+                );
+                batch.push((
+                    StateDeltaByBlockRoot(block_root).to_string(),
+                    bincode::serialize(&delta)?,
+                ));
+            } else {
+                warn_with_peers!("base state not found at slot {base_slot}, storing full state instead at slot {state_slot}");
+                batch.push(serialize(
+                    StateByBlockRoot(block_root),
+                    state.get_or_init(|| chain_link.state(store)),
+                )?);
+            }
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
     pub(crate) fn append_blob_sidecars(
@@ -784,7 +789,7 @@ impl<P: Preset> Storage<P> {
         if let Ok(cache) = self.base_state_cache.read() {
             if let Some((cached_root, cached_state)) = cache.as_ref() {
                 if *cached_root == base_root {
-                    let reconstructed = apply_delta(cached_state.as_ref().clone(), delta);
+                    let reconstructed = apply_delta(&cached_state.as_ref().clone(), &delta);
                     return Ok(Some(Arc::new(reconstructed)));
                 }
             }
@@ -800,7 +805,7 @@ impl<P: Preset> Storage<P> {
             *cache = Some((base_root, base_state.clone().into()));
         }
 
-        let reconstructed = apply_delta(base_state, delta);
+        let reconstructed = apply_delta(&base_state, &delta);
 
         Ok(Some(Arc::new(reconstructed)))
     }

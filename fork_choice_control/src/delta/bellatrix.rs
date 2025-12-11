@@ -84,7 +84,7 @@ pub struct BeaconStateDelta<P: Preset> {
     pub cache: Cache,
 }
 
-pub fn delta<P: Preset>(base: BeaconState<P>, target: BeaconState<P>) -> BeaconStateDelta<P> {
+pub fn delta<P: Preset>(base: &BeaconState<P>, target: BeaconState<P>) -> BeaconStateDelta<P> {
     let base_slot = base.slot;
     let target_slot = target.slot;
 
@@ -96,55 +96,50 @@ pub fn delta<P: Preset>(base: BeaconState<P>, target: BeaconState<P>) -> BeaconS
     let latest_block_header = target.latest_block_header;
 
     let target_block_roots = target.block_roots;
-    let block_roots = roots_delta::<P>(base_slot, target_slot, target_block_roots);
+    let block_roots = roots_delta::<P>(base_slot, target_slot, &target_block_roots);
 
     let target_state_roots = target.state_roots;
-    let state_roots = roots_delta::<P>(base_slot, target_slot, target_state_roots);
+    let state_roots = roots_delta::<P>(base_slot, target_slot, &target_state_roots);
 
-    let mut historical_roots = None;
-    if target.historical_roots != base.historical_roots {
-        historical_roots = Some(target.historical_roots);
-    }
+    let historical_roots =
+        (target.historical_roots != base.historical_roots).then_some(target.historical_roots);
 
     let eth1_data = target.eth1_data;
     let eth1_data_votes = target.eth1_data_votes;
     let eth1_deposit_index = target.eth1_deposit_index;
 
-    let validators = validators_delta::<P>(base.validators, target.validators);
-    let balances = balances_delta::<P>(base.balances, target.balances);
+    let validators = validators_delta::<P>(&base.validators, &target.validators);
+    let balances = balances_delta::<P>(&base.balances, &target.balances);
 
-    let randao_mixes = randao_delta::<P>(base_slot, target_slot, target.randao_mixes);
+    let randao_mixes = randao_delta::<P>(base_slot, target_slot, &target.randao_mixes);
 
-    let slashings = slashings_delta::<P>(base_slot, base.slashings, target_slot, target.slashings);
+    let slashings =
+        slashings_delta::<P>(base_slot, &base.slashings, target_slot, &target.slashings);
 
     let previous_epoch_participation = epoch_participation_delta::<P>(
-        base.previous_epoch_participation,
-        target.previous_epoch_participation,
+        &base.previous_epoch_participation,
+        &target.previous_epoch_participation,
     );
     let current_epoch_participation = epoch_participation_delta::<P>(
-        base.current_epoch_participation,
-        target.current_epoch_participation,
+        &base.current_epoch_participation,
+        &target.current_epoch_participation,
     );
 
-    let mut justification_bits = None;
-    if target.justification_bits != base.justification_bits {
-        justification_bits = Some(target.justification_bits);
-    }
+    let justification_bits =
+        (target.justification_bits != base.justification_bits).then_some(target.justification_bits);
+
     let previous_justified_checkpoint = target.previous_justified_checkpoint;
     let current_justified_checkpoint = target.current_justified_checkpoint;
     let finalized_checkpoint = target.finalized_checkpoint;
 
     let inactivity_scores =
-        inactivity_scores_delta::<P>(base.inactivity_scores, target.inactivity_scores);
+        inactivity_scores_delta::<P>(&base.inactivity_scores, &target.inactivity_scores);
 
-    let mut current_sync_committee = None;
-    if target.current_sync_committee != base.current_sync_committee {
-        current_sync_committee = Some(target.current_sync_committee);
-    }
-    let mut next_sync_committee = None;
-    if target.next_sync_committee != base.next_sync_committee {
-        next_sync_committee = Some(target.next_sync_committee);
-    }
+    let current_sync_committee = (target.current_sync_committee != base.current_sync_committee)
+        .then_some(target.current_sync_committee);
+
+    let next_sync_committee = (target.next_sync_committee != base.next_sync_committee)
+        .then_some(target.next_sync_committee);
 
     let latest_execution_payload_header = target.latest_execution_payload_header;
 
@@ -187,8 +182,8 @@ pub fn apply_delta<P: Preset>(base: BeaconState<P>, delta: BeaconStateDelta<P>) 
     let slot = delta.slot;
 
     let latest_block_header = delta.latest_block_header;
-    let block_roots = apply_roots_delta::<P>(base.slot, base.block_roots, delta.block_roots);
-    let state_roots = apply_roots_delta::<P>(base.slot, base.state_roots, delta.state_roots);
+    let block_roots = apply_roots_delta::<P>(base.slot, base.block_roots, &delta.block_roots);
+    let state_roots = apply_roots_delta::<P>(base.slot, base.state_roots, &delta.state_roots);
 
     let historical_roots = match delta.historical_roots {
         Some(historical_roots) => historical_roots,
@@ -202,7 +197,7 @@ pub fn apply_delta<P: Preset>(base: BeaconState<P>, delta: BeaconStateDelta<P>) 
     let validators = apply_validators_delta::<P>(base.validators, delta.validators);
     let balances = apply_balances_delta::<P>(base.balances, delta.balances);
 
-    let randao_mixes = apply_randao::<P>(base.randao_mixes, delta.randao_mixes);
+    let randao_mixes = apply_randao::<P>(base.randao_mixes, &delta.randao_mixes);
 
     let slashings = apply_slashings::<P>(base.slashings, delta.slashings);
 
