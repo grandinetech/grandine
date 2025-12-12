@@ -51,8 +51,6 @@ pub(crate) enum Error {
     SlotOutOfRange,
     #[error("subnet ID overflowed")]
     SubnetIdOverflow,
-    #[error("subnet prefix bit count overflowed")]
-    SubnetPrefixBitCountOverflow,
 }
 
 #[derive(Debug, Display)]

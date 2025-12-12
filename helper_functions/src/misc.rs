@@ -383,13 +383,8 @@ pub fn compute_subscribed_subnets<P: Preset>(
     config: &Config,
     epoch: Epoch,
 ) -> Result<impl Iterator<Item = SubnetId>> {
-    let attestation_subnet_prefix_bits = AttestationSubnetCount::USIZE
-        .ilog2_ceil()
-        .checked_add(config.attestation_subnet_extra_bits)
-        .ok_or(Error::SubnetPrefixBitCountOverflow)?;
-
     let node_id_prefix = node_id
-        .shr(NodeId::BITS - u16::from(attestation_subnet_prefix_bits))
+        .shr(NodeId::BITS - u16::from(config.attestation_subnet_prefix_bits))
         .try_into()?;
 
     let node_offset = node_id % config.epochs_per_subnet_subscription;
@@ -400,7 +395,7 @@ pub fn compute_subscribed_subnets<P: Preset>(
         .map(hashing::hash_64)?;
 
     let permutated_prefix_maximum = 1_u64
-        .checked_shl(attestation_subnet_prefix_bits.into())
+        .checked_shl(config.attestation_subnet_prefix_bits.into())
         .ok_or(Error::PermutatedPrefixMaximumOverflow)?
         .try_into()?;
 

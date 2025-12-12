@@ -115,6 +115,12 @@ pub struct Config {
     // Fork choice
     #[serde(with = "serde_utils::string_or_native")]
     pub proposer_score_boost: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub reorg_head_weight_threshold: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub reorg_max_epochs_since_finalization: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub reorg_parent_weight_threshold: u64,
 
     // Deposit contract
     #[serde(with = "serde_utils::string_or_native")]
@@ -127,9 +133,14 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub attestation_subnet_extra_bits: u8,
     #[serde(with = "serde_utils::string_or_native")]
+    pub attestation_subnet_prefix_bits: u8,
+    #[serde(with = "serde_utils::string_or_native")]
     pub epochs_per_subnet_subscription: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_payload_size: usize,
+    #[serde(with = "As::<DurationMilliSeconds<String>>")]
+    pub maximum_gossip_clock_disparity: Duration,
+    pub message_domain_invalid_snappy: DomainType,
     pub message_domain_valid_snappy: DomainType,
     #[serde(with = "serde_utils::string_or_native")]
     pub subnets_per_node: u64,
@@ -255,6 +266,9 @@ impl Default for Config {
 
             // Fork choice
             proposer_score_boost: 40,
+            reorg_head_weight_threshold: 20,
+            reorg_max_epochs_since_finalization: 2,
+            reorg_parent_weight_threshold: 160,
 
             // Deposit contract
             deposit_chain_id: 0,
@@ -263,8 +277,11 @@ impl Default for Config {
 
             // Networking
             attestation_subnet_extra_bits: 0,
+            attestation_subnet_prefix_bits: 6,
             epochs_per_subnet_subscription: nonzero!(256_u64),
             max_payload_size: 10_485_760,
+            maximum_gossip_clock_disparity: Duration::from_millis(500),
+            message_domain_invalid_snappy: H32::zero(),
             message_domain_valid_snappy: H32(hex!("01000000")),
             subnets_per_node: 2,
             max_blobs_per_block: 6,
