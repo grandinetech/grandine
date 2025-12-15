@@ -195,6 +195,8 @@ jobs:
             ${{ runner.os }}-zkm-toolchain-nightly-2025-06-30-
       - name: Installing ${{ matrix.backend }} zkVM
         run: ${{ matrix.install }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Pre-build step for ${{ matrix.backend }}
         if: matrix.pre_build != ''
         run: ${{ matrix.pre_build }}
