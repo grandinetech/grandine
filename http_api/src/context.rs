@@ -331,7 +331,6 @@ impl<P: Preset> Context<P> {
             None,
             validator_channels,
             network_config.network_dir.as_deref(),
-            network_config.subscribe_all_data_column_subnets,
         );
 
         let subnet_service = SubnetService::new(

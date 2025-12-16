@@ -640,7 +640,6 @@ pub async fn run_after_genesis<P: Preset>(
         validator_statistics.clone(),
         validator_channels,
         network_config.network_dir.as_deref(),
-        network_config.subscribe_all_data_column_subnets,
     );
 
     let p2p_channels = Channels {
@@ -675,6 +674,7 @@ pub async fn run_after_genesis<P: Preset>(
         registry.as_mut(),
         data_dumper.clone_arc(),
         validator_config.backfill_custody_groups,
+        validator_config.custody_mode,
     )
     .await?;
 
@@ -1247,6 +1247,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         report_validator_performance,
         backfill_custody_groups,
         sync_without_reconstruction,
+        custody_mode,
         ..
     } = config;
 
@@ -1284,6 +1285,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         default_gas_limit,
         keystore_storage_password_file,
         backfill_custody_groups,
+        custody_mode,
     });
 
     let store_config = StoreConfig {

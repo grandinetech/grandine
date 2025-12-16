@@ -58,7 +58,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    nonstandard::{Phase, RelativeEpoch, WithStatus},
+    nonstandard::{CustodyMode, Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
@@ -160,6 +160,7 @@ impl<P: Preset> Network<P> {
         libp2p_registry: Option<&mut Registry>,
         data_dumper: Arc<DataDumper>,
         backfill_custody_groups: bool,
+        custody_mode: CustodyMode,
     ) -> Result<Self> {
         let chain_config = controller.chain_config();
         let head_state = controller.head_state().value;
@@ -173,9 +174,7 @@ impl<P: Preset> Network<P> {
         let enr_fork_id = Self::enr_fork_id(&controller, &fork_context, slot);
         let (shutdown_tx, shutdown_rx) = futures::channel::mpsc::channel(1);
         let executor = TaskExecutor::new(shutdown_tx);
-
-        let mut custody_group_count =
-            chain_config.custody_group_count(network_config.subscribe_all_data_column_subnets);
+        let mut custody_group_count = chain_config.custody_group_count(custody_mode);
 
         let context = Context {
             chain_config: chain_config.clone_arc(),

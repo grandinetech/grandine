@@ -16,7 +16,7 @@ use typenum::Unsigned as _;
 use crate::{
     bellatrix::primitives::Difficulty,
     fulu::containers::DataColumnsByRootIdentifier,
-    nonstandard::{Phase, Toption},
+    nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         primitives::{
@@ -1040,11 +1040,11 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn custody_group_count(&self, subscribe_all_data_column_subnets: bool) -> u64 {
-        if subscribe_all_data_column_subnets {
-            self.number_of_custody_groups
-        } else {
-            self.custody_requirement
+    pub const fn custody_group_count(&self, custody_mode: CustodyMode) -> u64 {
+        match custody_mode {
+            CustodyMode::Super => self.number_of_custody_groups,
+            CustodyMode::Semi => self.number_of_custody_groups / 2,
+            CustodyMode::Minimal => self.custody_requirement,
         }
     }
 

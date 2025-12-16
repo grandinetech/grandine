@@ -56,7 +56,7 @@ use tracing::Level;
 use types::{
     bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
-    nonstandard::Phase,
+    nonstandard::{CustodyMode, Phase},
     phase0::primitives::{
         Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot,
     },
@@ -347,6 +347,14 @@ struct BeaconNodeOptions {
     /// [default: None]
     #[clap(long)]
     state_slot: Option<Slot>,
+
+    /// Subscribe to half of the data column subnets
+    #[clap(
+        long,
+        conflicts_with("subscribe_all_data_column_subnets"),
+        conflicts_with("subscribe_all_subnets")
+    )]
+    subscribe_half_data_column_subnets: bool,
 
     /// Subscribe to all data column subnets
     #[clap(long)]
@@ -1020,6 +1028,7 @@ impl GrandineArgs {
             max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout,
             state_slot,
+            subscribe_half_data_column_subnets,
             subscribe_all_data_column_subnets,
             subscribe_all_subnets,
             suggested_fee_recipient,
@@ -1384,6 +1393,14 @@ impl GrandineArgs {
             urls: web3signer_urls,
         };
 
+        let custody_mode = if subscribe_all_data_column_subnets {
+            CustodyMode::Super
+        } else if subscribe_half_data_column_subnets {
+            CustodyMode::Semi
+        } else {
+            CustodyMode::Minimal
+        };
+
         let storage_mode = if prune_storage {
             StorageMode::Prune
         } else if archive_storage {
@@ -1455,6 +1472,7 @@ impl GrandineArgs {
             report_validator_performance,
             backfill_custody_groups: !no_custody_groups_backfill,
             sync_without_reconstruction,
+            custody_mode,
         })
     }
 
@@ -2161,6 +2179,24 @@ mod tests {
     fn incompatible_storage_options() {
         try_config_from_args(["--archive-storage", "--prune-storage"])
             .expect_err("incompatible storage options should fail");
+    }
+
+    #[test]
+    fn incompatible_data_column_subnet_subscription_options() {
+        try_config_from_args([
+            "--subscribe-half-data-column-subnets",
+            "--subscribe-all-data-column-subnets",
+        ])
+        .expect_err("incompatible data column subnet subscription options should fail");
+    }
+
+    #[test]
+    fn incompatible_subnet_subscription_options() {
+        try_config_from_args([
+            "--subscribe-half-data-column-subnets",
+            "--subscribe-all-subnets",
+        ])
+        .expect_err("incompatible subnet subscription options should fail");
     }
 
     #[test]

@@ -242,6 +242,14 @@ pub struct BlockRewards {
     pub attester_slashings: Gwei,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum CustodyMode {
+    #[default]
+    Minimal,
+    Semi,
+    Super,
+}
+
 #[derive(Clone, Copy)]
 pub struct Participation {
     pub previous: ParticipationFlags,

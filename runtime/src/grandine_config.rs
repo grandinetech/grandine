@@ -14,6 +14,7 @@ use tracing::info;
 use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
+    nonstandard::CustodyMode,
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, H256, Slot},
     redacting_url::RedactingUrl,
 };
@@ -76,6 +77,7 @@ pub struct GrandineConfig {
     pub report_validator_performance: bool,
     pub backfill_custody_groups: bool,
     pub sync_without_reconstruction: bool,
+    pub custody_mode: CustodyMode,
 }
 
 impl GrandineConfig {
@@ -106,6 +108,7 @@ impl GrandineConfig {
             use_validator_key_cache,
             validator_api_config,
             sync_without_reconstruction,
+            custody_mode,
             ..
         } = self;
 
@@ -213,6 +216,10 @@ impl GrandineConfig {
 
         if *sync_without_reconstruction {
             info!("sync with reconstruction disabled");
+        }
+
+        if chain_config.is_peerdas_scheduled() {
+            info!("custody mode: {custody_mode:?}");
         }
     }
 }

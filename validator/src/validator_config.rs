@@ -4,6 +4,7 @@ use derivative::Derivative;
 use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
+    nonstandard::CustodyMode,
     phase0::primitives::{ExecutionAddress, H256},
 };
 
@@ -21,4 +22,5 @@ pub struct ValidatorConfig {
     pub keystore_storage_password_file: Option<PathBuf>,
     #[derivative(Default(value = "true"))]
     pub backfill_custody_groups: bool,
+    pub custody_mode: CustodyMode,
 }

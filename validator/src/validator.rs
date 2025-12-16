@@ -74,7 +74,8 @@ use types::{
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
     nonstandard::{
-        KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+        CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev,
+        WithStatus,
     },
     phase0::{
         consts::GENESIS_SLOT,
@@ -169,7 +170,6 @@ pub struct Validator<P: Preset, W: Wait> {
     internal_rx: UnboundedReceiver<InternalMessage>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
-    subscribe_to_all_data_column_subnets: bool,
     last_cgc_update_epoch: Option<Epoch>,
 }
 
@@ -192,7 +192,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P, W>,
         _network_dir: Option<&Path>,
-        subscribe_to_all_data_column_subnets: bool,
     ) -> Self {
         let Channels {
             api_to_validator_rx,
@@ -247,7 +246,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             internal_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
-            subscribe_to_all_data_column_subnets,
             last_cgc_update_epoch: None,
         }
     }
@@ -665,7 +663,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await;
 
         if self.last_cgc_update_epoch != Some(current_epoch)
-            && !self.subscribe_to_all_data_column_subnets
+            && self.validator_config.custody_mode != CustodyMode::Super
             && self.chain_config.is_peerdas_scheduled()
             && !own_validator_indices.is_empty()
         {
@@ -2177,8 +2175,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             || self.last_cgc_update_epoch.is_none()
         {
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
-            ValidatorToP2p::UpdateDataColumnSubnets(validator_custody_requirement)
-                .send(&self.p2p_tx);
+            ValidatorToP2p::UpdateDataColumnSubnets(
+                validator_custody_requirement.max(current_custody_requirements),
+            )
+            .send(&self.p2p_tx);
         }
 
         self.last_cgc_update_epoch = Some(current_epoch);
