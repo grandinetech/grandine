@@ -9,7 +9,8 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
-    ExecutionPayloadEnvelopeOrigin, PayloadAttestationOrigin,
+    ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction, PayloadAttestationItem,
+    PayloadAttestationValidationError,
 };
 use serde::Serialize;
 use ssz::H256;
@@ -22,7 +23,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -38,7 +39,7 @@ pub struct Delayed<P: Preset> {
     pub payload_status: Option<(PayloadStatusV1, Slot)>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
-    pub payload_attestations: Vec<PendingPayloadAttestation>,
+    pub payload_attestations: Vec<PendingPayloadAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
     pub execution_payload_envelopes: Vec<PendingExecutionPayloadEnvelope<P>>,
@@ -162,11 +163,7 @@ pub struct PendingAggregateAndProof<P: Preset> {
 
 pub type PendingAttestation<P> = AttestationItem<P, GossipId>;
 
-#[derive(Debug)]
-pub struct PendingPayloadAttestation {
-    pub payload_attestation: Arc<PayloadAttestationMessage>,
-    pub origin: PayloadAttestationOrigin,
-}
+pub type PendingPayloadAttestation<P> = PayloadAttestationItem<P>;
 
 #[derive(Debug)]
 pub struct PendingBlobSidecar<P: Preset> {
@@ -210,6 +207,9 @@ pub struct VerifyAggregateAndProofResult<P: Preset> {
 
 pub type VerifyAttestationResult<P> =
     Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>;
+
+pub type VerifyPayloadAttestationResult<P> =
+    Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>>;
 
 #[expect(clippy::enum_variant_names)]
 #[derive(Debug, IntoStaticStr, Serialize)]

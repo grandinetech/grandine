@@ -741,7 +741,7 @@ where
         )?;
     }
 
-    for payload_attestation in body.payload_attestations().iter().copied() {
+    for payload_attestation in body.payload_attestations() {
         process_payload_attestation(
             config,
             pubkey_cache,
@@ -936,7 +936,7 @@ pub fn process_payload_attestation<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &impl PostGloasBeaconState<P>,
-    payload_attestation: PayloadAttestation<P>,
+    payload_attestation: &PayloadAttestation<P>,
     verifier: impl Verifier,
 ) -> Result<()> {
     // > Check that the attestation is for the parent beacon block
@@ -1240,7 +1240,7 @@ mod spec_tests {
                 config,
                 pubkey_cache,
                 state,
-                payload_attestation,
+                &payload_attestation,
                 SingleVerifier,
             )
         },

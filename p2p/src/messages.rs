@@ -109,6 +109,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
+    PublishPayloadAttestation(Arc<PayloadAttestationMessage>),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),

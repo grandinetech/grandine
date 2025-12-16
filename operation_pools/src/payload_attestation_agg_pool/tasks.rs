@@ -137,18 +137,16 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
     }
 }
 
-pub struct AggregatePayloadAttestationsTask<P: Preset, W: Wait> {
-    pub controller: ApiController<P, W>,
+pub struct AggregatePayloadAttestationsTask<P: Preset> {
     pub pool: Arc<Pool<P>>,
+    pub slot: Slot,
 }
 
-impl<P: Preset, W: Wait> PoolTask for AggregatePayloadAttestationsTask<P, W> {
+impl<P: Preset> PoolTask for AggregatePayloadAttestationsTask<P> {
     type Output = ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>;
 
     async fn run(self) -> Result<Self::Output> {
-        let Self { controller, pool } = self;
-
-        let slot = controller.slot();
+        let Self { pool, slot } = self;
 
         pool.aggregate_payload_attestations(slot).await
     }

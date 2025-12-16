@@ -13,7 +13,7 @@ use fork_choice_store::{
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAttestationAction, PayloadAttestationOrigin,
+    PayloadAttestationAction, PayloadAttestationValidationError,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -35,7 +35,7 @@ use types::{
 use crate::{
     misc::{
         MutatorRejectionReason, ProcessingTimings, VerifyAggregateAndProofResult,
-        VerifyAttestationResult,
+        VerifyAttestationResult, VerifyPayloadAttestationResult,
     },
     unbounded_sink::UnboundedSink,
 };
@@ -113,6 +113,10 @@ pub enum MutatorMessage<P: Preset, W> {
         results:
             Vec<Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>>,
     },
+    BlockPayloadAttestations {
+        wait_group: W,
+        results: Vec<Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>>>,
+    },
     AttesterSlashing {
         wait_group: W,
         result: Result<Vec<ValidatorIndex>>,
@@ -163,8 +167,11 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     PayloadAttestation {
         wait_group: W,
-        result: Result<PayloadAttestationAction>,
-        origin: PayloadAttestationOrigin,
+        result: VerifyPayloadAttestationResult<P>,
+    },
+    PayloadAttestationBatch {
+        wait_group: W,
+        results: Vec<VerifyPayloadAttestationResult<P>>,
     },
     PayloadBid {
         wait_group: W,

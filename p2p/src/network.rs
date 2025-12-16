@@ -384,6 +384,10 @@ impl<P: Preset> Network<P> {
                             self.publish_voluntary_exit(voluntary_exit);
                             true
                         }
+                        ApiToP2p::PublishPayloadAttestation(payload_attestation_message) => {
+                            self.publish_payload_attestation_message(payload_attestation_message);
+                            true
+                        }
                         ApiToP2p::RequestIdentity(receiver) => {
                             receiver.send(self.node_identity()).is_ok()
                         },

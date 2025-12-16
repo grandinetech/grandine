@@ -322,6 +322,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         }
                     },
                     ValidatorMessage::ValidPayloadAttestation(wait_group, payload_attestation) => {
+                        let span = tracing::debug_span!("ValidatorMessage::ValidPayloadAttestation", service = "validator");
+                        let _enter = span.enter();
+
                         // TODO: (gloas): only add to pool if any validators is the next proposer
                         self.payload_attestation_agg_pool
                             .insert_payload_attestation(wait_group, payload_attestation);
@@ -1716,9 +1719,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         );
 
         for own_payload_attestation in own_payload_attestations {
-            let payload_attestation = Arc::new(own_payload_attestation.clone());
-
-            ValidatorToP2p::PublishPayloadAttestation(payload_attestation.clone_arc())
+            ValidatorToP2p::PublishPayloadAttestation(Arc::new(*own_payload_attestation))
                 .send(&self.p2p_tx);
         }
 

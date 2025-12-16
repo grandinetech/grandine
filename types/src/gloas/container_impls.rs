@@ -13,7 +13,8 @@ use crate::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
     gloas::containers::{
-        DataColumnSidecar, ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope,
+        CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayloadEnvelope,
+        PayloadAttestationData, SignedExecutionPayloadEnvelope,
     },
     preset::Preset,
 };
@@ -64,5 +65,14 @@ impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
             .field("beacon_block_root", &self.beacon_block_root)
             .field("kzg_commitments", &self.kzg_commitments)
             .finish()
+    }
+}
+
+impl<P: Preset> CombinedPayloadAttestation<P> {
+    pub fn data(&self) -> PayloadAttestationData {
+        match self {
+            Self::Attestation(payload_attestation) => payload_attestation.data,
+            Self::Message(payload_attestation) => payload_attestation.data,
+        }
     }
 }

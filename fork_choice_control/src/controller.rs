@@ -25,8 +25,8 @@ use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    ExecutionPayloadEnvelopeOrigin, PayloadAttestationOrigin, StateCacheProcessor, Store,
-    StoreConfig,
+    ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+    StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -67,7 +67,8 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
-        ExecutionPayloadEnvelopeTask, PayloadAttestationTask, StateAtSlotCacheFlushTask,
+        ExecutionPayloadEnvelopeTask, PayloadAttestationBatchTask, PayloadAttestationTask,
+        StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -699,13 +700,12 @@ where
         })
     }
 
-    pub fn on_own_payload_attestation(&self, payload_attestation: Arc<PayloadAttestationMessage>) {
+    pub fn on_payload_attestation(&self, payload_attestation: PayloadAttestationItem<P>) {
         self.spawn(PayloadAttestationTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
             payload_attestation,
-            origin: PayloadAttestationOrigin::Own,
             metrics: self.metrics.clone(),
         })
     }
@@ -719,8 +719,27 @@ where
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
-            payload_attestation,
-            origin: PayloadAttestationOrigin::Gossip(gossip_id),
+            payload_attestation: PayloadAttestationItem::unverified(
+                Arc::new(payload_attestation.into()),
+                PayloadAttestationOrigin::Gossip(gossip_id),
+            ),
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    pub fn on_api_payload_attestation_batch(
+        &self,
+        payload_attestations: Vec<PayloadAttestationItem<P>>,
+    ) {
+        if payload_attestations.is_empty() {
+            return;
+        }
+
+        self.spawn(PayloadAttestationBatchTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            payload_attestations,
             metrics: self.metrics.clone(),
         })
     }

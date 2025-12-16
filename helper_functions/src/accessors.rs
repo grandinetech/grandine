@@ -1083,9 +1083,7 @@ fn compute_ptc_for_slot_internal<P: Preset>(
     let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
     let seed = hashing::hash_256_64(seed, slot);
 
-    let indices = beacon_committees(state, slot)?
-        .flatten()
-        .collect_vec();
+    let indices = beacon_committees(state, slot)?.flatten().collect_vec();
 
     misc::compute_balance_weighted_selection::<P>(
         state,
@@ -1096,10 +1094,7 @@ fn compute_ptc_for_slot_internal<P: Preset>(
     )
 }
 
-pub fn relative_slot<P: Preset>(
-    state: &impl BeaconState<P>,
-    slot: Slot,
-) -> Result<RelativeSlot> {
+pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<RelativeSlot> {
     match (state.slot() + 1).checked_sub(slot) {
         None => bail!(Error::SlotAfterNext),
         Some(0) => Ok(RelativeSlot::Next),
@@ -1129,18 +1124,15 @@ pub fn get_or_try_init_ptc<P: Preset>(
     if state.is_post_gloas() {
         let slot = absolute_slot(state, relative_slot);
 
-        let cached = state
-            .cache()
-            .ptc_cache[relative_slot]
-            .get_or_try_init(|| {
-                if report_cache_miss {
-                    #[cfg(feature = "metrics")]
-                    if let Some(metrics) = METRICS.get() {
-                        metrics.ptc_cache_init_count.inc();
-                    }
+        let cached = state.cache().ptc_cache[relative_slot].get_or_try_init(|| {
+            if report_cache_miss {
+                #[cfg(feature = "metrics")]
+                if let Some(metrics) = METRICS.get() {
+                    metrics.ptc_cache_init_count.inc();
                 }
-                compute_ptc_for_slot_internal(state, slot)
-            })?;
+            }
+            compute_ptc_for_slot_internal(state, slot)
+        })?;
 
         Ok(Some(cached))
     } else {
@@ -1171,26 +1163,24 @@ pub fn get_ptc<P: Preset>(
 
 pub fn get_indexed_payload_attestation<P: Preset>(
     state: &impl BeaconState<P>,
-    payload_attestation: PayloadAttestation<P>,
+    payload_attestation: &PayloadAttestation<P>,
 ) -> Result<IndexedPayloadAttestation<P>> {
-    let PayloadAttestation {
-        aggregation_bits,
-        data,
-        signature,
-    } = payload_attestation;
-
-    let ptc = get_ptc(state, data.slot)?;
-    let attesting_indices =
+    let ptc = get_ptc(state, payload_attestation.data.slot)?;
+    let mut attesting_indices =
         ContiguousList::try_from_iter(ptc.into_iter().zip(0..).filter_map(|(index, i)| {
-            aggregation_bits
+            payload_attestation
+                .aggregation_bits
                 .get(i)
                 .and_then(|is_true| is_true.then_some(index))
         }))?;
 
+    // Sorting a slice is faster than building a `BTreeMap`.
+    attesting_indices.sort_unstable();
+
     Ok(IndexedPayloadAttestation {
         attesting_indices,
-        data,
-        signature,
+        data: payload_attestation.data,
+        signature: payload_attestation.signature,
     })
 }
 
