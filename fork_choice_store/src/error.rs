@@ -7,8 +7,10 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
+    gloas::containers::{
+        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    },
+    phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
     preset::{Mainnet, Preset},
 };
 
@@ -172,6 +174,20 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
+    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
+    #[error("builder index mismatch: expected {expected}, actual {actual}")]
+    BuilderIndexMismatch {
+        expected: ValidatorIndex,
+        actual: ValidatorIndex,
+    },
+    #[error("execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})")]
+    ExecutionPayloadBlockHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
+    #[error("validator not active (builder_index: {builder_index})")]
+    ValidatorNotActive { builder_index: ValidatorIndex },
     #[error("payload attestation's block is invalid: {payload_attestation:?}")]
     PayloadAttestationInvalidBlock {
         payload_attestation: Arc<PayloadAttestationMessage>,

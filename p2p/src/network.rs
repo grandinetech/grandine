@@ -2386,14 +2386,28 @@ impl<P: Preset> Network<P> {
                 self.controller
                     .on_gossip_execution_payload_bid(payload_bid, GossipId { source, message_id });
             }
-            PubsubMessage::ExecutionPayload(_) => {
-                // TODO: (gloas): handle pubsub message
-            }
             PubsubMessage::LightClientFinalityUpdate(_) => {
                 debug_with_peers!("received light client finality update as gossip");
             }
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug_with_peers!("received light client optimistic update as gossip");
+            }
+            PubsubMessage::ExecutionPayload(execution_payload_envelope) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["execution_payload_envelope"]);
+                }
+
+                trace_with_peers!(
+                    "received execution payload envelope as gossip: \
+                    {execution_payload_envelope:?} from {source}"
+                );
+
+                P2pToSync::GossipExecutionPayload(
+                    execution_payload_envelope,
+                    source,
+                    GossipId { source, message_id },
+                )
+                .send(&self.channels.p2p_to_sync_tx);
             }
         }
     }

@@ -12,7 +12,8 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin, PayloadAttestationAction, PayloadAttestationOrigin,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
+    PayloadAttestationAction, PayloadAttestationOrigin,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -23,7 +24,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, Slot, ValidatorIndex, H256},
@@ -149,6 +150,12 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
         slot: Slot,
+    },
+    ExecutionPayloadEnvelope {
+        wait_group: W,
+        result: Result<ExecutionPayloadEnvelopeAction<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+        submission_time: Instant,
     },
     FinishedPersistingExecutionPayloadEnvelopes {
         wait_group: W,

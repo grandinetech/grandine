@@ -51,6 +51,7 @@ pub enum Topic {
     ContributionAndProof,
     DataColumnSidecar,
     ExecutionPayloadBid,
+    ExecutionPayloadAvailable,
     FinalizedCheckpoint,
     Head,
     PayloadAttestation,
@@ -70,6 +71,7 @@ pub enum Event<P: Preset> {
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
     ExecutionPayloadBid(ExecutionPayloadBidEvent),
+    ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttestation(PayloadAttestationEvent),
@@ -91,6 +93,7 @@ impl<P: Preset> Event<P> {
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
             Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
+            Self::ExecutionPayloadAvailable(_) => Topic::ExecutionPayloadAvailable,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::PayloadAttestation(_) => Topic::PayloadAttestation,
@@ -113,6 +116,7 @@ pub struct EventChannels<P: Preset> {
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
     pub execution_payload_bids: Sender<Event<P>>,
+    pub execution_payload_available: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub payload_attestations: Sender<Event<P>>,
@@ -142,6 +146,7 @@ impl<P: Preset> EventChannels<P> {
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
             execution_payload_bids: broadcast::channel(max_events).0,
+            execution_payload_available: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attestations: broadcast::channel(max_events).0,
@@ -164,6 +169,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
             Topic::ExecutionPayloadBid => &self.execution_payload_bids,
+            Topic::ExecutionPayloadAvailable => &self.execution_payload_available,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttestation => &self.payload_attestations,
@@ -293,6 +299,12 @@ impl<P: Preset> EventChannels<P> {
                     warn_with_peers!("unable to send chain reorg event: {error}");
                 }
             }
+        }
+    }
+
+    pub fn send_execution_payload_available_event(&self, slot: Slot, block_root: H256) {
+        if let Err(error) = self.send_execution_payload_available_event_internal(slot, block_root) {
+            warn_with_peers!("unable to send execution payload available event: {error}");
         }
     }
 
@@ -511,6 +523,22 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_execution_payload_available_event_internal(
+        &self,
+        slot: Slot,
+        block_root: H256,
+    ) -> Result<()> {
+        if self.execution_payload_available.receiver_count() > 0 {
+            let event = Event::ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent {
+                slot,
+                block_root,
+            });
+            self.execution_payload_available.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_payload_attestation_event_internal(
         &self,
         payload_attestation: Arc<PayloadAttestationMessage>,
@@ -638,6 +666,13 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
             kzg_commitments: data_column_sidecar.kzg_commitments().clone(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadAvailableEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    pub block_root: H256,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
