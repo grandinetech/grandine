@@ -1443,6 +1443,7 @@ impl<P: Preset> Network<P> {
         Ok(())
     }
 
+    #[expect(clippy::too_many_lines)]
     fn handle_data_columns_by_range_request(
         &self,
         peer_id: PeerId,
@@ -1499,8 +1500,10 @@ impl<P: Preset> Network<P> {
             .try_into()?;
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
+        let sampling_columns = controller.sampling_columns();
         let columns = Arc::unwrap_or_clone(columns)
             .into_iter()
+            .filter(|column_index| sampling_columns.contains(column_index))
             .sorted()
             .collect::<Vec<_>>();
 
@@ -1708,9 +1711,11 @@ impl<P: Preset> Network<P> {
         self.dedicated_executor
             .spawn(async move {
                 // > Clients MAY limit the number of blocks and sidecars in the response.
+                let sampling_columns = controller.sampling_columns();
                 let data_column_ids = data_column_ids
                     .into_iter()
                     .flat_map(Into::<Vec<DataColumnIdentifier>>::into)
+                    .filter(|column_identifier| sampling_columns.contains(&column_identifier.index))
                     .take(max_request_data_column_sidecars.try_into()?);
 
                 let mut data_column_sidecars = controller
