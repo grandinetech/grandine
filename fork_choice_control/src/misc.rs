@@ -12,6 +12,7 @@ use fork_choice_store::{
     ExecutionPayloadEnvelopeOrigin, PayloadAttestationOrigin,
 };
 use serde::Serialize;
+use ssz::H256;
 use strum::IntoStaticStr;
 use tracing::Span;
 use types::{
@@ -188,6 +189,18 @@ pub struct PendingExecutionPayloadEnvelope<P: Preset> {
     pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     pub origin: ExecutionPayloadEnvelopeOrigin,
     pub submission_time: Instant,
+}
+
+impl<P: Preset> PendingExecutionPayloadEnvelope<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        self.execution_payload_envelope.message.slot
+    }
+
+    #[must_use]
+    pub fn block_root(&self) -> H256 {
+        self.execution_payload_envelope.message.beacon_block_root
+    }
 }
 
 pub struct VerifyAggregateAndProofResult<P: Preset> {

@@ -181,7 +181,9 @@ pub enum Error<P: Preset> {
         expected: ValidatorIndex,
         actual: ValidatorIndex,
     },
-    #[error("execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})")]
+    #[error(
+        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
     ExecutionPayloadBlockHashMismatch {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
@@ -197,6 +199,10 @@ pub enum Error<P: Preset> {
         payload_attestation: Arc<PayloadAttestationMessage>,
         validator_index: ValidatorIndex,
         slot: Slot,
+    },
+    #[error("payload envelope's block is invalid: {payload_envelope:?}")]
+    PayloadEnvelopeInvalidBlock {
+        payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },

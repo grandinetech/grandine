@@ -25,8 +25,8 @@ use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    ExecutionPayloadEnvelopeOrigin,
-    PayloadAttestationOrigin, StateCacheProcessor, Store, StoreConfig,
+    ExecutionPayloadEnvelopeOrigin, PayloadAttestationOrigin, StateCacheProcessor, Store,
+    StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -67,8 +67,7 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
-        ExecutionPayloadEnvelopeTask,
-        PayloadAttestationTask, StateAtSlotCacheFlushTask,
+        ExecutionPayloadEnvelopeTask, PayloadAttestationTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -398,15 +397,10 @@ where
         execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         gossip_id: GossipId,
     ) {
-        self.spawn(ExecutionPayloadEnvelopeTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
+        self.spawn_execution_payload_envelope_task(
             execution_payload_envelope,
-            origin: ExecutionPayloadEnvelopeOrigin::Gossip(gossip_id),
-            submission_time: Instant::now(),
-            metrics: self.metrics.clone(),
-        })
+            ExecutionPayloadEnvelopeOrigin::Gossip(gossip_id),
+        );
     }
 
     pub fn on_notified_new_payload(
@@ -625,18 +619,13 @@ where
 
     pub fn on_requested_execution_payload_envelope(
         &self,
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         peer_id: PeerId,
     ) {
-        self.spawn(ExecutionPayloadEnvelopeTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
-            execution_payload_envelope: envelope,
-            origin: ExecutionPayloadEnvelopeOrigin::Requested(peer_id),
-            submission_time: Instant::now(),
-            metrics: self.metrics.clone(),
-        })
+        self.spawn_execution_payload_envelope_task(
+            execution_payload_envelope,
+            ExecutionPayloadEnvelopeOrigin::Requested(peer_id),
+        );
     }
 
     pub fn on_requested_data_column_sidecar(
@@ -874,6 +863,23 @@ where
             processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),
             tracing_span: Span::current(),
+        })
+    }
+
+    fn spawn_execution_payload_envelope_task(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+    ) {
+        self.spawn(ExecutionPayloadEnvelopeTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            execution_payload_envelope,
+            state: None,
+            origin,
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
         })
     }
 

@@ -947,6 +947,15 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub const fn should_generate_event(&self) -> bool {
         matches!(self, Self::Gossip(_))
     }
+
+    // TODO: (gloas): confirm whether can we trust own execution payload envelope
+    #[must_use]
+    pub const fn verify_signatures(&self) -> bool {
+        match self {
+            Self::Gossip(_) | Self::Requested(_) => true,
+            Self::Own => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -955,7 +964,7 @@ pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
     Ignore(Publishable),
     DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
     DelayUntilState(Arc<SignedExecutionPayloadEnvelope<P>>, H256, Slot),
-    DelayUntilSlot(Arc<SignedExecutionPayloadEnvelope<P>>),
+    DelayUntilData(Arc<SignedExecutionPayloadEnvelope<P>>),
 }
 
 impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
