@@ -4213,6 +4213,7 @@ dependencies = [
  "ssz",
  "test-generator",
  "thiserror 2.0.17",
+ "tokio",
  "tracing",
  "try_from_iterator",
  "typenum",

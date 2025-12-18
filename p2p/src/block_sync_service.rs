@@ -13,6 +13,7 @@ use anyhow::Result;
 use data_dumper::DataDumper;
 use database::{Database, PrefixableKey as _};
 use debug_info::HealthCheck;
+use dedicated_executor::DedicatedExecutor;
 use eth1_api::RealController;
 use eth2_libp2p::{
     NetworkGlobals, PeerAction, PeerId, ReportSource, service::api_types::AppRequestId,
@@ -85,7 +86,7 @@ pub struct Channels<P: Preset> {
 
 pub struct BlockSyncService<P: Preset> {
     config: Arc<Config>,
-    database: Database,
+    database: Arc<Database>,
     sync_direction: SyncDirection,
     back_sync: Option<BackSync<P>>,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
@@ -111,8 +112,9 @@ pub struct BlockSyncService<P: Preset> {
     sync_to_metrics_tx: Option<UnboundedSender<SyncToMetrics>>,
     archiver_to_sync_tx: Option<UnboundedSender<ArchiverToSync>>,
     archiver_to_sync_rx: Option<UnboundedReceiver<ArchiverToSync>>,
-    self_tx: UnboundedSender<BlockSyncServiceMessage>,
-    self_rx: UnboundedReceiver<BlockSyncServiceMessage>,
+    self_tx: UnboundedSender<BlockSyncServiceMessage<P>>,
+    self_rx: UnboundedReceiver<BlockSyncServiceMessage<P>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
 }
 
 impl<P: Preset> Drop for BlockSyncService<P> {
@@ -139,6 +141,7 @@ impl<P: Preset> BlockSyncService<P> {
         received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
         data_dumper: Arc<DataDumper>,
         network_globals: Arc<NetworkGlobals>,
+        dedicated_executor: Arc<DedicatedExecutor>,
     ) -> Result<Self> {
         let back_sync;
 
@@ -223,7 +226,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         let mut service = Self {
             config,
-            database: db,
+            database: Arc::new(db),
             sync_direction: SyncDirection::Forward,
             back_sync,
             anchor_checkpoint_provider,
@@ -257,6 +260,7 @@ impl<P: Preset> BlockSyncService<P> {
             archiver_to_sync_rx,
             self_tx,
             self_rx,
+            dedicated_executor,
         };
 
         service.set_back_synced(is_back_synced);
@@ -537,7 +541,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.sync_manager.blobs_by_range_request_finished(request_id, request_direction);
 
                             if request_direction == Some(SyncDirection::Back) {
-                                self.check_back_sync_progress().await?;
+                                self.check_back_sync_progress().await;
                             }
 
                             self.request_blobs_and_blocks_if_ready();
@@ -553,7 +557,7 @@ impl<P: Preset> BlockSyncService<P> {
                             );
 
                             if request_direction == Some(SyncDirection::Back) {
-                                self.check_back_sync_progress().await?;
+                                self.check_back_sync_progress().await;
                             }
 
                             self.request_blobs_and_blocks_if_ready();
@@ -564,7 +568,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.sync_manager.data_columns_by_range_request_finished(request_id, request_direction);
 
                             if request_direction == Some(SyncDirection::Back) {
-                                self.check_back_sync_progress().await?;
+                                self.check_back_sync_progress().await;
                             }
 
                             self.request_blobs_and_blocks_if_ready();
@@ -613,6 +617,13 @@ impl<P: Preset> BlockSyncService<P> {
 
                 message = self.self_rx.select_next_some() => {
                     match message {
+                        BlockSyncServiceMessage::BackSync { back_sync } => {
+                            self.back_sync = *back_sync;
+
+                            if let Err(error) = self.try_to_spawn_back_sync_states_archiver() {
+                                warn_with_peers!("error while trying to spawn back states archiver: {error:?}");
+                            }
+                        }
                         BlockSyncServiceMessage::RequestData => {
                             if let Err(error) = self.request_data().await {
                                 warn_with_peers!("unable to request new data from the network: {error:?}");
@@ -626,35 +637,67 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    pub async fn check_back_sync_progress(&mut self) -> Result<()> {
-        self.request_expired_blob_range_requests().await?;
-        self.request_expired_block_range_requests().await?;
-        self.request_expired_data_column_range_requests().await?;
+    pub async fn check_back_sync_progress(&mut self) {
+        if let Err(error) = self.request_expired_data().await {
+            warn_with_peers!("unable to request expired requests: {error:?}");
+        }
 
         // Check if batch has finished
         if !self.sync_manager.ready_to_request_by_range() || !self.delayed_batches.is_empty() {
-            return Ok(());
+            return;
         }
 
-        let Some(back_sync) = self.back_sync.as_mut() else {
-            return Ok(());
+        let Some(mut back_sync) = self.back_sync.take() else {
+            return;
         };
 
-        if let Err(error) = back_sync.verify_blocks(&self.config, &self.database, &self.controller)
-        {
-            warn_with_peers!("error occurred while verifying back-sync data: {error:?}");
+        let self_tx = self.self_tx.clone();
+        let config = self.config.clone_arc();
+        let database = self.database.clone_arc();
+        let controller = self.controller.clone_arc();
 
-            if let Some(BackSyncError::FinalCheckpointMismatch::<P> { .. }) = error.downcast_ref() {
-                back_sync.remove(&self.database)?;
-                self.back_sync = BackSync::load(&self.database)?;
-            }
-        }
+        self.dedicated_executor
+            .spawn(async move {
+                if let Err(error) = back_sync.verify_blocks(&config, &database, &controller) {
+                    warn_with_peers!("error occurred while verifying back-sync data: {error:?}");
 
-        if let Some(back_sync) = self.back_sync.as_mut() {
-            back_sync.reset_batch();
-        }
+                    if let Some(BackSyncError::FinalCheckpointMismatch::<P> { .. }) =
+                        error.downcast_ref()
+                    {
+                        if let Err(error) = back_sync.remove(&database) {
+                            warn_with_peers!(
+                                "error occurred while removing back-sync from database: {error:?}"
+                            );
+                        }
 
-        self.try_to_spawn_back_sync_states_archiver()
+                        match BackSync::load(&database) {
+                            Ok(mut back_sync) => {
+                                if let Some(back_sync) = back_sync.as_mut() {
+                                    back_sync.reset_batch();
+                                }
+
+                                return BlockSyncServiceMessage::BackSync {
+                                    back_sync: Box::new(back_sync),
+                                }
+                                .send(&self_tx);
+                            }
+                            Err(error) => {
+                                warn_with_peers!(
+                                    "error occurred while load back-sync from database: {error:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+
+                back_sync.reset_batch();
+
+                BlockSyncServiceMessage::BackSync {
+                    back_sync: Box::new(Some(back_sync)),
+                }
+                .send(&self_tx)
+            })
+            .detach()
     }
 
     fn finish_back_sync(&mut self) -> Result<()> {
@@ -907,10 +950,14 @@ impl<P: Preset> BlockSyncService<P> {
         BlockSyncServiceMessage::RequestData.send(&self.self_tx);
     }
 
-    async fn request_data(&mut self) -> Result<()> {
+    async fn request_expired_data(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests().await?;
         self.request_expired_block_range_requests().await?;
-        self.request_expired_data_column_range_requests().await?;
+        self.request_expired_data_column_range_requests().await
+    }
+
+    async fn request_data(&mut self) -> Result<()> {
+        self.request_expired_data().await?;
 
         if !self.sync_manager.ready_to_request_by_range() {
             return Ok(());

@@ -348,7 +348,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let attestation_verifier = AttestationVerifier::new(
         controller.clone_arc(),
-        dedicated_executor_low_priority,
+        dedicated_executor_low_priority.clone_arc(),
         metrics.clone(),
         fork_choice_to_attestation_verifier_rx,
     );
@@ -708,6 +708,7 @@ pub async fn run_after_genesis<P: Preset>(
         received_data_column_sidecars,
         data_dumper,
         network.network_globals().clone_arc(),
+        dedicated_executor_low_priority,
     )
     .await?;
 

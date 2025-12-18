@@ -34,6 +34,7 @@ use types::{
 };
 
 use crate::{
+    back_sync::BackSync,
     misc::{
         AttestationSubnetActions, BeaconCommitteeSubscription, PeerReportReason, RPCRequestType,
         SyncCommitteeSubnetAction, SyncCommitteeSubscription,
@@ -180,11 +181,12 @@ impl ArchiverToSync {
     }
 }
 
-pub enum BlockSyncServiceMessage {
+pub enum BlockSyncServiceMessage<P: Preset> {
+    BackSync { back_sync: Box<Option<BackSync<P>>> },
     RequestData,
 }
 
-impl BlockSyncServiceMessage {
+impl<P: Preset> BlockSyncServiceMessage<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug_with_peers!("send to block sync service failed because the receiver was dropped");
