@@ -1711,8 +1711,6 @@ where
                     } else {
                         self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
                     }
-
-                    // TODO: (gloas): retry payload envelope corresponding to `block_root`?
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilParent(data_column_sidecar)) => {
