@@ -216,7 +216,7 @@ override DOCKER_SUFFIX := -$(DOCKER_SUFFIX)
 endif
 
 .PHONY: docker
-docker: grandine-docker nethermind-docker
+docker: nethermind-docker grandine-docker
 
 # ----- GRANDINE DOCKER -----
 
