@@ -88,8 +88,8 @@ use crate::{
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
     AttestationOrigin, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
-    ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAttestationAction, PayloadAttestationOrigin,
+    ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction,
+    PayloadAttestationOrigin,
 };
 
 /// [`Store`] from the Fork Choice specification.
@@ -2573,9 +2573,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub fn validate_execution_payload_envelope(
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        state: Option<Arc<BeaconState<P>>>,
+        origin: &ExecutionPayloadEnvelopeOrigin,
+    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
+        let slot = envelope.message.slot;
+        let block_root = envelope.message.beacon_block_root;
+
+        self.validate_execution_payload_envelope_with_state(envelope, origin, || {
+            state.or_else(|| {
+                self.state_cache
+                    .existing_state_at_slot(self, block_root, slot)
+            })
+        })
+    }
+
+    pub fn validate_execution_payload_envelope_with_state(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: &ExecutionPayloadEnvelopeOrigin,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         let slot = envelope.message.slot;
         let beacon_block_root = envelope.message.beacon_block_root;
@@ -2585,6 +2605,50 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
         if slot < self.finalized_slot() {
             return Ok(ExecutionPayloadEnvelopeAction::Ignore(false));
+        }
+
+        // [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
+        // for this block root from this builder (spec line 230-231)
+        if self.accepted_execution_payload_envelopes.contains(&(
+            slot,
+            beacon_block_root,
+            builder_index,
+        )) {
+            return Ok(ExecutionPayloadEnvelopeAction::Ignore(true));
+        }
+
+        // [REJECT] block passes validation.
+        // Part 1/2:
+        ensure!(
+            !self.rejected_block_roots.contains(&beacon_block_root),
+            Error::<P>::PayloadEnvelopeInvalidBlock {
+                payload_envelope: envelope
+            },
+        );
+
+        let Some(state) = state_fn() else {
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilState(
+                envelope,
+                beacon_block_root,
+                slot,
+            ));
+        };
+
+        if origin.verify_signatures() {
+            // [REJECT] The builder signature envelope.signature is valid
+            SingleVerifier.verify_singular(
+                envelope.message.signing_root(&self.chain_config, &state),
+                envelope.signature,
+                self.pubkey_cache
+                    .get_or_insert(*accessors::public_key(&state, builder_index)?)?,
+                SignatureKind::ExecutionPayloadEnvelope,
+            )?;
+        }
+
+        // > Check if blob data is available
+        // > If not, this payload MAY be queued and subsequently considered when blob data becomes available
+        if !self.is_data_available_for_envelope(&envelope) {
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(envelope));
         }
 
         // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
@@ -2599,6 +2663,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         };
 
+        // [REJECT] block passes validation.
+        // Part 2/2:
+        ensure!(
+            !chain_link.payload_status.is_invalid(),
+            Error::<P>::PayloadEnvelopeInvalidBlock {
+                payload_envelope: envelope
+            },
+        );
+
         let block = &chain_link.block;
 
         // [REJECT] block.slot equals envelope.slot
@@ -2610,39 +2683,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        let Some(ref state) = chain_link.state else {
-            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilState(
-                envelope,
-                beacon_block_root,
-                slot,
-            ));
+        let Some(bid) = block
+            .message()
+            .body()
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().message)
+        else {
+            return Err(Error::PayloadEnvelopeInvalidBlock {
+                payload_envelope: envelope,
+            }
+            .into());
         };
-
-        // [REJECT] The builder_index must be a valid and active validator
-        let validator = state
-            .validators()
-            .get(builder_index)
-            .map_err(|_| Error::<P>::ValidatorNotActive { builder_index })?;
-
-        ensure!(
-            predicates::is_active_validator(validator, accessors::get_current_epoch(state)),
-            Error::<P>::ValidatorNotActive { builder_index },
-        );
-
-        // [REJECT] The builder signature envelope.signature is valid
-        SingleVerifier.verify_singular(
-            envelope.message.signing_root(&self.chain_config, state),
-            envelope.signature,
-            self.pubkey_cache.get_or_insert(validator.pubkey)?,
-            SignatureKind::ExecutionPayloadEnvelope,
-        )?;
-
-        // [REJECT] Get the payload bid from state
-        // Spec: "this can be obtained from the state.latest_execution_payload_bid"
-        let bid = state
-            .post_gloas()
-            .ok_or_else(|| anyhow::anyhow!("ExecutionPayloadEnvelope requires Gloas state"))?
-            .latest_execution_payload_bid();
 
         // [REJECT] envelope.builder_index == bid.builder_index
         ensure!(
@@ -2662,17 +2713,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        // [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
-        // for this block root from this builder (spec line 230-231)
-        if self.accepted_execution_payload_envelopes.contains(&(
-            slot,
-            beacon_block_root,
-            builder_index,
-        )) {
-            return Ok(ExecutionPayloadEnvelopeAction::Ignore(true));
-        }
-
-        // All validations passed
         Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
     }
 

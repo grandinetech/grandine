@@ -38,8 +38,8 @@ use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAction, PayloadAttestationAction, PayloadAttestationOrigin, StateCacheProcessor,
-    Store, ValidAttestation,
+    PayloadAction, PayloadAttestationAction, PayloadAttestationOrigin, StateCacheProcessor, Store,
+    ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -107,6 +107,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
+    delayed_until_data: HashMap<H256, PendingExecutionPayloadEnvelope<P>>,
     // We previously ignored objects that would have to be delayed more than one slot. This was
     // based on the assumption that one slot is enough to account for clock differences between
     // nodes. However, this meant that if the application lagged enough to miss multiple slot
@@ -185,6 +186,7 @@ where
             execution_engine,
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
+            delayed_until_data: HashMap::new(),
             delayed_until_slot: BTreeMap::new(),
             delayed_until_payload: HashMap::new(),
             delayed_until_state: HashMap::new(),
@@ -1811,11 +1813,7 @@ where
                     execution_payload_envelope.message.slot
                 );
 
-                if origin.should_generate_event()
-                    && self
-                        .store
-                        .is_data_available_for_envelope(&execution_payload_envelope)
-                {
+                if origin.should_generate_event() {
                     self.event_channels.send_execution_payload_available_event(
                         execution_payload_envelope.message.slot,
                         execution_payload_envelope.message.beacon_block_root,
@@ -1880,7 +1878,11 @@ where
                     self.state_cache
                         .existing_state_at_slot(&self.store, beacon_block_root, slot)
                 {
-                    self.retry_execution_payload_envelope(wait_group.clone(), pending_envelope);
+                    self.retry_execution_payload_envelope(
+                        wait_group.clone(),
+                        pending_envelope,
+                        Some(state),
+                    );
                 } else {
                     debug_with_peers!(
                         "execution payload envelope delayed until state at same slot is ready \
@@ -1894,19 +1896,38 @@ where
                         .push(pending_envelope);
                 }
             }
-            Ok(ExecutionPayloadEnvelopeAction::DelayUntilSlot(execution_payload_envelope)) => {
+            Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(execution_payload_envelope)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.register_mutator_execution_payload_envelope(&["delayed_until_slot"]);
+                    metrics.register_mutator_execution_payload_envelope(&["delayed_until_data"]);
                 }
 
-                self.delay_execution_payload_envelope_until_slot(
-                    wait_group,
-                    PendingExecutionPayloadEnvelope {
-                        execution_payload_envelope,
-                        origin,
-                        submission_time,
-                    },
-                );
+                let pending_payload_envelope = PendingExecutionPayloadEnvelope {
+                    execution_payload_envelope,
+                    origin,
+                    submission_time,
+                };
+                if self.store.is_data_available_for_envelope(
+                    &pending_payload_envelope.execution_payload_envelope,
+                ) {
+                    self.retry_execution_payload_envelope(
+                        wait_group.clone(),
+                        pending_payload_envelope,
+                        None,
+                    );
+                } else {
+                    let slot = pending_payload_envelope.slot();
+                    let block_root = pending_payload_envelope.block_root();
+
+                    debug_with_peers!(
+                        "execution payload envelope delayed until data available \
+                         (block_root: {block_root:?}, slot: {slot})",
+                    );
+
+                    self.delay_execution_payload_envelope_until_data(
+                        block_root,
+                        pending_payload_envelope,
+                    );
+                }
             }
             Err(error) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -2676,10 +2697,12 @@ where
             .then(|| {
                 let delayed = self.prune_delayed_until_block();
                 let delayed_until_blobs = self.prune_delayed_until_blobs();
+                let delayed_until_data = self.prune_delayed_until_data();
                 let waiting = self.prune_waiting_for_checkpoint_states();
                 delayed
                     .into_iter()
                     .chain(delayed_until_blobs)
+                    .chain(delayed_until_data)
                     .chain(waiting)
             })
             .into_iter()
@@ -2840,6 +2863,17 @@ where
         if should_retry_block {
             if let Some(pending_block) = self.take_delayed_until_blobs(block_root) {
                 self.retry_block(wait_group.clone(), pending_block);
+            }
+        }
+
+        // Once all sampling columns are available, retry pending payload envelope
+        if accepted_data_columns == self.store.sampling_columns_count() {
+            if let Some(pending_payload_envelope) = self.take_delayed_until_data(block_root) {
+                self.retry_execution_payload_envelope(
+                    wait_group.clone(),
+                    pending_payload_envelope,
+                    None,
+                );
             }
         }
 
@@ -3096,6 +3130,7 @@ where
             self.retry_execution_payload_envelope(
                 wait_group.clone(),
                 pending_execution_payload_envelope,
+                None,
             );
         } else {
             trace_with_peers!(
@@ -3118,23 +3153,13 @@ where
         }
     }
 
-    fn delay_execution_payload_envelope_until_slot(
+    fn delay_execution_payload_envelope_until_data(
         &mut self,
-        wait_group: &W,
+        beacon_block_root: H256,
         pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
     ) {
-        let slot = pending_execution_payload_envelope
-            .execution_payload_envelope
-            .message
-            .slot;
-
-        trace_with_peers!("execution payload envelope delayed until slot (slot: {slot})",);
-
-        self.delayed_until_slot
-            .entry(slot)
-            .or_default()
-            .execution_payload_envelopes
-            .push(pending_execution_payload_envelope);
+        self.delayed_until_data
+            .insert(beacon_block_root, pending_execution_payload_envelope);
     }
 
     fn delay_payload_status_until_block(
@@ -3319,6 +3344,13 @@ where
         self.delayed_until_block.remove(&block_root)
     }
 
+    fn take_delayed_until_data(
+        &mut self,
+        block_root: H256,
+    ) -> Option<PendingExecutionPayloadEnvelope<P>> {
+        self.delayed_until_data.remove(&block_root)
+    }
+
     fn take_delayed_until_slot(&mut self, slot: Slot) -> impl Iterator<Item = Delayed<P>> {
         match slot.checked_add(1) {
             Some(next_slot) => {
@@ -3370,6 +3402,7 @@ where
             self.retry_execution_payload_envelope(
                 wait_group.clone(),
                 pending_execution_payload_envelope,
+                None,
             );
         }
 
@@ -3457,6 +3490,7 @@ where
         &self,
         wait_group: W,
         pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
+        state: Option<Arc<BeaconState<P>>>,
     ) {
         trace_with_peers!("retrying delayed execution payload envelope");
 
@@ -3471,6 +3505,7 @@ where
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             execution_payload_envelope,
+            state,
             origin,
             submission_time,
             metrics: self.metrics.clone(),
@@ -3683,6 +3718,27 @@ where
 
             !delayed.is_empty()
         });
+
+        gossip_ids
+    }
+
+    fn prune_delayed_until_data(&mut self) -> Vec<GossipId> {
+        let finalized_slot = self.store.finalized_slot();
+
+        let mut gossip_ids = vec![];
+
+        self.delayed_until_data
+            .retain(|_, pending_payload_envelope| {
+                if pending_payload_envelope.slot() > finalized_slot {
+                    return true;
+                }
+
+                if let Some(gossip_id) = pending_payload_envelope.origin.gossip_id_ref() {
+                    gossip_ids.push(gossip_id.clone());
+                }
+
+                false
+            });
 
         gossip_ids
     }
@@ -4090,6 +4146,13 @@ where
                 &type_name,
                 "delayed_until_block",
                 self.delayed_until_block.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_data",
+                self.delayed_until_data.len(),
             );
 
             metrics.set_collection_length(

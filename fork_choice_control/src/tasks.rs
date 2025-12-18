@@ -506,6 +506,7 @@ pub struct ExecutionPayloadEnvelopeTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
     pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
     pub origin: ExecutionPayloadEnvelopeOrigin,
     pub submission_time: Instant,
     pub metrics: Option<Arc<Metrics>>,
@@ -518,6 +519,7 @@ impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
             mutator_tx,
             wait_group,
             execution_payload_envelope,
+            state,
             origin,
             submission_time,
             metrics,
@@ -529,7 +531,11 @@ impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
                 .start_timer()
         });
 
-        let result = store_snapshot.validate_execution_payload_envelope(execution_payload_envelope);
+        let result = store_snapshot.validate_execution_payload_envelope(
+            execution_payload_envelope,
+            state,
+            &origin,
+        );
 
         MutatorMessage::ExecutionPayloadEnvelope {
             wait_group,
