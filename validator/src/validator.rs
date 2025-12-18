@@ -907,7 +907,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        // TODO: (gloas): build gloas block without blinded
         let beacon_block_option = match block_build_context
             .build_blinded_beacon_block(
                 randao_reveal,
@@ -1069,7 +1068,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 if let Some(blobs) = block_blobs {
                     if !blobs.is_empty() {
-                        // TODO: (gloas): handle gloas block publishing
                         if self
                             .chain_config
                             .phase_at_slot::<P>(slot_head.slot())
