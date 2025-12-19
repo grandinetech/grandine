@@ -1421,6 +1421,7 @@ pub async fn blobs<P: Preset, W: Wait>(
 )]
 pub async fn publish_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSszWithOptionalPhase(signed_api_block, _): EthJsonOrSszWithOptionalPhase<
@@ -1456,6 +1457,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
             Arc::new(signed_beacon_block),
             data_column_sidecars,
             controller,
+            event_channels,
             api_to_p2p_tx,
         )
         .await
@@ -1470,6 +1472,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
             Arc::new(signed_beacon_block),
             blob_sidecars,
             controller,
+            event_channels,
             api_to_p2p_tx,
         )
         .await
@@ -1490,6 +1493,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
 pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSszWithOptionalPhase(signed_blinded_block, _): EthJsonOrSszWithOptionalPhase<
@@ -1537,6 +1541,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
             signed_beacon_block,
             data_column_sidecars,
             controller,
+            event_channels,
             api_to_p2p_tx,
         )
         .await
@@ -1551,6 +1556,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
             signed_beacon_block,
             blob_sidecars,
             controller,
+            event_channels,
             api_to_p2p_tx,
         )
         .await
@@ -1561,6 +1567,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
 pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
     EthJsonOrSsz(signed_blinded_block, _): EthJsonOrSsz<
@@ -1600,6 +1607,7 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
         blob_sidecars,
         query.broadcast_validation.unwrap_or_default(),
         controller,
+        event_channels,
         api_to_p2p_tx,
     )
     .await
@@ -1608,6 +1616,7 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
 /// `POST /eth/v2/beacon/blocks`
 pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
+    State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
@@ -1640,6 +1649,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
             data_column_sidecars,
             query.broadcast_validation.unwrap_or_default(),
             controller,
+            event_channels,
             api_to_p2p_tx,
         )
         .await
@@ -1655,6 +1665,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
             blob_sidecars,
             query.broadcast_validation.unwrap_or_default(),
             controller,
+            event_channels,
             api_to_p2p_tx,
         )
         .await
@@ -2307,6 +2318,7 @@ pub async fn beacon_events<P: Preset>(
                 Event::AttesterSlashing(data) => ssevent.json_data(data),
                 Event::BlobSidecar(data) => ssevent.json_data(data),
                 Event::Block(data) => ssevent.json_data(data),
+                Event::BlockGossip(data) => ssevent.json_data(data),
                 Event::BlsToExecutionChange(data) => ssevent.json_data(data),
                 Event::ChainReorg(data) => ssevent.json_data(data),
                 Event::ContributionAndProof(data) => ssevent.json_data(data),
@@ -3549,6 +3561,7 @@ async fn publish_signed_block<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
@@ -3556,6 +3569,7 @@ async fn publish_signed_block<P: Preset, W: Wait>(
 
     if let Some(status_code) = publish_beacon_block_with_gossip_checks(
         controller.clone_arc(),
+        event_channels,
         block.clone_arc(),
         &blob_sidecars,
         &api_to_p2p_tx,
@@ -3600,6 +3614,7 @@ async fn publish_signed_block<P: Preset, W: Wait>(
 
 async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: &[Arc<BlobSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
@@ -3610,6 +3625,10 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
 
     match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => {
+            // `block` has been passed the gossip validation rules
+            event_channels
+                .send_block_gossip_event(block.message().slot(), block.message().hash_tree_root());
+
             publish_block_to_network(block, blob_sidecars, api_to_p2p_tx);
         }
         Ok(Some(ValidationOutcome::Ignore(publishable))) => {
@@ -3635,6 +3654,7 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
 
 async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
@@ -3645,6 +3665,10 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
 
     match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => {
+            // `block` has been passed the gossip validation rules
+            event_channels
+                .send_block_gossip_event(block.message().slot(), block.message().hash_tree_root());
+
             publish_block_to_network_with_data_column_sidecars(
                 block,
                 data_column_sidecars,
@@ -3705,6 +3729,7 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let data_column_sidecars =
@@ -3712,6 +3737,7 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
 
     if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
         controller.clone_arc(),
+        event_channels,
         block.clone_arc(),
         &data_column_sidecars,
         &api_to_p2p_tx,
@@ -3762,6 +3788,7 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
     blob_sidecars: Vec<BlobSidecar<P>>,
     broadcast_validation: BroadcastValidation,
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let blob_sidecars = blob_sidecars.into_iter().map(Arc::new).collect_vec();
@@ -3770,6 +3797,7 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
     if broadcast_validation == BroadcastValidation::Gossip
         && let Some(status_code) = publish_beacon_block_with_gossip_checks(
             controller.clone_arc(),
+            event_channels,
             block.clone_arc(),
             &blob_sidecars,
             &api_to_p2p_tx,
@@ -3854,6 +3882,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     broadcast_validation: BroadcastValidation,
     controller: ApiController<P, W>,
+    event_channels: Arc<EventChannels<P>>,
     api_to_p2p_tx: UnboundedSender<ApiToP2p<P>>,
 ) -> Result<StatusCode, Error> {
     let data_column_sidecars =
@@ -3862,6 +3891,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     if broadcast_validation == BroadcastValidation::Gossip
         && let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
             controller.clone_arc(),
+            event_channels,
             block.clone_arc(),
             &data_column_sidecars,
             &api_to_p2p_tx,

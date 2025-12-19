@@ -200,6 +200,14 @@ impl BlockOrigin {
         }
     }
 
+    #[must_use]
+    pub const fn should_send_gossip_event(&self) -> bool {
+        match self {
+            Self::Gossip(_) | Self::Api(_) => true,
+            Self::Requested(_) | Self::Own | Self::Persisted => false,
+        }
+    }
+
     // TODO: use Debug instead
     #[must_use]
     pub const fn metrics_label(&self) -> &str {

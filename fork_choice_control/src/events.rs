@@ -45,6 +45,7 @@ pub enum Topic {
     AttesterSlashing,
     BlobSidecar,
     Block,
+    BlockGossip,
     BlsToExecutionChange,
     ChainReorg,
     ContributionAndProof,
@@ -62,6 +63,7 @@ pub enum Event<P: Preset> {
     AttesterSlashing(Box<AttesterSlashing<P>>),
     BlobSidecar(BlobSidecarEvent),
     Block(BlockEvent),
+    BlockGossip(BlockGossipEvent),
     BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
@@ -81,6 +83,7 @@ impl<P: Preset> Event<P> {
             Self::AttesterSlashing(_) => Topic::AttesterSlashing,
             Self::BlobSidecar(_) => Topic::BlobSidecar,
             Self::Block(_) => Topic::Block,
+            Self::BlockGossip(_) => Topic::BlockGossip,
             Self::BlsToExecutionChange(_) => Topic::BlsToExecutionChange,
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
@@ -101,6 +104,7 @@ pub struct EventChannels<P: Preset> {
     pub attester_slashings: Sender<Event<P>>,
     pub blob_sidecars: Sender<Event<P>>,
     pub blocks: Sender<Event<P>>,
+    pub blocks_gossip: Sender<Event<P>>,
     pub bls_to_execution_changes: Sender<Event<P>>,
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
@@ -128,6 +132,7 @@ impl<P: Preset> EventChannels<P> {
             attester_slashings: broadcast::channel(max_events).0,
             blob_sidecars: broadcast::channel(max_events).0,
             blocks: broadcast::channel(max_events).0,
+            blocks_gossip: broadcast::channel(max_events).0,
             bls_to_execution_changes: broadcast::channel(max_events).0,
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
@@ -148,6 +153,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::AttesterSlashing => &self.attester_slashings,
             Topic::BlobSidecar => &self.blob_sidecars,
             Topic::Block => &self.blocks,
+            Topic::BlockGossip => &self.blocks_gossip,
             Topic::BlsToExecutionChange => &self.bls_to_execution_changes,
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
@@ -182,6 +188,12 @@ impl<P: Preset> EventChannels<P> {
     pub fn send_block_event(&self, slot: Slot, block_root: H256, execution_optimistic: bool) {
         if let Err(error) = self.send_block_event_internal(slot, block_root, execution_optimistic) {
             warn_with_peers!("unable to send block event: {error}");
+        }
+    }
+
+    pub fn send_block_gossip_event(&self, slot: Slot, block_root: H256) {
+        if let Err(error) = self.send_block_gossip_event_internal(slot, block_root) {
+            warn_with_peers!("unable to send block gossip event: {error}");
         }
     }
 
@@ -383,6 +395,20 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_block_gossip_event_internal(&self, slot: Slot, block_root: H256) -> Result<()> {
+        if self.blocks_gossip.receiver_count() > 0 {
+            let block_gossip_event = BlockGossipEvent {
+                slot,
+                block: block_root,
+            };
+
+            let event = Event::BlockGossip(block_gossip_event);
+            self.blocks_gossip.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_bls_to_execution_change_event_internal(
         &self,
         signed_bls_to_execution_change: SignedBlsToExecutionChange,
@@ -562,6 +588,13 @@ pub struct BlockEvent {
     pub slot: Slot,
     pub block: H256,
     pub execution_optimistic: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct BlockGossipEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    pub block: H256,
 }
 
 #[derive(Clone, Debug, Serialize)]

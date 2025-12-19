@@ -624,6 +624,11 @@ where
                 let block_root = chain_link.block_root;
                 let parent_root = chain_link.block.message().parent_root();
 
+                if origin.should_send_gossip_event() {
+                    self.event_channels
+                        .send_block_gossip_event(chain_link.slot(), block_root);
+                }
+
                 if let Some(delayed) = self.delayed_until_block.get_mut(&block_root)
                     && let Some((payload_status, _)) = delayed.payload_status.take()
                 {
