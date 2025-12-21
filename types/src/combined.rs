@@ -473,56 +473,55 @@ impl<P: Preset> SignedBeaconBlock<P> {
     #[must_use]
     pub fn upgrade(self) -> Self {
         match self {
-            Self::Electra(ElectraSignedBeaconBlock { message, signature }) => {
-                let ElectraBeaconBlock {
-                    slot,
-                    proposer_index,
-                    parent_root,
-                    state_root,
-                    body:
-                        ElectraBeaconBlockBody {
-                            randao_reveal,
-                            eth1_data,
-                            graffiti,
-                            proposer_slashings,
-                            attester_slashings,
-                            attestations,
-                            deposits,
-                            voluntary_exits,
-                            sync_aggregate,
-                            execution_payload,
-                            bls_to_execution_changes,
-                            blob_kzg_commitments,
-                            execution_requests,
-                        },
-                } = message.into_inner();
-
-                Self::Fulu(FuluSignedBeaconBlock {
-                    message: FuluBeaconBlock {
+            Self::Electra(ElectraSignedBeaconBlock {
+                message:
+                    ElectraBeaconBlock {
                         slot,
                         proposer_index,
                         parent_root,
                         state_root,
-                        body: FuluBeaconBlockBody {
-                            randao_reveal,
-                            eth1_data,
-                            graffiti,
-                            proposer_slashings,
-                            attester_slashings,
-                            attestations,
-                            deposits,
-                            voluntary_exits,
-                            sync_aggregate,
-                            execution_payload,
-                            bls_to_execution_changes,
-                            blob_kzg_commitments,
-                            execution_requests,
-                        },
-                    }
-                    .into(),
-                    signature,
-                })
-            }
+                        body:
+                            ElectraBeaconBlockBody {
+                                randao_reveal,
+                                eth1_data,
+                                graffiti,
+                                proposer_slashings,
+                                attester_slashings,
+                                attestations,
+                                deposits,
+                                voluntary_exits,
+                                sync_aggregate,
+                                execution_payload,
+                                bls_to_execution_changes,
+                                blob_kzg_commitments,
+                                execution_requests,
+                            },
+                    },
+                signature,
+            }) => Self::Fulu(FuluSignedBeaconBlock {
+                message: FuluBeaconBlock {
+                    slot,
+                    proposer_index,
+                    parent_root,
+                    state_root,
+                    body: FuluBeaconBlockBody {
+                        randao_reveal,
+                        eth1_data,
+                        graffiti,
+                        proposer_slashings,
+                        attester_slashings,
+                        attestations,
+                        deposits,
+                        voluntary_exits,
+                        sync_aggregate,
+                        execution_payload,
+                        bls_to_execution_changes,
+                        blob_kzg_commitments,
+                        execution_requests,
+                    },
+                },
+                signature,
+            }),
             _ => self,
         }
     }
@@ -564,19 +563,19 @@ impl<P: Preset> SignedBeaconBlock<P> {
         match self {
             Self::Phase0(_) | Self::Altair(_) => None,
             Self::Bellatrix(block) => Some(ExecutionPayload::Bellatrix(
-                block.message.into_inner().body.execution_payload,
+                block.message.body.execution_payload,
             )),
             Self::Capella(block) => Some(ExecutionPayload::Capella(
-                block.message.into_inner().body.execution_payload,
+                block.message.body.execution_payload,
             )),
             Self::Deneb(block) => Some(ExecutionPayload::Deneb(
-                block.message.into_inner().body.execution_payload,
+                block.message.body.execution_payload,
             )),
             Self::Electra(block) => Some(ExecutionPayload::Deneb(
-                block.message.into_inner().body.execution_payload,
+                block.message.body.execution_payload,
             )),
             Self::Fulu(block) => Some(ExecutionPayload::Deneb(
-                block.message.into_inner().body.execution_payload,
+                block.message.body.execution_payload,
             )),
         }
     }
@@ -622,13 +621,13 @@ impl<P: Preset> SignedBeaconBlock<P> {
 #[derive(Clone, Debug, From, VariantCount, Serialize)]
 #[serde(bound = "", untagged)]
 pub enum BeaconBlock<P: Preset> {
-    Phase0(Hc<Phase0BeaconBlock<P>>),
-    Altair(Hc<AltairBeaconBlock<P>>),
-    Bellatrix(Hc<BellatrixBeaconBlock<P>>),
-    Capella(Hc<CapellaBeaconBlock<P>>),
-    Deneb(Hc<DenebBeaconBlock<P>>),
-    Electra(Hc<ElectraBeaconBlock<P>>),
-    Fulu(Hc<FuluBeaconBlock<P>>),
+    Phase0(Phase0BeaconBlock<P>),
+    Altair(AltairBeaconBlock<P>),
+    Bellatrix(BellatrixBeaconBlock<P>),
+    Capella(CapellaBeaconBlock<P>),
+    Deneb(DenebBeaconBlock<P>),
+    Electra(ElectraBeaconBlock<P>),
+    Fulu(FuluBeaconBlock<P>),
 }
 
 // This assertion will become incorrect if later phases don't modify `BeaconBlock`.
@@ -704,7 +703,7 @@ impl<P: Preset> SszHash for BeaconBlock<P> {
 }
 
 impl<P: Preset> BeaconBlock<P> {
-    pub fn set_graffiti(&mut self, graffiti: H256) {
+    pub const fn set_graffiti(&mut self, graffiti: H256) {
         match self {
             Self::Phase0(block) => {
                 block.body.graffiti = graffiti;
@@ -747,7 +746,7 @@ impl<P: Preset> BeaconBlock<P> {
     }
 
     #[must_use]
-    pub fn with_state_root(mut self, state_root: H256) -> Self {
+    pub const fn with_state_root(mut self, state_root: H256) -> Self {
         match &mut self {
             Self::Phase0(block) => block.state_root = state_root,
             Self::Altair(block) => block.state_root = state_root,
@@ -852,20 +851,16 @@ impl<P: Preset> BeaconBlock<P> {
         execution_requests: Option<ExecutionRequests<P>>,
     ) -> Result<BlindedBeaconBlock<P>, BlockPhaseError> {
         match (self, execution_payload_header) {
-            (Self::Bellatrix(block), ExecutionPayloadHeader::Bellatrix(header)) => Ok(block
-                .into_inner()
-                .with_execution_payload_header(header)
-                .into()),
-            (Self::Capella(block), ExecutionPayloadHeader::Capella(header)) => Ok(block
-                .into_inner()
-                .with_execution_payload_header(header)
-                .into()),
+            (Self::Bellatrix(block), ExecutionPayloadHeader::Bellatrix(header)) => {
+                Ok(block.with_execution_payload_header(header).into())
+            }
+            (Self::Capella(block), ExecutionPayloadHeader::Capella(header)) => {
+                Ok(block.with_execution_payload_header(header).into())
+            }
             (Self::Deneb(block), ExecutionPayloadHeader::Deneb(header)) => Ok(block
-                .into_inner()
                 .with_execution_payload_header_and_kzg_commitments(header, kzg_commitments)
                 .into()),
             (Self::Electra(block), ExecutionPayloadHeader::Deneb(header)) => Ok(block
-                .into_inner()
                 .with_execution_payload_header_and_kzg_commitments(
                     header,
                     kzg_commitments,
@@ -873,7 +868,6 @@ impl<P: Preset> BeaconBlock<P> {
                 )
                 .into()),
             (Self::Fulu(block), ExecutionPayloadHeader::Deneb(header)) => Ok(block
-                .into_inner()
                 .with_execution_payload_header_and_kzg_commitments(
                     header,
                     kzg_commitments,
@@ -896,21 +890,13 @@ impl<P: Preset> BeaconBlock<P> {
     pub fn execution_payload(self) -> Option<ExecutionPayload<P>> {
         match self {
             Self::Phase0(_) | Self::Altair(_) => None,
-            Self::Bellatrix(block) => Some(ExecutionPayload::Bellatrix(
-                block.into_inner().body.execution_payload,
-            )),
-            Self::Capella(block) => Some(ExecutionPayload::Capella(
-                block.into_inner().body.execution_payload,
-            )),
-            Self::Deneb(block) => Some(ExecutionPayload::Deneb(
-                block.into_inner().body.execution_payload,
-            )),
-            Self::Electra(block) => Some(ExecutionPayload::Deneb(
-                block.into_inner().body.execution_payload,
-            )),
-            Self::Fulu(block) => Some(ExecutionPayload::Deneb(
-                block.into_inner().body.execution_payload,
-            )),
+            Self::Bellatrix(block) => {
+                Some(ExecutionPayload::Bellatrix(block.body.execution_payload))
+            }
+            Self::Capella(block) => Some(ExecutionPayload::Capella(block.body.execution_payload)),
+            Self::Deneb(block) => Some(ExecutionPayload::Deneb(block.body.execution_payload)),
+            Self::Electra(block) => Some(ExecutionPayload::Deneb(block.body.execution_payload)),
+            Self::Fulu(block) => Some(ExecutionPayload::Deneb(block.body.execution_payload)),
         }
     }
 

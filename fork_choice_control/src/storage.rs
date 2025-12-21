@@ -1296,8 +1296,7 @@ mod tests {
             message: Phase0BeaconBlock {
                 slot,
                 ..Phase0BeaconBlock::default()
-            }
-            .into(),
+            },
             ..Phase0SignedBeaconBlock::default()
         })
     }

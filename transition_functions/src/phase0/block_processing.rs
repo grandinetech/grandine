@@ -15,7 +15,6 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::Hc;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -54,7 +53,7 @@ pub fn process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
-    block: &Hc<Phase0BeaconBlock<P>>,
+    block: &Phase0BeaconBlock<P>,
     mut verifier: impl Verifier,
     slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -101,7 +100,7 @@ pub fn custom_process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
-    block: &Hc<Phase0BeaconBlock<P>>,
+    block: &Phase0BeaconBlock<P>,
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -534,7 +533,7 @@ mod spec_tests {
     // Test files for `process_block_header` are named `block.*` and contain `BeaconBlock`s.
     processing_tests! {
         process_block_header,
-        |config, _, state, block: Hc<Phase0BeaconBlock<_>>, _| unphased::process_block_header(config, state, &block),
+        |config, _, state, block: Phase0BeaconBlock<_>, _| unphased::process_block_header(config, state, &block),
         "block",
         "consensus-spec-tests/tests/mainnet/phase0/operations/block_header/*/*",
         "consensus-spec-tests/tests/minimal/phase0/operations/block_header/*/*",

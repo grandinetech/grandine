@@ -148,6 +148,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             ),
         };
 
+        // TODO: reduce number of block root computations across the app
         let block_root = block.message().hash_tree_root();
 
         MutatorMessage::Block {
