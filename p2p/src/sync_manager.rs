@@ -280,7 +280,7 @@ impl<P: Preset> SyncManager<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn build_back_sync_batches(
+    pub async fn build_back_sync_batches(
         &mut self,
         config: &Config,
         data_availability_serve_range_slot: Slot,
@@ -367,11 +367,13 @@ impl<P: Preset> SyncManager<P> {
                         }
 
                         if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
-                            let missing_column_indices = self.missing_column_indices_by_range(
-                                sampling_columns,
-                                start_slot,
-                                count,
-                            );
+                            let missing_column_indices = self
+                                .missing_column_indices_by_range(
+                                    sampling_columns,
+                                    start_slot,
+                                    count,
+                                )
+                                .await;
 
                             let missing_column_indices = match sync_mode {
                                 SyncMode::Default => missing_column_indices,
@@ -500,7 +502,7 @@ impl<P: Preset> SyncManager<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn build_forward_sync_batches(
+    pub async fn build_forward_sync_batches(
         &mut self,
         config: &Config,
         current_slot: Slot,
@@ -663,8 +665,9 @@ impl<P: Preset> SyncManager<P> {
                 if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
                     && data_column_serve_range_slot < max_slot
                 {
-                    let missing_column_indices =
-                        self.missing_column_indices_by_range(sampling_columns, start_slot, count);
+                    let missing_column_indices = self
+                        .missing_column_indices_by_range(sampling_columns, start_slot, count)
+                        .await;
 
                     if missing_column_indices.is_empty() {
                         self.log(
@@ -1187,7 +1190,7 @@ impl<P: Preset> SyncManager<P> {
         self.peers_custodial.insert(peer_id, custody_columns);
     }
 
-    pub fn missing_column_indices_by_root(
+    pub async fn missing_column_indices_by_root(
         &self,
         controller: &RealController<P>,
         local_head_slot: Slot,
@@ -1197,7 +1200,7 @@ impl<P: Preset> SyncManager<P> {
         let mut received = HashMap::new();
 
         self.received_data_column_sidecars
-            .iter_sync(|identifier, slot| {
+            .iter_async(|identifier, slot| {
                 if *slot > local_head_slot && *slot < local_head_slot + max_slot_ahead {
                     let DataColumnIdentifier { block_root, index } = *identifier;
 
@@ -1208,7 +1211,8 @@ impl<P: Preset> SyncManager<P> {
                 }
 
                 true
-            });
+            })
+            .await;
 
         received
             .into_iter()
@@ -1227,7 +1231,7 @@ impl<P: Preset> SyncManager<P> {
             .pipe(Some)
     }
 
-    pub fn missing_column_indices_by_range(
+    pub async fn missing_column_indices_by_range(
         &self,
         sampling_columns: &HashSet<ColumnIndex>,
         start_slot: Slot,
@@ -1239,13 +1243,14 @@ impl<P: Preset> SyncManager<P> {
             let mut received_indices = HashSet::new();
 
             self.received_data_column_sidecars
-                .iter_sync(|identifier, entry_slot| {
+                .iter_async(|identifier, entry_slot| {
                     if *entry_slot == slot {
                         received_indices.insert(identifier.index);
                     }
 
                     true
-                });
+                })
+                .await;
 
             missing_indices.extend(sampling_columns.difference(&received_indices));
         }
@@ -1476,6 +1481,7 @@ mod tests {
     // `SyncBatch.count` is either 2 (blocks & blobs) or 16 (blocks only) because the test cases use `Minimal`.
     // `Minimal::SlotsPerEpoch::U64` × `EPOCHS_PER_REQUEST` = 8 × 2 = 16.
     // `Minimal::SlotsPerEpoch::U64` = 8
+    #[tokio::test]
     #[test_case(
         Slot::MAX,
         128,
@@ -1552,7 +1558,7 @@ mod tests {
             (0, 1, SyncTarget::Block),
         ]
     )]
-    fn build_back_sync_batches(
+    async fn build_back_sync_batches(
         data_availability_serve_start_slot: Slot,
         head_slot: Slot,
         resulting_batches: impl IntoIterator<Item = (Slot, u64, SyncTarget)>,
@@ -1581,14 +1587,16 @@ mod tests {
         sync_manager.add_data_columns_request_by_range_busy_peer(PeerId::random());
         sync_manager.add_data_columns_request_by_root_busy_peer(PeerId::random());
 
-        let batches = sync_manager.build_back_sync_batches(
-            &config,
-            data_availability_serve_start_slot,
-            head_slot,
-            0,
-            &sampling_columns,
-            &SyncMode::Default,
-        );
+        let batches = sync_manager
+            .build_back_sync_batches(
+                &config,
+                data_availability_serve_start_slot,
+                head_slot,
+                0,
+                &sampling_columns,
+                &SyncMode::Default,
+            )
+            .await;
 
         itertools::assert_equal(
             batches
@@ -1598,8 +1606,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_build_forward_sync_batches_with_peers_with_various_statuses() {
+    #[tokio::test]
+    async fn test_build_forward_sync_batches_with_peers_with_various_statuses() {
         let config = Arc::new(Config::mainnet());
         let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
         let sampling_columns = HashSet::new();
@@ -1608,7 +1616,9 @@ mod tests {
         sync_manager.add_peer(PeerId::random(), status_message_v2(0));
         sync_manager.add_peer(PeerId::random(), status_message_v2(Slot::MAX));
 
-        let batches = sync_manager.build_forward_sync_batches(&config, 0, 0, 0, &sampling_columns);
+        let batches = sync_manager
+            .build_forward_sync_batches(&config, 0, 0, 0, &sampling_columns)
+            .await;
 
         itertools::assert_equal(
             batches
@@ -1619,8 +1629,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_build_forward_sync_batches_when_head_progresses() {
+    #[tokio::test]
+    async fn test_build_forward_sync_batches_when_head_progresses() {
         let config = Arc::new(Config::mainnet());
         let current_slot = 20_001;
         let local_head_slot = 3000;
@@ -1641,13 +1651,15 @@ mod tests {
         sync_manager.add_peer(PeerId::random(), peer_status);
 
         for i in 0..50 {
-            let batches = sync_manager.build_forward_sync_batches(
-                &config,
-                current_slot,
-                local_head_slot + i,
-                local_finalized_slot,
-                &sampling_columns,
-            );
+            let batches = sync_manager
+                .build_forward_sync_batches(
+                    &config,
+                    current_slot,
+                    local_head_slot + i,
+                    local_finalized_slot,
+                    &sampling_columns,
+                )
+                .await;
 
             let sync_range_from = local_head_slot + slots_per_request * i + 1;
             let sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1668,8 +1680,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_build_forward_sync_batches_when_head_does_not_progress() {
+    #[tokio::test]
+    async fn test_build_forward_sync_batches_when_head_does_not_progress() {
         let config = Arc::new(Config::mainnet());
         let current_slot = 20_001;
         let local_head_slot = 3000;
@@ -1689,24 +1701,28 @@ mod tests {
 
         sync_manager.add_peer(PeerId::random(), peer_status);
 
-        sync_manager.build_forward_sync_batches(
-            &config,
-            current_slot,
-            local_head_slot,
-            local_finalized_slot,
-            &sampling_columns,
-        );
-
-        // From first to sixth retry try to download blocks from local head slot
-
-        for _ in 0..5 {
-            sync_manager.build_forward_sync_batches(
+        sync_manager
+            .build_forward_sync_batches(
                 &config,
                 current_slot,
                 local_head_slot,
                 local_finalized_slot,
                 &sampling_columns,
-            );
+            )
+            .await;
+
+        // From first to sixth retry try to download blocks from local head slot
+
+        for _ in 0..5 {
+            sync_manager
+                .build_forward_sync_batches(
+                    &config,
+                    current_slot,
+                    local_head_slot,
+                    local_finalized_slot,
+                    &sampling_columns,
+                )
+                .await;
 
             let sync_range_from = local_head_slot + 1;
             let sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1717,13 +1733,15 @@ mod tests {
         // From sixth to tenth retry try to download blocks from local head slot minus one epoch
 
         for _ in 6..10 {
-            sync_manager.build_forward_sync_batches(
-                &config,
-                current_slot,
-                local_head_slot,
-                local_finalized_slot,
-                &sampling_columns,
-            );
+            sync_manager
+                .build_forward_sync_batches(
+                    &config,
+                    current_slot,
+                    local_head_slot,
+                    local_finalized_slot,
+                    &sampling_columns,
+                )
+                .await;
 
             let sync_range_from = local_head_slot - 32 + 1;
             let sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1737,13 +1755,15 @@ mod tests {
         let mut sync_range_to = 0;
 
         while sync_range_to < local_head_slot {
-            sync_manager.build_forward_sync_batches(
-                &config,
-                current_slot,
-                local_head_slot,
-                local_finalized_slot,
-                &sampling_columns,
-            );
+            sync_manager
+                .build_forward_sync_batches(
+                    &config,
+                    current_slot,
+                    local_head_slot,
+                    local_finalized_slot,
+                    &sampling_columns,
+                )
+                .await;
 
             let sync_range_from = local_finalized_slot + slots_per_request * i + 1;
             sync_range_to = sync_range_from + slots_per_request - 1;
@@ -1755,13 +1775,15 @@ mod tests {
 
         // Resume normal syncing behaviour
 
-        sync_manager.build_forward_sync_batches(
-            &config,
-            current_slot,
-            local_head_slot,
-            local_finalized_slot,
-            &sampling_columns,
-        );
+        sync_manager
+            .build_forward_sync_batches(
+                &config,
+                current_slot,
+                local_head_slot,
+                local_finalized_slot,
+                &sampling_columns,
+            )
+            .await;
 
         let sync_range_from = local_head_slot + 1;
         let sync_range_to = sync_range_from + slots_per_request - 1;

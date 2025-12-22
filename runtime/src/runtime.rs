@@ -708,7 +708,8 @@ pub async fn run_after_genesis<P: Preset>(
         received_data_column_sidecars,
         data_dumper,
         network.network_globals().clone_arc(),
-    )?;
+    )
+    .await?;
 
     block_sync_service.try_to_spawn_back_sync_states_archiver()?;
 

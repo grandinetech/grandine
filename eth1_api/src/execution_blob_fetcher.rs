@@ -236,15 +236,20 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         };
 
-        let missing_columns_indices = data_column_identifiers
-            .iter()
+        let missing_columns_indices = futures::stream::iter(data_column_identifiers)
             .filter(|identifier| {
-                !self
-                    .received_data_column_sidecars
-                    .contains_sync(*identifier)
+                let identifier = *identifier;
+                let received_data_column_sidecars = self.received_data_column_sidecars.clone_arc();
+
+                async move {
+                    !received_data_column_sidecars
+                        .contains_async(&identifier)
+                        .await
+                }
             })
             .map(|identifier| identifier.index)
-            .collect::<HashSet<ColumnIndex>>();
+            .collect::<HashSet<ColumnIndex>>()
+            .await;
 
         if missing_columns_indices.is_empty() {
             debug_with_peers!(
@@ -303,80 +308,74 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                             let controller = self.controller.clone_arc();
 
-                            let received_data_column_sidecars =
-                                self.received_data_column_sidecars.clone_arc();
-
                             let reconstruction_result = tokio::task::spawn_blocking(move || {
-                                let mut data_column_sidecars = vec![];
+                                let cells_and_kzg_proofs =
+                                    eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                                        &received_blobs,
+                                        &cells_proofs,
+                                        controller.store_config().kzg_backend,
+                                    )?;
 
-                                match eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                                    &received_blobs,
-                                    &cells_proofs,
-                                    controller.store_config().kzg_backend,
-                                ) {
-                                    Ok(cells_and_kzg_proofs) => {
-                                        let result = match block_or_sidecar {
-                                            BlockOrDataColumnSidecar::Block(block) => eip_7594::construct_data_column_sidecars(
-                                                &block,
-                                                &cells_and_kzg_proofs,
-                                            ),
-                                            BlockOrDataColumnSidecar::Sidecar(sidecar) => eip_7594::construct_data_column_sidecars_from_sidecar(
-                                                &sidecar,
-                                                &cells_and_kzg_proofs,
-                                            ),
-                                        };
-
-                                        prometheus_metrics::stop_and_record(timer);
-
-                                        match result {
-                                            Ok(data_columns) => {
-                                                controller.mark_sidecar_construction_started(block_root, slot);
-
-                                                for data_column_sidecar in
-                                                    data_columns.into_iter().filter(|column| {
-                                                        controller
-                                                            .sampling_columns()
-                                                            .contains(&column.index)
-                                                    })
-                                                {
-                                                    let identifier = DataColumnIdentifier {
-                                                        block_root,
-                                                        index: data_column_sidecar.index,
-                                                    };
-
-                                                    received_data_column_sidecars.upsert_sync(identifier, slot);
-                                                    data_column_sidecars.push(data_column_sidecar);
-                                                }
-                                            }
-                                            Err(error) => {
-                                                controller.mark_sidecar_construction_failed(&block_root);
-
-                                                warn_with_peers!(
-                                                    "failed to construct data column sidecars with \
-                                                    cells and kzg proofs: {error:?}"
-                                                );
-                                            }
-                                        }
+                                let result = match block_or_sidecar {
+                                    BlockOrDataColumnSidecar::Block(block) => {
+                                        eip_7594::construct_data_column_sidecars(
+                                            &block,
+                                            &cells_and_kzg_proofs,
+                                        )
                                     }
-                                    Err(error) => warn_with_peers!(
-                                        "failed to convert blobs received from EL into extended cells: {error:?}"
-                                    ),
-                                }
+                                    BlockOrDataColumnSidecar::Sidecar(sidecar) => {
+                                        eip_7594::construct_data_column_sidecars_from_sidecar(
+                                            &sidecar,
+                                            &cells_and_kzg_proofs,
+                                        )
+                                    }
+                                };
 
-                                data_column_sidecars
-                            }).await;
+                                prometheus_metrics::stop_and_record(timer);
+
+                                result
+                            })
+                            .await;
 
                             match reconstruction_result {
-                                Ok(data_column_sidecars) => {
-                                    for data_column_sidecar in data_column_sidecars {
+                                Ok(cells_and_kzg_proofs) => match cells_and_kzg_proofs {
+                                    Ok(data_columns) => {
                                         self.controller
-                                            .on_el_data_column_sidecar(data_column_sidecar);
+                                            .mark_sidecar_construction_started(block_root, slot);
+
+                                        for data_column_sidecar in
+                                            data_columns.into_iter().filter(|column| {
+                                                self.controller
+                                                    .sampling_columns()
+                                                    .contains(&column.index)
+                                            })
+                                        {
+                                            let identifier = DataColumnIdentifier {
+                                                block_root,
+                                                index: data_column_sidecar.index,
+                                            };
+
+                                            self.received_data_column_sidecars
+                                                .upsert_async(identifier, slot)
+                                                .await;
+
+                                            self.controller
+                                                .on_el_data_column_sidecar(data_column_sidecar);
+                                        }
                                     }
-                                }
+                                    Err(error) => {
+                                        warn_with_peers!(
+                                            "failed to construct data column sidecars with cells and kzg_proofs: {error:?}",
+                                        );
+                                    }
+                                },
                                 Err(error) => {
+                                    self.controller
+                                        .mark_sidecar_construction_failed(&block_root);
+
                                     warn_with_peers!(
-                                        "failed to reconstruct data columns from EL response: {error:?}"
-                                    )
+                                        "failed to convert blobs received from EL into extended cells: {error:?}",
+                                    );
                                 }
                             }
                         } else {
@@ -399,17 +398,20 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             .is_sidecars_construction_started(&block_root)
         {
             // Request remaining missing data column sidecars from P2P
-            let missing_indices = missing_columns_indices
-                .into_iter()
+            let missing_indices = futures::stream::iter(missing_columns_indices)
                 .filter(|index| {
-                    !self
-                        .received_data_column_sidecars
-                        .contains_sync(&DataColumnIdentifier {
-                            block_root,
-                            index: *index,
-                        })
+                    let index = *index;
+                    let received_data_column_sidecars =
+                        self.received_data_column_sidecars.clone_arc();
+
+                    async move {
+                        !received_data_column_sidecars
+                            .contains_async(&DataColumnIdentifier { block_root, index })
+                            .await
+                    }
                 })
-                .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+                .await;
 
             debug_with_peers!(
                 "missing data columns sidecars: {missing_indices:?} at block {block_root}"

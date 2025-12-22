@@ -123,7 +123,7 @@ impl<P: Preset> Drop for BlockSyncService<P> {
 
 impl<P: Preset> BlockSyncService<P> {
     #[expect(clippy::too_many_arguments)]
-    pub fn new(
+    pub async fn new(
         config: Arc<Config>,
         db: Database,
         anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
@@ -260,7 +260,7 @@ impl<P: Preset> BlockSyncService<P> {
         };
 
         service.set_back_synced(is_back_synced);
-        service.set_forward_synced(is_forward_synced);
+        service.set_forward_synced(is_forward_synced).await;
 
         Ok(service)
     }
@@ -333,12 +333,12 @@ impl<P: Preset> BlockSyncService<P> {
                         }
                         P2pToSync::RemovePeer(peer_id) => {
                             let batches_to_retry = self.sync_manager.remove_peer(&peer_id);
-                            self.retry_sync_batches(batches_to_retry)?;
+                            self.retry_sync_batches(batches_to_retry).await?;
                         }
                         P2pToSync::RequestFailed(peer_id) => {
                             if !self.is_forward_synced || !self.controller.is_back_synced() {
                                 let batches_to_retry = self.sync_manager.remove_peer(&peer_id);
-                                self.retry_sync_batches(batches_to_retry)?;
+                                self.retry_sync_batches(batches_to_retry).await?;
                             }
                         }
                         P2pToSync::StatusPeer(peer_id) => {
@@ -351,7 +351,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.request_needed_block(block_root, peer_id)?;
                         }
                         P2pToSync::DataColumnsNeeded(data_columns_by_root, slot) => {
-                            self.request_needed_data_columns(data_columns_by_root, slot)?;
+                            self.request_needed_data_columns(data_columns_by_root, slot).await?;
                         }
                         P2pToSync::GossipBlobSidecar(blob_sidecar, subnet_id, gossip_id) => {
                             self.data_dumper.dump_blob_sidecar(blob_sidecar.clone_arc());
@@ -537,7 +537,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.sync_manager.blobs_by_range_request_finished(request_id, request_direction);
 
                             if request_direction == Some(SyncDirection::Back) {
-                                self.check_back_sync_progress()?;
+                                self.check_back_sync_progress().await?;
                             }
 
                             self.request_blobs_and_blocks_if_ready();
@@ -553,7 +553,7 @@ impl<P: Preset> BlockSyncService<P> {
                             );
 
                             if request_direction == Some(SyncDirection::Back) {
-                                self.check_back_sync_progress()?;
+                                self.check_back_sync_progress().await?;
                             }
 
                             self.request_blobs_and_blocks_if_ready();
@@ -564,7 +564,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.sync_manager.data_columns_by_range_request_finished(request_id, request_direction);
 
                             if request_direction == Some(SyncDirection::Back) {
-                                self.check_back_sync_progress()?;
+                                self.check_back_sync_progress().await?;
                             }
 
                             self.request_blobs_and_blocks_if_ready();
@@ -614,7 +614,7 @@ impl<P: Preset> BlockSyncService<P> {
                 message = self.self_rx.select_next_some() => {
                     match message {
                         BlockSyncServiceMessage::RequestData => {
-                            if let Err(error) = self.request_data() {
+                            if let Err(error) = self.request_data().await {
                                 warn_with_peers!("unable to request new data from the network: {error:?}");
                             }
                         }
@@ -626,10 +626,10 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    pub fn check_back_sync_progress(&mut self) -> Result<()> {
-        self.request_expired_blob_range_requests()?;
-        self.request_expired_block_range_requests()?;
-        self.request_expired_data_column_range_requests()?;
+    pub async fn check_back_sync_progress(&mut self) -> Result<()> {
+        self.request_expired_blob_range_requests().await?;
+        self.request_expired_block_range_requests().await?;
+        self.request_expired_data_column_range_requests().await?;
 
         // Check if batch has finished
         if !self.sync_manager.ready_to_request_by_range() || !self.delayed_batches.is_empty() {
@@ -716,7 +716,7 @@ impl<P: Preset> BlockSyncService<P> {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
+    pub async fn retry_sync_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         let mut peers_to_request = self.sync_manager.find_available_custodial_peers();
         let sampling_columns = self.controller.sampling_columns();
 
@@ -796,11 +796,10 @@ impl<P: Preset> BlockSyncService<P> {
                 SyncTarget::DataColumnSidecar => {
                     if let Some(ref data_columns) = batch.data_columns {
                         let mut request_id = self.request_id()?;
-                        let missing_indices = self.sync_manager.missing_column_indices_by_range(
-                            &sampling_columns,
-                            start_slot,
-                            count,
-                        );
+                        let missing_indices = self
+                            .sync_manager
+                            .missing_column_indices_by_range(&sampling_columns, start_slot, count)
+                            .await;
 
                         let missing_column_indices = data_columns
                             .iter()
@@ -874,44 +873,44 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    fn request_expired_blob_range_requests(&mut self) -> Result<()> {
+    async fn request_expired_blob_range_requests(&mut self) -> Result<()> {
         let expired_batches = self
             .sync_manager
             .expired_blob_range_batches()
             .map(|(batch, _)| batch)
             .collect();
 
-        self.retry_sync_batches(expired_batches)
+        self.retry_sync_batches(expired_batches).await
     }
 
-    fn request_expired_block_range_requests(&mut self) -> Result<()> {
+    async fn request_expired_block_range_requests(&mut self) -> Result<()> {
         let expired_batches = self
             .sync_manager
             .expired_block_range_batches()
             .map(|(batch, _)| batch)
             .collect();
 
-        self.retry_sync_batches(expired_batches)
+        self.retry_sync_batches(expired_batches).await
     }
 
-    fn request_expired_data_column_range_requests(&mut self) -> Result<()> {
+    async fn request_expired_data_column_range_requests(&mut self) -> Result<()> {
         let expired_batches = self
             .sync_manager
             .expired_data_column_range_batches()
             .map(|(batch, _)| batch)
             .collect();
 
-        self.retry_sync_batches(expired_batches)
+        self.retry_sync_batches(expired_batches).await
     }
 
     fn request_blobs_and_blocks_if_ready(&self) {
         BlockSyncServiceMessage::RequestData.send(&self.self_tx);
     }
 
-    fn request_data(&mut self) -> Result<()> {
-        self.request_expired_blob_range_requests()?;
-        self.request_expired_block_range_requests()?;
-        self.request_expired_data_column_range_requests()?;
+    async fn request_data(&mut self) -> Result<()> {
+        self.request_expired_blob_range_requests().await?;
+        self.request_expired_block_range_requests().await?;
+        self.request_expired_data_column_range_requests().await?;
 
         if !self.sync_manager.ready_to_request_by_range() {
             return Ok(());
@@ -925,7 +924,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         // Batch request data columns by root for missing columns if any
         if !self.is_forward_synced && is_peerdas_activated {
-            self.batch_request_missing_data_columns()?;
+            self.batch_request_missing_data_columns().await?;
         }
 
         let snapshot = self.controller.snapshot();
@@ -934,7 +933,7 @@ impl<P: Preset> BlockSyncService<P> {
             misc::compute_start_slot_at_epoch::<P>(snapshot.finalized_epoch());
         let sampling_columns = self.controller.sampling_columns();
 
-        self.set_forward_synced(snapshot.is_forward_synced());
+        self.set_forward_synced(snapshot.is_forward_synced()).await;
 
         let batches = match self.sync_direction {
             SyncDirection::Forward => {
@@ -944,13 +943,15 @@ impl<P: Preset> BlockSyncService<P> {
                     return Ok(());
                 }
 
-                self.sync_manager.build_forward_sync_batches(
-                    self.controller.chain_config(),
-                    self.slot,
-                    head_slot,
-                    local_finalized_slot,
-                    &sampling_columns,
-                )
+                self.sync_manager
+                    .build_forward_sync_batches(
+                        self.controller.chain_config(),
+                        self.slot,
+                        head_slot,
+                        local_finalized_slot,
+                        &sampling_columns,
+                    )
+                    .await
             }
             SyncDirection::Back => {
                 if !self.delayed_batches.is_empty() {
@@ -966,11 +967,13 @@ impl<P: Preset> BlockSyncService<P> {
                     misc::blob_serve_range_slot::<P>(self.controller.chain_config(), self.slot)
                 };
 
-                self.back_sync
+                if let Some(back_sync) = self
+                    .back_sync
                     .as_ref()
                     .filter(|back_sync| !back_sync.is_finished())
-                    .map(|back_sync| {
-                        self.sync_manager.build_back_sync_batches(
+                {
+                    self.sync_manager
+                        .build_back_sync_batches(
                             self.controller.chain_config(),
                             data_availability_serve_range_slot,
                             back_sync.current_slot(),
@@ -979,8 +982,10 @@ impl<P: Preset> BlockSyncService<P> {
                             &sampling_columns,
                             back_sync.sync_mode(),
                         )
-                    })
-                    .unwrap_or_default()
+                        .await
+                } else {
+                    vec![]
+                }
             }
         };
 
@@ -1202,7 +1207,7 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    fn request_needed_data_columns(
+    async fn request_needed_data_columns(
         &mut self,
         data_columns_by_root: DataColumnsByRootIdentifier<P>,
         slot: Slot,
@@ -1229,22 +1234,31 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         }
 
-        let missing_indices = indices
-            .into_iter()
+        let mut missing_indices = futures::stream::iter(indices)
             .filter(|index| {
-                let identifier = DataColumnIdentifier {
-                    block_root,
-                    index: *index,
-                };
+                let index = *index;
+                let received_data_column_sidecars = self.received_data_column_sidecars.clone_arc();
 
-                !self
-                    .received_data_column_sidecars
-                    .contains_sync(&identifier)
-                    && self
-                        .sync_manager
-                        .ready_to_request_data_column_by_root(&identifier, None)
+                async move {
+                    let identifier = DataColumnIdentifier { block_root, index };
+
+                    !received_data_column_sidecars
+                        .contains_async(&identifier)
+                        .await
+                }
             })
-            .collect::<HashSet<_>>();
+            .collect::<HashSet<_>>()
+            .await;
+
+        missing_indices.retain(|index| {
+            let identifier = DataColumnIdentifier {
+                block_root,
+                index: *index,
+            };
+
+            self.sync_manager
+                .ready_to_request_data_column_by_root(&identifier, None)
+        });
 
         if missing_indices.is_empty() {
             debug_with_peers!(
@@ -1296,13 +1310,14 @@ impl<P: Preset> BlockSyncService<P> {
         Ok(())
     }
 
-    fn batch_request_missing_data_columns(&mut self) -> Result<()> {
+    async fn batch_request_missing_data_columns(&mut self) -> Result<()> {
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();
 
         let Some(missing_column_indices_by_root) = self
             .sync_manager
             .missing_column_indices_by_root(&self.controller, head_slot)
+            .await
         else {
             return Ok(());
         };
@@ -1421,7 +1436,7 @@ impl<P: Preset> BlockSyncService<P> {
         }
     }
 
-    fn set_forward_synced(&mut self, is_forward_synced: bool) {
+    async fn set_forward_synced(&mut self, is_forward_synced: bool) {
         debug_with_peers!("set forward synced: {is_forward_synced}");
 
         let was_forward_synced = self.is_forward_synced;
@@ -1441,8 +1456,8 @@ impl<P: Preset> BlockSyncService<P> {
 
             if self.back_sync.is_some() {
                 self.received_block_roots = HashMap::new();
-                self.received_blob_sidecars.clear_sync();
-                self.received_data_column_sidecars.clear_sync();
+                self.received_blob_sidecars.clear_async().await;
+                self.received_data_column_sidecars.clear_async().await;
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready();
