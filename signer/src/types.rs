@@ -22,7 +22,9 @@ use types::{
     fulu::containers::{
         BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
     },
-    gloas::containers::{BeaconBlock as GloasBeaconBlock, PayloadAttestationData},
+    gloas::containers::{
+        BeaconBlock as GloasBeaconBlock, ExecutionPayloadEnvelope, PayloadAttestationData,
+    },
     phase0::{
         containers::{
             AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
@@ -74,6 +76,7 @@ pub enum SigningMessage<'block, P: Preset> {
         epoch: Epoch,
     },
     PayloadAttestation(PayloadAttestationData),
+    ExecutionPayloadEnvelope(&'block ExecutionPayloadEnvelope<P>),
     SyncCommitteeMessage {
         beacon_block_root: H256,
         #[serde(with = "serde_utils::string_or_native")]

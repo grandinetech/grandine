@@ -62,7 +62,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::{Phase, RelativeEpoch, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -531,6 +531,9 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
                             self.publish_data_column_sidecar(data_column_sidecar);
                         }
+                        ValidatorToP2p::PublishExecutionPayloadEnvelope(envelope) => {
+                            self.publish_execution_payload_envelope(envelope);
+                        }
                         ValidatorToP2p::PublishSingularAttestation(attestation, subnet_id) => {
                             self.publish_singular_attestation(attestation, subnet_id);
                         }
@@ -780,6 +783,17 @@ impl<P: Preset> Network<P> {
             subnet_id,
             data_column_sidecar,
         ))));
+    }
+
+    fn publish_execution_payload_envelope(&self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+        debug_with_peers!(
+            "publishing execution payload envelope (block_root: {:?}, slot: {}, builder_index: {})",
+            envelope.message.beacon_block_root,
+            envelope.message.slot,
+            envelope.message.builder_index,
+        );
+
+        self.publish(PubsubMessage::ExecutionPayload(envelope));
     }
 
     fn publish_singular_attestation(&self, attestation: Arc<Attestation<P>>, subnet_id: SubnetId) {

@@ -36,6 +36,8 @@ use tap::Pipe as _;
 use tokio::task::JoinHandle;
 use tracing::instrument;
 use transition_functions::{capella, electra, gloas, unphased};
+use helper_functions::verifier::NullVerifier;
+use types::gloas::containers::{ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -174,6 +176,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             head_block_root,
             proposer_index,
             options,
+            cached_payload_root: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -648,6 +651,8 @@ pub struct BlockBuildContext<P: Preset, W: Wait> {
     head_block_root: H256,
     proposer_index: ValidatorIndex,
     options: BlockBuildOptions,
+    /// Payload root for retrieving cached envelope data from payload_cache
+    cached_payload_root: Arc<Mutex<Option<H256>>>,
 }
 
 impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
@@ -1186,6 +1191,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 WithClientVersions::none(WithBlobsAndMev::with_default(None))
             }
         };
+
+        // Cache payload root for Gloas envelope retrieval later (only when self-building)
+        // External builders publish their own envelope
+        if can_self_build && self.beacon_state.phase() >= Phase::Gloas {
+            if let Some(ref payload) = execution_payload {
+                *self.cached_payload_root.lock().await = Some(payload.hash_tree_root());
+            }
+        }
 
         let mut without_state_root = if let Some(state) = self.beacon_state.post_gloas() {
             let signed_payload_bid = if can_self_build {
@@ -1869,6 +1882,95 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             tokio::spawn(async move { builder_context.local_execution_payload_option().await });
 
         Some(handle)
+    }
+
+    /// Get cached Gloas envelope data from payload_cache (called by validator after signing block)
+    /// Returns None if not self-building (external builder publishes envelope)
+    /// Returns only the fields needed to build ExecutionPayloadEnvelope
+    pub async fn get_gloas_envelope_data(
+        &self,
+    ) -> Option<(
+        DenebExecutionPayload<P>,
+        ExecutionRequests<P>,
+        ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    )> {
+        let payload_root = (*self.cached_payload_root.lock().await)?;
+
+        let cached = self
+            .producer_context
+            .payload_cache
+            .lock()
+            .await
+            .cache_get(&payload_root)
+            .cloned()?;
+
+        let WithBlobsAndMev {
+            value: execution_payload,
+            commitments,
+            execution_requests,
+            ..
+        } = cached.result;
+
+        let deneb_payload = match execution_payload {
+            ExecutionPayload::Deneb(p) => p,
+            _ => {
+                warn_with_peers!(
+                    "unexpected non-Deneb payload format in Gloas envelope data"
+                );
+                return None;
+            }
+        };
+
+        Some((
+            deneb_payload,
+            execution_requests.unwrap_or_default(),
+            commitments.unwrap_or_default(),
+        ))
+    }
+
+    /// Compute the post-execution state root for the envelope
+    pub async fn compute_post_execution_state_root(
+        &self,
+        beacon_block_root: H256,
+        builder_index: ValidatorIndex,
+    ) -> Result<H256> {
+        let (deneb_payload, execution_requests_data, blob_kzg_commitments) = self
+            .get_gloas_envelope_data()
+            .await
+            .ok_or_else(|| AnyhowError::msg("envelope data not available"))?;
+
+        // Build envelope with placeholder state_root (will be set after processing)
+        let envelope = ExecutionPayloadEnvelope {
+            payload: deneb_payload.into(),
+            execution_requests: execution_requests_data,
+            builder_index,
+            beacon_block_root,
+            slot: self.beacon_state.slot(),
+            blob_kzg_commitments,
+            state_root: H256::zero(), // Placeholder
+        };
+
+        let signed_envelope = SignedExecutionPayloadEnvelope {
+            message: envelope,
+            signature: SignatureBytes::default(),
+        };
+
+        let BeaconState::Gloas(ref gloas_state) = *self.beacon_state else {
+            return Err(AnyhowError::msg("compute_post_execution_state_root requires Gloas state"));
+        };
+
+        let mut post_execution_state = gloas_state.clone();
+
+        gloas::process_execution_payload(
+            &self.producer_context.chain_config,
+            &self.producer_context.pubkey_cache,
+            &mut post_execution_state,
+            &signed_envelope,
+            self.producer_context.execution_engine.as_ref(),
+            NullVerifier,
+        )?;
+
+        Ok(post_execution_state.hash_tree_root())
     }
 
     async fn local_execution_payload_result(
