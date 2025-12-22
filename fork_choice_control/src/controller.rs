@@ -743,6 +743,12 @@ where
             return;
         }
 
+        debug_with_peers!(
+            "spawning data column sidecar task, origin: {origin:?} (index: {}, slot: {})",
+            data_column_sidecar.index,
+            data_column_sidecar.slot(),
+        );
+
         self.spawn(DataColumnSidecarTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),

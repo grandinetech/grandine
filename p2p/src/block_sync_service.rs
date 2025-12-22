@@ -468,14 +468,28 @@ impl<P: Preset> BlockSyncService<P> {
                             let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
                             let data_column_sidecar_slot = data_column_sidecar.slot();
 
+                            debug_with_peers!(
+                                "received data column sidecar as gossip from network in subnet \
+                                {subnet_id}: {data_column_identifier:?}",
+                            );
+
                             self.register_new_received_data_column_sidecar(
                                 data_column_identifier,
                                 data_column_sidecar_slot,
                             ).await;
 
+                            debug_with_peers!(
+                                "registered data column sidecar as received from gossip in subnet \
+                                {subnet_id}: {data_column_identifier:?}",
+                            );
+
                             let block_seen = self
                                 .received_block_roots
                                 .contains_key(&data_column_identifier.block_root);
+
+                            debug_with_peers!(
+                                "block_seen for data column sidecar: {data_column_identifier:?} - {block_seen}",
+                            );
 
                             self.controller.on_gossip_data_column_sidecar(
                                 data_column_sidecar,

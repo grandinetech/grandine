@@ -1571,6 +1571,11 @@ where
         block_seen: bool,
         submission_time: Instant,
     ) {
+        debug_with_peers!(
+            "handling data column sidecar: {data_column_identifier:?}, block_seen: {block_seen}, \
+            origin: {origin:?}",
+        );
+
         match result {
             Ok(DataColumnSidecarAction::Accept(data_column_sidecar)) => {
                 if origin.is_from_el() {
@@ -1583,6 +1588,8 @@ where
                     data_column_sidecar.signed_block_header.message,
                     data_column_sidecar.index,
                 ) {
+                    debug_with_peers!("data column sidecaar already accepted: {data_column_sidecar:?}");
+
                     let (_, sender) = origin.split();
 
                     reply_to_http_api(sender, Ok(ValidationOutcome::Accept));

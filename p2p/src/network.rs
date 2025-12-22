@@ -1934,6 +1934,14 @@ impl<P: Preset> Network<P> {
     ) {
         match message {
             PubsubMessage::BeaconBlock(beacon_block) => {
+                let block_root = beacon_block.message().hash_tree_root();
+                let block_slot = beacon_block.message().slot();
+
+                debug_with_peers!(
+                    "received beacon block as gossip (network) (slot: {block_slot}, root: {block_root:?}, \
+                    peer_id: {source})",
+                );
+
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_gossip_object(&["beacon_block"]);
                 }

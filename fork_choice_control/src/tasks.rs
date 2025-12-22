@@ -18,7 +18,7 @@ use helper_functions::{
     accessors, misc,
     verifier::{MultiVerifier, NullVerifier},
 };
-use logging::{debug_with_peers, warn_with_peers};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
@@ -459,6 +459,11 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             block_seen,
             &origin,
             metrics.as_ref(),
+        );
+
+        info_with_peers!(
+            "validating data column sidecar: {block_root:?}, index: {index}, \
+            result: {result:?}",
         );
 
         if result.is_err()
