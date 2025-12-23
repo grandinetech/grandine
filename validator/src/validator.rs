@@ -65,8 +65,10 @@ use types::{
     },
     combined::{
         AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
+    deneb::primitives::Blob,
     electra::containers::{
         AggregateAndProof as ElectraAggregateAndProof,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
@@ -983,77 +985,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let signed_blinded_block = blinded_block.with_signature(signature);
 
-                let builder_api = self.builder_api.as_ref().expect(
-                    "Builder API should be present as it was used to query ExecutionPayloadHeader",
-                );
-
-                if slot_head.phase() >= Phase::Fulu
-                    && builder_api
-                        .post_blinded_block_post_fulu(
-                            &self.chain_config,
-                            self.controller.genesis_time(),
-                            &signed_blinded_block,
-                        )
-                        .await
-                        .is_ok()
-                {
-                    debug_with_peers!("submitted blinded block to the builder node");
-
-                    SignedBeaconBlockOrBlockRoot::Root(
-                        signed_blinded_block.message().hash_tree_root(),
+                match self
+                    .post_blinded_block(
+                        slot_head,
+                        signed_blinded_block,
+                        &mut block_blobs,
+                        &mut block_proofs,
                     )
-                } else {
-                    let WithBlobsAndMev {
-                        value: execution_payload,
-                        proofs,
-                        blobs,
-                        ..
-                    } = match builder_api
-                        .post_blinded_block(
-                            &self.chain_config,
-                            self.controller.genesis_time(),
-                            &signed_blinded_block,
-                        )
-                        .await
-                    {
-                        Ok(response) => response,
-                        Err(error) => {
-                            if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
-                                if reqwest_error.is_timeout() {
-                                    // If posting signed blinded beacon block to builder fails, don't print a warning,
-                                    // because builder should publish the block anyway, just cannot respond in a timely
-                                    // manner. We cannot do anything else here either, but exit early from propose, due
-                                    // to the risk of slashing.
-                                    debug_with_peers!(
-                                        "failed to post blinded block to the builder node: {error:?}"
-                                    );
-                                }
-
-                                return Ok(());
-                            }
-
-                            warn_with_peers!(
-                                "failed to post blinded block to the builder node: {error:?}"
-                            );
-
-                            return Ok(());
-                        }
-                    };
-
-                    block_proofs = proofs;
-                    block_blobs = blobs;
-
-                    debug_with_peers!(
-                        "received execution payload from the builder node: {execution_payload:?}"
-                    );
-
-                    let (message, signature) = signed_blinded_block.split();
-
-                    SignedBeaconBlockOrBlockRoot::Block(Box::new(
-                        message
-                            .with_execution_payload(execution_payload)?
-                            .with_signature(signature),
-                    ))
+                    .await?
+                {
+                    Some(signed_block) => signed_block,
+                    None => return Ok(()),
                 }
             }
             ValidatorBlindedBlock::BeaconBlock(block) => {
@@ -1097,67 +1039,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if let Some(blobs) = block_blobs
                     && !blobs.is_empty()
                 {
-                    if self
-                        .chain_config
-                        .phase_at_slot::<P>(slot_head.slot())
-                        .is_peerdas_activated()
-                    {
-                        let timer = self
-                            .metrics
-                            .as_ref()
-                            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-                        let block = block.clone_arc();
-                        let kzg_backend = self.controller.store_config().kzg_backend;
-
-                        let data_column_sidecars = tokio::task::spawn_blocking(move || {
-                            let cells_and_kzg_proofs =
-                                eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                                    blobs.as_ref(),
-                                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-                                    kzg_backend,
-                                )?;
-
-                            eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)
-                        })
-                        .await??;
-
-                        prometheus_metrics::stop_and_record(timer);
-
-                        for data_column_sidecar in data_column_sidecars {
-                            if self
-                                .controller
-                                .sampling_columns()
-                                .into_iter()
-                                .contains(&data_column_sidecar.index)
-                            {
-                                self.controller.on_own_data_column_sidecar(
-                                    wait_group.clone(),
-                                    data_column_sidecar.clone_arc(),
-                                );
-                            }
-
-                            if !self.validator_config.withhold_data_columns_publishing {
-                                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
-                                    .send(&self.p2p_tx);
-                            }
-                        }
-                    } else {
-                        for blob_sidecar in misc::construct_blob_sidecars(
-                            &block,
-                            blobs.into_iter(),
-                            block_proofs
-                                .unwrap_or_else(KzgProofs::empty_deneb)
-                                .into_iter(),
-                        )? {
-                            let blob_sidecar = Arc::new(blob_sidecar);
-
-                            self.controller
-                                .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
-
-                            ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
-                        }
-                    }
+                    self.publish_blob_data(&wait_group, slot_head, &block, blobs, block_proofs)
+                        .await?;
                 }
 
                 self.controller
@@ -1169,6 +1052,157 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.validator_propose_successes.inc();
+        }
+
+        Ok(())
+    }
+
+    async fn post_blinded_block(
+        &self,
+        slot_head: &SlotHead<P>,
+        signed_blinded_block: SignedBlindedBeaconBlock<P>,
+        block_blobs: &mut Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+        block_proofs: &mut Option<KzgProofs<P>>,
+    ) -> Result<Option<SignedBeaconBlockOrBlockRoot<P>>> {
+        let builder_api = self
+            .builder_api
+            .as_ref()
+            .expect("Builder API should be present as it was used to query ExecutionPayloadHeader");
+
+        let signed_block = if slot_head.phase() >= Phase::Fulu
+            && builder_api
+                .post_blinded_block_post_fulu(
+                    &self.chain_config,
+                    self.controller.genesis_time(),
+                    &signed_blinded_block,
+                )
+                .await
+                .is_ok()
+        {
+            debug_with_peers!("submitted blinded block to the builder node");
+
+            Some(SignedBeaconBlockOrBlockRoot::Root(
+                signed_blinded_block.message().hash_tree_root(),
+            ))
+        } else {
+            let WithBlobsAndMev {
+                value: execution_payload,
+                proofs,
+                blobs,
+                ..
+            } = match builder_api
+                .post_blinded_block(
+                    &self.chain_config,
+                    self.controller.genesis_time(),
+                    &signed_blinded_block,
+                )
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
+                        if reqwest_error.is_timeout() {
+                            // If posting signed blinded beacon block to builder fails, don't print a warning,
+                            // because builder should publish the block anyway, just cannot respond in a timely
+                            // manner. We cannot do anything else here either, but exit early from propose, due
+                            // to the risk of slashing.
+                            debug_with_peers!(
+                                "failed to post blinded block to the builder node: {error:?}"
+                            );
+                        }
+
+                        return Ok(None);
+                    }
+
+                    warn_with_peers!("failed to post blinded block to the builder node: {error:?}");
+
+                    return Ok(None);
+                }
+            };
+
+            *block_proofs = proofs;
+            *block_blobs = blobs;
+
+            debug_with_peers!(
+                "received execution payload from the builder node: {execution_payload:?}"
+            );
+
+            let (message, signature) = signed_blinded_block.split();
+
+            Some(SignedBeaconBlockOrBlockRoot::Block(Box::new(
+                message
+                    .with_execution_payload(execution_payload)?
+                    .with_signature(signature),
+            )))
+        };
+
+        Ok(signed_block)
+    }
+
+    async fn publish_blob_data(
+        &self,
+        wait_group: &W,
+        slot_head: &SlotHead<P>,
+        block: &Arc<SignedBeaconBlock<P>>,
+        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+        block_proofs: Option<KzgProofs<P>>,
+    ) -> Result<()> {
+        if self
+            .chain_config
+            .phase_at_slot::<P>(slot_head.slot())
+            .is_peerdas_activated()
+        {
+            let timer = self
+                .metrics
+                .as_ref()
+                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
+            let block = block.clone_arc();
+            let kzg_backend = self.controller.store_config().kzg_backend;
+
+            let data_column_sidecars = tokio::task::spawn_blocking(move || {
+                let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
+                    blobs.as_ref(),
+                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
+                    kzg_backend,
+                )?;
+
+                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)
+            })
+            .await??;
+
+            prometheus_metrics::stop_and_record(timer);
+
+            for data_column_sidecar in data_column_sidecars {
+                if self
+                    .controller
+                    .sampling_columns()
+                    .into_iter()
+                    .contains(&data_column_sidecar.index)
+                {
+                    self.controller.on_own_data_column_sidecar(
+                        wait_group.clone(),
+                        data_column_sidecar.clone_arc(),
+                    );
+                }
+
+                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
+            }
+        } else {
+            for blob_sidecar in misc::construct_blob_sidecars(
+                block,
+                blobs.into_iter(),
+                block_proofs
+                    .unwrap_or_else(KzgProofs::empty_deneb)
+                    .into_iter(),
+            )? {
+                let blob_sidecar = Arc::new(blob_sidecar);
+
+                self.controller
+                    .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
+
+                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
+            }
         }
 
         Ok(())

@@ -440,11 +440,6 @@ struct BeaconNodeOptions {
     #[clap(long)]
     blacklisted_blocks: Vec<H256>,
 
-    /// Disable `engine_getBlobs` integration, use purely gossip and p2p requests.
-    /// Use for testing purpose
-    #[clap(long)]
-    disable_engine_getblobs: bool,
-
     /// Disable reconstruction while syncing the chain
     /// [default: disabled]
     #[clap(long)]
@@ -868,10 +863,6 @@ struct ValidatorOptions {
     #[clap(long)]
     report_validator_performance: bool,
 
-    // Withhold all data column sidecars when assigned to propose a block. Use for testing purpose
-    #[clap(long)]
-    withhold_data_columns_publishing: bool,
-
     // Backfill custody groups
     #[clap(long)]
     no_custody_groups_backfill: bool,
@@ -1044,7 +1035,6 @@ impl GrandineArgs {
             in_memory,
             kzg_backend,
             blacklisted_blocks,
-            disable_engine_getblobs,
             sync_without_reconstruction,
             ..
         } = beacon_node_options;
@@ -1077,7 +1067,6 @@ impl GrandineArgs {
             web3signer_urls,
             slashing_protection_history_limit,
             report_validator_performance,
-            withhold_data_columns_publishing,
             no_custody_groups_backfill,
         } = validator_options;
 
@@ -1460,9 +1449,7 @@ impl GrandineArgs {
             kzg_backend,
             blacklisted_blocks: blacklisted_blocks.into_iter().collect(),
             report_validator_performance,
-            withhold_data_columns_publishing,
             backfill_custody_groups: !no_custody_groups_backfill,
-            disable_engine_getblobs,
             sync_without_reconstruction,
         })
     }

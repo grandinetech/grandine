@@ -20,8 +20,6 @@ pub struct StoreConfig {
     #[derivative(Default(value = "DEFAULT_KZG_BACKEND"))]
     pub kzg_backend: KzgBackend,
     #[derivative(Default(value = "false"))]
-    pub disable_engine_getblobs: bool,
-    #[derivative(Default(value = "false"))]
     pub sync_without_reconstruction: bool,
 }
 

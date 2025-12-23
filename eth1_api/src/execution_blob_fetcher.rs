@@ -124,9 +124,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 return;
             }
 
-            if self.controller.is_forward_synced()
-                && !self.controller.store_config().disable_engine_getblobs
-            {
+            if self.controller.is_forward_synced() {
                 let versioned_hashes = kzg_commitments
                     .iter()
                     .copied()
@@ -258,9 +256,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
-        if self.controller.is_forward_synced()
-            && !self.controller.store_config().disable_engine_getblobs
-        {
+        if self.controller.is_forward_synced() {
             let request_timer = self
                 .metrics
                 .as_ref()

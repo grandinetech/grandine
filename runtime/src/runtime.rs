@@ -1245,9 +1245,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         kzg_backend,
         blacklisted_blocks,
         report_validator_performance,
-        withhold_data_columns_publishing,
         backfill_custody_groups,
-        disable_engine_getblobs,
         sync_without_reconstruction,
         ..
     } = config;
@@ -1285,7 +1283,6 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         default_builder_boost_factor,
         default_gas_limit,
         keystore_storage_password_file,
-        withhold_data_columns_publishing,
         backfill_custody_groups,
     });
 
@@ -1295,7 +1292,6 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         state_cache_lock_timeout,
         unfinalized_states_in_memory,
         kzg_backend,
-        disable_engine_getblobs,
         sync_without_reconstruction,
     };
 
