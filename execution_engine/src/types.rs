@@ -11,10 +11,7 @@ use serde::{
     de::Visitor,
     ser::{Error as _, SerializeSeq as _},
 };
-use ssz::{
-    ByteList, ByteVector, ContiguousList, ContiguousVector, SszHash as _, SszReadDefault,
-    SszWrite as _,
-};
+use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite as _};
 use typenum::Unsigned;
 use types::{
     bellatrix::{
@@ -33,17 +30,13 @@ use types::{
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
-    nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
-    phase0::{
-        containers::SignedBeaconBlockHeader,
-        primitives::{
-            ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
-            UnixSeconds, ValidatorIndex,
-        },
+    fulu::containers::DataColumnIdentifier,
+    nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
+    phase0::primitives::{
+        ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, UnixSeconds,
+        ValidatorIndex,
     },
     preset::Preset,
-    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 const SUPPORTED_REQUEST_TYPES: &[&str; 3] = &[
@@ -1047,62 +1040,6 @@ pub struct EngineGetBlobsV2Params<P: Preset> {
 impl<P: Preset> From<EngineGetBlobsV2Params<P>> for EngineGetBlobsParams<P> {
     fn from(value: EngineGetBlobsV2Params<P>) -> Self {
         Self::V2(value)
-    }
-}
-
-pub enum BlockOrDataColumnSidecar<P: Preset> {
-    Block(Arc<SignedBeaconBlock<P>>),
-    Sidecar(Arc<DataColumnSidecar<P>>),
-}
-
-impl<P: Preset> BlockOrDataColumnSidecar<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        match self {
-            Self::Block(block) => block.message().slot(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.slot,
-        }
-    }
-
-    #[must_use]
-    pub fn block_root(&self) -> H256 {
-        match self {
-            Self::Block(block) => block.message().hash_tree_root(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
-        }
-    }
-
-    #[must_use]
-    pub fn signed_block_header(&self) -> SignedBeaconBlockHeader {
-        match self {
-            Self::Block(block) => block.to_header(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header,
-        }
-    }
-
-    pub fn kzg_commitments(
-        &self,
-    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
-        match self {
-            Self::Block(block) => block
-                .message()
-                .body()
-                .with_blob_kzg_commitments()
-                .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
-            Self::Sidecar(sidecar) => Some(&sidecar.kzg_commitments),
-        }
-    }
-}
-
-impl<P: Preset> From<Arc<SignedBeaconBlock<P>>> for BlockOrDataColumnSidecar<P> {
-    fn from(block: Arc<SignedBeaconBlock<P>>) -> Self {
-        Self::Block(block)
-    }
-}
-
-impl<P: Preset> From<Arc<DataColumnSidecar<P>>> for BlockOrDataColumnSidecar<P> {
-    fn from(sidecar: Arc<DataColumnSidecar<P>>) -> Self {
-        Self::Sidecar(sidecar)
     }
 }
 

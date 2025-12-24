@@ -3,13 +3,13 @@ use std::sync::Arc;
 
 use bit_field::BitField as _;
 use bls::Signature;
-use derive_more::Constructor;
+use derive_more::{Constructor, From};
 use enum_iterator::Sequence;
 use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
+use ssz::{ContiguousList, Size, SszHash as _, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -26,8 +26,12 @@ use crate::{
     },
     electra::containers::ExecutionRequests,
     fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
-    phase0::primitives::{Gwei, H256, Uint256, UnixSeconds, ValidatorIndex},
+    phase0::{
+        containers::SignedBeaconBlockHeader,
+        primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
+    },
     preset::Preset,
+    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 pub use smallvec::smallvec;
@@ -351,6 +355,51 @@ impl<P: Preset> KzgProofs<P> {
     #[must_use]
     pub fn empty_fulu() -> Self {
         Self::Fulu(ContiguousList::default())
+    }
+}
+
+#[derive(Clone, Debug, From)]
+pub enum BlockOrDataColumnSidecar<P: Preset> {
+    Block(Arc<SignedBeaconBlock<P>>),
+    Sidecar(Arc<DataColumnSidecar<P>>),
+}
+
+impl<P: Preset> BlockOrDataColumnSidecar<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Block(block) => block.message().slot(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.slot,
+        }
+    }
+
+    #[must_use]
+    pub fn block_root(&self) -> H256 {
+        match self {
+            Self::Block(block) => block.message().hash_tree_root(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
+        }
+    }
+
+    #[must_use]
+    pub fn signed_block_header(&self) -> SignedBeaconBlockHeader {
+        match self {
+            Self::Block(block) => block.to_header(),
+            Self::Sidecar(sidecar) => sidecar.signed_block_header,
+        }
+    }
+
+    pub fn kzg_commitments(
+        &self,
+    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
+        match self {
+            Self::Block(block) => block
+                .message()
+                .body()
+                .with_blob_kzg_commitments()
+                .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
+            Self::Sidecar(sidecar) => Some(&sidecar.kzg_commitments),
+        }
     }
 }
 

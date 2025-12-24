@@ -6,8 +6,8 @@ use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use eth2_libp2p::GossipId;
 use execution_engine::{
-    BlockOrDataColumnSidecar, EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params,
-    ExecutionServiceMessage, MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
+    EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
+    MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
@@ -401,15 +401,7 @@ impl<P: Preset> Context<P> {
                             .all(|id| id.block_root == block_root)
                     );
                     assert!(!data_column_identifiers.is_empty());
-
-                    match block_or_sidecar {
-                        BlockOrDataColumnSidecar::Block(block_with_missing_blobs) => {
-                            assert_eq!(block_with_missing_blobs, *block)
-                        }
-                        BlockOrDataColumnSidecar::Sidecar(data_column_sidecar) => {
-                            assert_eq!(data_column_sidecar.signed_block_header, block.to_header())
-                        }
-                    }
+                    assert_eq!(block_or_sidecar.signed_block_header(), block.to_header());
                 }
             },
             _ => panic!("ExecutionServiceMessage::GetBlobs expected"),
