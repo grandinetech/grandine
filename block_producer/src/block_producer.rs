@@ -1934,16 +1934,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     }
 
     /// Compute the post-execution state root for the envelope
-    pub async fn compute_post_execution_state_root(
+    pub fn compute_post_execution_state_root(
         &self,
         beacon_block_root: H256,
         builder_index: ValidatorIndex,
+        deneb_payload: DenebExecutionPayload<P>,
+        execution_requests_data: ExecutionRequests<P>,
+        blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     ) -> Result<H256> {
-        let (deneb_payload, execution_requests_data, blob_kzg_commitments) = self
-            .get_gloas_envelope_data()
-            .await
-            .ok_or_else(|| AnyhowError::msg("envelope data not available"))?;
-
         // Build envelope with placeholder state_root (will be set after processing)
         let envelope = ExecutionPayloadEnvelope {
             payload: deneb_payload.into(),

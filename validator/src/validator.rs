@@ -1150,10 +1150,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                     // Compute state_root by calling process_execution_payload(verify=false)
                     // then hash_tree_root(state). This is the post-execution beacon state root
-                    let state_root = match block_build_context
-                        .compute_post_execution_state_root(beacon_block_root, proposer_index)
-                        .await
-                    {
+                    let state_root = match block_build_context.compute_post_execution_state_root(
+                        beacon_block_root,
+                        proposer_index,
+                        deneb_payload.clone(),
+                        execution_requests_data.clone(),
+                        blob_kzg_commitments.clone(),
+                    ) {
                         Ok(root) => root,
                         Err(error) => {
                             warn_with_peers!(
