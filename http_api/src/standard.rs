@@ -4414,25 +4414,17 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
     proofs: Option<KzgProofs<P>>,
     metrics: Option<Arc<Metrics>>,
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
-    tokio::task::spawn_blocking(move || {
-        let timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-        let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-            blobs.unwrap_or_default().as_ref(),
-            proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-            controller.store_config().kzg_backend,
-        )?;
-
-        let data_column_sidecars =
-            eip_7594::construct_data_column_sidecars(&signed_beacon_block, &cells_and_kzg_proofs)?;
-
-        prometheus_metrics::stop_and_record(timer);
-
-        Ok(data_column_sidecars)
-    })
-    .await?
+    eip_7594::construct_data_column_sidecars_from_blobs(
+        signed_beacon_block.into(),
+        blobs.unwrap_or_default().to_vec(),
+        proofs
+            .unwrap_or_else(KzgProofs::empty_fulu)
+            .into_iter()
+            .collect_vec(),
+        controller.store_config().kzg_backend,
+        metrics,
+    )
+    .await
 }
 
 #[cfg(test)]

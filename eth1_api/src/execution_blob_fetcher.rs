@@ -19,12 +19,9 @@ use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
     combined::SignedBeaconBlock,
-    deneb::{
-        containers::BlobIdentifier,
-        primitives::{Blob, BlobIndex, KzgProof},
-    },
+    deneb::{containers::BlobIdentifier, primitives::BlobIndex},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
     nonstandard::BlockOrDataColumnSidecar,
@@ -302,11 +299,13 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                 .flat_map(IntoIterator::into_iter)
                                 .collect::<Vec<_>>();
 
-                            let reconstruction_result = self
-                                .construct_data_column_sidecars(
+                            let reconstruction_result =
+                                eip_7594::construct_data_column_sidecars_from_blobs(
                                     block_or_sidecar,
                                     received_blobs,
                                     cells_proofs,
+                                    self.controller.store_config().kzg_backend,
+                                    self.metrics.clone(),
                                 )
                                 .await;
 
@@ -397,45 +396,5 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .send(&self.p2p_tx);
             }
         }
-    }
-
-    // TODO: possible merge with `construct_data_column_sidecars_from_blobs` in `http_api`
-    async fn construct_data_column_sidecars(
-        &self,
-        block_or_sidecar: BlockOrDataColumnSidecar<P>,
-        received_blobs: Vec<Blob<P>>,
-        cells_proofs: Vec<KzgProof>,
-    ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
-        let kzg_backend = self.controller.store_config().kzg_backend;
-        let metrics = self.metrics.clone();
-
-        tokio::task::spawn_blocking(move || {
-            let timer = metrics
-                .as_ref()
-                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-            let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                &received_blobs,
-                &cells_proofs,
-                kzg_backend,
-            )?;
-
-            let data_column_sidecars = match block_or_sidecar {
-                BlockOrDataColumnSidecar::Block(block) => {
-                    eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?
-                }
-                BlockOrDataColumnSidecar::Sidecar(sidecar) => {
-                    eip_7594::construct_data_column_sidecars_from_sidecar(
-                        &sidecar,
-                        &cells_and_kzg_proofs,
-                    )?
-                }
-            };
-
-            prometheus_metrics::stop_and_record(timer);
-
-            Ok(data_column_sidecars)
-        })
-        .await?
     }
 }

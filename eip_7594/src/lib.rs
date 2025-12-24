@@ -29,6 +29,7 @@ use types::{
         containers::{DataColumnSidecar, MatrixEntry},
         primitives::{BlobCommitmentsInclusionProof, CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
+    nonstandard::BlockOrDataColumnSidecar,
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, NodeId, SubnetId, ValidatorIndex},
@@ -385,6 +386,35 @@ pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
             })
         })
         .collect::<Result<Vec<_>>>()
+}
+
+pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
+    block_or_sidecar: BlockOrDataColumnSidecar<P>,
+    received_blobs: Vec<Blob<P>>,
+    cells_proofs: Vec<KzgProof>,
+    kzg_backend: KzgBackend,
+    metrics: Option<Arc<Metrics>>,
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    tokio::task::spawn_blocking(move || {
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+
+        let cells_and_kzg_proofs =
+            try_convert_to_cells_and_kzg_proofs::<P>(&received_blobs, &cells_proofs, kzg_backend)?;
+
+        let data_column_sidecars = match block_or_sidecar {
+            BlockOrDataColumnSidecar::Block(block) => {
+                construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?
+            }
+            BlockOrDataColumnSidecar::Sidecar(sidecar) => {
+                construct_data_column_sidecars_from_sidecar(&sidecar, &cells_and_kzg_proofs)?
+            }
+        };
+
+        Ok(data_column_sidecars)
+    })
+    .await?
 }
 
 pub fn construct_cells_and_kzg_proofs<P: Preset>(
