@@ -905,6 +905,7 @@ pub enum PartialAttestationAction {
 
 #[derive(Debug)]
 pub enum ExecutionPayloadEnvelopeOrigin {
+    BackSync,
     Gossip(GossipId),
     Requested(PeerId),
     Own,
@@ -920,8 +921,7 @@ impl ExecutionPayloadEnvelopeOrigin {
     ) {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
-            Self::Requested(_) => (None, None),
-            Self::Own => (None, None),
+            Self::BackSync | Self::Requested(_) | Self::Own => (None, None),
         }
     }
 
@@ -929,8 +929,7 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::Requested(_) => None,
-            Self::Own => None,
+            Self::BackSync | Self::Requested(_) | Self::Own => None,
         }
     }
 
@@ -938,8 +937,7 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::Requested(_) => None,
-            Self::Own => None,
+            Self::BackSync | Self::Requested(_) | Self::Own => None,
         }
     }
 
@@ -952,9 +950,14 @@ impl ExecutionPayloadEnvelopeOrigin {
     #[must_use]
     pub const fn verify_signatures(&self) -> bool {
         match self {
-            Self::Gossip(_) | Self::Requested(_) => true,
+            Self::BackSync | Self::Gossip(_) | Self::Requested(_) => true,
             Self::Own => false,
         }
+    }
+
+    #[must_use]
+    pub const fn is_from_back_sync(&self) -> bool {
+        matches!(self, Self::BackSync)
     }
 }
 

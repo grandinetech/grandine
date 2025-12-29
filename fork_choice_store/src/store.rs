@@ -2614,7 +2614,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
         // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
-        if slot < self.finalized_slot() {
+        if !origin.is_from_back_sync() && slot < self.finalized_slot() {
             return Ok(ExecutionPayloadEnvelopeAction::Ignore(false));
         }
 
@@ -2662,6 +2662,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(envelope));
         }
 
+        // For BackSync, block is already validated and passed to valid_execution_payload_envelopes_for,
+        // so we skip block-related checks since back-synced blocks go to finalized storage, not fork choice.
+        if origin.is_from_back_sync() {
+            return Ok(ExecutionPayloadEnvelopeAction::Accept(envelope));
+        }
+
         // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
         // (a client MAY queue envelope for processing once the block is retrieved)
         // Note: Block visibility check is done via chain_link lookup below.
@@ -2683,7 +2689,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        let block = &chain_link.block;
+        let block: &Arc<SignedBeaconBlock<P>> = &chain_link.block;
 
         // [REJECT] block.slot equals envelope.slot
         ensure!(
