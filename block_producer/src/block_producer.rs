@@ -105,7 +105,7 @@ const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
 pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
 pub type LocalExecutionPayloadJoinHandle<P> =
-    JoinHandle<Option<(WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>, H256)>>;
+    JoinHandle<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
 
 type PayloadCache<P> =
     Mutex<SizedCache<H256, WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
@@ -1152,27 +1152,20 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let can_self_build = !self.beacon_state.is_post_gloas()
             || predicates::has_builder_withdrawal_credential(self.proposer()?);
 
-        let (payload_with_data, payload_root) = if can_self_build {
+        let payload_with_data = if can_self_build {
             if let Some(handle) = local_execution_payload_handle {
-                match handle.await? {
-                    Some((payload, root)) => (
-                        Some(payload.map(|value| value.map(Some))),
-                        Some(root),
-                    ),
-                    None => (None, None),
-                }
+                handle
+                    .await?
+                    .map(|value| value.map(|value| value.map(Some)))
             } else {
-                (None, None)
+                None
             }
         } else {
             // To prevent return error in payload_with_data check
-            (
-                Some(WithClientVersions {
-                    client_versions: Some(vec![ClientVersionV1::own()].into()),
-                    result: WithBlobsAndMev::with_default(None),
-                }),
-                None,
-            )
+            Some(WithClientVersions {
+                client_versions: Some(vec![ClientVersionV1::own()].into()),
+                result: WithBlobsAndMev::with_default(None),
+            })
         };
 
         let WithClientVersions {
@@ -1200,9 +1193,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         // Cache payload root for Gloas envelope retrieval later (only when self-building)
-        // payload_root already computed in local_execution_payload_result, no need to recompute
+        // External builders publish their own envelope
         if can_self_build && self.beacon_state.phase() >= Phase::Gloas {
-            *self.cached_payload_root.lock().await = payload_root;
+            if let Some(ref payload) = execution_payload {
+                *self.cached_payload_root.lock().await = Some(payload.hash_tree_root());
+            }
         }
 
         let mut without_state_root = if let Some(state) = self.beacon_state.post_gloas() {
@@ -1978,7 +1973,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     async fn local_execution_payload_result(
         &self,
-    ) -> Result<Option<(WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>, H256)>> {
+    ) -> Result<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>> {
         let snapshot = self.producer_context.controller.snapshot();
 
         let mut payload_id = self
@@ -2073,16 +2068,15 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .await
             .cache_set(payload_root, payload.clone());
 
-        Ok(Some((payload, payload_root)))
+        Ok(Some(payload))
     }
 
     // If the local execution engine fails, a block can still be constructed with a payload received
     // from an external block builder or even the default payload, though blocks with default
     // payloads are only valid before the Merge.
-    // Returns (payload, payload_root) to avoid recomputing hash_tree_root
     async fn local_execution_payload_option(
         &self,
-    ) -> Option<(WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>, H256)> {
+    ) -> Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
         if self.producer_context.fake_execution_payloads {
             let slot = self.beacon_state.slot();
 
@@ -2101,11 +2095,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 match execution_payload {
                     Ok(payload) => {
-                        let payload_root = payload.hash_tree_root();
-                        return Some((
-                            WithClientVersions::none(WithBlobsAndMev::with_default(payload)),
-                            payload_root,
-                        ))
+                        return Some(WithClientVersions::none(WithBlobsAndMev::with_default(
+                            payload,
+                        )))
                     }
                     Err(error) => panic!("failed to produce fake payload: {error:?}"),
                 };
