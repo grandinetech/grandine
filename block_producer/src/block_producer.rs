@@ -1953,11 +1953,20 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             signature: SignatureBytes::default(),
         };
 
-        let BeaconState::Gloas(ref gloas_state) = *self.beacon_state else {
-            return Err(AnyhowError::msg("compute_post_execution_state_root requires Gloas state"));
+        let mut post_execution_state = match &*self.beacon_state {
+            BeaconState::Phase0(_)
+            | BeaconState::Altair(_)
+            | BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_)
+            | BeaconState::Electra(_)
+            | BeaconState::Fulu(_) => {
+                return Err(AnyhowError::msg(
+                    "compute_post_execution_state_root requires Gloas state",
+                ));
+            }
+            BeaconState::Gloas(gloas_state) => gloas_state.clone(),
         };
-
-        let mut post_execution_state = gloas_state.clone();
 
         gloas::process_execution_payload(
             &self.producer_context.chain_config,
