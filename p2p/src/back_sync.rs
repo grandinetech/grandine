@@ -457,53 +457,13 @@ impl<P: Preset> Batch<P> {
             return Ok(vec![]);
         };
 
-        // Block-derived checks (these are skipped in store for BackSync, so we do them here)
-        // [REJECT] block.slot equals envelope.slot
-        ensure!(
-            slot == envelope.message.slot,
-            Error::ExecutionPayloadEnvelopeSlotMismatch::<P> {
-                block_root,
-                expected: slot,
-                actual: envelope.message.slot,
-            },
-        );
-
-        // Get bid from block
-        let Some(bid) = block
-            .message()
-            .body()
-            .with_payload_bid()
-            .map(|body| body.signed_execution_payload_bid().message)
-        else {
-            bail!(Error::ExecutionPayloadEnvelopeNoBid::<P> { block_root });
-        };
-
-        // [REJECT] envelope.builder_index == bid.builder_index
-        ensure!(
-            envelope.message.builder_index == bid.builder_index,
-            Error::ExecutionPayloadEnvelopeBuilderMismatch::<P> {
-                block_root,
-                expected: bid.builder_index,
-                actual: envelope.message.builder_index,
-            },
-        );
-
-        // [REJECT] payload.block_hash == bid.block_hash
-        ensure!(
-            envelope.message.payload.block_hash == bid.block_hash,
-            Error::ExecutionPayloadEnvelopeBlockHashMismatch::<P> {
-                block_root,
-                expected: bid.block_hash,
-                actual: envelope.message.payload.block_hash,
-            },
-        );
-
         let head_state = controller.head_state().value;
 
         let action = tokio::task::block_in_place(|| {
             controller.validate_execution_payload_envelope_with_state(
                 envelope.clone_arc(),
                 &ExecutionPayloadEnvelopeOrigin::BackSync,
+                || Some((block.clone_arc(), PayloadStatus::Optimistic)),
                 || Some(head_state.clone_arc()),
             )
         })?;
@@ -919,35 +879,6 @@ pub enum Error<P: Preset> {
         action: ExecutionPayloadEnvelopeAction<P>,
         block_root: H256,
         slot: Slot,
-    },
-    #[error(
-        "execution payload envelope slot mismatch for block {block_root:?} \
-         (expected: {expected}, actual: {actual})"
-    )]
-    ExecutionPayloadEnvelopeSlotMismatch {
-        block_root: H256,
-        expected: Slot,
-        actual: Slot,
-    },
-    #[error("execution payload envelope for block {block_root:?} has no payload bid")]
-    ExecutionPayloadEnvelopeNoBid { block_root: H256 },
-    #[error(
-        "execution payload envelope builder index mismatch for block {block_root:?} \
-         (expected: {expected}, actual: {actual})"
-    )]
-    ExecutionPayloadEnvelopeBuilderMismatch {
-        block_root: H256,
-        expected: u64,
-        actual: u64,
-    },
-    #[error(
-        "execution payload envelope block hash mismatch for block {block_root:?} \
-         (expected: {expected:?}, actual: {actual:?})"
-    )]
-    ExecutionPayloadEnvelopeBlockHashMismatch {
-        block_root: H256,
-        expected: H256,
-        actual: H256,
     },
     #[error("final back-sync checkpoint mismatch (expected: {expected:?}, actual: {actual:?})")]
     FinalCheckpointMismatch {

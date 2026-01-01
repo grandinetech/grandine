@@ -870,10 +870,11 @@ where
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
+        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         self.store_snapshot()
-            .validate_execution_payload_envelope_with_state(envelope, origin, state_fn)
+            .validate_execution_payload_envelope_with_state(envelope, origin, block_info, state_fn)
     }
 }
 
