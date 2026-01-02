@@ -156,6 +156,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             voluntary_exits: Mutex::new(vec![]),
             payload_cache: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             payload_id_cache: Mutex::new(SizedCache::with_size(PAYLOAD_ID_CACHE_SIZE)),
+            cached_payload_roots: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             metrics,
             fake_execution_payloads,
         });
@@ -176,7 +177,6 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             head_block_root,
             proposer_index,
             options,
-            cached_payload_root: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -632,6 +632,8 @@ struct ProducerContext<P: Preset, W: Wait> {
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
     payload_cache: PayloadCache<P>,
     payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
+    /// Cached payload roots keyed by beacon_block_root for envelope retrieval
+    cached_payload_roots: Mutex<SizedCache<H256, H256>>,
     metrics: Option<Arc<Metrics>>,
     fake_execution_payloads: bool,
 }
@@ -651,8 +653,6 @@ pub struct BlockBuildContext<P: Preset, W: Wait> {
     head_block_root: H256,
     proposer_index: ValidatorIndex,
     options: BlockBuildOptions,
-    /// Payload root for retrieving cached envelope data from payload_cache
-    cached_payload_root: Arc<Mutex<Option<H256>>>,
 }
 
 impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
@@ -1196,7 +1196,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // External builders publish their own envelope
         if can_self_build && self.beacon_state.phase() >= Phase::Gloas {
             if let Some(ref payload) = execution_payload {
-                *self.cached_payload_root.lock().await = Some(payload.hash_tree_root());
+                self.producer_context
+                    .cached_payload_roots
+                    .lock()
+                    .await
+                    .cache_set(self.head_block_root, payload.hash_tree_root());
             }
         }
 
@@ -1894,7 +1898,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         ExecutionRequests<P>,
         ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     )> {
-        let payload_root = (*self.cached_payload_root.lock().await)?;
+        let payload_root = *self
+            .producer_context
+            .cached_payload_roots
+            .lock()
+            .await
+            .cache_get(&self.head_block_root)?;
 
         let cached = self
             .producer_context
