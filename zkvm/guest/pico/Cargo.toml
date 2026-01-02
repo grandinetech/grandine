@@ -13,7 +13,7 @@ bls = { path = '../../../bls', features = ['zkcrypto'] }
 # this package is used by `bls` and need `zkvm-pico` feature activated.
 bls-zkcrypto = { path = '../../../bls/bls-zkcrypto', features = ['zkvm-pico'] }
 enum-iterator = '2'
-pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" }
+pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.2.2" }
 pubkey_cache = { path = '../../../pubkey_cache' }
 serde = { version = "1.0", features = ["derive"] }
 # Specify sha2 library to activate `zkvm-pico` feature

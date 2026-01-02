@@ -10,7 +10,7 @@ anyhow = '1'
 bls = { path = '../../../bls', features = ['zkcrypto'] }
 enum-iterator = '2'
 pubkey_cache = { path = '../../../pubkey_cache' }
-sp1-zkvm = { version = '5.2.1', features = ['embedded'] }
+sp1-zkvm = { version = '5.2.4', features = ['embedded'] }
 ssz = { path = '../../../ssz' }
 transition_functions = { path = '../../../transition_functions' }
 types = { path = '../../../types' }

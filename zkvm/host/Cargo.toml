@@ -31,8 +31,8 @@ zkvm_guest_risc0 = { workspace = true, optional = true }
 zkm-sdk = { workspace = true, optional = true }
 
 # For pico zkvm
-pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" , optional = true }
-pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.1.7" , optional = true }
+pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.2.2" , optional = true }
+pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.2.2" , optional = true }
 
 [build-dependencies]
 sp1-helper = { workspace = true, optional = true }

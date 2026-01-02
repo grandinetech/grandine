@@ -14,8 +14,7 @@ bls-zkcrypto = { path = '../../../../bls/bls-zkcrypto', features = ['zkvm-risc0'
 database = { path = '../../../../database' }
 enum-iterator = '2'
 pubkey_cache = { path = '../../../../pubkey_cache' }
-risc0-zkvm = { version = "2.3.1", default-features = false, features = ['std', 'unstable', 'heap-embedded-alloc'] }
-risc0-zkvm-platform = { version = "2.0.3", features = ['sys-getenv', 'heap-embedded-alloc'] }
+risc0-zkvm = { version = "3.0.4", default-features = false, features = ["std", "unstable", "heap-embedded-alloc"] }
 serde = { version = "1.0", features = ["derive"] }
 # Specify sha2 library to activate `zkvm-risc0` feature
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2', features = ['compress', 'zkvm-risc0'] }

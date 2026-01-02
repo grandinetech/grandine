@@ -97,10 +97,12 @@ impl VmBackend for Vm {
 
         // zkVM emulation
         println!("zkvm_host: emulation starts.");
-        let (cycle, output) = prover.emulate(stdin_builder);
+        let (reports, output) = prover.emulate(stdin_builder);
         println!("zkvm_host: emulation ends.");
 
-        Ok((output, Report(cycle)))
+        let total_num_cycles = reports.last().unwrap().current_cycle;
+
+        Ok((output, Report(total_num_cycles)))
     }
 
     fn prove(

@@ -1,9 +1,8 @@
-use risc0_zkvm::guest::env;
-
 use anyhow::Result;
-use ssz::{SszRead as _, SszHash as _};
-use transition_functions::combined::untrusted_state_transition as state_transition;
 use pubkey_cache::PubkeyCache;
+use risc0_zkvm::guest::env;
+use ssz::{SszHash as _, SszRead as _};
+use transition_functions::combined::untrusted_state_transition as state_transition;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config,
@@ -11,7 +10,10 @@ use types::{
     preset::{Mainnet, Preset},
 };
 
-fn read_block_and_state<P: Preset>() -> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
+risc0_zkvm::guest::entry!(main);
+
+fn read_block_and_state<P: Preset>()
+-> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
     let config_kind: u8 = env::read();
     let config = match config_kind {
         0 => Config::mainnet(),
@@ -54,12 +56,12 @@ fn read_block_and_state<P: Preset>() -> Result<(Config, SignedBeaconBlock<P>, Be
     Ok((config, block, state, cache))
 }
 
-fn main() -> Result<()> {
+fn main() {
     // ----------------
 
     let start = env::cycle_count();
 
-    let (config, block, mut state, cache) = read_block_and_state::<Mainnet>()?;
+    let (config, block, mut state, cache) = read_block_and_state::<Mainnet>().unwrap();
 
     eprintln!("read input: {}", env::cycle_count() - start);
 
@@ -67,7 +69,7 @@ fn main() -> Result<()> {
 
     let start = env::cycle_count();
 
-    state_transition(&config, &cache, &mut state, &block)?;
+    state_transition(&config, &cache, &mut state, &block).unwrap();
 
     eprintln!("state transition: {}", env::cycle_count() - start);
 
@@ -78,6 +80,4 @@ fn main() -> Result<()> {
     env::commit_slice(&state.hash_tree_root().0);
 
     eprintln!("write output: {}", env::cycle_count() - start);
-
-    Ok(())
 }

@@ -1,17 +1,17 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
 use anyhow::Result;
 use borsh::BorshSerialize;
-use risc0_zkvm::{ExecutorEnv, Receipt, SessionStats, default_prover};
+use risc0_zkvm::{ExecutorEnv, Receipt, SessionStats, default_executor, default_prover};
 use std::{fs::File, io::BufWriter};
 use zkvm_guest_risc0::{RISC0_GRANDINE_STATE_TRANSITION_ELF, RISC0_GRANDINE_STATE_TRANSITION_ID};
 
 pub struct Vm;
 
-pub struct Report(SessionStats);
+pub struct Report(u64);
 
 impl ReportTrait for Report {
     fn cycles(&self) -> u64 {
-        self.0.total_cycles
+        self.0
     }
 }
 
@@ -50,7 +50,7 @@ impl VmBackend for Vm {
         cache_ssz: Vec<u8>,
         phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Report)> {
-        let prover = default_prover();
+        let prover = default_executor();
 
         let env = ExecutorEnv::builder()
             .write(&(config as u8))?
@@ -66,10 +66,11 @@ impl VmBackend for Vm {
 
         let elf = RISC0_GRANDINE_STATE_TRANSITION_ELF;
 
-        let prove_info = prover.prove(env, elf)?;
-        let receipt = prove_info.receipt;
+        let receipt = prover.execute(env, elf)?;
 
-        Ok((receipt.journal.bytes, Report(prove_info.stats)))
+        let cycles = receipt.cycles();
+
+        Ok((receipt.journal.bytes, Report(cycles)))
     }
 
     fn prove(
