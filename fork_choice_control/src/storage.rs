@@ -40,15 +40,10 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-<<<<<<< HEAD
-use crate::{StorageMode, checkpoint_sync};
-=======
 use crate::{
-    checkpoint_sync,
-    delta::{apply_delta, delta, BeaconStateDelta},
-    StorageMode,
+    StorageMode, checkpoint_sync,
+    delta::{BeaconStateDelta, apply_delta, delta},
 };
->>>>>>> 5e586ec2 (feat: integrate delta-based state storage)
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 pub const DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(256_u64);
@@ -427,7 +422,9 @@ impl<P: Preset> Storage<P> {
                     bincode::serialize(&delta)?,
                 ));
             } else {
-                warn_with_peers!("base state not found at slot {base_slot}, storing full state instead at slot {state_slot}");
+                warn_with_peers!(
+                    "base state not found at slot {base_slot}, storing full state instead at slot {state_slot}"
+                );
                 batch.push(serialize(
                     StateByBlockRoot(block_root),
                     state.get_or_init(|| chain_link.state(store)),
