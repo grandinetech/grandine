@@ -11,15 +11,15 @@ use types::{
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
-        primitives::{DepositIndex, Slot, UnixSeconds, H256},
+        primitives::{DepositIndex, H256, Slot, UnixSeconds},
     },
     preset::Preset,
 };
 
 use super::phase0::{
-    apply_balances_delta, apply_randao, apply_roots_delta, apply_slashings, apply_validators_delta,
-    balances_delta, randao_delta, roots_delta, slashings_delta, validators_delta, BalanceDiffs,
-    RandaoChange, SlashingChange, ValidatorsChange,
+    BalanceDiffs, RandaoChange, SlashingChange, ValidatorsChange, apply_balances_delta,
+    apply_randao, apply_roots_delta, apply_slashings, apply_validators_delta, balances_delta,
+    randao_delta, roots_delta, slashings_delta, validators_delta,
 };
 
 #[derive(Debug, Clone, Default, Derivative, Serialize, Deserialize)]

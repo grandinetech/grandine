@@ -12,7 +12,7 @@ use types::{
         beacon_state::BeaconState,
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork, Validator},
-        primitives::{DepositIndex, Gwei, Slot, UnixSeconds, H256},
+        primitives::{DepositIndex, Gwei, H256, Slot, UnixSeconds},
     },
     preset::Preset,
 };

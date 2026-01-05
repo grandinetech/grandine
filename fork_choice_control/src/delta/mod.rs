@@ -12,31 +12,31 @@ mod fulu;
 mod phase0;
 
 pub use altair::{
-    apply_delta as apply_altair_delta, delta as altair_delta,
-    BeaconStateDelta as AltairBeaconStateDelta,
+    BeaconStateDelta as AltairBeaconStateDelta, apply_delta as apply_altair_delta,
+    delta as altair_delta,
 };
 pub use bellatrix::{
-    apply_delta as apply_bellatrix_delta, delta as bellatrix_delta,
-    BeaconStateDelta as BellatrixBeaconStateDelta,
+    BeaconStateDelta as BellatrixBeaconStateDelta, apply_delta as apply_bellatrix_delta,
+    delta as bellatrix_delta,
 };
 pub use capella::{
-    apply_delta as apply_capella_delta, delta as capella_delta,
-    BeaconStateDelta as CapellaBeaconStateDelta,
+    BeaconStateDelta as CapellaBeaconStateDelta, apply_delta as apply_capella_delta,
+    delta as capella_delta,
 };
 pub use deneb::{
-    apply_delta as apply_deneb_delta, delta as deneb_delta,
-    BeaconStateDelta as DenebBeaconStateDelta,
+    BeaconStateDelta as DenebBeaconStateDelta, apply_delta as apply_deneb_delta,
+    delta as deneb_delta,
 };
 pub use electra::{
-    apply_delta as apply_electra_delta, delta as electra_delta,
-    BeaconStateDelta as ElectraBeaconStateDelta,
+    BeaconStateDelta as ElectraBeaconStateDelta, apply_delta as apply_electra_delta,
+    delta as electra_delta,
 };
 pub use fulu::{
-    apply_delta as apply_fulu_delta, delta as fulu_delta, BeaconStateDelta as FuluBeaconStateDelta,
+    BeaconStateDelta as FuluBeaconStateDelta, apply_delta as apply_fulu_delta, delta as fulu_delta,
 };
 pub use phase0::{
-    apply_delta as apply_phase0_delta, delta as phase0_delta,
-    BeaconStateDelta as Phase0BeaconStateDelta,
+    BeaconStateDelta as Phase0BeaconStateDelta, apply_delta as apply_phase0_delta,
+    delta as phase0_delta,
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

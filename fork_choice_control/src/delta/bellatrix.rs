@@ -11,20 +11,20 @@ use types::{
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
-        primitives::{DepositIndex, Slot, UnixSeconds, H256},
+        primitives::{DepositIndex, H256, Slot, UnixSeconds},
     },
     preset::Preset,
 };
 
 use super::{
     altair::{
-        apply_epoch_participation, apply_inactivity_score, epoch_participation_delta,
-        inactivity_scores_delta, InactivityScoreDiff, ParticipationDiff,
+        InactivityScoreDiff, ParticipationDiff, apply_epoch_participation, apply_inactivity_score,
+        epoch_participation_delta, inactivity_scores_delta,
     },
     phase0::{
-        apply_balances_delta, apply_randao, apply_roots_delta, apply_slashings,
-        apply_validators_delta, balances_delta, randao_delta, roots_delta, slashings_delta,
-        validators_delta, BalanceDiffs, RandaoChange, SlashingChange, ValidatorsChange,
+        BalanceDiffs, RandaoChange, SlashingChange, ValidatorsChange, apply_balances_delta,
+        apply_randao, apply_roots_delta, apply_slashings, apply_validators_delta, balances_delta,
+        randao_delta, roots_delta, slashings_delta, validators_delta,
     },
 };
 
