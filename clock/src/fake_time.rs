@@ -42,7 +42,7 @@ impl SystemTimeLike for FakeSystemTime {
         let earlier = earlier.0;
         later
             .checked_sub(earlier)
-            .ok_or_else(|| FakeSystemTimeError(earlier - later))
+            .ok_or_else(|| FakeSystemTimeError(earlier.saturating_sub(later)))
     }
 }
 
