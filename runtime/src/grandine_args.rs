@@ -1149,7 +1149,8 @@ impl GrandineArgs {
 
         let predefined_network = network.predefined_network();
 
-        if predefined_network.is_none() && eth1_rpc_urls.is_empty() {
+        if cfg!(not(feature = "embed")) && predefined_network.is_none() && eth1_rpc_urls.is_empty()
+        {
             ensure!(
                 genesis_state_file.is_some(),
                 Error::MissingEth1RpcUrlsForCustomWithoutGenesisState,

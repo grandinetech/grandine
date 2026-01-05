@@ -359,7 +359,7 @@ pub async fn run_after_genesis<P: Preset>(
         sync_to_metrics_tx = Some(sync_tx);
 
         let eth1_connection_data = Eth1ConnectionData {
-            sync_eth1_connected: !eth1_config.eth1_rpc_urls.is_empty(),
+            sync_eth1_connected: cfg!(feature = "embed") || !eth1_config.eth1_rpc_urls.is_empty(),
             sync_eth1_fallback_connected: false,
         };
 
@@ -1039,7 +1039,7 @@ impl Context {
 
         let signer_snapshot = signer.load();
 
-        if eth1_rpc_urls.is_empty() {
+        if cfg!(not(feature = "embed")) && eth1_rpc_urls.is_empty() {
             ensure!(
                 signer_snapshot.no_keys(),
                 Error::MissingEth1RpcUrlsWithValidators,
