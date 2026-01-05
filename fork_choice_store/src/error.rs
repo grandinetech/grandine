@@ -7,8 +7,10 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
+    gloas::containers::{
+        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    },
+    phase0::primitives::{Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H256},
     preset::{Mainnet, Preset},
 };
 
@@ -81,6 +83,11 @@ pub enum Error<P: Preset> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("builder index mismatch: expected {expected}, actual {actual}")]
+    BuilderIndexMismatch {
+        expected: ValidatorIndex,
+        actual: ValidatorIndex,
+    },
     #[error("the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}")]
     DataColumnSidecarBlockNotADescendantOfFinalized {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -138,13 +145,10 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
-    #[error("execution payload bid's builder is not active: {payload_bid:?}")]
+    #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
     ExecutionPayloadBidBuilderInactive {
         payload_bid: Arc<SignedExecutionPayloadBid>,
-    },
-    #[error("execution payload bid's builder has been slashed: {payload_bid:?}")]
-    ExecutionPayloadBidBuilderSlashed {
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        epoch: Epoch,
     },
     #[error("execution payload bid's builder has invalid withdrawal credentials: {payload_bid:?}")]
     ExecutionPayloadBidBuilderInvalid {
@@ -154,16 +158,29 @@ pub enum Error<P: Preset> {
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
         payload_bid: Arc<SignedExecutionPayloadBid>,
     },
-    #[error("execution payload bid has invalid signature: {payload_bid:?}")]
-    InvalidExecutionPayloadBidSignature {
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+    #[error("execution payload bid's signature for self-build is not empty")]
+    ExecutionPayloadBidSignatureNotEmpty,
+    #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
+    ExecutionPayloadBidValueNonZero { value: Gwei },
+    #[error(
+        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadBlockHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
     },
+    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
+    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("block has invalid execution payload")]
     InvalidExecutionPayload,
+    #[error("execution payload bid has invalid signature: {payload_bid:?}")]
+    InvalidExecutionPayloadBidSignature {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -172,20 +189,6 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
-    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
-    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
-    #[error("builder index mismatch: expected {expected}, actual {actual}")]
-    BuilderIndexMismatch {
-        expected: ValidatorIndex,
-        actual: ValidatorIndex,
-    },
-    #[error(
-        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
-    )]
-    ExecutionPayloadBlockHashMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Box<H256>,
-    },
     #[error("validator not active (builder_index: {builder_index})")]
     ValidatorNotActive { builder_index: ValidatorIndex },
     #[error("validator {validator_index} is not a member of PTC at slot {slot}")]

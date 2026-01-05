@@ -692,7 +692,13 @@ impl<P: Preset> Batch<P> {
 
         debug_with_peers!("next batch checkpoint: {checkpoint:?}");
 
-        Ok((checkpoint, vec![], vec![], verified_data_column_sidecars, vec![]))
+        Ok((
+            checkpoint,
+            vec![],
+            vec![],
+            verified_data_column_sidecars,
+            vec![],
+        ))
     }
 }
 

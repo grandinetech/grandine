@@ -225,6 +225,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Send
         + Sync;
     type MaxPayloadAttestation: MerkleElements<PayloadAttestation<Self>> + Eq + Debug + Send + Sync;
+    type BuilderRegistryLimit: FitsInU64 + NonZero + Debug + Send + Sync;
     type BuilderPendingWithdrawalsLimit: MerkleElements<BuilderPendingWithdrawal>
         + Eq
         + Debug
@@ -296,6 +297,9 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     const MIN_ACTIVATION_BALANCE: Gwei = 32_000_000_000;
     const MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
     const WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
+
+    // Gloas
+    const MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: u64 = 1 << 14;
 
     /// Returns the default configuration associated with a preset.
     ///
@@ -369,6 +373,7 @@ impl Preset for Mainnet {
     // Gloas
     type PtcSize = U512;
     type MaxPayloadAttestation = U4;
+    type BuilderRegistryLimit = U1099511627776;
     type BuilderPendingWithdrawalsLimit = U1048576;
 
     // Derived type-level variables
@@ -450,6 +455,7 @@ impl Preset for Minimal {
 
         // Gloas
         type MaxPayloadAttestation;
+        type BuilderRegistryLimit;
         type BuilderPendingWithdrawalsLimit;
     }
 
@@ -498,6 +504,9 @@ impl Preset for Minimal {
 
     // Electra
     const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 2;
+
+    // Gloas
+    const MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: u64 = 16;
 }
 
 /// [Medalla preset](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/medalla/config.yaml).
@@ -563,6 +572,7 @@ impl Preset for Medalla {
         // Gloas
         type PtcSize;
         type MaxPayloadAttestation;
+        type BuilderRegistryLimit;
         type BuilderPendingWithdrawalsLimit;
 
         // Derived type-level variables
@@ -1075,7 +1085,11 @@ pub struct GloasPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_payload_attestation: u64,
     #[serde(with = "serde_utils::string_or_native")]
+    builder_registry_limit: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
     builder_pending_withdrawals_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_builders_per_withdrawals_sweep: u64,
 }
 
 impl GloasPreset {
@@ -1084,7 +1098,9 @@ impl GloasPreset {
         Self {
             ptc_size: P::PtcSize::non_zero(),
             max_payload_attestation: P::MaxPayloadAttestation::U64,
+            builder_registry_limit: P::BuilderRegistryLimit::non_zero(),
             builder_pending_withdrawals_limit: P::BuilderPendingWithdrawalsLimit::U64,
+            max_builders_per_withdrawals_sweep: P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,
         }
     }
 }

@@ -4,7 +4,6 @@ use helper_functions::{
     accessors::{get_builder_payment_quorum_threshold, get_current_epoch, get_next_epoch},
     electra::{initiate_validator_exit, is_eligible_for_activation_queue},
     misc::{compute_activation_exit_epoch, vec_of_default},
-    mutators::compute_exit_epoch_and_update_churn,
     predicates::{is_active_validator, is_eligible_for_activation},
 };
 use itertools::Itertools as _;
@@ -15,10 +14,7 @@ use typenum::Unsigned as _;
 use types::{
     capella::containers::HistoricalSummary,
     config::Config,
-    gloas::{
-        beacon_state::BeaconState,
-        containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
-    },
+    gloas::{beacon_state::BeaconState, containers::BuilderPendingPayment},
     preset::{BuilderPendingPaymentsLength, Preset},
     traits::{BeaconState as _, PostGloasBeaconState},
 };
@@ -76,7 +72,7 @@ pub fn process_epoch(
     electra::process_pending_deposits(config, pubkey_cache, state)?;
     electra::process_pending_consolidations(state)?;
 
-    process_builder_pending_payments(config, state)?;
+    process_builder_pending_payments(state)?;
     electra::process_effective_balance_updates(state);
     unphased::process_slashings_reset(state);
     unphased::process_randao_mixes_reset(state);
@@ -95,7 +91,6 @@ pub fn process_epoch(
 }
 
 fn process_builder_pending_payments<P: Preset>(
-    config: &Config,
     state: &mut impl PostGloasBeaconState<P>,
 ) -> Result<()> {
     let quorum = get_builder_payment_quorum_threshold(state);
@@ -106,18 +101,10 @@ fn process_builder_pending_payments<P: Preset>(
         .collect_vec();
 
     for payment in payments.iter().take(P::SlotsPerEpoch::USIZE) {
-        if payment.weight > quorum {
-            let exit_queue_epoch =
-                compute_exit_epoch_and_update_churn(config, state, payment.withdrawal.amount);
-            let withdrawable_epoch =
-                exit_queue_epoch.saturating_add(config.min_validator_withdrawability_delay);
-
+        if payment.weight >= quorum {
             state
                 .builder_pending_withdrawals_mut()
-                .push(BuilderPendingWithdrawal {
-                    withdrawable_epoch,
-                    ..payment.withdrawal
-                })?;
+                .push(payment.withdrawal)?;
         }
     }
 
@@ -626,9 +613,7 @@ mod spec_tests {
     }
 
     fn run_process_builder_pending_payments_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |_, state| {
-            process_builder_pending_payments(&P::default_config(), state)
-        })
+        run_case::<P>(case, |_, state| process_builder_pending_payments(state))
     }
 
     fn run_case<P: Preset>(

@@ -50,7 +50,7 @@ use crate::{
         primitives::WithdrawalIndex,
     },
     collections::{
-        Balances, BuilderPendingPayments, BuilderPendingWithdrawals, EpochParticipation,
+        Balances, BuilderPendingPayments, BuilderPendingWithdrawals, Builders, EpochParticipation,
         Eth1DataVotes, HistoricalRoots, InactivityScores, PayloadExpectedWithdrawals,
         PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, ProposerLookahead,
         RandaoMixes, RecentRoots, Slashings, Validators,
@@ -98,6 +98,7 @@ use crate::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
             ExecutionPayloadBid, PayloadAttestation, SignedExecutionPayloadBid,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::Phase,
     phase0::{
@@ -933,6 +934,8 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn builder_pending_withdrawals(&self) -> &BuilderPendingWithdrawals<P>;
     fn latest_block_hash(&self) -> ExecutionBlockHash;
     fn payload_expected_withdrawals(&self) -> &PayloadExpectedWithdrawals<P>;
+    fn builders(&self) -> &Builders<P>;
+    fn next_withdrawal_builder_index(&self) -> BuilderIndex;
 
     fn latest_execution_payload_bid_mut(&mut self) -> &mut ExecutionPayloadBid;
     fn execution_payload_availability_mut(&mut self) -> &mut BitVector<SlotsPerHistoricalRoot<P>>;
@@ -940,6 +943,8 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn builder_pending_withdrawals_mut(&mut self) -> &mut BuilderPendingWithdrawals<P>;
     fn latest_block_hash_mut(&mut self) -> &mut ExecutionBlockHash;
     fn payload_expected_withdrawals_mut(&mut self) -> &mut PayloadExpectedWithdrawals<P>;
+    fn builders_mut(&mut self) -> &mut Builders<P>;
+    fn next_withdrawal_builder_index_mut(&mut self) -> &mut BuilderIndex;
 }
 
 #[duplicate_item(
@@ -967,6 +972,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         [latest_execution_payload_bid]     [ExecutionPayloadBid];
         [execution_payload_availability]   [BitVector<SlotsPerHistoricalRoot<P>>];
         [latest_block_hash]                [ExecutionBlockHash];
+        [next_withdrawal_builder_index]    [BuilderIndex];
     )]
     fn field(&self) -> return_type {
         get_copy([field])
@@ -977,6 +983,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         [builder_pending_payments]          [BuilderPendingPayments<P>];
         [builder_pending_withdrawals]       [BuilderPendingWithdrawals<P>];
         [payload_expected_withdrawals]      [PayloadExpectedWithdrawals<P>];
+        [builders]                          [Builders<P>];
     )]
     fn field(&self) -> &return_type {
         get_ref([field])
@@ -990,6 +997,8 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         [builder_pending_withdrawals]      [builder_pending_withdrawals_mut]      [BuilderPendingWithdrawals<P>];
         [latest_block_hash]                [latest_block_hash_mut]                [ExecutionBlockHash];
         [payload_expected_withdrawals]     [payload_expected_withdrawals_mut]     [PayloadExpectedWithdrawals<P>];
+        [builders]                         [builders_mut]                         [Builders<P>];
+        [next_withdrawal_builder_index]    [next_withdrawal_builder_index_mut]    [BuilderIndex];
     )]
     fn method(&mut self) -> &mut return_type {
         get_ref_mut([field], [method])

@@ -39,6 +39,7 @@ use types::{
             DOMAIN_PTC_ATTESTER,
         },
         containers::{IndexedPayloadAttestation, PayloadAttestation},
+        primitives::BuilderIndex,
     },
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch, RelativeSlot},
     phase0::{
@@ -981,18 +982,6 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
     state: &impl PostElectraBeaconState<P>,
     validator_index: ValidatorIndex,
 ) -> Gwei {
-    if let Some(post_gloas) = state.post_gloas() {
-        get_pending_balance_to_withdraw_post_gloas(post_gloas, validator_index)
-    } else {
-        get_pending_balance_to_withdraw_pre_gloas(state, validator_index)
-    }
-}
-
-#[must_use]
-fn get_pending_balance_to_withdraw_pre_gloas<P: Preset>(
-    state: &impl PostElectraBeaconState<P>,
-    validator_index: ValidatorIndex,
-) -> Gwei {
     state
         .pending_partial_withdrawals()
         .into_iter()
@@ -1002,35 +991,26 @@ fn get_pending_balance_to_withdraw_pre_gloas<P: Preset>(
 }
 
 #[must_use]
-fn get_pending_balance_to_withdraw_post_gloas<P: Preset>(
+pub fn get_pending_balance_to_withdraw_for_builder<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
-    validator_index: ValidatorIndex,
+    builder_index: BuilderIndex,
 ) -> Gwei {
-    let pending_partial_withdrawals: Gwei = state
-        .pending_partial_withdrawals()
-        .into_iter()
-        .filter(|withdrawal| withdrawal.validator_index == validator_index)
-        .map(|withdrawal| withdrawal.amount)
-        .sum();
-
     let builder_pending_withdrawals: Gwei = state
         .builder_pending_withdrawals()
         .into_iter()
         .filter_map(|withdrawal| {
-            (withdrawal.builder_index == validator_index).then_some(withdrawal.amount)
+            (withdrawal.builder_index == builder_index).then_some(withdrawal.amount)
         })
         .sum();
 
     let builder_pending_payments: Gwei = state
         .builder_pending_payments()
         .into_iter()
-        .filter(|payment| payment.withdrawal.builder_index == validator_index)
+        .filter(|payment| payment.withdrawal.builder_index == builder_index)
         .map(|payment| payment.withdrawal.amount)
         .sum();
 
-    pending_partial_withdrawals
-        .saturating_add(builder_pending_withdrawals)
-        .saturating_add(builder_pending_payments)
+    builder_pending_withdrawals.saturating_add(builder_pending_payments)
 }
 
 pub fn get_beacon_proposer_indices<P: Preset>(

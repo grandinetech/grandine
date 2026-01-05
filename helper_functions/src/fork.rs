@@ -899,6 +899,8 @@ pub fn upgrade_to_gloas<P: Preset>(
         pending_consolidations,
         proposer_lookahead,
         // > ePBS states introduced in Gloas
+        builders: PersistentList::default(),
+        next_withdrawal_builder_index: 0,
         execution_payload_availability: BitVector::new(true),
         builder_pending_payments: PersistentVector::repeat_element(BuilderPendingPayment::default()),
         builder_pending_withdrawals: PersistentList::default(),

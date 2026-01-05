@@ -22,4 +22,5 @@ pub struct ValidatorConfig {
     pub withhold_data_columns_publishing: bool,
     #[derivative(Default(value = "true"))]
     pub backfill_custody_groups: bool,
+    pub enable_payload_build: bool,
 }
