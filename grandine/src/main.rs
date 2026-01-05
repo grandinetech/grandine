@@ -421,6 +421,7 @@ fn try_main() -> Result<()> {
         backfill_custody_groups,
         disable_engine_getblobs,
         sync_without_reconstruction,
+        enable_payload_build,
         ..
     } = config;
 
@@ -459,6 +460,7 @@ fn try_main() -> Result<()> {
         keystore_storage_password_file,
         withhold_data_columns_publishing,
         backfill_custody_groups,
+        enable_payload_build,
     });
 
     let store_config = StoreConfig {

@@ -7,22 +7,24 @@ use helper_functions::{
     accessors::{
         self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
         get_base_reward_per_increment, get_beacon_proposer_index, get_current_epoch,
-        get_indexed_payload_attestation, get_previous_epoch, get_randao_mix,
-        initialize_shuffled_indices,
+        get_indexed_payload_attestation, get_pending_balance_to_withdraw_for_builder,
+        get_previous_epoch, get_randao_mix, initialize_shuffled_indices,
     },
     electra::{
-        get_attesting_indices, get_indexed_attestation, is_fully_withdrawable_validator,
-        is_partially_withdrawable_validator, slash_validator,
+        get_attesting_indices, get_indexed_attestation, initiate_validator_exit,
+        is_fully_withdrawable_validator, is_partially_withdrawable_validator, slash_validator,
     },
     error::SignatureKind,
     misc::{
         builder_payment_index_for_current_epoch, builder_payment_index_for_previous_epoch,
-        compute_epoch_at_slot, get_max_effective_balance,
+        compute_epoch_at_slot, convert_builder_index_to_validator_index, get_max_effective_balance,
+        maybe_builder_index,
     },
-    mutators::{balance, decrease_balance, increase_balance},
+    mutators::{
+        balance, builder_balance, decrease_balance, increase_balance, initiate_builder_exit,
+    },
     predicates::{
-        has_builder_withdrawal_credential, is_active_validator, is_attestation_same_slot,
-        is_builder_payment_withdrawable, is_parent_block_full,
+        can_builder_cover_bid, is_active_builder, is_attestation_same_slot, is_parent_block_full,
         validate_constructed_indexed_attestation, validate_constructed_indexed_payload_attestation,
     },
     signing::SignForSingleFork as _,
@@ -38,21 +40,23 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::consts::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR},
-    capella::containers::Withdrawal,
+    capella::{containers::Withdrawal, primitives::WithdrawalIndex},
     config::Config,
     electra::containers::Attestation,
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
+        consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             BeaconBlock, BuilderPendingPayment, BuilderPendingWithdrawal, ExecutionPayloadBid,
             PayloadAttestation, SignedBeaconBlock, SignedExecutionPayloadBid,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{AttestationEpoch, SlashingKind},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
-        containers::{AttestationData, ProposerSlashing},
-        primitives::{DepositIndex, ExecutionAddress, H256},
+        containers::{AttestationData, ProposerSlashing, SignedVoluntaryExit},
+        primitives::{DepositIndex, Epoch, ExecutionAddress, H256},
     },
     preset::Preset,
     traits::{
@@ -174,74 +178,137 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-/// [`get_expected_withdrawals`](https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/beacon-chain.md#modified-get_expected_withdrawals)
-#[expect(clippy::too_many_lines)]
+/// [`get_expected_withdrawals`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.0/specs/gloas/beacon-chain.md#modified-get_expected_withdrawals)
 pub fn get_expected_withdrawals<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
-) -> Result<(Vec<Withdrawal>, usize, usize)> {
-    let epoch = get_current_epoch(state);
-    let total_validators = state.validators().len_u64();
-    let max_pending_partials_per_withdrawals_sweep: usize =
-        P::MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP.try_into()?;
-
+) -> Result<(Vec<Withdrawal>, usize, usize, u64)> {
+    let current_epoch = get_current_epoch(state);
     let mut withdrawal_index = state.next_withdrawal_index();
-    let mut validator_index = state.next_withdrawal_validator_index();
     let mut withdrawals: Vec<Withdrawal> = vec![];
-    let mut processed_partial_withdrawals_count = 0;
-    let mut processed_builder_withdrawals_count = 0;
 
-    // > [New in Gloas:EIP7732] Sweep for builder payments
+    // > [New in Gloas:EIP7732] Get builder withdrawals
+    let processed_builder_withdrawals_count =
+        get_builder_withdrawals_count(state, &mut withdrawal_index, &mut withdrawals)?;
+
+    // Get partial withdrawals
+    let processed_partial_withdrawals_count = get_pending_partial_withdrawals_count(
+        state,
+        &mut withdrawal_index,
+        &mut withdrawals,
+        current_epoch,
+    )?;
+
+    // > [New in Gloas:EIP7732] Get builders sweep withdrawals
+    let processed_builders_sweep_count = get_builders_sweep_withdrawals_count(
+        state,
+        &mut withdrawal_index,
+        &mut withdrawals,
+        current_epoch,
+    )?;
+
+    // Get validators sweep withdrawals
+    process_validators_sweep_withdrawals(
+        state,
+        &mut withdrawal_index,
+        &mut withdrawals,
+        current_epoch,
+    )?;
+
+    Ok((
+        withdrawals,
+        processed_builder_withdrawals_count,
+        processed_partial_withdrawals_count,
+        processed_builders_sweep_count,
+    ))
+}
+
+fn get_builder_withdrawals_count<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    withdrawal_index: &mut WithdrawalIndex,
+    withdrawals: &mut Vec<Withdrawal>,
+) -> Result<usize> {
+    let mut processed_count = 0;
+
     for withdrawal in &state.builder_pending_withdrawals().clone() {
-        if withdrawal.withdrawable_epoch > epoch
-            || withdrawals.len() + 1 == P::MaxWithdrawalsPerPayload::USIZE
-        {
+        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
             break;
         }
 
-        if is_builder_payment_withdrawable(state, withdrawal)? {
-            let builder = state.validators().get(withdrawal.builder_index)?;
-            let total_withdrawn = withdrawals
-                .iter()
-                .filter(|w| w.validator_index == withdrawal.builder_index)
-                .map(|w| w.amount)
-                .sum();
-            let balance = state
-                .balances()
-                .get(withdrawal.builder_index)
-                .copied()?
-                .saturating_sub(total_withdrawn);
+        withdrawals.push(Withdrawal {
+            index: *withdrawal_index,
+            validator_index: convert_builder_index_to_validator_index(withdrawal.builder_index),
+            address: withdrawal.fee_recipient,
+            amount: withdrawal.amount,
+        });
 
-            let withdrawable_balance = if builder.slashed {
-                withdrawal.amount.min(balance)
-            } else if balance > P::MIN_ACTIVATION_BALANCE {
-                withdrawal
-                    .amount
-                    .min(balance.saturating_sub(P::MIN_ACTIVATION_BALANCE))
-            } else {
-                0
-            };
+        *withdrawal_index = withdrawal_index
+            .checked_add(1)
+            .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
 
-            if withdrawable_balance > 0 {
-                withdrawals.push(Withdrawal {
-                    index: withdrawal_index,
-                    validator_index: withdrawal.builder_index,
-                    address: withdrawal.fee_recipient,
-                    amount: withdrawable_balance,
-                });
-                withdrawal_index += 1;
-            }
-        }
-
-        processed_builder_withdrawals_count += 1;
+        processed_count += 1;
     }
 
-    // > Sweep for pending partial withdrawals
+    Ok(processed_count)
+}
+
+fn get_builders_sweep_withdrawals_count<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    withdrawal_index: &mut WithdrawalIndex,
+    withdrawals: &mut Vec<Withdrawal>,
+    current_epoch: Epoch,
+) -> Result<u64> {
+    let total_builders = state.builders().len_u64();
+    let bound = total_builders.min(P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP);
+    let mut builder_index = state.next_withdrawal_builder_index();
+    let mut processed_count = 0;
+
+    for _ in 0..bound {
+        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
+            break;
+        }
+
+        let builder = state.builders().get(builder_index)?;
+        if builder.withdrawable_epoch <= current_epoch && builder.balance > 0 {
+            withdrawals.push(Withdrawal {
+                index: *withdrawal_index,
+                validator_index: convert_builder_index_to_validator_index(builder_index),
+                address: builder.execution_address,
+                amount: builder.balance,
+            });
+
+            *withdrawal_index = withdrawal_index
+                .checked_add(1)
+                .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
+        }
+
+        builder_index = builder_index
+            .checked_add(1)
+            .ok_or(Error::<P>::BuilderIndexOverflow)?
+            .checked_rem(total_builders)
+            .expect("total_builders being 0 should prevent the loop from being executed");
+
+        processed_count += 1;
+    }
+
+    Ok(processed_count)
+}
+
+fn get_pending_partial_withdrawals_count<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    withdrawal_index: &mut WithdrawalIndex,
+    withdrawals: &mut Vec<Withdrawal>,
+    current_epoch: Epoch,
+) -> Result<usize> {
+    let max_pending_partials_per_withdrawals_sweep: usize =
+        P::MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP.try_into()?;
     let bound = withdrawals
         .len()
         .saturating_add(max_pending_partials_per_withdrawals_sweep)
         .min(P::MaxWithdrawalsPerPayload::USIZE - 1);
+    let mut processed_count = 0;
+
     for withdrawal in &state.pending_partial_withdrawals().clone() {
-        if withdrawal.withdrawable_epoch > epoch || withdrawals.len() == bound {
+        if withdrawal.withdrawable_epoch > current_epoch || withdrawals.len() == bound {
             break;
         }
 
@@ -253,12 +320,12 @@ pub fn get_expected_withdrawals<P: Preset>(
             .filter(|w| w.validator_index == withdrawal.validator_index)
             .map(|w| w.amount)
             .sum();
-        let validator_balance = state
+        let balance_after_withdrawn = state
             .balances()
             .get(withdrawal.validator_index)
             .copied()?
             .saturating_sub(total_withdrawn);
-        let has_excess_balance = validator_balance > P::MIN_ACTIVATION_BALANCE;
+        let has_excess_balance = balance_after_withdrawn > P::MIN_ACTIVATION_BALANCE;
 
         if validator.exit_epoch == FAR_FUTURE_EPOCH
             && has_sufficient_effective_balance
@@ -266,28 +333,45 @@ pub fn get_expected_withdrawals<P: Preset>(
         {
             let withdrawable_balance = withdrawal
                 .amount
-                .min(validator_balance - P::MIN_ACTIVATION_BALANCE);
+                .min(balance_after_withdrawn - P::MIN_ACTIVATION_BALANCE);
 
             let mut address = ExecutionAddress::zero();
 
             address.assign_from_slice(&validator.withdrawal_credentials[12..]);
 
             withdrawals.push(Withdrawal {
-                index: withdrawal_index,
+                index: *withdrawal_index,
                 validator_index: withdrawal.validator_index,
                 address,
                 amount: withdrawable_balance,
             });
 
-            withdrawal_index += 1;
+            *withdrawal_index = withdrawal_index
+                .checked_add(1)
+                .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
         }
 
-        processed_partial_withdrawals_count += 1;
+        processed_count += 1;
     }
 
-    // > Sweep for remaining
+    Ok(processed_count)
+}
+
+fn process_validators_sweep_withdrawals<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    withdrawal_index: &mut WithdrawalIndex,
+    withdrawals: &mut Vec<Withdrawal>,
+    current_epoch: Epoch,
+) -> Result<()> {
+    let total_validators = state.validators().len_u64();
     let bound = total_validators.min(P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP);
+    let mut validator_index = state.next_withdrawal_validator_index();
+
     for _ in 0..bound {
+        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
+            break;
+        }
+
         let validator = state.validators().get(validator_index)?;
 
         let partially_withdrawn_balance = withdrawals
@@ -308,20 +392,20 @@ pub fn get_expected_withdrawals<P: Preset>(
             .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
             .pipe(ExecutionAddress::from_slice);
 
-        if is_fully_withdrawable_validator(validator, balance, epoch) {
+        if is_fully_withdrawable_validator(validator, balance, current_epoch) {
             withdrawals.push(Withdrawal {
-                index: withdrawal_index,
+                index: *withdrawal_index,
                 validator_index,
                 address,
                 amount: balance,
             });
 
-            withdrawal_index = withdrawal_index
+            *withdrawal_index = withdrawal_index
                 .checked_add(1)
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
         } else if is_partially_withdrawable_validator::<P>(validator, balance) {
             withdrawals.push(Withdrawal {
-                index: withdrawal_index,
+                index: *withdrawal_index,
                 validator_index,
                 address,
                 amount: balance
@@ -332,13 +416,9 @@ pub fn get_expected_withdrawals<P: Preset>(
                     ),
             });
 
-            withdrawal_index = withdrawal_index
+            *withdrawal_index = withdrawal_index
                 .checked_add(1)
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
-        }
-
-        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
-            break;
         }
 
         validator_index = validator_index
@@ -348,11 +428,7 @@ pub fn get_expected_withdrawals<P: Preset>(
             .expect("total_validators being 0 should prevent the loop from being executed");
     }
 
-    Ok((
-        withdrawals,
-        processed_builder_withdrawals_count,
-        processed_partial_withdrawals_count,
-    ))
+    Ok(())
 }
 
 pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
@@ -361,46 +437,34 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     }
 
     let (
-        expected_withdrawals,
+        withdrawals,
         processed_builder_withdrawals_count,
         processed_partial_withdrawals_count,
+        processed_builders_sweep_count,
     ) = get_expected_withdrawals(state)?;
 
+    apply_withdrawals(state, withdrawals.iter().copied())?;
+
+    // > Update the next withdrawal index if this block contained withdrawals
+    if let Some(latest_withdrawal) = withdrawals.last() {
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
+    }
+
+    // > Update payload expected withdrawals
     *state.payload_expected_withdrawals_mut() = PersistentList::try_from_iter(
-        expected_withdrawals
+        withdrawals
             .iter()
             .copied()
             .take(P::MaxWithdrawalsPerPayload::USIZE),
     )?;
-
-    for withdrawal in expected_withdrawals.iter().copied() {
-        let Withdrawal {
-            amount,
-            validator_index,
-            ..
-        } = withdrawal;
-
-        decrease_balance(balance(state, validator_index)?, amount);
-    }
 
     // > Update the pending builder withdrawals
     *state.builder_pending_withdrawals_mut() = PersistentList::try_from_iter(
         state
             .builder_pending_withdrawals()
             .into_iter()
-            .take(processed_builder_withdrawals_count)
-            .filter(|&withdrawal| {
-                !is_builder_payment_withdrawable(state, withdrawal).is_ok_and(|is_true| is_true)
-            })
             .copied()
-            .chain(
-                state
-                    .builder_pending_withdrawals()
-                    .into_iter()
-                    .copied()
-                    .skip(processed_builder_withdrawals_count),
-            )
-            .take(P::BuilderPendingWithdrawalsLimit::USIZE),
+            .skip(processed_builder_withdrawals_count),
     )?;
 
     // > Update pending partial withdrawals
@@ -412,13 +476,36 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
             .skip(processed_partial_withdrawals_count),
     )?;
 
-    // > Update the next withdrawal index if this block contained withdrawals
-    if let Some(latest_withdrawal) = expected_withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
+    // > Update next withdrawal builder index to start the next withdrawal sweep
+    let total_builders = state.builders().len_u64();
+    if total_builders > 0 {
+        let next_index = state.next_withdrawal_builder_index() + processed_builders_sweep_count;
+        *state.next_withdrawal_builder_index_mut() = next_index % total_builders;
     }
 
     // > Update the next validator index to start the next withdrawal sweep
-    capella::update_next_withdrawal_validator_index(state, &expected_withdrawals);
+    capella::update_next_withdrawal_validator_index(state, &withdrawals);
+
+    Ok(())
+}
+
+fn apply_withdrawals<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+    withdrawals: impl Iterator<Item = Withdrawal>,
+) -> Result<()> {
+    for withdrawal in withdrawals {
+        let Withdrawal {
+            amount,
+            validator_index,
+            ..
+        } = withdrawal;
+
+        if let Some(builder_index) = maybe_builder_index(validator_index) {
+            decrease_balance(builder_balance(state, builder_index)?, amount);
+        } else {
+            decrease_balance(balance(state, validator_index)?, amount);
+        }
+    }
 
     Ok(())
 }
@@ -435,9 +522,7 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
         signature,
     } = signed_bid;
 
-    let builder = state
-        .validators()
-        .get(execution_payload_bid.builder_index)?;
+    let builder = state.builders().get(execution_payload_bid.builder_index)?;
 
     // > Verify signature
     verifier.verify_singular(
@@ -448,13 +533,13 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
     )
 }
 
-#[expect(clippy::too_many_lines)]
 fn validate_execution_payload_bid<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &impl PostGloasBeaconState<P>,
     block: &BeaconBlock<P>,
 ) -> Result<()> {
+    let current_epoch = get_current_epoch(state);
     let signed_bid = block.body.signed_execution_payload_bid;
     let ExecutionPayloadBid {
         builder_index,
@@ -465,19 +550,30 @@ fn validate_execution_payload_bid<P: Preset>(
         prev_randao,
         ..
     } = signed_bid.message;
-    let builder = state.validators().get(builder_index)?;
 
-    // > For self-builds, amount must be zero regardless of withdrawal credential prefix
-    if builder_index == block.proposer_index {
+    // > For self-builds, `amount` must be zero and `signature` must be empty,
+    // Otherwise verify builder is active, has valid signature, and can pay bid.
+    if builder_index == BUILDER_INDEX_SELF_BUILD {
         ensure!(amount == 0, Error::<P>::NoneZeroBidValue);
         ensure!(
             signed_bid.signature.is_empty(),
             Error::<P>::ExecutionPayloadBidSignatureInvalid
         );
     } else {
+        let builder = state.builders().get(builder_index)?;
         ensure!(
-            has_builder_withdrawal_credential(builder),
-            Error::<P>::ExecutionPayloadBidNotBuilder
+            is_active_builder(builder, state.finalized_checkpoint().epoch),
+            Error::<P>::BuilderNotActive {
+                index: builder_index,
+                current_epoch
+            }
+        );
+        ensure!(
+            can_builder_cover_bid(state, builder_index, amount)?,
+            Error::<P>::BuilderBalanceNotSufficient {
+                index: builder_index,
+                amount
+            }
         );
         ensure!(
             validate_execution_payload_bid_signature_with_verifier(
@@ -491,50 +587,6 @@ fn validate_execution_payload_bid<P: Preset>(
             Error::<P>::ExecutionPayloadBidSignatureInvalid
         );
     }
-
-    // > Check that the builder is active, non-slashed
-    let current_epoch = get_current_epoch(state);
-    ensure!(
-        is_active_validator(builder, current_epoch),
-        Error::<P>::ValidatorNotActive {
-            index: builder_index,
-            validator: builder.clone(),
-            current_epoch
-        }
-    );
-    ensure!(
-        !builder.slashed,
-        Error::<P>::ValidatorAlreadySlashed {
-            index: builder_index,
-        }
-    );
-
-    // > Check that builder has funds to cover the bid
-    let builder_balance = *state.balances().get(builder_index)?;
-    let pending_withdrawals = state
-        .builder_pending_withdrawals()
-        .into_iter()
-        .filter_map(|withdrawal| {
-            (withdrawal.builder_index == builder_index).then_some(withdrawal.amount)
-        })
-        .sum();
-    let pending_payments = state
-        .builder_pending_payments()
-        .into_iter()
-        .filter(|payment| payment.withdrawal.builder_index == builder_index)
-        .map(|payment| payment.withdrawal.amount)
-        .sum();
-    let total_payment_withdraw_amount = amount
-        .saturating_add(pending_payments)
-        .saturating_add(pending_withdrawals)
-        .saturating_add(P::MIN_ACTIVATION_BALANCE);
-    ensure!(
-        amount == 0 || builder_balance >= total_payment_withdraw_amount,
-        Error::<P>::BuilderBalanceNotSufficient {
-            balance: builder_balance,
-            payments: total_payment_withdraw_amount,
-        }
-    );
 
     // > Verify that the bid is for the current slot
     ensure!(
@@ -599,7 +651,6 @@ pub fn process_execution_payload_bid<P: Preset>(
                 fee_recipient,
                 amount,
                 builder_index,
-                withdrawable_epoch: FAR_FUTURE_EPOCH,
             },
         };
         *state
@@ -722,13 +773,7 @@ where
     }
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {
-        electra::process_voluntary_exit(
-            config,
-            pubkey_cache,
-            state,
-            voluntary_exit,
-            &mut verifier,
-        )?;
+        process_voluntary_exit(config, pubkey_cache, state, voluntary_exit, &mut verifier)?;
     }
 
     for bls_to_execution_change in body.bls_to_execution_changes().iter().copied() {
@@ -932,6 +977,122 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     )
 }
 
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
+pub fn process_voluntary_exit<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    signed_voluntary_exit: SignedVoluntaryExit,
+    verifier: impl Verifier,
+) -> Result<()> {
+    validate_voluntary_exit_with_verifier(
+        config,
+        pubkey_cache,
+        state,
+        signed_voluntary_exit,
+        verifier,
+    )?;
+
+    // > Initiate exit
+    let validator_index = signed_voluntary_exit.message.validator_index;
+    if let Some(builder_index) = maybe_builder_index(validator_index) {
+        initiate_builder_exit(config, state, builder_index)
+    } else {
+        initiate_validator_exit(config, state, validator_index)
+    }
+}
+
+pub fn validate_voluntary_exit<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl PostGloasBeaconState<P>,
+    signed_voluntary_exit: SignedVoluntaryExit,
+) -> Result<()> {
+    validate_voluntary_exit_with_verifier(
+        config,
+        pubkey_cache,
+        state,
+        signed_voluntary_exit,
+        SingleVerifier,
+    )
+}
+
+pub fn validate_voluntary_exit_with_verifier<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl PostGloasBeaconState<P>,
+    signed_voluntary_exit: SignedVoluntaryExit,
+    verifier: impl Verifier,
+) -> Result<()> {
+    if let Some(builder_index) = maybe_builder_index(signed_voluntary_exit.message.validator_index)
+    {
+        validate_builder_voluntary_exit_with_verifier(
+            config,
+            pubkey_cache,
+            state,
+            signed_voluntary_exit,
+            builder_index,
+            verifier,
+        )
+    } else {
+        electra::validate_voluntary_exit_with_verifier(
+            config,
+            pubkey_cache,
+            state,
+            signed_voluntary_exit,
+            verifier,
+        )
+    }
+}
+
+fn validate_builder_voluntary_exit_with_verifier<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl PostGloasBeaconState<P>,
+    signed_voluntary_exit: SignedVoluntaryExit,
+    builder_index: BuilderIndex,
+    mut verifier: impl Verifier,
+) -> Result<()> {
+    let voluntary_exit = signed_voluntary_exit.message;
+    let builder = state.builders().get(builder_index)?;
+    let current_epoch = get_current_epoch(state);
+
+    // > Exits must specify an epoch when they become valid; they are not valid before then
+    ensure!(
+        current_epoch >= voluntary_exit.epoch,
+        Error::<P>::VoluntaryExitIsExpired {
+            current_epoch,
+            epoch: voluntary_exit.epoch,
+        },
+    );
+
+    // > Verify the builder is active
+    ensure!(
+        is_active_builder(builder, state.finalized_checkpoint().epoch),
+        Error::<P>::BuilderNotActive {
+            index: builder_index,
+            current_epoch
+        }
+    );
+
+    // > Only exit builder if it has no pending withdrawals in the queue
+    ensure!(
+        get_pending_balance_to_withdraw_for_builder(state, builder_index) == 0,
+        Error::<P>::BuilderVoluntaryExitWithPendingWithdrawals
+    );
+
+    // > Verify signature
+    verifier.verify_singular(
+        voluntary_exit.signing_root(config, state),
+        signed_voluntary_exit.signature,
+        pubkey_cache.get_or_insert(builder.pubkey)?,
+        SignatureKind::VoluntaryExit,
+    )?;
+
+    Ok(())
+}
+
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_payload_attestation<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -1188,7 +1349,7 @@ mod spec_tests {
     processing_tests! {
         process_voluntary_exit,
         |config, pubkey_cache, state, voluntary_exit, _| {
-            electra::process_voluntary_exit(
+            process_voluntary_exit(
                 config,
                 pubkey_cache,
                 state,
@@ -1272,7 +1433,7 @@ mod spec_tests {
     validation_tests! {
         validate_voluntary_exit,
         |config, pubkey_cache, state, voluntary_exit| {
-            electra::validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
+            validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",

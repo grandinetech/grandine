@@ -1,7 +1,7 @@
 use core::num::NonZeroUsize;
 
 use crate::{
-    gloas::primitives::PayloadStatus,
+    gloas::primitives::{BuilderIndex, PayloadStatus},
     phase0::primitives::{DomainType, H32},
 };
 use hex_literal::hex;
@@ -19,7 +19,12 @@ pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 1u8;
 pub const PAYLOAD_STATUS_FULL: PayloadStatus = 2u8;
 
 // Misc
+pub const BUILDER_INDEX_SELF_BUILD: BuilderIndex = BuilderIndex::MAX;
 pub const BUILDER_PAYMENT_THRESHOLD_NUMERATOR: u64 = 6;
 pub const BUILDER_PAYMENT_THRESHOLD_DENOMINATOR: u64 = 10;
 
+// Flags
+//
+// Bitwise flag which indicates that a `ValidatorIndex` should be treated as a `BuilderIndex`
+pub const BUILDER_INDEX_FLAG: u64 = 0x0100_0000_0000;
 pub const BUILDER_WITHDRAWAL_PREFIX: &[u8] = &hex!("03");

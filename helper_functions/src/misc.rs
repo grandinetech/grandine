@@ -29,6 +29,7 @@ use types::{
         containers::MatrixEntry,
         primitives::{BlobCommitmentsInclusionProof, ColumnIndex},
     },
+    gloas::{consts::BUILDER_INDEX_FLAG, primitives::BuilderIndex},
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
@@ -933,6 +934,27 @@ fn compute_balance_weighted_acceptance<P: Preset>(
         .map(|validator| validator.effective_balance)?;
 
     Ok(effective_balance * max_random_value >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value)
+}
+
+#[must_use]
+pub const fn convert_builder_index_to_validator_index(
+    builder_index: BuilderIndex,
+) -> ValidatorIndex {
+    builder_index | BUILDER_INDEX_FLAG
+}
+
+#[must_use]
+pub const fn convert_validator_index_to_builder_index(
+    validator_index: ValidatorIndex,
+) -> BuilderIndex {
+    validator_index & !BUILDER_INDEX_FLAG
+}
+
+#[must_use]
+pub fn maybe_builder_index(validator_index: ValidatorIndex) -> Option<BuilderIndex> {
+    let is_builder_index = (validator_index & BUILDER_INDEX_FLAG) != 0;
+
+    is_builder_index.then_some(convert_validator_index_to_builder_index(validator_index))
 }
 
 #[cfg(test)]

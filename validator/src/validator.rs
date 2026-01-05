@@ -881,6 +881,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 graffiti,
                 disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
                 builder_boost_factor: self.validator_config.default_builder_boost_factor,
+                enable_payload_build: self.validator_config.enable_payload_build,
                 ..BlockBuildOptions::default()
             },
         );

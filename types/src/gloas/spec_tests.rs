@@ -130,6 +130,12 @@ tests_for_type! {
 }
 
 tests_for_type! {
+    Builder,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/Builder/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/Builder/*/*",
+}
+
+tests_for_type! {
     BuilderPendingPayment,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BuilderPendingPayment/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/BuilderPendingPayment/*/*",

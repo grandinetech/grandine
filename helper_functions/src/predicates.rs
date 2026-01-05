@@ -21,12 +21,13 @@ use types::{
     fulu::containers::DataColumnSidecar,
     gloas::{
         consts::BUILDER_WITHDRAWAL_PREFIX,
-        containers::{BuilderPendingWithdrawal, IndexedPayloadAttestation},
+        containers::{Builder, IndexedPayloadAttestation},
+        primitives::BuilderIndex,
     },
     phase0::{
         consts::{TargetAggregatorsPerCommittee, ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH},
         containers::{AttestationData, Validator},
-        primitives::{CommitteeIndex, Epoch, Slot, H256},
+        primitives::{CommitteeIndex, Epoch, Gwei, Slot, H256},
     },
     preset::Preset,
     traits::{
@@ -36,7 +37,7 @@ use types::{
 };
 
 use crate::{
-    accessors::{self, get_block_root_at_slot, get_current_epoch},
+    accessors::{self, get_block_root_at_slot, get_pending_balance_to_withdraw_for_builder},
     error::{Error, SignatureKind},
     signing::SignForSingleFork as _,
     verifier::Verifier,
@@ -386,14 +387,13 @@ pub fn is_compounding_withdrawal_credential(withdrawal_credentials: H256) -> boo
         .starts_with(COMPOUNDING_WITHDRAWAL_PREFIX)
 }
 
-// > Check if ``validator`` has an 0x02 or 0x03 prefixed "compounding" withdrawal credential.
+// > Check if ``validator`` has an 0x02 prefixed "compounding" withdrawal credential.
 #[must_use]
 pub fn has_compounding_withdrawal_credential(validator: &Validator) -> bool {
     is_compounding_withdrawal_credential(validator.withdrawal_credentials)
-        || is_builder_withdrawal_credential(validator.withdrawal_credentials)
 }
 
-// > Check if ``validator`` has a 0x01 or 0x02 or 0x03 prefixed withdrawal credential.
+// > Check if ``validator`` has a 0x01 or 0x02 prefixed withdrawal credential.
 #[must_use]
 pub fn has_execution_withdrawal_credential(validator: &Validator) -> bool {
     has_compounding_withdrawal_credential(validator) || has_eth1_withdrawal_credential(validator)
@@ -409,6 +409,27 @@ pub fn is_builder_withdrawal_credential(withdrawal_credentials: H256) -> bool {
 #[must_use]
 pub fn has_builder_withdrawal_credential(validator: &Validator) -> bool {
     is_builder_withdrawal_credential(validator.withdrawal_credentials)
+}
+
+// >  Check if the builder is active.
+#[inline]
+#[must_use]
+pub const fn is_active_builder(builder: &Builder, finalized_epoch: Epoch) -> bool {
+    // Builder deposit has been finalized and has not initiated exit
+    builder.deposit_epoch < finalized_epoch && builder.withdrawable_epoch == FAR_FUTURE_EPOCH
+}
+
+pub fn can_builder_cover_bid<P: Preset>(
+    state: &dyn PostGloasBeaconState<P>,
+    builder_index: BuilderIndex,
+    bid_amount: Gwei,
+) -> Result<bool> {
+    let balance = state.builders().get(builder_index)?.balance;
+    let pending_withdrawals_amount =
+        get_pending_balance_to_withdraw_for_builder(state, builder_index);
+    let min_balance = P::MIN_DEPOSIT_AMOUNT + pending_withdrawals_amount;
+
+    Ok(balance.saturating_sub(min_balance).ge(&bid_amount))
 }
 
 // > Checks if the attestation was for the block proposed at the attestation slot
@@ -433,17 +454,6 @@ pub fn is_attestation_same_slot<P: Preset>(
 #[must_use]
 pub fn is_parent_block_full<P: Preset>(state: &impl PostGloasBeaconState<P>) -> bool {
     state.latest_execution_payload_bid().block_hash == state.latest_block_hash()
-}
-
-// > Check if the builder is slashed and not yet withdrawable.
-pub fn is_builder_payment_withdrawable<P: Preset>(
-    state: &(impl PostGloasBeaconState<P> + ?Sized),
-    withdrawal: &BuilderPendingWithdrawal,
-) -> Result<bool> {
-    let builder = state.validators().get(withdrawal.builder_index)?;
-    let current_epoch = get_current_epoch(state);
-
-    Ok(builder.withdrawable_epoch >= current_epoch || !builder.slashed)
 }
 
 // This doesn't verify the signature when called directly with `MultiVerifier`.

@@ -190,15 +190,15 @@ pub mod electra {
         custom_process_blinded_block, process_withdrawals_root,
     };
     pub use block_processing::{
-        add_validator_to_registry, get_expected_withdrawals, validate_attestation_with_verifier,
-        validate_voluntary_exit, validate_voluntary_exit_with_verifier,
+        add_validator_to_registry, get_expected_withdrawals, process_voluntary_exit,
+        validate_attestation_with_verifier, validate_voluntary_exit,
+        validate_voluntary_exit_with_verifier,
     };
 
     pub(crate) use block_processing::{
         apply_deposits, process_attester_slashing, process_block, process_block_for_gossip,
         process_consolidation_request, process_deposit_data, process_deposit_request,
-        process_operations, process_voluntary_exit, process_withdrawal_request,
-        process_withdrawals,
+        process_operations, process_withdrawal_request, process_withdrawals,
     };
     pub(crate) use epoch_processing::{
         epoch_report, process_effective_balance_updates, process_epoch,
@@ -237,7 +237,7 @@ pub mod fulu {
 }
 
 pub mod gloas {
-    pub use block_processing::get_expected_withdrawals;
+    pub use block_processing::{get_expected_withdrawals, validate_voluntary_exit};
     pub use execution_payload_processing::process_execution_payload;
 
     pub(crate) use block_processing::{process_block, process_block_for_gossip};

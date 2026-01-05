@@ -13,7 +13,7 @@ use crate::{
     altair::primitives::ParticipationFlags,
     capella::containers::{HistoricalSummary, Withdrawal},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
-    gloas::containers::{BuilderPendingPayment, BuilderPendingWithdrawal},
+    gloas::containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
     phase0::{
         containers::{Eth1Data, PendingAttestation, Validator},
         primitives::{Gwei, ValidatorIndex, H256},
@@ -70,6 +70,8 @@ pub type ProposerLookahead<P> = PersistentVector<
     ProposerLookaheadLength<P>,
     UnhashedBundleSize<ValidatorIndex>,
 >;
+
+pub type Builders<P> = PersistentList<Builder, <P as Preset>::BuilderRegistryLimit>;
 
 pub type BuilderPendingPayments<P> = PersistentVector<
     BuilderPendingPayment,

@@ -3,6 +3,7 @@ use types::{
     bellatrix::primitives::Gas,
     capella::containers::Withdrawal,
     combined::Attestation,
+    gloas::primitives::BuilderIndex,
     phase0::{
         containers::{AttestationData, BeaconBlockHeader, Checkpoint, Deposit, Validator},
         primitives::{Epoch, ExecutionBlockHash, Gwei, Slot, UnixSeconds, ValidatorIndex, H256},
@@ -55,8 +56,17 @@ pub enum Error<P: Preset> {
         block_slot: Slot,
         block_header_slot: Slot,
     },
-    #[error("builder balance is not sufficient (balance: {balance}, payments: {payments})")]
-    BuilderBalanceNotSufficient { balance: Gwei, payments: Gwei },
+    #[error("builder {index} can not cover bid of {amount} gwei")]
+    BuilderBalanceNotSufficient { index: BuilderIndex, amount: Gwei },
+    #[error("builder index overflowed")]
+    BuilderIndexOverflow,
+    #[error("builder {index} is not active in epoch {current_epoch}")]
+    BuilderNotActive {
+        index: BuilderIndex,
+        current_epoch: Epoch,
+    },
+    #[error("cannot exit builder because it has pending withdrawals in the queue")]
+    BuilderVoluntaryExitWithPendingWithdrawals,
     #[error("deposit count is incorrect (computed: {computed}, in_block: {in_block})")]
     DepositCountMismatch { computed: u64, in_block: u64 },
     #[error("deposit proof is invalid: {deposit:?}")]
@@ -79,8 +89,6 @@ pub enum Error<P: Preset> {
     EnvelopeBlockRootMismatch { in_envelope: H256, in_state: H256 },
     #[error("slot in envelope ({in_envelope}) does not match in state ({in_state})")]
     EnvelopeSlotMismatch { in_envelope: Slot, in_state: Slot },
-    #[error("the execution payload bid is not from builder")]
-    ExecutionPayloadBidNotBuilder,
     #[error("execution payload bid's signature is invalid")]
     ExecutionPayloadBidSignatureInvalid,
     #[error(
@@ -170,8 +178,6 @@ pub enum Error<P: Preset> {
         index: ValidatorIndex,
         exit_epoch: Epoch,
     },
-    #[error("validator {index} is already slashed")]
-    ValidatorAlreadySlashed { index: ValidatorIndex },
     #[error(
         "validator {index} has not been active long enough \
          (activation_epoch: {activation_epoch}, current_epoch: {current_epoch})"

@@ -5,11 +5,14 @@ use std::{
 };
 
 use anyhow::{Context as _, Error as AnyhowError, Result};
-use bls::{traits::Signature as _, AggregateSignature, PublicKeyBytes, SignatureBytes};
+use bls::{
+    traits::{Signature as _, SignatureBytes as _},
+    AggregateSignature, PublicKeyBytes, SignatureBytes,
+};
 use builder_api::{combined::SignedBuilderBid, BuilderApi};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
-use eth1_api::{ApiController, ClientVersionV1, Eth1ExecutionEngine, WithClientVersions};
+use eth1_api::{ApiController, Eth1ExecutionEngine, WithClientVersions};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
     PayloadAttributesV3, PayloadId,
@@ -20,8 +23,7 @@ use futures::{
     lock::Mutex,
     stream::{FuturesOrdered, StreamExt as _},
 };
-use helper_functions::verifier::NullVerifier;
-use helper_functions::{accessors, misc, predicates};
+use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
 use logging::{error_with_peers, info_with_peers, warn_with_peers};
@@ -76,10 +78,13 @@ use types::{
         ExecutionRequests,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
-    gloas::containers::{
-        BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-        ExecutionPayloadBid, ExecutionPayloadEnvelope, PayloadAttestation,
-        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{
+            BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
+            ExecutionPayloadBid, ExecutionPayloadEnvelope, PayloadAttestation,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        },
     },
     nonstandard::{BlockRewards, Phase, WithBlobsAndMev, WEI_IN_GWEI},
     phase0::{
@@ -87,7 +92,7 @@ use types::{
         containers::{
             Attestation, AttestationData, AttesterSlashing as Phase0AttesterSlashing,
             BeaconBlock as Phase0BeaconBlock, BeaconBlockBody as Phase0BeaconBlockBody,
-            ProposerSlashing, SignedVoluntaryExit, Validator,
+            ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
             CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Slot, Uint256,
@@ -483,7 +488,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 state,
                 exit,
             ),
-            BeaconState::Gloas(state) => electra::validate_voluntary_exit(
+            BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
                 &self.producer_context.chain_config,
                 &self.producer_context.pubkey_cache,
                 state,
@@ -632,7 +637,8 @@ struct ProducerContext<P: Preset, W: Wait> {
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
     payload_cache: PayloadCache<P>,
     payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
-    /// Cached payload roots keyed by `beacon_block_root` for envelope retrieval
+    // Cached payload root by `BlockBuildContext.head_block_root` for `payload_cache` retrieval
+    // used to construct execution payload envelope
     cached_payload_roots: Mutex<SizedCache<H256, H256>>,
     metrics: Option<Arc<Metrics>>,
     fake_execution_payloads: bool,
@@ -644,6 +650,7 @@ pub struct BlockBuildOptions {
     pub disable_blockprint_graffiti: bool,
     pub skip_randao_verification: bool,
     pub builder_boost_factor: Uint256,
+    pub enable_payload_build: bool,
 }
 
 #[derive(Clone)]
@@ -1147,26 +1154,16 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
-        // Proposer have to call `engine_getPayload` only if they are also a builder
-        // for post-Gloas
-        let can_self_build = !self.beacon_state.is_post_gloas()
-            || predicates::has_builder_withdrawal_credential(self.proposer()?);
-
-        let payload_with_data = if can_self_build {
+        // Start from Gloas, proposer no longer required to build execution payload data
+        // unless they choose to self-build
+        let mut payload_with_data = None;
+        if !self.beacon_state.is_post_gloas() || self.options.enable_payload_build {
             if let Some(handle) = local_execution_payload_handle {
-                handle
+                payload_with_data = handle
                     .await?
                     .map(|value| value.map(|value| value.map(Some)))
-            } else {
-                None
             }
-        } else {
-            // To prevent return error in payload_with_data check
-            Some(WithClientVersions {
-                client_versions: Some(vec![ClientVersionV1::own()].into()),
-                result: WithBlobsAndMev::with_default(None),
-            })
-        };
+        }
 
         let WithClientVersions {
             client_versions,
@@ -1182,9 +1179,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         } = match payload_with_data {
             Some(payload_with_mev_and_versions) => payload_with_mev_and_versions,
             None => {
-                if self.beacon_state.post_capella().is_some()
-                    || post_merge_state(&self.beacon_state).is_some()
-                {
+                let has_no_payload = if self.beacon_state.is_post_gloas() {
+                    self.options.enable_payload_build
+                } else {
+                    self.beacon_state.post_capella().is_some()
+                        || post_merge_state(&self.beacon_state).is_some()
+                };
+
+                if has_no_payload {
                     return Err(AnyhowError::msg("no execution payload to include in block"));
                 }
 
@@ -1192,9 +1194,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
-        let mut without_state_root = if let Some(state) = self.beacon_state.post_gloas() {
-            let signed_payload_bid = if can_self_build {
-                // Cache payload root for Gloas envelope retrieval later (only when self-building)
+        let mut without_state_root_with_payload = if let Some(state) =
+            self.beacon_state.post_gloas()
+        {
+            let signed_payload_bid = if self.options.enable_payload_build {
+                // Cache payload root for payload envelope construction (only when self-building)
                 // External builders publish their own envelope
                 if let Some(ref payload) = execution_payload {
                     self.producer_context
@@ -1214,7 +1218,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     .accepted_payload_bid_at_slot(state.slot());
 
                 // Set block_mev value to the in-protocol builder bid value to be compare with
-                // boosted_builder_mev in case we still want to support the off-protocol builders
+                // `boosted_builder_mev` in case we still want to support the off-protocol builders
                 block_mev = selected_bid.map(|bid| Wei::from_u64(bid.message.value) * WEI_IN_GWEI);
 
                 selected_bid
@@ -1230,10 +1234,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         if !self.options.disable_blockprint_graffiti {
             let graffiti = build_graffiti(self.options.graffiti, client_versions);
-            without_state_root.set_graffiti(graffiti);
+            without_state_root_with_payload.set_graffiti(graffiti);
         }
 
-        self.process_beacon_block(without_state_root)
+        self.process_beacon_block(without_state_root_with_payload)
             .map(|(beacon_block, block_rewards)| {
                 (
                     WithBlobsAndMev::new(
@@ -1437,6 +1441,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     async fn prepare_payload_attestations(
         &self,
     ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
+        // Constructed `payload_attestations` in current block is to aggregate all payload
+        // attestations for the previous block payload.
+        // See <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/validator.md#constructing-payload_attestations>
+        // TODO: (gloas) fix payload attestations aggregation
         self.producer_context
             .payload_attestation_agg_pool
             .aggregate_payload_attestations()
@@ -1574,7 +1582,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     async fn construct_self_payload_bid(
         &self,
-        state: &dyn PostGloasBeaconState<P>,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
         execution_payload_opt: Option<ExecutionPayload<P>>,
         blob_kzg_commitments_opt: Option<
             ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
@@ -1583,6 +1591,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let Some(payload) = execution_payload_opt else {
             return Ok(None);
         };
+
+        let blob_kzg_commitments_root = blob_kzg_commitments_opt
+            .map(|commitments| commitments.hash_tree_root())
+            .unwrap_or(H256::zero());
 
         let fee_recipient = self.fee_recipient().await?;
 
@@ -1593,18 +1605,16 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             prev_randao: payload.prev_randao(),
             fee_recipient,
             gas_limit: payload.gas_limit(),
-            builder_index: self.proposer_index,
+            builder_index: BUILDER_INDEX_SELF_BUILD,
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments_root: blob_kzg_commitments_opt
-                .map(|commitments| commitments.hash_tree_root())
-                .unwrap_or(H256::zero()),
+            blob_kzg_commitments_root,
         };
 
         Ok(Some(SignedExecutionPayloadBid {
             message: payload_bid,
-            signature: SignatureBytes::zero(),
+            signature: SignatureBytes::empty(),
         }))
     }
 
@@ -1701,7 +1711,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 })
             }
             BeaconState::Gloas(state) => {
-                let (withdrawals, _, _) = gloas::get_expected_withdrawals(state)?;
+                let (withdrawals, _, _, _) = gloas::get_expected_withdrawals(state)?;
 
                 let withdrawals = withdrawals
                     .into_iter()
@@ -2038,7 +2048,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         beacon_block_root: H256,
     ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
-        let Some((deneb_payload, execution_requests_data, blob_kzg_commitments)) =
+        let Some((payload, execution_requests, blob_kzg_commitments)) =
             self.get_gloas_envelope_data().await
         else {
             return Ok(None);
@@ -2046,9 +2056,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         // Build envelope with placeholder state_root (will be set after processing)
         let mut envelope = ExecutionPayloadEnvelope {
-            payload: deneb_payload,
-            execution_requests: execution_requests_data,
-            builder_index: self.proposer_index,
+            payload,
+            execution_requests,
+            builder_index: BUILDER_INDEX_SELF_BUILD,
             beacon_block_root,
             slot: self.beacon_state.slot(),
             blob_kzg_commitments,
@@ -2069,7 +2079,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             | BeaconState::Electra(_)
             | BeaconState::Fulu(_) => {
                 return Err(AnyhowError::msg(
-                    "compute_post_execution_state_root requires post-Gloas state",
+                    "compute_execution_payload_envelope requires post-Gloas state",
                 ));
             }
             BeaconState::Gloas(gloas_state) => {
@@ -2108,7 +2118,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .await
             .cache_get(&self.head_block_root)?;
 
-        let cached = self
+        let local_payload = self
             .producer_context
             .payload_cache
             .lock()
@@ -2121,7 +2131,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             commitments,
             execution_requests,
             ..
-        } = cached.result;
+        } = local_payload.result;
 
         let ExecutionPayload::Deneb(deneb_payload) = execution_payload else {
             warn_with_peers!("unexpected non-Deneb payload format in Gloas envelope data");
@@ -2151,13 +2161,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     .proposer_configs
                     .fee_recipient(*proposer_pubkey)
             })
-    }
-
-    fn proposer(&self) -> Result<&Validator> {
-        self.beacon_state
-            .validators()
-            .get(self.proposer_index)
-            .map_err(Into::into)
     }
 
     fn spawn_job<T, F>(&self, task: T) -> Job<F::Output>

@@ -9,13 +9,13 @@ use crate::{
     cache::Cache,
     capella::primitives::WithdrawalIndex,
     collections::{
-        Balances, BuilderPendingPayments, BuilderPendingWithdrawals, EpochParticipation,
+        Balances, BuilderPendingPayments, BuilderPendingWithdrawals, Builders, EpochParticipation,
         Eth1DataVotes, HistoricalRoots, HistoricalSummaries, InactivityScores,
         PayloadExpectedWithdrawals, PendingConsolidations, PendingDeposits,
         PendingPartialWithdrawals, ProposerLookahead, RandaoMixes, RecentRoots, Slashings,
         Validators,
     },
-    gloas::containers::ExecutionPayloadBid,
+    gloas::{containers::ExecutionPayloadBid, primitives::BuilderIndex},
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
@@ -108,11 +108,20 @@ pub struct BeaconState<P: Preset> {
     pub pending_deposits: PendingDeposits<P>,
     pub pending_partial_withdrawals: PendingPartialWithdrawals<P>,
     pub pending_consolidations: PendingConsolidations<P>,
+
+    // > Next proposers
     #[serde(with = "serde_utils::string_or_native_sequence")]
     pub proposer_lookahead: ProposerLookahead<P>,
 
-    // > ePBS states introduced in Gloas
+    // > Builders
+    pub builders: Builders<P>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub next_withdrawal_builder_index: BuilderIndex,
+
+    // > Payload availability
     pub execution_payload_availability: BitVector<SlotsPerHistoricalRoot<P>>,
+
+    // > Builder payments
     pub builder_pending_payments: BuilderPendingPayments<P>,
     pub builder_pending_withdrawals: BuilderPendingWithdrawals<P>,
     pub latest_block_hash: ExecutionBlockHash,

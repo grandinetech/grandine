@@ -1,11 +1,13 @@
 use anyhow::{ensure, Result};
+use bls::{PublicKeyBytes, SignatureBytes};
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors::get_current_epoch,
     error::SignatureKind,
     misc::{self, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
-    mutators::compute_exit_epoch_and_update_churn,
-    signing::SignForSingleFork as _,
+    mutators::{builder_balance, increase_balance},
+    predicates::is_builder_withdrawal_credential,
+    signing::{SignForAllForks as _, SignForSingleFork as _},
     verifier::Verifier,
 };
 use pubkey_cache::PubkeyCache;
@@ -14,10 +16,19 @@ use typenum::Unsigned as _;
 use types::{
     combined::ExecutionPayloadParams,
     config::Config,
-    electra::containers::ExecutionRequests,
-    gloas::containers::{
-        BuilderPendingPayment, BuilderPendingWithdrawal, ExecutionPayloadEnvelope,
-        SignedExecutionPayloadEnvelope,
+    electra::containers::{DepositRequest, ExecutionRequests, PendingDeposit},
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{
+            Builder, BuilderPendingPayment, ExecutionPayloadEnvelope,
+            SignedExecutionPayloadEnvelope,
+        },
+        primitives::BuilderIndex,
+    },
+    phase0::{
+        consts::FAR_FUTURE_EPOCH,
+        containers::DepositMessage,
+        primitives::{ExecutionAddress, Gwei},
     },
     preset::{Preset, SlotsPerHistoricalRoot},
     traits::PostGloasBeaconState,
@@ -32,21 +43,25 @@ pub fn verify_execution_payload_envelope_signature<P: Preset>(
     signed_envelope: &SignedExecutionPayloadEnvelope<P>,
     mut verifier: impl Verifier,
 ) -> Result<()> {
-    let builder = state
-        .validators()
-        .get(signed_envelope.message.builder_index)?;
+    let builder_index = signed_envelope.message.builder_index;
+    let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
+        let validator_index = state.latest_block_header().proposer_index;
+        state.validators().get(validator_index)?.pubkey
+    } else {
+        state.builders().get(builder_index)?.pubkey
+    };
 
     verifier.verify_singular(
         signed_envelope.message.signing_root(config, state),
         signed_envelope.signature,
-        pubkey_cache.get_or_insert(builder.pubkey)?,
+        pubkey_cache.get_or_insert(pubkey)?,
         SignatureKind::ExecutionPayloadEnvelope,
     )?;
 
     Ok(())
 }
 
-pub fn validate_execution_payload_for_gossip<P: Preset>(
+pub fn validate_execution_payload_envelope_for_gossip<P: Preset>(
     config: &Config,
     state: &impl PostGloasBeaconState<P>,
     envelope: &ExecutionPayloadEnvelope<P>,
@@ -77,7 +92,7 @@ pub fn validate_execution_payload_for_gossip<P: Preset>(
     Ok(())
 }
 
-pub fn validate_execution_payload<P: Preset>(
+pub fn validate_execution_payload_envelope<P: Preset>(
     config: &Config,
     state: &impl PostGloasBeaconState<P>,
     signed_envelope: &SignedExecutionPayloadEnvelope<P>,
@@ -85,7 +100,7 @@ pub fn validate_execution_payload<P: Preset>(
     let envelope = &signed_envelope.message;
     let payload = &envelope.payload;
 
-    validate_execution_payload_for_gossip(config, state, envelope)?;
+    validate_execution_payload_envelope_for_gossip(config, state, envelope)?;
 
     // > Verify consistency with the beacon block
     let in_envelope = envelope.beacon_block_root;
@@ -204,11 +219,11 @@ pub fn process_execution_payload<P: Preset, V: Verifier>(
 
     // > Cache latest block header state root
     let previous_state_root = state.hash_tree_root();
-    if state.latest_block_header().state_root == H256::zero() {
+    if state.latest_block_header().state_root.is_zero() {
         state.latest_block_header_mut().state_root = previous_state_root;
     }
 
-    validate_execution_payload(config, state, signed_envelope)?;
+    validate_execution_payload_envelope(config, state, signed_envelope)?;
 
     // > Verify the execution payload is valid
     let versioned_hashes = envelope
@@ -229,22 +244,16 @@ pub fn process_execution_payload<P: Preset, V: Verifier>(
         None,
     )?;
 
-    process_execution_requests(config, state, &envelope.execution_requests)?;
+    process_execution_requests(config, pubkey_cache, state, &envelope.execution_requests)?;
 
     // > Queue the builder payment
     let payment_slot = misc::builder_payment_index_for_current_epoch::<P>(state.slot());
     let payment = *state.builder_pending_payments().get(payment_slot)?;
     let amount = payment.withdrawal.amount;
     if amount > 0 {
-        let exit_queue_epoch = compute_exit_epoch_and_update_churn(config, state, amount);
-        let withdrawable_epoch =
-            exit_queue_epoch.saturating_add(config.min_validator_withdrawability_delay);
         state
             .builder_pending_withdrawals_mut()
-            .push(BuilderPendingWithdrawal {
-                withdrawable_epoch,
-                ..payment.withdrawal
-            })?;
+            .push(payment.withdrawal)?;
     }
     *state
         .builder_pending_payments_mut()
@@ -274,11 +283,12 @@ pub fn process_execution_payload<P: Preset, V: Verifier>(
 
 fn process_execution_requests<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
     execution_requests: &ExecutionRequests<P>,
 ) -> Result<()> {
     for deposit_request in &execution_requests.deposits {
-        electra::process_deposit_request(state, *deposit_request)?;
+        process_deposit_request(config, pubkey_cache, state, *deposit_request)?;
     }
 
     for withdrawal_request in &execution_requests.withdrawals {
@@ -290,6 +300,150 @@ fn process_execution_requests<P: Preset>(
     }
 
     Ok(())
+}
+
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
+pub fn process_deposit_request<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    deposit_request: DepositRequest,
+) -> Result<()> {
+    let DepositRequest {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+        ..
+    } = deposit_request;
+
+    // > Regardless of the withdrawal credentials prefix, if a builder/validator
+    //   already exists with this pubkey, apply the deposit to their balance
+    if state
+        .builders()
+        .into_iter()
+        .any(|builder| builder.pubkey == pubkey)
+        || (is_builder_withdrawal_credential(withdrawal_credentials)
+            && !state
+                .validators()
+                .into_iter()
+                .any(|validator| validator.pubkey == pubkey))
+    {
+        apply_deposit_for_builder(
+            config,
+            pubkey_cache,
+            state,
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+        )?;
+    } else {
+        let slot = state.slot();
+
+        state.pending_deposits_mut().push(PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            slot,
+        })?;
+    }
+
+    Ok(())
+}
+
+pub fn apply_deposit_for_builder<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    pubkey: PublicKeyBytes,
+    withdrawal_credentials: H256,
+    amount: Gwei,
+    signature: SignatureBytes,
+) -> Result<()> {
+    if let Some(builder_index) = state
+        .builders()
+        .into_iter()
+        .position(|builder| builder.pubkey == pubkey)
+    {
+        let builder_index = builder_index.try_into()?;
+
+        increase_balance(builder_balance(state, builder_index)?, amount);
+    } else {
+        // > Verify the deposit signature (proof of possession)
+        // > which is not checked by the deposit contract
+        let deposit_message = DepositMessage {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+        };
+
+        // > Fork-agnostic domain since deposits are valid across forks
+        if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey) {
+            if deposit_message
+                .verify(config, signature, decompressed)
+                .is_ok()
+            {
+                add_builder_to_registry(state, pubkey, withdrawal_credentials, amount)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn add_builder_to_registry<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+    pubkey: PublicKeyBytes,
+    withdrawal_credentials: H256,
+    amount: Gwei,
+) -> Result<()> {
+    let builder_index = get_index_for_new_builder(state);
+    let builder = get_builder_from_deposit(state, pubkey, withdrawal_credentials, amount);
+
+    if builder_index == state.builders().len_u64() {
+        state.builders_mut().push(builder)?;
+    } else {
+        *state.builders_mut().get_mut(builder_index)? = builder;
+    }
+
+    // TODO(gloas): Should builder indices be cached like validators?
+    // if so, it need to pruned since builder index is reusable. remove this TODO if not
+    Ok(())
+}
+
+fn get_index_for_new_builder<P: Preset>(state: &impl PostGloasBeaconState<P>) -> BuilderIndex {
+    let current_epoch = get_current_epoch(state);
+
+    state
+        .builders()
+        .into_iter()
+        .zip(0..)
+        .find_map(|(builder, index)| {
+            (builder.withdrawable_epoch <= current_epoch && builder.balance == 0).then_some(index)
+        })
+        .unwrap_or_else(|| state.builders().len_u64())
+}
+
+fn get_builder_from_deposit<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    pubkey: PublicKeyBytes,
+    withdrawal_credentials: H256,
+    amount: Gwei,
+) -> Builder {
+    let version = withdrawal_credentials[0];
+    let mut address = ExecutionAddress::zero();
+    address.assign_from_slice(&withdrawal_credentials[12..]);
+
+    Builder {
+        pubkey,
+        version,
+        execution_address: address,
+        balance: amount,
+        deposit_epoch: get_current_epoch(state),
+        withdrawable_epoch: FAR_FUTURE_EPOCH,
+    }
 }
 
 #[cfg(test)]
@@ -342,7 +496,7 @@ mod spec_tests {
 
     processing_tests! {
         process_deposit_request,
-        |_, _, state, deposit_request, _| electra::process_deposit_request(state, deposit_request),
+        |config, pubkey_cache, state, deposit_request, _| process_deposit_request(config, pubkey_cache, state, deposit_request),
         "deposit_request",
         "consensus-spec-tests/tests/mainnet/gloas/operations/deposit_request/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/deposit_request/*/*",

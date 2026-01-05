@@ -78,6 +78,7 @@ pub struct GrandineConfig {
     pub backfill_custody_groups: bool,
     pub disable_engine_getblobs: bool,
     pub sync_without_reconstruction: bool,
+    pub enable_payload_build: bool,
 }
 
 impl GrandineConfig {
@@ -110,6 +111,7 @@ impl GrandineConfig {
             withhold_data_columns_publishing,
             disable_engine_getblobs,
             sync_without_reconstruction,
+            enable_payload_build,
             ..
         } = self;
 
@@ -213,6 +215,10 @@ impl GrandineConfig {
 
         if *use_validator_key_cache {
             info!("using validator key cache");
+        }
+
+        if *enable_payload_build {
+            info!("self payload build enabled");
         }
 
         if *withhold_data_columns_publishing {
