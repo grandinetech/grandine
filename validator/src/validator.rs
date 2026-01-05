@@ -75,7 +75,9 @@ use types::{
         ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
         SignedExecutionPayloadEnvelope,
     },
-    nonstandard::{KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
+    nonstandard::{
+        KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+    },
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
@@ -2141,7 +2143,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let doppelganger_protection = self
                 .doppelganger_protection
-                .as_deref() 
+                .as_deref()
                 .map(DoppelgangerProtection::load);
 
             own_members

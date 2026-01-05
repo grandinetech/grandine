@@ -20,6 +20,7 @@ use futures::{
     lock::Mutex,
     stream::{FuturesOrdered, StreamExt as _},
 };
+use helper_functions::verifier::NullVerifier;
 use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
@@ -36,10 +37,9 @@ use tap::Pipe as _;
 use tokio::task::JoinHandle;
 use tracing::instrument;
 use transition_functions::{capella, electra, gloas, unphased};
-use helper_functions::verifier::NullVerifier;
-use types::gloas::containers::{ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
+use types::gloas::containers::{ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope};
 use types::{
     altair::{
         consts::SyncCommitteeSubnetCount,
@@ -1923,9 +1923,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let deneb_payload = match execution_payload {
             ExecutionPayload::Deneb(p) => p,
             _ => {
-                warn_with_peers!(
-                    "unexpected non-Deneb payload format in Gloas envelope data"
-                );
+                warn_with_peers!("unexpected non-Deneb payload format in Gloas envelope data");
                 return None;
             }
         };
