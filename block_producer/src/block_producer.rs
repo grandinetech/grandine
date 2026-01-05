@@ -36,6 +36,8 @@ use tap::Pipe as _;
 use tokio::task::JoinHandle;
 use tracing::instrument;
 use transition_functions::{capella, electra, gloas, unphased};
+use helper_functions::verifier::NullVerifier;
+use types::gloas::containers::{ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -154,6 +156,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             voluntary_exits: Mutex::new(vec![]),
             payload_cache: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             payload_id_cache: Mutex::new(SizedCache::with_size(PAYLOAD_ID_CACHE_SIZE)),
+            cached_payload_roots: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             metrics,
             fake_execution_payloads,
         });
@@ -629,6 +632,8 @@ struct ProducerContext<P: Preset, W: Wait> {
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
     payload_cache: PayloadCache<P>,
     payload_id_cache: Mutex<SizedCache<(H256, Slot), PayloadId>>,
+    /// Cached payload roots keyed by beacon_block_root for envelope retrieval
+    cached_payload_roots: Mutex<SizedCache<H256, H256>>,
     metrics: Option<Arc<Metrics>>,
     fake_execution_payloads: bool,
 }
@@ -1186,6 +1191,18 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 WithClientVersions::none(WithBlobsAndMev::with_default(None))
             }
         };
+
+        // Cache payload root for Gloas envelope retrieval later (only when self-building)
+        // External builders publish their own envelope
+        if can_self_build && self.beacon_state.phase() >= Phase::Gloas {
+            if let Some(ref payload) = execution_payload {
+                self.producer_context
+                    .cached_payload_roots
+                    .lock()
+                    .await
+                    .cache_set(self.head_block_root, payload.hash_tree_root());
+            }
+        }
 
         let mut without_state_root = if let Some(state) = self.beacon_state.post_gloas() {
             let signed_payload_bid = if can_self_build {
@@ -1869,6 +1886,107 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             tokio::spawn(async move { builder_context.local_execution_payload_option().await });
 
         Some(handle)
+    }
+
+    /// Get cached Gloas envelope data from payload_cache (called by validator after signing block)
+    /// Returns None if not self-building (external builder publishes envelope)
+    /// Returns only the fields needed to build ExecutionPayloadEnvelope
+    pub async fn get_gloas_envelope_data(
+        &self,
+    ) -> Option<(
+        DenebExecutionPayload<P>,
+        ExecutionRequests<P>,
+        ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    )> {
+        let payload_root = *self
+            .producer_context
+            .cached_payload_roots
+            .lock()
+            .await
+            .cache_get(&self.head_block_root)?;
+
+        let cached = self
+            .producer_context
+            .payload_cache
+            .lock()
+            .await
+            .cache_get(&payload_root)
+            .cloned()?;
+
+        let WithBlobsAndMev {
+            value: execution_payload,
+            commitments,
+            execution_requests,
+            ..
+        } = cached.result;
+
+        let deneb_payload = match execution_payload {
+            ExecutionPayload::Deneb(p) => p,
+            _ => {
+                warn_with_peers!(
+                    "unexpected non-Deneb payload format in Gloas envelope data"
+                );
+                return None;
+            }
+        };
+
+        Some((
+            deneb_payload,
+            execution_requests.unwrap_or_default(),
+            commitments.unwrap_or_default(),
+        ))
+    }
+
+    /// Compute the post-execution state root for the envelope
+    pub fn compute_post_execution_state_root(
+        &self,
+        beacon_block_root: H256,
+        builder_index: ValidatorIndex,
+        deneb_payload: DenebExecutionPayload<P>,
+        execution_requests_data: ExecutionRequests<P>,
+        blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<H256> {
+        // Build envelope with placeholder state_root (will be set after processing)
+        let envelope = ExecutionPayloadEnvelope {
+            payload: deneb_payload.into(),
+            execution_requests: execution_requests_data,
+            builder_index,
+            beacon_block_root,
+            slot: self.beacon_state.slot(),
+            blob_kzg_commitments,
+            state_root: H256::zero(), // Placeholder
+        };
+
+        let signed_envelope = SignedExecutionPayloadEnvelope {
+            message: envelope,
+            signature: SignatureBytes::default(),
+        };
+
+        let mut post_execution_state = match &*self.beacon_state {
+            BeaconState::Phase0(_)
+            | BeaconState::Altair(_)
+            | BeaconState::Bellatrix(_)
+            | BeaconState::Capella(_)
+            | BeaconState::Deneb(_)
+            | BeaconState::Electra(_)
+            | BeaconState::Fulu(_) => {
+                return Err(AnyhowError::msg(
+                    "compute_post_execution_state_root requires Gloas state",
+                ));
+            }
+            BeaconState::Gloas(gloas_state) => gloas_state.clone(),
+        };
+
+        gloas::process_execution_payload(
+            &self.producer_context.chain_config,
+            &self.producer_context.pubkey_cache,
+            &mut post_execution_state,
+            &signed_envelope,
+            self.producer_context.execution_engine.as_ref(),
+            NullVerifier,
+        )?;
+
+        Ok(post_execution_state.hash_tree_root())
     }
 
     async fn local_execution_payload_result(

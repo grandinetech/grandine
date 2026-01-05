@@ -71,10 +71,11 @@ use types::{
         AggregateAndProof as ElectraAggregateAndProof,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
-    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
-    nonstandard::{
-        KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus,
+    gloas::containers::{
+        ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
+        SignedExecutionPayloadEnvelope,
     },
+    nonstandard::{KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
@@ -1139,7 +1140,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.controller
                     .on_own_block(wait_group.clone(), block.clone_arc());
 
-                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
+                ValidatorToP2p::PublishBeaconBlock(block.clone_arc()).send(&self.p2p_tx);
+
+                // Handle Gloas execution payload envelope (only for self-build)
+                if let Some(signed_envelope) = self
+                    .create_gloas_envelope(
+                        &block_build_context,
+                        &block,
+                        proposer_index,
+                        slot_head,
+                        &signer_snapshot,
+                        public_key,
+                    )
+                    .await
+                {
+                    info_with_peers!(
+                        "validator {} publishing execution payload envelope for block {:?} in slot {}",
+                        proposer_index,
+                        signed_envelope.message.beacon_block_root,
+                        slot_head.slot(),
+                    );
+
+                    // Publish envelope to controller and P2P
+                    self.controller.on_own_execution_payload_envelope(
+                        wait_group.clone(),
+                        signed_envelope.clone_arc(),
+                    );
+
+                    ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope)
+                        .send(&self.p2p_tx);
+                }
             }
         }
 
@@ -1148,6 +1178,80 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         Ok(())
+    }
+
+    /// Create and sign Gloas execution payload envelope for self-build proposers.
+    /// Returns None if envelope data is not available (i.e., not self-building).
+    async fn create_gloas_envelope(
+        &self,
+        block_build_context: &block_producer::BlockBuildContext<P, W>,
+        block: &Arc<types::combined::SignedBeaconBlock<P>>,
+        proposer_index: ValidatorIndex,
+        slot_head: &SlotHead<P>,
+        signer_snapshot: &signer::Snapshot,
+        public_key: &PublicKeyBytes,
+    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+        let (deneb_payload, execution_requests_data, blob_kzg_commitments) =
+            block_build_context.get_gloas_envelope_data().await?;
+
+        let beacon_block_root = block.message().hash_tree_root();
+
+        // Compute state_root by calling process_execution_payload(verify=false)
+        // then hash_tree_root(state). This is the post-execution beacon state root
+        let state_root = match block_build_context.compute_post_execution_state_root(
+            beacon_block_root,
+            proposer_index,
+            deneb_payload.clone(),
+            execution_requests_data.clone(),
+            blob_kzg_commitments.clone(),
+        ) {
+            Ok(root) => root,
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to compute post-execution state root (slot: {}): {error:?}",
+                    slot_head.slot(),
+                );
+                return None;
+            }
+        };
+
+        let envelope = ExecutionPayloadEnvelope {
+            payload: deneb_payload.into(),
+            execution_requests: execution_requests_data,
+            builder_index: proposer_index,
+            beacon_block_root,
+            slot: slot_head.slot(),
+            blob_kzg_commitments,
+            state_root,
+        };
+
+        // Sign the envelope
+        let envelope_signing_root =
+            envelope.signing_root(&self.chain_config, &slot_head.beacon_state);
+        let envelope_sig = match signer_snapshot
+            .sign_without_slashing_protection(
+                SigningMessage::ExecutionPayloadEnvelope(&envelope),
+                envelope_signing_root,
+                Some(slot_head.beacon_state.as_ref().into()),
+                *public_key,
+            )
+            .await
+        {
+            Ok(signature) => SignatureBytes::from(signature),
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to sign execution payload envelope (slot: {}, public_key: {public_key}): \
+                    {error:?}",
+                    slot_head.slot(),
+                );
+                return None;
+            }
+        };
+
+        Some(Arc::new(SignedExecutionPayloadEnvelope {
+            message: envelope,
+            signature: envelope_sig,
+        }))
     }
 
     /// See:
@@ -2037,7 +2141,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let doppelganger_protection = self
                 .doppelganger_protection
-                .as_deref()
+                .as_deref() 
                 .map(DoppelgangerProtection::load);
 
             own_members

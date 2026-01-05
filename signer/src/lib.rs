@@ -1,5 +1,5 @@
 pub use crate::{
-    signer::{KeyOrigin, Signer},
+    signer::{KeyOrigin, Signer, Snapshot},
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::Config as Web3SignerConfig,
 };
