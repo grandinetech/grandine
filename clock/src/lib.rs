@@ -343,14 +343,20 @@ fn next_tick_with_instant<I: InstantLike, S: SystemTimeLike>(
 
     if unix_epoch_to_now <= unix_epoch_to_genesis {
         next_tick = Tick::start_of_slot(GENESIS_SLOT);
-        now_to_next_tick = unix_epoch_to_genesis - unix_epoch_to_now;
+        now_to_next_tick = unix_epoch_to_genesis
+            .checked_sub(unix_epoch_to_now)
+            .expect("the difference from genesis to now fits in Duration");
     } else {
         let tick_duration = tick_duration(config);
-        let genesis_to_now = unix_epoch_to_now - unix_epoch_to_genesis;
+        let genesis_to_now = unix_epoch_to_now
+            .checked_sub(unix_epoch_to_genesis)
+            .expect("the difference from now to genesis fits in Duration");
         let slots_since_genesis = genesis_to_now.as_secs() / config.slot_duration_ms.as_secs();
         let genesis_to_current_slot =
             Duration::from_secs(slots_since_genesis * config.slot_duration_ms.as_secs());
-        let current_slot_to_now = genesis_to_now - genesis_to_current_slot;
+        let current_slot_to_now = genesis_to_now
+            .checked_sub(genesis_to_current_slot)
+            .expect("the difference from now to current slot fits in Duration");
 
         next_tick = Tick::start_of_slot(GENESIS_SLOT + slots_since_genesis);
         now_to_next_tick = Duration::ZERO;

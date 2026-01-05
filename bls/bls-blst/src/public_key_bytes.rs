@@ -1,5 +1,3 @@
-#![expect(unexpected_cfgs, reason = "construct_fixed_hash! uses cfg internally")]
-
 use derive_more::derive::AsRef;
 use fixed_hash::construct_fixed_hash;
 use impl_serde::impl_fixed_hash_serde;
