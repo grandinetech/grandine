@@ -783,13 +783,12 @@ impl<P: Preset> Storage<P> {
             .block_root_by_slot(base_slot)?
             .ok_or(Error::DependentRootLookupFailed)?;
 
-        if let Ok(cache) = self.base_state_cache.read() {
-            if let Some((cached_root, cached_state)) = cache.as_ref() {
-                if *cached_root == base_root {
-                    let reconstructed = apply_delta(&cached_state.as_ref().clone(), &delta);
-                    return Ok(Some(Arc::new(reconstructed)));
-                }
-            }
+        if let Ok(cache) = self.base_state_cache.read()
+            && let Some((cached_root, cached_state)) = cache.as_ref()
+            && *cached_root == base_root
+        {
+            let reconstructed = apply_delta(&cached_state.as_ref().clone(), &delta);
+            return Ok(Some(Arc::new(reconstructed)));
         }
 
         let base_state = self

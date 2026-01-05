@@ -329,7 +329,7 @@ pub fn apply_inactivity_score<P: Preset>(
     mut base_inactivity_scores: InactivityScores<P>,
     delta: InactivityScoreDiff,
 ) -> InactivityScores<P> {
-    let target_inactivity_scores = match delta {
+    match delta {
         InactivityScoreDiff::ZeroList(len) => {
             PersistentList::try_from_iter(core::iter::repeat_n(0, len))
                 .expect("Failed to create a inactivity scores with repeated zeros")
@@ -362,9 +362,7 @@ pub fn apply_inactivity_score<P: Preset>(
             }
             base_inactivity_scores
         }
-    };
-
-    target_inactivity_scores
+    }
 }
 
 pub fn epoch_participation_delta<P: Preset>(
@@ -402,7 +400,7 @@ pub fn apply_epoch_participation<P: Preset>(
     pd: ParticipationDiff,
 ) -> EpochParticipation<P> {
     let base_len = base_epoch_participation.len_usize();
-    let target_epoch_participation = match pd {
+    match pd {
         ParticipationDiff::ZeroList(new_len) => {
             base_epoch_participation =
                 PersistentList::repeat_zero_with_length_of(&base_epoch_participation);
@@ -426,7 +424,5 @@ pub fn apply_epoch_participation<P: Preset>(
             }
             base_epoch_participation
         }
-    };
-
-    target_epoch_participation
+    }
 }
