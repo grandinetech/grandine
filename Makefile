@@ -279,6 +279,8 @@ endif
 	docker buildx imagetools create -t $(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)-amd64$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)-arm64$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION)
+	docker buildx imagetools create -t $(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind \
+		$(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION)
 ifeq ($(DOCKER_LABEL),stable)
 	docker buildx imagetools create -t $(DOCKER_REPO):$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION) \
 		$(DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION)
