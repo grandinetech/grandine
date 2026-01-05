@@ -441,20 +441,19 @@ impl<P: Preset> Batch<P> {
         config: &Config,
         controller: &RealController<P>,
         block: &Arc<SignedBeaconBlock<P>>,
-        parent: &Arc<SignedBeaconBlock<P>>,
-    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
         let block_root = block.message().hash_tree_root();
         let slot = block.message().slot();
 
         // Only process envelopes for Gloas phase
         if config.phase_at_slot::<P>(slot) < Phase::Gloas {
-            return Ok(vec![]);
+            return Ok(None);
         }
 
         // Check if envelope exists for this block
         let Some(envelope) = self.execution_payload_envelopes.get(&block_root) else {
             // Envelope might not exist if block was empty (no payload)
-            return Ok(vec![]);
+            return Ok(None);
         };
 
         let head_state = controller.head_state().value;
@@ -477,13 +476,12 @@ impl<P: Preset> Batch<P> {
         }
 
         debug_with_peers!(
-            "validated execution payload envelope for back sync (block_root: {:?}, slot: {}, parent_slot: {})",
+            "validated execution payload envelope for back sync (block_root: {:?}, slot: {})",
             block_root,
             slot,
-            parent.message().slot()
         );
 
-        Ok(vec![envelope.clone_arc()])
+        Ok(Some(envelope.clone_arc()))
     }
 
     #[expect(clippy::type_complexity)]
@@ -558,9 +556,11 @@ impl<P: Preset> Batch<P> {
                 }
 
                 // Validate execution payload envelopes for Gloas phase
-                let mut envelopes =
-                    self.valid_execution_payload_envelopes_for(config, controller, block, parent)?;
-                verified_execution_payload_envelopes.append(&mut envelopes);
+                if let Some(envelope) =
+                    self.valid_execution_payload_envelopes_for(config, controller, block)?
+                {
+                    verified_execution_payload_envelopes.push(envelope);
+                }
 
                 transition_functions::combined::verify_base_signature_with_head_state(
                     config,
