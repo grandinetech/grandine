@@ -93,6 +93,14 @@ pub struct Config {
     pub shard_committee_period: u64,
     #[serde(with = "As::<DurationMilliSeconds<String>>")]
     pub slot_duration_ms: Duration,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub attestation_due_bps: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregate_due_bps: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub sync_message_due_bps: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub contribution_due_bps: u64,
 
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
@@ -253,6 +261,10 @@ impl Default for Config {
             seconds_per_slot: nonzero!(12_u64),
             shard_committee_period: 256,
             slot_duration_ms: Duration::from_millis(12000),
+            attestation_due_bps: 3333,
+            aggregate_due_bps: 6667,
+            sync_message_due_bps: 3333,
+            contribution_due_bps: 6667,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
