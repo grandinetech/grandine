@@ -763,6 +763,14 @@ where
         self.storage.store_back_sync_blocks(blocks)
     }
 
+    pub fn store_back_sync_execution_payload_envelopes(
+        &self,
+        execution_payload_envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<()> {
+        self.storage
+            .store_back_sync_execution_payload_envelopes(execution_payload_envelopes)
+    }
+
     pub fn archive_back_sync_states(
         &self,
         start_slot: Slot,

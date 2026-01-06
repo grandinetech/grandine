@@ -7,7 +7,8 @@ use eth2_libp2p::GossipId;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
-    DataColumnSidecarAction, DataColumnSidecarOrigin, StateCacheProcessor, Store,
+    DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeAction,
+    ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store,
 };
 use helper_functions::misc;
 use itertools::Itertools as _;
@@ -863,6 +864,17 @@ where
                     None,
                 ),
         }
+    }
+
+    pub fn validate_execution_payload_envelope_with_state(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: &ExecutionPayloadEnvelopeOrigin,
+        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
+        self.store_snapshot()
+            .validate_execution_payload_envelope_with_state(envelope, origin, block_info, state_fn)
     }
 }
 

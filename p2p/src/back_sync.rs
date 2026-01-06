@@ -11,6 +11,7 @@ use derive_more::Display;
 use eth1_api::RealController;
 use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
+    ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
 };
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
@@ -29,7 +30,7 @@ use types::{
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadEnvelope,
-    nonstandard::{PayloadStatus, WithStatus},
+    nonstandard::{PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Slot, H256},
@@ -224,21 +225,22 @@ impl<P: Preset> BackSync<P> {
     ) -> Result<()> {
         let last_block_checkpoint = self.data.current;
 
-        let (checkpoint, blocks, blob_sidecars, data_column_sidecars) = match &self.sync_mode {
-            SyncMode::Default => {
-                self.batch
-                    .verify_from_checkpoint(config, controller, last_block_checkpoint)?
-            }
-            SyncMode::DataColumnsOnly { column_indices, .. } => {
-                self.batch.verify_extra_data_columns_from_checkpoint(
-                    config,
-                    controller,
-                    last_block_checkpoint,
-                    column_indices,
-                    self.low_slot(),
-                )?
-            }
-        };
+        let (checkpoint, blocks, blob_sidecars, data_column_sidecars, execution_payload_envelopes) =
+            match &self.sync_mode {
+                SyncMode::Default => {
+                    self.batch
+                        .verify_from_checkpoint(config, controller, last_block_checkpoint)?
+                }
+                SyncMode::DataColumnsOnly { column_indices, .. } => {
+                    self.batch.verify_extra_data_columns_from_checkpoint(
+                        config,
+                        controller,
+                        last_block_checkpoint,
+                        column_indices,
+                        self.low_slot(),
+                    )?
+                }
+            };
 
         info_with_peers!("back-synced to {} slot", checkpoint.slot);
 
@@ -258,8 +260,7 @@ impl<P: Preset> BackSync<P> {
         controller.store_back_sync_blocks(blocks)?;
         controller.store_back_sync_blob_sidecars(blob_sidecars)?;
         controller.store_back_sync_data_column_sidecars(data_column_sidecars)?;
-        // TODO: Store execution payload envelopes from back-sync
-        // controller.store_back_sync_execution_payload_envelopes(execution_payload_envelopes)?;
+        controller.store_back_sync_execution_payload_envelopes(execution_payload_envelopes)?;
 
         // Update back-sync progress in sync database.
         self.data.current = checkpoint;
@@ -435,6 +436,54 @@ impl<P: Preset> Batch<P> {
             .collect()
     }
 
+    fn valid_execution_payload_envelopes_for(
+        &self,
+        config: &Config,
+        controller: &RealController<P>,
+        block: &Arc<SignedBeaconBlock<P>>,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let block_root = block.message().hash_tree_root();
+        let slot = block.message().slot();
+
+        // Only process envelopes for Gloas phase
+        if config.phase_at_slot::<P>(slot) < Phase::Gloas {
+            return Ok(None);
+        }
+
+        // Check if envelope exists for this block
+        let Some(envelope) = self.execution_payload_envelopes.get(&block_root) else {
+            // Envelope might not exist if block was empty (no payload)
+            return Ok(None);
+        };
+
+        let head_state = controller.head_state().value;
+
+        let action = tokio::task::block_in_place(|| {
+            controller.validate_execution_payload_envelope_with_state(
+                envelope.clone_arc(),
+                &ExecutionPayloadEnvelopeOrigin::BackSync,
+                || Some((block.clone_arc(), PayloadStatus::Optimistic)),
+                || Some(head_state.clone_arc()),
+            )
+        })?;
+
+        if !action.accepted() {
+            bail!(Error::ExecutionPayloadEnvelopeNotAccepted::<P> {
+                action,
+                block_root,
+                slot,
+            })
+        }
+
+        debug_with_peers!(
+            "validated execution payload envelope for back sync (block_root: {:?}, slot: {})",
+            block_root,
+            slot,
+        );
+
+        Ok(Some(envelope.clone_arc()))
+    }
+
     #[expect(clippy::type_complexity)]
     fn verify_from_checkpoint(
         &self,
@@ -446,6 +495,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<SignedBeaconBlock<P>>>,
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedExecutionPayloadEnvelope<P>>>,
     )> {
         debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
@@ -453,6 +503,7 @@ impl<P: Preset> Batch<P> {
         let mut verified_blob_sidecars = vec![];
         let mut verified_blocks = vec![];
         let mut verified_data_column_sidecars = vec![];
+        let mut verified_execution_payload_envelopes = vec![];
         let head_state = controller.head_state().value();
 
         let mut blocks = self
@@ -504,6 +555,13 @@ impl<P: Preset> Batch<P> {
                     verified_blob_sidecars.append(&mut blobs);
                 }
 
+                // Validate execution payload envelopes for Gloas phase
+                if let Some(envelope) =
+                    self.valid_execution_payload_envelopes_for(config, controller, block)?
+                {
+                    verified_execution_payload_envelopes.push(envelope);
+                }
+
                 transition_functions::combined::verify_base_signature_with_head_state(
                     config,
                     controller.pubkey_cache(),
@@ -528,6 +586,7 @@ impl<P: Preset> Batch<P> {
             verified_blocks,
             verified_blob_sidecars,
             verified_data_column_sidecars,
+            verified_execution_payload_envelopes,
         ))
     }
 
@@ -544,6 +603,7 @@ impl<P: Preset> Batch<P> {
         Vec<Arc<SignedBeaconBlock<P>>>,
         Vec<Arc<BlobSidecar<P>>>,
         Vec<Arc<DataColumnSidecar<P>>>,
+        Vec<Arc<SignedExecutionPayloadEnvelope<P>>>,
     )> {
         debug_with_peers!("verify back-sync batch from: {checkpoint:?}");
 
@@ -632,7 +692,7 @@ impl<P: Preset> Batch<P> {
 
         debug_with_peers!("next batch checkpoint: {checkpoint:?}");
 
-        Ok((checkpoint, vec![], vec![], verified_data_column_sidecars))
+        Ok((checkpoint, vec![], vec![], verified_data_column_sidecars, vec![]))
     }
 }
 
@@ -811,6 +871,14 @@ pub enum Error<P: Preset> {
         block_root: H256,
         slot: Slot,
         index: ColumnIndex,
+    },
+    #[error(
+        "execution payload envelope for block {block_root:?} in slot {slot} not accepted: {action:?}"
+    )]
+    ExecutionPayloadEnvelopeNotAccepted {
+        action: ExecutionPayloadEnvelopeAction<P>,
+        block_root: H256,
+        slot: Slot,
     },
     #[error("final back-sync checkpoint mismatch (expected: {expected:?}, actual: {actual:?})")]
     FinalCheckpointMismatch {

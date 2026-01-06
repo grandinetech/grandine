@@ -2594,18 +2594,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let slot = envelope.message.slot;
         let block_root = envelope.message.beacon_block_root;
 
-        self.validate_execution_payload_envelope_with_state(envelope, origin, || {
-            state.or_else(|| {
-                self.state_cache
-                    .existing_state_at_slot(self, block_root, slot)
-            })
-        })
+        self.validate_execution_payload_envelope_with_state(
+            envelope,
+            origin,
+            || {
+                self.chain_link(block_root)
+                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+            },
+            || {
+                state.or_else(|| {
+                    self.state_cache
+                        .existing_state_at_slot(self, block_root, slot)
+                })
+            },
+        )
     }
 
     pub fn validate_execution_payload_envelope_with_state(
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
+        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         let slot = envelope.message.slot;
@@ -2614,7 +2623,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
         // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
-        if slot < self.finalized_slot() {
+        if !origin.is_from_back_sync() && slot < self.finalized_slot() {
             return Ok(ExecutionPayloadEnvelopeAction::Ignore(false));
         }
 
@@ -2664,10 +2673,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
         // (a client MAY queue envelope for processing once the block is retrieved)
-        // Note: Block visibility check is done via chain_link lookup below.
-        // Early filtering in p2p layer queues envelopes until block gossip arrives.
-        let Some(chain_link) = self.chain_link(beacon_block_root) else {
-            // Block not in store yet, delay until it arrives
+        let Some((block, block_payload_status)) = block_info() else {
+            // Block not available yet, delay until it arrives
             return Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
                 envelope,
                 beacon_block_root,
@@ -2677,13 +2684,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // [REJECT] block passes validation.
         // Part 2/2:
         ensure!(
-            !chain_link.payload_status.is_invalid(),
+            !block_payload_status.is_invalid(),
             Error::<P>::PayloadEnvelopeInvalidBlock {
                 payload_envelope: envelope
             },
         );
-
-        let block = &chain_link.block;
 
         // [REJECT] block.slot equals envelope.slot
         ensure!(
