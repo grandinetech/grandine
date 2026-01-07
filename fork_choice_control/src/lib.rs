@@ -28,8 +28,8 @@ pub use crate::{
     storage::{
         BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
         DataColumnSidecarByColumnId, FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot,
-        SlotColumnId, StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage,
-        UnfinalizedBlockByRoot, get, save,
+        SlotColumnId, StateByBlockRoot, StateCheckpoint, StateDeltaByBlockRoot, StateLoadStrategy,
+        Storage, UnfinalizedBlockByRoot, get, save,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},
     wait::Wait,
