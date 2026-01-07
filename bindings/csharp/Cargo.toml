@@ -5,7 +5,10 @@ edition = { workspace = true }
 [build-dependencies]
 bindgen = { workspace = true }
 c_grandine = { workspace = true, default-features = false }
+clap = { workspace = true }
+convert_case = { workspace = true }
 csbindgen = { workspace = true }
+runtime = { workspace = true }
 toml = { workspace = true }
 
 [features]

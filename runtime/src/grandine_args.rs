@@ -268,6 +268,7 @@ impl HttpApiOptions {
 )]
 #[derive(Debug, Args)]
 struct BeaconNodeOptions {
+    /// Max empty slots
     #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
     max_empty_slots: u64,
 
@@ -304,6 +305,7 @@ struct BeaconNodeOptions {
     #[clap(long)]
     network_dir: Option<PathBuf>,
 
+    /// Archival epoch interval
     #[clap(long, default_value_t = DEFAULT_ARCHIVAL_EPOCH_INTERVAL)]
     archival_epoch_interval: NonZeroU64,
 
@@ -433,6 +435,7 @@ struct BeaconNodeOptions {
     #[clap(long)]
     in_memory: bool,
 
+    /// KZG backend
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
 
@@ -863,7 +866,7 @@ struct ValidatorOptions {
     #[clap(long)]
     report_validator_performance: bool,
 
-    // Backfill custody groups
+    /// Backfill custody groups
     #[clap(long)]
     no_custody_groups_backfill: bool,
 }

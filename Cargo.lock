@@ -3153,6 +3153,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3411,7 +3420,10 @@ version = "0.0.0"
 dependencies = [
  "bindgen 0.72.1",
  "c_grandine",
+ "clap",
+ "convert_case 0.10.0",
  "csbindgen",
+ "runtime",
  "toml 0.5.11",
 ]
 
