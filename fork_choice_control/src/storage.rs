@@ -382,8 +382,7 @@ impl<P: Preset> Storage<P> {
 
         if append_delta {
             info_with_peers!("saving state delta in slot {state_slot}");
-            let base_epoch = (state_epoch / self.state_archival_epoch_interval.get())
-                * self.state_archival_epoch_interval.get();
+            let base_epoch = self.base_epoch_at_state_epoch(state_epoch);
             let base_slot = misc::compute_start_slot_at_epoch::<P>(base_epoch);
             let base_root = self.block_root_by_slot(base_slot)?;
 
@@ -773,10 +772,9 @@ impl<P: Preset> Storage<P> {
             bincode::deserialize(&delta_bytes).context("failed to deserialize delta")?;
 
         let slot = delta.slot();
-        let epoch = Self::epoch_at_slot(slot);
+        let state_epoch = Self::epoch_at_slot(slot);
 
-        let base_epoch = (epoch / DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL.get())
-            * DEFAULT_STATE_ARCHIVAL_EPOCH_INTERVAL.get();
+        let base_epoch = self.base_epoch_at_state_epoch(state_epoch);
         let base_slot = misc::compute_start_slot_at_epoch::<P>(base_epoch);
 
         let base_root = self
@@ -1093,6 +1091,11 @@ impl<P: Preset> Storage<P> {
 
             bail!(Error::BlockNotFound { block_root })
         }))
+    }
+
+    fn base_epoch_at_state_epoch(&self, state_epoch: Epoch) -> Epoch {
+        (state_epoch / self.state_archival_epoch_interval.get())
+            * self.state_archival_epoch_interval.get()
     }
 
     pub(crate) fn epoch_at_slot(slot: Slot) -> Epoch {
