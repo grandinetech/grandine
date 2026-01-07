@@ -366,14 +366,12 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
         processed_partial_withdrawals_count,
     ) = get_expected_withdrawals(state)?;
 
-    *state.latest_withdrawals_root_mut() =
-        ContiguousList::<Withdrawal, P::MaxWithdrawalsPerPayload>::try_from_iter(
-            expected_withdrawals
-                .iter()
-                .copied()
-                .take(P::MaxWithdrawalsPerPayload::USIZE),
-        )?
-        .hash_tree_root();
+    *state.payload_expected_withdrawals_mut() = PersistentList::try_from_iter(
+        expected_withdrawals
+            .iter()
+            .copied()
+            .take(P::MaxWithdrawalsPerPayload::USIZE),
+    )?;
 
     for withdrawal in expected_withdrawals.iter().copied() {
         let Withdrawal {

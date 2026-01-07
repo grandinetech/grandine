@@ -903,7 +903,7 @@ pub fn upgrade_to_gloas<P: Preset>(
         builder_pending_payments: PersistentVector::repeat_element(BuilderPendingPayment::default()),
         builder_pending_withdrawals: PersistentList::default(),
         latest_block_hash: latest_execution_payload_header.block_hash,
-        latest_withdrawals_root: H256::zero(),
+        payload_expected_withdrawals: PersistentList::default(),
         // Cache
         cache,
     }

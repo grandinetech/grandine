@@ -11,8 +11,9 @@ use crate::{
     collections::{
         Balances, BuilderPendingPayments, BuilderPendingWithdrawals, EpochParticipation,
         Eth1DataVotes, HistoricalRoots, HistoricalSummaries, InactivityScores,
-        PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, ProposerLookahead,
-        RandaoMixes, RecentRoots, Slashings, Validators,
+        PayloadExpectedWithdrawals, PendingConsolidations, PendingDeposits,
+        PendingPartialWithdrawals, ProposerLookahead, RandaoMixes, RecentRoots, Slashings,
+        Validators,
     },
     gloas::containers::ExecutionPayloadBid,
     phase0::{
@@ -115,7 +116,7 @@ pub struct BeaconState<P: Preset> {
     pub builder_pending_payments: BuilderPendingPayments<P>,
     pub builder_pending_withdrawals: BuilderPendingWithdrawals<P>,
     pub latest_block_hash: ExecutionBlockHash,
-    pub latest_withdrawals_root: H256,
+    pub payload_expected_withdrawals: PayloadExpectedWithdrawals<P>,
 
     // Cache
     #[derivative(PartialEq = "ignore")]
