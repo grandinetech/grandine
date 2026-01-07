@@ -1,4 +1,4 @@
-use core::ops::{Add as _, Index as _, Rem as _};
+use core::ops::Index as _;
 
 use anyhow::{ensure, Result};
 use bit_field::BitField as _;
@@ -32,7 +32,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::{ContiguousList, PersistentList, SszHash as _};
+use ssz::PersistentList;
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -418,28 +418,7 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     }
 
     // > Update the next validator index to start the next withdrawal sweep
-    if expected_withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
-        // > Next sweep starts after the latest withdrawal's validator index
-        let next_validator_index = expected_withdrawals
-            .last()
-            .expect(
-                "the NonZero bound on P::MaxWithdrawalsPerPayload \
-                 ensures that expected_withdrawals is not empty",
-            )
-            .validator_index
-            .add(1)
-            .rem(state.validators().len_u64());
-
-        *state.next_withdrawal_validator_index_mut() = next_validator_index;
-    } else {
-        // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
-        let next_index =
-            state.next_withdrawal_validator_index() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP;
-
-        let next_validator_index = next_index % state.validators().len_u64();
-
-        *state.next_withdrawal_validator_index_mut() = next_validator_index;
-    }
+    capella::update_next_withdrawal_validator_index(state, &expected_withdrawals);
 
     Ok(())
 }
@@ -455,6 +434,7 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
         message: execution_payload_bid,
         signature,
     } = signed_bid;
+
     let builder = state
         .validators()
         .get(execution_payload_bid.builder_index)?;
