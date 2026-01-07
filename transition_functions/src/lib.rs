@@ -239,6 +239,7 @@ pub mod fulu {
 pub mod gloas {
     pub use block_processing::get_expected_withdrawals;
     pub use execution_payload_processing::process_execution_payload;
+
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;

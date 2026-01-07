@@ -17,8 +17,6 @@ pub enum Error<P: Preset> {
         data_1: AttestationData,
         data_2: AttestationData,
     },
-    #[error("post-Gloas attestation for current slot with payload presence: {attestation:?}")]
-    AttestationForCurrentSlotWithPayloadPresence { attestation: Attestation<P> },
     #[error(
         "attestation in slot {attestation_slot} is outside \
          inclusion range for state at slot {state_slot}"
