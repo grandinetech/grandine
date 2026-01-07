@@ -2,6 +2,7 @@ use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, PersistentList};
 use try_from_iterator::TryFromIterator;
+use typenum::Unsigned;
 use types::{
     cache::Cache,
     collections::{
@@ -14,7 +15,7 @@ use types::{
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork, Validator},
         primitives::{DepositIndex, Gwei, H256, Slot, UnixSeconds},
     },
-    preset::Preset,
+    preset::{Preset, SlotsPerHistoricalRoot},
 };
 
 #[derive(Debug, Clone, Default, Derivative, Serialize, Deserialize)]
@@ -287,7 +288,7 @@ pub(super) fn roots_delta<P: Preset>(
     let roots: Vec<_> = (0..inputs)
         .map(|i| {
             *target_roots
-                .get((base_slot + i) % 8192)
+                .get((base_slot + i) % SlotsPerHistoricalRoot::<P>::U64)
                 .expect("Failed to index recent roots")
         })
         .collect();
@@ -301,7 +302,8 @@ pub(super) fn apply_roots_delta<P: Preset>(
     delta: &[H256],
 ) -> RecentRoots<P> {
     for (i, change) in delta.iter().enumerate() {
-        *base_roots.mod_index_mut((base_slot + i as u64) % 8192) = *change;
+        *base_roots.mod_index_mut((base_slot + i as u64) % SlotsPerHistoricalRoot::<P>::U64) =
+            *change;
     }
 
     base_roots
@@ -496,8 +498,8 @@ pub(super) fn randao_delta<P: Preset>(
     target_slot: Slot,
     target_randao: &RandaoMixes<P>,
 ) -> RandaoChange {
-    let diff_len = (target_slot - base_slot) / 32;
-    let end_idx = (target_slot / 32) % 0x0001_0000;
+    let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
+    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % P::EpochsPerHistoricalVector::U64;
     let start_idx = end_idx - diff_len - 1;
 
     let new_mixes: Vec<_> = (start_idx..=end_idx)
@@ -536,8 +538,8 @@ pub(super) fn slashings_delta<P: Preset>(
         return None;
     }
 
-    let diff_len = (target_slot - base_slot) / 32;
-    let end_idx = (target_slot / 32) % 8192;
+    let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
+    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % P::EpochsPerSlashingsVector::U64;
     let start_idx = end_idx - diff_len - 1;
 
     let slashing_changes: Vec<_> = (start_idx..=end_idx)
