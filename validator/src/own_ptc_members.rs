@@ -110,7 +110,7 @@ impl OwnPTCMembers {
             })
             .collect::<HashMap<_, _>>();
 
-        accessors::ptc_for_slot(state, slot)?
+        accessors::get_ptc(state, slot)?
             .into_iter()
             .zip(0..)
             .filter_map(|(validator_index, position_in_committee)| {

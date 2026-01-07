@@ -940,6 +940,9 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn builder_pending_withdrawals_mut(&mut self) -> &mut BuilderPendingWithdrawals<P>;
     fn latest_block_hash_mut(&mut self) -> &mut ExecutionBlockHash;
     fn payload_expected_withdrawals_mut(&mut self) -> &mut PayloadExpectedWithdrawals<P>;
+
+    // PTC caching (not in spec)
+    fn ptc_cache(&self) -> &crate::gloas::ptc_cache::PtcCache;
 }
 
 #[duplicate_item(
@@ -970,6 +973,10 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
     )]
     fn field(&self) -> return_type {
         get_copy([field])
+    }
+
+    fn ptc_cache(&self) -> &crate::gloas::ptc_cache::PtcCache {
+        get_ref([ptc_cache])
     }
 
     #[duplicate_item(

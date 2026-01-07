@@ -180,7 +180,7 @@ impl<P: Preset> Pool<P> {
         }
 
         let mut ptc_members_map = self.ptc_members.write().await;
-        let ptc_members = accessors::ptc_for_slot(beacon_state, slot)?;
+        let ptc_members = accessors::get_ptc(beacon_state, slot)?;
         ptc_members_map.insert(slot, ptc_members.clone());
 
         Ok(ptc_members)

@@ -32,6 +32,7 @@ use types::{
         primitives::{ParticipationFlags, SubcommitteeIndex},
     },
     cache::{IndexSlice, PackedIndices},
+    combined::BeaconState as CombinedBeaconState,
     config::Config,
     gloas::{
         consts::{
@@ -39,6 +40,7 @@ use types::{
             DOMAIN_PTC_ATTESTER,
         },
         containers::{IndexedPayloadAttestation, PayloadAttestation},
+        ptc_cache::PTCCache,
     },
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
@@ -1072,6 +1074,84 @@ pub fn ptc_for_slot<P: Preset>(
     .take(P::PtcSize::USIZE)
     .pipe(ContiguousVector::try_from_iter)
     .map_err(Into::into)
+}
+
+// Helper function to build epoch-wide PTC cache
+fn build_ptc_cache<P: Preset>(state: &impl PostGloasBeaconState<P>, epoch: Epoch) -> Result<PTCCache> {
+    let slots_per_epoch = P::SlotsPerEpoch::U64;
+    let ptc_size = P::PtcSize::USIZE;
+
+    let mut ptc_shuffling = Vec::with_capacity((slots_per_epoch as usize) * ptc_size);
+    let epoch_start_slot = epoch * slots_per_epoch;
+
+    // Build PTC for each slot in epoch
+    for slot_offset in 0..slots_per_epoch {
+        let slot = epoch_start_slot + slot_offset;
+        let slot_ptc = compute_ptc_for_slot_internal(state, slot)?;
+        ptc_shuffling.extend(slot_ptc);
+    }
+
+    Ok(PTCCache::from_parts(
+        epoch,
+        ptc_shuffling,
+        ptc_size,
+        slots_per_epoch,
+    ))
+}
+
+// Internal helper to compute PTC for one slot
+fn compute_ptc_for_slot_internal<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    slot: Slot,
+) -> Result<Vec<ValidatorIndex>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
+    let seed = hashing::hash_256_64(seed, slot);
+
+    let indices = beacon_committees(state, slot)?
+        .flatten()
+        .collect_vec();
+
+    misc::compute_balance_weighted_selection::<P>(
+        state,
+        &PackedIndices::U64(indices.into_iter().collect()),
+        seed,
+        P::PtcSize::USIZE,
+        false,
+    )
+}
+
+/// Get PTC members for a slot with epoch-level caching.
+///
+/// Drop-in replacement for `ptc_for_slot`. Callers don't need to manage cache lifetime
+/// or worry about recomputation - caching is handled internally. For PostGloas states, first
+/// call per epoch builds the cache, subsequent calls are constant time lookups.
+/// Falls back to `ptc_for_slot` for pre-Gloas cases.
+///
+/// See [`PTCCache`](types::gloas::ptc_cache::PTCCache) for full caching rationale.
+pub fn get_ptc<P: Preset>(
+    state: &CombinedBeaconState<P>,
+    slot: Slot,
+) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
+    match state {
+        CombinedBeaconState::Gloas(gloas_state) => {
+            let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+            // Get or initialize current epoch PTC cache
+            let epoch_cache = gloas_state.ptc_cache().get_or_init(|| {
+                Arc::new(build_ptc_cache(gloas_state, epoch).expect("PTC cache computation failed"))
+            });
+
+            // Extract this slot's PTC from the epoch cache
+            epoch_cache
+                .get_ptc(slot, P::SlotsPerEpoch::U64, P::PtcSize::USIZE)?
+                .iter()
+                .copied()
+                .pipe(ContiguousVector::try_from_iter)
+                .map_err(Into::into)
+        }
+        _ => ptc_for_slot(state, slot),
+    }
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
