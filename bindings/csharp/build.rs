@@ -2,9 +2,6 @@ use std::{env, fs, path::PathBuf};
 
 use toml::Value;
 
-/// The path where the generated bindings file will be written, relative to the bindings folder.
-const PATH_FOR_CSHARP_BINDINGS_FILE: &str = "csharp/Grandine.NethermindPlugin/NativeMethods.g.cs";
-
 fn main() {
     let package_name_of_c_crate = get_package_name_of_c_crate();
     println!(
@@ -12,8 +9,10 @@ fn main() {
         path_to_bindings_folder().display()
     );
 
-    let parent = path_to_bindings_folder();
-    let path_to_output_file = parent.join(PATH_FOR_CSHARP_BINDINGS_FILE);
+    let parent = path_to_generated_csharp_artifacts_folder();
+    fs::create_dir_all(&parent).unwrap();
+
+    let path_to_output_file = parent.join("NativeMethods.g.cs");
 
     bindgen::Builder::default()
         .header(path_to_c_crate().join("build/grandine.h").to_str().unwrap())
@@ -36,6 +35,13 @@ fn main() {
         .method_filter(|v| v.starts_with("grandine_"))
         .generate_csharp_file(path_to_output_file)
         .expect("csharp bindgen failed to generate bindgen file");
+}
+
+fn path_to_generated_csharp_artifacts_folder() -> PathBuf {
+    let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let crate_dir = PathBuf::from(crate_dir);
+
+    crate_dir.join("generated")
 }
 
 fn path_to_bindings_folder() -> PathBuf {

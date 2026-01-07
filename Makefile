@@ -20,12 +20,10 @@ endif
 all: build
 
 .PHONY: clean
-clean:
+clean: clean-nethermind-plugin
 	cargo clean
 	rm -rf build
 	rm -rf bindings/c/build
-	rm -rf bindings/csharp/Grandine.NethermindPlugin/bin
-	rm -rf bindings/csharp/Grandine.NethermindPlugin/obj
 
 .PHONY: check
 check:
@@ -121,6 +119,12 @@ nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.
 ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll:
 	cd ./bindings/csharp && \
 	dotnet publish -c Release
+
+.PHONY: clean-nethermind-plugin
+clean-nethermind-plugin:
+	rm -rf bindings/csharp/Grandine.NethermindPlugin/bin
+	rm -rf bindings/csharp/Grandine.NethermindPlugin/obj
+	rm -rf bindings/csharp/generated
 
 ifneq ($(GITHUB_TOKEN),)
 NETHERMIND_DOWNLOAD_EXTRA_ARGS = --header "Authorization: Bearer $(GITHUB_TOKEN)"

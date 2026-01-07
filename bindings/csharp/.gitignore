@@ -3,3 +3,4 @@
 nupkgs
 **/runtimes
 src/generated.rs
+generated/*

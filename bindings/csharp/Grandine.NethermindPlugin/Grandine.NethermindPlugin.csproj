@@ -42,7 +42,13 @@
     </PackageReference>
   </ItemGroup>
 
-  <Target Name="Generate csharp bindings" BeforeTargets="Compile">
-    <Exec Command="cargo build" />
+  <Target Name="GenerateBindings" BeforeTargets="BeforeBuild;BeforeRebuild">
+    <Exec Command="cargo build" Outputs="../generated/*.cs">
+      <Output ItemName="Generated" TaskParameter="Outputs" />
+    </Exec>
+    <ItemGroup>
+      <Compile Include="@(Generated)" />
+      <FileWrites Include="@(Generated)" />
+    </ItemGroup>
   </Target>
 </Project>
