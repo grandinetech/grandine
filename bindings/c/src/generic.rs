@@ -49,7 +49,7 @@ impl CErrorMessage {
     }
 
     pub unsafe fn new(v: *const c_char) -> Self {
-        let v = CStr::from_ptr(v);
+        let v = unsafe { CStr::from_ptr(v) };
 
         Self(v.to_owned().into_raw())
     }

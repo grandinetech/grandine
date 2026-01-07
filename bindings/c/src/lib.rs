@@ -335,7 +335,7 @@ pub extern "C" fn grandine_vec_alloc(item_layout: CLayout, size: usize) -> *mut 
 /// CErrorMessage must be passed back to grandine, where it will be automatically cleaned up.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn grandine_error_message(str: *const c_char) -> CErrorMessage {
-    CErrorMessage::new(str)
+    unsafe { CErrorMessage::new(str) }
 }
 
 #[unsafe(no_mangle)]
@@ -346,18 +346,18 @@ pub extern "C" fn grandine_shutdown() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn grandine_run(argc: u64, argv: *const *const c_char) -> u64 {
     unsafe fn try_run(argc: u64, argv: *const *const c_char) -> Result<()> {
-        let args = std::iter::once("").chain(
+        let args = std::iter::once("").chain(unsafe {
             std::slice::from_raw_parts(argv, argc as usize)
                 .into_iter()
-                .filter_map(|it| CStr::from_ptr(*it).to_str().ok()),
-        );
+                .filter_map(|it| CStr::from_ptr(*it).to_str().ok())
+        });
 
         let args = GrandineArgs::try_parse_from(args)?;
 
         run(args)
     }
 
-    if let Err(error) = try_run(argc, argv) {
+    if let Err(error) = unsafe { try_run(argc, argv) } {
         error.downcast_ref().map(ClapError::exit);
         error!("{error:?}");
 

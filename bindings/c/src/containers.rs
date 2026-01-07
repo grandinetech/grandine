@@ -407,6 +407,7 @@ impl From<PayloadAttributesV3<Mainnet>> for CPayloadAttributesV3 {
 
 #[derive(Debug)]
 #[repr(C)]
+#[allow(unused, reason = "constructed from the C side of bindings")]
 pub enum CPayloadValidationStatus {
     Valid = 0,
     Invalid,
