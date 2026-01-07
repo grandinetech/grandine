@@ -2934,7 +2934,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `Store::insert_block` fails, but only if segment IDs or positions in a segment run out,
         // which is extremely unlikely and at which point the `Store` is unusable anyway.
         if self.slot() == chain_link.slot() && is_before_attesting_interval && is_first_block {
-            self.proposer_boost_root = block_root;
+            let state = self.state_cache.state_at_slot(
+                &self.pubkey_cache,
+                self,
+                old_head.block_root,
+                self.slot(),
+            )?;
+
+            if chain_link.block.message().proposer_index()
+                == accessors::get_beacon_proposer_index(&self.chain_config, &state)?
+            {
+                self.proposer_boost_root = block_root;
+            }
         }
 
         let old_justified_checkpoint = self.justified_checkpoint;
