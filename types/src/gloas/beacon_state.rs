@@ -15,7 +15,7 @@ use crate::{
         PendingPartialWithdrawals, ProposerLookahead, RandaoMixes, RecentRoots, Slashings,
         Validators,
     },
-    gloas::{containers::ExecutionPayloadBid, ptc_cache::PtcCache},
+    gloas::containers::ExecutionPayloadBid,
     phase0::{
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
@@ -123,10 +123,4 @@ pub struct BeaconState<P: Preset> {
     #[serde(skip)]
     #[ssz(skip)]
     pub cache: Cache,
-
-    // PTC cache
-    #[derivative(PartialEq = "ignore")]
-    #[serde(skip)]
-    #[ssz(skip)]
-    pub ptc_cache: PtcCache,
 }

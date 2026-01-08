@@ -40,7 +40,6 @@ use types::{
             DOMAIN_PTC_ATTESTER,
         },
         containers::{IndexedPayloadAttestation, PayloadAttestation},
-        ptc_cache::PTCCache,
     },
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
@@ -1077,26 +1076,23 @@ pub fn ptc_for_slot<P: Preset>(
 }
 
 // Helper function to build epoch-wide PTC cache
-fn build_ptc_cache<P: Preset>(state: &impl PostGloasBeaconState<P>, epoch: Epoch) -> Result<PTCCache> {
+fn build_ptc_cache<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    epoch: Epoch,
+) -> Result<HashMap<Slot, Vec<ValidatorIndex>>> {
     let slots_per_epoch = P::SlotsPerEpoch::U64;
-    let ptc_size = P::PtcSize::USIZE;
-
-    let mut ptc_shuffling = Vec::with_capacity((slots_per_epoch as usize) * ptc_size);
     let epoch_start_slot = epoch * slots_per_epoch;
+
+    let mut ptc_members = HashMap::new();
 
     // Build PTC for each slot in epoch
     for slot_offset in 0..slots_per_epoch {
         let slot = epoch_start_slot + slot_offset;
         let slot_ptc = compute_ptc_for_slot_internal(state, slot)?;
-        ptc_shuffling.extend(slot_ptc);
+        ptc_members.insert(slot, slot_ptc);
     }
 
-    Ok(PTCCache::from_parts(
-        epoch,
-        ptc_shuffling,
-        ptc_size,
-        slots_per_epoch,
-    ))
+    Ok(ptc_members)
 }
 
 // Internal helper to compute PTC for one slot
@@ -1127,8 +1123,6 @@ fn compute_ptc_for_slot_internal<P: Preset>(
 /// or worry about recomputation - caching is handled internally. For PostGloas states, first
 /// call per epoch builds the cache, subsequent calls are constant time lookups.
 /// Falls back to `ptc_for_slot` for pre-Gloas cases.
-///
-/// See [`PTCCache`](types::gloas::ptc_cache::PTCCache) for full caching rationale.
 pub fn get_ptc<P: Preset>(
     state: &CombinedBeaconState<P>,
     slot: Slot,
@@ -1137,14 +1131,15 @@ pub fn get_ptc<P: Preset>(
         CombinedBeaconState::Gloas(gloas_state) => {
             let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-            // Get or initialize current epoch PTC cache
-            let epoch_cache = gloas_state.ptc_cache().get_or_init(|| {
-                Arc::new(build_ptc_cache(gloas_state, epoch).expect("PTC cache computation failed"))
+            // Get or initialize current epoch PTC cache (stored in Cache struct)
+            let epoch_cache = gloas_state.cache.ptc_cache.get_or_init(|| {
+                build_ptc_cache(gloas_state, epoch).expect("PTC cache computation failed")
             });
 
             // Extract this slot's PTC from the epoch cache
             epoch_cache
-                .get_ptc(slot, P::SlotsPerEpoch::U64, P::PtcSize::USIZE)?
+                .get(&slot)
+                .ok_or_else(|| anyhow::anyhow!("PTC not found for slot {}", slot))?
                 .iter()
                 .copied()
                 .pipe(ContiguousVector::try_from_iter)

@@ -906,8 +906,6 @@ pub fn upgrade_to_gloas<P: Preset>(
         payload_expected_withdrawals: PersistentList::default(),
         // Cache
         cache,
-        // PTC cache
-        ptc_cache: Default::default(),
     }
 }
 

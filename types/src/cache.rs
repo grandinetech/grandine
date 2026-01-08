@@ -11,7 +11,9 @@ use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 
 use crate::{
-    altair::primitives::NonZeroGwei, nonstandard::RelativeEpoch, phase0::primitives::ValidatorIndex,
+    altair::primitives::NonZeroGwei,
+    nonstandard::RelativeEpoch,
+    phase0::primitives::{Slot, ValidatorIndex},
 };
 
 // Possible optimization: cache all proposer indices in an epoch.
@@ -34,6 +36,10 @@ pub struct Cache {
     pub active_validator_indices_shuffled: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
     pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
+    /// PTC cache for current epoch only.
+    /// OnceCell (not EnumMap<RelativeEpoch>) because: cannot pre-compute Next
+    /// (balances unknown), no Previous needed.
+    pub ptc_cache: OnceCell<HashMap<Slot, Vec<ValidatorIndex>>>,
 }
 
 impl Cache {
@@ -53,6 +59,12 @@ impl Cache {
         ordered[RelativeEpoch::Current] = core::mem::take(&mut ordered[RelativeEpoch::Next]);
         shuffled[RelativeEpoch::Current] = core::mem::take(&mut shuffled[RelativeEpoch::Next]);
         balance[RelativeEpoch::Current] = core::mem::take(&mut balance[RelativeEpoch::Next]);
+    }
+
+    /// Clear PTC cache. Called only from Gloas epoch processing
+    /// (balance_weighted_selection invalidated by balance changes).
+    pub fn clear_ptc_cache(&mut self) {
+        self.ptc_cache.take();
     }
 }
 
