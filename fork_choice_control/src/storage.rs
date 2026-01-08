@@ -785,7 +785,7 @@ impl<P: Preset> Storage<P> {
             && let Some((cached_root, cached_state)) = cache.as_ref()
             && *cached_root == base_root
         {
-            let reconstructed = apply_delta(&cached_state.as_ref().clone(), &delta);
+            let reconstructed = apply_delta(&cached_state.as_ref().clone(), delta);
             return Ok(Some(Arc::new(reconstructed)));
         }
 
@@ -799,7 +799,7 @@ impl<P: Preset> Storage<P> {
             *cache = Some((base_root, base_state.clone().into()));
         }
 
-        let reconstructed = apply_delta(&base_state, &delta);
+        let reconstructed = apply_delta(&base_state, delta);
 
         Ok(Some(Arc::new(reconstructed)))
     }
