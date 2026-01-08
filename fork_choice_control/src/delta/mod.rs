@@ -1,7 +1,8 @@
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use ssz::Hc;
 use std::sync::Arc;
-use types::{combined::BeaconState, phase0::primitives::Slot, preset::Preset};
+use types::{combined::BeaconState, nonstandard::Phase, phase0::primitives::Slot, preset::Preset};
 
 mod altair;
 mod bellatrix;
@@ -63,62 +64,85 @@ impl<P: Preset> BeaconStateDelta<P> {
             Self::Fulu(fulu_delta) => fulu_delta.slot,
         }
     }
+
+    pub const fn phase(&self) -> Phase {
+        match self {
+            Self::Phase0(_) => Phase::Phase0,
+            Self::Altair(_) => Phase::Altair,
+            Self::Bellatrix(_) => Phase::Bellatrix,
+            Self::Capella(_) => Phase::Capella,
+            Self::Deneb(_) => Phase::Deneb,
+            Self::Electra(_) => Phase::Electra,
+            Self::Fulu(_) => Phase::Fulu,
+        }
+    }
 }
 
 pub fn delta<P: Preset>(
     base: &Arc<BeaconState<P>>,
     target: &Arc<BeaconState<P>>,
-) -> BeaconStateDelta<P> {
+) -> Result<BeaconStateDelta<P>> {
     match (base.as_ref(), &target.as_ref()) {
-        (BeaconState::Phase0(base), BeaconState::Phase0(target)) => {
-            BeaconStateDelta::Phase0(phase0_delta(base, (**target).clone()))
-        }
-        (BeaconState::Altair(base), BeaconState::Altair(target)) => {
-            BeaconStateDelta::Altair(altair_delta(base, (**target).clone()))
-        }
-        (BeaconState::Bellatrix(base), BeaconState::Bellatrix(target)) => {
-            BeaconStateDelta::Bellatrix(bellatrix_delta(base, (**target).clone()))
-        }
-        (BeaconState::Capella(base), BeaconState::Capella(target)) => {
-            BeaconStateDelta::Capella(capella_delta(base, (**target).clone()))
-        }
-        (BeaconState::Deneb(base), BeaconState::Deneb(target)) => {
-            BeaconStateDelta::Deneb(deneb_delta(base, (**target).clone()))
-        }
-        (BeaconState::Electra(base), BeaconState::Electra(target)) => {
-            BeaconStateDelta::Electra(electra_delta(base, (**target).clone()))
-        }
+        (BeaconState::Phase0(base), BeaconState::Phase0(target)) => Ok(BeaconStateDelta::Phase0(
+            phase0_delta(base, (**target).clone()),
+        )),
+        (BeaconState::Altair(base), BeaconState::Altair(target)) => Ok(BeaconStateDelta::Altair(
+            altair_delta(base, (**target).clone()),
+        )),
+        (BeaconState::Bellatrix(base), BeaconState::Bellatrix(target)) => Ok(
+            BeaconStateDelta::Bellatrix(bellatrix_delta(base, (**target).clone())),
+        ),
+        (BeaconState::Capella(base), BeaconState::Capella(target)) => Ok(
+            BeaconStateDelta::Capella(capella_delta(base, (**target).clone())),
+        ),
+        (BeaconState::Deneb(base), BeaconState::Deneb(target)) => Ok(BeaconStateDelta::Deneb(
+            deneb_delta(base, (**target).clone()),
+        )),
+        (BeaconState::Electra(base), BeaconState::Electra(target)) => Ok(
+            BeaconStateDelta::Electra(electra_delta(base, (**target).clone())),
+        ),
         (BeaconState::Fulu(base), BeaconState::Fulu(target)) => {
-            BeaconStateDelta::Fulu(fulu_delta(base, (**target).clone()))
+            Ok(BeaconStateDelta::Fulu(fulu_delta(base, (**target).clone())))
         }
-        _ => panic!("Cannot create delta across different phases"),
+        _ => bail!(
+            "Cannot create delta across different phases: base is {:?}, target is {:?}",
+            base.phase(),
+            target.phase()
+        ),
     }
 }
 
-pub fn apply_delta<P: Preset>(base: &BeaconState<P>, delta: BeaconStateDelta<P>) -> BeaconState<P> {
+pub fn apply_delta<P: Preset>(
+    base: &BeaconState<P>,
+    delta: BeaconStateDelta<P>,
+) -> Result<BeaconState<P>> {
+    let delta_phase = delta.phase();
     match (&base, delta) {
-        (BeaconState::Phase0(base), BeaconStateDelta::Phase0(delta)) => {
-            BeaconState::Phase0(Hc::from(apply_phase0_delta((**base).clone(), delta)))
-        }
-        (BeaconState::Altair(base), BeaconStateDelta::Altair(delta)) => {
-            BeaconState::Altair(Hc::from(apply_altair_delta((**base).clone(), delta)))
-        }
-        (BeaconState::Bellatrix(base), BeaconStateDelta::Bellatrix(delta)) => {
-            BeaconState::Bellatrix(Hc::from(apply_bellatrix_delta((**base).clone(), delta)))
-        }
-        (BeaconState::Capella(base), BeaconStateDelta::Capella(delta)) => {
-            BeaconState::Capella(Hc::from(apply_capella_delta((**base).clone(), delta)))
-        }
-        (BeaconState::Deneb(base), BeaconStateDelta::Deneb(delta)) => {
-            BeaconState::Deneb(Hc::from(apply_deneb_delta((**base).clone(), delta)))
-        }
-
-        (BeaconState::Electra(base), BeaconStateDelta::Electra(delta)) => {
-            BeaconState::Electra(Hc::from(apply_electra_delta((**base).clone(), delta)))
-        }
-        (BeaconState::Fulu(base), BeaconStateDelta::Fulu(delta)) => {
-            BeaconState::Fulu(Hc::from(apply_fulu_delta((**base).clone(), delta)))
-        }
-        _ => panic!("Cannot apply delta from different phase"),
+        (BeaconState::Phase0(base), BeaconStateDelta::Phase0(delta)) => Ok(BeaconState::Phase0(
+            Hc::from(apply_phase0_delta((**base).clone(), delta)),
+        )),
+        (BeaconState::Altair(base), BeaconStateDelta::Altair(delta)) => Ok(BeaconState::Altair(
+            Hc::from(apply_altair_delta((**base).clone(), delta)),
+        )),
+        (BeaconState::Bellatrix(base), BeaconStateDelta::Bellatrix(delta)) => Ok(
+            BeaconState::Bellatrix(Hc::from(apply_bellatrix_delta((**base).clone(), delta))),
+        ),
+        (BeaconState::Capella(base), BeaconStateDelta::Capella(delta)) => Ok(BeaconState::Capella(
+            Hc::from(apply_capella_delta((**base).clone(), delta)),
+        )),
+        (BeaconState::Deneb(base), BeaconStateDelta::Deneb(delta)) => Ok(BeaconState::Deneb(
+            Hc::from(apply_deneb_delta((**base).clone(), delta)),
+        )),
+        (BeaconState::Electra(base), BeaconStateDelta::Electra(delta)) => Ok(BeaconState::Electra(
+            Hc::from(apply_electra_delta((**base).clone(), delta)),
+        )),
+        (BeaconState::Fulu(base), BeaconStateDelta::Fulu(delta)) => Ok(BeaconState::Fulu(
+            Hc::from(apply_fulu_delta((**base).clone(), delta)),
+        )),
+        _ => bail!(
+            "Cannot apply delta from different phase: base is {:?}, delta is {:?}",
+            base.phase(),
+            delta_phase
+        ),
     }
 }

@@ -412,14 +412,25 @@ impl<P: Preset> Storage<P> {
             };
 
             if let Some((_, base_state)) = base_state {
-                let delta = delta(
-                    &base_state,
-                    &Arc::clone(state.get_or_init(|| chain_link.state(store))),
-                );
-                batch.push((
-                    StateDeltaByBlockRoot(block_root).to_string(),
-                    bincode::serialize(&delta)?,
-                ));
+                let current_state = Arc::clone(state.get_or_init(|| chain_link.state(store)));
+
+                if base_state.phase() != current_state.phase() {
+                    warn_with_peers!(
+                        "Fork boundary detected at slot {state_slot} (base: {:?}, current: {:?}), storing full state instead of delta",
+                        base_state.phase(),
+                        current_state.phase()
+                    );
+                    batch.push(serialize(StateByBlockRoot(block_root), &current_state)?);
+                } else {
+                    let delta = delta(
+                        &base_state,
+                        &Arc::clone(state.get_or_init(|| chain_link.state(store))),
+                    )?;
+                    batch.push((
+                        StateDeltaByBlockRoot(block_root).to_string(),
+                        bincode::serialize(&delta)?,
+                    ));
+                }
             } else {
                 warn_with_peers!(
                     "base state not found at slot {base_slot}, storing full state instead at slot {state_slot}"
@@ -785,7 +796,7 @@ impl<P: Preset> Storage<P> {
             && let Some((cached_root, cached_state)) = cache.as_ref()
             && *cached_root == base_root
         {
-            let reconstructed = apply_delta(&cached_state.as_ref().clone(), delta);
+            let reconstructed = apply_delta(&cached_state.as_ref().clone(), delta)?;
             return Ok(Some(Arc::new(reconstructed)));
         }
 
@@ -799,7 +810,7 @@ impl<P: Preset> Storage<P> {
             *cache = Some((base_root, base_state.clone().into()));
         }
 
-        let reconstructed = apply_delta(&base_state, delta);
+        let reconstructed = apply_delta(&base_state, delta)?;
 
         Ok(Some(Arc::new(reconstructed)))
     }
