@@ -414,14 +414,7 @@ impl<P: Preset> Storage<P> {
             if let Some((_, base_state)) = base_state {
                 let current_state = Arc::clone(state.get_or_init(|| chain_link.state(store)));
 
-                if base_state.phase() != current_state.phase() {
-                    warn_with_peers!(
-                        "Fork boundary detected at slot {state_slot} (base: {:?}, current: {:?}), storing full state instead of delta",
-                        base_state.phase(),
-                        current_state.phase()
-                    );
-                    batch.push(serialize(StateByBlockRoot(block_root), &current_state)?);
-                } else {
+                if base_state.phase() == current_state.phase() {
                     let delta = delta(
                         &base_state,
                         &Arc::clone(state.get_or_init(|| chain_link.state(store))),
@@ -430,6 +423,13 @@ impl<P: Preset> Storage<P> {
                         StateDeltaByBlockRoot(block_root).to_string(),
                         bincode::serialize(&delta)?,
                     ));
+                } else {
+                    warn_with_peers!(
+                        "Fork boundary detected at slot {state_slot} (base: {:?}, current: {:?}), storing full state instead of delta",
+                        base_state.phase(),
+                        current_state.phase()
+                    );
+                    batch.push(serialize(StateByBlockRoot(block_root), &current_state)?);
                 }
             } else {
                 warn_with_peers!(
@@ -1104,7 +1104,7 @@ impl<P: Preset> Storage<P> {
         }))
     }
 
-    fn base_epoch_at_state_epoch(&self, state_epoch: Epoch) -> Epoch {
+    const fn base_epoch_at_state_epoch(&self, state_epoch: Epoch) -> Epoch {
         (state_epoch / self.state_archival_epoch_interval.get())
             * self.state_archival_epoch_interval.get()
     }
