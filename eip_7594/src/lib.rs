@@ -197,6 +197,12 @@ pub fn verify_kzg_proofs<P: Preset>(
             .start_timer()
     });
 
+    let _timer = metrics.as_ref().map(|metrics| {
+        metrics
+            .data_column_sidecar_kzg_verification_single
+            .start_timer()
+    });
+
     let DataColumnSidecar {
         index,
         column,

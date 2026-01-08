@@ -6,7 +6,7 @@ use logging::warn_with_peers;
 use once_cell::sync::OnceCell;
 use prometheus::{
     Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
-    histogram_opts, opts,
+    exponential_buckets, histogram_opts, opts,
 };
 use types::{
     nonstandard::SystemStats,
@@ -69,6 +69,7 @@ pub struct Metrics {
     pub data_column_sidecar_computation: Histogram,
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
     pub data_column_sidecar_kzg_verification_batch: Histogram,
+    pub data_column_sidecar_kzg_verification_single: Histogram,
     beacon_custody_groups: IntGauge,
     beacon_custody_groups_backfilled: IntGauge,
     pub engine_get_blobs_v2_requests_count: IntCounter,
@@ -352,6 +353,7 @@ impl Metrics {
             data_column_sidecar_computation: Histogram::with_opts(histogram_opts!(
                 "beacon_data_column_sidecar_computation_seconds",
                 "Time taken to compute data column sidecar, including cells, proofs and inclusion proof",
+                vec![0.1, 0.15, 0.25, 0.35, 0.5, 0.7, 1.0, 2.5, 5.0, 10.0],
             ))?,
 
             data_column_sidecar_inclusion_proof_verification: Histogram::with_opts(
@@ -364,6 +366,13 @@ impl Metrics {
             data_column_sidecar_kzg_verification_batch: Histogram::with_opts(histogram_opts!(
                 "beacon_kzg_verification_data_column_batch_seconds",
                 "Runtime of batched data column kzg verification",
+                exponential_buckets(0.002, 2.0, 7)?,
+            ))?,
+
+            data_column_sidecar_kzg_verification_single: Histogram::with_opts(histogram_opts!(
+                "beacon_kzg_verification_data_column_single_seconds",
+                "Runtime of single data column kzg verification",
+                exponential_buckets(0.002, 2.0, 7)?,
             ))?,
 
             beacon_custody_groups: IntGauge::new(
@@ -900,6 +909,9 @@ impl Metrics {
         ))?;
         default_registry.register(Box::new(
             self.data_column_sidecar_kzg_verification_batch.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.data_column_sidecar_kzg_verification_single.clone(),
         ))?;
         default_registry.register(Box::new(self.beacon_custody_groups.clone()))?;
         default_registry.register(Box::new(self.beacon_custody_groups_backfilled.clone()))?;
