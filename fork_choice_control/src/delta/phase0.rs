@@ -1,7 +1,6 @@
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
-use ssz::{BitVector, PersistentList};
-use try_from_iterator::TryFromIterator;
+use ssz::BitVector;
 use typenum::Unsigned;
 use types::{
     cache::Cache,
@@ -13,7 +12,7 @@ use types::{
         beacon_state::BeaconState,
         consts::JustificationBitsLength,
         containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork, Validator},
-        primitives::{DepositIndex, Gwei, H256, Slot, UnixSeconds},
+        primitives::{DepositIndex, Epoch, Gwei, H256, Slot, UnixSeconds},
     },
     preset::{Preset, SlotsPerHistoricalRoot},
 };
@@ -78,28 +77,28 @@ pub struct SlashingChange {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct Rem {
-    pub len: i64,
-    pub val: Vec<Gwei>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct BalanceDiffs {
     tags: BitTagVec,
     small_diffs: Vec<i32>,
     target_values: Vec<Gwei>,
-    rem: Rem,
+    new_balances: Vec<Gwei>,
 }
-#[derive(Default, Debug, Clone, Deserialize, Serialize)]
-pub struct RemValidators {
-    pub len: i64,
-    pub val: Vec<Validator>,
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ValidatorFieldChanges {
+    pub withdrawal_credentials: Option<H256>,
+    pub effective_balance: Option<Gwei>,
+    pub slashed: Option<bool>,
+    pub activation_eligibility_epoch: Option<Epoch>,
+    pub activation_epoch: Option<Epoch>,
+    pub exit_epoch: Option<Epoch>,
+    pub withdrawable_epoch: Option<Epoch>,
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct ValidatorsChange {
-    pub rem: RemValidators,
-    pub validators: Vec<(u64, Validator)>,
+    pub new_validators: Vec<Validator>,
+    pub modified_validators: Vec<(u64, ValidatorFieldChanges)>,
 }
 
 // represent each field with a tag,
@@ -313,59 +312,91 @@ pub(super) fn validators_delta<P: Preset>(
     base_validators: &Validators<P>,
     target_validators: &Validators<P>,
 ) -> ValidatorsChange {
-    let len1 = base_validators.len_usize();
-    let rem_len = i64::try_from(target_validators.len_u64())
-        .expect("target_validators length too large")
-        - i64::try_from(base_validators.len_u64()).expect("base_validators length too large");
+    let base_len = base_validators.len_usize();
 
-    let mut validators = vec![];
+    let new_validators = target_validators
+        .into_iter()
+        .skip(base_len)
+        .cloned()
+        .collect();
+
+    let mut modified_validators = vec![];
     for (i, (v1, v2)) in base_validators
         .into_iter()
         .zip(target_validators.into_iter())
         .enumerate()
     {
         if v1 != v2 {
-            validators.push((i as u64, v2.clone()));
+            let changes = ValidatorFieldChanges {
+                withdrawal_credentials: (v1.withdrawal_credentials != v2.withdrawal_credentials)
+                    .then_some(v2.withdrawal_credentials),
+
+                effective_balance: (v1.effective_balance != v2.effective_balance)
+                    .then_some(v2.effective_balance),
+
+                slashed: (v1.slashed != v2.slashed).then_some(v2.slashed),
+
+                activation_eligibility_epoch: (v1.activation_eligibility_epoch
+                    != v2.activation_eligibility_epoch)
+                    .then_some(v2.activation_eligibility_epoch),
+
+                activation_epoch: (v1.activation_epoch != v2.activation_epoch)
+                    .then_some(v2.activation_epoch),
+
+                exit_epoch: (v1.exit_epoch != v2.exit_epoch).then_some(v2.exit_epoch),
+
+                withdrawable_epoch: (v1.withdrawable_epoch != v2.withdrawable_epoch)
+                    .then_some(v2.withdrawable_epoch),
+            };
+
+            modified_validators.push((i as u64, changes));
         }
     }
 
-    let rem_values = target_validators.into_iter().skip(len1).cloned().collect();
-    let rem = RemValidators {
-        len: rem_len,
-        val: rem_values,
-    };
-
-    ValidatorsChange { rem, validators }
+    ValidatorsChange {
+        new_validators,
+        modified_validators,
+    }
 }
 
 pub(super) fn apply_validators_delta<P: Preset>(
     mut base_validators: Validators<P>,
     vc: ValidatorsChange,
 ) -> Validators<P> {
-    let base_len = base_validators.len_usize();
-
-    for (i, v) in &vc.validators {
-        *base_validators
+    // Apply field changes to existing validators
+    for (i, changes) in &vc.modified_validators {
+        let validator = base_validators
             .get_mut(*i)
-            .expect("Failed to get mut index in base_validators") = v.clone();
+            .expect("Failed to get mut index in base_validators");
+
+        if let Some(wc) = changes.withdrawal_credentials {
+            validator.withdrawal_credentials = wc;
+        }
+        if let Some(eb) = changes.effective_balance {
+            validator.effective_balance = eb;
+        }
+        if let Some(slashed) = changes.slashed {
+            validator.slashed = slashed;
+        }
+        if let Some(aee) = changes.activation_eligibility_epoch {
+            validator.activation_eligibility_epoch = aee;
+        }
+        if let Some(ae) = changes.activation_epoch {
+            validator.activation_epoch = ae;
+        }
+        if let Some(ee) = changes.exit_epoch {
+            validator.exit_epoch = ee;
+        }
+        if let Some(we) = changes.withdrawable_epoch {
+            validator.withdrawable_epoch = we;
+        }
     }
 
-    if vc.rem.len < 0 {
-        // List got shorter - rebuild with only the first N elements
-        let new_len = usize::try_from(
-            i64::try_from(base_len).expect("base_len exceeds i64::MAX") + vc.rem.len,
-        )
-        .expect("Exceeds usize");
-        base_validators =
-            PersistentList::try_from_iter(base_validators.into_iter().take(new_len).cloned())
-                .expect("Failed to build persistent list from base_validators iter");
-    } else if vc.rem.len > 0 {
-        // List got longer - add new elements
-        for val in vc.rem.val {
-            base_validators
-                .push(val)
-                .expect("Failed to push to base_validators");
-        }
+    // Append new validators
+    for validator in vc.new_validators {
+        base_validators
+            .push(validator)
+            .expect("Failed to push to base_validators");
     }
 
     base_validators
@@ -375,15 +406,15 @@ pub(super) fn balances_delta<P: Preset>(
     base_balances: &Balances<P>,
     target_balances: &Balances<P>,
 ) -> BalanceDiffs {
-    let len1 = base_balances.len_usize();
+    let base_len = base_balances.len_usize();
 
-    let rem_len = i64::try_from(target_balances.len_usize())
-        .expect("target_balances length exceeds i64::MAX")
-        - i64::try_from(len1).expect("len1 exceeds i64::MAX");
+    let new_balances: Vec<Gwei> = target_balances
+        .into_iter()
+        .skip(base_len)
+        .copied()
+        .collect();
 
-    let rem_values: Vec<Gwei> = target_balances.into_iter().skip(len1).copied().collect();
-
-    let mut tags = BitTagVec::new(len1);
+    let mut tags = BitTagVec::new(base_len);
     let mut small_diffs = Vec::new();
     let mut target_values = Vec::new();
     for (i, (&v1, &v2)) in base_balances
@@ -420,10 +451,7 @@ pub(super) fn balances_delta<P: Preset>(
         tags,
         small_diffs,
         target_values,
-        rem: Rem {
-            len: rem_len,
-            val: rem_values,
-        },
+        new_balances,
     }
 }
 
@@ -472,22 +500,10 @@ pub(super) fn apply_balances_delta<P: Preset>(
         }
     }
 
-    if bd.rem.len < 0 {
-        // List got shorter - rebuild with only the first N elements
-        let new_len =
-            usize::try_from(i64::try_from(len1).expect("len1 exceeds i64::MAX") + bd.rem.len)
-                .expect("usize overflow");
-
-        base_balances =
-            PersistentList::try_from_iter(base_balances.into_iter().take(new_len).copied())
-                .expect("Failed to rebuild persistent list from base_balances with new length");
-    } else if bd.rem.len > 0 {
-        // List got longer - add new elements
-        for val in bd.rem.val {
-            base_balances
-                .push(val)
-                .expect("Failed to push to base_balances");
-        }
+    for balance in bd.new_balances {
+        base_balances
+            .push(balance)
+            .expect("Failed to push to base_balances");
     }
 
     base_balances

@@ -85,7 +85,6 @@ pub struct ScoreIndexChange {
 pub enum InactivityScoreDiff {
     ZeroList(usize),
     NonZero {
-        new_len: usize,
         updated_values: Vec<ScoreIndexChange>,
         extensions: Vec<u64>,
     },
@@ -319,7 +318,6 @@ pub fn inactivity_scores_delta<P: Preset>(
         .collect::<Vec<u64>>();
 
     InactivityScoreDiff::NonZero {
-        new_len: target_len,
         updated_values: score_index_changes,
         extensions,
     }
@@ -335,7 +333,6 @@ pub fn apply_inactivity_score<P: Preset>(
                 .expect("Failed to create a inactivity scores with repeated zeros")
         }
         InactivityScoreDiff::NonZero {
-            new_len,
             updated_values,
             extensions,
         } => {
@@ -345,21 +342,12 @@ pub fn apply_inactivity_score<P: Preset>(
                     .expect("Index out of bound") = change.new_score;
             }
 
-            let base_len = base_inactivity_scores.len_usize();
-
-            if new_len < base_len {
-                base_inactivity_scores = PersistentList::try_from_iter(
-                    base_inactivity_scores.into_iter().take(new_len).copied(),
-                )
-                .expect("Failed to inactivity scores with target length");
-            } else {
-                // List got longer - add new elements
-                for element in extensions {
-                    base_inactivity_scores
-                        .push(element)
-                        .expect("Failed to push to inactivity scores");
-                }
+            for element in extensions {
+                base_inactivity_scores
+                    .push(element)
+                    .expect("Failed to push to inactivity scores");
             }
+
             base_inactivity_scores
         }
     }
