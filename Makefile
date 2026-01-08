@@ -115,8 +115,8 @@ NETHERMIND_VERSION ?=
 GITHUB_TOKEN ?=
 
 .PHONY: nethermind-plugin
-nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
-./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll:
+nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
+./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll:
 	cd ./bindings/csharp && \
 	dotnet publish -c Release
 
@@ -144,10 +144,10 @@ pack-grandine-nethermind: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETH
 
 .PHONY: grandine-nethermind-linux-x64
 grandine-nethermind-linux-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64.zip
-./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64: ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-unknown-linux-gnu.zip ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64: ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-unknown-linux-gnu.zip ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 	unzip ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-unknown-linux-gnu.zip -d ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64
 	cp ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64/plugins
-	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64/plugins
+	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64/plugins
 
 ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64.zip: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-x64/*
@@ -159,10 +159,10 @@ grandine-nethermind-linux-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$
 
 .PHONY: grandine-nethermind-linux-arm64
 grandine-nethermind-linux-arm64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64.zip
-./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64: ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-unknown-linux-gnu.zip ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64: ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-unknown-linux-gnu.zip ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 	unzip ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-unknown-linux-gnu.zip -d ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64
 	cp ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64/plugins
-	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64/plugins
+	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64/plugins
 
 ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64.zip: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64/*
@@ -174,10 +174,10 @@ grandine-nethermind-linux-arm64: ./build/grandine-$(GRANDINE_VERSION)-nethermind
 
 .PHONY: grandine-nethermind-windows-x64
 grandine-nethermind-windows-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64.zip
-./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64: ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-pc-windows-msvc.zip ./target/x86_64-pc-windows-msvc/compact/grandine.dll ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64: ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-pc-windows-msvc.zip ./target/x86_64-pc-windows-msvc/compact/grandine.dll ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 	unzip ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-pc-windows-msvc.zip -d ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64
 	cp ./target/x86_64-pc-windows-msvc/compact/grandine.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64/plugins
-	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64/plugins
+	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64/plugins
 
 ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64.zip: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64/*
@@ -189,10 +189,10 @@ grandine-nethermind-windows-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind
 
 .PHONY: grandine-nethermind-macos-x64
 grandine-nethermind-macos-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64.zip
-./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64: ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-apple-darwin.zip ./target/x86_64-apple-darwin/compact/libgrandine.dylib ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64: ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-apple-darwin.zip ./target/x86_64-apple-darwin/compact/libgrandine.dylib ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 	unzip ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-apple-darwin.zip -d ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64
 	cp ./target/x86_64-apple-darwin/compact/libgrandine.dylib ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64/plugins
-	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64/plugins
+	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64/plugins
 
 ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64.zip: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-x64/*
@@ -204,10 +204,10 @@ grandine-nethermind-macos-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$
 
 .PHONY: grandine-nethermind-macos-arm64
 grandine-nethermind-macos-arm64: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64.zip
-./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64: ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-apple-darwin.zip ./target/aarch64-apple-darwin/compact/libgrandine.dylib ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64: ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-apple-darwin.zip ./target/aarch64-apple-darwin/compact/libgrandine.dylib ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 	unzip ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-apple-darwin.zip -d ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64
 	cp ./target/aarch64-apple-darwin/compact/libgrandine.dylib ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64/plugins
-	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64/plugins
+	cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64/plugins
 
 ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64.zip: ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-macos-arm64/*
@@ -291,11 +291,11 @@ ifeq ($(DOCKER_LABEL),stable)
 endif
 
 .PHONY: nethermind-docker-arm64
-nethermind-docker-arm64: ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+nethermind-docker-arm64: ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 ifeq ($(DOCKER_LABEL),)
 	@echo "Failed to build docker image - please provide DOCKER_LABEL=, either 'stable' or 'unstable'"
 else
-	@cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./target/aarch64-unknown-linux-gnu/compact/
+	@cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./target/aarch64-unknown-linux-gnu/compact/
 	docker buildx build \
 		--file ./bindings/csharp/Grandine.NethermindPlugin/Dockerfile \
 		--platform linux/arm64 \
@@ -306,11 +306,11 @@ else
 endif
 
 .PHONY: nethermind-docker-amd64
-nethermind-docker-amd64: ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+nethermind-docker-amd64: ./target/x86_64-unknown-linux-gnu/compact/libgrandine.so ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 ifeq ($(DOCKER_LABEL),)
 	@echo "Failed to build docker image - please provide DOCKER_LABEL=, either 'stable' or 'unstable'"
 else
-	@cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll ./target/x86_64-unknown-linux-gnu/compact/
+	@cp ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll ./target/x86_64-unknown-linux-gnu/compact/
 	docker buildx build \
 		--file ./bindings/csharp/Grandine.NethermindPlugin/Dockerfile \
 		--platform linux/amd64 \

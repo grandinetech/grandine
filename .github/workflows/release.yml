@@ -142,10 +142,10 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
           submodules: true
 
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.x'
+          dotnet-version: '10.x'
 
       - name: Build nethermind plugin
         run: make nethermind-plugin
@@ -155,7 +155,7 @@ jobs:
         with:
           name: plugin
           path: |
-            bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/Grandine.NethermindPlugin.dll
+            bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
           if-no-files-found: error
 
   build_docker:
@@ -202,8 +202,8 @@ jobs:
           chmod +x ./target/aarch64-unknown-linux-gnu/compact/grandine
           mv ./artifacts/lib-linux-arm64/libgrandine.so ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so
           
-          mkdir -p ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
-          mv ./artifacts/Grandine.NethermindPlugin.dll ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
+          mkdir -p ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/
+          mv ./artifacts/Grandine.NethermindPlugin.dll ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -267,7 +267,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: plugin
-          path: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net9.0/
+          path: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/
 
       - name: Pack nethermind with bundled grandine
         run: |

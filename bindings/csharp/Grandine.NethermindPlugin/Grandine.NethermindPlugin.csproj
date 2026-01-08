@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Grandine</RootNamespace>
@@ -33,9 +33,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Autofac" Version="8.4.0" />
-    <PackageReference Include="Nethermind.Numerics.Int256" Version="1.3.6" />
-    <PackageReference Include="Nethermind.ReferenceAssemblies" Version="1.33.1" />
+    <PackageReference Include="Autofac" Version="9.0.0" />
+    <PackageReference Include="Nethermind.Numerics.Int256" Version="1.4.0" />
+    <PackageReference Include="Nethermind.ReferenceAssemblies" Version="1.35.8" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
