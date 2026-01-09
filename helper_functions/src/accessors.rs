@@ -32,7 +32,6 @@ use types::{
         primitives::{ParticipationFlags, SubcommitteeIndex},
     },
     cache::{IndexSlice, PackedIndices},
-    combined::BeaconState as CombinedBeaconState,
     config::Config,
     gloas::{
         consts::{
@@ -41,7 +40,7 @@ use types::{
         },
         containers::{IndexedPayloadAttestation, PayloadAttestation},
     },
-    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
+    nonstandard::{AttestationEpoch, Participation, RelativeEpoch, RelativeSlot},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -1075,29 +1074,9 @@ pub fn ptc_for_slot<P: Preset>(
     .map_err(Into::into)
 }
 
-// Helper function to build epoch-wide PTC cache
-fn build_ptc_cache<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
-    epoch: Epoch,
-) -> Result<HashMap<Slot, Vec<ValidatorIndex>>> {
-    let slots_per_epoch = P::SlotsPerEpoch::U64;
-    let epoch_start_slot = epoch * slots_per_epoch;
-
-    let mut ptc_members = HashMap::new();
-
-    // Build PTC for each slot in epoch
-    for slot_offset in 0..slots_per_epoch {
-        let slot = epoch_start_slot + slot_offset;
-        let slot_ptc = compute_ptc_for_slot_internal(state, slot)?;
-        ptc_members.insert(slot, slot_ptc);
-    }
-
-    Ok(ptc_members)
-}
-
 // Internal helper to compute PTC for one slot
 fn compute_ptc_for_slot_internal<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
+    state: &impl BeaconState<P>,
     slot: Slot,
 ) -> Result<Vec<ValidatorIndex>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
@@ -1117,35 +1096,80 @@ fn compute_ptc_for_slot_internal<P: Preset>(
     )
 }
 
-/// Get PTC members for a slot with epoch-level caching.
+/// Map RelativeSlot to actual slot number
+fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: RelativeSlot) -> Slot {
+    let state_slot = state.slot();
+    match relative_slot {
+        RelativeSlot::Previous => state_slot.saturating_sub(1),
+        RelativeSlot::Current => state_slot,
+        RelativeSlot::Next => state_slot + 1,
+    }
+}
+
+/// Initialize PTC cache for a relative slot (Gloas only, no-op for other phases).
+pub fn get_or_try_init_ptc<P: Preset>(
+    state: &impl BeaconState<P>,
+    relative_slot: RelativeSlot,
+    report_cache_miss: bool,
+) -> Result<()> {
+    if state.is_post_gloas() {
+        let slot = absolute_slot(state, relative_slot);
+
+        state
+            .cache()
+            .ptc_cache[relative_slot]
+            .get_or_try_init(|| {
+                if report_cache_miss {
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = METRICS.get() {
+                        metrics.ptc_cache_init_count.inc();
+                    }
+                }
+                compute_ptc_for_slot_internal(state, slot)
+            })?;
+    }
+
+    Ok(())
+}
+
+/// Get PTC members for a slot with 3-slot caching (previous, current, next).
 ///
-/// Drop-in replacement for `ptc_for_slot`. Callers don't need to manage cache lifetime
-/// or worry about recomputation - caching is handled internally. For PostGloas states, first
-/// call per epoch builds the cache, subsequent calls are constant time lookups.
-/// Falls back to `ptc_for_slot` for pre-Gloas cases.
+/// For Gloas states, caches PTC using RelativeSlot.
+/// Cache is to advance_slot(): Previous <- Current <- Next.
+/// Falls back to `ptc_for_slot` for pre-Gloas cases or out-of-range slots.
 pub fn get_ptc<P: Preset>(
-    state: &CombinedBeaconState<P>,
+    state: &impl BeaconState<P>,
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
-    match state {
-        CombinedBeaconState::Gloas(gloas_state) => {
-            let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    if state.is_post_gloas() {
+        let state_slot = state.slot();
 
-            // Get or initialize current epoch PTC cache (stored in Cache struct)
-            let epoch_cache = gloas_state.cache.ptc_cache.get_or_init(|| {
-                build_ptc_cache(gloas_state, epoch).expect("PTC cache computation failed")
-            });
+        let relative_slot = if slot + 1 == state_slot {
+            RelativeSlot::Previous
+        } else if slot == state_slot {
+            RelativeSlot::Current
+        } else if slot == state_slot + 1 {
+            RelativeSlot::Next
+        } else {
+            // Outside cache range - compute on demand (shouldn't happen per spec)
+            return ptc_for_slot(state, slot);
+        };
 
-            // Extract this slot's PTC from the epoch cache
-            epoch_cache
-                .get(&slot)
-                .ok_or_else(|| anyhow::anyhow!("PTC not found for slot {}", slot))?
-                .iter()
-                .copied()
-                .pipe(ContiguousVector::try_from_iter)
-                .map_err(Into::into)
-        }
-        _ => ptc_for_slot(state, slot),
+        // Initialize cache if needed
+        get_or_try_init_ptc(state, relative_slot, true)?;
+
+        // Get the cached value
+        state
+            .cache()
+            .ptc_cache[relative_slot]
+            .get()
+            .expect("just initialized by get_or_try_init_ptc")
+            .iter()
+            .copied()
+            .pipe(ContiguousVector::try_from_iter)
+            .map_err(Into::into)
+    } else {
+        ptc_for_slot(state, slot)
     }
 }
 

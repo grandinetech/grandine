@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 use crate::{
     altair::primitives::NonZeroGwei,
-    nonstandard::RelativeEpoch,
-    phase0::primitives::{Slot, ValidatorIndex},
+    nonstandard::{RelativeEpoch, RelativeSlot},
+    phase0::primitives::ValidatorIndex,
 };
 
 // Possible optimization: cache all proposer indices in an epoch.
@@ -36,22 +36,24 @@ pub struct Cache {
     pub active_validator_indices_shuffled: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
     pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
-    /// PTC cache for current epoch only.
-    /// OnceCell (not EnumMap<RelativeEpoch>) because: cannot pre-compute Next
-    /// (balances unknown), no Previous needed.
-    pub ptc_cache: OnceCell<HashMap<Slot, Vec<ValidatorIndex>>>,
+    /// PTC cache: previous, current, and next slot.
+    /// Shifted in advance_slot(): Previous <- Current <- Next.
+    pub ptc_cache: EnumMap<RelativeSlot, OnceCell<Vec<ValidatorIndex>>>,
 }
 
 impl Cache {
     pub fn advance_slot(&mut self) {
         self.proposer_index.take();
+        // Shift PTC: Previous <- Current <- Next
+        let ptc = &mut self.ptc_cache;
+        ptc[RelativeSlot::Previous] = core::mem::take(&mut ptc[RelativeSlot::Current]);
+        ptc[RelativeSlot::Current] = core::mem::take(&mut ptc[RelativeSlot::Next]);
     }
 
     pub fn advance_epoch(&mut self) {
         let ordered = &mut self.active_validator_indices_ordered;
         let shuffled = &mut self.active_validator_indices_shuffled;
         let balance = &mut self.total_active_balance;
-        let ptc = &mut self.ptc_cache;
 
         ordered[RelativeEpoch::Previous] = core::mem::take(&mut ordered[RelativeEpoch::Current]);
         shuffled[RelativeEpoch::Previous] = core::mem::take(&mut shuffled[RelativeEpoch::Current]);
@@ -61,8 +63,12 @@ impl Cache {
         shuffled[RelativeEpoch::Current] = core::mem::take(&mut shuffled[RelativeEpoch::Next]);
         balance[RelativeEpoch::Current] = core::mem::take(&mut balance[RelativeEpoch::Next]);
 
-        // Clear PTC cache (no-op for non-Gloas since never initialized)
-        ptc.take();
+        // Clear PTC cache - balance_weighted_selection depends on effective balances
+        // which change at epoch boundaries
+        let ptc = &mut self.ptc_cache;
+        ptc[RelativeSlot::Previous] = OnceCell::new();
+        ptc[RelativeSlot::Current] = OnceCell::new();
+        ptc[RelativeSlot::Next] = OnceCell::new();
     }
 }
 
