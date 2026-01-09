@@ -1096,6 +1096,19 @@ fn compute_ptc_for_slot_internal<P: Preset>(
     )
 }
 
+pub fn relative_slot<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<RelativeSlot> {
+    match (state.slot() + 1).checked_sub(slot) {
+        None => bail!(Error::SlotAfterNext),
+        Some(0) => Ok(RelativeSlot::Next),
+        Some(1) => Ok(RelativeSlot::Current),
+        Some(2) => Ok(RelativeSlot::Previous),
+        Some(_) => bail!(Error::SlotBeforePrevious),
+    }
+}
+
 /// Map RelativeSlot to actual slot number
 fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: RelativeSlot) -> Slot {
     let state_slot = state.slot();
@@ -1142,26 +1155,18 @@ pub fn get_ptc<P: Preset>(
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
     if state.is_post_gloas() {
-        let state_slot = state.slot();
-
-        let relative_slot = if slot + 1 == state_slot {
-            RelativeSlot::Previous
-        } else if slot == state_slot {
-            RelativeSlot::Current
-        } else if slot == state_slot + 1 {
-            RelativeSlot::Next
-        } else {
-            // Outside cache range - compute on demand (shouldn't happen per spec)
-            return ptc_for_slot(state, slot);
+        let rel_slot = match relative_slot(state, slot) {
+            Ok(rel) => rel,
+            Err(_) => return ptc_for_slot(state, slot),
         };
 
         // Initialize cache if needed
-        get_or_try_init_ptc(state, relative_slot, true)?;
+        get_or_try_init_ptc(state, rel_slot, true)?;
 
         // Get the cached value
         state
             .cache()
-            .ptc_cache[relative_slot]
+            .ptc_cache[rel_slot]
             .get()
             .expect("just initialized by get_or_try_init_ptc")
             .iter()
