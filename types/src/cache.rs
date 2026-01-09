@@ -51,6 +51,7 @@ impl Cache {
         let ordered = &mut self.active_validator_indices_ordered;
         let shuffled = &mut self.active_validator_indices_shuffled;
         let balance = &mut self.total_active_balance;
+        let ptc = &mut self.ptc_cache;
 
         ordered[RelativeEpoch::Previous] = core::mem::take(&mut ordered[RelativeEpoch::Current]);
         shuffled[RelativeEpoch::Previous] = core::mem::take(&mut shuffled[RelativeEpoch::Current]);
@@ -59,12 +60,9 @@ impl Cache {
         ordered[RelativeEpoch::Current] = core::mem::take(&mut ordered[RelativeEpoch::Next]);
         shuffled[RelativeEpoch::Current] = core::mem::take(&mut shuffled[RelativeEpoch::Next]);
         balance[RelativeEpoch::Current] = core::mem::take(&mut balance[RelativeEpoch::Next]);
-    }
 
-    /// Clear PTC cache. Called only from Gloas epoch processing
-    /// (balance_weighted_selection invalidated by balance changes).
-    pub fn clear_ptc_cache(&mut self) {
-        self.ptc_cache.take();
+        // Clear PTC cache (no-op for non-Gloas since never initialized)
+        ptc.take();
     }
 }
 

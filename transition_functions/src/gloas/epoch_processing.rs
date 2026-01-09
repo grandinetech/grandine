@@ -90,7 +90,6 @@ pub fn process_epoch(
     fulu::process_proposer_lookahead(config, state)?;
 
     state.cache.advance_epoch();
-    state.cache.clear_ptc_cache();
 
     Ok(())
 }
@@ -200,7 +199,6 @@ pub fn epoch_report<P: Preset>(
     altair::process_sync_committee_updates(pubkey_cache, state)?;
 
     state.cache.advance_epoch();
-    state.cache.clear_ptc_cache();
 
     Ok(EpochReport {
         statistics,
