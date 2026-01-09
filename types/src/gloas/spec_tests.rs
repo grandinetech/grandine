@@ -358,6 +358,12 @@ tests_for_type! {
 }
 
 tests_for_type! {
+    ProposerPreferences,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ProposerPreferences/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/ProposerPreferences/*/*",
+}
+
+tests_for_type! {
     ProposerSlashing,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ProposerSlashing/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/ProposerSlashing/*/*",
@@ -403,6 +409,12 @@ tests_for_type! {
     SignedExecutionPayloadEnvelope<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedExecutionPayloadEnvelope/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedExecutionPayloadEnvelope/*/*",
+}
+
+tests_for_type! {
+    SignedProposerPreferences,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedProposerPreferences/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedProposerPreferences/*/*",
 }
 
 tests_for_type! {
