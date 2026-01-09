@@ -14,8 +14,6 @@ use types::{
 
 use crate::{blob_reconstruction_pool::tasks::ReconstructDataColumnSidecarsTask, misc::PoolTask};
 
-const RECONSTRUCTION_START_DELAY: Duration = Duration::from_secs(2);
-
 pub type ReconstructionParams<P, W> = (W, H256, Arc<SignedBeaconBlock<P>>, Slot);
 
 pub struct Manager<P: Preset, W: Wait> {
@@ -55,9 +53,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         block_root: H256,
         block: Arc<SignedBeaconBlock<P>>,
         slot: Slot,
+        delay: Duration,
     ) {
         self.scheduled_reconstructions
-            .entry(Instant::now() + RECONSTRUCTION_START_DELAY)
+            .entry(Instant::now() + delay)
             .or_default()
             .push((wait_group, block_root, block, slot));
     }

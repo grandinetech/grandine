@@ -1,6 +1,6 @@
 use core::{
     convert::Infallible as Never, future::Future, net::SocketAddr, panic::AssertUnwindSafe,
-    pin::pin,
+    pin::pin, time::Duration,
 };
 #[cfg(feature = "embed")]
 use std::sync::LazyLock;
@@ -111,6 +111,7 @@ pub struct RuntimeConfig {
     pub back_sync_enabled: bool,
     pub detect_doppelgangers: bool,
     pub max_events: usize,
+    pub reconstruction_delay: Duration,
     pub slashing_protection_history_limit: u64,
     pub track_liveness: bool,
     pub validator_enabled: bool,
@@ -147,6 +148,7 @@ pub async fn run_after_genesis<P: Preset>(
         back_sync_enabled,
         detect_doppelgangers,
         max_events,
+        reconstruction_delay,
         slashing_protection_history_limit,
         track_liveness,
         validator_enabled,
@@ -598,6 +600,7 @@ pub async fn run_after_genesis<P: Preset>(
         bls_to_execution_change_pool.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
         fork_choice_to_pool_rx,
+        reconstruction_delay,
     );
 
     let block_producer = Arc::new(BlockProducer::new(
@@ -946,6 +949,7 @@ struct Context {
     slashing_protection_history_limit: u64,
     validator_enabled: bool,
     blacklisted_blocks: HashSet<H256>,
+    reconstruction_delay: Duration,
     report_validator_performance: bool,
 }
 
@@ -1032,6 +1036,7 @@ impl Context {
             slashing_protection_history_limit,
             validator_enabled,
             blacklisted_blocks,
+            reconstruction_delay,
             report_validator_performance,
         } = self;
 
@@ -1130,6 +1135,7 @@ impl Context {
                 back_sync_enabled,
                 detect_doppelgangers,
                 max_events,
+                reconstruction_delay,
                 slashing_protection_history_limit,
                 track_liveness,
                 validator_enabled,
@@ -1222,6 +1228,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         default_gas_limit,
         network_config,
         storage_config,
+        reconstruction_delay,
         request_timeout,
         max_epochs_to_retain_states_in_cache,
         state_cache_lock_timeout,
@@ -1405,6 +1412,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         slashing_protection_history_limit,
         validator_enabled,
         blacklisted_blocks,
+        reconstruction_delay,
         report_validator_performance,
     };
 

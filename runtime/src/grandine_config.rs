@@ -52,6 +52,7 @@ pub struct GrandineConfig {
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
     pub unfinalized_states_in_memory: u64,
+    pub reconstruction_delay: Duration,
     pub request_timeout: Duration,
     pub max_epochs_to_retain_states_in_cache: u64,
     pub state_cache_lock_timeout: Duration,

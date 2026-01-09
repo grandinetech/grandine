@@ -76,6 +76,7 @@ use crate::{
     },
     consts::GRANDINE_DONATION_ADDRESS,
     default_network_config,
+    defaults::DEFAULT_RECONSTRUCTION_DELAY_MS,
     grandine_config::GrandineConfig,
     predefined_network::PredefinedNetwork,
     validators::Validators,
@@ -330,6 +331,10 @@ struct BeaconNodeOptions {
     /// Max size of the Eth1 database
     #[clap(long, default_value_t = DEFAULT_ETH1_DB_SIZE)]
     eth1_database_size: ByteSize,
+
+    /// Default data column reconstruction delay in milliseconds for nodes serving more than half of the available data columns.
+    #[clap(long, default_value_t = DEFAULT_RECONSTRUCTION_DELAY_MS)]
+    reconstruction_delay: u64,
 
     /// Default global request timeout for various services in milliseconds
     #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
@@ -1024,6 +1029,7 @@ impl GrandineArgs {
             archive_storage,
             prune_storage,
             unfinalized_states_in_memory,
+            reconstruction_delay,
             request_timeout,
             max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout,
@@ -1447,6 +1453,7 @@ impl GrandineArgs {
             ),
             storage_config,
             unfinalized_states_in_memory,
+            reconstruction_delay: Duration::from_millis(reconstruction_delay),
             request_timeout: Duration::from_millis(request_timeout),
             max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout: Duration::from_millis(state_cache_lock_timeout),
