@@ -63,12 +63,10 @@ impl Cache {
         shuffled[RelativeEpoch::Current] = core::mem::take(&mut shuffled[RelativeEpoch::Next]);
         balance[RelativeEpoch::Current] = core::mem::take(&mut balance[RelativeEpoch::Next]);
 
-        // Clear PTC cache - balance_weighted_selection depends on effective balances
-        // which change at epoch boundaries
-        let ptc = &mut self.ptc_cache;
-        ptc[RelativeSlot::Previous] = OnceCell::new();
-        ptc[RelativeSlot::Current] = OnceCell::new();
-        ptc[RelativeSlot::Next] = OnceCell::new();
+        // Clear only Current PTC slot - it may have been pre-computed (as Next) before
+        // the epoch transition with stale effective balances. Previous was computed with
+        // correct old-epoch balances, and Next is empty after advance_slot() shift.
+        self.ptc_cache[RelativeSlot::Current] = OnceCell::new();
     }
 }
 
