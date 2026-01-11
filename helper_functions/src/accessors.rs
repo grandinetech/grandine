@@ -1151,7 +1151,6 @@ pub fn get_or_try_init_ptc<P: Preset>(
 /// Get PTC members for a slot with 3-slot caching (previous, current, next).
 ///
 /// Caches PTC using RelativeSlot. Cache is shifted in advance_slot(): Previous <- Current <- Next.
-/// Falls back to `ptc_for_slot` for out-of-range slots.
 /// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
 pub fn get_ptc<P: Preset>(
     state: &impl BeaconState<P>,
@@ -1180,7 +1179,7 @@ pub fn get_indexed_payload_attestation<P: Preset>(
         signature,
     } = payload_attestation;
 
-    let ptc = ptc_for_slot(state, data.slot)?;
+    let ptc = get_ptc(state, data.slot)?;
     let attesting_indices =
         ContiguousList::try_from_iter(ptc.into_iter().zip(0..).filter_map(|(index, i)| {
             aggregation_bits
