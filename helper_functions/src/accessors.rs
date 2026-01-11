@@ -1157,24 +1157,17 @@ pub fn get_ptc<P: Preset>(
     state: &impl BeaconState<P>,
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
-    if state.is_post_gloas() {
-        let rel_slot = match relative_slot(state, slot) {
-            Ok(rel) => rel,
-            Err(_) => return ptc_for_slot(state, slot),
-        };
+    let rel_slot = match relative_slot(state, slot) {
+        Ok(rel) => rel,
+        Err(_) => return ptc_for_slot(state, slot),
+    };
 
-        // Get or initialize cached value directly
-        let cached = get_or_try_init_ptc(state, rel_slot, true)?
-            .expect("is_post_gloas checked above");
-
-        cached
-            .iter()
-            .copied()
-            .pipe(ContiguousVector::try_from_iter)
-            .map_err(Into::into)
-    } else {
-        ptc_for_slot(state, slot)
-    }
+    get_or_try_init_ptc(state, rel_slot, true)?
+        .expect("callers must ensure post-Gloas state")
+        .iter()
+        .copied()
+        .pipe(ContiguousVector::try_from_iter)
+        .map_err(Into::into)
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
