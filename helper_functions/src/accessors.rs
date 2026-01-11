@@ -1119,16 +1119,17 @@ fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: Relative
     }
 }
 
-/// Initialize PTC cache for a relative slot (Gloas only, no-op for other phases).
+/// Initialize PTC cache for a relative slot and return the cached value.
+/// Returns None for pre-Gloas states (PTC is not relevant for pre-Gloas).
 pub fn get_or_try_init_ptc<P: Preset>(
     state: &impl BeaconState<P>,
     relative_slot: RelativeSlot,
     report_cache_miss: bool,
-) -> Result<()> {
+) -> Result<Option<&Vec<ValidatorIndex>>> {
     if state.is_post_gloas() {
         let slot = absolute_slot(state, relative_slot);
 
-        state
+        let cached = state
             .cache()
             .ptc_cache[relative_slot]
             .get_or_try_init(|| {
@@ -1140,16 +1141,18 @@ pub fn get_or_try_init_ptc<P: Preset>(
                 }
                 compute_ptc_for_slot_internal(state, slot)
             })?;
-    }
 
-    Ok(())
+        Ok(Some(cached))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Get PTC members for a slot with 3-slot caching (previous, current, next).
 ///
-/// For Gloas states, caches PTC using RelativeSlot.
-/// Cache is to advance_slot(): Previous <- Current <- Next.
-/// Falls back to `ptc_for_slot` for pre-Gloas cases or out-of-range slots.
+/// Caches PTC using RelativeSlot. Cache is shifted in advance_slot(): Previous <- Current <- Next.
+/// Falls back to `ptc_for_slot` for out-of-range slots.
+/// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
 pub fn get_ptc<P: Preset>(
     state: &impl BeaconState<P>,
     slot: Slot,
@@ -1160,15 +1163,11 @@ pub fn get_ptc<P: Preset>(
             Err(_) => return ptc_for_slot(state, slot),
         };
 
-        // Initialize cache if needed
-        get_or_try_init_ptc(state, rel_slot, true)?;
+        // Get or initialize cached value directly
+        let cached = get_or_try_init_ptc(state, rel_slot, true)?
+            .expect("is_post_gloas checked above");
 
-        // Get the cached value
-        state
-            .cache()
-            .ptc_cache[rel_slot]
-            .get()
-            .expect("just initialized by get_or_try_init_ptc")
+        cached
             .iter()
             .copied()
             .pipe(ContiguousVector::try_from_iter)
