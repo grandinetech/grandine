@@ -439,15 +439,31 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
         next_tick = Tick::start_of_slot(GENESIS_SLOT + slots_since_genesis);
         now_to_next_tick = Duration::ZERO;
 
+        // Cache tick duration, and only update when phase changed
+        let mut tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
+        let mut current_phase = config.phase_at_slot::<P>(next_tick.slot);
+
         while now_to_next_tick < current_slot_to_now {
             next_tick = next_tick.next::<P>(config)?;
-            now_to_next_tick += tick_duration_at_slot::<P>(config, next_tick.slot);
+            let next_phase = config.phase_at_slot::<P>(next_tick.slot);
+
+            if next_phase != current_phase {
+                tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
+                current_phase = next_phase;
+            }
+            now_to_next_tick += tick_duration;
         }
 
         if only_interval_ticks {
             while !next_tick.is_start_of_interval() {
                 next_tick = next_tick.next::<P>(config)?;
-                now_to_next_tick += tick_duration_at_slot::<P>(config, next_tick.slot);
+                let next_phase = config.phase_at_slot::<P>(next_tick.slot);
+
+                if next_phase != current_phase {
+                    tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
+                    current_phase = next_phase;
+                }
+                now_to_next_tick += tick_duration;
             }
         }
 
