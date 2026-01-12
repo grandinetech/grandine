@@ -539,11 +539,8 @@ pub fn update_next_withdrawal_validator_index<P: Preset>(
         *state.next_withdrawal_validator_index_mut() = next_validator_index;
     } else {
         // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
-        let bound = state
-            .validators()
-            .len_u64()
-            .min(P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP);
-        let next_index = state.next_withdrawal_validator_index() + bound;
+        let next_index =
+            state.next_withdrawal_validator_index() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP;
 
         let next_validator_index = next_index % state.validators().len_u64();
 
