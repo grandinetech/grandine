@@ -40,7 +40,7 @@ use types::{
         },
         containers::{IndexedPayloadAttestation, PayloadAttestation},
     },
-    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
+    nonstandard::{AttestationEpoch, Participation, RelativeEpoch, RelativeSlot},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -1074,6 +1074,101 @@ pub fn ptc_for_slot<P: Preset>(
     .map_err(Into::into)
 }
 
+// Internal helper to compute PTC for one slot
+fn compute_ptc_for_slot_internal<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<Vec<ValidatorIndex>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
+    let seed = hashing::hash_256_64(seed, slot);
+
+    let indices = beacon_committees(state, slot)?
+        .flatten()
+        .collect_vec();
+
+    misc::compute_balance_weighted_selection::<P>(
+        state,
+        &PackedIndices::U64(indices.into_iter().collect()),
+        seed,
+        P::PtcSize::USIZE,
+        false,
+    )
+}
+
+pub fn relative_slot<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<RelativeSlot> {
+    match (state.slot() + 1).checked_sub(slot) {
+        None => bail!(Error::SlotAfterNext),
+        Some(0) => Ok(RelativeSlot::Next),
+        Some(1) => Ok(RelativeSlot::Current),
+        Some(2) => Ok(RelativeSlot::Previous),
+        Some(_) => bail!(Error::SlotBeforePrevious),
+    }
+}
+
+/// Map RelativeSlot to actual slot number
+fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: RelativeSlot) -> Slot {
+    let state_slot = state.slot();
+    match relative_slot {
+        RelativeSlot::Previous => state_slot.saturating_sub(1),
+        RelativeSlot::Current => state_slot,
+        RelativeSlot::Next => state_slot + 1,
+    }
+}
+
+/// Initialize PTC cache for a relative slot and return the cached value.
+/// Returns None for pre-Gloas states (PTC is not relevant for pre-Gloas).
+pub fn get_or_try_init_ptc<P: Preset>(
+    state: &impl BeaconState<P>,
+    relative_slot: RelativeSlot,
+    report_cache_miss: bool,
+) -> Result<Option<&Vec<ValidatorIndex>>> {
+    if state.is_post_gloas() {
+        let slot = absolute_slot(state, relative_slot);
+
+        let cached = state
+            .cache()
+            .ptc_cache[relative_slot]
+            .get_or_try_init(|| {
+                if report_cache_miss {
+                    #[cfg(feature = "metrics")]
+                    if let Some(metrics) = METRICS.get() {
+                        metrics.ptc_cache_init_count.inc();
+                    }
+                }
+                compute_ptc_for_slot_internal(state, slot)
+            })?;
+
+        Ok(Some(cached))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Get PTC members for a slot with 3-slot caching (previous, current, next).
+///
+/// Caches PTC using RelativeSlot. Cache is shifted in advance_slot(): Previous <- Current <- Next.
+/// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
+pub fn get_ptc<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
+    let rel_slot = match relative_slot(state, slot) {
+        Ok(rel) => rel,
+        Err(_) => return ptc_for_slot(state, slot),
+    };
+
+    get_or_try_init_ptc(state, rel_slot, true)?
+        .expect("callers must ensure post-Gloas state")
+        .iter()
+        .copied()
+        .pipe(ContiguousVector::try_from_iter)
+        .map_err(Into::into)
+}
+
 pub fn get_indexed_payload_attestation<P: Preset>(
     state: &impl BeaconState<P>,
     payload_attestation: PayloadAttestation<P>,
@@ -1084,7 +1179,7 @@ pub fn get_indexed_payload_attestation<P: Preset>(
         signature,
     } = payload_attestation;
 
-    let ptc = ptc_for_slot(state, data.slot)?;
+    let ptc = get_ptc(state, data.slot)?;
     let attesting_indices =
         ContiguousList::try_from_iter(ptc.into_iter().zip(0..).filter_map(|(index, i)| {
             aggregation_bits

@@ -2794,8 +2794,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(PayloadAttestationAction::Ignore(true));
         }
 
-        // TODO: (gloas): cache ptc members for the slot
-        let Ok(ptc_members) = accessors::ptc_for_slot(state, data.slot) else {
+        let Ok(ptc_members) = accessors::get_ptc(state, data.slot) else {
             return Ok(PayloadAttestationAction::Ignore(false));
         };
 

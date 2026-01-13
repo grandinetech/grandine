@@ -35,7 +35,7 @@ use types::{
     gloas::containers::{
         PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
     },
-    nonstandard::{RelativeEpoch, ValidationOutcome},
+    nonstandard::{RelativeEpoch, RelativeSlot, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{Slot, H256},
@@ -885,6 +885,10 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Next, false);
     accessors::get_or_init_total_active_balance(state, false);
     accessors::get_or_init_validator_indices(state, false);
+
+    // Pre-compute PTC cache (no-op for non-Gloas)
+    accessors::get_or_try_init_ptc(state, RelativeSlot::Current, false)?;
+    accessors::get_or_try_init_ptc(state, RelativeSlot::Next, false)?;
 
     Ok(())
 }

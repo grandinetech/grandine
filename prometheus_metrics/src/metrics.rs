@@ -170,6 +170,7 @@ pub struct Metrics {
     pub active_validator_indices_ordered_init_count: IntCounter,
     pub active_validator_indices_shuffled_init_count: IntCounter,
     pub beacon_proposer_index_init_count: IntCounter,
+    pub ptc_cache_init_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
     pub validator_indices_init_count: IntCounter,
 
@@ -769,6 +770,11 @@ impl Metrics {
                 "Beacon proposer index cache init count",
             )?,
 
+            ptc_cache_init_count: IntCounter::new(
+                "PTC_CACHE_INIT_COUNT",
+                "PTC cache init count",
+            )?,
+
             total_active_balance_init_count: IntCounter::new(
                 "TOTAL_ACTIVE_BALANCE_INIT_COUNT",
                 "Total active balance cache init count",
@@ -1095,6 +1101,7 @@ impl Metrics {
             self.active_validator_indices_shuffled_init_count.clone(),
         ))?;
         default_registry.register(Box::new(self.beacon_proposer_index_init_count.clone()))?;
+        default_registry.register(Box::new(self.ptc_cache_init_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
         default_registry.register(Box::new(self.validator_indices_init_count.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;

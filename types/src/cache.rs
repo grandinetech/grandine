@@ -11,7 +11,9 @@ use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 
 use crate::{
-    altair::primitives::NonZeroGwei, nonstandard::RelativeEpoch, phase0::primitives::ValidatorIndex,
+    altair::primitives::NonZeroGwei,
+    nonstandard::{RelativeEpoch, RelativeSlot},
+    phase0::primitives::ValidatorIndex,
 };
 
 // Possible optimization: cache all proposer indices in an epoch.
@@ -34,11 +36,18 @@ pub struct Cache {
     pub active_validator_indices_shuffled: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
     pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
+    /// PTC cache: previous, current, and next slot.
+    /// Shifted in advance_slot(): Previous <- Current <- Next.
+    pub ptc_cache: EnumMap<RelativeSlot, OnceCell<Vec<ValidatorIndex>>>,
 }
 
 impl Cache {
     pub fn advance_slot(&mut self) {
         self.proposer_index.take();
+        // Shift PTC: Previous <- Current <- Next
+        let ptc = &mut self.ptc_cache;
+        ptc[RelativeSlot::Previous] = core::mem::take(&mut ptc[RelativeSlot::Current]);
+        ptc[RelativeSlot::Current] = core::mem::take(&mut ptc[RelativeSlot::Next]);
     }
 
     pub fn advance_epoch(&mut self) {
@@ -53,6 +62,11 @@ impl Cache {
         ordered[RelativeEpoch::Current] = core::mem::take(&mut ordered[RelativeEpoch::Next]);
         shuffled[RelativeEpoch::Current] = core::mem::take(&mut shuffled[RelativeEpoch::Next]);
         balance[RelativeEpoch::Current] = core::mem::take(&mut balance[RelativeEpoch::Next]);
+
+        // Clear only Current PTC slot - it may have been pre-computed (as Next) before
+        // the epoch transition with stale effective balances. Previous was computed with
+        // correct old-epoch balances, and Next is empty after advance_slot() shift.
+        self.ptc_cache[RelativeSlot::Current] = OnceCell::new();
     }
 }
 

@@ -30,6 +30,10 @@ pub(crate) enum Error {
     EpochAfterNext,
     #[error("epoch is before previous one relative to state")]
     EpochBeforePrevious,
+    #[error("slot is after next one relative to state")]
+    SlotAfterNext,
+    #[error("slot is before previous one relative to state")]
+    SlotBeforePrevious,
     #[error("epoch is in the future relative to state")]
     EpochInTheFuture,
     #[error("epoch number overflowed")]
