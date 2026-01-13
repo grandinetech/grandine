@@ -331,12 +331,14 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                             .await;
 
                                         self.controller
-                                            .on_el_data_column_sidecar(data_column_sidecar);
+                                            .on_el_data_column_sidecar(data_column_sidecar)
+                                            .await;
                                     }
                                 }
                                 Err(error) => {
                                     self.controller
-                                        .mark_sidecar_construction_failed(&block_root);
+                                        .mark_sidecar_construction_failed(&block_root)
+                                        .await;
 
                                     warn_with_peers!(
                                         "failed to reconstruct data column sidecars from EL response: {error:?}"

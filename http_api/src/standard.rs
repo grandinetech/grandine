@@ -4238,7 +4238,9 @@ async fn submit_data_column_sidecar<P: Preset, W: Wait>(
 ) -> Result<ValidationOutcome> {
     let (sender, receiver) = futures::channel::oneshot::channel();
 
-    controller.on_api_data_column_sidecar(data_column_sidecar.clone_arc(), Some(sender));
+    controller
+        .on_api_data_column_sidecar(data_column_sidecar.clone_arc(), Some(sender))
+        .await;
 
     receiver.await?
 }

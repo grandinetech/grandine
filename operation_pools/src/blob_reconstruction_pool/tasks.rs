@@ -114,7 +114,9 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
                 }
             }
             Err(error) => {
-                controller.mark_sidecar_construction_failed(&block_root);
+                controller
+                    .mark_sidecar_construction_failed(&block_root)
+                    .await;
 
                 warn_with_peers!(
                     "failed to reconstruct missing data column sidecars for \

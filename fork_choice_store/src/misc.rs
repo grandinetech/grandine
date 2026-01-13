@@ -996,6 +996,6 @@ impl DataAvailabilityPolicy {
     }
 }
 
-pub trait Storage<P: Preset> {
+pub trait Storage<P: Preset>: Sync {
     fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>>;
 }

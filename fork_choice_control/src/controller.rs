@@ -105,7 +105,7 @@ impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
-    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>> + Sync,
     W: Wait,
 {
     #[expect(clippy::too_many_arguments)]
@@ -243,9 +243,10 @@ where
             .mark_sidecar_construction_started(block_root, slot);
     }
 
-    pub fn mark_sidecar_construction_failed(&self, block_root: &H256) {
+    pub async fn mark_sidecar_construction_failed(&self, block_root: &H256) {
         self.store_snapshot()
             .mark_sidecar_construction_failed(block_root)
+            .await
     }
 
     // This should be called at the start of every tick.
@@ -325,7 +326,7 @@ where
         self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::Api(sender))
     }
 
-    pub fn on_own_data_column_sidecar(
+    pub async fn on_own_data_column_sidecar(
         &self,
         wait_group: W,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -336,9 +337,10 @@ where
             true,
             DataColumnSidecarOrigin::Own,
         )
+        .await
     }
 
-    pub fn on_api_data_column_sidecar(
+    pub async fn on_api_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         sender: Option<OneshotSender<Result<ValidationOutcome>>>,
@@ -348,6 +350,7 @@ where
             true,
             DataColumnSidecarOrigin::Api(sender),
         )
+        .await
     }
 
     #[instrument(
@@ -544,12 +547,13 @@ where
         self.spawn_blob_sidecar_task(blob_sidecar, true, BlobSidecarOrigin::ExecutionLayer)
     }
 
-    pub fn on_el_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+    pub async fn on_el_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         self.spawn_data_column_sidecar_task(
             data_column_sidecar,
             true,
             DataColumnSidecarOrigin::ExecutionLayer,
         )
+        .await
     }
 
     pub fn on_gossip_blob_sidecar(
@@ -566,7 +570,7 @@ where
         )
     }
 
-    pub fn on_gossip_data_column_sidecar(
+    pub async fn on_gossip_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         subnet_id: SubnetId,
@@ -578,6 +582,7 @@ where
             block_seen,
             DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
         )
+        .await
     }
 
     pub fn on_requested_blob_sidecar(
@@ -599,7 +604,7 @@ where
         })
     }
 
-    pub fn on_requested_data_column_sidecar(
+    pub async fn on_requested_data_column_sidecar(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         block_seen: bool,
@@ -611,6 +616,7 @@ where
             block_seen,
             DataColumnSidecarOrigin::Requested(peer_id),
         )
+        .await
     }
 
     pub fn on_reconstruction(
@@ -700,7 +706,7 @@ where
         })
     }
 
-    fn spawn_data_column_sidecar_task(
+    async fn spawn_data_column_sidecar_task(
         &self,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         block_seen: bool,
@@ -712,9 +718,10 @@ where
             block_seen,
             origin,
         )
+        .await
     }
 
-    fn spawn_data_column_sidecar_task_with_wait_group(
+    async fn spawn_data_column_sidecar_task_with_wait_group(
         &self,
         wait_group: W,
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -741,7 +748,8 @@ where
         // disable block presence validation if block has been imported early with reconstruction promise
         let validate_block_presence = !self
             .sidecars_pending_reconstruction
-            .contains_sync::<DataColumnIdentifier>(&data_column_sidecar.as_ref().into());
+            .contains_async::<DataColumnIdentifier>(&data_column_sidecar.as_ref().into())
+            .await;
 
         self.spawn(DataColumnSidecarTask {
             store_snapshot: self.owned_store_snapshot(),

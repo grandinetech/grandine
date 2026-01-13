@@ -1178,10 +1178,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .into_iter()
                     .contains(&data_column_sidecar.index)
                 {
-                    self.controller.on_own_data_column_sidecar(
-                        wait_group.clone(),
-                        data_column_sidecar.clone_arc(),
-                    );
+                    self.controller
+                        .on_own_data_column_sidecar(
+                            wait_group.clone(),
+                            data_column_sidecar.clone_arc(),
+                        )
+                        .await;
                 }
 
                 ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);

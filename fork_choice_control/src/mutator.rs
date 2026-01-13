@@ -149,7 +149,7 @@ where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
     W: Wait,
-    TS: UnboundedSink<AttestationVerifierMessage<P, W>>,
+    TS: UnboundedSink<AttestationVerifierMessage<P, W>> + Sync,
     PS: UnboundedSink<P2pMessage<P>>,
     LS: UnboundedSink<PoolMessage<P, W>>,
     NS: UnboundedSink<SubnetMessage<W>>,

@@ -151,13 +151,17 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/minimal/fulu/sync/*/*/*"]                            [fulu_sync_minimal]                  [Minimal] [Fulu];
 )]
 #[test_resources(glob)]
-fn function_name(case: Case) {
+fn function_name(case: Case<'_>) {
+    let rt = tokio::runtime::Runtime::new().expect("Tokio runtime starts successfully in tests");
     let config = Arc::new(preset::default_config().start_and_stay_in(Phase::phase));
-    run_case::<preset>(&config, case);
+
+    rt.block_on(async {
+        run_case::<preset>(&config, case).await;
+    });
 }
 
 #[expect(clippy::too_many_lines)]
-fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
+async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
     let anchor_block = case
         .ssz::<_, BeaconBlock<P>>(config.as_ref(), "anchor_block")
         .with_zero_signature()
@@ -214,7 +218,7 @@ fn run_case<P: Preset>(config: &Arc<Config>, case: Case) {
 
                         for data_column_sidecar in data_column_sidecars {
                             data_column_sidecar_count += 1;
-                            context.on_data_column_sidecar(data_column_sidecar);
+                            context.on_data_column_sidecar(data_column_sidecar).await;
                         }
                     }
                 } else {

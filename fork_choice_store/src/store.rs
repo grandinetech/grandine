@@ -3918,8 +3918,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .upsert_sync(block_root, slot);
     }
 
-    pub fn mark_sidecar_construction_failed(&self, block_root: &H256) {
-        self.sidecars_construction_started.remove_sync(block_root);
+    pub async fn mark_sidecar_construction_failed(&self, block_root: &H256) {
+        self.sidecars_construction_started
+            .remove_async(block_root)
+            .await;
     }
 
     pub fn delay_block_at_slot(&mut self, slot: Slot, block_root: H256) {

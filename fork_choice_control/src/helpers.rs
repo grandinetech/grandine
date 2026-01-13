@@ -324,19 +324,21 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message()
     }
 
-    pub fn on_data_column_sidecar(
+    pub async fn on_data_column_sidecar(
         &mut self,
         data_column_sidecar: DataColumnSidecar<P>,
     ) -> Option<P2pMessage<P>> {
         let subnet_id =
             misc::compute_subnet_for_data_column_sidecar(self.config(), data_column_sidecar.index);
 
-        self.controller().on_gossip_data_column_sidecar(
-            Arc::new(data_column_sidecar),
-            subnet_id,
-            GossipId::default(),
-            true,
-        );
+        self.controller()
+            .on_gossip_data_column_sidecar(
+                Arc::new(data_column_sidecar),
+                subnet_id,
+                GossipId::default(),
+                true,
+            )
+            .await;
 
         self.controller().wait_for_tasks();
         self.next_p2p_message()

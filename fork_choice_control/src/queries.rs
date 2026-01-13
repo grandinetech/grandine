@@ -846,7 +846,7 @@ impl<P, E, A, W> Controller<P, E, A, W>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
-    A: UnboundedSink<AttestationVerifierMessage<P, W>>,
+    A: UnboundedSink<AttestationVerifierMessage<P, W>> + Sync,
     W: Wait,
 {
     #[must_use]

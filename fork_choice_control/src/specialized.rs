@@ -60,7 +60,7 @@ impl<P, E, A> Controller<P, E, A, WaitGroup>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
-    A: UnboundedSink<AttestationVerifierMessage<P, WaitGroup>>,
+    A: UnboundedSink<AttestationVerifierMessage<P, WaitGroup>> + Sync,
 {
     pub fn on_slot(&self, slot: Slot) {
         self.on_tick(Tick::start_of_slot(slot));
