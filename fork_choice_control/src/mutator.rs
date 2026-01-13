@@ -3110,6 +3110,11 @@ where
             submission_time,
         } = pending_data_column_sidecar;
 
+        // disable block presence validation if block has been imported early with reconstruction promise
+        let validate_block_presence = !self
+            .sidecars_pending_reconstruction
+            .contains_sync::<DataColumnIdentifier>(&data_column_sidecar.as_ref().into());
+
         self.spawn(RetryDataColumnSidecarTask {
             task: DataColumnSidecarTask {
                 store_snapshot: self.owned_store(),
@@ -3120,6 +3125,7 @@ where
                 block_seen,
                 origin,
                 submission_time,
+                validate_block_presence,
                 metrics: self.metrics.clone(),
             },
         });

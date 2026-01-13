@@ -2278,6 +2278,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state: Option<Arc<BeaconState<P>>>,
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
+        validate_block_presence: bool,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_header = data_column_sidecar.signed_block_header.message;
@@ -2292,7 +2293,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 data_column_sidecar,
                 block_seen,
                 origin,
-                true,
+                validate_block_presence,
                 parent_info,
                 || Some(state),
                 metrics,
@@ -2302,7 +2303,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 data_column_sidecar,
                 block_seen,
                 origin,
-                true,
+                validate_block_presence,
                 parent_info,
                 || {
                     self.state_cache.existing_state_at_slot(

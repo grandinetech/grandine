@@ -419,6 +419,7 @@ pub struct DataColumnSidecarTask<P: Preset, W> {
     pub block_seen: bool,
     pub origin: DataColumnSidecarOrigin,
     pub submission_time: Instant,
+    pub validate_block_presence: bool,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -434,6 +435,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             block_seen,
             origin,
             submission_time,
+            validate_block_presence,
             metrics,
         } = self;
 
@@ -458,6 +460,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             state,
             block_seen,
             &origin,
+            validate_block_presence,
             metrics.as_ref(),
         );
 

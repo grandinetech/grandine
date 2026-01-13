@@ -41,7 +41,10 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
+    fulu::{
+        containers::{DataColumnIdentifier, DataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     nonstandard::ValidationOutcome,
     phase0::{
         containers::BeaconBlockHeader,
@@ -602,32 +605,12 @@ where
         block_seen: bool,
         peer_id: PeerId,
     ) {
-        let block_header = data_column_sidecar.signed_block_header.message;
-        if !self.store_snapshot().is_forward_synced()
-            && self
-                .store_snapshot()
-                .accepted_data_column_sidecar(block_header, data_column_sidecar.index)
-        {
-            debug_with_peers!(
-                "received data column sidecar has been accepted, ignore this one from peer {peer_id} \
-                 (index: {}, slot: {})",
-                data_column_sidecar.index,
-                data_column_sidecar.slot(),
-            );
-            return;
-        }
-
-        self.spawn(DataColumnSidecarTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
+        self.spawn_data_column_sidecar_task_with_wait_group(
+            self.owned_wait_group(),
             data_column_sidecar,
-            state: None,
             block_seen,
-            origin: DataColumnSidecarOrigin::Requested(peer_id),
-            submission_time: Instant::now(),
-            metrics: self.metrics.clone(),
-        })
+            DataColumnSidecarOrigin::Requested(peer_id),
+        )
     }
 
     pub fn on_reconstruction(
@@ -755,6 +738,11 @@ where
             return;
         }
 
+        // disable block presence validation if block has been imported early with reconstruction promise
+        let validate_block_presence = !self
+            .sidecars_pending_reconstruction
+            .contains_sync::<DataColumnIdentifier>(&data_column_sidecar.as_ref().into());
+
         self.spawn(DataColumnSidecarTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
@@ -764,6 +752,7 @@ where
             block_seen,
             origin,
             submission_time: Instant::now(),
+            validate_block_presence,
             metrics: self.metrics.clone(),
         })
     }
