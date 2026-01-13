@@ -14,7 +14,6 @@ use fork_choice_store::{
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
-use ssz::H256;
 use strum::IntoStaticStr;
 use tokio::sync::broadcast::Sender;
 use tracing::Span;
@@ -188,18 +187,6 @@ pub struct PendingExecutionPayloadEnvelope<P: Preset> {
     pub submission_time: Instant,
 }
 
-impl<P: Preset> PendingExecutionPayloadEnvelope<P> {
-    #[must_use]
-    pub fn slot(&self) -> Slot {
-        self.execution_payload_envelope.message.slot
-    }
-
-    #[must_use]
-    pub fn block_root(&self) -> H256 {
-        self.execution_payload_envelope.message.beacon_block_root
-    }
-}
-
 pub struct VerifyAggregateAndProofResult<P: Preset> {
     pub result: Result<AggregateAndProofAction<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
@@ -275,6 +262,14 @@ pub enum BlockDataColumnAvailability {
     AnyPending,
     Missing(Vec<ColumnIndex>),
     Irrelevant,
+}
+
+#[derive(Debug)]
+pub enum EnvelopeDataColumnAvailability {
+    Complete,
+    CompleteWithReconstruction,
+    AnyPending,
+    Missing(Vec<ColumnIndex>),
 }
 
 pub type SidecarsPendingReconstruction<P> =

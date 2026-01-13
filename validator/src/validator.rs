@@ -81,8 +81,8 @@ use types::{
         SignedExecutionPayloadEnvelope,
     },
     nonstandard::{
-        CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev,
-        WithStatus,
+        BlockOrData, CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch,
+        WithBlobsAndMev, WithStatus,
     },
     phase0::{
         consts::GENESIS_SLOT,
@@ -1075,17 +1075,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let block = Arc::new(*beacon_block);
 
-                if let Some(blobs) = block_blobs
-                    && !blobs.is_empty()
-                {
-                    self.publish_blob_data(&wait_group, slot_head, &block, blobs, block_proofs)
-                        .await?;
-                }
-
                 // Handle Gloas execution payload envelope (only for self-build)
-                if let Some(envelope) = block_build_context
-                    .compute_execution_payload_envelope(beacon_block_root)
-                    .await?
+                let signed_envelope_opt = if slot_head.phase() >= Phase::Gloas
+                    && let Some(envelope) = block_build_context
+                        .compute_execution_payload_envelope(beacon_block_root)
+                        .await?
                 {
                     self.publish_execution_payload_envelope(
                         &wait_group,
@@ -1096,7 +1090,37 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         &signer_snapshot,
                         public_key,
                     )
-                    .await?;
+                    .await?
+                } else {
+                    None
+                };
+
+                // Assuming after Gloas if proposer doesn't self build, `block_blobs` always None
+                if let Some(blobs) = block_blobs
+                    && !blobs.is_empty()
+                {
+                    if slot_head.phase().is_peerdas_activated() {
+                        // If proposer self build the payload, so they have to publish data as well
+                        if let Some(signed_envelope) = signed_envelope_opt {
+                            self.publish_data_column_sidecars(
+                                &wait_group,
+                                signed_envelope.into(),
+                                blobs,
+                                block_proofs,
+                            )
+                            .await?;
+                        } else {
+                            self.publish_data_column_sidecars(
+                                &wait_group,
+                                block.clone_arc().into(),
+                                blobs,
+                                block_proofs,
+                            )
+                            .await?;
+                        }
+                    } else {
+                        self.publish_blob_sidecars(&wait_group, &block, blobs, block_proofs)?;
+                    }
                 }
 
                 self.controller
@@ -1195,72 +1219,63 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         Ok(signed_block)
     }
 
-    async fn publish_blob_data(
+    async fn publish_data_column_sidecars(
         &self,
         wait_group: &W,
-        slot_head: &SlotHead<P>,
+        block_or_data: BlockOrData<P>,
+        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+        block_proofs: Option<KzgProofs<P>>,
+    ) -> Result<()> {
+        let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+            block_or_data,
+            blobs.to_vec(),
+            block_proofs
+                .unwrap_or_else(KzgProofs::empty_fulu)
+                .into_iter()
+                .collect_vec(),
+            self.controller.store_config().kzg_backend,
+            self.metrics.clone(),
+        )
+        .await?;
+
+        for data_column_sidecar in data_column_sidecars {
+            if self
+                .controller
+                .sampling_columns()
+                .into_iter()
+                .contains(&data_column_sidecar.index())
+            {
+                self.controller
+                    .on_own_data_column_sidecar(wait_group.clone(), data_column_sidecar.clone_arc())
+                    .await;
+            }
+
+            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
+        }
+
+        Ok(())
+    }
+
+    fn publish_blob_sidecars(
+        &self,
+        wait_group: &W,
         block: &Arc<SignedBeaconBlock<P>>,
         blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
         block_proofs: Option<KzgProofs<P>>,
     ) -> Result<()> {
-        if self
-            .chain_config
-            .phase_at_slot::<P>(slot_head.slot())
-            .is_peerdas_activated()
-        {
-            let timer = self
-                .metrics
-                .as_ref()
-                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+        for blob_sidecar in misc::construct_blob_sidecars(
+            block,
+            blobs.into_iter(),
+            block_proofs
+                .unwrap_or_else(KzgProofs::empty_deneb)
+                .into_iter(),
+        )? {
+            let blob_sidecar = Arc::new(blob_sidecar);
 
-            let block = block.clone_arc();
-            let kzg_backend = self.controller.store_config().kzg_backend;
+            self.controller
+                .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
 
-            let data_column_sidecars = tokio::task::spawn_blocking(move || {
-                let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                    blobs.as_ref(),
-                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-                    kzg_backend,
-                )?;
-
-                eip_7594::construct_fulu_data_column_sidecars(&block, &cells_and_kzg_proofs)
-            })
-            .await??;
-
-            prometheus_metrics::stop_and_record(timer);
-
-            for data_column_sidecar in data_column_sidecars {
-                if self
-                    .controller
-                    .sampling_columns()
-                    .into_iter()
-                    .contains(&data_column_sidecar.index())
-                {
-                    self.controller
-                        .on_own_data_column_sidecar(
-                            wait_group.clone(),
-                            data_column_sidecar.clone_arc(),
-                        )
-                        .await;
-                }
-
-                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
-            }
-        } else {
-            for blob_sidecar in misc::construct_blob_sidecars(
-                block,
-                blobs.into_iter(),
-                block_proofs
-                    .unwrap_or_else(KzgProofs::empty_deneb)
-                    .into_iter(),
-            )? {
-                let blob_sidecar = Arc::new(blob_sidecar);
-
-                self.controller
-                    .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
-
-                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
-            }
+            ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
         }
 
         Ok(())
@@ -1277,7 +1292,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         proposer_index: ValidatorIndex,
         signer_snapshot: &Snapshot,
         public_key: &PublicKeyBytes,
-    ) -> Result<()> {
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
         // Sign the envelope
         let envelope_sig = match signer_snapshot
             .sign_without_slashing_protection(
@@ -1296,7 +1311,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     slot_head.slot(),
                 );
 
-                return Ok(());
+                return Ok(None);
             }
         };
 
@@ -1316,9 +1331,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.controller
             .on_own_execution_payload_envelope(wait_group.clone(), signed_envelope.clone_arc());
 
-        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.p2p_tx);
+        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+            .send(&self.p2p_tx);
 
-        Ok(())
+        Ok(Some(signed_envelope))
     }
 
     /// See:

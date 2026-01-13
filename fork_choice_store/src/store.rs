@@ -411,7 +411,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn cached_execution_payload_envelope_by_root(
         &self,
         block_root: H256,
-    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+    ) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
         self.execution_payload_envelope_cache.get(block_root)
     }
 
@@ -519,6 +519,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn contains_block(&self, block_root: H256) -> bool {
         self.contains_unfinalized_block(block_root)
             || self.finalized_indices.contains_key(&block_root)
+    }
+
+    // Pre-Gloas: once block imported into fork choice, data is also available,
+    // Post-Gloas: block can be imported without data availability check
+    // For Pre-Gloas block, checking `Self::contains_block` is enough,
+    // but for Post-Gloas, an additional data availability check is required
+    #[must_use]
+    pub fn contains_block_and_data_available(&self, block_root: H256) -> bool {
+        let is_block_imported = self.contains_block(block_root);
+        let is_pre_gloas = self
+            .block(block_root)
+            .map(|chain_link| chain_link.value.phase() < Phase::Gloas)
+            .unwrap_or(false);
+
+        is_block_imported
+            && (is_pre_gloas
+                || self
+                    .cached_execution_payload_envelope_by_root(block_root)
+                    .map(|envelope| {
+                        self.indices_of_missing_data_columns_for_envelope(envelope)
+                            .is_empty()
+                    })
+                    .unwrap_or(false))
     }
 
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
@@ -1212,7 +1235,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(action);
         }
 
+        // Start from Gloas, block can be imported without data availability check
         if self.should_check_data_availability_at_slot(block.message().slot())
+            && !state.is_post_gloas()
             && data_availability_policy.check()
         {
             if state.phase().is_peerdas_activated() {
@@ -2445,9 +2470,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // i.e. already have all the data columns validated
         // The exception to this is data column sidecars from custody group column backfill,
         // where additional columns are being downloaded for blocks already in fork choice.
-        // TODO: (gloas): gloas block can be imported without sidecars, change this to
-        // `contains_block_and_sidecars` new function
-        if validate_block_presence && self.contains_block(block_root) {
+        if validate_block_presence && self.contains_block_and_data_available(block_root) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
@@ -2689,21 +2712,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         };
 
-        if origin.verify_signatures() {
-            // [REJECT] The builder signature envelope.signature is valid
-            SingleVerifier.verify_singular(
-                envelope.message.signing_root(&self.chain_config, &state),
-                envelope.signature,
-                self.pubkey_cache
-                    .get_or_insert(*accessors::public_key(&state, builder_index)?)?,
-                SignatureKind::ExecutionPayloadEnvelope,
-            )?;
-        }
-
         // > Check if blob data is available
         // > If not, this payload MAY be queued and subsequently considered when blob data becomes available
-        if !self.is_data_available_for_envelope(&envelope) {
-            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(envelope));
+        if self.should_check_data_availability_at_slot(slot)
+            && !self
+                .indices_of_missing_data_columns_for_envelope(&envelope)
+                .is_empty()
+        {
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(
+                envelope, state,
+            ));
         }
 
         // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
@@ -2763,6 +2781,31 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 expected: Box::new(bid.block_hash),
             },
         );
+
+        if origin.verify_signatures() {
+            let Some(post_gloas_state) = state.post_gloas() else {
+                return Err(Error::<P>::PayloadEnvelopeWithPreGloasState {
+                    envelope_slot: slot,
+                    state_slot: state.slot(),
+                }
+                .into());
+            };
+
+            // Verify signature with proposer key if proposer choose to self-build
+            let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
+                *accessors::public_key(&state, block.message().proposer_index())?
+            } else {
+                post_gloas_state.builders().get(builder_index)?.pubkey
+            };
+
+            // [REJECT] The builder signature envelope.signature is valid
+            SingleVerifier.verify_singular(
+                envelope.message.signing_root(&self.chain_config, &state),
+                envelope.signature,
+                self.pubkey_cache.get_or_insert(pubkey)?,
+                SignatureKind::ExecutionPayloadEnvelope,
+            )?;
+        }
 
         Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
     }
@@ -4482,11 +4525,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block: &SignedBeaconBlock<P>,
     ) -> Vec<ColumnIndex> {
-        let phase = block.phase();
         let block = block.message();
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        //
         // `block.phase` has already been checked
         let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
@@ -4501,43 +4541,39 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.sampling_columns
             .iter()
             .filter(|index| {
-                if phase >= Phase::Gloas {
-                    !self
-                        .accepted_gloas_data_column_sidecars
-                        .get(&(block.slot(), block_root, **index))
-                        .is_some_and(|kzg_commitments| {
-                            kzg_commitments == body.blob_kzg_commitments()
-                        })
-                } else {
-                    !self
-                        .accepted_data_column_sidecars
-                        .get(&(block.slot(), block.proposer_index(), **index))
-                        .is_some_and(|kzg_commitments| {
-                            kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
-                        })
-                }
+                !self
+                    .accepted_data_column_sidecars
+                    .get(&(block.slot(), block.proposer_index(), **index))
+                    .is_some_and(|kzg_commitments| {
+                        kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
+                    })
             })
             .copied()
             .collect()
     }
 
-    pub fn is_data_available_for_envelope(
+    pub fn indices_of_missing_data_columns_for_envelope(
         &self,
         envelope: &SignedExecutionPayloadEnvelope<P>,
-    ) -> bool {
-        let slot = envelope.message.slot;
-        let block_root = envelope.message.beacon_block_root;
-        let blob_kzg_commitments = &envelope.message.blob_kzg_commitments;
-
+    ) -> Vec<ColumnIndex> {
+        let blob_kzg_commitments = envelope.blob_kzg_commitments();
         if blob_kzg_commitments.is_empty() {
-            return true;
+            return vec![];
         }
 
-        self.sampling_columns.iter().all(|index| {
-            self.accepted_gloas_data_column_sidecars
-                .get(&(slot, block_root, *index))
-                .is_some_and(|kzg_commitments| kzg_commitments == blob_kzg_commitments)
-        })
+        let slot = envelope.slot();
+        let block_root = envelope.block_root();
+
+        self.sampling_columns
+            .iter()
+            .filter(|&column_index| {
+                !self
+                    .accepted_gloas_data_column_sidecars
+                    .get(&(slot, block_root, *column_index))
+                    .is_some_and(|kzg_commitments| kzg_commitments == blob_kzg_commitments)
+            })
+            .copied()
+            .collect()
     }
 
     pub fn register_rejected_block(&mut self, block_root: H256) {

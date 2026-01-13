@@ -394,7 +394,7 @@ impl<P: Preset> Context<P> {
                     assert_eq!(block_with_missing_blobs, *block);
                 }
                 EngineGetBlobsParams::V2(EngineGetBlobsV2Params {
-                    block_or_sidecar,
+                    block_or_data,
                     data_column_identifiers,
                 }) => {
                     assert!(
@@ -403,7 +403,7 @@ impl<P: Preset> Context<P> {
                             .all(|id| id.block_root == block_root)
                     );
                     assert!(!data_column_identifiers.is_empty());
-                    assert_eq!(block_or_sidecar.block_root(), block_root);
+                    assert_eq!(block_or_data.block_root(), block_root);
                 }
             },
             _ => panic!("ExecutionServiceMessage::GetBlobs expected"),

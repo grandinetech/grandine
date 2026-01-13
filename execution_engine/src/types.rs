@@ -31,7 +31,7 @@ use types::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
     fulu::containers::DataColumnIdentifier,
-    nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
+    nonstandard::{BlockOrData, KzgProofs, Phase, WithBlobsAndMev},
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, UnixSeconds,
         ValidatorIndex,
@@ -1036,7 +1036,7 @@ impl<P: Preset> From<EngineGetBlobsV1Params<P>> for EngineGetBlobsParams<P> {
 }
 
 pub struct EngineGetBlobsV2Params<P: Preset> {
-    pub block_or_sidecar: BlockOrDataColumnSidecar<P>,
+    pub block_or_data: BlockOrData<P>,
     pub data_column_identifiers: Vec<DataColumnIdentifier>,
 }
 

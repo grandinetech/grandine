@@ -59,8 +59,8 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::CombinedPayloadAttestation,
-    nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
+    gloas::containers::{CombinedPayloadAttestation, SignedExecutionPayloadEnvelope},
+    nonstandard::{BlockOrEnvelope, PayloadStatus, Phase, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -78,11 +78,12 @@ use crate::{
         SyncMessage, ValidatorMessage,
     },
     misc::{
-        BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
-        PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
-        PendingChainLink, PendingDataColumnSidecar, PendingExecutionPayloadEnvelope,
-        ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
-        VerifyPayloadAttestationResult, WaitingForCheckpointState,
+        BlockBlobAvailability, BlockDataColumnAvailability, Delayed,
+        EnvelopeDataColumnAvailability, MutatorRejectionReason, PendingAggregateAndProof,
+        PendingAttestation, PendingBlobSidecar, PendingBlock, PendingChainLink,
+        PendingDataColumnSidecar, PendingExecutionPayloadEnvelope, ProcessingTimings, ReorgSource,
+        VerifyAggregateAndProofResult, VerifyAttestationResult, VerifyPayloadAttestationResult,
+        WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
@@ -334,7 +335,7 @@ where
                     origin,
                     submission_time,
                 } => self.handle_execution_payload_envelope(
-                    &wait_group,
+                    wait_group,
                     result,
                     origin,
                     submission_time,
@@ -378,12 +379,12 @@ where
                 MutatorMessage::ReconstructedMissingColumns {
                     wait_group,
                     block_root,
-                    block,
+                    block_or_envelope,
                     data_column_sidecars,
                 } => self.handle_reconstructed_missing_columns(
                     &wait_group,
                     block_root,
-                    &block,
+                    block_or_envelope,
                     data_column_sidecars,
                 ),
             }
@@ -482,43 +483,66 @@ where
         if tick.is_end_of_interval() {
             let head = self.store.head();
 
-            // TODO: (gloas): get `execution_payload` from post-gloas payload envelope
-            if head.is_optimistic()
-                && let Some(execution_payload) = head.block.as_ref().clone().execution_payload()
-            {
-                // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-                let params =
-                    if let Some(body) = head.block.message().body().with_blob_kzg_commitments() {
-                        let versioned_hashes = body
-                            .blob_kzg_commitments()
-                            .iter()
-                            .copied()
-                            .map(misc::kzg_commitment_to_versioned_hash)
-                            .collect();
+            if head.is_optimistic() {
+                let payload_params_opt = if head.block.phase() >= Phase::Gloas {
+                    self.execution_payload_envelope_by_root(head.block_root)?
+                        .map(|envelope| {
+                            let versioned_hashes = envelope
+                                .blob_kzg_commitments()
+                                .iter()
+                                .copied()
+                                .map(misc::kzg_commitment_to_versioned_hash)
+                                .collect();
 
-                        // TODO: (gloas): get `execution_requests` from post-gloas payload envelope
-                        if let Some(body) = body.with_execution_requests() {
-                            Some(ExecutionPayloadParams::Electra {
+                            let params = Some(ExecutionPayloadParams::Electra {
                                 versioned_hashes,
                                 parent_beacon_block_root: head.block.message().parent_root(),
-                                execution_requests: body.execution_requests().clone(),
-                            })
-                        } else {
-                            Some(ExecutionPayloadParams::Deneb {
-                                versioned_hashes,
-                                parent_beacon_block_root: head.block.message().parent_root(),
-                            })
+                                execution_requests: envelope.message.execution_requests.clone(),
+                            });
+
+                            (envelope.message.payload.clone().into(), params)
+                        })
+                } else {
+                    if let Some(execution_payload) = head.block.as_ref().clone().execution_payload()
+                    {
+                        let mut params = None;
+                        if let Some(body) = head.block.message().body().with_blob_kzg_commitments()
+                        {
+                            let versioned_hashes = body
+                                .blob_kzg_commitments()
+                                .iter()
+                                .copied()
+                                .map(misc::kzg_commitment_to_versioned_hash)
+                                .collect();
+
+                            params = if let Some(body) = body.with_execution_requests() {
+                                Some(ExecutionPayloadParams::Electra {
+                                    versioned_hashes,
+                                    parent_beacon_block_root: head.block.message().parent_root(),
+                                    execution_requests: body.execution_requests().clone(),
+                                })
+                            } else {
+                                Some(ExecutionPayloadParams::Deneb {
+                                    versioned_hashes,
+                                    parent_beacon_block_root: head.block.message().parent_root(),
+                                })
+                            }
                         }
+
+                        Some((execution_payload, params))
                     } else {
                         None
-                    };
+                    }
+                };
 
-                self.execution_engine.notify_new_payload(
-                    head.block_root,
-                    execution_payload,
-                    params,
-                    None,
-                )?;
+                if let Some((execution_payload, params)) = payload_params_opt {
+                    self.execution_engine.notify_new_payload(
+                        head.block_root,
+                        execution_payload,
+                        params,
+                        None,
+                    )?;
+                }
             }
         }
 
@@ -858,7 +882,7 @@ where
 
                                 self.request_blobs_from_execution_engine(
                                     EngineGetBlobsV2Params {
-                                        block_or_sidecar: pending_block.block.clone_arc().into(),
+                                        block_or_data: pending_block.block.clone_arc().into(),
                                         data_column_identifiers,
                                     }
                                     .into(),
@@ -1719,7 +1743,7 @@ where
 
                         self.request_blobs_from_execution_engine(
                             EngineGetBlobsV2Params {
-                                block_or_sidecar: data_column_sidecar.clone_arc().into(),
+                                block_or_data: data_column_sidecar.clone_arc().into(),
                                 data_column_identifiers,
                             }
                             .into(),
@@ -1801,6 +1825,7 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilParent(data_column_sidecar)) => {
+                // Delay until parent block imported only for Fulu data column sidecar
                 let Some(parent_root) = data_column_sidecar
                     .pre_gloas()
                     .map(|sidecar| sidecar.signed_block_header.message.parent_root)
@@ -1815,7 +1840,6 @@ where
                     submission_time,
                 };
 
-                // TODO: (gloas): gloas block can be imported without sidecars
                 if self.store.contains_block(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
@@ -1883,7 +1907,7 @@ where
     #[expect(clippy::too_many_lines)]
     fn handle_execution_payload_envelope(
         &mut self,
-        wait_group: &W,
+        wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
         submission_time: Instant,
@@ -1913,7 +1937,10 @@ where
                     self.send_to_p2p(P2pMessage::Accept(gossip_id));
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+                reply_payload_envelope_validation_result_to_http_api(
+                    sender,
+                    Ok(ValidationOutcome::Accept),
+                );
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1926,7 +1953,10 @@ where
                     self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+                reply_payload_envelope_validation_result_to_http_api(
+                    sender,
+                    Ok(ValidationOutcome::Ignore(publishable)),
+                );
             }
             Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
                 execution_payload_envelope,
@@ -1966,7 +1996,7 @@ where
                         .existing_state_at_slot(&self.store, beacon_block_root, slot)
                 {
                     self.retry_execution_payload_envelope(
-                        wait_group.clone(),
+                        wait_group,
                         pending_envelope,
                         Some(state),
                     );
@@ -1983,37 +2013,152 @@ where
                         .push(pending_envelope);
                 }
             }
-            Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(execution_payload_envelope)) => {
+            Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(
+                execution_payload_envelope,
+                state,
+            )) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_execution_payload_envelope(&["delayed_until_data"]);
                 }
 
+                let slot = execution_payload_envelope.slot();
+                let block_root = execution_payload_envelope.block_root();
                 let pending_payload_envelope = PendingExecutionPayloadEnvelope {
                     execution_payload_envelope,
                     origin,
                     submission_time,
                 };
-                if self.store.is_data_available_for_envelope(
+
+                let envelope_data_column_availability = self.envelope_data_column_availability(
                     &pending_payload_envelope.execution_payload_envelope,
-                ) {
-                    self.retry_execution_payload_envelope(
-                        wait_group.clone(),
-                        pending_payload_envelope,
-                        None,
-                    );
-                } else {
-                    let slot = pending_payload_envelope.slot();
-                    let block_root = pending_payload_envelope.block_root();
+                    self.delayed_until_state
+                        .get(&(block_root, state.slot()))
+                        .iter()
+                        .flat_map(|delayed| delayed.data_column_sidecars.iter())
+                        .map(|pending| pending.data_column_sidecar.as_ref()),
+                );
 
-                    debug_with_peers!(
-                        "execution payload envelope delayed until data available \
-                         (block_root: {block_root:?}, slot: {slot})",
-                    );
+                debug_with_peers!(
+                    "data availability for block: {:?} with origin: {:?} at slot: {}: {envelope_data_column_availability:?}",
+                    block_root,
+                    pending_payload_envelope.origin,
+                    slot,
+                );
 
-                    self.delay_execution_payload_envelope_until_data(
-                        block_root,
-                        pending_payload_envelope,
-                    );
+                // Reuse `BlockDataColumnAvailability` state for DA of payload envelope since there
+                // is no significant changes
+                match envelope_data_column_availability {
+                    EnvelopeDataColumnAvailability::Complete => {
+                        self.retry_execution_payload_envelope(
+                            wait_group,
+                            pending_payload_envelope,
+                            None,
+                        );
+                    }
+                    EnvelopeDataColumnAvailability::AnyPending => {
+                        self.delay_execution_payload_envelope_until_data(
+                            block_root,
+                            pending_payload_envelope,
+                        );
+
+                        self.take_delayed_until_state(block_root, state.slot())
+                            .unwrap_or_default()
+                            .data_column_sidecars
+                            .into_iter()
+                            .for_each(|pending_data_column| {
+                                self.retry_data_column_sidecar(
+                                    wait_group.clone(),
+                                    pending_data_column,
+                                    Some(state.clone_arc()),
+                                );
+                            });
+                    }
+                    EnvelopeDataColumnAvailability::CompleteWithReconstruction => {
+                        if let Some(gossip_id) = pending_payload_envelope.origin.gossip_id() {
+                            self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                        }
+
+                        if self
+                            .store
+                            .indices_of_missing_data_columns_for_envelope(
+                                &pending_payload_envelope.execution_payload_envelope,
+                            )
+                            .is_empty()
+                        {
+                            self.retry_execution_payload_envelope(
+                                wait_group,
+                                pending_payload_envelope,
+                                None,
+                            );
+                        } else {
+                            if !matches!(
+                                pending_payload_envelope.origin,
+                                ExecutionPayloadEnvelopeOrigin::Own
+                            ) && !self.store.is_sidecars_construction_started(&block_root)
+                            {
+                                self.send_to_pool(PoolMessage::ReconstructDataColumnsForEnvelope {
+                                    wait_group,
+                                    block_root,
+                                    envelope: pending_payload_envelope
+                                        .execution_payload_envelope
+                                        .clone_arc(),
+                                    origin: pending_payload_envelope.origin.clone(),
+                                    slot,
+                                })
+                            }
+
+                            self.delay_execution_payload_envelope_until_data(
+                                block_root,
+                                pending_payload_envelope,
+                            );
+                        }
+                    }
+                    EnvelopeDataColumnAvailability::Missing(missing_column_indices) => {
+                        debug_with_peers!(
+                            "payload envelope delayed until sufficient data column sidecars are available \
+                             (missing columns: {missing_column_indices:?}, block root: {block_root:?})",
+                        );
+
+                        if let Some(gossip_id) = pending_payload_envelope.origin.gossip_id() {
+                            self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                        }
+
+                        let pending_payload_envelope =
+                            reply_delayed_payload_envelope_validation_result(
+                                pending_payload_envelope,
+                                Ok(ValidationOutcome::Ignore(false)),
+                            );
+
+                        if self.store.is_forward_synced()
+                            && !self.store.has_requested_blobs_from_el(&block_root)
+                            && !self.store.is_sidecars_construction_started(&block_root)
+                        {
+                            self.store_mut()
+                                .mark_requested_blobs_from_el(block_root, slot);
+                            self.update_store_snapshot();
+
+                            let data_column_identifiers = missing_column_indices
+                                .into_iter()
+                                .map(|index| DataColumnIdentifier { block_root, index })
+                                .collect_vec();
+
+                            self.request_blobs_from_execution_engine(
+                                EngineGetBlobsV2Params {
+                                    block_or_data: pending_payload_envelope
+                                        .execution_payload_envelope
+                                        .clone_arc()
+                                        .into(),
+                                    data_column_identifiers,
+                                }
+                                .into(),
+                            );
+                        }
+
+                        self.delay_execution_payload_envelope_until_data(
+                            block_root,
+                            pending_payload_envelope,
+                        );
+                    }
                 }
             }
             Err(error) => {
@@ -2033,7 +2178,7 @@ where
                     ));
                 }
 
-                reply_to_http_api(sender, Err(anyhow!(source)));
+                reply_payload_envelope_validation_result_to_http_api(sender, Err(anyhow!(source)));
             }
         }
 
@@ -2328,10 +2473,15 @@ where
         &mut self,
         wait_group: &W,
         block_root: H256,
-        block: &SignedBeaconBlock<P>,
+        block_or_envelope: BlockOrEnvelope<P>,
         mut data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     ) {
-        let missing_indices = self.store.indices_of_missing_data_columns(block);
+        let missing_indices = match block_or_envelope {
+            BlockOrEnvelope::Block(block) => self.store.indices_of_missing_data_columns(&block),
+            BlockOrEnvelope::Envelope(envelope) => self
+                .store
+                .indices_of_missing_data_columns_for_envelope(&envelope),
+        };
 
         if missing_indices.is_empty() {
             return;
@@ -3244,13 +3394,13 @@ where
 
     fn delay_execution_payload_envelope_until_block(
         &mut self,
-        wait_group: &W,
+        wait_group: W,
         pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
         beacon_block_root: H256,
     ) {
         if self.store.contains_block(beacon_block_root) {
             self.retry_execution_payload_envelope(
-                wait_group.clone(),
+                wait_group,
                 pending_execution_payload_envelope,
                 None,
             );
@@ -3440,6 +3590,7 @@ where
         else {
             return;
         };
+
         self.delayed_until_block
             .entry(parent_root)
             .or_default()
@@ -3852,7 +4003,7 @@ where
 
         self.delayed_until_data
             .retain(|_, pending_payload_envelope| {
-                if pending_payload_envelope.slot() > finalized_slot {
+                if pending_payload_envelope.execution_payload_envelope.slot() > finalized_slot {
                     return true;
                 }
 
@@ -4492,14 +4643,14 @@ where
         block: &SignedBeaconBlock<P>,
         mut pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
     ) -> BlockDataColumnAvailability {
-        if !block.phase().is_peerdas_activated() {
-            return BlockDataColumnAvailability::Irrelevant;
-        }
-
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockDataColumnAvailability::Irrelevant;
         };
+
+        // Only check DA with payload envelope for post-Gloas block
+        if block.phase() >= Phase::Gloas {
+            return BlockDataColumnAvailability::Irrelevant;
+        }
 
         let missing_indices = self.store.indices_of_missing_data_columns(block);
 
@@ -4532,6 +4683,56 @@ where
 
         BlockDataColumnAvailability::Missing(missing_indices)
     }
+
+    fn envelope_data_column_availability<'column>(
+        &self,
+        envelope: &SignedExecutionPayloadEnvelope<P>,
+        mut pending_data_columns_for_block: impl Iterator<Item = &'column DataColumnSidecar<P>>,
+    ) -> EnvelopeDataColumnAvailability {
+        let missing_indices = self
+            .store
+            .indices_of_missing_data_columns_for_envelope(envelope);
+
+        if missing_indices.is_empty() {
+            return EnvelopeDataColumnAvailability::Complete;
+        }
+
+        let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
+            missing_indices.contains(&data_column_sidecar.index())
+                && data_column_sidecar.kzg_commitments() == envelope.blob_kzg_commitments()
+        });
+
+        if any_pending_columns {
+            return EnvelopeDataColumnAvailability::AnyPending;
+        }
+
+        let available_columns_count = self
+            .store
+            .sampling_columns_count()
+            .saturating_sub(missing_indices.len());
+
+        if available_columns_count * 2 >= P::NumberOfColumns::USIZE
+            && (self.store.is_forward_synced()
+                || !self.store.store_config().sync_without_reconstruction)
+        {
+            return EnvelopeDataColumnAvailability::CompleteWithReconstruction;
+        }
+
+        EnvelopeDataColumnAvailability::Missing(missing_indices)
+    }
+
+    fn execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        match self
+            .store
+            .cached_execution_payload_envelope_by_root(block_root)
+        {
+            Some(envelope) => Ok(Some(envelope.clone_arc())),
+            None => self.storage.execution_payload_envelope_by_root(block_root),
+        }
+    }
 }
 
 fn reply_to_http_api(
@@ -4553,6 +4754,19 @@ fn reply_block_validation_result_to_http_api(
         && let Err(reply) = sender.try_send(reply)
     {
         debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+    }
+}
+
+fn reply_payload_envelope_validation_result_to_http_api(
+    sender: Option<MultiSender<Result<ValidationOutcome>>>,
+    reply: Result<ValidationOutcome>,
+) {
+    if let Some(mut sender) = sender {
+        if let Err(reply) = sender.try_send(reply) {
+            debug_with_peers!(
+                "reply to HTTP API failed because the receiver was dropped: {reply:?}"
+            );
+        }
     }
 }
 
@@ -4582,6 +4796,33 @@ fn reply_delayed_block_validation_result<P: Preset>(
             origin,
             processing_timings,
             tracing_span,
+        }
+    }
+}
+
+fn reply_delayed_payload_envelope_validation_result<P: Preset>(
+    pending_envelope: PendingExecutionPayloadEnvelope<P>,
+    reply: Result<ValidationOutcome>,
+) -> PendingExecutionPayloadEnvelope<P> {
+    let PendingExecutionPayloadEnvelope {
+        execution_payload_envelope,
+        origin,
+        submission_time,
+    } = pending_envelope;
+
+    if let ExecutionPayloadEnvelopeOrigin::Api(Some(sender)) = origin {
+        reply_payload_envelope_validation_result_to_http_api(Some(sender), reply);
+
+        PendingExecutionPayloadEnvelope {
+            execution_payload_envelope,
+            origin: ExecutionPayloadEnvelopeOrigin::Api(None),
+            submission_time,
+        }
+    } else {
+        PendingExecutionPayloadEnvelope {
+            execution_payload_envelope,
+            origin,
+            submission_time,
         }
     }
 }

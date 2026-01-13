@@ -1001,33 +1001,30 @@ pub enum PartialAttestationAction {
     DelayUntilSlot,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, AsRefStr)]
 pub enum ExecutionPayloadEnvelopeOrigin {
     BackSync,
     Gossip(GossipId),
     Requested(PeerId),
     Own,
+    Api(Option<Sender<Result<ValidationOutcome>>>),
 }
 
 impl ExecutionPayloadEnvelopeOrigin {
     #[must_use]
-    pub fn split(
-        self,
-    ) -> (
-        Option<GossipId>,
-        Option<OneshotSender<Result<ValidationOutcome>>>,
-    ) {
+    pub fn split(self) -> (Option<GossipId>, Option<Sender<Result<ValidationOutcome>>>) {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, sender),
             Self::BackSync | Self::Requested(_) | Self::Own => (None, None),
         }
     }
 
     #[must_use]
-    pub fn gossip_id(self) -> Option<GossipId> {
+    pub fn gossip_id(&self) -> Option<GossipId> {
         match self {
-            Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::BackSync | Self::Requested(_) | Self::Own => None,
+            Self::Gossip(gossip_id) => Some(gossip_id.clone()),
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
         }
     }
 
@@ -1035,7 +1032,7 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::BackSync | Self::Requested(_) | Self::Own => None,
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
         }
     }
 
@@ -1048,7 +1045,7 @@ impl ExecutionPayloadEnvelopeOrigin {
     #[must_use]
     pub const fn verify_signatures(&self) -> bool {
         match self {
-            Self::BackSync | Self::Gossip(_) | Self::Requested(_) => true,
+            Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
             Self::Own => false,
         }
     }
@@ -1056,6 +1053,11 @@ impl ExecutionPayloadEnvelopeOrigin {
     #[must_use]
     pub const fn is_from_back_sync(&self) -> bool {
         matches!(self, Self::BackSync)
+    }
+
+    #[must_use]
+    pub const fn is_requested(&self) -> bool {
+        matches!(self, Self::Requested(_))
     }
 }
 
@@ -1065,7 +1067,7 @@ pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
     Ignore(Publishable),
     DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
     DelayUntilState(Arc<SignedExecutionPayloadEnvelope<P>>, H256, Slot),
-    DelayUntilData(Arc<SignedExecutionPayloadEnvelope<P>>),
+    DelayUntilData(Arc<SignedExecutionPayloadEnvelope<P>>, Arc<BeaconState<P>>),
 }
 
 impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {

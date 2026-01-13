@@ -92,7 +92,25 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                             };
 
                             self.blob_reconstruction_pool
-                                .schedule_reconstruction(wait_group, block_root, block, slot, delay);
+                                .schedule_reconstruction(wait_group, block_root, block.into(), slot, delay);
+                        }
+                        PoolMessage::ReconstructDataColumnsForEnvelope {
+                            wait_group,
+                            block_root,
+                            envelope,
+                            origin,
+                            slot,
+                        } => {
+                            // We don't want to reconstruct blobs on each envelope during sync
+                            // if it downloads data columns relatively fast
+                            let delay = if origin.is_requested() {
+                                RECONSTRUCTION_START_DELAY_SYNCING
+                            } else {
+                                self.reconstruction_delay
+                            };
+
+                            self.blob_reconstruction_pool
+                                .schedule_reconstruction(wait_group, block_root, envelope.into(), slot, delay);
                         }
                     }
                 }

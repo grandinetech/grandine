@@ -12,8 +12,8 @@ pub struct ExecutionPayloadEnvelopeCache<P: Preset> {
 }
 
 impl<P: Preset> ExecutionPayloadEnvelopeCache<P> {
-    pub fn get(&self, block_root: H256) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
-        Some(self.envelopes.get(&block_root)?.0.clone_arc())
+    pub fn get(&self, block_root: H256) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
+        Some(&self.envelopes.get(&block_root)?.0)
     }
 
     pub fn insert(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {

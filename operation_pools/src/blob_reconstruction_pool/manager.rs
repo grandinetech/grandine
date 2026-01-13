@@ -7,14 +7,14 @@ use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use types::{
-    combined::SignedBeaconBlock,
+    nonstandard::BlockOrEnvelope,
     phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 
 use crate::{blob_reconstruction_pool::tasks::ReconstructDataColumnSidecarsTask, misc::PoolTask};
 
-pub type ReconstructionParams<P, W> = (W, H256, Arc<SignedBeaconBlock<P>>, Slot);
+pub type ReconstructionParams<P, W> = (W, H256, BlockOrEnvelope<P>, Slot);
 
 pub struct Manager<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
@@ -42,8 +42,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         let mut reconstructions = self.scheduled_reconstructions.split_off(&Instant::now());
         core::mem::swap(&mut self.scheduled_reconstructions, &mut reconstructions);
 
-        for (wait_group, block_root, block, slot) in reconstructions.into_values().flatten() {
-            self.spawn_reconstruction(wait_group, block_root, block, slot);
+        for (wait_group, block_root, block_or_envelope, slot) in
+            reconstructions.into_values().flatten()
+        {
+            self.spawn_reconstruction(wait_group, block_root, block_or_envelope, slot);
         }
     }
 
@@ -51,21 +53,21 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         &mut self,
         wait_group: W,
         block_root: H256,
-        block: Arc<SignedBeaconBlock<P>>,
+        block_or_envelope: BlockOrEnvelope<P>,
         slot: Slot,
         delay: Duration,
     ) {
         self.scheduled_reconstructions
             .entry(Instant::now() + delay)
             .or_default()
-            .push((wait_group, block_root, block, slot));
+            .push((wait_group, block_root, block_or_envelope, slot));
     }
 
     pub fn spawn_reconstruction(
         &self,
         wait_group: W,
         block_root: H256,
-        block: Arc<SignedBeaconBlock<P>>,
+        block_or_envelope: BlockOrEnvelope<P>,
         slot: Slot,
     ) {
         self.controller
@@ -75,7 +77,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             controller: self.controller.clone_arc(),
             wait_group,
             block_root,
-            block,
+            block_or_envelope,
             metrics: self.metrics.clone(),
         })
     }

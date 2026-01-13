@@ -204,6 +204,11 @@ pub enum Error<P: Preset> {
     PayloadEnvelopeInvalidBlock {
         payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     },
+    #[error("payload envelope validation with pre-Gloas state: (envelope_slot: {envelope_slot}, state_slot: {state_slot})")]
+    PayloadEnvelopeWithPreGloasState {
+        envelope_slot: Slot,
+        state_slot: Slot,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

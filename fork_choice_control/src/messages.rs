@@ -24,7 +24,8 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
+    nonstandard::BlockOrEnvelope,
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -210,7 +211,7 @@ pub enum MutatorMessage<P: Preset, W> {
     ReconstructedMissingColumns {
         wait_group: W,
         block_root: H256,
-        block: Arc<SignedBeaconBlock<P>>,
+        block_or_envelope: BlockOrEnvelope<P>,
         data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     },
 }
@@ -261,6 +262,13 @@ pub enum PoolMessage<P: Preset, W> {
         block_root: H256,
         block: Arc<SignedBeaconBlock<P>>,
         origin: BlockOrigin,
+        slot: Slot,
+    },
+    ReconstructDataColumnsForEnvelope {
+        wait_group: W,
+        block_root: H256,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
         slot: Slot,
     },
 }

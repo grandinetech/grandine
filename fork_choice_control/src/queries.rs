@@ -431,6 +431,11 @@ where
         self.store_snapshot().contains_block(block_root)
     }
 
+    pub fn contains_block_and_data_available(&self, block_root: H256) -> bool {
+        self.store_snapshot()
+            .contains_block_and_data_available(block_root)
+    }
+
     pub fn block_by_root(
         &self,
         block_root: H256,
@@ -561,7 +566,7 @@ where
             .filter_map(|block_root| {
                 // Check cache then fallback to database
                 match snapshot.cached_execution_payload_envelope(block_root) {
-                    Some(envelope) => Some(Ok(envelope)),
+                    Some(envelope) => Some(Ok(envelope.clone_arc())),
                     None => storage
                         .execution_payload_envelope_by_root(block_root)
                         .transpose(),
@@ -570,6 +575,19 @@ where
             .collect::<Result<Vec<_>>>()?;
 
         Ok(envelopes)
+    }
+
+    pub fn execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let snapshot = self.snapshot();
+        let storage = self.storage();
+
+        match snapshot.cached_execution_payload_envelope(block_root) {
+            Some(envelope) => Ok(Some(envelope.clone_arc())),
+            None => storage.execution_payload_envelope_by_root(block_root),
+        }
     }
 
     pub fn blocks_by_root(
@@ -1293,7 +1311,7 @@ impl<P: Preset> Snapshot<'_, P> {
     pub(crate) fn cached_execution_payload_envelope(
         &self,
         block_root: H256,
-    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+    ) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
         self.store_snapshot
             .cached_execution_payload_envelope_by_root(block_root)
     }

@@ -376,14 +376,20 @@ impl<P: Preset> Batch<P> {
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
         let block = block.message();
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        //
-        // `block.phase` has already been checked
-        let Some(body) = block.body().with_blob_kzg_commitments() else {
-            return Ok(vec![]);
-        };
+        // `block.phase` has already been checked (post-Fulu)
+        // False, in case there is blobs in block/envelope, or no envelope has been accepted
+        let no_data = block
+            .body()
+            .with_blob_kzg_commitments()
+            .map(|body| body.blob_kzg_commitments().is_empty())
+            .or_else(|| {
+                self.execution_payload_envelopes
+                    .get(&block.hash_tree_root())
+                    .map(|envelope| envelope.blob_kzg_commitments().is_empty())
+            })
+            .unwrap_or_default();
 
-        if body.blob_kzg_commitments().is_empty() {
+        if no_data {
             return Ok(vec![]);
         }
 

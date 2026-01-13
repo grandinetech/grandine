@@ -24,7 +24,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    nonstandard::BlockOrDataColumnSidecar,
+    nonstandard::BlockOrData,
     phase0::primitives::Slot,
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -76,10 +76,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                         peer_id,
                     }) => self.get_blobs_v1(block, blob_identifiers, peer_id).await,
                     EngineGetBlobsParams::V2(EngineGetBlobsV2Params {
-                        block_or_sidecar,
+                        block_or_data,
                         data_column_identifiers,
                     }) => {
-                        self.get_blobs_v2(block_or_sidecar, data_column_identifiers)
+                        self.get_blobs_v2(block_or_data, data_column_identifiers)
                             .await
                     }
                 },
@@ -214,14 +214,15 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
     #[expect(clippy::too_many_lines)]
     async fn get_blobs_v2(
         &self,
-        block_or_sidecar: BlockOrDataColumnSidecar<P>,
+        block_or_data: BlockOrData<P>,
         data_column_identifiers: Vec<DataColumnIdentifier>,
     ) {
-        let slot = block_or_sidecar.slot();
-        let block_root = block_or_sidecar.block_root();
+        let slot = block_or_data.slot();
+        let block_root = block_or_data.block_root();
 
-        // TODO: (gloas): block can be imported before data available
-        if self.controller.contains_block(block_root)
+        if self
+            .controller
+            .contains_block_and_data_available(block_root)
             || self
                 .controller
                 .is_sidecars_construction_started(&block_root)
@@ -232,8 +233,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() else {
+        let Some(kzg_commitments) = block_or_data.kzg_commitments() else {
             return;
         };
 
@@ -303,7 +303,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                             let reconstruction_result =
                                 eip_7594::construct_data_column_sidecars_from_blobs(
-                                    block_or_sidecar,
+                                    block_or_data,
                                     received_blobs,
                                     cells_proofs,
                                     self.controller.store_config().kzg_backend,

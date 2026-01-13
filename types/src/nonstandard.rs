@@ -26,6 +26,7 @@ use crate::{
     },
     electra::containers::ExecutionRequests,
     fulu::containers::DataColumnIdentifier,
+    gloas::containers::SignedExecutionPayloadEnvelope,
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -208,6 +209,12 @@ impl AttestationOutcome {
     }
 }
 
+#[derive(Clone, Debug, From)]
+pub enum BlockOrEnvelope<P: Preset> {
+    Block(Arc<SignedBeaconBlock<P>>),
+    Envelope(Arc<SignedExecutionPayloadEnvelope<P>>),
+}
+
 #[derive(Clone, Debug)]
 pub struct BlobSidecarWithId<P: Preset> {
     pub blob_sidecar: Arc<BlobSidecar<P>>,
@@ -376,17 +383,19 @@ impl<P: Preset> KzgProofs<P> {
 }
 
 #[derive(Clone, Debug, From)]
-pub enum BlockOrDataColumnSidecar<P: Preset> {
+pub enum BlockOrData<P: Preset> {
     Block(Arc<SignedBeaconBlock<P>>),
     Sidecar(Arc<DataColumnSidecar<P>>),
+    Envelope(Arc<SignedExecutionPayloadEnvelope<P>>),
 }
 
-impl<P: Preset> BlockOrDataColumnSidecar<P> {
+impl<P: Preset> BlockOrData<P> {
     #[must_use]
     pub fn slot(&self) -> Slot {
         match self {
             Self::Block(block) => block.message().slot(),
             Self::Sidecar(sidecar) => sidecar.slot(),
+            Self::Envelope(envelope) => envelope.slot(),
         }
     }
 
@@ -395,6 +404,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
             Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
+            Self::Envelope(envelope) => envelope.block_root(),
         }
     }
 
@@ -405,6 +415,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Sidecar(sidecar) => sidecar
                 .pre_gloas()
                 .map(|sidecar| sidecar.signed_block_header),
+            Self::Envelope(_) => None,
         }
     }
 
@@ -418,6 +429,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
             Self::Sidecar(sidecar) => Some(sidecar.kzg_commitments()),
+            Self::Envelope(envelope) => Some(envelope.blob_kzg_commitments()),
         }
     }
 }

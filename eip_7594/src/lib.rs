@@ -29,8 +29,10 @@ use types::{
         containers::{DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry},
         primitives::{BlobCommitmentsInclusionProof, CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
-    gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
-    nonstandard::{BlockOrDataColumnSidecar, Phase},
+    gloas::containers::{
+        DataColumnSidecar as GloasDataColumnSidecar, SignedExecutionPayloadEnvelope,
+    },
+    nonstandard::{BlockOrData, Phase},
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, NodeId, Slot, SubnetId, ValidatorIndex},
@@ -366,6 +368,18 @@ pub fn construct_data_column_sidecars_post_gloas<P: Preset>(
     get_data_column_sidecars_post_gloas(root, slot, kzg_commitments, cells_and_kzg_proofs)
 }
 
+pub fn construct_data_column_sidecars_from_payload_envelope<P: Preset>(
+    envelope: &SignedExecutionPayloadEnvelope<P>,
+    cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    get_data_column_sidecars_post_gloas(
+        envelope.block_root(),
+        envelope.slot(),
+        envelope.blob_kzg_commitments(),
+        cells_and_kzg_proofs,
+    )
+}
+
 pub fn construct_fulu_data_column_sidecars<P: Preset>(
     signed_block: &SignedBeaconBlock<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
@@ -463,7 +477,7 @@ pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
 }
 
 pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
-    block_or_sidecar: BlockOrDataColumnSidecar<P>,
+    block_or_data: BlockOrData<P>,
     received_blobs: Vec<Blob<P>>,
     cells_proofs: Vec<KzgProof>,
     kzg_backend: KzgBackend,
@@ -477,12 +491,18 @@ pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
         let cells_and_kzg_proofs =
             try_convert_to_cells_and_kzg_proofs::<P>(&received_blobs, &cells_proofs, kzg_backend)?;
 
-        let data_column_sidecars = match block_or_sidecar {
-            BlockOrDataColumnSidecar::Block(block) => {
+        let data_column_sidecars = match block_or_data {
+            BlockOrData::Block(block) => {
                 construct_fulu_data_column_sidecars(&block, &cells_and_kzg_proofs)?
             }
-            BlockOrDataColumnSidecar::Sidecar(sidecar) => {
+            BlockOrData::Sidecar(sidecar) => {
                 construct_data_column_sidecars_from_sidecar(&sidecar, &cells_and_kzg_proofs)?
+            }
+            BlockOrData::Envelope(envelope) => {
+                construct_data_column_sidecars_from_payload_envelope(
+                    &envelope,
+                    &cells_and_kzg_proofs,
+                )?
             }
         };
 

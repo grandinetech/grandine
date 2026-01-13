@@ -385,17 +385,7 @@ impl Eth1Api {
                 .await?
                 .result
             }
-            Phase::Deneb | Phase::Electra | Phase::Fulu => {
-                self.execute(
-                    ENGINE_FORKCHOICE_UPDATED_V3,
-                    params,
-                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
-                    None,
-                )
-                .await?
-                .result
-            }
-            Phase::Gloas => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 self.execute(
                     ENGINE_FORKCHOICE_UPDATED_V3,
                     params,

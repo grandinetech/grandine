@@ -9,7 +9,7 @@ use prometheus_metrics::Metrics;
 use tap::Tap as _;
 use typenum::Unsigned as _;
 use types::{
-    combined::SignedBeaconBlock, fulu::containers::DataColumnIdentifier, phase0::primitives::H256,
+    fulu::containers::DataColumnIdentifier, nonstandard::BlockOrEnvelope, phase0::primitives::H256,
     preset::Preset,
 };
 
@@ -18,7 +18,7 @@ pub struct ReconstructDataColumnSidecarsTask<P: Preset, W: Wait> {
     pub controller: ApiController<P, W>,
     pub wait_group: W,
     pub block_root: H256,
-    pub block: Arc<SignedBeaconBlock<P>>,
+    pub block_or_envelope: BlockOrEnvelope<P>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -30,7 +30,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             controller,
             wait_group,
             block_root,
-            block,
+            block_or_envelope,
             metrics,
         } = self;
 
@@ -113,7 +113,12 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             Ok(data_column_sidecars) => {
                 info_with_peers!("reconstructed missing data columns for block: {block_root:?}");
 
-                controller.on_reconstruction(wait_group, block_root, block, data_column_sidecars);
+                controller.on_reconstruction(
+                    wait_group,
+                    block_root,
+                    block_or_envelope,
+                    data_column_sidecars,
+                );
 
                 if let Some(metrics) = metrics.as_ref() {
                     metrics
