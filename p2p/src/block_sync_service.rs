@@ -41,9 +41,10 @@ use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+    gloas::primitives::BuilderIndex,
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{H256, Slot, ValidatorIndex},
+        primitives::{H256, Slot},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -102,7 +103,7 @@ pub struct BlockSyncService<P: Preset> {
     received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
-    received_envelopes: HashMap<(H256, ValidatorIndex), Slot>,
+    received_envelopes: HashMap<(H256, BuilderIndex), Slot>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
     delayed_batches: BTreeMap<Instant, Vec<SyncBatch<P>>>,
@@ -1690,7 +1691,7 @@ impl<P: Preset> BlockSyncService<P> {
     fn register_new_received_envelope(
         &mut self,
         block_root: H256,
-        builder_index: ValidatorIndex,
+        builder_index: BuilderIndex,
         slot: Slot,
     ) -> bool {
         self.received_envelopes

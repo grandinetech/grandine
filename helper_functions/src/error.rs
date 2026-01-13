@@ -48,8 +48,8 @@ pub(crate) enum Error {
     NoActiveValidators,
     #[error("no committee attesters for {index} committee")]
     NoCommitteeAttesters { index: CommitteeIndex },
-    #[error("attestation data index is not zero")]
-    NoneZeroDataIndex,
+    #[error("attestation data index is invalid for current slot (got: {index}, expected: 0)")]
+    InvalidAttestationIndexForCurrentSlot { index: u64 },
     #[error("execution payload availability is out of range")]
     PayloadAvailabilityOutOfRange,
     #[error(
