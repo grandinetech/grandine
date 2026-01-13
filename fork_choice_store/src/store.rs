@@ -60,6 +60,7 @@ use types::{
             CombinedPayloadAttestation, DataColumnSidecar as GloasDataColumnSidecar,
             SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -238,8 +239,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, H256, ColumnIndex),
         ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     >,
-    accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, SignedExecutionPayloadBid>>,
-    accepted_execution_payload_envelopes: HashSet<(Slot, H256, ValidatorIndex)>,
+    accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, SignedExecutionPayloadBid>>,
+    accepted_execution_payload_envelopes: HashSet<(Slot, H256, BuilderIndex)>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -1212,6 +1213,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(action);
         }
 
+        // Post-Gloas block can be imported without data availability check
         if self.should_check_data_availability_at_slot(block.message().slot())
             && data_availability_policy.check()
         {
@@ -1326,7 +1328,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let bid = payload_bid.message;
         let builder_index = bid.builder_index;
 
-        // > off-protocol payment is disallowed in gossip, the `bid.execution_payment` MUST be zero
+        // > off-protocol payment is disallowed to gossip via p2p and API, the `bid.execution_payment` MUST be zero
         if origin.off_protocol_bid_disallowed() {
             ensure!(
                 bid.execution_payment == 0,
@@ -1335,7 +1337,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // > the `bid.slot` is the current slot or the next slot
-        if bid.slot > self.slot() + 1 {
+        if bid.slot < self.slot() || bid.slot > self.slot() + 1 {
             return Ok(ExecutionPayloadBidAction::Ignore(false));
         }
 
@@ -1348,7 +1350,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
-        let Some(state) = self.state_by_block_root(bid.parent_block_root) else {
+        if !self.contains_block(bid.parent_block_root) {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        }
+
+        let Some(state) =
+            self.state_cache
+                .existing_state_at_slot(self, bid.parent_block_root, bid.slot)
+        else {
             return Ok(ExecutionPayloadBidAction::Ignore(true));
         };
 
@@ -3362,7 +3371,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         } else {
             self.accepted_gloas_data_column_sidecars
                 .keys()
-                .filter(|(_, root, _)| *root == block_root)
+                .filter(|(slot, root, _)| {
+                    *slot == data_column_sidecar.slot() && *root == block_root
+                })
                 .count()
         }
     }

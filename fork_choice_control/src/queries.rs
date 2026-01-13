@@ -572,6 +572,19 @@ where
         Ok(envelopes)
     }
 
+    pub fn execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        let snapshot = self.snapshot();
+        let storage = self.storage();
+
+        match snapshot.cached_execution_payload_envelope(block_root) {
+            Some(envelope) => Ok(Some(envelope.clone_arc())),
+            None => storage.execution_payload_envelope_by_root(block_root),
+        }
+    }
+
     pub fn blocks_by_root(
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,

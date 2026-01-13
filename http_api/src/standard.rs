@@ -1337,21 +1337,27 @@ pub async fn blobs<P: Preset, W: Wait>(
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
     let requested_indices = if let Some(versioned_hashes) = query.versioned_hashes {
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        let Some(kzg_commitments) = block
-            .message()
-            .body()
-            .with_blob_kzg_commitments()
-            .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
-        else {
+        let kzg_commitments_opt = if version >= Phase::Gloas {
+            controller
+                .execution_payload_envelope_by_root(block_root)?
+                .map(|envelope| envelope.blob_kzg_commitments().clone())
+        } else {
+            block
+                .message()
+                .body()
+                .with_blob_kzg_commitments()
+                .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
+                .cloned()
+        };
+
+        let Some(kzg_commitments) = kzg_commitments_opt else {
             return Ok(EthResponse::json_or_ssz(DynamicList::empty(), &headers)?
                 .execution_optimistic(status.is_optimistic())
                 .finalized(finalized));
         };
 
         let block_versioned_hashes = kzg_commitments
-            .iter()
-            .copied()
+            .into_iter()
             .map(misc::kzg_commitment_to_versioned_hash)
             .collect::<Vec<_>>();
 
@@ -1435,13 +1441,8 @@ pub async fn publish_block<P: Preset, W: Wait>(
     >,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
-    let slot = signed_beacon_block.to_header().message.slot;
 
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if signed_beacon_block.phase() == Phase::Fulu {
         let signed_beacon_block = Arc::new(signed_beacon_block);
 
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
@@ -1526,13 +1527,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .with_signature(signature)
         .pipe(Arc::new);
 
-    let slot = signed_beacon_block.to_header().message.slot;
-
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if signed_beacon_block.phase() == Phase::Fulu {
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
             controller.clone_arc(),
             signed_beacon_block.clone_arc(),
@@ -1631,14 +1626,8 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     >,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
-    let slot = signed_beacon_block.to_header().message.slot;
 
-    // TODO: (gloas): handle publish gloas block only
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if signed_beacon_block.phase() == Phase::Fulu {
         let signed_beacon_block = Arc::new(signed_beacon_block);
 
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
@@ -1660,6 +1649,8 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         )
         .await
     } else {
+        // Post-Gloas block is not implement `BlockBodyWithBlobKzgCommitments` trait, so no blob
+        // sidecars will be contrusted, though only publish the block
         let blob_sidecars = misc::construct_blob_sidecars(
             &signed_beacon_block,
             blobs.unwrap_or_default().into_iter(),

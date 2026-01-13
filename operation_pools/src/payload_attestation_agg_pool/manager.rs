@@ -62,16 +62,6 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
     pub async fn aggregate_payload_attestations(
         &self,
-    ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
-        self.spawn_task(AggregatePayloadAttestationsTask {
-            pool: self.pool.clone_arc(),
-            slot: self.controller.slot(),
-        })
-        .await
-    }
-
-    pub async fn aggregate_payload_attestations_for_slot(
-        &self,
         slot: Slot,
     ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
         self.spawn_task(AggregatePayloadAttestationsTask {

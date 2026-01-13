@@ -24,6 +24,8 @@ impl<P: Preset> DataColumnCache<P> {
     ) -> bool {
         self.data_columns.iter().any(
             move |(data_column_identifier, (data_column_sidecar, data_column_slot, _))| {
+                // There is no `signed_block_header` or `proposer_index` field in
+                // post-Gloas data column sidecar.
                 let data_column_proposer_index =
                     data_column_sidecar.pre_gloas().map(|data_column_sidecar| {
                         data_column_sidecar
@@ -32,6 +34,7 @@ impl<P: Preset> DataColumnCache<P> {
                             .proposer_index
                     });
 
+                // So we can only compare `slot` and `block_root`
                 *data_column_slot == slot
                     && data_column_proposer_index == proposer_index
                     && data_column_identifier.block_root != block_root

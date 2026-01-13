@@ -64,6 +64,8 @@ impl<P: Preset> Pool<P> {
                 .await
                 .retain(|data, _| data.slot >= previous_slot);
 
+            // Keep payload attestations from previous slot as will be used to aggregate into block
+            // payload attestations
             self.payload_attestation_messages
                 .write()
                 .await
@@ -135,27 +137,23 @@ impl<P: Preset> Pool<P> {
             .read()
             .await
             .iter()
+            .filter(|(data, _)| data.slot == slot)
             .map(|(data, aggregate)| async {
-                if data.slot == slot {
-                    let Aggregate {
-                        aggregation_bits,
-                        signature,
-                    } = *aggregate.read().await;
+                let Aggregate {
+                    aggregation_bits,
+                    signature,
+                } = *aggregate.read().await;
 
-                    Some(PayloadAttestation {
-                        aggregation_bits,
-                        data: *data,
-                        signature: signature.into(),
-                    })
-                } else {
-                    None
+                PayloadAttestation {
+                    aggregation_bits,
+                    data: *data,
+                    signature: signature.into(),
                 }
             })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await
             .into_iter()
-            .flatten()
             .take(P::MaxPayloadAttestation::USIZE)
             .pipe(ContiguousList::try_from_iter)
             .map_err(Into::into)

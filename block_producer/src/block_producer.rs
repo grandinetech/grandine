@@ -1438,16 +1438,16 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .await
     }
 
+    // Constructed `payload_attestations` in current block is to aggregate all payload attestations for the previous block payload.
+    // See <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/validator.md#constructing-payload_attestations>
     async fn prepare_payload_attestations(
         &self,
     ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
-        // Constructed `payload_attestations` in current block is to aggregate all payload
-        // attestations for the previous block payload.
-        // See <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/validator.md#constructing-payload_attestations>
-        // TODO: (gloas) fix payload attestations aggregation
+        let message_slot = misc::previous_slot(self.beacon_state.slot());
+
         self.producer_context
             .payload_attestation_agg_pool
-            .aggregate_payload_attestations()
+            .aggregate_payload_attestations(message_slot)
             .await
     }
 

@@ -808,7 +808,10 @@ pub fn get_attestation_participation_flags<P: Preset>(
     // > [New in Gloas:EIP7732]
     if let Some(post_gloas) = state.post_gloas() {
         let is_matching_payload = if predicates::is_attestation_same_slot::<P>(state, &data)? {
-            ensure!(data.index == 0, Error::NoneZeroDataIndex);
+            ensure!(
+                data.index == 0,
+                Error::InvalidAttestationIndexForCurrentSlot { index: data.index }
+            );
 
             true
         } else {
