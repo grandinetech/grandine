@@ -57,8 +57,8 @@ use crate::{
     block_processor::BlockProcessor,
     events::EventChannels,
     messages::{
-        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
-        SyncMessage, ValidatorMessage,
+        AttestationVerifierMessage, BuilderMessage, MutatorMessage, P2pMessage, PoolMessage,
+        SubnetMessage, SyncMessage, ValidatorMessage,
     },
     misc::{
         ProcessingTimings, SidecarsPendingReconstruction, VerifyAggregateAndProofResult,
@@ -126,6 +126,7 @@ where
         subnet_tx: impl UnboundedSink<SubnetMessage<W>>,
         sync_tx: impl UnboundedSink<SyncMessage<P>>,
         validator_tx: impl UnboundedSink<ValidatorMessage<P, W>>,
+        builder_tx: impl UnboundedSink<BuilderMessage<P, W>>,
         storage: Arc<Storage<P>>,
         unfinalized_blocks: impl DoubleEndedIterator<Item = Result<Arc<SignedBeaconBlock<P>>>>,
         finished_back_sync: bool,
@@ -181,6 +182,7 @@ where
             subnet_tx,
             sync_tx,
             validator_tx,
+            builder_tx,
         );
 
         mutator.process_unfinalized_blocks(unfinalized_blocks)?;

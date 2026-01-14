@@ -46,7 +46,10 @@ use types::{
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
-use validator::{Validator, ValidatorChannels, ValidatorConfig};
+use validator::{
+    Builder as Builders, BuilderChannels, BuilderConfig, Validator, ValidatorChannels,
+    ValidatorConfig,
+};
 
 use crate::{
     http_api_config::HttpApiConfig,
@@ -111,6 +114,11 @@ impl<P: Preset> Context<P> {
             futures::channel::mpsc::unbounded();
         let (validator_to_p2p_tx, validator_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (execution_service_tx, execution_service_rx) = futures::channel::mpsc::unbounded();
+
+        // Builder channels
+        let (fc_to_builder_tx, fc_to_builder_rx) = futures::channel::mpsc::unbounded();
+        let (_, p2p_to_builder_rx) = futures::channel::mpsc::unbounded();
+        let (builder_to_p2p_tx, _) = futures::channel::mpsc::unbounded();
 
         let chain_config = Arc::new(chain_config);
         let store_config = StoreConfig::aggressive(&chain_config);
@@ -188,6 +196,7 @@ impl<P: Preset> Context<P> {
             fc_to_subnet_tx,
             fc_to_sync_tx,
             fc_to_validator_tx,
+            fc_to_builder_tx,
             storage,
             core::iter::empty(),
             true,
@@ -238,6 +247,9 @@ impl<P: Preset> Context<P> {
             disable_blockprint_graffiti: true,
             ..Default::default()
         });
+
+        // TODO(gloas): Set actual config once added support for Builder <-> Beacon API comm.
+        let builder_config = Arc::new(BuilderConfig::default());
 
         let keymanager = Arc::new(KeyManager::new_in_memory(
             signer.clone_arc(),
@@ -333,7 +345,7 @@ impl<P: Preset> Context<P> {
             None,
             event_channels.clone_arc(),
             keymanager.proposer_configs().clone_arc(),
-            signer,
+            signer.clone_arc(),
             slashing_protector,
             payload_attestation_agg_pool,
             sync_committee_agg_pool.clone_arc(),
@@ -341,6 +353,22 @@ impl<P: Preset> Context<P> {
             None,
             validator_channels,
             network_config.network_dir.as_deref(),
+        );
+
+        let builder_channels = BuilderChannels {
+            fork_choice_rx: fc_to_builder_rx,
+            p2p_tx: builder_to_p2p_tx,
+            p2p_to_builder_rx,
+        };
+
+        let builder = Builders::new(
+            builder_channels,
+            builder_config.clone_arc(),
+            block_producer.clone_arc(),
+            controller.clone_arc(),
+            signer,
+            event_channels.clone_arc(),
+            None,
         );
 
         let subnet_service = SubnetService::new(
@@ -418,6 +446,7 @@ impl<P: Preset> Context<P> {
             result = bls_to_execution_change_pool_service.run().fuse() => result,
             result = liveness_tracker.run().fuse() => result,
             result = validator.run().fuse() => result,
+            result = builder.run().fuse() => result,
             result = subnet_service.run().fuse() => result,
             result = submit_requests.fuse() => result,
         }

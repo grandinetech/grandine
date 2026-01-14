@@ -16,7 +16,7 @@ use anyhow::{Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
-use builder_api::{BuilderApi, BuilderConfig};
+use builder_api::{BuilderApi, BuilderConfig as BuilderApiConfig};
 use bytesize::ByteSize;
 use clock::Tick;
 use data_dumper::DataDumper;
@@ -69,7 +69,7 @@ use slashing_protection::{SlashingProtector, interchange_format::InterchangeData
 use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tokio::{runtime::Builder, select};
+use tokio::{runtime::Builder as RuntimeBuilder, select};
 #[cfg(feature = "embed")]
 use tokio_util::sync::CancellationToken;
 use types::{
@@ -83,7 +83,8 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
-    Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig, run_validator_api,
+    Builder, BuilderChannels, BuilderConfig, Validator, ValidatorApiConfig, ValidatorChannels,
+    ValidatorConfig, run_validator_api,
 };
 use validator_key_cache::ValidatorKeyCache;
 use validator_statistics::ValidatorStatistics;
@@ -115,6 +116,7 @@ pub struct RuntimeConfig {
     pub slashing_protection_history_limit: u64,
     pub track_liveness: bool,
     pub validator_enabled: bool,
+    pub builder_enabled: bool,
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -126,12 +128,13 @@ pub async fn run_after_genesis<P: Preset>(
     store_config: StoreConfig,
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
+    builder_config: Arc<BuilderConfig>,
     network_config: NetworkConfig,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     state_load_strategy: StateLoadStrategy<P>,
     eth1_config: Arc<Eth1Config>,
     storage_config: StorageConfig,
-    builder_config: Option<BuilderConfig>,
+    builder_api_config: Option<BuilderApiConfig>,
     signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     http_api_config: Option<HttpApiConfig>,
@@ -152,6 +155,7 @@ pub async fn run_after_genesis<P: Preset>(
         slashing_protection_history_limit,
         track_liveness,
         validator_enabled,
+        builder_enabled,
     } = runtime_config;
 
     let MetricsConfig {
@@ -171,9 +175,14 @@ pub async fn run_after_genesis<P: Preset>(
     let signer_snapshot = signer.load();
 
     if !signer_snapshot.is_empty() {
-        info_with_peers!("loaded {} validator key(s)", signer_snapshot.keys().len());
+        info_with_peers!(
+            "loaded {} validator/builder key(s)",
+            signer_snapshot.keys().len()
+        );
     } else if validator_enabled {
         warn_with_peers!("failed to load validator keys");
+    } else if builder_enabled {
+        warn_with_peers!("failed to load builder keys");
     }
 
     let (blob_fetcher_to_p2p_tx, blob_fetcher_to_p2p_rx) = mpsc::unbounded();
@@ -199,6 +208,11 @@ pub async fn run_after_genesis<P: Preset>(
 
     let (fork_choice_to_sync_tx, fork_choice_to_sync_rx) =
         back_sync_enabled.then(mpsc::unbounded).unzip();
+
+    // Builder channels
+    let (fork_choice_to_builder_tx, fork_choice_to_builder_rx) = mpsc::unbounded();
+    let (p2p_to_builder_tx, p2p_to_builder_rx) = mpsc::unbounded();
+    let (builder_to_p2p_tx, builder_to_p2p_rx) = mpsc::unbounded();
 
     let mut api_to_liveness_tx = None;
     let mut network_to_slasher_tx = None;
@@ -292,7 +306,7 @@ pub async fn run_after_genesis<P: Preset>(
         )?
     };
 
-    slashing_protector.register_validators(signer_snapshot.keys().copied())?;
+    slashing_protector.register_validators(signer_snapshot.validator_keys().copied())?;
 
     let slashing_protector = Arc::new(Mutex::new(slashing_protector));
 
@@ -318,11 +332,12 @@ pub async fn run_after_genesis<P: Preset>(
         fork_choice_to_subnet_tx,
         fork_choice_to_sync_tx,
         fork_choice_to_validator_tx,
+        fork_choice_to_builder_tx,
         storage.clone_arc(),
         unfinalized_blocks,
         !back_sync_enabled || is_anchor_genesis,
         blacklisted_blocks,
-        sidecars_construction_started.clone_arc(),
+        sidecars_construction_started,
     )?;
 
     let received_blob_sidecars = Arc::new(SccHashMap::new());
@@ -346,7 +361,12 @@ pub async fn run_after_genesis<P: Preset>(
         execution_service_to_blob_fetcher_rx,
     );
 
-    let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
+    let validator_keys = Arc::new(
+        signer_snapshot
+            .validator_keys()
+            .copied()
+            .collect::<HashSet<_>>(),
+    );
 
     let attestation_verifier = AttestationVerifier::new(
         controller.clone_arc(),
@@ -427,9 +447,9 @@ pub async fn run_after_genesis<P: Preset>(
     let validator_statistics =
         report_validator_performance.then(|| Arc::new(ValidatorStatistics::new(metrics.clone())));
 
-    let builder_api = builder_config.map(|builder_config| {
+    let builder_api = builder_api_config.map(|builder_api_config| {
         Arc::new(BuilderApi::new(
-            builder_config,
+            builder_api_config,
             pubkey_cache,
             signer_snapshot.client().clone(),
             metrics.clone(),
@@ -654,6 +674,22 @@ pub async fn run_after_genesis<P: Preset>(
         network_config.network_dir.as_deref(),
     );
 
+    let builder_channels = BuilderChannels {
+        fork_choice_rx: fork_choice_to_builder_rx,
+        p2p_tx: builder_to_p2p_tx,
+        p2p_to_builder_rx,
+    };
+
+    let builder = Builder::new(
+        builder_channels,
+        builder_config.clone_arc(),
+        block_producer.clone_arc(),
+        controller.clone_arc(),
+        signer.clone_arc(),
+        event_channels.clone_arc(),
+        metrics.clone(),
+    );
+
     let p2p_channels = Channels {
         api_to_p2p_rx,
         blob_fetcher_to_p2p_rx,
@@ -661,8 +697,10 @@ pub async fn run_after_genesis<P: Preset>(
         pool_to_p2p_rx,
         p2p_to_sync_tx,
         p2p_to_validator_tx,
+        p2p_to_builder_tx,
         sync_to_p2p_rx,
         validator_to_p2p_rx,
+        builder_to_p2p_rx,
         network_to_slasher_tx,
         subnet_service_to_p2p_rx,
     };
@@ -815,6 +853,7 @@ pub async fn run_after_genesis<P: Preset>(
         result = spawn_fallible(execution_service.run()) => result,
         result = spawn_fallible(execution_blob_fetcher.run()) => result,
         result = spawn_fallible(validator.run()) => result,
+        result = spawn_fallible(builder.run()) => result,
         result = spawn_fallible(attestation_verifier.run()) => result,
         result = spawn_fallible(block_sync_service.run()) => result,
         result = spawn_fallible(network.run()) => result,
@@ -939,6 +978,7 @@ struct Context {
     genesis_state_download_url: Option<RedactingUrl>,
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
+    builder_config: Arc<BuilderConfig>,
     checkpoint_sync_url: Option<RedactingUrl>,
     force_checkpoint_sync: bool,
     back_sync_enabled: bool,
@@ -946,7 +986,7 @@ struct Context {
     network_config: NetworkConfig,
     storage_config: StorageConfig,
     command: Option<GrandineCommand>,
-    builder_config: Option<BuilderConfig>,
+    builder_api_config: Option<BuilderApiConfig>,
     signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     state_slot: Option<Slot>,
@@ -959,6 +999,7 @@ struct Context {
     detect_doppelgangers: bool,
     slashing_protection_history_limit: u64,
     validator_enabled: bool,
+    builder_enabled: bool,
     blacklisted_blocks: HashSet<H256>,
     reconstruction_delay: Duration,
     report_validator_performance: bool,
@@ -1026,6 +1067,7 @@ impl Context {
             genesis_state_download_url,
             validator_api_config,
             validator_config,
+            builder_config,
             checkpoint_sync_url,
             force_checkpoint_sync,
             back_sync_enabled,
@@ -1033,7 +1075,7 @@ impl Context {
             network_config,
             storage_config,
             command,
-            builder_config,
+            builder_api_config,
             signer,
             slasher_config,
             state_slot,
@@ -1046,6 +1088,7 @@ impl Context {
             detect_doppelgangers,
             slashing_protection_history_limit,
             validator_enabled,
+            builder_enabled,
             blacklisted_blocks,
             reconstruction_delay,
             report_validator_performance,
@@ -1058,7 +1101,7 @@ impl Context {
 
         if cfg!(not(feature = "embed")) && eth1_rpc_urls.is_empty() {
             ensure!(
-                signer_snapshot.no_keys(),
+                signer_snapshot.no_validator_keys(),
                 Error::MissingEth1RpcUrlsWithValidators,
             );
         }
@@ -1150,16 +1193,18 @@ impl Context {
                 slashing_protection_history_limit,
                 track_liveness,
                 validator_enabled,
+                builder_enabled,
             },
             store_config,
             validator_api_config,
             validator_config,
+            builder_config,
             network_config,
             anchor_checkpoint_provider,
             state_load_strategy,
             eth1_config,
             storage_config,
-            builder_config,
+            builder_api_config,
             signer,
             slasher_config,
             http_api_config,
@@ -1231,6 +1276,8 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         data_dir,
         validators,
         keystore_storage_password_file,
+        builders,
+        builder_keystore_storage_password_file,
         disable_blockprint_graffiti,
         graffiti,
         max_empty_slots,
@@ -1249,7 +1296,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         slashing_history_limit,
         state_slot,
         auth_options,
-        builder_config,
+        builder_config: builder_api_config,
         web3signer_config,
         http_api_config,
         max_events,
@@ -1308,6 +1355,13 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         enable_payload_build,
     });
 
+    let builder_config = Arc::new(BuilderConfig {
+        max_empty_slots,
+        keystore_storage_password_file: builder_keystore_storage_password_file,
+        min_bid_value: 0,
+        always_bid: false,
+    });
+
     let store_config = StoreConfig {
         max_empty_slots,
         max_epochs_to_retain_states_in_cache,
@@ -1364,22 +1418,97 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         info_with_peers!("started loading validator keys");
     }
 
-    let mut validator_keys = validators
+    let mut builder_key_cache = use_validator_key_cache.then(|| {
+        ValidatorKeyCache::new(
+            storage_config
+                .directories
+                .builder_dir
+                .clone()
+                .unwrap_or_default(),
+        )
+    });
+
+    let builder_keystore_storage = match &builder_config.keystore_storage_password_file {
+        Some(password_path) => {
+            let password = keymanager::load_key_storage_password(password_path)?;
+
+            keymanager::load_key_storage(
+                &password,
+                storage_config
+                    .directories
+                    .builder_dir
+                    .clone()
+                    .unwrap_or_default(),
+            )?
+        }
+        None => ValidatorKeyCache::default(),
+    };
+
+    let builder_enabled = builder_key_cache.is_some()
+        // || !web3signer_config.is_empty()
+        || builders.is_some()
+        || builder_config.keystore_storage_password_file.is_some();
+
+    if builder_enabled {
+        info_with_peers!("started loading builder keys");
+    }
+
+    let mut keys = validators
         .map(|validators| {
-            validators
+            let validators = validators
                 .normalize(cache.as_mut())
-                .expect("unable to load local validator keys")
+                .expect("unable to load local validator keys");
+
+            validators
+                .into_iter()
+                .map(|(pubkey, secret_key, key_origin)| {
+                    (pubkey, secret_key, key_origin, KeyType::Validator)
+                })
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
-    validator_keys.extend(
-        keystore_storage
+    keys.extend(keystore_storage.keypairs().map(|(public_key, secret_key)| {
+        (
+            public_key,
+            secret_key,
+            KeyOrigin::KeymanagerAPI,
+            KeyType::Validator,
+        )
+    }));
+
+    keys.extend(
+        builders
+            .map(|builders| {
+                let builders = builders
+                    .normalize(builder_key_cache.as_mut())
+                    .expect("unable to load local validator keys");
+
+                builders
+                    .into_iter()
+                    .map(|(pubkey, secret_key, key_origin)| {
+                        (pubkey, secret_key, key_origin, KeyType::Builder)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    );
+
+    keys.extend(
+        builder_keystore_storage
             .keypairs()
-            .map(|(public_key, secret_key)| (public_key, secret_key, KeyOrigin::KeymanagerAPI)),
+            .map(|(public_key, secret_key)| {
+                (
+                    public_key,
+                    secret_key,
+                    KeyOrigin::KeymanagerAPI,
+                    KeyType::Builder,
+                )
+            }),
     );
 
     let signer = Arc::new(Signer::new(
-        validator_keys,
+        keys,
         client,
         web3signer_config,
         metrics.clone(),
@@ -1389,6 +1518,12 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         && let Err(error) = cache.save()
     {
         warn_with_peers!("Unable to save validator key cache: {error:?}");
+    }
+
+    if let Some(builder_key_cache) = builder_key_cache {
+        if let Err(error) = builder_key_cache.save() {
+            warn_with_peers!("Unable to save builder key cache: {error:?}");
+        }
     }
 
     let slasher_config = slashing_enabled.then_some(SlasherConfig {
@@ -1404,6 +1539,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         genesis_state_download_url,
         validator_api_config,
         validator_config,
+        builder_config,
         checkpoint_sync_url,
         force_checkpoint_sync,
         back_sync_enabled,
@@ -1411,7 +1547,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         network_config,
         storage_config,
         command,
-        builder_config,
+        builder_api_config,
         signer,
         slasher_config,
         state_slot,
@@ -1424,6 +1560,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         detect_doppelgangers,
         slashing_protection_history_limit,
         validator_enabled,
+        builder_enabled,
         blacklisted_blocks,
         reconstruction_delay,
         report_validator_performance,
@@ -1760,7 +1897,7 @@ async fn genesis_checkpoint_provider<P: Preset>(
 fn block_on(future: impl Future<Output = Result<()>>) -> Result<()> {
     // This is roughly what `#[tokio::main]` expands to.
     // See <https://github.com/tokio-rs/tokio/blob/7096a8007502526b23ee1707a6cb37c68c4f0a84/tokio-macros/src/entry.rs#L361-L398>.
-    Builder::new_multi_thread()
+    RuntimeBuilder::new_multi_thread()
         .enable_all()
         .build()?
         .block_on(future)

@@ -646,7 +646,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.register_validators(current_epoch).await;
         }
 
-        let no_validators = self.signer.load().no_keys()
+        let no_validators = self.signer.load().no_validator_keys()
             && self.registered_validators.is_empty()
             && self.block_producer.no_prepared_proposers().await;
 
@@ -1909,7 +1909,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
-        self.signer.load().keys().copied().collect::<HashSet<_>>()
+        self.signer
+            .load()
+            .validator_keys()
+            .copied()
+            .collect::<HashSet<_>>()
     }
 
     #[expect(clippy::too_many_lines)]
@@ -2617,7 +2621,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         tokio::spawn(async move {
             let signer_snapshot = signer.load();
-            let pubkeys = signer_snapshot.keys().copied().collect_vec();
+            let pubkeys = signer_snapshot.validator_keys().copied().collect_vec();
 
             ToSubnetService::SetRegisteredValidators(
                 registered_validators

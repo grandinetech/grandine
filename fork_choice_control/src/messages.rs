@@ -299,6 +299,22 @@ impl<P: Preset, W> ValidatorMessage<P, W> {
     }
 }
 
+pub enum BuilderMessage<P: Preset, W> {
+    Tick(W, Tick),
+    Head(W, ChainLink<P>),
+    PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),
+    Stop,
+}
+
+impl<P: Preset, W> BuilderMessage<P, W> {
+    pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
+        // Don't log the value because it can contain entire `BeaconState`s.
+        if tx.unbounded_send(self).is_err() {
+            debug_with_peers!("send to builder failed because the receiver was dropped");
+        }
+    }
+}
+
 pub enum SubnetMessage<W> {
     Slot(W, Slot),
     Stop,

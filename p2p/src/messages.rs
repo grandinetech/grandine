@@ -28,7 +28,10 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
+    gloas::containers::{
+        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -235,6 +238,21 @@ impl<P: Preset> ValidatorToP2p<P> {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub enum BuilderToP2p<P: Preset> {
+    PublishPayloadBid(Arc<SignedExecutionPayloadBid>),
+    PublishExecutionPayloadEnvelope(Arc<SignedExecutionPayloadEnvelope<P>>),
+}
+
+impl<P: Preset> BuilderToP2p<P> {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
+        }
+    }
+}
+
 pub enum P2pToValidator<P: Preset> {
     AttesterSlashing(Box<AttesterSlashing<P>>, GossipId),
     ProposerSlashing(Box<ProposerSlashing>, GossipId),
@@ -245,6 +263,18 @@ impl<P: Preset> P2pToValidator<P> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug_with_peers!("send to validator failed because the receiver was dropped");
+        }
+    }
+}
+
+pub enum P2pToBuilder {
+    ProposerPreferences(Box<SignedProposerPreferences>, GossipId),
+}
+
+impl P2pToBuilder {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug_with_peers!("send to builder failed because the receiver was dropped");
         }
     }
 }

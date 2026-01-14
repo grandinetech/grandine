@@ -11,7 +11,7 @@ use futures::lock::{MappedMutexGuard, Mutex, MutexGuard};
 use itertools::Itertools as _;
 use logging::{info_with_peers, warn_with_peers};
 use serde::Serialize;
-use signer::{KeyOrigin, Signer};
+use signer::{KeyOrigin, KeyType, Signer};
 use slashing_protection::{SlashingProtector, interchange_format::InterchangeFormat};
 use std_ext::ArcExt as _;
 use tap::{Pipe as _, TryConv as _};
@@ -210,7 +210,7 @@ impl KeystoreManager {
                         Error::Duplicate.into()
                     } else {
                         key_storage.add(uuid, public_key, secret_key.clone_arc());
-                        imported_keys.push((public_key, secret_key));
+                        imported_keys.push((public_key, secret_key, KeyType::Validator));
                         Status::Imported.into()
                     }
                 }
@@ -223,7 +223,7 @@ impl KeystoreManager {
             self.slashing_protector
                 .lock()
                 .await
-                .register_validators(imported_keys.iter().map(|(pubkey, _)| *pubkey))?;
+                .register_validators(imported_keys.iter().map(|(pubkey, _, _)| *pubkey))?;
 
             self.signer.update(|snapshot| {
                 let mut snapshot = snapshot.as_ref().clone();

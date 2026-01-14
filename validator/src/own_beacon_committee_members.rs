@@ -130,7 +130,7 @@ impl OwnBeaconCommitteeMembers {
         let signer_snapshot = self.signer.load();
 
         let own_public_keys = signer_snapshot
-            .keys()
+            .validator_keys()
             .copied()
             .filter_map(|public_key| {
                 let validator_index = accessors::index_of_public_key(state, &public_key)?;
