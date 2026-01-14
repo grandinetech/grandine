@@ -155,7 +155,7 @@ pub mod capella {
     };
     pub(crate) use block_processing::{
         process_block, process_block_for_gossip, process_bls_to_execution_change,
-        process_operations, process_withdrawals,
+        process_operations, process_withdrawals, update_next_withdrawal_validator_index,
     };
     pub(crate) use epoch_processing::{epoch_report, process_epoch};
     pub(crate) use slot_processing::process_slots;
