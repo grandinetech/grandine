@@ -66,7 +66,6 @@ pub struct BeaconStateDelta<P: Preset> {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct RandaoChange {
     pub start_idx: u64,
-    pub end_idx: u64,
     pub new_mixes: Vec<H256>,
 }
 
@@ -285,11 +284,7 @@ pub(super) fn roots_delta<P: Preset>(
     let inputs = target_slot - base_slot;
 
     let roots: Vec<_> = (0..inputs)
-        .map(|i| {
-            *target_roots
-                .get((base_slot + i) % SlotsPerHistoricalRoot::<P>::U64)
-                .expect("Failed to index recent roots")
-        })
+        .map(|i| *target_roots.mod_index(base_slot + i))
         .collect();
 
     roots
@@ -514,21 +509,19 @@ pub(super) fn randao_delta<P: Preset>(
     target_slot: Slot,
     target_randao: &RandaoMixes<P>,
 ) -> RandaoChange {
-    let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
-    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % P::EpochsPerHistoricalVector::U64;
-    let start_idx = end_idx - diff_len - 1;
+    let modulus = P::EpochsPerHistoricalVector::U64;
 
-    let new_mixes: Vec<_> = (start_idx..=end_idx)
-        .map(|i| {
-            *target_randao
-                .get(i)
-                .expect("Failed to get value at index in target_randao")
-        })
+    let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
+    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % modulus;
+    let start_idx = (end_idx + modulus - diff_len - 1) % modulus;
+
+    let num_mixes = diff_len + 1;
+    let new_mixes: Vec<_> = (0..num_mixes)
+        .map(|offset| *target_randao.mod_index(start_idx + offset))
         .collect();
 
     RandaoChange {
         start_idx,
-        end_idx,
         new_mixes,
     }
 }
@@ -554,24 +547,23 @@ pub(super) fn slashings_delta<P: Preset>(
         return None;
     }
 
+    let modulus = P::EpochsPerSlashingsVector::U64;
     let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
-    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % P::EpochsPerSlashingsVector::U64;
-    let start_idx = end_idx - diff_len - 1;
+    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % modulus;
+    let start_idx = (end_idx + modulus - diff_len - 1) % modulus;
 
-    let slashing_changes: Vec<_> = (start_idx..=end_idx)
-        .filter_map(|i| {
-            let base_val = base_slashings
-                .get(i)
-                .expect("Failed to get value at index in base_slashings");
-            let target_val = target_slashings
-                .get(i)
-                .expect("Failed to get value at index in target_slashings");
+    let num_epochs = diff_len + 1;
+    let slashing_changes: Vec<_> = (0..num_epochs)
+        .filter_map(|offset| {
+            let i = start_idx + offset;
+            let base_val = base_slashings.mod_index(i);
+            let target_val = target_slashings.mod_index(i);
 
             if base_val == target_val {
                 None
             } else {
                 Some(SlashingChange {
-                    index: i,
+                    index: i % modulus,
                     new_slashing: *target_val,
                 })
             }
