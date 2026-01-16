@@ -387,26 +387,8 @@ impl<P: Preset> Storage<P> {
             let base_root = self.block_root_by_slot(base_slot)?;
 
             let base_state = if let Some(base_root_value) = base_root {
-                let cached_state = if let Ok(cache) = self.base_state_cache.read() {
-                    if let Some((cached_root, cached_state)) = cache.as_ref() {
-                        (*cached_root == base_root_value).then(|| Arc::clone(cached_state))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                if let Some(state) = cached_state {
-                    Some((base_root_value, state))
-                } else if let Some(state) = self.state_by_block_root(base_root_value)? {
-                    if let Ok(mut cache) = self.base_state_cache.write() {
-                        *cache = Some((base_root_value, Arc::clone(&state)))
-                    }
-                    Some((base_root_value, state))
-                } else {
-                    None
-                }
+                self.load_base_state(base_root_value)?
+                    .map(|state| (base_root_value, state))
             } else {
                 None
             };
@@ -1065,6 +1047,36 @@ impl<P: Preset> Storage<P> {
         Ok(OptionalStateStorage::UnfinalizedOnly(
             self.blocks_by_roots(block_roots),
         ))
+    }
+
+    fn load_cached_base_state(&self, root: H256) -> Option<Arc<BeaconState<P>>> {
+        self.base_state_cache
+            .read()
+            .ok()?
+            .as_ref()
+            .and_then(|(cached_root, cached_state)| {
+                (*cached_root == root).then(|| Arc::clone(cached_state))
+            })
+    }
+
+    fn set_cached_base_state(&self, root: H256, state: &Arc<BeaconState<P>>) {
+        if let Ok(mut cache) = self.base_state_cache.write() {
+            *cache = Some((root, Arc::clone(state)));
+        }
+    }
+
+    fn load_base_state(&self, root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
+        if let Some(cached) = self.load_cached_base_state(root) {
+            return Ok(Some(cached));
+        }
+
+        let Some(state) = self.state_by_block_root(root)? else {
+            return Ok(None);
+        };
+
+        self.set_cached_base_state(root, &state);
+
+        Ok(Some(state))
     }
 
     fn load_block_checkpoint(&self) -> Result<Option<BlockCheckpoint<P>>> {
