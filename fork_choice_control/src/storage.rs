@@ -1331,7 +1331,7 @@ impl PrefixableKey for StateByBlockRoot {
 pub struct StateDeltaByBlockRoot(pub H256);
 
 impl PrefixableKey for StateDeltaByBlockRoot {
-    const PREFIX: &'static str = "s_d";
+    const PREFIX: &'static str = "x";
 }
 
 #[derive(Display)]
