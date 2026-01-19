@@ -110,7 +110,7 @@ aarch64-apple-darwin: ./target/aarch64-apple-darwin/compact/grandine ./target/aa
 
 # ------ GRANDINE-NETHERMIND INTEGRATION ------
 
-NETHERMIND_VERSION ?=
+NETHERMIND_VERSION ?= 1.36.0
 # If empty, public authentication will happen. Public auth rate limits by ip address, so may fail unexpectedly.
 GITHUB_TOKEN ?=
 
@@ -118,6 +118,7 @@ GITHUB_TOKEN ?=
 nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll:
 	cd ./bindings/csharp && \
+	dotnet add ./Grandine.NethermindPlugin/Grandine.NethermindPlugin.csproj package Nethermind.ReferenceAssemblies --version $(NETHERMIND_VERSION) && \
 	dotnet publish -c Release
 
 .PHONY: clean-nethermind-plugin
