@@ -374,9 +374,9 @@ impl<P: Preset> Storage<P> {
             info_with_peers!("saving state in slot {state_slot}");
             let current_state = state.get_or_init(|| chain_link.state(store));
             batch.push(serialize(StateByBlockRoot(block_root), current_state)?);
-            if let Ok(mut base_state) = self.base_state_cache.write() {
-                *base_state = Some((block_root, Arc::clone(current_state)));
-            }
+
+            self.set_cached_base_state(block_root, current_state);
+
             return Ok(true);
         }
 
@@ -774,12 +774,8 @@ impl<P: Preset> Storage<P> {
             .block_root_by_slot(base_slot)?
             .ok_or(Error::DependentRootLookupFailed)?;
 
-        if let Ok(cache) = self.base_state_cache.read()
-            && let Some((cached_root, cached_state)) = cache.as_ref()
-            && *cached_root == base_root
-        {
-            let reconstructed = apply_delta(cached_state, delta)?;
-            return Ok(Some(Arc::new(reconstructed)));
+        if let Some(cached_state) = self.load_cached_base_state(base_root) {
+            return Ok(Some(Arc::new(apply_delta(&cached_state, delta)?)));
         }
 
         let base_state = self
@@ -790,9 +786,7 @@ impl<P: Preset> Storage<P> {
 
         let base_state_arc = Arc::new(base_state);
 
-        if let Ok(mut cache) = self.base_state_cache.write() {
-            *cache = Some((base_root, Arc::clone(&base_state_arc)));
-        }
+        self.set_cached_base_state(base_root, &base_state_arc);
 
         let reconstructed = apply_delta(&base_state_arc, delta)?;
 
@@ -1061,7 +1055,7 @@ impl<P: Preset> Storage<P> {
 
     fn set_cached_base_state(&self, root: H256, state: &Arc<BeaconState<P>>) {
         if let Ok(mut cache) = self.base_state_cache.write() {
-            *cache = Some((root, Arc::clone(state)));
+            *cache = Some((root, state.clone_arc()));
         }
     }
 
