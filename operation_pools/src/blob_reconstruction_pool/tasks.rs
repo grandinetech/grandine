@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use eth1_api::ApiController;
@@ -9,8 +9,11 @@ use prometheus_metrics::Metrics;
 use tap::Tap as _;
 use typenum::Unsigned as _;
 use types::{
-    combined::SignedBeaconBlock, fulu::containers::DataColumnIdentifier, phase0::primitives::H256,
+    combined::SignedBeaconBlock,
+    fulu::containers::DataColumnIdentifier,
+    phase0::primitives::H256,
     preset::Preset,
+    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 use crate::misc::PoolTask;
@@ -76,6 +79,15 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
+        let gauge_timer = Instant::now();
+        let expected_blob_count = block
+            .message()
+            .body()
+            .with_blob_kzg_commitments()
+            .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
+            .map(|contiguous_list| contiguous_list.len())
+            .unwrap_or_default();
+
         let reconstructed_count = P::NumberOfColumns::USIZE.saturating_sub(available_columns.len());
         let partial_matrix = available_columns
             .into_iter()
@@ -123,6 +135,13 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
                     block_root: {block_root:?}: {error:?}",
                 );
             }
+        }
+
+        if let Some(metrics) = metrics.as_ref() {
+            metrics.set_columns_reconstruction_time(
+                &expected_blob_count.to_string(),
+                gauge_timer.elapsed(),
+            );
         }
 
         Ok(())

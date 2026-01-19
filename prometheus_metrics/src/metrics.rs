@@ -66,6 +66,7 @@ pub struct Metrics {
     pub data_column_sidecar_verification_times: Histogram,
     pub reconstructed_columns: IntCounter,
     pub columns_reconstruction_time: Histogram,
+    columns_reconstruction_time_gauge: GaugeVec,
     pub data_column_sidecar_computation: Histogram,
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
     pub data_column_sidecar_kzg_verification_batch: Histogram,
@@ -349,6 +350,14 @@ impl Metrics {
                 "beacon_data_availability_reconstruction_time_seconds",
                 "Time taken to reconstruct columns",
             ))?,
+
+            columns_reconstruction_time_gauge: GaugeVec::new(
+                opts!(
+                    "COLUMN_RECONSTRUCTION_TIMES",
+                    "Nonstandard gauge for column reconstruction"
+                ),
+                &["blob_count"],
+            )?,
 
             data_column_sidecar_computation: Histogram::with_opts(histogram_opts!(
                 "beacon_data_column_sidecar_computation_seconds",
@@ -902,6 +911,7 @@ impl Metrics {
         ))?;
         default_registry.register(Box::new(self.reconstructed_columns.clone()))?;
         default_registry.register(Box::new(self.columns_reconstruction_time.clone()))?;
+        default_registry.register(Box::new(self.columns_reconstruction_time_gauge.clone()))?;
         default_registry.register(Box::new(self.data_column_sidecar_computation.clone()))?;
         default_registry.register(Box::new(
             self.data_column_sidecar_inclusion_proof_verification
@@ -1199,6 +1209,16 @@ impl Metrics {
     }
 
     // Custody Subnets / PeerDAS
+    pub fn set_columns_reconstruction_time(&self, blob_count: &str, time: Duration) {
+        self.columns_reconstruction_time_gauge
+            .get_metric_with_label_values(&[blob_count])
+            .expect(
+                "the number of label values should match the number \
+                 of labels that columns_reconstruction_time_gauge was created with",
+            )
+            .set(time.as_secs_f64())
+    }
+
     pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
         match self
             .column_subnet_peers
