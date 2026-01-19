@@ -394,13 +394,10 @@ impl<P: Preset> Storage<P> {
             };
 
             if let Some((_, base_state)) = base_state {
-                let current_state = Arc::clone(state.get_or_init(|| chain_link.state(store)));
+                let current_state = state.get_or_init(|| chain_link.state(store));
 
                 if base_state.phase() == current_state.phase() {
-                    let delta = delta(
-                        &base_state,
-                        &Arc::clone(state.get_or_init(|| chain_link.state(store))),
-                    )?;
+                    let delta = delta(&base_state, current_state)?;
                     batch.push((
                         StateDeltaByBlockRoot(block_root).to_string(),
                         bincode::serialize(&delta)?,
@@ -411,7 +408,7 @@ impl<P: Preset> Storage<P> {
                         base_state.phase(),
                         current_state.phase()
                     );
-                    batch.push(serialize(StateByBlockRoot(block_root), &current_state)?);
+                    batch.push(serialize(StateByBlockRoot(block_root), current_state)?);
                 }
             } else {
                 warn_with_peers!(
