@@ -392,6 +392,21 @@ const fn slot_duration(config: &Config) -> Duration {
     config.slot_duration_ms
 }
 
+#[must_use]
+pub fn duration_since_slot(
+    config: &Config,
+    slot: Slot,
+    genesis_time: UnixSeconds,
+) -> Result<Duration> {
+    let duration_since_unix_epoch = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+    let unix_epoch_to_genesis = Duration::from_secs(genesis_time);
+    let duration_since_genesis = duration_since_unix_epoch.saturating_sub(unix_epoch_to_genesis);
+    let slot_duration = slot_duration(config);
+    let duration_before_slot = slot_duration.saturating_mul((slot - GENESIS_SLOT).try_into()?);
+
+    Ok(duration_since_genesis.saturating_sub(duration_before_slot))
+}
+
 #[cfg(test)]
 mod tests {
     use core::{num::NonZeroU64, ops::Add as _};

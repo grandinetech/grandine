@@ -6,7 +6,7 @@ use logging::warn_with_peers;
 use once_cell::sync::OnceCell;
 use prometheus::{
     Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
-    exponential_buckets, histogram_opts, opts,
+    exponential_buckets, histogram_opts, linear_buckets, opts,
 };
 use types::{
     nonstandard::SystemStats,
@@ -66,6 +66,7 @@ pub struct Metrics {
     pub data_column_sidecar_verification_times: Histogram,
     pub reconstructed_columns: IntCounter,
     pub columns_reconstruction_time: Histogram,
+    pub reconstruction_duration_since_slot: Histogram,
     columns_reconstruction_time_gauge: GaugeVec,
     pub data_column_sidecar_computation: Histogram,
     pub data_column_sidecar_inclusion_proof_verification: Histogram,
@@ -349,6 +350,12 @@ impl Metrics {
             columns_reconstruction_time: Histogram::with_opts(histogram_opts!(
                 "beacon_data_availability_reconstruction_time_seconds",
                 "Time taken to reconstruct columns",
+            ))?,
+
+            reconstruction_duration_since_slot: Histogram::with_opts(histogram_opts!(
+                "RECONSTRUCTION_DURATION_SINCE_SLOT",
+                "Time taken to reconstruct columns from the slot start",
+                linear_buckets(0.1, 0.1, 50)?,
             ))?,
 
             columns_reconstruction_time_gauge: GaugeVec::new(
@@ -911,6 +918,7 @@ impl Metrics {
         ))?;
         default_registry.register(Box::new(self.reconstructed_columns.clone()))?;
         default_registry.register(Box::new(self.columns_reconstruction_time.clone()))?;
+        default_registry.register(Box::new(self.reconstruction_duration_since_slot.clone()))?;
         default_registry.register(Box::new(self.columns_reconstruction_time_gauge.clone()))?;
         default_registry.register(Box::new(self.data_column_sidecar_computation.clone()))?;
         default_registry.register(Box::new(

@@ -117,13 +117,26 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             Ok(data_column_sidecars) => {
                 info_with_peers!("reconstructed missing data columns for block: {block_root:?}");
 
-                controller.on_reconstruction(wait_group, block_root, block, data_column_sidecars);
-
                 if let Some(metrics) = metrics.as_ref() {
+                    if let Ok(duration) = clock::duration_since_slot(
+                        controller.chain_config(),
+                        block.message().slot(),
+                        controller.genesis_time(),
+                    )
+                    .inspect_err(|error| {
+                        warn_with_peers!("unable to calculate duration from slot start: {error:?}")
+                    }) {
+                        metrics
+                            .reconstruction_duration_since_slot
+                            .observe(duration.as_secs_f64());
+                    }
+
                     metrics
                         .reconstructed_columns
                         .inc_by(reconstructed_count as u64);
                 }
+
+                controller.on_reconstruction(wait_group, block_root, block, data_column_sidecars);
             }
             Err(error) => {
                 controller
