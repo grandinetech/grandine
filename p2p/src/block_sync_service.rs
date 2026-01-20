@@ -43,7 +43,7 @@ use types::{
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{H256, Slot},
+        primitives::{H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -102,6 +102,7 @@ pub struct BlockSyncService<P: Preset> {
     received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
+    received_envelopes: HashMap<(H256, ValidatorIndex), Slot>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
     delayed_batches: BTreeMap<Instant, Vec<SyncBatch<P>>>,
@@ -248,6 +249,7 @@ impl<P: Preset> BlockSyncService<P> {
             received_blob_sidecars,
             received_block_roots: HashMap::new(),
             received_data_column_sidecars,
+            received_envelopes: HashMap::new(),
             data_dumper,
             network_globals,
             delayed_batches: BTreeMap::new(),
@@ -510,6 +512,8 @@ impl<P: Preset> BlockSyncService<P> {
                                 SyncDirection::Forward => {
                                     let data_column_sidecar_slot = data_column_sidecar.slot();
 
+                                    // TODO: (gloas): gloas block can be imported without the
+                                    // sidecars, this should change to `contains_block_and_sidecars`
                                     if !self.controller.contains_block(data_column_identifier.block_root)
                                         && self.register_new_received_data_column_sidecar(
                                             data_column_identifier,
@@ -577,6 +581,64 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.request_blobs_and_blocks_if_ready();
                         }
+                        P2pToSync::RequestedExecutionPayloadEnvelope(envelope, peer_id, request_id, request_type) => {
+                            let block_root = envelope.message.beacon_block_root;
+
+                            self.sync_manager.record_received_execution_payload_envelope_response(
+                                block_root,
+                                peer_id,
+                                request_id,
+                            );
+
+                            let request_direction = match request_type {
+                                RPCRequestType::Root => SyncDirection::Forward,
+                                RPCRequestType::Range => self
+                                    .sync_manager
+                                    .request_direction(request_id)
+                                    .unwrap_or(self.sync_direction),
+                            };
+
+                            match request_direction {
+                                SyncDirection::Forward => {
+                                    let envelope_slot = envelope.message.slot;
+                                    let builder_index = envelope.message.builder_index;
+
+                                    if self.register_new_received_envelope(block_root, builder_index, envelope_slot) {
+                                        self.controller.on_requested_execution_payload_envelope(envelope, peer_id);
+
+                                        debug_with_peers!(
+                                            "received execution payload envelope (block_root: {block_root:?}, \
+                                             slot: {envelope_slot}, peer_id: {peer_id}, request_id: {request_id:?})"
+                                        );
+                                    }
+                                }
+                                SyncDirection::Back => {
+                                    if let Some(back_sync) = self.back_sync.as_mut() {
+                                        back_sync.push_execution_payload_envelope(envelope);
+                                        debug_with_peers!(
+                                            "received execution payload envelope for back sync (block_root: {block_root:?}, \
+                                             peer_id: {peer_id})"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        P2pToSync::ExecutionPayloadEnvelopesByRangeRequestFinished(peer_id, request_id) => {
+                            let request_direction = self.sync_manager.request_direction(request_id);
+
+                            self.sync_manager.execution_payload_envelopes_by_range_request_finished(
+                                &self.controller,
+                                peer_id,
+                                request_id,
+                                request_direction,
+                            );
+
+                            if request_direction == Some(SyncDirection::Back) {
+                                self.check_back_sync_progress().await;
+                            }
+
+                            self.request_blobs_and_blocks_if_ready();
+                        }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
                             let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
                                 finalized_checkpoint.epoch);
@@ -604,6 +666,8 @@ impl<P: Preset> BlockSyncService<P> {
                                     sidecars_pending_reconstruction.retain_sync(|_, value| value.0 >= availability_slot);
                                 });
                             }
+
+                            self.received_envelopes.retain(|_, slot| *slot >= start_of_epoch);
                         }
                         P2pToSync::BlobSidecarRejected(blob_identifier) => {
                             // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
@@ -622,6 +686,23 @@ impl<P: Preset> BlockSyncService<P> {
                                 previous_earliest_available_slot,
                             ) {
                                 warn_with_peers!("failed to start data column backfill: {error}");
+                            }
+                        }
+                        P2pToSync::GossipExecutionPayload(execution_payload_envelope, peer_id, gossip_id) => {
+                            let block_slot = execution_payload_envelope.message.slot;
+                            let beacon_block_root = execution_payload_envelope.message.beacon_block_root;
+                            let builder_index = execution_payload_envelope.message.builder_index;
+
+                            if self.register_new_received_envelope(beacon_block_root, builder_index, block_slot) {
+                                debug_with_peers!(
+                                    "received execution payload as gossip (slot: {block_slot}, \
+                                    beacon_block_root: {beacon_block_root:?}, peer_id: {peer_id})"
+                                );
+
+                                self.controller.on_gossip_execution_payload(
+                                    execution_payload_envelope,
+                                    gossip_id,
+                                );
                             }
                         }
                         P2pToSync::Stop => {
@@ -839,7 +920,9 @@ impl<P: Preset> BlockSyncService<P> {
             }
 
             match target {
-                SyncTarget::BlobSidecar | SyncTarget::Block => {
+                SyncTarget::BlobSidecar
+                | SyncTarget::Block
+                | SyncTarget::ExecutionPayloadEnvelope => {
                     let request_id = self.request_id()?;
                     let peer = self
                         .sync_manager
@@ -849,6 +932,11 @@ impl<P: Preset> BlockSyncService<P> {
                         if target == SyncTarget::BlobSidecar {
                             SyncToP2p::RequestBlobsByRange(request_id, peer_id, start_slot, count)
                                 .send(&self.sync_to_p2p_tx);
+                        } else if target == SyncTarget::ExecutionPayloadEnvelope {
+                            SyncToP2p::RequestExecutionPayloadEnvelopesByRange(
+                                request_id, peer_id, start_slot, count,
+                            )
+                            .send(&self.sync_to_p2p_tx);
                         } else {
                             SyncToP2p::RequestBlocksByRange(request_id, peer_id, start_slot, count)
                                 .send(&self.sync_to_p2p_tx);
@@ -967,6 +1055,16 @@ impl<P: Preset> BlockSyncService<P> {
         self.retry_sync_batches(expired_batches).await
     }
 
+    async fn request_expired_execution_payload_envelope_range_requests(&mut self) -> Result<()> {
+        let expired_batches = self
+            .sync_manager
+            .expired_execution_payload_envelope_range_batches()
+            .map(|(batch, _)| batch)
+            .collect();
+
+        self.retry_sync_batches(expired_batches).await
+    }
+
     fn request_blobs_and_blocks_if_ready(&self) {
         BlockSyncServiceMessage::RequestData.send(&self.self_tx);
     }
@@ -974,7 +1072,9 @@ impl<P: Preset> BlockSyncService<P> {
     async fn request_expired_data(&mut self) -> Result<()> {
         self.request_expired_blob_range_requests().await?;
         self.request_expired_block_range_requests().await?;
-        self.request_expired_data_column_range_requests().await
+        self.request_expired_data_column_range_requests().await?;
+        self.request_expired_execution_payload_envelope_range_requests()
+            .await
     }
 
     async fn request_data(&mut self) -> Result<()> {
@@ -1112,6 +1212,15 @@ impl<P: Preset> BlockSyncService<P> {
 
                     SyncToP2p::RequestBlocksByRange(request_id, peer_id, start_slot, count)
                         .send(&self.sync_to_p2p_tx);
+                }
+                SyncTarget::ExecutionPayloadEnvelope => {
+                    self.sync_manager
+                        .add_execution_payload_envelope_request_by_range(request_id, batch);
+
+                    SyncToP2p::RequestExecutionPayloadEnvelopesByRange(
+                        request_id, peer_id, start_slot, count,
+                    )
+                    .send(&self.sync_to_p2p_tx);
                 }
             }
         }
@@ -1297,6 +1406,7 @@ impl<P: Preset> BlockSyncService<P> {
             columns: indices,
         } = data_columns_by_root;
 
+        // TODO: (gloas): gloas block can be imported without the sidecars
         if self.controller.contains_block(block_root) {
             debug_with_peers!("block {block_root:?} already imported into the fork choice");
             return Ok(());
@@ -1390,6 +1500,7 @@ impl<P: Preset> BlockSyncService<P> {
             return Ok(());
         };
 
+        // TODO: (gloas): gloas block can be imported without consider data availability
         let missing_column_by_indices = missing_column_indices_by_root
             .into_iter()
             .filter(|(block_root, _)| !self.controller.contains_block(*block_root))
@@ -1526,6 +1637,7 @@ impl<P: Preset> BlockSyncService<P> {
                 self.received_block_roots = HashMap::new();
                 self.received_blob_sidecars.clear_async().await;
                 self.received_data_column_sidecars.clear_async().await;
+                self.received_envelopes = HashMap::new();
                 self.sync_direction = SyncDirection::Back;
                 self.sync_manager.cache_clear();
                 self.request_blobs_and_blocks_if_ready();
@@ -1572,6 +1684,17 @@ impl<P: Preset> BlockSyncService<P> {
             .is_none()
     }
 
+    fn register_new_received_envelope(
+        &mut self,
+        block_root: H256,
+        builder_index: ValidatorIndex,
+        slot: Slot,
+    ) -> bool {
+        self.received_envelopes
+            .insert((block_root, builder_index), slot)
+            .is_none()
+    }
+
     fn track_collection_metrics(&self) {
         if let Some(metrics) = self.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
@@ -1595,6 +1718,13 @@ impl<P: Preset> BlockSyncService<P> {
                 &type_name,
                 "received_data_column_sidecars",
                 self.received_data_column_sidecars.len(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "received_envelopes",
+                self.received_envelopes.len(),
             );
         }
     }

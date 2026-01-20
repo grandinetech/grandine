@@ -10,9 +10,9 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{DataColumnSidecar, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    fulu::containers::DataColumnSidecar,
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
     phase0::primitives::Slot,
     preset::Preset,
@@ -169,6 +169,14 @@ impl<P: Preset> Storage<P> {
         }
 
         self.database.put_batch(batch)
+    }
+
+    pub(crate) fn store_back_sync_execution_payload_envelopes(
+        &self,
+        execution_payload_envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<()> {
+        self.append_execution_payload_envelopes(execution_payload_envelopes)?;
+        Ok(())
     }
 }
 

@@ -19,12 +19,16 @@ use serde::Serialize;
 use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -63,9 +67,16 @@ pub enum P2pToSync<P: Preset> {
         AppRequestId,
         RPCRequestType,
     ),
+    RequestedExecutionPayloadEnvelope(
+        Arc<SignedExecutionPayloadEnvelope<P>>,
+        PeerId,
+        AppRequestId,
+        RPCRequestType,
+    ),
     BlobsByRangeRequestFinished(AppRequestId),
     BlocksByRangeRequestFinished(PeerId, AppRequestId),
     DataColumnsByRangeRequestFinished(AppRequestId),
+    ExecutionPayloadEnvelopesByRangeRequestFinished(PeerId, AppRequestId),
     RequestFailed(PeerId),
     FinalizedCheckpoint(Checkpoint),
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
@@ -73,6 +84,7 @@ pub enum P2pToSync<P: Preset> {
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
+    GossipExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>, PeerId, GossipId),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
     Stop,
@@ -98,6 +110,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
+    PublishPayloadAttestation(Arc<PayloadAttestationMessage>),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),
@@ -155,6 +168,8 @@ pub enum SyncToP2p<P: Preset> {
         u64,
         Arc<ContiguousList<ColumnIndex, P::NumberOfColumns>>,
     ),
+    RequestExecutionPayloadEnvelopesByRange(AppRequestId, PeerId, Slot, u64),
+    RequestExecutionPayloadEnvelopesByRoot(AppRequestId, PeerId, Vec<H256>),
     RequestDataColumnsByRoot(AppRequestId, PeerId, Vec<DataColumnsByRootIdentifier<P>>),
     RequestPeerStatus(AppRequestId, PeerId),
     SubscribeToCoreTopics,
@@ -203,10 +218,12 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
+    PublishExecutionPayloadEnvelope(Arc<SignedExecutionPayloadEnvelope<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
+    PublishPayloadAttestation(Arc<PayloadAttestationMessage>),
     UpdateDataColumnSubnets(u64),
 }
 

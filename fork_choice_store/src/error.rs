@@ -5,10 +5,10 @@ use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::containers::PowBlock,
-    combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    fulu::containers::DataColumnSidecar,
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    phase0::primitives::{Epoch, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -16,6 +16,10 @@ use types::{
 pub enum Error<P: Preset> {
     #[error("attestation data should have index as zero")]
     AttestationDataIndexNotZero { attestation: Arc<Attestation<P>> },
+    #[error("attestation data with invalid payload status")]
+    AttestationDataInvalidPayloadStatus { attestation: Arc<Attestation<P>> },
+    #[error("attestation data for current slot with payload presence")]
+    AttestationDataPayloadPresenceForCurrentSlot { attestation: Arc<Attestation<P>> },
     #[error("attestation with multiple committee bits")]
     AttestationFromMultipleCommittees { attestation: Arc<Attestation<P>> },
     #[error("aggregate attestation has no aggregation bits set: {aggregate_and_proof:?}")]
@@ -79,6 +83,11 @@ pub enum Error<P: Preset> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("builder index mismatch: expected {expected}, actual {actual}")]
+    BuilderIndexMismatch {
+        expected: ValidatorIndex,
+        actual: ValidatorIndex,
+    },
     #[error(
         "the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}"
     )]
@@ -87,6 +96,10 @@ pub enum Error<P: Preset> {
     },
     #[error("data column sidecar is invalid: {data_column_sidecar:?}")]
     DataColumnSidecarInvalid {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
+    #[error("data column sidecar's kzg commitments is invalid: {data_column_sidecar:?}")]
+    DataColumnSidecarInvalidKzgCommitments {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
     // TODO(feature/deneb): This is vague.
@@ -122,6 +135,13 @@ pub enum Error<P: Preset> {
         actual: SubnetId,
     },
     #[error(
+        "data column sidecar's slot mismatch the slot in beacon block: {data_column_sidecar:?}, block_slot: {block_slot}"
+    )]
+    DataColumnSidecarSlotMismatch {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_slot: Slot,
+    },
+    #[error(
         "data column sidecar has incorrect proposer index \
          (data_column_sidecar: {data_column_sidecar:?}, computed: {computed})"
     )]
@@ -129,12 +149,42 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
+    ExecutionPayloadBidBuilderInactive {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+        epoch: Epoch,
+    },
+    #[error("execution payload bid's builder has invalid withdrawal credentials: {payload_bid:?}")]
+    ExecutionPayloadBidBuilderInvalid {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
+    ExecutionPayloadBidOffProtocolPaymentDisallowed {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("execution payload bid's signature for self-build is not empty")]
+    ExecutionPayloadBidSignatureNotEmpty,
+    #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
+    ExecutionPayloadBidValueNonZero { value: Gwei },
+    #[error(
+        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadBlockHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
+    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
+    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("block has invalid execution payload")]
     InvalidExecutionPayload,
+    #[error("execution payload bid has invalid signature: {payload_bid:?}")]
+    InvalidExecutionPayloadBidSignature {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -143,6 +193,17 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("validator not active (builder_index: {builder_index})")]
+    ValidatorNotActive { builder_index: ValidatorIndex },
+    #[error("validator {validator_index} is not a member of PTC at slot {slot}")]
+    PayloadAttestationNotInCommittee {
+        validator_index: ValidatorIndex,
+        slot: Slot,
+    },
+    #[error("payload envelope's block is invalid: {payload_envelope:?}")]
+    PayloadEnvelopeInvalidBlock {
+        payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

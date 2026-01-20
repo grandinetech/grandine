@@ -13,14 +13,12 @@ use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{
-    combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::containers::DataColumnSidecar,
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -328,8 +326,10 @@ impl<P: Preset> Context<P> {
         &mut self,
         data_column_sidecar: DataColumnSidecar<P>,
     ) -> Option<P2pMessage<P>> {
-        let subnet_id =
-            misc::compute_subnet_for_data_column_sidecar(self.config(), data_column_sidecar.index);
+        let subnet_id = misc::compute_subnet_for_data_column_sidecar(
+            self.config(),
+            data_column_sidecar.index(),
+        );
 
         self.controller()
             .on_gossip_data_column_sidecar(
@@ -403,7 +403,7 @@ impl<P: Preset> Context<P> {
                             .all(|id| id.block_root == block_root)
                     );
                     assert!(!data_column_identifiers.is_empty());
-                    assert_eq!(block_or_sidecar.signed_block_header(), block.to_header());
+                    assert_eq!(block_or_sidecar.block_root(), block_root);
                 }
             },
             _ => panic!("ExecutionServiceMessage::GetBlobs expected"),
@@ -420,13 +420,7 @@ impl<P: Preset> Context<P> {
         loop {
             match self.next_p2p_message() {
                 Some(P2pMessage::PublishDataColumnSidecar(data_column_sidecar)) => {
-                    assert_eq!(
-                        data_column_sidecar
-                            .signed_block_header
-                            .message
-                            .hash_tree_root(),
-                        block_root
-                    );
+                    assert_eq!(data_column_sidecar.beacon_block_root(), block_root);
                 }
                 Some(P2pMessage::Accept(_)) | None => break,
                 Some(other) => panic!("Unexpected P2P message: {other:?}"),

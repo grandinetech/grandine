@@ -220,6 +220,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         let slot = block_or_sidecar.slot();
         let block_root = block_or_sidecar.block_root();
 
+        // TODO: (gloas): block can be imported before data available
         if self.controller.contains_block(block_root)
             || self
                 .controller
@@ -231,6 +232,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() else {
             return;
         };
@@ -318,12 +320,12 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                         data_column_sidecars.into_iter().filter(|column| {
                                             self.controller
                                                 .sampling_columns()
-                                                .contains(&column.index)
+                                                .contains(&column.index())
                                         })
                                     {
                                         let identifier = DataColumnIdentifier {
                                             block_root,
-                                            index: data_column_sidecar.index,
+                                            index: data_column_sidecar.index(),
                                         };
 
                                         self.received_data_column_sidecars

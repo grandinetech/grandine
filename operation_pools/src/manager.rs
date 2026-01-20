@@ -9,7 +9,8 @@ use tokio_stream::wrappers::IntervalStream;
 use types::preset::Preset;
 
 use crate::{
-    AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, SyncCommitteeAggPool,
+    AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool,
+    PayloadAttestationAggPool, SyncCommitteeAggPool,
 };
 
 const RECONSTRUCTION_START_DELAY_SYNCING: Duration = Duration::from_secs(2);
@@ -18,6 +19,7 @@ pub struct Manager<P: Preset, W: Wait> {
     pub attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     pub blob_reconstruction_pool: BlobReconstructionPool<P, W>,
     pub bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
+    pub payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
     pub sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     pub fork_choice_to_pool_rx: UnboundedReceiver<PoolMessage<P, W>>,
     pub reconstruction_delay: Duration,
@@ -29,6 +31,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         blob_reconstruction_pool: BlobReconstructionPool<P, W>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
+        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         fork_choice_to_pool_rx: UnboundedReceiver<PoolMessage<P, W>>,
         reconstruction_delay: Duration,
@@ -37,6 +40,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             attestation_agg_pool,
             blob_reconstruction_pool,
             bls_to_execution_change_pool,
+            payload_attestation_agg_pool,
             sync_committee_agg_pool,
             fork_choice_to_pool_rx,
             reconstruction_delay,
@@ -55,7 +59,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
                 message = self.fork_choice_to_pool_rx.select_next_some() => {
                     match message {
-                        PoolMessage::Slot(slot) => self.sync_committee_agg_pool.on_slot(slot),
+                        PoolMessage::Slot(slot) => {
+                            self.sync_committee_agg_pool.on_slot(slot);
+                            self.payload_attestation_agg_pool.on_slot(slot);
+                        }
                         PoolMessage::Tick(tick) => {
                             if tick.is_start_of_epoch::<P>() {
                                 self.bls_to_execution_change_pool

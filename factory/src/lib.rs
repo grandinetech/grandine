@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use bls::{
-    AggregateSignature,
-    traits::{SecretKey as _, Signature as _},
+    AggregateSignature, SignatureBytes,
+    traits::{SecretKey as _, Signature as _, SignatureBytes as _},
 };
 use deposit_tree::DepositTree;
 use helper_functions::{
@@ -46,6 +46,13 @@ use types::{
         BeaconBlockBody as ElectraBeaconBlockBody,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{
+            BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
+            ExecutionPayloadBid, SignedExecutionPayloadBid,
+        },
+    },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
     phase0::{
         consts::GENESIS_SLOT,
@@ -56,7 +63,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::BeaconState as _,
+    traits::{BeaconState as _, PostGloasBeaconState},
 };
 
 type BlockWithState<P> = (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>);
@@ -363,6 +370,28 @@ pub fn singular_attestation<P: Preset>(
     bail!("validator should belong to some committee")
 }
 
+fn signed_execution_payload_bid<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+) -> SignedExecutionPayloadBid {
+    let prev_randao = accessors::get_randao_mix(state, accessors::get_current_epoch(state));
+
+    SignedExecutionPayloadBid {
+        message: ExecutionPayloadBid {
+            parent_block_hash: state.latest_block_hash(),
+            parent_block_root: state.latest_block_header().hash_tree_root(),
+            block_hash: ExecutionBlockHash::zero(),
+            prev_randao,
+            builder_index: BUILDER_INDEX_SELF_BUILD,
+            slot: state.slot(),
+            value: 0,
+            execution_payment: 0,
+            blob_kzg_commitments_root: H256::zero(),
+            ..Default::default()
+        },
+        signature: SignatureBytes::empty(),
+    }
+}
+
 pub fn execution_payload<P: Preset>(
     config: &Config,
     state: &Arc<BeaconState<P>>,
@@ -406,7 +435,7 @@ pub fn execution_payload<P: Preset>(
             ..CapellaExecutionPayload::default()
         }
         .into(),
-        Phase::Deneb | Phase::Electra | Phase::Fulu => DenebExecutionPayload {
+        Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => DenebExecutionPayload {
             parent_hash,
             prev_randao,
             timestamp,
@@ -462,7 +491,11 @@ fn block<P: Preset>(
     );
 
     // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
-    if advanced_state.phase() >= Phase::Capella && execution_payload.is_none() {
+    // Starting from Gloas, `execution_payload` is no longer inside BeaconBlock.
+    if advanced_state.phase() >= Phase::Capella
+        && advanced_state.phase() < Phase::Gloas
+        && execution_payload.is_none()
+    {
         execution_payload = Some(self::execution_payload(
             config,
             &advanced_state,
@@ -470,6 +503,10 @@ fn block<P: Preset>(
             ExecutionBlockHash::zero(),
         )?);
     }
+
+    let signed_execution_payload_bid = advanced_state
+        .post_gloas()
+        .map(signed_execution_payload_bid);
 
     let without_state_root = match advanced_state.phase() {
         Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {
@@ -576,6 +613,22 @@ fn block<P: Preset>(
                 ..FuluBeaconBlockBody::default()
             },
         })),
+        Phase::Gloas => BeaconBlock::from(Hc::new(GloasBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            state_root: H256::zero(),
+            body: GloasBeaconBlockBody {
+                randao_reveal,
+                eth1_data,
+                graffiti,
+                attestations: electra_attestations.try_into()?,
+                deposits,
+                sync_aggregate,
+                ..GloasBeaconBlockBody::default()
+            },
+        }))
+        .with_signed_execution_payload_bid(signed_execution_payload_bid),
     }
     .with_execution_payload(execution_payload)?;
 

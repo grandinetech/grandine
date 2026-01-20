@@ -15,6 +15,10 @@ pub(crate) enum Error {
         "attempted to construct a blob sidecar for pre-Deneb block: slot: {slot}, root: {root:?}"
     )]
     BlobsForPreDenebBlock { root: H256, slot: Slot },
+    #[error(
+        "attempted to construct a blob sidecar for post-Gloas block: slot: {slot}, root: {root:?}"
+    )]
+    BlobsForPostGloasBlock { root: H256, slot: Slot },
     #[error("committee index is out of bounds")]
     CommitteeIndexOutOfBounds,
     #[error(
@@ -28,6 +32,10 @@ pub(crate) enum Error {
     EpochAfterNext,
     #[error("epoch is before previous one relative to state")]
     EpochBeforePrevious,
+    #[error("slot is after next one relative to state")]
+    SlotAfterNext,
+    #[error("slot is before previous one relative to state")]
+    SlotBeforePrevious,
     #[error("epoch is in the future relative to state")]
     EpochInTheFuture,
     #[error("epoch number overflowed")]
@@ -40,6 +48,10 @@ pub(crate) enum Error {
     NoActiveValidators,
     #[error("no committee attesters for {index} committee")]
     NoCommitteeAttesters { index: CommitteeIndex },
+    #[error("attestation data index is not zero")]
+    NoneZeroDataIndex,
+    #[error("execution payload availability is out of range")]
+    PayloadAvailabilityOutOfRange,
     #[error(
         "aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}"
     )]
@@ -77,8 +89,14 @@ pub enum SignatureKind {
     ContributionAndProof,
     #[display("deposit signature")]
     Deposit,
+    #[display("execution payload bid signature")]
+    ExecutionPayloadBid,
+    #[display("execution payload envelope signature")]
+    ExecutionPayloadEnvelope,
     #[display("collection of multiple signatures")]
     Multi,
+    #[display("payload attestation signature")]
+    PayloadAttestation,
     #[display("RANDAO reveal")]
     Randao,
     #[display("selection proof")]

@@ -5318,6 +5318,7 @@ dependencies = [
  "parking_lot",
  "prometheus_metrics",
  "pubkey_cache",
+ "rayon",
  "reqwest 0.12.28",
  "scc 3.4.8",
  "serde",
@@ -5348,6 +5349,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arithmetic",
+ "bls",
  "clock",
  "crossbeam-skiplist",
  "derivative",

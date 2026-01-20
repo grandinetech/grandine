@@ -5,12 +5,13 @@ use bls::{SignatureBytes, traits::SignatureBytes as _};
 use types::{
     config::Config,
     electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},
+    gloas::primitives::BuilderIndex,
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         primitives::{Epoch, Gwei, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState, PostElectraBeaconState},
+    traits::{BeaconState, PostElectraBeaconState, PostGloasBeaconState},
 };
 
 use crate::{
@@ -29,6 +30,17 @@ pub fn balance<P: Preset>(
     state
         .balances_mut()
         .get_mut(validator_index)
+        .map_err(Into::into)
+}
+
+pub fn builder_balance<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+    builder_index: BuilderIndex,
+) -> Result<&mut Gwei> {
+    state
+        .builders_mut()
+        .get_mut(builder_index)
+        .map(|builder| &mut builder.balance)
         .map_err(Into::into)
 }
 
@@ -94,6 +106,27 @@ pub fn initiate_validator_exit<P: Preset>(
 
     validator.withdrawable_epoch = exit_queue_epoch
         .checked_add(config.min_validator_withdrawability_delay)
+        .ok_or(Error::EpochOverflow)?;
+
+    Ok(())
+}
+
+pub fn initiate_builder_exit<P: Preset>(
+    config: &Config,
+    state: &mut impl PostGloasBeaconState<P>,
+    builder_index: BuilderIndex,
+) -> Result<()> {
+    // > Return if builder already initiated exit
+    if state.builders().get(builder_index)?.withdrawable_epoch != FAR_FUTURE_EPOCH {
+        return Ok(());
+    }
+
+    // > Set builder withdrawable epoch
+    let current_epoch = get_current_epoch(state);
+    let builder = state.builders_mut().get_mut(builder_index)?;
+
+    builder.withdrawable_epoch = current_epoch
+        .checked_add(config.min_builder_withdrawability_delay)
         .ok_or(Error::EpochOverflow)?;
 
     Ok(())

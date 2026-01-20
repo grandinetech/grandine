@@ -69,8 +69,8 @@ use types::{
     },
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
-        Attestation, AttesterSlashing, BeaconBlock, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -78,7 +78,7 @@ use types::{
         primitives::{Blob, BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, MatrixEntry},
+        containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
     nonstandard::{
@@ -98,7 +98,8 @@ use types::{
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{
-        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -904,7 +905,10 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = state.phase();
-    let proposer_lookahead = state.proposer_lookahead().ok_or(Error::StatePreFulu)?;
+    let proposer_lookahead = state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
+        .ok_or(Error::StatePreFulu)?;
 
     Ok(EthResponse::json_or_ssz(proposer_lookahead, &headers)?
         .execution_optimistic(status.is_optimistic())
@@ -1333,6 +1337,7 @@ pub async fn blobs<P: Preset, W: Wait>(
     let max_blobs_per_block = controller.chain_config().max_blobs_per_block(epoch);
 
     let requested_indices = if let Some(versioned_hashes) = query.versioned_hashes {
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(kzg_commitments) = block
             .message()
             .body()
@@ -1628,6 +1633,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
 
+    // TODO: (gloas): handle publish gloas block only
     if controller
         .chain_config()
         .phase_at_slot::<P>(slot)
@@ -1967,7 +1973,7 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
                 .map(|slashing| AttesterSlashing::Phase0(slashing))
                 .collect()
         }
-        Phase::Electra | Phase::Fulu => slashings
+        Phase::Electra | Phase::Fulu | Phase::Gloas => slashings
             .into_iter()
             .filter_map(AttesterSlashing::post_electra)
             .map(|slashing| AttesterSlashing::Electra(slashing))
@@ -2324,8 +2330,11 @@ pub async fn beacon_events<P: Preset>(
                 Event::ChainReorg(data) => ssevent.json_data(data),
                 Event::ContributionAndProof(data) => ssevent.json_data(data),
                 Event::DataColumnSidecar(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadAvailable(data) => ssevent.json_data(data),
                 Event::FinalizedCheckpoint(data) => ssevent.json_data(data),
                 Event::Head(data) => ssevent.json_data(data),
+                Event::PayloadAttestation(data) => ssevent.json_data(data),
                 Event::PayloadAttributes(data) => ssevent.json_data(data),
                 Event::ProposerSlashing(data) => ssevent.json_data(data),
                 Event::VoluntaryExit(data) => ssevent.json_data(data),
@@ -2909,6 +2918,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
+    // TODO: (gloas): no longer supported from gloas phase
+
     let block_root = controller.head().value.block_root;
     let beacon_state = controller
         .preprocessed_state_for_block_production(block_root, slot)
@@ -2938,6 +2949,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
+            enable_payload_build: false,
         },
     );
 
@@ -4330,12 +4342,16 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
             return Ok(vec![]);
         }
 
+        let first_column = data_column_sidecars
+            .first()
+            .expect("this cannot happen unless NumberOfColumns is zero");
+
         let half_columns = P::NumberOfColumns::U64.saturating_div(2);
 
         if (0..half_columns).any(|index| {
             !data_column_sidecars
                 .iter()
-                .any(|sidecar| sidecar.index == index)
+                .any(|sidecar| sidecar.index() == index)
         }) {
             let partial_matrix = data_column_sidecars
                 .iter()
@@ -4357,14 +4373,16 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
 
             let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
-            data_column_sidecars =
-                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
+            data_column_sidecars = eip_7594::construct_data_column_sidecars_from_sidecar(
+                first_column,
+                &cells_and_kzg_proofs,
+            )?;
         }
 
         let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
         for matrix in data_column_sidecars
             .into_iter()
-            .take_while(|sidecar| (0..half_columns).contains(&sidecar.index))
+            .take_while(|sidecar| (0..half_columns).contains(&sidecar.index()))
             .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
         {
             blobs_matrix_map
@@ -4417,6 +4435,14 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
     proofs: Option<KzgProofs<P>>,
     metrics: Option<Arc<Metrics>>,
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    ensure!(
+        signed_beacon_block.phase() == Phase::Fulu,
+        Error::InvalidPhase {
+            expected: Phase::Fulu,
+            got: signed_beacon_block.phase()
+        }
+    );
+
     eip_7594::construct_data_column_sidecars_from_blobs(
         signed_beacon_block.into(),
         blobs.unwrap_or_default().to_vec(),

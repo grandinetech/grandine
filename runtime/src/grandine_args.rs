@@ -882,6 +882,10 @@ struct ValidatorOptions {
     /// Backfill custody groups
     #[clap(long)]
     no_custody_groups_backfill: bool,
+
+    // Enable payload build for post-Gloas block proposing
+    #[clap(long)]
+    enable_payload_build: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1086,6 +1090,7 @@ impl GrandineArgs {
             slashing_protection_history_limit,
             report_validator_performance,
             no_custody_groups_backfill,
+            enable_payload_build,
         } = validator_options;
 
         if in_memory {
@@ -1480,6 +1485,7 @@ impl GrandineArgs {
             backfill_custody_groups: !no_custody_groups_backfill,
             sync_without_reconstruction,
             custody_mode,
+            enable_payload_build,
         })
     }
 

@@ -20,6 +20,7 @@ use types::{
     altair::primitives::SubcommitteeIndex,
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
+    nonstandard::Phase,
     phase0::primitives::Slot,
 };
 
@@ -100,6 +101,8 @@ pub enum Error {
     InvalidJsonValue(#[source] serde_json::Error),
     #[error("invalid peer ID")]
     InvalidPeerId(#[source] AnyhowError),
+    #[error("invalid phase (expected: {expected}, got: {got})")]
+    InvalidPhase { expected: Phase, got: Phase },
     #[error(
         "randao_reveal must be {:?} when skip_randao_verification is set",
         SignatureBytes::empty()
@@ -241,6 +244,7 @@ impl Error {
             | Self::InvalidJsonValue(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPeerId(_)
+            | Self::InvalidPhase { .. }
             | Self::InvalidProposerSlashing(_)
             | Self::InvalidSignedVoluntaryExit(_)
             | Self::InvalidStateId(_)

@@ -21,7 +21,7 @@ pub use crate::{
     },
     misc::{
         MutatorRejectionReason, SidecarsPendingReconstruction, StorageMode,
-        VerifyAggregateAndProofResult, VerifyAttestationResult,
+        VerifyAggregateAndProofResult, VerifyAttestationResult, VerifyPayloadAttestationResult,
     },
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},

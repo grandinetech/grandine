@@ -44,7 +44,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
         let sampling_column_indices = controller.sampling_columns();
         let available_column_indices = available_columns
             .iter()
-            .map(|sidecar| sidecar.index)
+            .map(|sidecar| sidecar.index())
             .collect::<HashSet<_>>();
 
         if sampling_column_indices
@@ -70,6 +70,11 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             return Ok(());
         }
 
+        let first_column = available_columns
+            .first()
+            .cloned()
+            .expect("this cannot happen unless NumberOfColumns is zero");
+
         debug_with_peers!("starting reconstruction for block: {block_root:?}");
 
         let columns_reconstruction_timer = metrics
@@ -94,7 +99,10 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
                         eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
                     let data_column_sidecars =
-                        eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
+                        eip_7594::construct_data_column_sidecars_from_sidecar(
+                            &first_column,
+                            &cells_and_kzg_proofs,
+                        )?;
 
                     prometheus_metrics::stop_and_record(timer);
 

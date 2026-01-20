@@ -11,7 +11,8 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem,
+    PayloadAttestationOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -21,17 +22,19 @@ use helper_functions::{
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use ssz::SszHash as _;
 use tracing::{Span, instrument};
 use types::{
     combined::{
-        AttesterSlashing, BeaconState as CombinedBeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        AttesterSlashing, BeaconState as CombinedBeaconState, DataColumnSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
-    nonstandard::{RelativeEpoch, ValidationOutcome},
+    fulu::containers::DataColumnIdentifier,
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    nonstandard::{RelativeEpoch, RelativeSlot, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{H256, Slot},
@@ -325,6 +328,60 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
     }
 }
 
+pub struct BlockPayloadAttestationsTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub block_root: H256,
+    pub block: Arc<SignedBeaconBlock<P>>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for BlockPayloadAttestationsTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "BlockPayloadAttestationsTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            block_root,
+            block,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_block_payload_attestation_task_times
+                .start_timer()
+        });
+
+        let Some(body) = block.message().body().with_payload_attestations() else {
+            return;
+        };
+
+        // TODO(Grandine Team): Consider turning the pipeline into a new method in `Store`.
+        let results = body
+            .payload_attestations()
+            .iter()
+            .map(|payload_attestation| {
+                store_snapshot.validate_payload_attestation(
+                    PayloadAttestationItem::verified(
+                        Arc::new((*payload_attestation).into()),
+                        PayloadAttestationOrigin::Block(block_root),
+                    ),
+                    true,
+                )
+            })
+            .collect();
+
+        MutatorMessage::BlockPayloadAttestations {
+            wait_group,
+            results,
+        }
+        .send(&mutator_tx);
+    }
+}
+
 pub struct AttesterSlashingTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
@@ -414,6 +471,7 @@ pub struct DataColumnSidecarTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
+    pub block_root: H256,
     pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
     pub state: Option<Arc<CombinedBeaconState<P>>>,
     pub block_seen: bool,
@@ -430,6 +488,7 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             store_snapshot,
             mutator_tx,
             wait_group,
+            block_root,
             data_column_sidecar,
             state,
             block_seen,
@@ -439,11 +498,6 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             metrics,
         } = self;
 
-        let block_root = data_column_sidecar
-            .signed_block_header
-            .message
-            .hash_tree_root();
-
         let _data_column_sidecar_verification_timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_verification_times.start_timer());
@@ -452,8 +506,10 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
 
-        let index = data_column_sidecar.index;
-        let data_column_identifier = DataColumnIdentifier { block_root, index };
+        let data_column_identifier = DataColumnIdentifier {
+            block_root,
+            index: data_column_sidecar.index(),
+        };
 
         let result = store_snapshot.validate_data_column_sidecar(
             data_column_sidecar,
@@ -497,6 +553,162 @@ impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
     #[instrument(skip_all, level = "debug", name = "RetryDataColumnSidecarTask::run")]
     fn run(self) {
         self.task.run()
+    }
+}
+
+pub struct ExecutionPayloadEnvelopeTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
+    pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            execution_payload_envelope,
+            state,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_execution_payload_envelope_task_times
+                .start_timer()
+        });
+
+        let result = store_snapshot.validate_execution_payload_envelope(
+            execution_payload_envelope,
+            state,
+            &origin,
+        );
+
+        MutatorMessage::ExecutionPayloadEnvelope {
+            wait_group,
+            result,
+            origin,
+            submission_time,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+pub struct PayloadAttestationTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_attestation: PayloadAttestationItem<P>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PayloadAttestationTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PayloadAttestationTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_attestation,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_payload_attestation_task_times,
+                payload_attestation.origin.as_ref(),
+            )
+        });
+
+        let result = store_snapshot.validate_payload_attestation(payload_attestation, false);
+
+        MutatorMessage::PayloadAttestation { wait_group, result }.send(&mutator_tx);
+    }
+}
+
+pub struct PayloadAttestationBatchTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_attestations: Vec<PayloadAttestationItem<P>>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PayloadAttestationBatchTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PayloadAttestationBatchTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_attestations,
+            metrics,
+        } = self;
+
+        let Some(origin_label) = payload_attestations
+            .first()
+            .map(|attestation| attestation.origin.as_ref())
+        else {
+            return;
+        };
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_payload_attestation_batch_task_times,
+                origin_label,
+            )
+        });
+
+        let results = payload_attestations
+            .into_par_iter()
+            .map(|payload_attestation| {
+                store_snapshot.validate_payload_attestation(payload_attestation, false)
+            })
+            .collect();
+
+        MutatorMessage::PayloadAttestationBatch {
+            wait_group,
+            results,
+        }
+        .send(&mutator_tx);
+    }
+}
+
+pub struct ExecutionPayloadBidTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_bid: Arc<SignedExecutionPayloadBid>,
+    pub origin: ExecutionPayloadBidOrigin,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadBidTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "ExecutionPayloadBidTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_bid,
+            origin,
+        } = self;
+
+        let result = store_snapshot.validate_execution_payload_bid(payload_bid, &origin);
+
+        MutatorMessage::PayloadBid {
+            wait_group,
+            result,
+            origin,
+        }
+        .send(&mutator_tx);
     }
 }
 
@@ -601,6 +813,49 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
             }
             Err(error) => {
                 warn_with_peers!("failed to persist data column sidecars to storage: {error:?}");
+            }
+        }
+    }
+}
+
+pub struct PersistExecutionPayloadEnvelopesTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub storage: Arc<Storage<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            storage,
+            mutator_tx,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_execution_payload_envelope_persist_task_times
+                .start_timer()
+        });
+
+        let envelopes = store_snapshot.unpersisted_envelopes();
+
+        match storage.append_execution_payload_envelopes(envelopes) {
+            Ok(persisted_block_roots) => {
+                MutatorMessage::FinishedPersistingExecutionPayloadEnvelopes {
+                    wait_group,
+                    persisted_block_roots,
+                }
+                .send(&mutator_tx);
+            }
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to persist execution payload envelopes to storage: {error:?}"
+                );
             }
         }
     }
@@ -748,6 +1003,10 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Next, false);
     accessors::get_or_init_total_active_balance(state, false);
     accessors::get_or_init_validator_indices(state, false);
+
+    // Pre-compute PTC cache (no-op for non-Gloas)
+    accessors::get_or_try_init_ptc(state, RelativeSlot::Current, false)?;
+    accessors::get_or_try_init_ptc(state, RelativeSlot::Next, false)?;
 
     Ok(())
 }
