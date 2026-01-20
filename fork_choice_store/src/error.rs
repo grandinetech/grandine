@@ -7,9 +7,7 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::{
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-    },
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
     phase0::primitives::{Slot, SubnetId, ValidatorIndex, H256},
     preset::{Mainnet, Preset},
 };
@@ -190,13 +188,8 @@ pub enum Error<P: Preset> {
     },
     #[error("validator not active (builder_index: {builder_index})")]
     ValidatorNotActive { builder_index: ValidatorIndex },
-    #[error("payload attestation's block is invalid: {payload_attestation:?}")]
-    PayloadAttestationInvalidBlock {
-        payload_attestation: Arc<PayloadAttestationMessage>,
-    },
-    #[error("validator {validator_index} is not a member of PTC at slot {slot}: {payload_attestation:?}")]
+    #[error("validator {validator_index} is not a member of PTC at slot {slot}")]
     PayloadAttestationNotInCommittee {
-        payload_attestation: Arc<PayloadAttestationMessage>,
         validator_index: ValidatorIndex,
         slot: Slot,
     },

@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use bls::SignatureBytes;
+use derive_more::From;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, ContiguousList, ContiguousVector, Ssz};
 use typenum::Log2;
@@ -255,4 +258,10 @@ pub struct SignedExecutionPayloadEnvelope<P: Preset> {
 pub struct SignedProposerPreferences {
     pub message: ProposerPreferences,
     pub signature: SignatureBytes,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From)]
+pub enum CombinedPayloadAttestation<P: Preset> {
+    Attestation(PayloadAttestation<P>),
+    Message(Arc<PayloadAttestationMessage>),
 }

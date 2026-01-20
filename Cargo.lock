@@ -4678,6 +4678,7 @@ dependencies = [
  "parking_lot",
  "prometheus_metrics",
  "pubkey_cache",
+ "rayon",
  "reqwest",
  "serde",
  "serde-aux",

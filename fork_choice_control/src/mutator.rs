@@ -38,8 +38,9 @@ use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAction, PayloadAttestationAction, PayloadAttestationOrigin, StateCacheProcessor, Store,
-    ValidAttestation,
+    PayloadAction, PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationOrigin,
+    PayloadAttestationValidationError, StateCacheProcessor, Store, ValidAttestation,
+    ValidPayloadAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -58,6 +59,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::CombinedPayloadAttestation,
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -78,14 +80,14 @@ use crate::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
         PendingChainLink, PendingDataColumnSidecar, PendingExecutionPayloadEnvelope,
-        PendingPayloadAttestation, ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult,
-        VerifyAttestationResult, WaitingForCheckpointState,
+        ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
+        VerifyPayloadAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
-        AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        DataColumnSidecarTask, ExecutionPayloadEnvelopeTask, PayloadAttestationTask,
-        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockPayloadAttestationsTask,
+        BlockTask, CheckpointStateTask, DataColumnSidecarTask, ExecutionPayloadEnvelopeTask,
+        PayloadAttestationTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
         PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
         RetryDataColumnSidecarTask,
     },
@@ -252,6 +254,10 @@ where
                     wait_group,
                     results,
                 } => self.handle_block_attestations(&wait_group, results)?,
+                MutatorMessage::BlockPayloadAttestations {
+                    wait_group,
+                    results,
+                } => self.handle_block_payload_attestations(&wait_group, results)?,
                 MutatorMessage::AttesterSlashing {
                     wait_group,
                     result,
@@ -329,11 +335,13 @@ where
                     origin,
                     submission_time,
                 )?,
-                MutatorMessage::PayloadAttestation {
+                MutatorMessage::PayloadAttestation { wait_group, result } => {
+                    self.handle_payload_attestation(&wait_group, result)?
+                }
+                MutatorMessage::PayloadAttestationBatch {
                     wait_group,
-                    result,
-                    origin,
-                } => self.handle_payload_attestation(&wait_group, result, origin)?,
+                    results,
+                } => self.handle_payload_attestation_batch(&wait_group, results)?,
                 MutatorMessage::PayloadBid {
                     wait_group,
                     result,
@@ -1403,6 +1411,45 @@ where
         Ok(())
     }
 
+    fn handle_block_payload_attestations(
+        &mut self,
+        wait_group: &W,
+        results: Vec<Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>>>,
+    ) -> Result<()> {
+        let accepted = results
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(PayloadAttestationAction::Accept {
+                    payload_attestation,
+                    attesting_indices_positions,
+                }) => Some(ValidPayloadAttestation {
+                    data: payload_attestation.data(),
+                    attesting_indices_positions,
+                    is_from_block: true,
+                }),
+                Ok(PayloadAttestationAction::Ignore(_)) => None,
+                Ok(PayloadAttestationAction::DelayUntilBlock(payload_attestation, block_root)) => {
+                    self.delay_payload_attestation_until_block(
+                        wait_group,
+                        payload_attestation,
+                        block_root,
+                    );
+                    None
+                }
+                Err(error) => {
+                    warn_with_peers!("block payload attestation rejected (error: {error})");
+                    None
+                }
+            })
+            .collect_vec();
+
+        self.store_mut().apply_payload_attestation_batch(accepted)?;
+
+        self.update_store_snapshot();
+
+        Ok(())
+    }
+
     fn handle_attester_slashing(
         &mut self,
         wait_group: &W,
@@ -1957,11 +2004,13 @@ where
     fn handle_payload_attestation(
         &mut self,
         wait_group: &W,
-        result: Result<PayloadAttestationAction>,
-        origin: PayloadAttestationOrigin,
+        result: VerifyPayloadAttestationResult<P>,
     ) -> Result<()> {
         match result {
-            Ok(PayloadAttestationAction::Accept(payload_attestation)) => {
+            Ok(PayloadAttestationAction::Accept {
+                payload_attestation,
+                attesting_indices_positions,
+            }) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_payload_attestation(&["accepted"]);
                 }
@@ -1970,16 +2019,29 @@ where
                     "payload attestation accepted (payload_attestation: {payload_attestation:?})"
                 );
 
-                if origin.should_generate_event() {
-                    self.event_channels
-                        .send_payload_attestation_event(payload_attestation.clone_arc());
-                }
+                let PayloadAttestationItem {
+                    item: payload_attestation,
+                    origin,
+                    ..
+                } = payload_attestation;
+                let data = payload_attestation.data();
+                let is_from_block = origin.is_from_block();
 
-                if origin.send_to_validator() {
-                    self.send_to_validator(ValidatorMessage::ValidPayloadAttestation(
-                        wait_group.clone(),
-                        payload_attestation.clone_arc(),
-                    ));
+                if let CombinedPayloadAttestation::Message(payload_attestation_message) =
+                    Arc::unwrap_or_clone(payload_attestation)
+                {
+                    if origin.should_generate_event() {
+                        self.event_channels.send_payload_attestation_event(
+                            payload_attestation_message.clone_arc(),
+                        );
+                    }
+
+                    if origin.send_to_validator() {
+                        self.send_to_validator(ValidatorMessage::ValidPayloadAttestation(
+                            wait_group.clone(),
+                            payload_attestation_message,
+                        ));
+                    }
                 }
 
                 let (gossip_id, sender) = origin.split();
@@ -1990,35 +2052,29 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
-                // TODO: (gloas): apply payload attestation into fork choice
-                // spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-on_payload_attestation_message
-                //
-                // let old_head = self.store_mut().apply_payload_attestation(payload_attestation, origin.is_from_block())?;
-                //
-                // self.update_store_snapshot();
-                //
-                // if let Some(old_head) = old_head {
-                //     self.notify_about_reorganization(
-                //         wait_group.clone(),
-                //         &old_head,
-                //         ReorgSource::Attestation,
-                //     );
-                //
-                //     self.spawn_preprocess_head_state_for_next_slot_task();
-                // }
+                let valid_payload_attestation = ValidPayloadAttestation {
+                    data,
+                    attesting_indices_positions,
+                    is_from_block,
+                };
+
+                self.store_mut()
+                    .apply_payload_attestation(valid_payload_attestation)?;
+
+                self.update_store_snapshot();
             }
-            Ok(PayloadAttestationAction::Ignore(publishable)) => {
+            Ok(PayloadAttestationAction::Ignore(payload_attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_payload_attestation(&["ignored"]);
                 }
 
-                let (gossip_id, sender) = origin.split();
+                let (gossip_id, sender) = payload_attestation.origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
             }
             Ok(PayloadAttestationAction::DelayUntilBlock(payload_attestation, block_root)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -2027,10 +2083,7 @@ where
 
                 self.delay_payload_attestation_until_block(
                     wait_group,
-                    PendingPayloadAttestation {
-                        payload_attestation,
-                        origin,
-                    },
+                    payload_attestation,
                     block_root,
                 );
             }
@@ -2042,7 +2095,8 @@ where
                 let source = error.to_string();
                 warn_with_peers!("payload attestation rejected (error: {error:?})",);
 
-                let (gossip_id, sender) = origin.split();
+                let payload_attestation = error.payload_attestation();
+                let (gossip_id, sender) = payload_attestation.origin.split();
 
                 if gossip_id.is_some() {
                     self.send_to_p2p(P2pMessage::Reject(
@@ -2109,6 +2163,18 @@ where
                 reply_to_http_api(sender, Err(anyhow!(source)));
             }
         }
+    }
+
+    fn handle_payload_attestation_batch(
+        &mut self,
+        wait_group: &W,
+        results: Vec<VerifyPayloadAttestationResult<P>>,
+    ) -> Result<()> {
+        for result in results {
+            self.handle_payload_attestation(wait_group, result)?;
+        }
+
+        Ok(())
     }
 
     fn handle_checkpoint_state(
@@ -2636,6 +2702,7 @@ where
         }
 
         self.maybe_spawn_block_attestations_task(wait_group, block_root, &block);
+        self.maybe_spawn_block_payload_attestations_task(wait_group, block_root, &block);
 
         if changes.is_finalized_checkpoint_updated() {
             self.archive_finalized(wait_group)?;
@@ -3088,7 +3155,7 @@ where
     fn delay_payload_attestation_until_block(
         &mut self,
         wait_group: &W,
-        pending_payload_attestation: PendingPayloadAttestation,
+        pending_payload_attestation: PayloadAttestationItem<P>,
         block_root: H256,
     ) {
         if self.store.contains_block(block_root) {
@@ -3467,21 +3534,15 @@ where
     fn retry_payload_attestation(
         &self,
         wait_group: W,
-        pending_payload_attestation: PendingPayloadAttestation,
+        payload_attestation: PayloadAttestationItem<P>,
     ) {
-        trace_with_peers!("retrying delayed payload attestation: {pending_payload_attestation:?}");
-
-        let PendingPayloadAttestation {
-            payload_attestation,
-            origin,
-        } = pending_payload_attestation;
+        trace_with_peers!("retrying delayed payload attestation: {payload_attestation:?}");
 
         self.spawn(PayloadAttestationTask {
             store_snapshot: self.owned_store(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
             payload_attestation,
-            origin,
             metrics: self.metrics.clone(),
         });
     }
@@ -3683,9 +3744,7 @@ where
 
             gossip_ids.extend(
                 payload_attestations
-                    .extract_if(.., |pending| {
-                        pending.payload_attestation.data.slot - 1 <= finalized_slot
-                    })
+                    .extract_if(.., |pending| pending.data().slot - 1 <= finalized_slot)
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
 
@@ -3801,6 +3860,32 @@ where
         }
 
         self.spawn(BlockAttestationsTask {
+            store_snapshot: self.owned_store(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: wait_group.clone(),
+            block_root,
+            block: block.clone_arc(),
+            metrics: self.metrics.clone(),
+        });
+    }
+
+    fn maybe_spawn_block_payload_attestations_task(
+        &self,
+        wait_group: &W,
+        block_root: H256,
+        block: &Arc<SignedBeaconBlock<P>>,
+    ) {
+        // `BlockPayloadAttestationsTask`s have a surprisingly large amount of overhead.
+        // Avoid spawning them if possible.
+        let Some(body) = block.message().body().with_payload_attestations() else {
+            return;
+        };
+
+        if body.payload_attestations().is_empty() {
+            return;
+        }
+
+        self.spawn(BlockPayloadAttestationsTask {
             store_snapshot: self.owned_store(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: wait_group.clone(),

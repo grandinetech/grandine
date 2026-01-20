@@ -96,6 +96,10 @@ pub struct Metrics {
     pub attestation_verifier_process_aggregate_batch_times: Histogram,
     pub attestation_verifier_verify_agg_batch_signature_times: Histogram,
 
+    // Payload Attestation Verifier
+    payload_attestation_verifier_active_task_count: IntGauge,
+    pub payload_attestation_verifier_process_attestation_batch_times: Histogram,
+
     // Validator ticks + Epoch processing
     pub validator_propose_tick_times: Histogram,
     pub validator_attest_tick_times: Histogram,
@@ -153,6 +157,7 @@ pub struct Metrics {
     pub fc_aggregate_and_proof_task_times: HistogramVec,
     pub fc_attestation_task_times: HistogramVec,
     pub fc_payload_attestation_task_times: HistogramVec,
+    pub fc_payload_attestation_batch_task_times: HistogramVec,
 
     pub fc_blob_sidecar_task_times: Histogram,
     pub fc_data_column_sidecar_task_times: Histogram,
@@ -165,6 +170,7 @@ pub struct Metrics {
     pub fc_preprocess_state_task_times: Histogram,
     pub fc_checkpoint_state_task_times: Histogram,
     pub fc_persist_pubkey_cache_task_times: Histogram,
+    pub fc_block_payload_attestation_task_times: Histogram,
 
     // Cache metrics
     pub active_validator_indices_ordered_init_count: IntCounter,
@@ -482,6 +488,19 @@ impl Metrics {
                 )
             )?,
 
+            // Payload Attestation Verifier
+            payload_attestation_verifier_active_task_count: IntGauge::new(
+                "PAYLOAD_ATTESTATION_VERIFIER_ACTIVE_TASK_COUNT",
+                "Payload attestation verifier active task count",
+            )?,
+
+            payload_attestation_verifier_process_attestation_batch_times: Histogram::with_opts(
+                histogram_opts!(
+                    "PAYLOAD_ATTESTATION_VERIFIER_PROCESS_ATTESTATION_BATCH_TIMES",
+                    "Payload attestation verifier process attestation batch task times",
+                )
+            )?,
+
             // Validator ticks + Epoch processing
             validator_propose_tick_times: Histogram::with_opts(histogram_opts!(
                 "VALIDATOR_PROPOSE_TICK_TIMES",
@@ -699,6 +718,14 @@ impl Metrics {
                 &["origin"],
             )?,
 
+            fc_payload_attestation_batch_task_times: HistogramVec::new(
+            histogram_opts!(
+                    "FC_PAYLOAD_ATTESTATION_BATCH_TASK_TIMES",
+                    "Forkchoice PayloadAttestationBatchTask times",
+                ),
+                &["origin"],
+            )?,
+
             fc_blob_sidecar_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_BLOB_SIDECAR_TASK_TIMES",
                 "Forkchoice BlobSidecar times",
@@ -752,6 +779,11 @@ impl Metrics {
             fc_checkpoint_state_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_CHECKPOINT_STATE_TASK_TIMES",
                 "Forkchoice CheckpointStateTask times",
+            ))?,
+
+            fc_block_payload_attestation_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_BLOCK_PAYLOAD_ATTESTATION_TASK_TIMES",
+                "Forkchoice BlockPayloadAttesttionTask times",
             ))?,
 
             // Cache metrics
@@ -1017,6 +1049,13 @@ impl Metrics {
             self.attestation_verifier_verify_agg_batch_signature_times
                 .clone(),
         ))?;
+        default_registry.register(Box::new(
+            self.payload_attestation_verifier_active_task_count.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.payload_attestation_verifier_process_attestation_batch_times
+                .clone(),
+        ))?;
         default_registry.register(Box::new(self.validator_propose_tick_times.clone()))?;
         default_registry.register(Box::new(self.validator_attest_tick_times.clone()))?;
         default_registry.register(Box::new(self.validator_aggregate_tick_times.clone()))?;
@@ -1076,6 +1115,9 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_aggregate_and_proof_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_attestation_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_payload_attestation_task_times.clone()))?;
+        default_registry.register(Box::new(
+            self.fc_payload_attestation_batch_task_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.fc_blob_sidecar_task_times.clone()))?;
         default_registry.register(Box::new(
             self.fc_execution_payload_envelope_task_times.clone(),
@@ -1094,6 +1136,9 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_preprocess_state_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_checkpoint_state_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_persist_pubkey_cache_task_times.clone()))?;
+        default_registry.register(Box::new(
+            self.fc_block_payload_attestation_task_times.clone(),
+        ))?;
         default_registry.register(Box::new(
             self.active_validator_indices_ordered_init_count.clone(),
         ))?;
@@ -1386,6 +1431,12 @@ impl Metrics {
     // Attestation Verifier
     pub fn set_attestation_verifier_active_task_count(&self, task_count: usize) {
         self.attestation_verifier_active_task_count
+            .set(task_count as i64)
+    }
+
+    // Payload Attestation Verifier
+    pub fn set_payload_attestation_verifier_active_task_count(&self, task_count: usize) {
+        self.payload_attestation_verifier_active_task_count
             .set(task_count as i64)
     }
 
