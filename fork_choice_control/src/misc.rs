@@ -39,7 +39,7 @@ pub struct Delayed<P: Preset> {
     pub payload_status: Option<(PayloadStatusV1, Slot)>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
-    pub payload_attestations: Vec<PendingPayloadAttestation<P>>,
+    pub payload_attestations: Vec<PayloadAttestationItem<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
     pub execution_payload_envelopes: Vec<PendingExecutionPayloadEnvelope<P>>,
@@ -162,8 +162,6 @@ pub struct PendingAggregateAndProof<P: Preset> {
 }
 
 pub type PendingAttestation<P> = AttestationItem<P, GossipId>;
-
-pub type PendingPayloadAttestation<P> = PayloadAttestationItem<P>;
 
 #[derive(Debug)]
 pub struct PendingBlobSidecar<P: Preset> {

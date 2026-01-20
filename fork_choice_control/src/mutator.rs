@@ -80,8 +80,8 @@ use crate::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
         PendingChainLink, PendingDataColumnSidecar, PendingExecutionPayloadEnvelope,
-        PendingPayloadAttestation, ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult,
-        VerifyAttestationResult, VerifyPayloadAttestationResult, WaitingForCheckpointState,
+        ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
+        VerifyPayloadAttestationResult, WaitingForCheckpointState,
     },
     storage::Storage,
     tasks::{
@@ -3155,7 +3155,7 @@ where
     fn delay_payload_attestation_until_block(
         &mut self,
         wait_group: &W,
-        pending_payload_attestation: PendingPayloadAttestation<P>,
+        pending_payload_attestation: PayloadAttestationItem<P>,
         block_root: H256,
     ) {
         if self.store.contains_block(block_root) {
@@ -3534,7 +3534,7 @@ where
     fn retry_payload_attestation(
         &self,
         wait_group: W,
-        payload_attestation: PendingPayloadAttestation<P>,
+        payload_attestation: PayloadAttestationItem<P>,
     ) {
         trace_with_peers!("retrying delayed payload attestation: {payload_attestation:?}");
 
