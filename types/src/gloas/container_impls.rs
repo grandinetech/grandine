@@ -1,7 +1,7 @@
 use core::fmt;
 use std::sync::Arc;
 
-use ssz::{ByteList, ContiguousList};
+use ssz::{ByteList, ContiguousList, H256};
 
 use crate::{
     capella::containers::Withdrawal,
@@ -16,10 +16,28 @@ use crate::{
         CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayloadEnvelope,
         PayloadAttestationData, SignedExecutionPayloadEnvelope,
     },
+    phase0::primitives::Slot,
     preset::Preset,
 };
 
 impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
+    #[must_use]
+    pub const fn slot(&self) -> Slot {
+        self.message.slot
+    }
+
+    #[must_use]
+    pub const fn block_root(&self) -> H256 {
+        self.message.beacon_block_root
+    }
+
+    #[must_use]
+    pub const fn blob_kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+        &self.message.blob_kzg_commitments
+    }
+
     #[must_use]
     pub fn full() -> Self {
         Self {

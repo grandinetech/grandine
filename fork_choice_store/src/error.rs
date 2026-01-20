@@ -7,9 +7,7 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::{
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-    },
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
     phase0::primitives::{Epoch, Gwei, Slot, SubnetId, ValidatorIndex, H256},
     preset::{Mainnet, Preset},
 };

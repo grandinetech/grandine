@@ -58,7 +58,7 @@ use types::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             CombinedPayloadAttestation, DataColumnSidecar as GloasDataColumnSidecar,
-            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
