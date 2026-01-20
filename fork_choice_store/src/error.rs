@@ -204,7 +204,9 @@ pub enum Error<P: Preset> {
     PayloadEnvelopeInvalidBlock {
         payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     },
-    #[error("payload envelope validation with pre-Gloas state: (envelope_slot: {envelope_slot}, state_slot: {state_slot})")]
+    #[error(
+        "payload envelope validation with pre-Gloas state: (envelope_slot: {envelope_slot}, state_slot: {state_slot})"
+    )]
     PayloadEnvelopeWithPreGloasState {
         envelope_slot: Slot,
         state_slot: Slot,

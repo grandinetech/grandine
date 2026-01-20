@@ -32,7 +32,7 @@ use p2p::{NetworkConfig, SubnetService, SyncToApi};
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
 use scc::HashMap as SccHashMap;
-use signer::{KeyOrigin, Signer, Web3SignerConfig};
+use signer::{KeyOrigin, KeyType, Signer, Web3SignerConfig};
 use slashing_protection::{DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT, SlashingProtector};
 use snapshot_test_utils::Case;
 use std_ext::ArcExt as _;
@@ -226,7 +226,12 @@ impl<P: Preset> Context<P> {
         );
 
         let signer = Arc::new(Signer::new(
-            validator_keys,
+            validator_keys
+                .into_iter()
+                .map(|(pubkey, secret_key, key_origin)| {
+                    (pubkey, secret_key, key_origin, KeyType::Validator)
+                })
+                .collect::<Vec<_>>(),
             client,
             Web3SignerConfig::default(),
             None,

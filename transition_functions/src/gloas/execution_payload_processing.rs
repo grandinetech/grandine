@@ -2,7 +2,7 @@ use anyhow::{Result, ensure};
 use bls::{PublicKeyBytes, SignatureBytes};
 use execution_engine::ExecutionEngine;
 use helper_functions::{
-    accessors::get_current_epoch,
+    accessors::{self, get_current_epoch},
     error::SignatureKind,
     misc::{self, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
     mutators::{builder_balance, increase_balance},
@@ -362,13 +362,7 @@ pub fn apply_deposit_for_builder<P: Preset>(
     amount: Gwei,
     signature: SignatureBytes,
 ) -> Result<()> {
-    if let Some(builder_index) = state
-        .builders()
-        .into_iter()
-        .position(|builder| builder.pubkey == pubkey)
-    {
-        let builder_index = builder_index.try_into()?;
-
+    if let Some(builder_index) = accessors::builder_index_of_public_key(state, &pubkey) {
         increase_balance(builder_balance(state, builder_index)?, amount);
     } else {
         // > Verify the deposit signature (proof of possession)
@@ -407,8 +401,16 @@ pub fn add_builder_to_registry<P: Preset>(
         *state.builders_mut().get_mut(builder_index)? = builder;
     }
 
-    // TODO(gloas): Should builder indices be cached like validators?
-    // if so, it need to pruned since builder index is reusable. remove this TODO if not
+    state
+        .cache_mut()
+        .builder_indices
+        .get_mut()
+        .expect(
+            "state.cache.builder_indices is initialized by \
+                builder_index_of_public_key, which is called before apply_deposit_for_builder",
+        )
+        .insert(pubkey, builder_index);
+
     Ok(())
 }
 

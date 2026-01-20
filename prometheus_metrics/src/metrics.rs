@@ -116,6 +116,9 @@ pub struct Metrics {
     pub validator_own_payload_attestations_init_times: Histogram,
     pub validator_attest_payload_times: Histogram,
 
+    // Builder metrics
+    pub builder_own_signed_payload_bids_init_times: Histogram,
+
     // eth/v1/validator/attestation_data
     pub validator_api_attestation_data_times: Histogram,
 
@@ -180,6 +183,7 @@ pub struct Metrics {
     pub ptc_cache_init_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
     pub validator_indices_init_count: IntCounter,
+    pub builder_indices_init_count: IntCounter,
 
     // Transition function metrics
     pub blinded_block_transition_times: Histogram,
@@ -563,6 +567,12 @@ impl Metrics {
                 "Validator attest payload duty times",
             ))?,
 
+            // Builder metrics
+            builder_own_signed_payload_bids_init_times: Histogram::with_opts(histogram_opts!(
+                "BUILDER_OWN_SIGNED_PAYLOAD_BIDS_INIT_TIMES",
+                "Builder own_signed_payload_bids init times",
+            ))?,
+
             // eth/v1/validator/attestation_data
             validator_api_attestation_data_times: Histogram::with_opts(histogram_opts!(
                 "VALIDATOR_API_ATTESTATION_DATA_TIMES",
@@ -825,6 +835,11 @@ impl Metrics {
                 "Validator indices cache init count",
             )?,
 
+            builder_indices_init_count: IntCounter::new(
+                "BUILDER_INDICES_INIT_COUNT",
+                "Builder indices init count",
+            )?,
+
             // Transition function metrics
             blinded_block_transition_times: Histogram::with_opts(histogram_opts!(
                 "BLINDED_BLOCK_TRANSITION_TIMES",
@@ -1071,6 +1086,9 @@ impl Metrics {
             self.validator_own_payload_attestations_init_times.clone(),
         ))?;
         default_registry.register(Box::new(self.validator_attest_payload_times.clone()))?;
+        default_registry.register(Box::new(
+            self.builder_own_signed_payload_bids_init_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.validator_api_attestation_data_times.clone()))?;
         default_registry.register(Box::new(self.validator_propose_times.clone()))?;
         default_registry.register(Box::new(self.validator_propose_successes.clone()))?;
@@ -1151,6 +1169,7 @@ impl Metrics {
         default_registry.register(Box::new(self.ptc_cache_init_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
         default_registry.register(Box::new(self.validator_indices_init_count.clone()))?;
+        default_registry.register(Box::new(self.builder_indices_init_count.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
         default_registry.register(Box::new(self.block_transition_times.clone()))?;
         default_registry.register(Box::new(self.epoch_processing_times.clone()))?;

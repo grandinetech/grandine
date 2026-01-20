@@ -390,7 +390,8 @@ impl Snapshot {
                 | SigningMessage::ContributionAndProof(_)
                 | SigningMessage::ValidatorRegistration(_)
                 | SigningMessage::VoluntaryExit(_)
-                | SigningMessage::ExecutionPayloadEnvelope(_) => {
+                | SigningMessage::ExecutionPayloadEnvelope(_)
+                | SigningMessage::ExecutionPayloadBid(_) => {
                     signable_messages.push(SigningTriple {
                         message,
                         signing_root,

@@ -41,6 +41,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             SigningMessage::ValidatorRegistration(_) => MessageType::ValidatorRegistration,
             SigningMessage::VoluntaryExit(_) => MessageType::VoluntaryExit,
             SigningMessage::ExecutionPayloadEnvelope(_) => MessageType::ExecutionPayloadEnvelope,
+            SigningMessage::ExecutionPayloadBid(_) => MessageType::ExecutionPayloadBid,
         };
 
         Self {
@@ -68,6 +69,7 @@ enum MessageType {
     ValidatorRegistration,
     VoluntaryExit,
     ExecutionPayloadEnvelope,
+    ExecutionPayloadBid,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +99,7 @@ mod tests {
                 "VALIDATOR_REGISTRATION",
                 "VOLUNTARY_EXIT",
                 "EXECUTION_PAYLOAD_ENVELOPE",
+                "EXECUTION_PAYLOAD_BID",
             ],
         );
     }

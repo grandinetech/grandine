@@ -1149,6 +1149,42 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Some((beacon_block, block_rewards))
     }
 
+    pub async fn produce_default_payload_bid(&self) -> Result<Option<ExecutionPayloadBid>> {
+        let Some(state) = self.beacon_state.post_gloas() else {
+            return Err(AnyhowError::msg(
+                "cannot construct payload bid with pre-Gloas state",
+            ));
+        };
+
+        let mut payload_with_data = None;
+
+        if let Some(handle) = self.get_local_execution_payload() {
+            payload_with_data = handle
+                .await?
+                .map(|value| value.map(|value| value.map(Some)))
+        }
+
+        let WithClientVersions {
+            result:
+                WithBlobsAndMev {
+                    value: execution_payload,
+                    commitments,
+                    ..
+                },
+            ..
+        } = match payload_with_data {
+            Some(payload_with_mev_and_versions) => payload_with_mev_and_versions,
+            None => {
+                return Err(AnyhowError::msg(
+                    "no execution payload to include in make a bid",
+                ));
+            }
+        };
+
+        self.construct_default_payload_bid(state, execution_payload, commitments)
+            .await
+    }
+
     async fn produce_beacon_block(
         &self,
         block_without_state_root: BeaconBlock<P>,
@@ -1208,7 +1244,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .cache_set(self.head_block_root, payload.hash_tree_root());
                 }
 
-                self.construct_self_payload_bid(state, execution_payload, commitments)
+                self.construct_self_signed_payload_bid(state, execution_payload, commitments)
                     .await?
             } else {
                 // TODO: (gloas): select from received bids based on proposer preference
@@ -1580,14 +1616,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             )
     }
 
-    async fn construct_self_payload_bid(
+    async fn construct_default_payload_bid(
         &self,
         state: &(impl PostGloasBeaconState<P> + ?Sized),
         execution_payload_opt: Option<ExecutionPayload<P>>,
         blob_kzg_commitments_opt: Option<
             ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
         >,
-    ) -> Result<Option<SignedExecutionPayloadBid>> {
+    ) -> Result<Option<ExecutionPayloadBid>> {
         let Some(payload) = execution_payload_opt else {
             return Ok(None);
         };
@@ -1598,18 +1634,39 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let fee_recipient = self.fee_recipient().await?;
 
-        let payload_bid = ExecutionPayloadBid {
+        let default_payload_bid = ExecutionPayloadBid {
             parent_block_hash: state.latest_block_hash(),
             parent_block_root: state.latest_block_header().hash_tree_root(),
             block_hash: payload.block_hash(),
             prev_randao: payload.prev_randao(),
             fee_recipient,
             gas_limit: payload.gas_limit(),
-            builder_index: BUILDER_INDEX_SELF_BUILD,
             slot: state.slot(),
-            value: 0,
-            execution_payment: 0,
             blob_kzg_commitments_root,
+            ..Default::default()
+        };
+
+        Ok(Some(default_payload_bid))
+    }
+
+    async fn construct_self_signed_payload_bid(
+        &self,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
+        execution_payload_opt: Option<ExecutionPayload<P>>,
+        blob_kzg_commitments_opt: Option<
+            ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+        >,
+    ) -> Result<Option<SignedExecutionPayloadBid>> {
+        let Some(default_payload_bid) = self
+            .construct_default_payload_bid(state, execution_payload_opt, blob_kzg_commitments_opt)
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let payload_bid = ExecutionPayloadBid {
+            builder_index: BUILDER_INDEX_SELF_BUILD,
+            ..default_payload_bid
         };
 
         Ok(Some(SignedExecutionPayloadBid {

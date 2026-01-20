@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use crate::{
     altair::primitives::NonZeroGwei,
+    gloas::primitives::BuilderIndex,
     nonstandard::{RelativeEpoch, RelativeSlot},
     phase0::primitives::ValidatorIndex,
 };
@@ -37,8 +38,9 @@ pub struct Cache {
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
     pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
     /// PTC cache: previous, current, and next slot.
-    /// Shifted in `advance_slot()`: Previous <- Current <- Next.
+    /// Shifted in `advance_slot()`: Previous <- Current <- Next.nd
     pub ptc_cache: EnumMap<RelativeSlot, OnceCell<Vec<ValidatorIndex>>>,
+    pub builder_indices: OnceCell<HashMap<PublicKeyBytes, BuilderIndex>>,
 }
 
 impl Cache {

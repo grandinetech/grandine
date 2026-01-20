@@ -224,6 +224,44 @@ pub fn get_or_init_validator_indices<P: Preset>(
     })
 }
 
+pub fn builder_public_key<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    builder_index: BuilderIndex,
+) -> Result<&PublicKeyBytes> {
+    Ok(&state.builders().get(builder_index)?.pubkey)
+}
+
+#[must_use]
+pub fn builder_index_of_public_key<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    public_key: &PublicKeyBytes,
+) -> Option<BuilderIndex> {
+    get_or_init_builder_indices(state, true)
+        .get(public_key)
+        .copied()
+}
+
+pub fn get_or_init_builder_indices<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    report_cache_miss: bool,
+) -> &HashMap<PublicKeyBytes, BuilderIndex> {
+    state.cache().builder_indices.get_or_init(|| {
+        if report_cache_miss {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = METRICS.get() {
+                metrics.builder_indices_init_count.inc();
+            }
+        }
+
+        state
+            .builders()
+            .into_iter()
+            .map(|builder| builder.pubkey)
+            .zip(0..)
+            .collect()
+    })
+}
+
 pub fn get_active_validator_indices<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,

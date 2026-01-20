@@ -1004,9 +1004,14 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     accessors::get_or_init_total_active_balance(state, false);
     accessors::get_or_init_validator_indices(state, false);
 
-    // Pre-compute PTC cache (no-op for non-Gloas)
-    accessors::get_or_try_init_ptc(state, RelativeSlot::Current, false)?;
-    accessors::get_or_try_init_ptc(state, RelativeSlot::Next, false)?;
+    if let Some(post_gloas_state) = state.post_gloas() {
+        accessors::get_or_init_builder_indices(post_gloas_state, false);
+
+        // TODO(gloas): pass `post_gloas_state` to init PTC
+        // Pre-compute PTC cache (no-op for non-Gloas)
+        accessors::get_or_try_init_ptc(state, RelativeSlot::Current, false)?;
+        accessors::get_or_try_init_ptc(state, RelativeSlot::Next, false)?;
+    }
 
     Ok(())
 }

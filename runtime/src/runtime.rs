@@ -63,7 +63,7 @@ use p2p::{
 use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder};
 use scc::HashMap as SccHashMap;
-use signer::{KeyOrigin, Signer};
+use signer::{KeyOrigin, KeyType, Signer};
 use slasher::{Databases, Slasher, SlasherConfig};
 use slashing_protection::{SlashingProtector, interchange_format::InterchangeData};
 use ssz::SszRead as _;

@@ -128,7 +128,7 @@ mod tests {
     use hex_literal::hex;
     use itertools::Itertools as _;
     use reqwest::Client;
-    use signer::Web3SignerConfig;
+    use signer::{KeyType, Web3SignerConfig};
     use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
     use std_ext::ArcExt as _;
 
@@ -153,6 +153,7 @@ mod tests {
                         .expect("secret key should be valid"),
                 ),
                 KeyOrigin::LocalFileSystem,
+                KeyType::Validator,
             )],
             Client::new(),
             Web3SignerConfig::default(),

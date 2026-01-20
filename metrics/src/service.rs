@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(
             format!("{config:?}"),
             "MetricsServiceConfig { \
-                directories: Directories { data_dir: None, store_directory: None, network_dir: None, validator_dir: None }, \
+                directories: Directories { data_dir: None, store_directory: None, network_dir: None, validator_dir: None, builder_dir: None }, \
                 metrics_update_interval: 5s, \
                 remote_metrics_url: Some(\"http://*:*@metrics.service.url/\") \
             }",

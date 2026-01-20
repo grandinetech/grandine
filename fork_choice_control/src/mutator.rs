@@ -3613,7 +3613,7 @@ where
     fn take_delayed_until_slot(
         &mut self,
         slot: Slot,
-    ) -> impl Iterator<Item = Delayed<P>> + use<P, E, W, TS, PS, LS, NS, SS, VS> {
+    ) -> impl Iterator<Item = Delayed<P>> + use<P, E, W, TS, PS, LS, NS, SS, VS, BS> {
         match slot.checked_add(1) {
             Some(next_slot) => {
                 let later = self.delayed_until_slot.split_off(&next_slot);

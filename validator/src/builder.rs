@@ -1,33 +1,35 @@
 //! <https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/builder.md>
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use block_producer::{BlockBuildOptions, BlockProducer};
-use clock::Tick;
+use bls::PublicKeyBytes;
+use clock::{Tick, TickKind};
 use debug_info::HealthCheck;
 use derive_more::Display;
 use eth1_api::ApiController;
 use features::Feature;
-use fork_choice_control::{BuilderMessage, EventChannels, Wait};
+use fork_choice_control::{BuilderMessage, Event, EventChannels, Topic, Wait};
 use fork_choice_store::ChainLink;
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     select,
     stream::StreamExt as _,
 };
+use helper_functions::{accessors, signing::SignForSingleFork as _};
+use itertools::Itertools as _;
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use once_cell::sync::OnceCell;
 use p2p::{BuilderToP2p, P2pToBuilder};
 use prometheus_metrics::Metrics;
-use signer::Signer;
+use signer::{Signer, SigningMessage, SigningTriple};
 use std_ext::ArcExt as _;
+use tokio::time::timeout;
 use tracing::instrument;
 use types::{
     config::Config as ChainConfig,
-    gloas::containers::{
-        ExecutionPayloadBid, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-    },
+    gloas::containers::{ExecutionPayloadBid, SignedExecutionPayloadBid},
     nonstandard::WithStatus,
     phase0::primitives::{ExecutionBlockHash, Slot},
     preset::Preset,
@@ -73,7 +75,7 @@ pub struct Builder<P: Preset, W: Wait> {
     signer: Arc<Signer>,
     event_channels: Arc<EventChannels<P>>,
     last_tick: Option<Tick>,
-    own_payload_bids: OnceCell<Vec<ExecutionPayloadBid>>,
+    own_signed_payload_bids: OnceCell<Vec<SignedExecutionPayloadBid>>,
     metrics: Option<Arc<Metrics>>,
 }
 
@@ -107,7 +109,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             signer,
             event_channels,
             last_tick: None,
-            own_payload_bids: OnceCell::new(),
+            own_signed_payload_bids: OnceCell::new(),
             metrics,
         }
     }
@@ -170,11 +172,106 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
+    #[instrument(
+        parent = None,
+        level = "debug",
+        fields(
+            service = "builder",
+            tick = ?tick,
+        ),
+        skip_all
+    )]
     async fn handle_tick(&mut self, wait_group: W, tick: Tick) -> Result<()> {
-        // TODO(gloas): Implement payload bids submission at slot start
-        // - Consider to bid for building payload for the slot
-        // - Call `BlockProducer::construct_payload_bid` to construct the payload bid
-        // - Sign bid and broadcast to `execution_payload_bid` gossipsub topic
+        if self.signer.load().no_builder_keys() {
+            return Ok(());
+        }
+
+        if let Some(metrics) = self.metrics.as_ref() {
+            if tick.is_start_of_interval() {
+                let tick_delay =
+                    tick.delay::<P>(&self.chain_config, self.controller.genesis_time())?;
+                debug_with_peers!("tick_delay: {tick_delay:?} for {tick:?}");
+                metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
+            }
+        }
+
+        let Tick { slot, kind } = tick;
+
+        debug_with_peers!("{kind:?} tick in slot {slot}");
+
+        let Some(slot_head) = self
+            .slot_head(slot)
+            .await?
+            .map_err(|head_far_behind| warn_with_peers!("{head_far_behind}"))
+            .ok()
+        else {
+            return Ok(());
+        };
+
+        if !slot_head.beacon_state.is_post_gloas() {
+            warn_with_peers!(
+                "builder cannot place a bid because \
+                 head state has not been transited to Gloas state"
+            );
+            return Ok(());
+        };
+
+        if self
+            .wait_for_fully_validated_head(&slot_head)
+            .await
+            .is_err()
+        {
+            warn_with_peers!(
+                "builder cannot place a bid because \
+                 chain head has not been fully verified by an execution engine",
+            );
+            return Ok(());
+        }
+
+        if kind == TickKind::PayloadAttestFourth {
+            // Discard old payload bids at the end of slot
+            self.own_signed_payload_bids.take();
+        }
+
+        if tick.is_start_of_slot() && self.builder_config.always_bid {
+            let proposer_index = tokio::task::block_in_place(|| slot_head.proposer_index())?;
+            let block_build_context = self.block_producer.new_build_context(
+                slot_head.beacon_state.clone_arc(),
+                slot_head.beacon_block_root,
+                proposer_index,
+                BlockBuildOptions::default(),
+            );
+
+            let Some(payload_bid) = block_build_context.produce_default_payload_bid().await? else {
+                return Ok(());
+            };
+
+            let own_signed_payload_bids = self
+                .own_signed_payload_bids(&slot_head, payload_bid)
+                .await?;
+
+            if own_signed_payload_bids.is_empty() {
+                return Ok(());
+            }
+
+            info_with_peers!(
+                "builders [{}] publish execution payload bids for slot {}",
+                own_signed_payload_bids
+                    .iter()
+                    .map(|b| b.message.builder_index)
+                    .format(", "),
+                slot_head.slot(),
+            );
+
+            for own_signed_payload_bid in own_signed_payload_bids {
+                BuilderToP2p::PublishPayloadBid(Arc::new(*own_signed_payload_bid))
+                    .send(&self.p2p_tx);
+            }
+        }
+
+        self.last_tick = Some(tick);
+
         Ok(())
     }
 
@@ -202,7 +299,9 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             let proposer_index = match slot_head.proposer_index() {
                 Ok(proposer_index) => proposer_index,
                 Err(error) => {
-                    error_with_peers!("failed to compute proposer index while preparing execution payload: {error:?}");
+                    error_with_peers!(
+                        "failed to compute proposer index while preparing execution payload: {error:?}"
+                    );
                     return;
                 }
             };
@@ -262,6 +361,83 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         }
     }
 
+    fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
+        self.signer.load().builder_keys().copied().collect()
+    }
+
+    async fn own_signed_payload_bids(
+        &self,
+        slot_head: &SlotHead<P>,
+        payload_bid: ExecutionPayloadBid,
+    ) -> Result<&[SignedExecutionPayloadBid]> {
+        if let Some(own_signed_payload_bids) = self.own_signed_payload_bids.get() {
+            return Ok(own_signed_payload_bids);
+        }
+
+        let Some(state) = slot_head.beacon_state.post_gloas() else {
+            return Ok(&[]);
+        };
+
+        let (triples, data): (Vec<_>, Vec<_>) = self
+            .own_public_keys()
+            .iter()
+            .filter_map(|pubkey| {
+                let builder_index = accessors::builder_index_of_public_key(state, pubkey)?;
+                let data = ExecutionPayloadBid {
+                    builder_index,
+                    // TODO(gloas): set `value` (in gwei) that the builder will pay the proposer if the bid is accepted.
+                    value: 0,
+                    ..payload_bid
+                };
+
+                let triple = SigningTriple {
+                    message: SigningMessage::<P>::ExecutionPayloadBid(data),
+                    signing_root: data.signing_root(&self.chain_config, &slot_head.beacon_state),
+                    public_key: *pubkey,
+                };
+
+                Some((triple, data))
+            })
+            .unzip();
+
+        let snapshot = self.signer.load();
+
+        let result = snapshot
+            .sign_triples_without_slashing_protection(
+                triples,
+                Some(slot_head.beacon_state.as_ref().into()),
+            )
+            .await;
+
+        let signatures = match result {
+            Ok(signatures) => signatures,
+            Err(error) => {
+                warn_with_peers!("failed to sign payload bid: {error:?}");
+                return Ok(&[]);
+            }
+        };
+
+        self.own_signed_payload_bids
+            .get_or_try_init(|| {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    metrics
+                        .builder_own_signed_payload_bids_init_times
+                        .start_timer()
+                });
+
+                let own_signed_payload_bids = signatures
+                    .zip(data)
+                    .map(|(signature, data)| SignedExecutionPayloadBid {
+                        message: data,
+                        signature: signature.into(),
+                    })
+                    .collect();
+
+                Ok(own_signed_payload_bids)
+            })
+            .map(Vec::as_slice)
+    }
+
     #[instrument(level = "debug", skip_all)]
     async fn safe_slot_head(&self, slot: Slot) -> Option<SlotHead<P>> {
         self.slot_head(slot)
@@ -313,26 +489,33 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         }))
     }
 
-    fn publish_payload_bid(&self, signed_bid: Arc<SignedExecutionPayloadBid>) {
-        info_with_peers!(
-            "Publishing execution payload bid (slot: {}, value: {} gwei)",
-            signed_bid.message.slot,
-            signed_bid.message.value
-        );
+    async fn wait_for_fully_validated_head(&self, slot_head: &SlotHead<P>) -> Result<()> {
+        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
-        BuilderToP2p::PublishPayloadBid(signed_bid).send(&self.p2p_tx);
-    }
+        if !slot_head.is_optimistic(&self.controller)? {
+            return Ok(());
+        }
 
-    fn publish_execution_payload(
-        &mut self,
-        signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-    ) {
-        info_with_peers!(
-            "Publishing execution payload envelope (block root: {:?}, slot: {})",
-            signed_envelope.block_root(),
-            signed_envelope.slot()
-        );
+        timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+            loop {
+                let block_event = match self.event_channels.receiver_for(Topic::Block).recv().await
+                {
+                    Ok(Event::Block(block_event)) => block_event,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        warn_with_peers!("error receiving block event: {error:?}");
+                        continue;
+                    }
+                };
 
-        BuilderToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.p2p_tx);
+                if block_event.block == slot_head.beacon_block_root
+                    && !block_event.execution_optimistic
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .map_err(Into::into)
     }
 }

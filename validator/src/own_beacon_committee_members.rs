@@ -246,7 +246,7 @@ mod tests {
     use bls::traits::SecretKey as _;
     use pubkey_cache::PubkeyCache;
     use reqwest::Client;
-    use signer::{KeyOrigin, Web3SignerConfig};
+    use signer::{KeyOrigin, KeyType, Web3SignerConfig};
     use types::preset::Minimal;
 
     use super::*;
@@ -273,9 +273,24 @@ mod tests {
 
         let signer = Arc::new(Signer::new(
             [
-                (public_key_1, secret_key_1, KeyOrigin::LocalFileSystem),
-                (public_key_2, secret_key_2, KeyOrigin::LocalFileSystem),
-                (public_key_3, secret_key_3, KeyOrigin::LocalFileSystem),
+                (
+                    public_key_1,
+                    secret_key_1,
+                    KeyOrigin::LocalFileSystem,
+                    KeyType::Validator,
+                ),
+                (
+                    public_key_2,
+                    secret_key_2,
+                    KeyOrigin::LocalFileSystem,
+                    KeyType::Validator,
+                ),
+                (
+                    public_key_3,
+                    secret_key_3,
+                    KeyOrigin::LocalFileSystem,
+                    KeyType::Validator,
+                ),
             ],
             Client::new(),
             Web3SignerConfig::default(),

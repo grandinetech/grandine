@@ -24,7 +24,8 @@ use types::{
         BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
     },
     gloas::containers::{
-        BeaconBlock as GloasBeaconBlock, ExecutionPayloadEnvelope, PayloadAttestationData,
+        BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid, ExecutionPayloadEnvelope,
+        PayloadAttestationData,
     },
     phase0::{
         containers::{
@@ -77,6 +78,7 @@ pub enum SigningMessage<'block, P: Preset> {
         epoch: Epoch,
     },
     PayloadAttestation(PayloadAttestationData),
+    ExecutionPayloadBid(ExecutionPayloadBid),
     ExecutionPayloadEnvelope(&'block ExecutionPayloadEnvelope<P>),
     SyncCommitteeMessage {
         beacon_block_root: H256,
