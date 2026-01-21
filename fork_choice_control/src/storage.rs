@@ -1707,4 +1707,50 @@ mod tests {
 
         Ok(())
     }
+
+    #[cfg(feature = "eth2-cache")]
+    #[test]
+    fn test_delta_roundtrip_genesis() -> Result<()> {
+        use eth2_cache_utils::mainnet;
+
+        let config = Arc::new(Config::mainnet());
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+        let base_state = mainnet::GENESIS_BEACON_STATE.force();
+        let blocks = mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force();
+
+        let mut state = base_state.clone_arc();
+        let state_mut = state.make_mut();
+
+        for block in blocks.iter().skip(1) {
+            combined::untrusted_state_transition(&config, &pubkey_cache, state_mut, block)?;
+            let delta = delta(base_state, &Arc::new(state_mut.clone()))?;
+            let recovered = apply_delta(base_state, delta)?;
+            assert_eq!(*state_mut, recovered);
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "eth2-cache")]
+    #[test]
+    fn test_delta_roundtrip_altair() -> Result<()> {
+        use eth2_cache_utils::mainnet;
+
+        let config = Arc::new(Config::mainnet());
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+        let base_state = mainnet::ALTAIR_BEACON_STATE.force();
+        let blocks = mainnet::ALTAIR_BEACON_BLOCKS_FROM_128_SLOTS.force();
+
+        let mut state = base_state.clone_arc();
+        let state_mut = state.make_mut();
+
+        for block in blocks.iter().skip(1) {
+            combined::untrusted_state_transition(&config, &pubkey_cache, state_mut, block)?;
+            let delta = delta(base_state, &Arc::new(state_mut.clone()))?;
+            let recovered = apply_delta(base_state, delta)?;
+            assert_eq!(*state_mut, recovered);
+        }
+
+        Ok(())
+    }
 }
