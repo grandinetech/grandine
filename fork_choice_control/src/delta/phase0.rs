@@ -511,12 +511,14 @@ pub(super) fn randao_delta<P: Preset>(
 ) -> RandaoChange {
     let modulus = P::EpochsPerHistoricalVector::U64;
 
-    let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
-    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % modulus;
-    let start_idx = (end_idx + modulus - diff_len - 1) % modulus;
+    let base_epoch = base_slot / P::SlotsPerEpoch::U64;
+    let target_epoch = target_slot / P::SlotsPerEpoch::U64;
 
-    let num_mixes = diff_len + 1;
-    let new_mixes: Vec<_> = (0..num_mixes)
+    let num_epochs_changed = target_epoch - base_epoch + 1;
+
+    let start_idx = base_epoch % modulus;
+
+    let new_mixes: Vec<_> = (0..num_epochs_changed)
         .map(|offset| *target_randao.mod_index(start_idx + offset))
         .collect();
 
@@ -548,29 +550,37 @@ pub(super) fn slashings_delta<P: Preset>(
     }
 
     let modulus = P::EpochsPerSlashingsVector::U64;
-    let diff_len = (target_slot - base_slot) / P::SlotsPerEpoch::U64;
-    let end_idx = (target_slot / P::SlotsPerEpoch::U64) % modulus;
-    let start_idx = (end_idx + modulus - diff_len - 1) % modulus;
 
-    let num_epochs = diff_len + 1;
-    let slashing_changes: Vec<_> = (0..num_epochs)
+    let base_epoch = base_slot / P::SlotsPerEpoch::U64;
+    let target_epoch = target_slot / P::SlotsPerEpoch::U64;
+
+    let num_epochs_changed = target_epoch - base_epoch;
+
+    let start_epoch = base_epoch + 1;
+    let start_idx = start_epoch % modulus;
+
+    let slashing_changes: Vec<_> = (0..num_epochs_changed)
         .filter_map(|offset| {
-            let i = start_idx + offset;
-            let base_val = base_slashings.mod_index(i);
-            let target_val = target_slashings.mod_index(i);
+            let idx = (start_idx + offset) % modulus;
+            let base_val = base_slashings.mod_index(idx);
+            let target_val = target_slashings.mod_index(idx);
 
             if base_val == target_val {
                 None
             } else {
                 Some(SlashingChange {
-                    index: i % modulus,
+                    index: idx,
                     new_slashing: *target_val,
                 })
             }
         })
         .collect();
 
-    Some(slashing_changes)
+    if slashing_changes.is_empty() {
+        None
+    } else {
+        Some(slashing_changes)
+    }
 }
 
 pub(super) fn apply_slashings<P: Preset>(
