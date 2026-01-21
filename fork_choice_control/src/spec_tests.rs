@@ -308,7 +308,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     | Phase::Bellatrix
                     | Phase::Capella
                     | Phase::Deneb => AttesterSlashing::Phase0(case.ssz(config, file_name)),
-                    Phase::Electra | Phase::Fulu => {
+                    Phase::Electra | Phase::Fulu | Phase::Gloas => {
                         AttesterSlashing::Electra(case.ssz(config, file_name))
                     }
                 };

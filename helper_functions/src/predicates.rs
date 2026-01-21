@@ -19,14 +19,20 @@ use types::{
     deneb::{containers::BlobSidecar, primitives::BlobIndex},
     electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
     fulu::containers::DataColumnSidecar,
+    gloas::{
+        consts::BUILDER_WITHDRAWAL_PREFIX,
+        containers::{Builder, IndexedPayloadAttestation},
+        primitives::BuilderIndex,
+    },
     phase0::{
         consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
         containers::{AttestationData, Validator},
-        primitives::{CommitteeIndex, Epoch, H256, Slot},
+        primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot},
     },
     preset::Preset,
     traits::{
         BeaconState, BlockBodyWithExecutionPayload, IndexedAttestation, PostBellatrixBeaconState,
+        PostGloasBeaconState,
     },
 };
 
@@ -391,6 +397,130 @@ pub fn has_compounding_withdrawal_credential(validator: &Validator) -> bool {
 #[must_use]
 pub fn has_execution_withdrawal_credential(validator: &Validator) -> bool {
     has_compounding_withdrawal_credential(validator) || has_eth1_withdrawal_credential(validator)
+}
+
+#[must_use]
+pub fn is_builder_withdrawal_credential(withdrawal_credentials: H256) -> bool {
+    withdrawal_credentials
+        .as_bytes()
+        .starts_with(BUILDER_WITHDRAWAL_PREFIX)
+}
+
+#[must_use]
+pub fn has_builder_withdrawal_credential(validator: &Validator) -> bool {
+    is_builder_withdrawal_credential(validator.withdrawal_credentials)
+}
+
+// >  Check if the builder is active.
+#[inline]
+#[must_use]
+pub const fn is_active_builder(builder: &Builder, finalized_epoch: Epoch) -> bool {
+    // Builder deposit has been finalized and has not initiated exit
+    builder.deposit_epoch < finalized_epoch && builder.withdrawable_epoch == FAR_FUTURE_EPOCH
+}
+
+pub fn can_builder_cover_bid<P: Preset>(
+    state: &dyn PostGloasBeaconState<P>,
+    builder_index: BuilderIndex,
+    bid_amount: Gwei,
+) -> Result<bool> {
+    let balance = state.builders().get(builder_index)?.balance;
+    let pending_withdrawals_amount =
+        accessors::get_pending_balance_to_withdraw_for_builder(state, builder_index);
+    let min_balance = P::MIN_DEPOSIT_AMOUNT + pending_withdrawals_amount;
+
+    Ok(balance.saturating_sub(min_balance).ge(&bid_amount))
+}
+
+// > Checks if the attestation was for the block proposed at the attestation slot
+pub fn is_attestation_same_slot<P: Preset>(
+    state: &impl BeaconState<P>,
+    data: &AttestationData,
+) -> Result<bool> {
+    if data.slot == 0 {
+        return Ok(true);
+    }
+
+    let is_matching_blockroot =
+        data.beacon_block_root == accessors::get_block_root_at_slot(state, data.slot)?;
+    let is_current_blockroot =
+        data.beacon_block_root != accessors::get_block_root_at_slot(state, data.slot - 1)?;
+
+    Ok(is_matching_blockroot && is_current_blockroot)
+}
+
+// > This function returns true if the last committed payload bid was fulfilled with a payload,
+//   this can only happen when both beacon block and payload were present.
+//   This function must be called on a beacon state before processing the execution payload bid in the block.
+#[must_use]
+pub fn is_parent_block_full<P: Preset>(state: &impl PostGloasBeaconState<P>) -> bool {
+    state.latest_execution_payload_bid().block_hash == state.latest_block_hash()
+}
+
+// This doesn't verify the signature when called directly with `MultiVerifier`.
+// When calling directly, use `SingleVerifier` or call `finalize` manually.
+pub fn validate_constructed_indexed_payload_attestation<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl BeaconState<P>,
+    attestation: &IndexedPayloadAttestation<P>,
+    verifier: impl Verifier,
+) -> Result<()> {
+    validate_indexed_payload_attestation(config, pubkey_cache, state, attestation, verifier, false)
+}
+
+pub fn validate_received_indexed_payload_attestation<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl BeaconState<P>,
+    attestation: &IndexedPayloadAttestation<P>,
+    verifier: impl Verifier,
+) -> Result<()> {
+    validate_indexed_payload_attestation(config, pubkey_cache, state, attestation, verifier, true)
+}
+
+// > Check if ``indexed_payload_attestation`` is non-empty,
+// has sorted indices and has a valid aggregate signature.
+fn validate_indexed_payload_attestation<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl BeaconState<P>,
+    attestation: &IndexedPayloadAttestation<P>,
+    mut verifier: impl Verifier,
+    validate_indices_sorted: bool,
+) -> Result<()> {
+    ensure!(
+        !attestation.attesting_indices.is_empty(),
+        Error::AttestationHasNoAttestingIndices
+    );
+
+    if validate_indices_sorted {
+        // > Verify indices are sorted
+        ensure!(
+            attestation.attesting_indices.is_sorted(),
+            Error::AttestingIndicesNotSortedAndUnique,
+        );
+    }
+
+    // > Verify aggregate signature
+    itertools::process_results(
+        attestation
+            .attesting_indices
+            .as_ref()
+            .iter()
+            .copied()
+            .map(|validator_index| {
+                pubkey_cache.get_or_insert(*accessors::public_key(state, validator_index)?)
+            }),
+        |public_keys| {
+            verifier.verify_aggregate(
+                attestation.data.signing_root(config, state),
+                attestation.signature,
+                public_keys,
+                SignatureKind::PayloadAttestation,
+            )
+        },
+    )?
 }
 
 #[cfg(test)]

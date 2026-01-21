@@ -741,6 +741,7 @@ pub enum CombinedPayloadAttributesEventData {
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
     Fulu(PayloadAttributesEventDataV3),
+    Gloas(PayloadAttributesEventDataV3),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -870,6 +871,9 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             }
             PayloadAttributes::Fulu(payload_attributes_v3) => {
                 Self::Fulu(payload_attributes_v3.into())
+            }
+            PayloadAttributes::Gloas(payload_attributes_v3) => {
+                Self::Gloas(payload_attributes_v3.into())
             }
         }
     }

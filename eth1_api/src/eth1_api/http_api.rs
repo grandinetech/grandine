@@ -385,7 +385,7 @@ impl Eth1Api {
                 .await?
                 .result
             }
-            Phase::Deneb | Phase::Electra | Phase::Fulu => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 self.execute(
                     ENGINE_FORKCHOICE_UPDATED_V3,
                     params,
@@ -398,7 +398,7 @@ impl Eth1Api {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 7);
+                const_assert_eq!(Phase::CARDINALITY, 8);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -410,10 +410,11 @@ impl Eth1Api {
             Phase::Deneb => payload_id.map(PayloadId::Deneb),
             Phase::Electra => payload_id.map(PayloadId::Electra),
             Phase::Fulu => payload_id.map(PayloadId::Fulu),
+            Phase::Gloas => payload_id.map(PayloadId::Gloas),
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 7);
+                const_assert_eq!(Phase::CARDINALITY, 8);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -489,6 +490,18 @@ impl Eth1Api {
                 .map(|with_client_info| with_client_info.map(Into::into))
             }
             PayloadId::Fulu(payload_id) => {
+                let params = vec![serde_json::to_value(payload_id)?];
+
+                self.execute::<EngineGetPayloadV5Response<P>>(
+                    ENGINE_GET_PAYLOAD_V5,
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(|with_client_info| with_client_info.map(Into::into))
+            }
+            PayloadId::Gloas(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV5Response<P>>(

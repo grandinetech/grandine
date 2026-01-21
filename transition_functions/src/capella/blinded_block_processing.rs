@@ -1,6 +1,5 @@
-use core::ops::{Add as _, Rem as _};
-
 use anyhow::{Result, ensure};
+
 use helper_functions::{
     accessors, misc,
     mutators::{balance, decrease_balance},
@@ -10,7 +9,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 use ssz::{ContiguousList, SszHash as _};
 use tap::TryConv as _;
-use typenum::{NonZero, Unsigned as _};
+use typenum::NonZero;
 use types::{
     capella::{
         beacon_state::BeaconState,
@@ -23,7 +22,7 @@ use types::{
 
 use crate::{
     altair,
-    capella::{self, get_expected_withdrawals},
+    capella::{self, get_expected_withdrawals, update_next_withdrawal_validator_index},
     unphased::{self, Error},
 };
 
@@ -153,28 +152,7 @@ where
     }
 
     // > Update the next validator index to start the next withdrawal sweep
-    if expected_withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
-        // > Next sweep starts after the latest withdrawal's validator index
-        let next_validator_index = expected_withdrawals
-            .last()
-            .expect(
-                "the NonZero bound on P::MaxWithdrawalsPerPayload \
-                 ensures that expected_withdrawals is not empty",
-            )
-            .validator_index
-            .add(1)
-            .rem(state.validators().len_u64());
-
-        *state.next_withdrawal_validator_index_mut() = next_validator_index;
-    } else {
-        // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
-        let next_index =
-            *state.next_withdrawal_validator_index_mut() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP;
-
-        let next_validator_index = next_index % state.validators().len_u64();
-
-        *state.next_withdrawal_validator_index_mut() = next_validator_index;
-    }
+    update_next_withdrawal_validator_index(state, expected_withdrawals.as_ref());
 
     Ok(())
 }

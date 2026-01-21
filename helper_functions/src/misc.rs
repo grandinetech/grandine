@@ -28,6 +28,7 @@ use types::{
         containers::{DataColumnSidecar, MatrixEntry},
         primitives::{BlobCommitmentsInclusionProof, ColumnIndex},
     },
+    gloas::{consts::BUILDER_INDEX_FLAG, primitives::BuilderIndex},
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
@@ -62,6 +63,16 @@ pub const fn compute_start_slot_at_epoch<P: Preset>(epoch: Epoch) -> Slot {
 #[must_use]
 pub fn is_epoch_start<P: Preset>(slot: Slot) -> bool {
     slots_since_epoch_start::<P>(slot) == 0
+}
+
+#[must_use]
+pub const fn builder_payment_index_for_current_epoch<P: Preset>(slot: Slot) -> u64 {
+    P::SlotsPerEpoch::U64.saturating_add(slot % P::SlotsPerEpoch::U64)
+}
+
+#[must_use]
+pub const fn builder_payment_index_for_previous_epoch<P: Preset>(slot: Slot) -> u64 {
+    slot % P::SlotsPerEpoch::U64
 }
 
 #[expect(
@@ -706,6 +717,15 @@ pub fn construct_blob_sidecar<P: Preset>(
         SignedBeaconBlock::Fulu(block) => {
             electra_kzg_commitment_inclusion_proof(&block.message.body, index)?
         }
+        SignedBeaconBlock::Gloas(_) => {
+            let message = block.message();
+
+            return Err(Error::BlobsForPostGloasBlock {
+                root: message.hash_tree_root(),
+                slot: message.slot(),
+            }
+            .into());
+        }
         SignedBeaconBlock::Phase0(_)
         | SignedBeaconBlock::Altair(_)
         | SignedBeaconBlock::Bellatrix(_)
@@ -735,6 +755,8 @@ pub fn construct_blob_sidecars<P: Preset>(
     blobs: impl IntoIterator<Item = Blob<P>>,
     proofs: impl IntoIterator<Item = KzgProof>,
 ) -> Result<Vec<BlobSidecar<P>>> {
+    // it is being used in `blob_sidecars` beacon API, which deprecated in Fulu, and no longer
+    // supported start from Gloas
     let Some(body) = block.message().body().with_blob_kzg_commitments() else {
         return Ok(vec![]);
     };
@@ -840,9 +862,98 @@ pub fn compute_proposer_indices<P: Preset>(
     (0..P::SlotsPerEpoch::U64)
         .map(|i| {
             let seed = hashing::hash_256_64(seed, start_slot.saturating_add(i));
-            compute_proposer_index(config, state, indices, seed, epoch)
+
+            if state.is_post_gloas() {
+                compute_balance_weighted_selection(state, indices, seed, 1, true)
+                    .map(|validators| validators[0])
+            } else {
+                compute_proposer_index(config, state, indices, seed, epoch)
+            }
         })
         .collect::<Result<_>>()
+}
+
+pub fn compute_balance_weighted_selection<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+    indices: &PackedIndices,
+    seed: H256,
+    size: usize,
+    shuffle_indices: bool,
+) -> Result<Vec<ValidatorIndex>> {
+    let total = indices
+        .len()
+        .try_conv::<u64>()?
+        .pipe(NonZeroU64::new)
+        .ok_or(Error::NoActiveValidators)?;
+
+    let mut selected = vec![];
+    let mut i = 0u64;
+    while selected.len() < size {
+        let mut next_index = (i % total.get())
+            .try_conv::<usize>()
+            .expect("next_index fits in usize because it is less than indices.len()");
+
+        if shuffle_indices {
+            next_index = compute_shuffled_index::<P>(next_index as u64, total, seed)
+                .try_conv::<usize>()
+                .expect("next_index fits in usize because it is less than indices.len()");
+        }
+
+        let candidate_index = indices
+            .get(next_index)
+            .expect("compute_balance_weighted_selection returns a value less than indices.len()");
+
+        if compute_balance_weighted_acceptance(state, candidate_index, seed, i)? {
+            selected.push(candidate_index);
+        }
+
+        i += 1;
+    }
+
+    Ok(selected)
+}
+
+fn compute_balance_weighted_acceptance<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+    index: ValidatorIndex,
+    seed: H256,
+    i: u64,
+) -> Result<bool> {
+    let max_random_value = u64::from(u16::MAX);
+    let seed = hashing::hash_256_64(seed, i.saturating_div(16));
+    let random_bytes = seed.as_fixed_bytes();
+    let offset = usize::try_from((i % 16) * 2)?;
+    let random_value = u64::from(u16::from_le_bytes([
+        random_bytes[offset],
+        random_bytes[offset + 1],
+    ]));
+    let effective_balance = state
+        .validators()
+        .get(index)
+        .map(|validator| validator.effective_balance)?;
+
+    Ok(effective_balance * max_random_value >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value)
+}
+
+#[must_use]
+pub const fn convert_builder_index_to_validator_index(
+    builder_index: BuilderIndex,
+) -> ValidatorIndex {
+    builder_index | BUILDER_INDEX_FLAG
+}
+
+#[must_use]
+pub const fn convert_validator_index_to_builder_index(
+    validator_index: ValidatorIndex,
+) -> BuilderIndex {
+    validator_index & !BUILDER_INDEX_FLAG
+}
+
+#[must_use]
+pub fn maybe_builder_index(validator_index: ValidatorIndex) -> Option<BuilderIndex> {
+    let is_builder_index = (validator_index & BUILDER_INDEX_FLAG) != 0;
+
+    is_builder_index.then_some(convert_validator_index_to_builder_index(validator_index))
 }
 
 #[cfg(test)]

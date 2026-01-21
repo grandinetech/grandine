@@ -65,6 +65,7 @@ pub enum Phase {
     Deneb,
     Electra,
     Fulu,
+    Gloas,
 }
 
 impl Phase {
@@ -107,6 +108,14 @@ impl<T> Toption<T> {
 //                      - `http_api::standard::validator_proposer_duties`
 #[derive(Clone, Copy, Debug, Enum)]
 pub enum RelativeEpoch {
+    Previous,
+    Current,
+    Next,
+}
+
+/// Relative slot for PTC cache.
+#[derive(Clone, Copy, Debug, Enum)]
+pub enum RelativeSlot {
     Previous,
     Current,
     Next,
@@ -665,6 +674,7 @@ mod tests {
             Phase::Deneb,
             Phase::Electra,
             Phase::Fulu,
+            Phase::Gloas,
         ];
 
         assert_eq!(expected_order.len(), Phase::CARDINALITY);

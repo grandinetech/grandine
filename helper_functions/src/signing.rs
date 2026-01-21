@@ -29,6 +29,13 @@ use types::{
         AggregateAndProof as ElectraAggregateAndProof, BeaconBlock as ElectraBeaconBlock,
     },
     fulu::containers::BeaconBlock as FuluBeaconBlock,
+    gloas::{
+        consts::{DOMAIN_BEACON_BUILDER, DOMAIN_PTC_ATTESTER},
+        containers::{
+            BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid, ExecutionPayloadEnvelope,
+            PayloadAttestationData,
+        },
+    },
     phase0::{
         consts::{
             DOMAIN_AGGREGATE_AND_PROOF, DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER,
@@ -324,6 +331,15 @@ impl<P: Preset> SignForSingleFork<P> for FuluBeaconBlock<P> {
     }
 }
 
+impl<P: Preset> SignForSingleFork<P> for GloasBeaconBlock<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+}
+
 impl<P: Preset> SignForSingleFork<P> for CombinedBeaconBlock<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_PROPOSER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Block;
@@ -418,6 +434,7 @@ impl<P: Preset> SignForSingleFork<P> for VoluntaryExit {
         let domain = if current_fork_version == config.deneb_fork_version
             || current_fork_version == config.electra_fork_version
             || current_fork_version == config.fulu_fork_version
+            || current_fork_version == config.gloas_fork_version
         {
             let fork_version = Some(config.capella_fork_version);
             let genesis_validators_root = Some(beacon_state.genesis_validators_root());
@@ -435,4 +452,34 @@ impl<P: Preset> SignForSingleFork<P> for VoluntaryExit {
 impl<P: Preset> SignForSingleForkAtSlot<P> for H256 {
     const DOMAIN_TYPE: DomainType = DOMAIN_SYNC_COMMITTEE;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::SyncCommitteeMessage;
+}
+
+// <https://github.com/ethereum/consensus-specs/blob/v1.6.0-beta.0/specs/gloas/beacon-chain.md#new-is_valid_indexed_payload_attestation>
+impl<P: Preset> SignForSingleFork<P> for PayloadAttestationData {
+    const DOMAIN_TYPE: DomainType = DOMAIN_PTC_ATTESTER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::PayloadAttestation;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+}
+
+// <https://github.com/ethereum/consensus-specs/blob/v1.6.0-beta.0/specs/gloas/beacon-chain.md#new-verify_execution_payload_bid_signature>
+impl<P: Preset> SignForSingleFork<P> for ExecutionPayloadBid {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_BUILDER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::ExecutionPayloadBid;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
+}
+
+// <https://github.com/ethereum/consensus-specs/blob/v1.6.0-beta.0/specs/gloas/beacon-chain.md#new-verify_execution_payload_envelope_signature>
+impl<P: Preset> SignForSingleFork<P> for ExecutionPayloadEnvelope<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_BUILDER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::ExecutionPayloadEnvelope;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.slot)
+    }
 }

@@ -11,15 +11,16 @@ use ssz::{PersistentList, PersistentVector, UnhashedBundleSize};
 
 use crate::{
     altair::primitives::ParticipationFlags,
-    capella::containers::HistoricalSummary,
+    capella::containers::{HistoricalSummary, Withdrawal},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
+    gloas::containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
     phase0::{
         containers::{Eth1Data, PendingAttestation, Validator},
         primitives::{Gwei, H256, ValidatorIndex},
     },
     preset::{
-        MaxAttestationsPerEpoch, Preset, ProposerLookaheadLength, SlotsPerEth1VotingPeriod,
-        SlotsPerHistoricalRoot,
+        BuilderPendingPaymentsLength, MaxAttestationsPerEpoch, Preset, ProposerLookaheadLength,
+        SlotsPerEth1VotingPeriod, SlotsPerHistoricalRoot,
     },
 };
 
@@ -69,3 +70,17 @@ pub type ProposerLookahead<P> = PersistentVector<
     ProposerLookaheadLength<P>,
     UnhashedBundleSize<ValidatorIndex>,
 >;
+
+pub type Builders<P> = PersistentList<Builder, <P as Preset>::BuilderRegistryLimit>;
+
+pub type BuilderPendingPayments<P> = PersistentVector<
+    BuilderPendingPayment,
+    BuilderPendingPaymentsLength<P>,
+    UnhashedBundleSize<BuilderPendingPayment>,
+>;
+
+pub type BuilderPendingWithdrawals<P> =
+    PersistentList<BuilderPendingWithdrawal, <P as Preset>::BuilderPendingWithdrawalsLimit>;
+
+pub type PayloadExpectedWithdrawals<P> =
+    PersistentList<Withdrawal, <P as Preset>::MaxWithdrawalsPerPayload>;

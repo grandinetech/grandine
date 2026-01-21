@@ -39,6 +39,7 @@ use crate::{
         PendingPartialWithdrawal, WithdrawalRequest,
     },
     fulu::primitives::{Cell, ColumnIndex},
+    gloas::containers::{BuilderPendingPayment, BuilderPendingWithdrawal, PayloadAttestation},
     phase0::{
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
@@ -63,6 +64,8 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Mul<
             Self::SlotsPerEpoch,
             Output: PersistentVectorElements<H256, UnhashedBundleSize<H256>>
+                        + BitVectorBits
+                        + MerkleBits
                         + IsGreaterOrEqual<Sub1<Self::SlotsPerEpoch>, Output = True>
                         + Send
                         + Sync,
@@ -108,7 +111,18 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
                             + Sync,
             >,
         >;
-    type SlotsPerEpoch: Unsigned + NonZero + Sub<B1>;
+    type SlotsPerEpoch: Unsigned
+        + NonZero
+        + Sub<B1>
+        + Mul<
+            U2,
+            Output: PersistentVectorElements<
+                BuilderPendingPayment,
+                UnhashedBundleSize<BuilderPendingPayment>,
+            > + Debug
+                        + Send
+                        + Sync,
+        >;
     type ValidatorRegistryLimit: FitsInU64 + NonZero + Debug + Send + Sync;
 
     // Altair
@@ -198,6 +212,26 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Mul<BytesPerFieldElement, Output: ByteVectorBytes + MerkleElements<u8>>;
     type NumberOfColumns: MerkleElements<ColumnIndex> + Eq + Debug + Send + Sync;
 
+    // Gloas
+    type PtcSize: ContiguousVectorElements<ValidatorIndex>
+        + MerkleElements<ValidatorIndex>
+        + BitVectorBits
+        + MerkleBits
+        + Div<U2, Output: NonZero + Ord + Send + Sync>
+        + NonZero
+        + Eq
+        + Ord
+        + Debug
+        + Send
+        + Sync;
+    type MaxPayloadAttestation: MerkleElements<PayloadAttestation<Self>> + Eq + Debug + Send + Sync;
+    type BuilderRegistryLimit: FitsInU64 + NonZero + Debug + Send + Sync;
+    type BuilderPendingWithdrawalsLimit: MerkleElements<BuilderPendingWithdrawal>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+
     // Derived type-level variables
     type MaxAttestersPerSlot: MerkleElements<ValidatorIndex>
         + MerkleBits
@@ -263,6 +297,9 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     const MIN_ACTIVATION_BALANCE: Gwei = 32_000_000_000;
     const MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
     const WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA: NonZeroU64 = nonzero!(4096_u64);
+
+    // Gloas
+    const MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: u64 = 1 << 14;
 
     /// Returns the default configuration associated with a preset.
     ///
@@ -332,6 +369,12 @@ impl Preset for Mainnet {
     type KzgCommitmentsInclusionProofDepth = U4;
     type FieldElementsPerExtBlob = U8192;
     type NumberOfColumns = U128;
+
+    // Gloas
+    type PtcSize = U512;
+    type MaxPayloadAttestation = U4;
+    type BuilderRegistryLimit = U1099511627776;
+    type BuilderPendingWithdrawalsLimit = U1048576;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -409,6 +452,11 @@ impl Preset for Minimal {
         type KzgCommitmentsInclusionProofDepth;
         type FieldElementsPerExtBlob;
         type NumberOfColumns;
+
+        // Gloas
+        type MaxPayloadAttestation;
+        type BuilderRegistryLimit;
+        type BuilderPendingWithdrawalsLimit;
     }
 
     // Phase 0
@@ -428,6 +476,9 @@ impl Preset for Minimal {
     // Electra
     type PendingConsolidationsLimit = U64;
     type PendingPartialWithdrawalsLimit = U64;
+
+    // Gloas
+    type PtcSize = U2;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -453,6 +504,9 @@ impl Preset for Minimal {
 
     // Electra
     const MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP: u64 = 2;
+
+    // Gloas
+    const MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: u64 = 16;
 }
 
 /// [Medalla preset](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/medalla/config.yaml).
@@ -515,6 +569,12 @@ impl Preset for Medalla {
         type FieldElementsPerExtBlob;
         type NumberOfColumns;
 
+        // Gloas
+        type PtcSize;
+        type MaxPayloadAttestation;
+        type BuilderRegistryLimit;
+        type BuilderPendingWithdrawalsLimit;
+
         // Derived type-level variables
         type MaxAttestersPerSlot;
         type MaxCellProofsPerBlock;
@@ -549,6 +609,10 @@ pub type SlotsPerHistoricalRoot<P> =
 
 pub type ProposerLookaheadLength<P> =
     Prod<Sum<<P as Preset>::MinSeedLookahead, U1>, <P as Preset>::SlotsPerEpoch>;
+
+pub type BuilderPendingPaymentsLength<P> = Prod<<P as Preset>::SlotsPerEpoch, U2>;
+
+pub type PayloadTimelyThreshold<P> = Quot<<P as Preset>::PtcSize, U2>;
 
 // This variable has been renamed a number of times and no longer even exists in `consensus-specs`,
 // but it's still needed in our implementation.
@@ -624,6 +688,15 @@ impl PresetName {
             Self::Mainnet => FuluPreset::new::<Mainnet>(),
             Self::Minimal => FuluPreset::new::<Minimal>(),
             Self::Medalla => FuluPreset::new::<Medalla>(),
+        }
+    }
+
+    #[must_use]
+    pub fn gloas_preset(self) -> GloasPreset {
+        match self {
+            Self::Mainnet => GloasPreset::new::<Mainnet>(),
+            Self::Minimal => GloasPreset::new::<Minimal>(),
+            Self::Medalla => GloasPreset::new::<Medalla>(),
         }
     }
 
@@ -1004,6 +1077,34 @@ impl FuluPreset {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct GloasPreset {
+    #[serde(with = "serde_utils::string_or_native")]
+    ptc_size: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_payload_attestation: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    builder_registry_limit: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    builder_pending_withdrawals_limit: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_builders_per_withdrawals_sweep: u64,
+}
+
+impl GloasPreset {
+    #[must_use]
+    pub fn new<P: Preset>() -> Self {
+        Self {
+            ptc_size: P::PtcSize::non_zero(),
+            max_payload_attestation: P::MaxPayloadAttestation::U64,
+            builder_registry_limit: P::BuilderRegistryLimit::non_zero(),
+            builder_pending_withdrawals_limit: P::BuilderPendingWithdrawalsLimit::U64,
+            max_builders_per_withdrawals_sweep: P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::ops::Deref;
@@ -1059,6 +1160,7 @@ mod tests {
                 &preset_name.deneb_preset(),
                 &preset_name.electra_preset(),
                 &preset_name.fulu_preset(),
+                &preset_name.gloas_preset(),
             ];
         }
     }
