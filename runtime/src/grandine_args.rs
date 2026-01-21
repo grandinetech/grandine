@@ -353,19 +353,24 @@ struct BeaconNodeOptions {
     #[clap(long)]
     state_slot: Option<Slot>,
 
-    /// Subscribe to half of the data column subnets
+    /// Run in semi-supernode mode, subscribing to half of the data column subnets
     #[clap(
         long,
-        conflicts_with("subscribe_all_data_column_subnets"),
-        conflicts_with("subscribe_all_subnets")
+        conflicts_with("supernode"),
+        visible_alias("subscribe-half-data-column-subnets")
     )]
-    subscribe_half_data_column_subnets: bool,
+    semi_supernode: bool,
 
-    /// Subscribe to all data column subnets
-    #[clap(long)]
-    subscribe_all_data_column_subnets: bool,
+    /// Run in supernode mode, subscribing to all data column subnets
+    #[clap(
+        long,
+        conflicts_with("semi_supernode"),
+        visible_alias("subscribe-all-data-column-subnets")
+    )]
+    supernode: bool,
 
-    /// Subscribe to all subnets
+    /// Subscribe to all attestation and sync committee subnets.
+    /// This option does not include data column subnets.
     #[clap(long)]
     subscribe_all_subnets: bool,
 
@@ -1034,8 +1039,8 @@ impl GrandineArgs {
             max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout,
             state_slot,
-            subscribe_half_data_column_subnets,
-            subscribe_all_data_column_subnets,
+            semi_supernode,
+            supernode,
             subscribe_all_subnets,
             suggested_fee_recipient,
             jwt_id,
@@ -1347,10 +1352,7 @@ impl GrandineArgs {
             .into_iter()
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllSyncCommitteeSubnets))
-            .chain(
-                subscribe_all_data_column_subnets
-                    .then_some(Feature::SubscribeToAllDataColumnSubnets),
-            )
+            .chain(supernode.then_some(Feature::SubscribeToAllDataColumnSubnets))
             .collect::<Vec<_>>();
 
         // enabling these features here, because it being used in below network config conversion
@@ -1399,9 +1401,9 @@ impl GrandineArgs {
             urls: web3signer_urls,
         };
 
-        let custody_mode = if subscribe_all_data_column_subnets {
+        let custody_mode = if supernode {
             CustodyMode::Super
-        } else if subscribe_half_data_column_subnets {
+        } else if semi_supernode {
             CustodyMode::Semi
         } else {
             CustodyMode::Minimal
@@ -2189,21 +2191,26 @@ mod tests {
     }
 
     #[test]
-    fn incompatible_data_column_subnet_subscription_options() {
+    fn incompatible_data_column_subnet_subscription_alias_options() {
         try_config_from_args([
             "--subscribe-half-data-column-subnets",
             "--subscribe-all-data-column-subnets",
         ])
-        .expect_err("incompatible data column subnet subscription options should fail");
+        .expect_err("incompatible data column subnet subscription aliased options should fail");
     }
 
     #[test]
-    fn incompatible_subnet_subscription_options() {
-        try_config_from_args([
-            "--subscribe-half-data-column-subnets",
-            "--subscribe-all-subnets",
-        ])
-        .expect_err("incompatible subnet subscription options should fail");
+    fn incompatible_data_column_subnet_subscription_options() {
+        try_config_from_args(["--semi-supernode", "--supernode"])
+            .expect_err("incompatible data column subnet subscription options should fail");
+    }
+
+    #[test]
+    fn incompatible_data_column_subnet_subscription_options_with_alias_and_non_alias() {
+        try_config_from_args(["--subscribe-half-data-column-subnets", "--supernode"]).expect_err(
+            "incompatible data column subnet subscription options with alias \
+            and non-alias should fail",
+        );
     }
 
     #[test]
