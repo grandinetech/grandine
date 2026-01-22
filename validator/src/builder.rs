@@ -24,16 +24,22 @@ use once_cell::sync::OnceCell;
 use p2p::{BuilderToP2p, P2pToBuilder};
 use prometheus_metrics::Metrics;
 use signer::{Signer, SigningMessage, SigningTriple};
+use ssz::H256;
 use std_ext::ArcExt as _;
 use tokio::time::timeout;
 use tracing::instrument;
 use types::{
     config::Config as ChainConfig,
-    gloas::containers::{ExecutionPayloadBid, SignedExecutionPayloadBid},
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{
+            ExecutionPayloadBid, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        },
+    },
     nonstandard::WithStatus,
     phase0::primitives::{ExecutionBlockHash, Slot},
     preset::Preset,
-    traits::BeaconState as _,
+    traits::{BeaconState as _, BlockBodyWithPayloadBid, SignedBeaconBlock},
 };
 
 use crate::{builder_config::BuilderConfig, slot_head::SlotHead};
@@ -75,6 +81,7 @@ pub struct Builder<P: Preset, W: Wait> {
     signer: Arc<Signer>,
     event_channels: Arc<EventChannels<P>>,
     last_tick: Option<Tick>,
+    last_block_root: Option<H256>,
     own_signed_payload_bids: OnceCell<Vec<SignedExecutionPayloadBid>>,
     metrics: Option<Arc<Metrics>>,
 }
@@ -109,6 +116,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             signer,
             event_channels,
             last_tick: None,
+            last_block_root: None,
             own_signed_payload_bids: OnceCell::new(),
             metrics,
         }
@@ -144,8 +152,9 @@ impl<P: Preset, W: Wait> Builder<P, W> {
                             let span = tracing::debug_span!("BuilderMessage::Head", service = "builder");
                             let _enter = span.enter();
 
-                            self.maybe_publish_execution_payload_envelope(wait_group, head)
-                                .await;
+                            if let Err(error) = self.maybe_publish_execution_payload_envelope(wait_group, head).await {
+                                panic!("error while handling head: {error:?}");
+                            };
                         },
                         BuilderMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
                             let span = tracing::debug_span!("BuilderMessage::PrepareExecutionPayload", service = "builder");
@@ -161,8 +170,9 @@ impl<P: Preset, W: Wait> Builder<P, W> {
 
                 p2p_message = self.p2p_to_builder_rx.select_next_some() => {
                     match p2p_message {
-                        P2pToBuilder::ProposerPreferences(proposer_preferences, gossip_id) => {
-
+                        P2pToBuilder::ProposerPreferences(_proposer_preferences, _gossip_id) => {
+                            // TODO(gloas): Store proposer preferences (fee recipient, gas limit)
+                            // in `block_producer` used in payload bid construction
                         }
                     }
                 },
@@ -210,10 +220,6 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         };
 
         if !slot_head.beacon_state.is_post_gloas() {
-            warn_with_peers!(
-                "builder cannot place a bid because \
-                 head state has not been transited to Gloas state"
-            );
             return Ok(());
         };
 
@@ -255,7 +261,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
                 return Ok(());
             }
 
-            info_with_peers!(
+            debug_with_peers!(
                 "builders [{}] publish execution payload bids for slot {}",
                 own_signed_payload_bids
                     .iter()
@@ -265,12 +271,14 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             );
 
             for own_signed_payload_bid in own_signed_payload_bids {
+                // TODO(gloas): send own payload bid to fork choice
                 BuilderToP2p::PublishPayloadBid(Arc::new(*own_signed_payload_bid))
                     .send(&self.p2p_tx);
             }
         }
 
         self.last_tick = Some(tick);
+        self.last_block_root = Some(slot_head.beacon_block_root);
 
         Ok(())
     }
@@ -279,12 +287,120 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         &mut self,
         wait_group: W,
         head: ChainLink<P>,
-    ) {
-        // TODO(gloas): Implement payload envelope publishing
-        // - Check the `signed_execution_payload_bid` in head block, and the block is timely
-        // - Call `BlockProducer::construct_payload_envelope` to construct the payload envelope
-        // - Sign the envelope with the builder key, then broadcast to `execution_payload`
-        // gossipsub topic
+    ) -> Result<()> {
+        let beacon_block_root = head.block_root;
+
+        let Some(last_tick) = self.last_tick else {
+            return Ok(());
+        };
+
+        // Check if block is timely, otherwise builder withhold the payload
+        if !(last_tick.slot == head.slot() && last_tick.is_before_attesting_interval()) {
+            return Ok(());
+        }
+
+        // Get the block_root which used to create the block build context when placing bid
+        let Some(last_block_root) = self.last_block_root else {
+            return Ok(());
+        };
+
+        // TODO(gloas): get state at `last_block_root` with `state_before_or_at_slot`
+        let beacon_state = self.controller.state_by_chain_link(&head);
+        let Some(state) = beacon_state.post_gloas() else {
+            return Ok(());
+        };
+
+        let Some(signed_payload_bid) = head
+            .block
+            .message()
+            .body()
+            .with_payload_bid()
+            .map(BlockBodyWithPayloadBid::signed_execution_payload_bid)
+        else {
+            warn_with_peers!(
+                "builder cannot publish payload envelope because \
+                 head block has not been transited to post-Gloas block"
+            );
+            return Ok(());
+        };
+
+        let builder_index = signed_payload_bid.message.builder_index;
+
+        // Block with self-build payload bid, proposer responsible to publish the payload envelope
+        if builder_index == BUILDER_INDEX_SELF_BUILD {
+            info_with_peers!("proposer of block {beacon_block_root:?} build their own payload",);
+            return Ok(());
+        }
+
+        let public_key = accessors::builder_public_key(state, builder_index)?;
+        let signer_snapshot = self.signer.load();
+
+        if !signer_snapshot.has_key(*public_key) {
+            return Ok(());
+        }
+
+        let proposer_index = tokio::task::block_in_place(|| {
+            accessors::get_beacon_proposer_index(&self.chain_config, &beacon_state)
+        })?;
+        let block_build_context = self.block_producer.new_build_context(
+            beacon_state.clone_arc(),
+            last_block_root,
+            proposer_index,
+            BlockBuildOptions::default(),
+        );
+
+        let Some(envelope) = block_build_context
+            .compute_execution_payload_envelope(beacon_block_root, builder_index)
+            .await?
+        else {
+            warn_with_peers!(
+                "builder {} has been selected to publish payload envelope, \
+                but block producer has no execution payload to construct",
+                builder_index,
+            );
+            return Ok(());
+        };
+
+        let signature = match signer_snapshot
+            .sign_without_slashing_protection(
+                SigningMessage::ExecutionPayloadEnvelope(&envelope),
+                envelope.signing_root(&self.chain_config, &beacon_state),
+                Some(beacon_state.as_ref().into()),
+                *public_key,
+            )
+            .await
+        {
+            Ok(signature) => signature.into(),
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to sign execution payload envelope (block: {:?}, builder_index: {}): \
+                    {error:?}",
+                    beacon_block_root,
+                    builder_index,
+                );
+
+                return Ok(());
+            }
+        };
+
+        let signed_envelope = Arc::new(SignedExecutionPayloadEnvelope {
+            message: envelope,
+            signature,
+        });
+
+        debug_with_peers!(
+            "builder {} publishing execution payload envelope for (block {:?}, slot: {})",
+            builder_index,
+            beacon_block_root,
+            head.slot(),
+        );
+
+        self.controller
+            .on_own_execution_payload_envelope(wait_group, signed_envelope.clone_arc());
+
+        BuilderToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.p2p_tx);
+
+        Ok(())
     }
 
     async fn prepare_execution_payload(

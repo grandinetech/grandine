@@ -1078,7 +1078,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 // Handle Gloas execution payload envelope (only for self-build)
                 let signed_envelope_opt = if slot_head.phase() >= Phase::Gloas
                     && let Some(envelope) = block_build_context
-                        .compute_execution_payload_envelope(beacon_block_root)
+                        .compute_self_execution_payload_envelope(beacon_block_root)
                         .await?
                 {
                     self.publish_execution_payload_envelope(

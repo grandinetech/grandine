@@ -85,6 +85,7 @@ use types::{
             ExecutionPayloadBid, ExecutionPayloadEnvelope, PayloadAttestation,
             SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
     phase0::{
@@ -1181,6 +1182,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
+        if let Some(ref payload) = execution_payload {
+            self.producer_context
+                .cached_payload_roots
+                .lock()
+                .await
+                .cache_set(self.head_block_root, payload.hash_tree_root());
+        }
+
         self.construct_default_payload_bid(state, execution_payload, commitments)
             .await
     }
@@ -2098,9 +2107,18 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .flatten()
     }
 
+    pub async fn compute_self_execution_payload_envelope(
+        &self,
+        beacon_block_root: H256,
+    ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
+        self.compute_execution_payload_envelope(beacon_block_root, BUILDER_INDEX_SELF_BUILD)
+            .await
+    }
+
     pub async fn compute_execution_payload_envelope(
         &self,
         beacon_block_root: H256,
+        builder_index: BuilderIndex,
     ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
         let Some((payload, execution_requests, blob_kzg_commitments)) =
             self.get_gloas_envelope_data().await
@@ -2112,7 +2130,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut envelope = ExecutionPayloadEnvelope {
             payload,
             execution_requests,
-            builder_index: BUILDER_INDEX_SELF_BUILD,
+            builder_index,
             beacon_block_root,
             slot: self.beacon_state.slot(),
             blob_kzg_commitments,
