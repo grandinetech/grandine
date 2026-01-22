@@ -9,7 +9,7 @@ use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::{ContiguousList, Size, SszHash as _, SszSize, SszWrite, WriteError};
+use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -19,13 +19,13 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, DataColumnSidecar, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::containers::DataColumnIdentifier,
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -386,7 +386,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
     pub fn slot(&self) -> Slot {
         match self {
             Self::Block(block) => block.message().slot(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.slot,
+            Self::Sidecar(sidecar) => sidecar.slot(),
         }
     }
 
@@ -394,15 +394,17 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
     pub fn block_root(&self) -> H256 {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
+            Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
         }
     }
 
     #[must_use]
-    pub fn signed_block_header(&self) -> SignedBeaconBlockHeader {
+    pub fn signed_block_header(&self) -> Option<SignedBeaconBlockHeader> {
         match self {
-            Self::Block(block) => block.to_header(),
-            Self::Sidecar(sidecar) => sidecar.signed_block_header,
+            Self::Block(block) => Some(block.to_header()),
+            Self::Sidecar(sidecar) => sidecar
+                .pre_gloas()
+                .map(|sidecar| sidecar.signed_block_header),
         }
     }
 
@@ -415,7 +417,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .body()
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
-            Self::Sidecar(sidecar) => Some(&sidecar.kzg_commitments),
+            Self::Sidecar(sidecar) => Some(sidecar.kzg_commitments()),
         }
     }
 }

@@ -1172,7 +1172,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     kzg_backend,
                 )?;
 
-                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)
+                eip_7594::construct_fulu_data_column_sidecars(&block, &cells_and_kzg_proofs)
             })
             .await??;
 
@@ -1183,7 +1183,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .controller
                     .sampling_columns()
                     .into_iter()
-                    .contains(&data_column_sidecar.index)
+                    .contains(&data_column_sidecar.index())
                 {
                     self.controller
                         .on_own_data_column_sidecar(

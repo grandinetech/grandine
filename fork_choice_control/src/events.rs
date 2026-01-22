@@ -18,12 +18,12 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use types::{
     altair::containers::SignedContributionAndProof,
     capella::{containers::SignedBlsToExecutionChange, primitives::WithdrawalIndex},
-    combined::{Attestation, AttesterSlashing},
+    combined::{Attestation, AttesterSlashing, DataColumnSidecar},
     deneb::{
         containers::BlobSidecar,
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
-    fulu::{containers::DataColumnSidecar, primitives::ColumnIndex},
+    fulu::primitives::ColumnIndex,
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -611,9 +611,9 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
     fn new(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
         Self {
             block_root,
-            index: data_column_sidecar.index,
+            index: data_column_sidecar.index(),
             slot: data_column_sidecar.slot(),
-            kzg_commitments: data_column_sidecar.kzg_commitments.clone(),
+            kzg_commitments: data_column_sidecar.kzg_commitments().clone(),
         }
     }
 }

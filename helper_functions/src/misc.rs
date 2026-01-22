@@ -2,6 +2,7 @@ use core::{
     num::NonZeroU64,
     ops::{Div as _, Range, Shr as _},
 };
+use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use arithmetic::{U64Ext as _, UsizeExt as _};
@@ -15,7 +16,7 @@ use typenum::Unsigned as _;
 use types::{
     altair::{consts::SyncCommitteeSubnetCount, primitives::SyncCommitteePeriod},
     cache::PackedIndices,
-    combined::{Attestation, SignedBeaconBlock},
+    combined::{Attestation, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::{
         consts::{BlobCommitmentTreeDepth, VERSIONED_HASH_VERSION_KZG},
@@ -25,7 +26,7 @@ use types::{
         },
     },
     fulu::{
-        containers::{DataColumnSidecar, MatrixEntry},
+        containers::MatrixEntry,
         primitives::{BlobCommitmentsInclusionProof, ColumnIndex},
     },
     gloas::{consts::BUILDER_INDEX_FLAG, primitives::BuilderIndex},
@@ -830,21 +831,16 @@ pub fn data_column_serve_range_slot<P: Preset>(config: &Config, current_slot: Sl
 }
 
 pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
-    data_column_sidecar: &DataColumnSidecar<P>,
+    data_column_sidecar: &Arc<DataColumnSidecar<P>>,
 ) -> Vec<MatrixEntry<P>> {
-    let DataColumnSidecar {
-        index,
-        column,
-        kzg_proofs,
-        ..
-    } = data_column_sidecar;
-
+    let column = data_column_sidecar.column();
+    let column_index = data_column_sidecar.index();
     let blob_count = column.len() as u64;
 
-    izip!(0..blob_count, column, kzg_proofs)
+    izip!(0..blob_count, column, data_column_sidecar.kzg_proofs())
         .map(|(row_index, cell, kzg_proof)| MatrixEntry {
             row_index,
-            column_index: *index,
+            column_index,
             cell: cell.clone(),
             kzg_proof: *kzg_proof,
         })

@@ -16,15 +16,12 @@ use strum::IntoStaticStr;
 use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
-    combined::{SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };

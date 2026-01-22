@@ -37,19 +37,14 @@ use thiserror::Error;
 use tracing::{Span, instrument};
 use types::{
     combined::{
-        Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::ValidationOutcome,
-    phase0::{
-        containers::BeaconBlockHeader,
-        primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
-    },
+    phase0::primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -730,16 +725,15 @@ where
     ) {
         // During syncing, prevent spawning task if the sidecar has been accepted.
         // On the other hand, forward it to the `mutator` to allow distributed publishing if it is synced.
-        let block_header = data_column_sidecar.signed_block_header.message;
         if !self.store_snapshot().is_forward_synced()
             && self
                 .store_snapshot()
-                .accepted_data_column_sidecar(block_header, data_column_sidecar.index)
+                .accepted_data_column_sidecar(&data_column_sidecar)
         {
             debug_with_peers!(
                 "received data column sidecar has been accepted, ignore this one from {origin:?} \
                  (index: {}, slot: {})",
-                data_column_sidecar.index,
+                data_column_sidecar.index(),
                 data_column_sidecar.slot(),
             );
             return;
@@ -824,15 +818,6 @@ where
 
     pub fn sampling_columns_count(&self) -> usize {
         self.store_snapshot().sampling_columns_count()
-    }
-
-    pub fn accepted_data_column_sidecar(
-        &self,
-        block_header: BeaconBlockHeader,
-        index: ColumnIndex,
-    ) -> bool {
-        self.store_snapshot()
-            .accepted_data_column_sidecar(block_header, index)
     }
 
     pub(crate) fn store_snapshot(&self) -> Guard<Arc<Store<P, Storage<P>>>> {
