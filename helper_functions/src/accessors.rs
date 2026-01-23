@@ -1097,27 +1097,22 @@ fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: Relative
 /// Initialize PTC cache for a relative slot and return the cached value.
 /// Returns None for pre-Gloas states (PTC is not relevant for pre-Gloas).
 pub fn get_or_try_init_ptc<P: Preset>(
-    state: &impl BeaconState<P>,
+    state: &impl PostGloasBeaconState<P>,
     relative_slot: RelativeSlot,
     report_cache_miss: bool,
-) -> Result<Option<&Vec<ValidatorIndex>>> {
-    if state.is_post_gloas() {
+) -> Result<&Vec<ValidatorIndex>> {
+    state.cache().ptc_cache[relative_slot].get_or_try_init(|| {
+        if report_cache_miss {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = METRICS.get() {
+                metrics.ptc_cache_init_count.inc();
+            }
+        }
+
         let slot = absolute_slot(state, relative_slot);
 
-        let cached = state.cache().ptc_cache[relative_slot].get_or_try_init(|| {
-            if report_cache_miss {
-                #[cfg(feature = "metrics")]
-                if let Some(metrics) = METRICS.get() {
-                    metrics.ptc_cache_init_count.inc();
-                }
-            }
-            compute_ptc_for_slot_internal(state, slot)
-        })?;
-
-        Ok(Some(cached))
-    } else {
-        Ok(None)
-    }
+        compute_ptc_for_slot_internal(state, slot)
+    })
 }
 
 /// Get PTC members for a slot with 3-slot caching (previous, current, next).
@@ -1125,7 +1120,7 @@ pub fn get_or_try_init_ptc<P: Preset>(
 /// Caches PTC using `RelativeSlot`. Cache is shifted in `advance_slot()`: Previous <- Current <- Next.
 /// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
 pub fn get_ptc<P: Preset>(
-    state: &impl BeaconState<P>,
+    state: &impl PostGloasBeaconState<P>,
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
     let Ok(rel_slot) = relative_slot(state, slot) else {
@@ -1133,7 +1128,6 @@ pub fn get_ptc<P: Preset>(
     };
 
     get_or_try_init_ptc(state, rel_slot, true)?
-        .expect("callers must ensure post-Gloas state")
         .iter()
         .copied()
         .pipe(ContiguousVector::try_from_iter)
@@ -1141,7 +1135,7 @@ pub fn get_ptc<P: Preset>(
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
-    state: &impl BeaconState<P>,
+    state: &impl PostGloasBeaconState<P>,
     payload_attestation: &PayloadAttestation<P>,
 ) -> Result<IndexedPayloadAttestation<P>> {
     let ptc = get_ptc(state, payload_attestation.data.slot)?;
