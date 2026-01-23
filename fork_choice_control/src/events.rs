@@ -25,7 +25,7 @@ use types::{
     },
     electra::containers::SingleAttestation,
     fulu::primitives::ColumnIndex,
-    gloas::containers::SignedExecutionPayloadBid,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -56,6 +56,7 @@ pub enum Topic {
     ExecutionPayloadAvailable,
     FinalizedCheckpoint,
     Head,
+    PayloadAttestation,
     PayloadAttributes,
     ProposerSlashing,
     SingleAttestation,
@@ -77,6 +78,7 @@ pub enum Event<P: Preset> {
     ExecutionPayloadBid(ExecutionPayloadBidEvent<P>),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
+    PayloadAttestation(PayloadAttestationEvent),
     PayloadAttributes(PayloadAttributesEvent),
     ProposerSlashing(Box<ProposerSlashing>),
     SingleAttestation(SingleAttestation),
@@ -100,6 +102,7 @@ impl<P: Preset> Event<P> {
             Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
+            Self::PayloadAttestation(_) => Topic::PayloadAttestation,
             Self::PayloadAttributes(_) => Topic::PayloadAttributes,
             Self::ProposerSlashing(_) => Topic::ProposerSlashing,
             Self::SingleAttestation(_) => Topic::SingleAttestation,
@@ -124,6 +127,7 @@ pub struct EventChannels<P: Preset> {
     pub execution_payload_bids: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
+    pub payload_attestations: Sender<Event<P>>,
     pub payload_attributes: Sender<Event<P>>,
     pub proposer_slashings: Sender<Event<P>>,
     pub single_attestations: Sender<Event<P>>,
@@ -155,6 +159,7 @@ impl<P: Preset> EventChannels<P> {
             execution_payload_bids: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
+            payload_attestations: broadcast::channel(max_events).0,
             payload_attributes: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
             single_attestations: broadcast::channel(max_events).0,
@@ -179,6 +184,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ExecutionPayloadBid => &self.execution_payload_bids,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
+            Topic::PayloadAttestation => &self.payload_attestations,
             Topic::PayloadAttributes => &self.payload_attributes,
             Topic::ProposerSlashing => &self.proposer_slashings,
             Topic::SingleAttestation => &self.single_attestations,
@@ -321,6 +327,17 @@ impl<P: Preset> EventChannels<P> {
             if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
                 warn_with_peers!("unable to send chain reorg event: {error}");
             }
+        }
+    }
+
+    pub fn send_payload_attestation_event(
+        &self,
+        phase: Phase,
+        payload_attestation: &Arc<PayloadAttestationMessage>,
+    ) {
+        if let Err(error) = self.send_payload_attestation_event_internal(phase, payload_attestation)
+        {
+            warn_with_peers!("unable to send payload attestation event: {error}");
         }
     }
 
@@ -569,6 +586,21 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_payload_attestation_event_internal(
+        &self,
+        phase: Phase,
+        payload_attestation: &Arc<PayloadAttestationMessage>,
+    ) -> Result<()> {
+        if self.payload_attestations.receiver_count() > 0 {
+            let payload_attestation_event =
+                PayloadAttestationEvent::new(phase, payload_attestation);
+            let event = Event::PayloadAttestation(payload_attestation_event);
+            self.payload_attestations.send(event)?;
+        }
+
+        Ok(())
+    }
+
     #[expect(clippy::too_many_arguments)]
     fn send_payload_attributes_event_internal(
         &self,
@@ -804,6 +836,25 @@ impl HeadEvent {
             previous_duty_dependent_root,
             current_duty_dependent_root,
             execution_optimistic: head.is_optimistic(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct PayloadAttestationEvent {
+    pub version: Phase,
+    pub data: PayloadAttestationMessage,
+}
+
+impl PayloadAttestationEvent {
+    fn new(phase: Phase, payload_attestation: &Arc<PayloadAttestationMessage>) -> Self {
+        Self {
+            version: phase,
+            data: PayloadAttestationMessage {
+                validator_index: payload_attestation.validator_index,
+                data: payload_attestation.data,
+                signature: payload_attestation.signature,
+            },
         }
     }
 }

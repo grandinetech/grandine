@@ -58,7 +58,7 @@ use logging::{
 use metrics::{MetricsChannels, MetricsServerConfig, MetricsService, run_metrics_server};
 use operation_pools::{
     AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, Manager,
-    SyncCommitteeAggPool,
+    PayloadAttestationAggPool, SyncCommitteeAggPool,
 };
 use p2p::{
     BlockSyncService, BlockSyncServiceChannels, Channels, ListenAddr, Network, NetworkConfig,
@@ -588,6 +588,12 @@ pub async fn run_after_genesis<P: Preset>(
         dedicated_executor_low_priority.clone_arc(),
     );
 
+    let payload_attestation_agg_pool = PayloadAttestationAggPool::new(
+        controller.clone_arc(),
+        dedicated_executor_normal_priority.clone_arc(),
+        metrics.clone(),
+    );
+
     let sync_committee_agg_pool = SyncCommitteeAggPool::new(
         dedicated_executor_normal_priority.clone_arc(),
         controller.clone_arc(),
@@ -609,6 +615,7 @@ pub async fn run_after_genesis<P: Preset>(
         attestation_agg_pool.clone_arc(),
         blob_reconstruction_pool,
         bls_to_execution_change_pool.clone_arc(),
+        payload_attestation_agg_pool.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
         fork_choice_to_pool_rx,
         reconstruction_delay,
@@ -623,6 +630,7 @@ pub async fn run_after_genesis<P: Preset>(
         attestation_agg_pool.clone_arc(),
         bls_to_execution_change_pool.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
+        payload_attestation_agg_pool.clone_arc(),
         metrics.clone(),
         None,
     ));
@@ -649,6 +657,7 @@ pub async fn run_after_genesis<P: Preset>(
         keymanager.proposer_configs().clone_arc(),
         signer.clone_arc(),
         slashing_protector,
+        payload_attestation_agg_pool,
         sync_committee_agg_pool.clone_arc(),
         metrics.clone(),
         validator_statistics.clone(),

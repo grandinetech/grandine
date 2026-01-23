@@ -424,7 +424,7 @@ pub const fn is_active_builder(builder: &Builder, finalized_epoch: Epoch) -> boo
 }
 
 pub fn can_builder_cover_bid<P: Preset>(
-    state: &dyn PostGloasBeaconState<P>,
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
     builder_index: BuilderIndex,
     bid_amount: Gwei,
 ) -> Result<bool> {

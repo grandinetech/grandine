@@ -62,7 +62,9 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    gloas::containers::{
+        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+    },
     nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -405,6 +407,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             self.publish_voluntary_exit(voluntary_exit);
                             true
                         }
+                        ApiToP2p::PublishPayloadAttestation(payload_attestation_message) => {
+                            self.publish_payload_attestation_message(payload_attestation_message);
+                            true
+                        }
                         ApiToP2p::RequestIdentity(receiver) => {
                             receiver.send(self.node_identity()).is_ok()
                         },
@@ -553,6 +559,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         }
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
+                        }
+                        ValidatorToP2p::PublishPayloadAttestation(payload_attestation_message) => {
+                            self.publish_payload_attestation_message(payload_attestation_message);
                         }
                         ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count) => {
                             self.update_data_column_subnets(custody_group_count);
@@ -860,6 +869,21 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 ));
             }
         }
+    }
+
+    fn publish_payload_attestation_message(
+        &self,
+        payload_attestation_message: Arc<PayloadAttestationMessage>,
+    ) {
+        trace_with_peers!(
+            "publishing payload attestation message: (validator_index: {}, data: {:?})",
+            payload_attestation_message.validator_index,
+            payload_attestation_message.data
+        );
+
+        self.publish(PubsubMessage::PayloadAttestationMessage(
+            payload_attestation_message,
+        ));
     }
 
     fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
@@ -2441,6 +2465,21 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
                 self.controller
                     .on_gossip_execution_payload_bid(payload_bid, GossipId { source, message_id });
+            }
+            PubsubMessage::PayloadAttestationMessage(payload_attestation_message) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["payload_attestation_message"]);
+                }
+
+                trace_with_peers!(
+                    "received payload attestation message as gossip: \
+                    {payload_attestation_message:?} from {source}",
+                );
+
+                let gossip_id = GossipId { source, message_id };
+
+                self.controller
+                    .on_gossip_payload_attestation(payload_attestation_message, gossip_id);
             }
             PubsubMessage::LightClientFinalityUpdate(_) => {
                 debug_with_peers!("received light client finality update as gossip");
