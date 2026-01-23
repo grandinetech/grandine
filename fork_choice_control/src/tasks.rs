@@ -11,7 +11,8 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem,
+    PayloadAttestationOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -329,6 +330,60 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
     }
 }
 
+pub struct BlockPayloadAttestationsTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub block_root: H256,
+    pub block: Arc<SignedBeaconBlock<P>>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for BlockPayloadAttestationsTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "BlockPayloadAttestationsTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            block_root,
+            block,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_block_payload_attestation_task_times
+                .start_timer()
+        });
+
+        let Some(body) = block.message().body().with_payload_attestations() else {
+            return;
+        };
+
+        // TODO(Grandine Team): Consider turning the pipeline into a new method in `Store`.
+        let results = body
+            .payload_attestations()
+            .iter()
+            .map(|payload_attestation| {
+                store_snapshot.validate_payload_attestation(
+                    PayloadAttestationItem::verified(
+                        Arc::new((*payload_attestation).into()),
+                        PayloadAttestationOrigin::Block(block_root),
+                    ),
+                    true,
+                )
+            })
+            .collect();
+
+        MutatorMessage::BlockPayloadAttestations {
+            wait_group,
+            results,
+        }
+        .send(&mutator_tx);
+    }
+}
+
 pub struct AttesterSlashingTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
@@ -580,6 +635,86 @@ impl<P: Preset, W> Run for ExecutionPayloadBidTask<P, W> {
         let result = store_snapshot.validate_execution_payload_bid(payload_bid, &origin);
 
         MutatorMessage::PayloadBid { result, origin }.send(&mutator_tx);
+    }
+}
+
+pub struct PayloadAttestationTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_attestation: PayloadAttestationItem<P>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PayloadAttestationTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PayloadAttestationTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_attestation,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_payload_attestation_task_times,
+                payload_attestation.origin.as_ref(),
+            )
+        });
+
+        let result = store_snapshot.validate_payload_attestation(payload_attestation, false);
+
+        MutatorMessage::PayloadAttestation { wait_group, result }.send(&mutator_tx);
+    }
+}
+
+pub struct PayloadAttestationBatchTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub payload_attestations: Vec<PayloadAttestationItem<P>>,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PayloadAttestationBatchTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PayloadAttestationBatchTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            payload_attestations,
+            metrics,
+        } = self;
+
+        let Some(origin_label) = payload_attestations
+            .first()
+            .map(|attestation| attestation.origin.as_ref())
+        else {
+            return;
+        };
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.fc_payload_attestation_batch_task_times,
+                origin_label,
+            )
+        });
+
+        let results = payload_attestations
+            .into_iter()
+            .map(|payload_attestation| {
+                store_snapshot.validate_payload_attestation(payload_attestation, false)
+            })
+            .collect();
+
+        MutatorMessage::PayloadAttestationBatch {
+            wait_group,
+            results,
+        }
+        .send(&mutator_tx);
     }
 }
 

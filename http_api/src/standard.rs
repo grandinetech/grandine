@@ -1536,13 +1536,8 @@ pub async fn publish_block<P: Preset, W: Wait>(
     >,
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
-    let slot = signed_beacon_block.to_header().message.slot;
 
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if signed_beacon_block.phase() == Phase::Fulu {
         let signed_beacon_block = Arc::new(signed_beacon_block);
 
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
@@ -1625,13 +1620,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         .with_signature(signature)
         .pipe(Arc::new);
 
-    let slot = signed_beacon_block.to_header().message.slot;
-
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if signed_beacon_block.phase() == Phase::Fulu {
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
             controller.clone_arc(),
             signed_beacon_block.clone_arc(),
@@ -2538,6 +2527,7 @@ pub async fn beacon_events<P: Preset>(
                 Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
                 Event::FinalizedCheckpoint(data) => ssevent.json_data(data),
                 Event::Head(data) => ssevent.json_data(data),
+                Event::PayloadAttestation(data) => ssevent.json_data(data),
                 Event::PayloadAttributes(data) => ssevent.json_data(data),
                 Event::ProposerSlashing(data) => ssevent.json_data(data),
                 Event::SingleAttestation(data) => ssevent.json_data(data),
@@ -3195,6 +3185,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     if skip_randao_verification && !randao_reveal.is_empty() {
         return Err(Error::InvalidRandaoReveal);
     }
+
+    // TODO: (gloas): no longer supported from gloas phase
 
     let block_root = controller.head().value.block_root;
     let beacon_state = controller
@@ -4803,6 +4795,14 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
     metrics: Option<Arc<Metrics>>,
     dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    ensure!(
+        signed_beacon_block.phase() == Phase::Fulu,
+        Error::InvalidPhase {
+            expected: Phase::Fulu,
+            got: signed_beacon_block.phase()
+        }
+    );
+
     eip_7594::construct_data_column_sidecars_from_blobs(
         signed_beacon_block.into(),
         blobs.unwrap_or_default().into_iter(),

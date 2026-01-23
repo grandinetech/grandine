@@ -28,8 +28,8 @@ use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
 use logging::{error_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
-    AttestationAggPool, BlsToExecutionChangePool, PoolAdditionOutcome, PoolRejectionReason,
-    SyncCommitteeAggPool,
+    AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, PoolAdditionOutcome,
+    PoolRejectionReason, SyncCommitteeAggPool,
 };
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
@@ -79,8 +79,8 @@ use types::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayloadBid, ExecutionPayloadEnvelope, SignedExecutionPayloadBid,
-            SignedExecutionPayloadEnvelope,
+            ExecutionPayloadBid, ExecutionPayloadEnvelope, PayloadAttestation,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
     },
     nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
@@ -132,6 +132,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
+        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
         metrics: Option<Arc<Metrics>>,
         options: Option<Options>,
     ) -> Self {
@@ -150,6 +151,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             attestation_agg_pool,
             bls_to_execution_change_pool,
             sync_committee_agg_pool,
+            payload_attestation_agg_pool,
             prepared_proposers: Mutex::new(HashMap::new()),
             proposer_slashings: Mutex::new(vec![]),
             attester_slashings: Mutex::new(vec![]),
@@ -637,6 +639,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
+    payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
     prepared_proposers: Mutex<HashMap<ValidatorIndex, ExecutionAddress>>,
     proposer_slashings: Mutex<Vec<ProposerSlashing>>,
     attester_slashings: Mutex<Vec<AttesterSlashing<P>>>,
@@ -1008,8 +1011,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         },
                     })),
                     Phase::Gloas => {
-                        // TODO(gloas): prepare_payload_attestations
-                        let payload_attestations = ContiguousList::default();
+                        let payload_attestations = self.prepare_payload_attestations().await?;
 
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
                             slot,
@@ -1463,6 +1465,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         self.producer_context
             .attestation_agg_pool
             .best_proposable_attestations(self.beacon_state.clone_arc())
+            .await
+    }
+
+    // Constructed `payload_attestations` in current block is to aggregate all payload attestations for the previous block payload.
+    // See <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/validator.md#constructing-payload_attestations>
+    async fn prepare_payload_attestations(
+        &self,
+    ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
+        let message_slot = misc::previous_slot(self.beacon_state.slot());
+
+        self.producer_context
+            .payload_attestation_agg_pool
+            .aggregate_payload_attestations(message_slot)
             .await
     }
 

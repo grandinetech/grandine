@@ -24,7 +24,9 @@ use genesis::AnchorCheckpointProvider;
 use keymanager::KeyManager;
 use liveness_tracker::LivenessTracker;
 use once_cell::sync::OnceCell;
-use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
+use operation_pools::{
+    AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
+};
 use p2p::{NetworkConfig, SubnetService, SyncToApi};
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
@@ -270,6 +272,12 @@ impl<P: Preset> Context<P> {
             None,
         );
 
+        let payload_attestation_agg_pool = PayloadAttestationAggPool::new(
+            controller.clone_arc(),
+            dedicated_executor.clone_arc(),
+            None,
+        );
+
         let (bls_to_execution_change_pool, bls_to_execution_change_pool_service) =
             BlsToExecutionChangePool::new(
                 controller.clone_arc(),
@@ -295,6 +303,7 @@ impl<P: Preset> Context<P> {
             attestation_agg_pool.clone_arc(),
             bls_to_execution_change_pool.clone_arc(),
             sync_committee_agg_pool.clone_arc(),
+            payload_attestation_agg_pool.clone_arc(),
             None,
             Some(BlockProducerOptions {
                 fake_execution_payloads: true,
@@ -327,6 +336,7 @@ impl<P: Preset> Context<P> {
             keymanager.proposer_configs().clone_arc(),
             signer,
             slashing_protector,
+            payload_attestation_agg_pool,
             sync_committee_agg_pool.clone_arc(),
             None,
             None,
