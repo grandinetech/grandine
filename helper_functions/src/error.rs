@@ -1,3 +1,4 @@
+use anyhow::Error as AnyhowError;
 use parse_display::Display;
 use ssz::H256;
 use thiserror::Error;
@@ -36,10 +37,6 @@ pub(crate) enum Error {
     EpochAfterNext,
     #[error("epoch is before previous one relative to state")]
     EpochBeforePrevious,
-    #[error("slot is after next one relative to state")]
-    SlotAfterNext,
-    #[error("slot is before previous one relative to state")]
-    SlotBeforePrevious,
     #[error("epoch is in the future relative to state")]
     EpochInTheFuture,
     #[error("epoch number overflowed")]
@@ -52,8 +49,10 @@ pub(crate) enum Error {
     NoActiveValidators,
     #[error("no committee attesters for {index} committee")]
     NoCommitteeAttesters { index: CommitteeIndex },
-    #[error("attestation data index is not zero")]
-    NoneZeroDataIndex,
+    #[error("attestation data index is invalid for current slot (got: {index}, expected: 0)")]
+    InvalidAttestationIndexForCurrentSlot { index: u64 },
+    #[error("invalid phase (error: {error:})")]
+    InvalidPhase { error: AnyhowError },
     #[error("execution payload availability is out of range")]
     PayloadAvailabilityOutOfRange,
     #[error(
