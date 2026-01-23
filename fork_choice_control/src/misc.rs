@@ -9,6 +9,7 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
+    PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationValidationError,
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
@@ -37,6 +38,7 @@ pub struct Delayed<P: Preset> {
     pub payload_status: Option<(PayloadStatusV1, Slot)>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
     pub attestations: Vec<PendingAttestation<P>>,
+    pub payload_attestations: Vec<PayloadAttestationItem<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
 }
@@ -93,6 +95,7 @@ impl<P: Preset> Delayed<P> {
             payload_status,
             aggregates,
             attestations,
+            payload_attestations,
             blob_sidecars,
             data_column_sidecars,
         } = self;
@@ -101,6 +104,7 @@ impl<P: Preset> Delayed<P> {
             && payload_status.is_none()
             && aggregates.is_empty()
             && attestations.is_empty()
+            && payload_attestations.is_empty()
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
     }
@@ -179,6 +183,9 @@ pub struct VerifyAggregateAndProofResult<P: Preset> {
 pub type VerifyAttestationResult<P> =
     Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>;
 
+pub type VerifyPayloadAttestationResult<P> =
+    Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>>;
+
 #[expect(clippy::enum_variant_names)]
 #[derive(Debug, IntoStaticStr, Serialize)]
 #[strum(serialize_all = "snake_case")]
@@ -195,6 +202,7 @@ pub enum MutatorRejectionReason {
         data_column_identifier: DataColumnIdentifier,
     },
     InvalidPayloadBid,
+    InvalidPayloadAttestation,
 }
 
 pub enum BlockBlobAvailability {

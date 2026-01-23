@@ -341,6 +341,9 @@ impl Snapshot {
                         misc::compute_epoch_at_slot::<P>(slot),
                     ));
                 }
+                SigningMessage::PayloadAttestation(_payload_attestation) => {
+                    // TODO: (gloas): implement this
+                }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
                 | SigningMessage::RandaoReveal { .. }
@@ -348,7 +351,8 @@ impl Snapshot {
                 | SigningMessage::SyncAggregatorSelectionData(_)
                 | SigningMessage::ContributionAndProof(_)
                 | SigningMessage::ValidatorRegistration(_)
-                | SigningMessage::VoluntaryExit(_) => {
+                | SigningMessage::VoluntaryExit(_)
+                | SigningMessage::ExecutionPayloadEnvelope(_) => {
                     signable_messages.push(SigningTriple {
                         message,
                         signing_root,

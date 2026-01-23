@@ -63,8 +63,8 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            DataColumnSidecar as GloasDataColumnSidecar, ProposerPreferences,
-            SignedExecutionPayloadBid,
+            CombinedPayloadAttestation, DataColumnSidecar as GloasDataColumnSidecar,
+            ProposerPreferences, SignedExecutionPayloadBid,
         },
         primitives::BuilderIndex,
     },
@@ -92,8 +92,9 @@ use crate::{
         ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
         Difference, DifferenceAtLocation, DissolvedDifference, ExecutionPayloadBidAction,
         ExecutionPayloadBidOrigin, LatestMessage, Location, PartialAttestationAction,
-        PartialBlockAction, PayloadAction, Score, SegmentId, Storage, UnfinalizedBlock,
-        ValidAttestation,
+        PartialBlockAction, PayloadAction, PayloadAttestationAction, PayloadAttestationItem,
+        PayloadAttestationValidationError, Score, SegmentId, Storage, UnfinalizedBlock,
+        ValidAttestation, ValidPayloadAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -2767,6 +2768,175 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    pub fn validate_payload_attestation(
+        &self,
+        payload_attestation: PayloadAttestationItem<P>,
+        skip_signatures_verification: bool,
+    ) -> Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>> {
+        let data = payload_attestation.data();
+        let block_root = data.beacon_block_root;
+
+        if !payload_attestation.origin.is_from_block() {
+            // [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. data.slot == current_slot
+            if data.slot != self.slot() {
+                return Ok(PayloadAttestationAction::Ignore(payload_attestation));
+            }
+        }
+
+        // [IGNORE] The payload_attestation_message is the first valid message received from the
+        // validator with index payload_attestation_message.validate_index
+        // TODO: (gloas): check if the first valid message
+
+        // [REJECT] The message's block data.beacon_block_root passes validation.
+        // Part 1/2:
+        if self.rejected_block_roots.contains(&block_root) {
+            return Err(
+                PayloadAttestationValidationError::PayloadAttestationInvalidBlock {
+                    payload_attestation: Box::new(payload_attestation),
+                },
+            );
+        }
+
+        // [IGNORE] The message's block data.beacon_block_root has been seen (via gossip or non-gossip sources)
+        // (a client MAY queue attestation for processing once the block is retrieved. Note a client might want to request payload after).
+        let Some(chain_link) = self.chain_link(block_root) else {
+            return Ok(PayloadAttestationAction::DelayUntilBlock(
+                payload_attestation,
+                block_root,
+            ));
+        };
+
+        // [REJECT] The message's block data.beacon_block_root passes validation.
+        // Part 2/2:
+        if chain_link.payload_status.is_invalid() {
+            return Err(
+                PayloadAttestationValidationError::PayloadAttestationInvalidBlock {
+                    payload_attestation: Box::new(payload_attestation),
+                },
+            );
+        }
+
+        let Some(ref state) = chain_link.state else {
+            return Ok(PayloadAttestationAction::DelayUntilBlock(
+                payload_attestation,
+                block_root,
+            ));
+        };
+
+        if payload_attestation.origin.is_from_block() {
+            let parent_root = state.latest_block_header().parent_root;
+
+            // > Check that the attestation is for the parent beacon block
+            if data.beacon_block_root != parent_root {
+                return Err(
+                    PayloadAttestationValidationError::BlockPayloadAttestationMismatchParentRoot {
+                        parent_root,
+                        block_root: data.beacon_block_root,
+                        payload_attestation: Box::new(payload_attestation),
+                    },
+                );
+            }
+
+            // > Check that the attestation is for the previous slot
+            if data.slot + 1 != state.slot() {
+                return Err(
+                    PayloadAttestationValidationError::BlockPayloadAttestationInvalidSlot {
+                        in_state: state.slot(),
+                        in_block: data.slot,
+                        payload_attestation: Box::new(payload_attestation),
+                    },
+                );
+            }
+        }
+
+        // [REJECT] The message's validator index is within the payload committee in get_ptc(state, data.slot).
+        // The state is the head state corresponding to processing the block up to the current slot as determined by the fork choice.
+        let attesting_indices_positions = match self.attesting_indices_positions(
+            state,
+            &payload_attestation.item,
+            !skip_signatures_verification && payload_attestation.origin.verify_signatures(),
+        ) {
+            Ok(indices) => indices,
+            Err(source) => {
+                return Err(PayloadAttestationValidationError::Other {
+                    source,
+                    payload_attestation: Box::new(payload_attestation),
+                });
+            }
+        };
+
+        Ok(PayloadAttestationAction::Accept {
+            payload_attestation,
+            attesting_indices_positions,
+        })
+    }
+
+    fn attesting_indices_positions(
+        &self,
+        state: &BeaconState<P>,
+        payload_attestation: &CombinedPayloadAttestation<P>,
+        validate_signature: bool,
+    ) -> Result<Vec<(ValidatorIndex, Vec<usize>)>> {
+        let data = payload_attestation.data();
+
+        let attesting_indices = match payload_attestation {
+            CombinedPayloadAttestation::Attestation(payload_attestation) => {
+                let indexed_payload_attestation =
+                    accessors::get_indexed_payload_attestation(state, payload_attestation)?;
+                let attesting_indices = indexed_payload_attestation.attesting_indices.to_vec();
+
+                if validate_signature {
+                    predicates::validate_constructed_indexed_payload_attestation(
+                        &self.chain_config,
+                        &self.pubkey_cache,
+                        state,
+                        &indexed_payload_attestation,
+                        SingleVerifier,
+                    )?;
+                }
+
+                attesting_indices
+            }
+            CombinedPayloadAttestation::Message(payload_attestation) => {
+                let validator_index = payload_attestation.validator_index;
+
+                if validate_signature {
+                    SingleVerifier.verify_singular(
+                        data.signing_root(&self.chain_config, state),
+                        payload_attestation.signature,
+                        self.pubkey_cache
+                            .get_or_insert(*accessors::public_key(state, validator_index)?)?,
+                        SignatureKind::PayloadAttestation,
+                    )?;
+                }
+
+                vec![validator_index]
+            }
+        };
+
+        let ptc_members = accessors::get_ptc(state, data.slot)?;
+
+        attesting_indices
+            .into_iter()
+            .map(|validator_index| {
+                let positions = ptc_members
+                    .iter()
+                    .positions(|&member| validator_index == member)
+                    .collect_vec();
+
+                ensure!(
+                    !positions.is_empty(),
+                    Error::<P>::PayloadAttestationNotInCommittee {
+                        validator_index,
+                        slot: data.slot,
+                    }
+                );
+
+                Ok((validator_index, positions))
+            })
+            .collect::<Result<Vec<_>>>()
+    }
+
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)
     pub fn apply_tick(&mut self, new_tick: Tick) -> Result<Option<ApplyTickChanges<P>>> {
         let old_tick = self.tick;
@@ -3070,6 +3240,31 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.reorganized(old_head_segment_id)
             .then_some(old_head)
             .pipe(Ok)
+    }
+
+    /// Applies a payload attestation previously validated using [`Self::validate_payload_attestation`].
+    ///
+    /// Roughly corresponds to [`on_payload_attestation_message`] from the Fork Choice specification.
+    ///
+    /// [`on_payload_attestation_message`]: https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/gloas/fork-choice.md#new-on_payload_attestation_message
+    pub fn apply_payload_attestation(
+        &mut self,
+        valid_payload_attestation: ValidPayloadAttestation,
+    ) -> Result<()> {
+        self.apply_payload_attestation_batch(core::iter::once(valid_payload_attestation))
+    }
+
+    #[expect(clippy::unused_self)]
+    #[expect(clippy::unnecessary_wraps)]
+    #[expect(clippy::needless_pass_by_ref_mut)]
+    pub fn apply_payload_attestation_batch(
+        &mut self,
+        _valid_payload_attestations: impl IntoIterator<Item = ValidPayloadAttestation>,
+    ) -> Result<()> {
+        // TODO(gloas): update PTC votes into fork choice
+        // spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-on_payload_attestation_message
+
+        Ok(())
     }
 
     /// [`on_attester_slashing`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_attester_slashing)
