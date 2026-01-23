@@ -39,7 +39,7 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, Participation, RelativeEpoch, RelativeSlot},
+    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -847,7 +847,10 @@ pub fn get_attestation_participation_flags<P: Preset>(
     // > [New in Gloas:EIP7732]
     if let Some(post_gloas) = state.post_gloas() {
         let is_matching_payload = if predicates::is_attestation_same_slot::<P>(state, &data)? {
-            ensure!(data.index == 0, Error::NoneZeroDataIndex);
+            ensure!(
+                data.index == 0,
+                Error::InvalidAttestationIndexForCurrentSlot { index: data.index }
+            );
 
             true
         } else {
@@ -1147,70 +1150,23 @@ fn ptc_from_committee_members<P: Preset>(
     Ptc::<P>::try_from_iter(selection).map_err(Into::into)
 }
 
-pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<RelativeSlot> {
-    match state.slot().try_add(1)?.checked_sub(slot) {
-        None => bail!(Error::SlotAfterNext),
-        Some(0) => Ok(RelativeSlot::Next),
-        Some(1) => Ok(RelativeSlot::Current),
-        Some(2) => Ok(RelativeSlot::Previous),
-        Some(_) => bail!(Error::SlotBeforePrevious),
-    }
-}
+pub fn get_ptc<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<Ptc<P>> {
+    let previous_epoch = get_previous_epoch(state);
+    let window_start = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
 
-/// Map `RelativeSlot` to actual slot number
-fn absolute_slot<P: Preset>(
-    state: &impl BeaconState<P>,
-    relative_slot: RelativeSlot,
-) -> Result<Slot> {
-    let state_slot = state.slot();
-    let slot = match relative_slot {
-        RelativeSlot::Previous => state_slot.try_sub(1)?,
-        RelativeSlot::Current => state_slot,
-        RelativeSlot::Next => state_slot.try_add(1)?,
-    };
+    let index = slot
+        .checked_sub(window_start)
+        .ok_or(Error::SlotOutOfRange)?;
 
-    Ok(slot)
-}
+    let state = state.post_gloas().ok_or(Error::InvalidPhase {
+        error: anyhow!("get_ptc with pre-Gloas beacon state"),
+    })?;
 
-/// Initialize PTC cache for a relative slot and return the cached value.
-/// Returns None for pre-Gloas states (PTC is not relevant for pre-Gloas).
-pub fn get_or_try_init_ptc<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
-    relative_slot: RelativeSlot,
-    report_cache_miss: bool,
-) -> Result<&Vec<ValidatorIndex>> {
-    state.cache().ptc_cache[relative_slot].get_or_try_init(|| {
-        if report_cache_miss {
-            #[cfg(feature = "metrics")]
-            if let Some(metrics) = METRICS.get() {
-                metrics.ptc_cache_init_count.inc();
-            }
-        }
-
-        let slot = absolute_slot(state, relative_slot)?;
-
-        ptc_for_slot(state, slot).map(|ptc| ptc.into_iter().collect())
-    })
-}
-
-/// Get PTC members for a slot with 3-slot caching (previous, current, next).
-///
-/// Caches PTC using `RelativeSlot`. Cache is shifted in `advance_slot()`: Previous <- Current <- Next.
-/// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
-pub fn get_ptc<P: Preset>(state: &impl PostGloasBeaconState<P>, slot: Slot) -> Result<Ptc<P>> {
-    let Ok(rel_slot) = relative_slot(state, slot) else {
-        return ptc_for_slot(state, slot);
-    };
-
-    get_or_try_init_ptc(state, rel_slot, true)?
-        .iter()
-        .copied()
-        .pipe(Ptc::<P>::try_from_iter)
-        .map_err(Into::into)
+    state.ptc_window().get(index).cloned().map_err(Into::into)
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
+    state: &impl BeaconState<P>,
     payload_attestation: &PayloadAttestation<P>,
 ) -> Result<IndexedPayloadAttestation<P>> {
     let ptc = get_ptc(state, payload_attestation.data.slot)?;

@@ -31,6 +31,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             SigningMessage::BeaconBlock { .. } => MessageType::BlockV2,
             SigningMessage::ExecutionPayloadEnvelope(_) => MessageType::ExecutionPayloadEnvelope,
             SigningMessage::RandaoReveal { .. } => MessageType::RandaoReveal,
+            SigningMessage::PayloadAttestation(_) => MessageType::PayloadAttestation,
             SigningMessage::SyncCommitteeMessage { .. } => MessageType::SyncCommitteeMessage,
             SigningMessage::SyncAggregatorSelectionData(_) => {
                 MessageType::SyncCommitteeSelectionProof
@@ -65,6 +66,7 @@ enum MessageType {
     BlockV2,
     ExecutionPayloadEnvelope,
     RandaoReveal,
+    PayloadAttestation,
     SyncCommitteeMessage,
     SyncCommitteeSelectionProof,
     SyncCommitteeContributionAndProof,
@@ -93,6 +95,7 @@ mod tests {
                 "BLOCK_V2",
                 "EXECUTION_PAYLOAD_ENVELOPE",
                 "RANDAO_REVEAL",
+                "PAYLOAD_ATTESTATION",
                 "SYNC_COMMITTEE_MESSAGE",
                 "SYNC_COMMITTEE_SELECTION_PROOF",
                 "SYNC_COMMITTEE_CONTRIBUTION_AND_PROOF",

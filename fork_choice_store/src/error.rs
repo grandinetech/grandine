@@ -223,6 +223,11 @@ pub enum Error<P: Preset> {
         envelope_slot: Slot,
         state_slot: Slot,
     },
+    #[error("validator {validator_index} is not a member of PTC at slot {slot}")]
+    PayloadAttestationNotInCommittee {
+        validator_index: ValidatorIndex,
+        slot: Slot,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(
