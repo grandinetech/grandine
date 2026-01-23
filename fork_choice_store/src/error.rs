@@ -196,6 +196,11 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("validator {validator_index} is not a member of PTC at slot {slot}")]
+    PayloadAttestationNotInCommittee {
+        validator_index: ValidatorIndex,
+        slot: Slot,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(
