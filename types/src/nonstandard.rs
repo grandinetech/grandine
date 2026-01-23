@@ -114,14 +114,6 @@ pub enum RelativeEpoch {
     Next,
 }
 
-/// Relative slot for PTC cache.
-#[derive(Clone, Copy, Debug, Enum)]
-pub enum RelativeSlot {
-    Previous,
-    Current,
-    Next,
-}
-
 impl From<AttestationEpoch> for RelativeEpoch {
     fn from(attestation_epoch: AttestationEpoch) -> Self {
         match attestation_epoch {
