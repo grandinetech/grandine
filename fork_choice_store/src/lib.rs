@@ -82,8 +82,9 @@ pub use crate::{
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
         ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
-        ExecutionPayloadBidAction, ExecutionPayloadBidOrigin, PartialBlockAction, PayloadAction,
-        Storage, ValidAttestation,
+        ExecutionPayloadBidAction, ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction,
+        ExecutionPayloadEnvelopeOrigin, PartialBlockAction, PayloadAction, Storage,
+        ValidAttestation,
     },
     segment::Segment,
     state_cache_processor::{Error as StateCacheError, StateCacheProcessor},
@@ -95,6 +96,7 @@ pub use crate::{
 mod blob_cache;
 mod data_column_cache;
 mod error;
+mod execution_payload_envelope_cache;
 mod misc;
 mod segment;
 mod state_cache_processor;

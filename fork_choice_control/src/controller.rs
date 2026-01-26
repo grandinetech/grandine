@@ -24,7 +24,7 @@ use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    StateCacheProcessor, Store, StoreConfig,
+    ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -70,7 +70,7 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
-        StateAtSlotCacheFlushTask,
+        ExecutionPayloadEnvelopeTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -353,6 +353,16 @@ where
         .await
     }
 
+    pub fn on_own_execution_payload_envelope(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
+        self.spawn_execution_payload_envelope_task(
+            execution_payload_envelope,
+            ExecutionPayloadEnvelopeOrigin::Own,
+        );
+    }
+
     #[instrument(
         parent = None,
         skip_all
@@ -412,13 +422,10 @@ where
         execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         gossip_id: GossipId,
     ) {
-        // TODO: mocked for tests, actually handle payload envelope
-        MutatorMessage::MockValidExecutionPayloadEnvelope {
-            wait_group: self.owned_wait_group(),
+        self.spawn_execution_payload_envelope_task(
             execution_payload_envelope,
-            gossip_id,
-        }
-        .send(&self.mutator_tx);
+            ExecutionPayloadEnvelopeOrigin::Gossip(gossip_id),
+        );
     }
 
     pub fn on_notified_new_payload(
@@ -661,6 +668,17 @@ where
         .await
     }
 
+    pub fn on_requested_execution_payload_envelope(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        peer_id: PeerId,
+    ) {
+        self.spawn_execution_payload_envelope_task(
+            execution_payload_envelope,
+            ExecutionPayloadEnvelopeOrigin::Requested(peer_id),
+        );
+    }
+
     pub fn on_reconstruction(
         &self,
         wait_group: W,
@@ -697,6 +715,14 @@ where
         blocks: impl IntoIterator<Item = Arc<SignedBeaconBlock<P>>>,
     ) -> Result<()> {
         self.storage.store_back_sync_blocks(blocks)
+    }
+
+    pub fn store_back_sync_execution_payload_envelopes(
+        &self,
+        execution_payload_envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<()> {
+        self.storage
+            .store_back_sync_execution_payload_envelopes(execution_payload_envelopes)
     }
 
     pub fn archive_back_sync_states(
@@ -843,6 +869,23 @@ where
             processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),
             tracing_span: Span::current(),
+        })
+    }
+
+    fn spawn_execution_payload_envelope_task(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+    ) {
+        self.spawn(ExecutionPayloadEnvelopeTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            execution_payload_envelope,
+            state: None,
+            origin,
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
         })
     }
 

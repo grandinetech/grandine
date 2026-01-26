@@ -49,7 +49,7 @@ use operation_pools::{AttestationAggPool, Origin, PoolAdditionOutcome, SyncCommi
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
-use signer::{Signer, SigningMessage, SigningTriple};
+use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
 use ssz::{BitList, ContiguousList, ReadError};
@@ -74,6 +74,7 @@ use types::{
         AggregateAndProof as ElectraAggregateAndProof,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
+    gloas::containers::{ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope},
     nonstandard::{
         CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev,
         WithStatus,
@@ -925,6 +926,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 graffiti,
                 disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
                 builder_boost_factor: self.validator_config.default_builder_boost_factor,
+                enable_local_payload_building: self.validator_config.enable_local_payload_building,
                 ..BlockBuildOptions::default()
             },
         );
@@ -1047,10 +1049,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 slot_head.slot(),
             ),
             SignedBeaconBlockOrBlockRoot::Block(beacon_block) => {
+                let beacon_block_root = beacon_block.message().hash_tree_root();
+
                 info_with_peers!(
                     "validator {} proposing beacon block with root {:?} in slot {}",
                     proposer_index,
-                    beacon_block.message().hash_tree_root(),
+                    beacon_block_root,
                     slot_head.slot(),
                 );
 
@@ -1058,6 +1062,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let block = Arc::new(*beacon_block);
 
+                // Handle Gloas execution payload envelope (only for self-build)
+                if slot_head.phase() >= Phase::Gloas
+                    && let Some(envelope) = block_build_context
+                        .compute_execution_payload_envelope(beacon_block_root)
+                        .await?
+                {
+                    self.publish_execution_payload_envelope(
+                        slot_head,
+                        beacon_block_root,
+                        envelope,
+                        proposer_index,
+                        &signer_snapshot,
+                        public_key,
+                    )
+                    .await?;
+                }
+
+                // Assuming after Gloas if proposer doesn't self build, `block_blobs` always None
                 if let Some(blobs) = block_blobs
                     && !blobs.is_empty()
                 {
@@ -1169,32 +1191,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
         block_proofs: Option<KzgProofs<P>>,
     ) -> Result<()> {
-        if self
-            .chain_config
-            .phase_at_slot::<P>(slot_head.slot())
-            .is_peerdas_activated()
-        {
-            let timer = self
-                .metrics
-                .as_ref()
-                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
-
-            let block = block.clone_arc();
-            let kzg_backend = self.controller.store_config().kzg_backend;
-
-            let data_column_sidecars = {
-                let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                    blobs.into_iter(),
-                    block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
-                    kzg_backend,
-                    self.dedicated_executor_normal_priority.clone_arc(),
-                )
-                .await?;
-
-                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?
-            };
-
-            prometheus_metrics::stop_and_record(timer);
+        if slot_head.phase().is_peerdas_activated() {
+            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+                block.clone_arc().into(),
+                blobs.into_iter(),
+                block_proofs
+                    .unwrap_or_else(KzgProofs::empty_fulu)
+                    .into_iter()
+                    .collect_vec(),
+                self.controller.store_config().kzg_backend,
+                self.metrics.clone(),
+                self.dedicated_executor_normal_priority.clone_arc(),
+            )
+            .await?;
 
             for data_column_sidecar in data_column_sidecars {
                 if self
@@ -1225,6 +1234,60 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
             }
         }
+
+        Ok(())
+    }
+
+    /// Create and sign Gloas execution payload envelope for self-build proposers.
+    /// Returns None if envelope data is not available (i.e., not self-building).
+    async fn publish_execution_payload_envelope(
+        &self,
+        slot_head: &SlotHead<P>,
+        beacon_block_root: H256,
+        envelope: ExecutionPayloadEnvelope<P>,
+        proposer_index: ValidatorIndex,
+        signer_snapshot: &Snapshot,
+        public_key: &PublicKeyBytes,
+    ) -> Result<()> {
+        // Sign the envelope
+        let envelope_sig = match signer_snapshot
+            .sign_without_slashing_protection(
+                SigningMessage::ExecutionPayloadEnvelope(&envelope),
+                envelope.signing_root(&self.chain_config, &slot_head.beacon_state),
+                Some(slot_head.beacon_state.as_ref().into()),
+                *public_key,
+            )
+            .await
+        {
+            Ok(signature) => signature.into(),
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to sign execution payload envelope (slot: {}, public_key: {public_key}): \
+                    {error:?}",
+                    slot_head.slot(),
+                );
+
+                return Ok(());
+            }
+        };
+
+        let signed_envelope = Arc::new(SignedExecutionPayloadEnvelope {
+            message: envelope,
+            signature: envelope_sig,
+        });
+
+        debug_with_peers!(
+            "validator {} publishing execution payload envelope for block {:?} in slot {}",
+            proposer_index,
+            beacon_block_root,
+            slot_head.slot(),
+        );
+
+        // Publish envelope to controller and P2P
+        self.controller
+            .on_own_execution_payload_envelope(signed_envelope.clone_arc());
+
+        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.p2p_tx);
 
         Ok(())
     }
