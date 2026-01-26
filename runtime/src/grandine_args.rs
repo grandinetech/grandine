@@ -908,6 +908,10 @@ struct ValidatorOptions {
     /// Disable additional 1 second wait before attesting for late blocks that are being processed at the start of the attest duty
     #[clap(long)]
     disable_wait_for_late_blocks: bool,
+
+    /// Enable local payload build for post-Gloas block proposing
+    #[clap(long)]
+    enable_local_payload_building: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1115,6 +1119,7 @@ impl GrandineArgs {
             report_validator_performance,
             no_custody_groups_backfill,
             disable_wait_for_late_blocks,
+            enable_local_payload_building,
         } = validator_options;
 
         if in_memory {
@@ -1510,6 +1515,7 @@ impl GrandineArgs {
             sync_without_reconstruction,
             custody_mode,
             disable_wait_for_late_blocks,
+            enable_local_payload_building,
         })
     }
 

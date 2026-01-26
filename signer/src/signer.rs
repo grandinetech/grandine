@@ -176,6 +176,7 @@ impl Snapshot {
         self.sign_methods.is_empty()
     }
 
+    #[must_use]
     pub fn keys(&self) -> impl ExactSizeIterator<Item = &PublicKeyBytes> {
         self.sign_methods.keys()
     }
@@ -343,6 +344,7 @@ impl Snapshot {
                 }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
+                | SigningMessage::ExecutionPayloadEnvelope(_)
                 | SigningMessage::RandaoReveal { .. }
                 | SigningMessage::SyncCommitteeMessage { .. }
                 | SigningMessage::SyncAggregatorSelectionData(_)

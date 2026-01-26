@@ -29,6 +29,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint, StorageMode},
     phase0::{
         consts::GENESIS_SLOT,
@@ -601,6 +602,28 @@ impl<P: Preset> Storage<P> {
         Ok(persisted_data_column_ids)
     }
 
+    pub(crate) fn append_execution_payload_envelopes(
+        &self,
+        envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+    ) -> Result<Vec<H256>> {
+        let mut batch = vec![];
+        let mut persisted_block_roots = vec![];
+
+        for envelope in envelopes {
+            let block_root = envelope.message.beacon_block_root;
+            let slot = envelope.message.slot;
+
+            batch.push(serialize(EnvelopeByBlockRoot(block_root), envelope)?);
+            batch.push(serialize(EnvelopeRootBySlot(slot, block_root), block_root)?);
+
+            persisted_block_roots.push(block_root);
+        }
+
+        self.database.put_batch(batch)?;
+
+        Ok(persisted_block_roots)
+    }
+
     pub(crate) fn data_column_sidecar_by_id(
         &self,
         data_column_id: DataColumnIdentifier,
@@ -608,6 +631,13 @@ impl<P: Preset> Storage<P> {
         let DataColumnIdentifier { block_root, index } = data_column_id;
 
         self.get(DataColumnSidecarByColumnId(block_root, index))
+    }
+
+    pub(crate) fn execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
+        self.get(EnvelopeByBlockRoot(block_root))
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
@@ -653,6 +683,27 @@ impl<P: Preset> Storage<P> {
         }
 
         Ok(None)
+    }
+
+    pub(crate) fn prune_old_execution_payload_envelopes(&self, up_to_slot: Slot) -> Result<()> {
+        let results = self
+            .database
+            .iterator_descending(..=EnvelopeRootBySlot(up_to_slot, H256::zero()).to_string())?;
+
+        let (mut keys_to_remove, envelopes_to_remove): (Vec<_>, Vec<_>) =
+            itertools::process_results(results, |iter| {
+                iter.take_while(|(key_bytes, _)| EnvelopeRootBySlot::has_prefix(key_bytes))
+                    .map(|(k, v)| (k.into_owned(), v))
+                    .unzip()
+            })?;
+
+        for value_bytes in envelopes_to_remove {
+            let block_root = H256::from_ssz_default(value_bytes)?;
+
+            keys_to_remove.push(EnvelopeByBlockRoot(block_root).to_string().into());
+        }
+
+        self.database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn genesis_block_root(&self, store: &Store<P, Self>) -> Result<H256> {
@@ -1370,6 +1421,32 @@ pub struct SlotColumnId(pub Slot, pub H256, pub ColumnIndex);
 
 impl PrefixableKey for SlotColumnId {
     const PREFIX: &'static str = "c";
+}
+
+#[derive(Display)]
+#[display("{}{_0:x}", Self::PREFIX)]
+pub struct EnvelopeByBlockRoot(pub H256);
+
+impl PrefixableKey for EnvelopeByBlockRoot {
+    const PREFIX: &'static str = "e";
+
+    #[cfg(test)]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
+}
+
+#[derive(Display)]
+#[display("{}{_0:020}{_1:x}", Self::PREFIX)]
+pub struct EnvelopeRootBySlot(pub Slot, pub H256);
+
+impl PrefixableKey for EnvelopeRootBySlot {
+    const PREFIX: &'static str = "v";
+
+    #[cfg(test)]
+    fn has_prefix(bytes: &[u8]) -> bool {
+        bytes.starts_with(Self::PREFIX.as_bytes())
+    }
 }
 
 #[derive(Debug, Error)]
