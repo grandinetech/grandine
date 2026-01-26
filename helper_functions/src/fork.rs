@@ -1,6 +1,10 @@
 use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
+use crate::{
+    accessors, gloas::apply_deposit_for_builder, misc, mutators, phase0, predicates,
+    signing::SignForAllForks as _,
+};
 use anyhow::Result;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
@@ -37,14 +41,12 @@ use types::{
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::{Fork, PendingAttestation},
+        containers::{DepositMessage, Fork, PendingAttestation},
         primitives::H256,
     },
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState as _},
 };
-
-use crate::{accessors, misc, mutators, phase0, predicates};
 
 pub fn upgrade_to_altair<P: Preset>(
     config: &Config,
@@ -787,10 +789,12 @@ pub fn upgrade_to_fulu<P: Preset>(
     })
 }
 
+#[expect(clippy::too_many_lines)]
 pub fn upgrade_to_gloas<P: Preset>(
     config: &Config,
+    pubkey_cache: &PubkeyCache,
     pre: FuluBeaconState<P>,
-) -> GloasBeaconState<P> {
+) -> Result<GloasBeaconState<P>> {
     let epoch = accessors::get_current_epoch(&pre);
 
     let FuluBeaconState {
@@ -846,10 +850,7 @@ pub fn upgrade_to_gloas<P: Preset>(
         ..Default::default()
     };
 
-    // TODO(gloas): onboard_builders_from_pending_deposits
-    // spec: https://github.com/ethereum/consensus-specs/pull/4817
-
-    GloasBeaconState {
+    let mut post_state = GloasBeaconState {
         // > Versioning
         genesis_time,
         genesis_validators_root,
@@ -911,7 +912,12 @@ pub fn upgrade_to_gloas<P: Preset>(
         payload_expected_withdrawals: PersistentList::default(),
         // Cache
         cache,
-    }
+    };
+
+    // Applies any pending deposit for builders, effectively onboarding builders at the fork.
+    onboard_builders(config, pubkey_cache, &mut post_state)?;
+
+    Ok(post_state)
 }
 
 fn initialize_proposer_lookahead<P: Preset>(
@@ -928,6 +934,71 @@ fn initialize_proposer_lookahead<P: Preset>(
     }
 
     PersistentVector::try_from_iter(lookahead).map_err(Into::into)
+}
+
+fn onboard_builders<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut GloasBeaconState<P>,
+) -> Result<()> {
+    let mut validator_pubkeys = accessors::get_or_init_validator_indices(state, true)
+        .keys()
+        .copied()
+        .collect_vec();
+    let mut builder_pubkeys = vec![];
+    let mut pending_deposits = vec![];
+
+    for deposit in &state.pending_deposits().clone() {
+        let PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            slot,
+        } = *deposit;
+
+        if validator_pubkeys.contains(&pubkey) {
+            pending_deposits.push(*deposit);
+            continue;
+        }
+
+        if builder_pubkeys.contains(&pubkey)
+            || predicates::is_builder_withdrawal_credential(withdrawal_credentials)
+        {
+            builder_pubkeys.push(pubkey);
+            apply_deposit_for_builder(
+                config,
+                pubkey_cache,
+                state,
+                pubkey,
+                withdrawal_credentials,
+                amount,
+                signature,
+                slot,
+            )?;
+            continue;
+        }
+
+        let deposit_message = DepositMessage {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+        };
+
+        // > Fork-agnostic domain since deposits are valid across forks
+        if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey)
+            && deposit_message
+                .verify(config, signature, decompressed)
+                .is_ok()
+        {
+            validator_pubkeys.push(pubkey);
+            pending_deposits.push(*deposit);
+        }
+    }
+
+    *state.pending_deposits_mut() = PersistentList::try_from_iter(pending_deposits.into_iter())?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1068,9 +1139,11 @@ mod spec_tests {
 
     fn run_gloas_case<P: Preset>(case: Case) {
         let pre = case.ssz_default("pre");
+        let pubkey_cache = PubkeyCache::default();
         let expected_post = case.ssz_default("post");
 
-        let actual_post = upgrade_to_gloas::<P>(&P::default_config(), pre);
+        let actual_post = upgrade_to_gloas::<P>(&P::default_config(), &pubkey_cache, pre)
+            .expect("upgrade from Fulu to Gloas should succeed");
 
         assert_eq!(actual_post, expected_post);
     }

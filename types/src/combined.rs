@@ -270,7 +270,7 @@ impl<P: Preset> BeaconState<P> {
 
     pub fn with_execution_payload_bid(
         mut self,
-        execution_payload_bid: Option<ExecutionPayloadBid>,
+        execution_payload_bid: Option<ExecutionPayloadBid<P>>,
     ) -> Result<Self, StatePhaseError> {
         let Some(execution_payload_bid) = execution_payload_bid else {
             return Ok(self);
@@ -960,7 +960,7 @@ impl<P: Preset> BeaconBlock<P> {
     #[must_use]
     pub fn with_signed_execution_payload_bid(
         mut self,
-        payload_bid: Option<SignedExecutionPayloadBid>,
+        payload_bid: Option<SignedExecutionPayloadBid<P>>,
     ) -> Self {
         let Some(payload_bid) = payload_bid else {
             return self;
@@ -1551,7 +1551,7 @@ pub enum ExecutionPayloadHeader<P: Preset> {
     Bellatrix(BellatrixExecutionPayloadHeader<P>),
     Capella(CapellaExecutionPayloadHeader<P>),
     Deneb(DenebExecutionPayloadHeader<P>),
-    Gloas(ExecutionPayloadBid),
+    Gloas(ExecutionPayloadBid<P>),
 }
 
 impl<P: Preset> ExecutionPayloadHeader<P> {
@@ -2200,31 +2200,17 @@ impl<P: Preset> SszSize for DataColumnSidecar<P> {
 }
 
 impl<P: Preset> SszRead<Config> for DataColumnSidecar<P> {
-    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        // There are 3 variable offsets, 1 fixed part before `sidecar.slot`:
-        // - The contents of `sidecar.column_index`.
-        // - The offset of `sidecar.column`.
-        // - The offset of `sidecar.kzg_commitments`.
-        // - The offset of `sidecar.kzg_proofs`.
-        let slot_start = ColumnIndex::SIZE.get() + (Offset::SIZE.get() * 3);
-        let slot_end = slot_start + Slot::SIZE.get();
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
-        let phase = config.phase_at_slot::<P>(slot);
-
-        let sidecar = match phase {
-            Phase::Phase0
-            | Phase::Altair
-            | Phase::Bellatrix
-            | Phase::Capella
-            | Phase::Deneb
-            | Phase::Electra => {
-                return Err(ReadError::Custom {
-                    message: "data column sidecar is not available in pre-Fulu phase",
-                });
-            }
-            Phase::Fulu => Self::Fulu(FuluDataColumnSidecar::from_ssz_default(bytes)?),
-            Phase::Gloas => Self::Gloas(GloasDataColumnSidecar::from_ssz_default(bytes)?),
+    fn from_ssz_unchecked(_config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        let sidecar = match GloasDataColumnSidecar::from_ssz_default(bytes) {
+            Ok(data_column_sidecar) => Self::Gloas(data_column_sidecar),
+            Err(_) => match FuluDataColumnSidecar::from_ssz_default(bytes) {
+                Ok(data_column_sidecar) => Self::Fulu(data_column_sidecar),
+                Err(_) => {
+                    return Err(ReadError::Custom {
+                        message: "failed to parse data column sidecar from ssz bytes",
+                    });
+                }
+            },
         };
 
         Ok(sidecar)
@@ -2268,10 +2254,10 @@ impl<P: Preset> DataColumnSidecar<P> {
 
     pub const fn kzg_commitments(
         &self,
-    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
         match self {
-            Self::Fulu(sidecar) => &sidecar.kzg_commitments,
-            Self::Gloas(sidecar) => &sidecar.kzg_commitments,
+            Self::Fulu(sidecar) => Some(&sidecar.kzg_commitments),
+            Self::Gloas(_) => None,
         }
     }
 

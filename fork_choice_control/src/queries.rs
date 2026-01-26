@@ -818,8 +818,13 @@ where
     }
 
     #[must_use]
-    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid> {
-        self.store_snapshot().accepted_payload_bid_at_slot(slot)
+    pub fn accepted_payload_bid_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Option<Arc<SignedExecutionPayloadBid<P>>> {
+        self.store_snapshot()
+            .accepted_payload_bid_at_slot(slot)
+            .cloned()
     }
 
     pub fn validate_blob_sidecar_with_state(
@@ -868,7 +873,6 @@ where
                     block_seen,
                     origin,
                     validate_block_presence,
-                    state_fn,
                     None,
                 ),
         }

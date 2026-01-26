@@ -1803,7 +1803,7 @@ where
 
     fn handle_payload_bid(
         &mut self,
-        result: Result<ExecutionPayloadBidAction>,
+        result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
     ) {
         match result {
@@ -1811,7 +1811,7 @@ where
                 trace_with_peers!("payload bid accepted (payload_bid: {payload_bid:?})");
 
                 self.event_channels
-                    .send_execution_payload_bid_event(payload_bid.message);
+                    .send_execution_payload_bid_event(&payload_bid.message);
 
                 let (gossip_id, sender) = origin.split();
 
@@ -1821,7 +1821,7 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
-                self.store_mut().apply_execution_payload_bid(*payload_bid);
+                self.store_mut().apply_execution_payload_bid(payload_bid);
 
                 self.update_store_snapshot();
             }
@@ -2331,7 +2331,33 @@ where
         // > - otherwise:
         // >   - [IGNORE] The block's parent (defined by `block.parent_root`) passes all validation
         // >     (including execution node verification of the `block.body.execution_payload`).
-        if self
+        // > Changes in Gloas:
+        // > - If `execution_payload` verification of block's execution payload parent by an execution node **is complete**:
+        // >   - [REJECT] The block's execution payload parent (defined by `bid.parent_block_hash`) passes all validation.
+        if let Some(body) = block.message().body().with_payload_bid() {
+            let parent_block_hash = body
+                .signed_execution_payload_bid()
+                .message
+                .parent_block_hash;
+
+            // Only check in unfinalized path
+            if self
+                .store
+                .unfinalized_chain_link_by_execution_block_hash(parent_block_hash)
+                .is_some_and(ChainLink::is_invalid)
+            {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                }
+
+                reply_block_validation_result_to_http_api(
+                    sender,
+                    Ok(ValidationOutcome::Ignore(false)),
+                );
+            }
+        } else if self
             .store
             .chain_link(block_root)
             .is_some_and(ChainLink::is_invalid)
@@ -3862,7 +3888,6 @@ where
             return BlockDataColumnAvailability::Irrelevant;
         }
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockDataColumnAvailability::Irrelevant;
         };
@@ -3880,7 +3905,9 @@ where
 
         let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
             missing_indices.contains(&data_column_sidecar.index())
-                && data_column_sidecar.kzg_commitments() == body.blob_kzg_commitments()
+                && data_column_sidecar
+                    .kzg_commitments()
+                    .is_some_and(|kzg_commiments| kzg_commiments == body.blob_kzg_commitments())
         });
 
         if any_pending_columns {

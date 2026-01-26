@@ -1279,6 +1279,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 
         let blobs = construct_blobs_from_data_column_sidecars(
             controller.clone_arc(),
+            block.clone_arc(),
             block_root,
             metrics.as_ref(),
         )
@@ -1372,6 +1373,7 @@ pub async fn blobs<P: Preset, W: Wait>(
     let blobs = if version.is_peerdas_activated() {
         let blobs = construct_blobs_from_data_column_sidecars(
             controller.clone_arc(),
+            block,
             block_root,
             metrics.as_ref(),
         )
@@ -4320,6 +4322,7 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
 
 async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
+    block: Arc<SignedBeaconBlock<P>>,
     block_root: H256,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<Vec<Blob<P>>> {
@@ -4357,16 +4360,10 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
                 .as_ref()
                 .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
-            let first_column = data_column_sidecars
-                .first()
-                .expect("this cannot happen unless NumberOfColumns is zero");
-
             let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
-            data_column_sidecars = eip_7594::construct_data_column_sidecars_from_sidecar(
-                first_column,
-                &cells_and_kzg_proofs,
-            )?;
+            data_column_sidecars =
+                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
         }
 
         let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();

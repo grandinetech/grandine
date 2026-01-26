@@ -465,7 +465,7 @@ impl<P: Preset> SignForSingleFork<P> for PayloadAttestationData {
 }
 
 // <https://github.com/ethereum/consensus-specs/blob/v1.6.0-beta.0/specs/gloas/beacon-chain.md#new-verify_execution_payload_bid_signature>
-impl<P: Preset> SignForSingleFork<P> for ExecutionPayloadBid {
+impl<P: Preset> SignForSingleFork<P> for ExecutionPayloadBid<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_BEACON_BUILDER;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::ExecutionPayloadBid;
 

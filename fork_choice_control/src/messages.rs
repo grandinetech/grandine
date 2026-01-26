@@ -150,7 +150,7 @@ pub enum MutatorMessage<P: Preset, W> {
         slot: Slot,
     },
     PayloadBid {
-        result: Result<ExecutionPayloadBidAction>,
+        result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
     },
     PreprocessedBeaconState {

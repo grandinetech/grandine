@@ -928,7 +928,7 @@ impl<P: Preset> PostFuluBeaconState<P> for GloasBeaconState<P> {
 }
 
 pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
-    fn latest_execution_payload_bid(&self) -> ExecutionPayloadBid;
+    fn latest_execution_payload_bid(&self) -> &ExecutionPayloadBid<P>;
     fn execution_payload_availability(&self) -> BitVector<SlotsPerHistoricalRoot<P>>;
     fn builder_pending_payments(&self) -> &BuilderPendingPayments<P>;
     fn builder_pending_withdrawals(&self) -> &BuilderPendingWithdrawals<P>;
@@ -937,7 +937,7 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn builders(&self) -> &Builders<P>;
     fn next_withdrawal_builder_index(&self) -> BuilderIndex;
 
-    fn latest_execution_payload_bid_mut(&mut self) -> &mut ExecutionPayloadBid;
+    fn latest_execution_payload_bid_mut(&mut self) -> &mut ExecutionPayloadBid<P>;
     fn execution_payload_availability_mut(&mut self) -> &mut BitVector<SlotsPerHistoricalRoot<P>>;
     fn builder_pending_payments_mut(&mut self) -> &mut BuilderPendingPayments<P>;
     fn builder_pending_withdrawals_mut(&mut self) -> &mut BuilderPendingWithdrawals<P>;
@@ -969,7 +969,6 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
 impl<parameters> PostGloasBeaconState<P> for implementor {
     #[duplicate_item(
         field                              return_type;
-        [latest_execution_payload_bid]     [ExecutionPayloadBid];
         [execution_payload_availability]   [BitVector<SlotsPerHistoricalRoot<P>>];
         [latest_block_hash]                [ExecutionBlockHash];
         [next_withdrawal_builder_index]    [BuilderIndex];
@@ -980,6 +979,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
 
     #[duplicate_item(
         field                               return_type;
+        [latest_execution_payload_bid]      [ExecutionPayloadBid<P>];
         [builder_pending_payments]          [BuilderPendingPayments<P>];
         [builder_pending_withdrawals]       [BuilderPendingWithdrawals<P>];
         [payload_expected_withdrawals]      [PayloadExpectedWithdrawals<P>];
@@ -991,7 +991,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
 
     #[duplicate_item(
         field                              method                                 return_type;
-        [latest_execution_payload_bid]     [latest_execution_payload_bid_mut]     [ExecutionPayloadBid];
+        [latest_execution_payload_bid]     [latest_execution_payload_bid_mut]     [ExecutionPayloadBid<P>];
         [execution_payload_availability]   [execution_payload_availability_mut]   [BitVector<SlotsPerHistoricalRoot<P>>];
         [builder_pending_payments]         [builder_pending_payments_mut]         [BuilderPendingPayments<P>];
         [builder_pending_withdrawals]      [builder_pending_withdrawals_mut]      [BuilderPendingWithdrawals<P>];
@@ -1223,7 +1223,7 @@ pub trait BeaconBlockBody<P: Preset>: SszHash<PackingFactor = U1> {
     [DenebBeaconBlockBody<P>]            [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None]           [None]           [None];
     [ElectraBeaconBlockBody<P>]          [None]           [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None];
     [FuluBeaconBlockBody<P>]             [None]           [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [Some(self)]     [None]           [None];
-    [GloasBeaconBlockBody<P>]            [None]           [Some(self)]     [None]           [Some(self)]     [None]           [Some(self)]     [None]           [Some(self)]     [Some(self)];
+    [GloasBeaconBlockBody<P>]            [None]           [Some(self)]     [None]           [Some(self)]     [Some(self)]     [Some(self)]     [None]           [Some(self)]     [Some(self)];
 
     // `BellatrixBlindedBeaconBlockBody` does not implement `BlockBodyWithExecutionPayload`
     // because it does not have an `execution_payload` field.
@@ -1695,6 +1695,14 @@ impl<P: Preset> BlockBodyWithBlobKzgCommitments<P> for FuluBlindedBeaconBlockBod
     }
 }
 
+impl<P: Preset> BlockBodyWithBlobKzgCommitments<P> for GloasBeaconBlockBody<P> {
+    fn blob_kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, <P as Preset>::MaxBlobCommitmentsPerBlock> {
+        self.signed_execution_payload_bid().blob_kzg_commitments()
+    }
+}
+
 // Previously in `PostElectraBeaconBlockBody`
 pub trait BlockBodyWithElectraAttestations<P: Preset>: BeaconBlockBody<P> {
     fn attestations(&self) -> &ContiguousList<ElectraAttestation<P>, P::MaxAttestationsElectra>;
@@ -1793,12 +1801,12 @@ impl<P: Preset> BlockBodyWithExecutionRequests<P> for FuluBlindedBeaconBlockBody
 }
 
 pub trait BlockBodyWithPayloadBid<P: Preset>: BeaconBlockBody<P> {
-    fn signed_execution_payload_bid(&self) -> SignedExecutionPayloadBid;
+    fn signed_execution_payload_bid(&self) -> &SignedExecutionPayloadBid<P>;
 }
 
 impl<P: Preset> BlockBodyWithPayloadBid<P> for GloasBeaconBlockBody<P> {
-    fn signed_execution_payload_bid(&self) -> SignedExecutionPayloadBid {
-        self.signed_execution_payload_bid
+    fn signed_execution_payload_bid(&self) -> &SignedExecutionPayloadBid<P> {
+        &self.signed_execution_payload_bid
     }
 }
 
@@ -1957,7 +1965,7 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayloadHeader<P> {
     }
 }
 
-impl<P: Preset> ExecutionPayload<P> for ExecutionPayloadBid {
+impl<P: Preset> ExecutionPayload<P> for ExecutionPayloadBid<P> {
     fn block_hash(&self) -> ExecutionBlockHash {
         self.block_hash
     }
@@ -1976,7 +1984,7 @@ impl<P: Preset> ExecutionPayload<P> for ExecutionPayloadBid {
     }
 
     fn to_header(&self) -> CombinedExecutionPayloadHeader<P> {
-        (*self).into()
+        self.clone().into()
     }
 }
 

@@ -501,7 +501,7 @@ impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
 pub struct ExecutionPayloadBidTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
-    pub payload_bid: Arc<SignedExecutionPayloadBid>,
+    pub payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     pub origin: ExecutionPayloadBidOrigin,
 }
 

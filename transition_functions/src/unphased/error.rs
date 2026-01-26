@@ -75,10 +75,6 @@ pub enum Error<P: Preset> {
         deposit: Box<Deposit>,
     },
     #[error(
-        "blob commitments root in envelope ({in_envelope:?}) does not match in committed bid ({in_state:?})"
-    )]
-    EnvelopeBlobCommitmentsMismatch { in_envelope: H256, in_state: H256 },
-    #[error(
         "builder index in envelope ({in_envelope}) does not match in committed bid ({in_state})"
     )]
     EnvelopeBuilderMismatch {

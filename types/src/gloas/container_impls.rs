@@ -14,7 +14,7 @@ use crate::{
     },
     gloas::containers::{
         CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayloadEnvelope,
-        PayloadAttestationData, SignedExecutionPayloadEnvelope,
+        PayloadAttestationData, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
     },
     phase0::primitives::Slot,
     preset::Preset,
@@ -29,13 +29,6 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
     #[must_use]
     pub const fn block_root(&self) -> H256 {
         self.message.beacon_block_root
-    }
-
-    #[must_use]
-    pub const fn blob_kzg_commitments(
-        &self,
-    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
-        &self.message.blob_kzg_commitments
     }
 
     #[must_use]
@@ -55,7 +48,6 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
                     withdrawals: ContiguousList::full(WithdrawalRequest::default()),
                     consolidations: ContiguousList::full(ConsolidationRequest::default()),
                 },
-                blob_kzg_commitments: ContiguousList::full(KzgCommitment::repeat_byte(u8::MAX)),
                 ..Default::default()
             },
             ..Default::default()
@@ -68,7 +60,6 @@ impl<P: Preset> DataColumnSidecar<P> {
     pub fn full() -> Self {
         Self {
             column: ContiguousList::full(Box::default()),
-            kzg_commitments: ContiguousList::full(KzgCommitment::repeat_byte(u8::MAX)),
             kzg_proofs: ContiguousList::full(KzgProof::repeat_byte(u8::MAX)),
             ..Default::default()
         }
@@ -81,7 +72,7 @@ impl<P: Preset> fmt::Debug for DataColumnSidecar<P> {
         f.debug_struct("DataColumnSidecar")
             .field("index", &self.index)
             .field("beacon_block_root", &self.beacon_block_root)
-            .field("kzg_commitments", &self.kzg_commitments)
+            .field("slot", &self.slot)
             .finish()
     }
 }
@@ -92,5 +83,14 @@ impl<P: Preset> CombinedPayloadAttestation<P> {
             Self::Attestation(payload_attestation) => payload_attestation.data,
             Self::Message(payload_attestation) => payload_attestation.data,
         }
+    }
+}
+
+impl<P: Preset> SignedExecutionPayloadBid<P> {
+    #[must_use]
+    pub const fn blob_kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+        &self.message.blob_kzg_commitments
     }
 }
