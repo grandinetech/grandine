@@ -502,7 +502,9 @@ pub fn process_slots<P: Preset>(
                 }
 
                 if Toption::Some(last_slot_in_phase) == gloas_fork_slot {
-                    *state = fork::upgrade_to_gloas(config, fulu_state.as_ref().clone()).into();
+                    *state =
+                        fork::upgrade_to_gloas(config, pubkey_cache, fulu_state.as_ref().clone())?
+                            .into();
 
                     made_progress = true;
                 }
@@ -694,7 +696,9 @@ fn post_process_slots_for_epoch_report<P: Preset>(
                 let gloas_fork_slot = config.fork_slot::<P>(Phase::Gloas);
 
                 if Toption::Some(post_slot) == gloas_fork_slot {
-                    *state = fork::upgrade_to_gloas(config, fulu_state.as_ref().clone()).into();
+                    *state =
+                        fork::upgrade_to_gloas(config, pubkey_cache, fulu_state.as_ref().clone())?
+                            .into();
                 }
             }
             BeaconState::Gloas(_) => {}
