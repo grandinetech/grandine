@@ -73,12 +73,12 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                             wait_group,
                             block_root,
                             block,
-                            origin,
                             slot,
+                            is_from_requested
                         } => {
                             // We don't want to reconstruct blobs on each block during sync
                             // if it downloads data columns relatively fast
-                            let delay = if origin.is_requested() {
+                            let delay = if is_from_requested {
                                 RECONSTRUCTION_START_DELAY_SYNCING
                             } else {
                                 self.reconstruction_delay
