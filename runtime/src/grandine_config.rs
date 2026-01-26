@@ -80,6 +80,7 @@ pub struct GrandineConfig {
     pub sync_without_reconstruction: bool,
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
+    pub enable_payload_build: bool,
 }
 
 impl GrandineConfig {
@@ -111,6 +112,7 @@ impl GrandineConfig {
             validator_api_config,
             sync_without_reconstruction,
             custody_mode,
+            enable_payload_build,
             ..
         } = self;
 
@@ -214,6 +216,10 @@ impl GrandineConfig {
 
         if *use_validator_key_cache {
             info!("using validator key cache");
+        }
+
+        if *enable_payload_build {
+            info!("self payload build enabled");
         }
 
         if *sync_without_reconstruction {

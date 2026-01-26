@@ -29,6 +29,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             SigningMessage::AggregateAndProof(_) => MessageType::AggregateAndProof,
             SigningMessage::Attestation(_) => MessageType::Attestation,
             SigningMessage::BeaconBlock { .. } => MessageType::BlockV2,
+            SigningMessage::ExecutionPayloadEnvelope(_) => MessageType::ExecutionPayloadEnvelope,
             SigningMessage::RandaoReveal { .. } => MessageType::RandaoReveal,
             SigningMessage::SyncCommitteeMessage { .. } => MessageType::SyncCommitteeMessage,
             SigningMessage::SyncAggregatorSelectionData(_) => {
@@ -58,6 +59,7 @@ enum MessageType {
     AggregateAndProof,
     Attestation,
     BlockV2,
+    ExecutionPayloadEnvelope,
     RandaoReveal,
     SyncCommitteeMessage,
     SyncCommitteeSelectionProof,
@@ -85,6 +87,7 @@ mod tests {
                 "AGGREGATE_AND_PROOF",
                 "ATTESTATION",
                 "BLOCK_V2",
+                "EXECUTION_PAYLOAD_ENVELOPE",
                 "RANDAO_REVEAL",
                 "SYNC_COMMITTEE_MESSAGE",
                 "SYNC_COMMITTEE_SELECTION_PROOF",

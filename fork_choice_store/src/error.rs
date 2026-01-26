@@ -7,8 +7,8 @@ use types::{
     bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::SignedExecutionPayloadBid,
-    phase0::primitives::{Epoch, ExecutionAddress, Gwei, Slot, SubnetId, ValidatorIndex},
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    phase0::primitives::{Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -82,6 +82,11 @@ pub enum Error<P: Preset> {
     BlobSidecarProposerIndexMismatch {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
+    },
+    #[error("builder index mismatch: expected {expected}, actual {actual}")]
+    BuilderIndexMismatch {
+        expected: ValidatorIndex,
+        actual: ValidatorIndex,
     },
     #[error(
         "the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}"
@@ -174,6 +179,15 @@ pub enum Error<P: Preset> {
     ExecutionPayloadBidSignatureNotEmpty,
     #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
     ExecutionPayloadBidValueNonZero { value: Gwei },
+    #[error(
+        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadBlockHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
+    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
+    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -192,6 +206,17 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("payload envelope's block is invalid: {payload_envelope:?}")]
+    PayloadEnvelopeInvalidBlock {
+        payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    },
+    #[error(
+        "payload envelope validation with pre-Gloas state: (envelope_slot: {envelope_slot}, state_slot: {state_slot})"
+    )]
+    PayloadEnvelopeWithPreGloasState {
+        envelope_slot: Slot,
+        state_slot: Slot,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

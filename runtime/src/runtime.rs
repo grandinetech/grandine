@@ -1297,6 +1297,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         sync_without_reconstruction,
         custody_mode,
         disable_wait_for_late_blocks,
+        enable_payload_build,
         ..
     } = config;
 
@@ -1336,6 +1337,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         backfill_custody_groups,
         custody_mode,
         disable_wait_for_late_blocks,
+        enable_payload_build,
     });
 
     let store_config = StoreConfig {
