@@ -25,7 +25,7 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    gloas::containers::SignedExecutionPayloadBid,
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
     nonstandard::{
         PayloadStatus, Phase, Publishable, StorageMode, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -898,6 +898,85 @@ pub enum PartialAttestationAction {
     Ignore,
     DelayUntilBlock(H256),
     DelayUntilSlot,
+}
+
+#[derive(Debug, Clone, AsRefStr)]
+pub enum ExecutionPayloadEnvelopeOrigin {
+    BackSync,
+    Gossip(GossipId),
+    Requested(PeerId),
+    Own,
+    Api(Option<Sender<Result<ValidationOutcome>>>),
+}
+
+impl ExecutionPayloadEnvelopeOrigin {
+    #[must_use]
+    pub fn split(self) -> (Option<GossipId>, Option<Sender<Result<ValidationOutcome>>>) {
+        match self {
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, sender),
+            Self::BackSync | Self::Requested(_) | Self::Own => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(&self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id.clone()),
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn should_generate_event(&self) -> bool {
+        matches!(self, Self::Gossip(_) | Self::Api(_) | Self::Own)
+    }
+
+    // TODO: (gloas): confirm whether can we trust own execution payload envelope
+    #[must_use]
+    pub const fn verify_signatures(&self) -> bool {
+        match self {
+            Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
+            Self::Own => false,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_back_sync(&self) -> bool {
+        matches!(self, Self::BackSync)
+    }
+
+    #[must_use]
+    pub const fn is_requested(&self) -> bool {
+        matches!(self, Self::Requested(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
+    Accept(Arc<SignedExecutionPayloadEnvelope<P>>),
+    Ignore(Publishable),
+    DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
+    DelayUntilState(Arc<SignedExecutionPayloadEnvelope<P>>, H256, Slot),
+    DelayUntilData(
+        Arc<SignedExecutionPayloadEnvelope<P>>,
+        Arc<SignedBeaconBlock<P>>,
+    ),
+}
+
+impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
+    #[must_use]
+    pub const fn accepted(&self) -> bool {
+        matches!(self, Self::Accept(_))
+    }
 }
 
 #[derive(Clone)]
