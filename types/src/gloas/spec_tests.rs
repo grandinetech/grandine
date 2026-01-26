@@ -214,7 +214,7 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    ExecutionPayloadBid,
+    ExecutionPayloadBid<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ExecutionPayloadBid/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/ExecutionPayloadBid/*/*",
 }
@@ -406,7 +406,7 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    SignedExecutionPayloadBid,
+    SignedExecutionPayloadBid<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedExecutionPayloadBid/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedExecutionPayloadBid/*/*",
 }

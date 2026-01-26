@@ -60,6 +60,7 @@ use types::{
             DataColumnSidecar as GloasDataColumnSidecar, ProposerPreferences,
             SignedExecutionPayloadBid,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -234,11 +235,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, ValidatorIndex, ColumnIndex),
         HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
     >,
-    accepted_gloas_data_column_sidecars: HashMap<
-        (Slot, H256, ColumnIndex),
-        ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    >,
-    accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, SignedExecutionPayloadBid>>,
+    accepted_gloas_data_column_sidecars: HashMap<(H256, ColumnIndex), Slot>,
+    accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, Arc<SignedExecutionPayloadBid<P>>>>,
     proposer_preferences: HashMap<Slot, ProposerPreferences>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
@@ -406,14 +404,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid> {
-        Some(
-            *self
-                .accepted_payload_bids
-                .get(&slot)?
-                .values()
-                .max_by_key(|bid| bid.message.value)?,
-        )
+    pub fn accepted_payload_bid_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Option<&Arc<SignedExecutionPayloadBid<P>>> {
+        self.accepted_payload_bids
+            .get(&slot)?
+            .values()
+            .max_by_key(|bid| bid.message.value)
     }
 
     #[must_use]
@@ -1315,12 +1313,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn validate_execution_payload_bid(
         &self,
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         origin: &ExecutionPayloadBidOrigin,
-    ) -> Result<ExecutionPayloadBidAction> {
-        let bid = payload_bid.message;
+    ) -> Result<ExecutionPayloadBidAction<P>> {
+        let bid = &payload_bid.message;
         let builder_index = bid.builder_index;
 
         // > off-protocol payment is disallowed to gossip via p2p and API, the `bid.execution_payment` MUST be zero
@@ -1333,6 +1332,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if bid.slot < self.slot() || bid.slot > self.slot() + 1 {
             return Ok(ExecutionPayloadBidAction::Ignore(false));
         }
+
+        // > Verify commitments are under limit
+        let bid_epoch = misc::compute_epoch_at_slot::<P>(bid.slot);
+        let in_bid = bid.blob_kzg_commitments.len();
+        let maximum = self
+            .chain_config
+            .get_blob_schedule_entry(bid_epoch)
+            .max_blobs_per_block;
+        ensure!(
+            in_bid <= maximum,
+            Error::<P>::TooManyBlobKzgCommitments { maximum, in_bid }
+        );
 
         // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
         if !self
@@ -2253,6 +2264,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let column_index = data_column_sidecar.index;
+        let kzg_commitments = data_column_sidecar.kzg_commitments.clone();
         let block_header = data_column_sidecar.signed_block_header.message;
         let block_signature = data_column_sidecar.signed_block_header.signature;
         let block_root = block_header.hash_tree_root();
@@ -2283,7 +2295,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
         ensure!(
-            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar),
+            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar, &kzg_commitments),
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar
             },
@@ -2414,12 +2426,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            let verify_result =
-                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
-                        data_column_sidecar: data_column_sidecar.clone_arc(),
-                        error,
-                    })?;
+            let verify_result = verify_kzg_proofs(
+                &data_column_sidecar,
+                &kzg_commitments,
+                self.store_config.kzg_backend,
+                metrics,
+            )
+            .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
+            })?;
 
             ensure!(
                 verify_result,
@@ -2461,7 +2477,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         validate_block_presence: bool,
-        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_root = data_column_sidecar.beacon_block_root;
@@ -2494,7 +2509,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        let Some(state) = state_fn() else {
+        // [IGNORE] A valid block for the sidecar's `slot` has been seen (via gossip or non-gossip sources).
+        // A client MUST queue the sidecar for processing once the block is received or retrieved.
+        let Some(block) = self.block(block_root).map(WithStatus::value) else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
@@ -2503,37 +2520,28 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecars's `slot` matches the slot of the block with root `beacon_block_root`.
         ensure!(
-            slot == state.slot(),
+            slot == block.message().slot(),
             Error::DataColumnSidecarSlotMismatch {
                 data_column_sidecar,
-                block_slot: state.slot(),
+                block_slot: block.message().slot(),
             }
         );
 
-        // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
-        let Some(payload_bid) = self.accepted_payload_bids.get(&slot).and_then(|bids| {
-            bids.values()
-                .filter(|bid| bid.message.parent_block_root == block_root)
-                .max_by_key(|bid| bid.message.value)
-        }) else {
-            return Ok(DataColumnSidecarAction::DelayUntilState(
+        let Some(kzg_commitments) = block
+            .message()
+            .body()
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().blob_kzg_commitments())
+        else {
+            return Err(Error::DataColumnSidecarBlockWithoutPayloadBid {
                 data_column_sidecar,
-                block_root,
-            ));
-        };
-
-        // [REJECT] The hash of the sidecar's kzg_commitments matches the blob_kzg_commitments_root in the corresponding builder's bid for sidecar.beacon_block_root.
-        ensure!(
-            data_column_sidecar.kzg_commitments().hash_tree_root()
-                == payload_bid.message.blob_kzg_commitments_root,
-            Error::DataColumnSidecarInvalidKzgCommitments {
-                data_column_sidecar
             }
-        );
+            .into());
+        };
 
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
         ensure!(
-            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar),
+            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar, kzg_commitments),
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar
             },
@@ -2555,23 +2563,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (sidecar.beacon_block_root, sidecar.index) with valid kzg proof
         // Adjustment: Ignore data column sidecars for unseen blocks only
-        if self.accepted_gloas_data_column_sidecars.contains_key(&(
-            data_column_sidecar.slot(),
-            block_root,
-            column_index,
-        )) && !block_seen
+        if self
+            .accepted_gloas_data_column_sidecars
+            .contains_key(&(block_root, column_index))
+            && !block_seen
         {
             return Ok(DataColumnSidecarAction::Ignore(true));
         }
 
         if !origin.is_from_el() {
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            let verify_result =
-                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
-                        data_column_sidecar: data_column_sidecar.clone_arc(),
-                        error,
-                    })?;
+            let verify_result = verify_kzg_proofs(
+                &data_column_sidecar,
+                kzg_commitments,
+                self.store_config.kzg_backend,
+                metrics,
+            )
+            .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
+            })?;
 
             ensure!(
                 verify_result,
@@ -2626,24 +2637,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     metrics,
                 )
             }
-            DataColumnSidecar::Gloas(data_column_sidecar) => {
-                let slot = data_column_sidecar.slot;
-                let block_root = data_column_sidecar.beacon_block_root;
-
-                self.validate_gloas_data_column_sidecar_with_state(
+            DataColumnSidecar::Gloas(data_column_sidecar) => self
+                .validate_gloas_data_column_sidecar_with_state(
                     data_column_sidecar,
                     block_seen,
                     origin,
                     validate_block_presence,
-                    || {
-                        state.or_else(|| {
-                            self.state_cache
-                                .existing_state_at_slot(self, block_root, slot)
-                        })
-                    },
                     metrics,
-                )
-            }
+                ),
         }
     }
 
@@ -2801,8 +2802,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
         let log_imported_block_info = || {
-            // TODO: (gloas): glaas block can be imported without sidecars, so it would not know
-            // about the blob count from the block, but later when `on_execution_payload` called
             if let Some(post_deneb_block_body) = chain_link
                 .block
                 .message()
@@ -3000,11 +2999,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.blob_cache.insert(blob_sidecar);
     }
 
-    pub fn apply_execution_payload_bid(&mut self, payload_bid: SignedExecutionPayloadBid) {
-        let bid = payload_bid.message;
-        let accepted_bids = self.accepted_payload_bids.entry(bid.slot).or_default();
+    pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
+        let accepted_bids = self
+            .accepted_payload_bids
+            .entry(payload_bid.message.slot)
+            .or_default();
 
-        accepted_bids.insert(bid.builder_index, payload_bid);
+        accepted_bids.insert(payload_bid.message.builder_index, payload_bid);
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
@@ -3026,10 +3027,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let block_root = data_sidecar.beacon_block_root();
             let column_index = data_sidecar.index();
 
-            self.accepted_gloas_data_column_sidecars.insert(
-                (data_sidecar.slot(), block_root, column_index),
-                data_sidecar.kzg_commitments().clone(),
-            );
+            self.accepted_gloas_data_column_sidecars
+                .insert((block_root, column_index), data_sidecar.slot());
         }
 
         self.data_column_cache.insert(data_sidecar);
@@ -3054,8 +3053,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .count()
         } else {
             self.accepted_gloas_data_column_sidecars
-                .keys()
-                .filter(|(_, root, _)| *root == block_root)
+                .iter()
+                .filter(|((root, _), slot)| {
+                    *root == block_root && **slot == data_column_sidecar.slot()
+                })
                 .count()
         }
     }
@@ -3079,11 +3080,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             false
         } else {
-            self.accepted_gloas_data_column_sidecars.contains_key(&(
-                data_column_sidecar.slot(),
-                block_root,
-                data_column_sidecar.index(),
-            ))
+            self.accepted_gloas_data_column_sidecars
+                .contains_key(&(block_root, data_column_sidecar.index()))
         }
     }
 
@@ -3438,7 +3436,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.accepted_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_gloas_data_column_sidecars
-            .retain(|(slot, _, _), _| finalized_slot <= *slot);
+            .retain(|(_, _), slot| finalized_slot <= *slot);
         // TODO: (gloas): prune after block imported, as it's no longer relevant
         self.accepted_payload_bids
             .retain(|slot, _| finalized_slot <= *slot);
@@ -4175,8 +4173,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let phase = block.phase();
         let block = block.message();
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        //
         // `block.phase` has already been checked
         let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
@@ -4192,12 +4188,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .iter()
             .filter(|index| {
                 if phase >= Phase::Gloas {
-                    !self
-                        .accepted_gloas_data_column_sidecars
-                        .get(&(block.slot(), block_root, **index))
-                        .is_some_and(|kzg_commitments| {
-                            kzg_commitments == body.blob_kzg_commitments()
-                        })
+                    self.accepted_gloas_data_column_sidecars
+                        .get(&(block_root, **index))
+                        .is_none_or(|slot| *slot != block.slot())
                 } else {
                     !self
                         .accepted_data_column_sidecars

@@ -24,7 +24,7 @@ use helper_functions::{
         balance, builder_balance, decrease_balance, increase_balance, initiate_builder_exit,
     },
     predicates::{
-        can_builder_cover_bid, is_active_builder, is_attestation_same_slot, is_parent_block_full,
+        can_builder_cover_bid, is_active_builder, is_attestation_same_slot,
         validate_constructed_indexed_attestation, validate_constructed_indexed_payload_attestation,
     },
     signing::SignForSingleFork as _,
@@ -153,6 +153,7 @@ pub fn custom_process_block<P: Preset>(
     process_withdrawals(state)?;
 
     // > [New in Gloas:EIP7732]
+    // This function must be called after `process_withdrawals`
     process_execution_payload_bid(config, pubkey_cache, state, block)?;
 
     unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
@@ -182,19 +183,26 @@ pub fn custom_process_block<P: Preset>(
 pub fn get_expected_withdrawals<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
 ) -> Result<(Vec<Withdrawal>, usize, usize, u64)> {
+    // This limit is to ensure the last withdrawal is reserve for validator sweep
+    let withdrawal_limit = P::MaxWithdrawalsPerPayload::USIZE - 1;
     let current_epoch = get_current_epoch(state);
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut withdrawals: Vec<Withdrawal> = vec![];
 
     // > [New in Gloas:EIP7732] Get builder withdrawals
-    let processed_builder_withdrawals_count =
-        get_builder_withdrawals_count(state, &mut withdrawal_index, &mut withdrawals)?;
+    let processed_builder_withdrawals_count = get_builder_withdrawals_count(
+        state,
+        &mut withdrawal_index,
+        &mut withdrawals,
+        withdrawal_limit,
+    )?;
 
     // Get partial withdrawals
     let processed_partial_withdrawals_count = get_pending_partial_withdrawals_count(
         state,
         &mut withdrawal_index,
         &mut withdrawals,
+        withdrawal_limit,
         current_epoch,
     )?;
 
@@ -203,6 +211,7 @@ pub fn get_expected_withdrawals<P: Preset>(
         state,
         &mut withdrawal_index,
         &mut withdrawals,
+        withdrawal_limit,
         current_epoch,
     )?;
 
@@ -226,11 +235,12 @@ fn get_builder_withdrawals_count<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
     withdrawal_index: &mut WithdrawalIndex,
     withdrawals: &mut Vec<Withdrawal>,
+    withdrawal_limit: usize,
 ) -> Result<usize> {
     let mut processed_count = 0;
 
     for withdrawal in &state.builder_pending_withdrawals().clone() {
-        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
+        if withdrawals.len() >= withdrawal_limit {
             break;
         }
 
@@ -255,6 +265,7 @@ fn get_builders_sweep_withdrawals_count<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
     withdrawal_index: &mut WithdrawalIndex,
     withdrawals: &mut Vec<Withdrawal>,
+    withdrawal_limit: usize,
     current_epoch: Epoch,
 ) -> Result<u64> {
     let total_builders = state.builders().len_u64();
@@ -263,7 +274,7 @@ fn get_builders_sweep_withdrawals_count<P: Preset>(
     let mut processed_count = 0;
 
     for _ in 0..bound {
-        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
+        if withdrawals.len() >= withdrawal_limit {
             break;
         }
 
@@ -297,6 +308,7 @@ fn get_pending_partial_withdrawals_count<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
     withdrawal_index: &mut WithdrawalIndex,
     withdrawals: &mut Vec<Withdrawal>,
+    withdrawal_limit: usize,
     current_epoch: Epoch,
 ) -> Result<usize> {
     let max_pending_partials_per_withdrawals_sweep: usize =
@@ -304,11 +316,11 @@ fn get_pending_partial_withdrawals_count<P: Preset>(
     let bound = withdrawals
         .len()
         .saturating_add(max_pending_partials_per_withdrawals_sweep)
-        .min(P::MaxWithdrawalsPerPayload::USIZE - 1);
+        .min(withdrawal_limit);
     let mut processed_count = 0;
 
     for withdrawal in &state.pending_partial_withdrawals().clone() {
-        if withdrawal.withdrawable_epoch > current_epoch || withdrawals.len() == bound {
+        if withdrawal.withdrawable_epoch > current_epoch || withdrawals.len() >= bound {
             break;
         }
 
@@ -432,7 +444,8 @@ fn process_validators_sweep_withdrawals<P: Preset>(
 }
 
 pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
-    if !is_parent_block_full(state) {
+    // Return early if the parent block is empty.
+    if state.latest_execution_payload_bid().block_hash != state.latest_block_hash() {
         return Ok(());
     }
 
@@ -514,7 +527,7 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &impl PostGloasBeaconState<P>,
-    signed_bid: SignedExecutionPayloadBid,
+    signed_bid: &SignedExecutionPayloadBid<P>,
     mut verifier: impl Verifier,
 ) -> Result<()> {
     let SignedExecutionPayloadBid {
@@ -527,7 +540,7 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
     // > Verify signature
     verifier.verify_singular(
         execution_payload_bid.signing_root(config, state),
-        signature,
+        *signature,
         pubkey_cache.get_or_insert(builder.pubkey)?,
         SignatureKind::ExecutionPayloadBid,
     )
@@ -540,7 +553,8 @@ fn validate_execution_payload_bid<P: Preset>(
     block: &BeaconBlock<P>,
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
-    let signed_bid = block.body.signed_execution_payload_bid;
+    let signed_bid = &block.body.signed_execution_payload_bid;
+    let payload_bid = signed_bid.message.clone();
     let ExecutionPayloadBid {
         builder_index,
         value: amount,
@@ -549,7 +563,7 @@ fn validate_execution_payload_bid<P: Preset>(
         parent_block_root,
         prev_randao,
         ..
-    } = signed_bid.message;
+    } = payload_bid;
 
     // > For self-builds, `amount` must be zero and `signature` must be empty,
     // Otherwise verify builder is active, has valid signature, and can pay bid.
@@ -587,6 +601,17 @@ fn validate_execution_payload_bid<P: Preset>(
             Error::<P>::ExecutionPayloadBidSignatureInvalid
         );
     }
+
+    // > Verify commitments are under limit
+    let maximum = config
+        .get_blob_schedule_entry(get_current_epoch(state))
+        .max_blobs_per_block;
+    let in_block = signed_bid.message.blob_kzg_commitments.len();
+
+    ensure!(
+        in_block <= maximum,
+        Error::<P>::TooManyBlockKzgCommitments { in_block, maximum },
+    );
 
     // > Verify that the bid is for the current slot
     ensure!(
@@ -632,14 +657,14 @@ pub fn process_execution_payload_bid<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
     block: &BeaconBlock<P>,
 ) -> Result<()> {
-    let signed_bid = block.body.signed_execution_payload_bid;
+    let payload_bid = block.body.signed_execution_payload_bid.message.clone();
     let ExecutionPayloadBid {
         value: amount,
         builder_index,
         slot,
         fee_recipient,
         ..
-    } = signed_bid.message;
+    } = payload_bid;
 
     validate_execution_payload_bid(config, pubkey_cache, state, block)?;
 
@@ -659,7 +684,7 @@ pub fn process_execution_payload_bid<P: Preset>(
     }
 
     // > Cache the signed execution payload bid
-    *state.latest_execution_payload_bid_mut() = signed_bid.message;
+    *state.latest_execution_payload_bid_mut() = payload_bid;
 
     Ok(())
 }

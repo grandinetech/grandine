@@ -89,6 +89,12 @@ pub enum Error<P: Preset> {
     DataColumnSidecarBlockNotADescendantOfFinalized {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
     },
+    #[error(
+        "data column sidecar's block has no signed execution payload bid: {data_column_sidecar:?}"
+    )]
+    DataColumnSidecarBlockWithoutPayloadBid {
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    },
     #[error("data column sidecar is invalid: {data_column_sidecar:?}")]
     DataColumnSidecarInvalid {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -146,7 +152,7 @@ pub enum Error<P: Preset> {
     },
     #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
     ExecutionPayloadBidBuilderInactive {
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         epoch: Epoch,
     },
     #[error(
@@ -162,7 +168,7 @@ pub enum Error<P: Preset> {
     ExecutionPayloadBidGasLimitMismatch { in_preference: Gas, in_bid: Gas },
     #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     },
     #[error("execution payload bid's signature for self-build is not empty")]
     ExecutionPayloadBidSignatureNotEmpty,
@@ -176,7 +182,7 @@ pub enum Error<P: Preset> {
     InvalidExecutionPayload,
     #[error("execution payload bid has invalid signature: {payload_bid:?}")]
     InvalidExecutionPayloadBidSignature {
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     },
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
@@ -205,6 +211,8 @@ pub enum Error<P: Preset> {
         pow_block: Box<PowBlock>,
         parent: Box<PowBlock>,
     },
+    #[error("too many blob KZG commitments (maximum: {maximum}, in_bid: {in_bid})")]
+    TooManyBlobKzgCommitments { maximum: usize, in_bid: usize },
     #[error("validator is not an aggregator: {aggregate_and_proof:?}")]
     ValidatorNotAggregator {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,

@@ -83,7 +83,7 @@ pub struct BeaconState<P: Preset> {
     pub next_sync_committee: Arc<Hc<SyncCommittee<P>>>,
 
     // > Execution
-    pub latest_execution_payload_bid: ExecutionPayloadBid,
+    pub latest_execution_payload_bid: ExecutionPayloadBid<P>,
 
     // > Withdrawals
     #[serde(with = "serde_utils::string_or_native")]

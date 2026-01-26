@@ -809,8 +809,8 @@ impl<P: Preset> DataColumnSidecarAction<P> {
     }
 }
 
-pub enum ExecutionPayloadBidAction {
-    Accept(Arc<SignedExecutionPayloadBid>),
+pub enum ExecutionPayloadBidAction<P: Preset> {
+    Accept(Arc<SignedExecutionPayloadBid<P>>),
     Ignore(Publishable),
 }
 
