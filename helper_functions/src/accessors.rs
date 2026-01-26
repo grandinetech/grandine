@@ -15,7 +15,7 @@ use itertools::{EitherOrBoth, Itertools as _};
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
-use ssz::{ContiguousVector, FitsInU64, Hc, SszHash as _};
+use ssz::{ContiguousList, ContiguousVector, FitsInU64, Hc, SszHash as _};
 #[cfg(target_os = "zkvm")]
 use std::collections::HashMap;
 use std_ext::CopyExt as _;
@@ -33,7 +33,15 @@ use types::{
     },
     cache::{IndexSlice, PackedIndices},
     config::Config,
-    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
+    gloas::{
+        consts::{
+            BUILDER_PAYMENT_THRESHOLD_DENOMINATOR, BUILDER_PAYMENT_THRESHOLD_NUMERATOR,
+            DOMAIN_PTC_ATTESTER,
+        },
+        containers::{IndexedPayloadAttestation, PayloadAttestation},
+        primitives::BuilderIndex,
+    },
+    nonstandard::{AttestationEpoch, Participation, RelativeEpoch, RelativeSlot},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -44,7 +52,7 @@ use types::{
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
     traits::{
         Attestation, AttesterSlashing, BeaconState, IndexedAttestation as _, PostAltairBeaconState,
-        PostElectraBeaconState,
+        PostElectraBeaconState, PostFuluBeaconState, PostGloasBeaconState,
     },
 };
 
@@ -459,7 +467,10 @@ pub fn get_beacon_proposer_index<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
 ) -> Result<ValidatorIndex> {
-    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+    if let Some(proposer_lookahead) = state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
+    {
         proposer_lookahead
             .get(state.slot() % P::SlotsPerEpoch::U64)
             .copied()
@@ -500,7 +511,10 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
 
-    if let Some(proposer_lookahead) = state.proposer_lookahead() {
+    if let Some(proposer_lookahead) = state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
+    {
         match relative_epoch {
             RelativeEpoch::Current => {
                 return proposer_lookahead
@@ -582,7 +596,9 @@ pub fn get_or_init_total_active_balance<P: Preset>(
 fn get_next_sync_committee_indices<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
 ) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
-    if state.is_post_electra() {
+    if state.is_post_gloas() {
+        get_next_sync_committee_indices_post_gloas(state)
+    } else if state.is_post_electra() {
         get_next_sync_committee_indices_post_electra(state)
     } else {
         get_next_sync_committee_indices_pre_electra(state)
@@ -687,6 +703,30 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
         .map_err(Into::into)
 }
 
+fn get_next_sync_committee_indices_post_gloas<P: Preset>(
+    state: &(impl BeaconState<P> + ?Sized),
+) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
+    let next_epoch = get_next_epoch(state);
+    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
+    let indices = PackedIndices::U64(
+        get_active_validator_indices_by_epoch(state, next_epoch)
+            .collect_vec()
+            .into(),
+    );
+
+    misc::compute_balance_weighted_selection::<P>(
+        state,
+        &indices,
+        seed,
+        P::SyncCommitteeSize::USIZE,
+        true,
+    )?
+    .into_iter()
+    .take(P::SyncCommitteeSize::USIZE)
+    .pipe(ContiguousVector::try_from_iter)
+    .map_err(Into::into)
+}
+
 pub fn get_next_sync_committee<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &(impl BeaconState<P> + ?Sized),
@@ -761,9 +801,30 @@ pub fn get_attestation_participation_flags<P: Preset>(
     // > Matching roots
     let is_matching_source = data.source == justified_checkpoint;
     let is_matching_target = is_matching_source && data.target.root == expected_target;
-    let is_matching_head = is_matching_target && data.beacon_block_root == expected_head;
+    let mut is_matching_head = is_matching_target && data.beacon_block_root == expected_head;
 
     ensure!(is_matching_source, Error::AttestationSourceMismatch);
+
+    // > [New in Gloas:EIP7732]
+    if let Some(post_gloas) = state.post_gloas() {
+        let is_matching_payload = if predicates::is_attestation_same_slot::<P>(state, &data)? {
+            ensure!(data.index == 0, Error::NoneZeroDataIndex);
+
+            true
+        } else {
+            let slot = usize::try_from(data.slot)?;
+            let payload_status = u64::from(
+                post_gloas
+                    .execution_payload_availability()
+                    .get(slot % SlotsPerHistoricalRoot::<P>::USIZE)
+                    .ok_or(Error::PayloadAvailabilityOutOfRange)?,
+            );
+
+            data.index == payload_status
+        };
+
+        is_matching_head &= is_matching_payload
+    }
 
     let mut participation_flags = 0;
 
@@ -929,6 +990,29 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
         .sum()
 }
 
+#[must_use]
+pub fn get_pending_balance_to_withdraw_for_builder<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    builder_index: BuilderIndex,
+) -> Gwei {
+    let builder_pending_withdrawals: Gwei = state
+        .builder_pending_withdrawals()
+        .into_iter()
+        .filter_map(|withdrawal| {
+            (withdrawal.builder_index == builder_index).then_some(withdrawal.amount)
+        })
+        .sum();
+
+    let builder_pending_payments: Gwei = state
+        .builder_pending_payments()
+        .into_iter()
+        .filter(|payment| payment.withdrawal.builder_index == builder_index)
+        .map(|payment| payment.withdrawal.amount)
+        .sum();
+
+    builder_pending_withdrawals.saturating_add(builder_pending_payments)
+}
+
 pub fn get_beacon_proposer_indices<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
@@ -944,6 +1028,144 @@ pub fn get_beacon_proposer_indices<P: Preset>(
         seed,
         &PackedIndices::U64(indices.into_iter().collect()),
     )
+}
+
+pub fn ptc_for_slot<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
+    let seed = hashing::hash_256_64(seed, slot);
+
+    // > Concatenate all committees for this slot in order
+    let indices = beacon_committees(state, slot)?.flatten();
+
+    misc::compute_balance_weighted_selection::<P>(
+        state,
+        &PackedIndices::U64(indices.into_iter().collect()),
+        seed,
+        P::PtcSize::USIZE,
+        false,
+    )?
+    .into_iter()
+    .take(P::PtcSize::USIZE)
+    .pipe(ContiguousVector::try_from_iter)
+    .map_err(Into::into)
+}
+
+// Internal helper to compute PTC for one slot
+fn compute_ptc_for_slot_internal<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<Vec<ValidatorIndex>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
+    let seed = hashing::hash_256_64(seed, slot);
+
+    let indices = beacon_committees(state, slot)?.flatten().collect_vec();
+
+    misc::compute_balance_weighted_selection::<P>(
+        state,
+        &PackedIndices::U64(indices.into_iter().collect()),
+        seed,
+        P::PtcSize::USIZE,
+        false,
+    )
+}
+
+pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<RelativeSlot> {
+    match (state.slot() + 1).checked_sub(slot) {
+        None => bail!(Error::SlotAfterNext),
+        Some(0) => Ok(RelativeSlot::Next),
+        Some(1) => Ok(RelativeSlot::Current),
+        Some(2) => Ok(RelativeSlot::Previous),
+        Some(_) => bail!(Error::SlotBeforePrevious),
+    }
+}
+
+/// Map `RelativeSlot` to actual slot number
+fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: RelativeSlot) -> Slot {
+    let state_slot = state.slot();
+    match relative_slot {
+        RelativeSlot::Previous => state_slot.saturating_sub(1),
+        RelativeSlot::Current => state_slot,
+        RelativeSlot::Next => state_slot + 1,
+    }
+}
+
+/// Initialize PTC cache for a relative slot and return the cached value.
+/// Returns None for pre-Gloas states (PTC is not relevant for pre-Gloas).
+pub fn get_or_try_init_ptc<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    relative_slot: RelativeSlot,
+    report_cache_miss: bool,
+) -> Result<&Vec<ValidatorIndex>> {
+    state.cache().ptc_cache[relative_slot].get_or_try_init(|| {
+        if report_cache_miss {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = METRICS.get() {
+                metrics.ptc_cache_init_count.inc();
+            }
+        }
+
+        let slot = absolute_slot(state, relative_slot);
+
+        compute_ptc_for_slot_internal(state, slot)
+    })
+}
+
+/// Get PTC members for a slot with 3-slot caching (previous, current, next).
+///
+/// Caches PTC using `RelativeSlot`. Cache is shifted in `advance_slot()`: Previous <- Current <- Next.
+/// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
+pub fn get_ptc<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    slot: Slot,
+) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
+    let Ok(rel_slot) = relative_slot(state, slot) else {
+        return ptc_for_slot(state, slot);
+    };
+
+    get_or_try_init_ptc(state, rel_slot, true)?
+        .iter()
+        .copied()
+        .pipe(ContiguousVector::try_from_iter)
+        .map_err(Into::into)
+}
+
+pub fn get_indexed_payload_attestation<P: Preset>(
+    state: &impl PostGloasBeaconState<P>,
+    payload_attestation: &PayloadAttestation<P>,
+) -> Result<IndexedPayloadAttestation<P>> {
+    let ptc = get_ptc(state, payload_attestation.data.slot)?;
+    let mut attesting_indices =
+        ContiguousList::try_from_iter(ptc.into_iter().zip(0..).filter_map(|(index, i)| {
+            payload_attestation
+                .aggregation_bits
+                .get(i)
+                .and_then(|is_true| is_true.then_some(index))
+        }))?;
+
+    // Sorting a slice is faster than building a `BTreeMap`.
+    attesting_indices.sort_unstable();
+
+    Ok(IndexedPayloadAttestation {
+        attesting_indices,
+        data: payload_attestation.data,
+        signature: payload_attestation.signature,
+    })
+}
+
+pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<P>) -> u64 {
+    let active_balances = total_active_balance(state);
+
+    // > get_total_active_balance(state) // SLOTS_PER_EPOCH * BUILDER_PAYMENT_THRESHOLD_NUMERATOR
+    let quorum = active_balances
+        .saturating_div(P::SlotsPerEpoch::U64)
+        .saturating_mul(BUILDER_PAYMENT_THRESHOLD_NUMERATOR);
+
+    quorum.saturating_div(BUILDER_PAYMENT_THRESHOLD_DENOMINATOR)
 }
 
 #[cfg(test)]

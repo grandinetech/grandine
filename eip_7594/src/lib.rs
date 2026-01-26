@@ -317,13 +317,20 @@ pub fn construct_data_column_sidecars<P: Preset>(
     let signed_block_header = signed_block.to_header();
     let body = match signed_block {
         SignedBeaconBlock::Fulu(block) => &block.message.body,
+        SignedBeaconBlock::Gloas(_block) => {
+            return Err(Error::FuluDataColumnSidecarsForPostGloasBlock {
+                root: signed_block.message().hash_tree_root(),
+                slot: signed_block.message().slot(),
+            }
+            .into());
+        }
         SignedBeaconBlock::Phase0(_)
         | SignedBeaconBlock::Altair(_)
         | SignedBeaconBlock::Bellatrix(_)
         | SignedBeaconBlock::Capella(_)
         | SignedBeaconBlock::Deneb(_)
         | SignedBeaconBlock::Electra(_) => {
-            return Err(Error::BlobsForPreFuluBlock {
+            return Err(Error::DataColumnSidecarsForPreFuluBlock {
                 root: signed_block.message().hash_tree_root(),
                 slot: signed_block.message().slot(),
             }

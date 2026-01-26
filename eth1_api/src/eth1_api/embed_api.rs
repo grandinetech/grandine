@@ -491,7 +491,7 @@ impl Eth1Api {
                 })
                 .await?
             }
-            Phase::Deneb | Phase::Electra | Phase::Fulu => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
                     prometheus_metrics::start_timer_vec(
                         &metrics.eth1_api_request_times,
@@ -503,7 +503,8 @@ impl Eth1Api {
                     .map(|value| {
                         if let PayloadAttributes::Deneb(value)
                         | PayloadAttributes::Electra(value)
-                        | PayloadAttributes::Fulu(value) = value
+                        | PayloadAttributes::Fulu(value)
+                        | PayloadAttributes::Gloas(value) = value
                         {
                             Ok(value)
                         } else {
@@ -521,7 +522,7 @@ impl Eth1Api {
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 7);
+                const_assert_eq!(Phase::CARDINALITY, 8);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -533,10 +534,11 @@ impl Eth1Api {
             Phase::Deneb => payload_id.map(PayloadId::Deneb),
             Phase::Electra => payload_id.map(PayloadId::Electra),
             Phase::Fulu => payload_id.map(PayloadId::Fulu),
+            Phase::Gloas => payload_id.map(PayloadId::Gloas),
             _ => {
                 // This match arm will silently match any new phases.
                 // Cause a compilation error if a new phase is added.
-                const_assert_eq!(Phase::CARDINALITY, 7);
+                const_assert_eq!(Phase::CARDINALITY, 8);
 
                 bail!(Error::PhasePreBellatrix)
             }
@@ -639,7 +641,7 @@ impl Eth1Api {
 
                 Ok(WithClientVersions::none(value).map(Into::into))
             }
-            PayloadId::Fulu(payload_id) => {
+            PayloadId::Fulu(payload_id) | PayloadId::Gloas(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
                     prometheus_metrics::start_timer_vec(
                         &metrics.eth1_api_request_times,
