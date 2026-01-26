@@ -456,7 +456,7 @@ pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
 
 pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
     block_or_sidecar: BlockOrDataColumnSidecar<P>,
-    received_blobs: Vec<Blob<P>>,
+    received_blobs: impl ExactSizeIterator<Item = Blob<P>>,
     cells_proofs: Vec<KzgProof>,
     kzg_backend: KzgBackend,
     metrics: Option<Arc<Metrics>>,
@@ -467,7 +467,7 @@ pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
         .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
     let cells_and_kzg_proofs = try_convert_to_cells_and_kzg_proofs::<P>(
-        received_blobs.into_iter(),
+        received_blobs,
         &cells_proofs,
         kzg_backend,
         dedicated_executor,

@@ -1215,6 +1215,17 @@ pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<
         .map_err(Into::into)
 }
 
+pub fn get_active_builder_indices<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+) -> impl Iterator<Item = ValidatorIndex> + '_ {
+    (0..)
+        .zip(state.builders())
+        .filter(move |(_, builder)| {
+            predicates::is_active_builder(builder, state.finalized_checkpoint().epoch)
+        })
+        .map(|(index, _)| index)
+}
+
 #[cfg(test)]
 mod tests {
     use types::{

@@ -67,7 +67,7 @@ use types::{
         },
         containers::{
             DataColumnSidecar as GloasDataColumnSidecar, ProposerPreferences,
-            SignedExecutionPayloadBid,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
@@ -88,15 +88,17 @@ use crate::{
     blob_cache::BlobCache,
     data_column_cache::DataColumnCache,
     error::Error,
+    execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, AttestingBalances, BlobSidecarAction, BlobSidecarOrigin,
         BlockAction, BranchPoint, ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction,
         DataColumnSidecarOrigin, Difference, DifferenceAtLocation, Differences,
-        DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin, LatestMessage,
-        Location, PartialAttestationAction, PartialBlockAction, PayloadAction, PayloadPresence,
-        Score, SegmentId, Storage, UnfinalizedBlock, ValidAttestation,
+        DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
+        ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, LatestMessage, Location,
+        PartialAttestationAction, PartialBlockAction, PayloadAction, PayloadPresence, Score,
+        SegmentId, Storage, UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -263,12 +265,14 @@ pub struct Store<P: Preset, S: Storage<P>> {
         HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
     >,
     accepted_gloas_data_column_sidecars: HashMap<(H256, ColumnIndex), Slot>,
-    accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, Arc<SignedExecutionPayloadBid<P>>>>,
+    accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, SignedExecutionPayloadBid<P>>>,
+    accepted_execution_payload_envelopes: HashSet<(Slot, H256, BuilderIndex)>,
     proposer_preferences: HashMap<Slot, ProposerPreferences>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
     data_column_cache: DataColumnCache<P>,
+    execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache<P>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
@@ -372,6 +376,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             accepted_data_column_sidecars: HashMap::default(),
             accepted_gloas_data_column_sidecars: HashMap::default(),
             accepted_payload_bids: HashMap::default(),
+            accepted_execution_payload_envelopes: HashSet::default(),
             proposer_preferences: HashMap::default(),
             blob_cache: BlobCache::default(),
             state_cache: Arc::new(StateCacheProcessor::new(
@@ -379,6 +384,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             )),
             storage,
             data_column_cache: DataColumnCache::default(),
+            execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
@@ -452,7 +458,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn accepted_payload_bid_at_slot(
         &self,
         slot: Slot,
-    ) -> Option<&Arc<SignedExecutionPayloadBid<P>>> {
+    ) -> Option<&SignedExecutionPayloadBid<P>> {
         self.accepted_payload_bids
             .get(&slot)?
             .values()
@@ -464,8 +470,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         slot: Slot,
         builder_index: BuilderIndex,
-    ) -> Option<&Arc<SignedExecutionPayloadBid<P>>> {
+    ) -> Option<&SignedExecutionPayloadBid<P>> {
         self.accepted_payload_bids.get(&slot)?.get(&builder_index)
+    }
+
+    #[must_use]
+    pub fn cached_execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
+        self.execution_payload_envelope_cache.get(block_root)
     }
 
     #[must_use]
@@ -566,6 +580,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn contains_block(&self, block_root: H256) -> bool {
         self.contains_unfinalized_block(block_root)
             || self.finalized_indices.contains_key(&block_root)
+    }
+
+    // Pre-Gloas: once block imported into fork choice, data is also available,
+    // Post-Gloas: block can be imported without data availability check
+    // For Pre-Gloas block, checking `Self::contains_block` is enough,
+    // but for Post-Gloas, an additional data availability check is required
+    #[must_use]
+    pub fn contains_block_and_data_available(&self, block_root: H256) -> bool {
+        let is_block_imported = self.contains_block(block_root);
+        let is_pre_gloas = self
+            .block(block_root)
+            .map(|chain_link| chain_link.value.phase() < Phase::Gloas)
+            .unwrap_or(false);
+
+        is_block_imported
+            && (is_pre_gloas
+                || self
+                    .cached_execution_payload_envelope_by_root(block_root)
+                    .is_some())
     }
 
     #[must_use]
@@ -1625,7 +1658,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(action);
         }
 
+        // Start from Gloas, block can be imported without data availability check
         if self.should_check_data_availability_at_slot(block.message().slot())
+            && !state.is_post_gloas()
             && data_availability_policy.check()
         {
             let _span = debug_span!("validate_block_data_availability_check");
@@ -2974,7 +3009,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[instrument(level = "debug", skip_all)]
-    pub fn validate_gloas_data_column_sidecar_with_state(
+    pub fn validate_gloas_data_column_sidecar(
         &self,
         data_column_sidecar: GloasDataColumnSidecar<P>,
         block_seen: bool,
@@ -2991,9 +3026,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // i.e. already have all the data columns validated
         // The exception to this is data column sidecars from custody group column backfill,
         // where additional columns are being downloaded for blocks already in fork choice.
-        // TODO: (gloas): gloas block can be imported without sidecars, change this to
-        // `contains_block_and_sidecars` new function
-        if validate_block_presence && self.contains_block(block_root) {
+        if validate_block_presence && self.contains_block_and_data_available(block_root) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
@@ -3141,7 +3174,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 )
             }
             DataColumnSidecar::Gloas(data_column_sidecar) => self
-                .validate_gloas_data_column_sidecar_with_state(
+                .validate_gloas_data_column_sidecar(
                     data_column_sidecar,
                     block_seen,
                     origin,
@@ -3149,6 +3182,173 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     metrics,
                 ),
         }
+    }
+
+    #[instrument(level = "debug", skip_all)]
+    pub fn validate_execution_payload_envelope(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        state: Option<Arc<BeaconState<P>>>,
+        origin: &ExecutionPayloadEnvelopeOrigin,
+    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
+        let slot = envelope.message.slot;
+        let block_root = envelope.message.beacon_block_root;
+
+        self.validate_execution_payload_envelope_with_state(
+            envelope,
+            origin,
+            || {
+                self.chain_link(block_root)
+                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+            },
+            || {
+                state.or_else(|| {
+                    self.state_cache
+                        .existing_state_at_slot(self, block_root, slot)
+                })
+            },
+        )
+    }
+
+    pub fn validate_execution_payload_envelope_with_state(
+        &self,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        origin: &ExecutionPayloadEnvelopeOrigin,
+        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
+        let slot = envelope.message.slot;
+        let beacon_block_root = envelope.message.beacon_block_root;
+        let builder_index = envelope.message.builder_index;
+
+        // [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
+        // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
+        if !origin.is_from_back_sync() && slot < self.finalized_slot() {
+            return Ok(ExecutionPayloadEnvelopeAction::Ignore(false));
+        }
+
+        // [IGNORE] The node has not seen another valid SignedExecutionPayloadEnvelope
+        // for this block root from this builder (spec line 230-231)
+        if self.accepted_execution_payload_envelopes.contains(&(
+            slot,
+            beacon_block_root,
+            builder_index,
+        )) {
+            return Ok(ExecutionPayloadEnvelopeAction::Ignore(true));
+        }
+
+        // [REJECT] block passes validation.
+        // Part 1/2:
+        ensure!(
+            !self.rejected_block_roots.contains(&beacon_block_root),
+            Error::<P>::PayloadEnvelopeInvalidBlock {
+                payload_envelope: envelope
+            },
+        );
+
+        // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
+        // (a client MAY queue envelope for processing once the block is retrieved)
+        let Some((block, block_payload_status)) = block_info() else {
+            // Block not available yet, delay until it arrives
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
+                envelope,
+                beacon_block_root,
+            ));
+        };
+
+        // > Check if blob data is available
+        // > If not, this payload MAY be queued and subsequently considered when blob data becomes available
+        if self.should_check_data_availability_at_slot(slot)
+            && !self.indices_of_missing_data_columns(&block).is_empty()
+        {
+            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(
+                envelope,
+                block.clone_arc(),
+            ));
+        }
+
+        // [REJECT] block passes validation.
+        // Part 2/2:
+        ensure!(
+            !block_payload_status.is_invalid(),
+            Error::<P>::PayloadEnvelopeInvalidBlock {
+                payload_envelope: envelope
+            },
+        );
+
+        // [REJECT] block.slot equals envelope.slot
+        ensure!(
+            block.message().slot() == slot,
+            Error::<P>::ExecutionPayloadEnvelopeSlotMismatch {
+                expected: block.message().slot(),
+                actual: slot,
+            },
+        );
+
+        let Some(bid) = block
+            .message()
+            .body()
+            .with_payload_bid()
+            .map(|body| &body.signed_execution_payload_bid().message)
+        else {
+            return Err(Error::PayloadEnvelopeInvalidBlock {
+                payload_envelope: envelope,
+            }
+            .into());
+        };
+
+        // [REJECT] envelope.builder_index == bid.builder_index
+        ensure!(
+            builder_index == bid.builder_index,
+            Error::<P>::BuilderIndexMismatch {
+                expected: bid.builder_index,
+                actual: builder_index,
+            },
+        );
+
+        // [REJECT] payload.block_hash == bid.block_hash
+        ensure!(
+            envelope.message.payload.block_hash == bid.block_hash,
+            Error::<P>::ExecutionPayloadBlockHashMismatch {
+                envelope,
+                expected: Box::new(bid.block_hash),
+            },
+        );
+
+        if origin.verify_signatures() {
+            let Some(state) = state_fn() else {
+                return Ok(ExecutionPayloadEnvelopeAction::DelayUntilState(
+                    envelope,
+                    beacon_block_root,
+                    slot,
+                ));
+            };
+
+            let Some(post_gloas_state) = state.post_gloas() else {
+                return Err(Error::<P>::PayloadEnvelopeWithPreGloasState {
+                    envelope_slot: slot,
+                    state_slot: state.slot(),
+                }
+                .into());
+            };
+
+            // Verify signature with proposer key if proposer choose to self-build
+            let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
+                *accessors::public_key(&state, block.message().proposer_index())?
+            } else {
+                post_gloas_state.builders().get(builder_index)?.pubkey
+            };
+
+            // [REJECT] The builder signature envelope.signature is valid
+            SingleVerifier.verify_singular(
+                envelope.message.signing_root(&self.chain_config, &state),
+                envelope.signature,
+                self.pubkey_cache.get_or_insert(pubkey)?,
+                SignatureKind::ExecutionPayloadEnvelope,
+            )?;
+        }
+
+        Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
     }
 
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)
@@ -3512,6 +3712,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .pipe(Ok)
     }
 
+    // TODO: Implement apply_execution_payload_envelope
+    // This should:
+    // 1. Insert (slot, beacon_block_root, builder_index) into accepted_execution_payload_envelopes
+    // 2. Add envelope to execution_payload_envelope_cache
+    // 3. Update ChainLink from empty variant to full variant with execution payload
+    // 4. Integrate with execution engine for payload validation
+
     pub fn apply_blob_sidecar(&mut self, blob_sidecar: Arc<BlobSidecar<P>>) {
         let block_header = blob_sidecar.signed_block_header.message;
         let block_root = block_header.hash_tree_root();
@@ -3536,7 +3743,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .entry(payload_bid.message.slot)
             .or_default();
 
-        accepted_bids.insert(payload_bid.message.builder_index, payload_bid);
+        accepted_bids.insert(
+            payload_bid.message.builder_index,
+            Arc::unwrap_or_clone(payload_bid),
+        );
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
@@ -4012,6 +4222,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.finalized_attesting_balances.split_off(&finalized_slot);
         self.payload_states
             .retain(|block_root, _| self.unfinalized_locations.contains_key(block_root));
+        self.execution_payload_envelope_cache
+            .prune_finalized(finalized_slot);
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
@@ -4021,6 +4233,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // TODO: (gloas): prune after block imported, as it's no longer relevant
         self.accepted_payload_bids
             .retain(|slot, _| finalized_slot <= *slot);
+        self.accepted_execution_payload_envelopes
+            .retain(|(slot, _, _)| finalized_slot <= *slot);
         self.sidecars_construction_started
             .retain_sync(|_, slot| finalized_slot <= *slot);
         self.delayed_block_at_slot
@@ -4949,6 +5163,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.blob_cache.unpersisted_blob_sidecars()
     }
 
+    pub fn has_unpersisted_envelopes(&self) -> bool {
+        self.execution_payload_envelope_cache
+            .has_unpersisted_envelopes()
+    }
+
+    pub fn mark_persisted_envelopes(&mut self, persisted_block_roots: Vec<H256>) {
+        self.execution_payload_envelope_cache
+            .mark_persisted_envelopes(persisted_block_roots);
+    }
+
+    pub fn unpersisted_envelopes(
+        &self,
+    ) -> impl Iterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>> + '_ {
+        self.execution_payload_envelope_cache
+            .unpersisted_envelopes()
+            .map(|(_, envelope)| envelope)
+    }
+
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {
         self.tick
             .epoch::<P>()
@@ -5202,10 +5434,5 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .map(StdHashSet::len)
                 .sum(),
         );
-    }
-
-    pub fn insert_fake_payload_state(&mut self, block_root: H256) {
-        self.payload_states
-            .insert(block_root, self.anchor().state(self).clone_arc());
     }
 }
