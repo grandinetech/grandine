@@ -11,7 +11,7 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    ExecutionPayloadBidOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -31,7 +31,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
-    gloas::containers::SignedExecutionPayloadBid,
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -501,6 +501,52 @@ impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
     }
 }
 
+pub struct ExecutionPayloadEnvelopeTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
+    pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            execution_payload_envelope,
+            state,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_execution_payload_envelope_task_times
+                .start_timer()
+        });
+
+        let result = store_snapshot.validate_execution_payload_envelope(
+            execution_payload_envelope,
+            state,
+            &origin,
+        );
+
+        MutatorMessage::ExecutionPayloadEnvelope {
+            wait_group,
+            result,
+            origin,
+            submission_time,
+        }
+        .send(&mutator_tx);
+    }
+}
+
 pub struct ExecutionPayloadBidTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
@@ -625,6 +671,49 @@ impl<P: Preset, W> Run for PersistDataColumnSidecarsTask<P, W> {
             }
             Err(error) => {
                 warn_with_peers!("failed to persist data column sidecars to storage: {error:?}");
+            }
+        }
+    }
+}
+
+pub struct PersistExecutionPayloadEnvelopesTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub storage: Arc<Storage<P>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            storage,
+            mutator_tx,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .fc_execution_payload_envelope_persist_task_times
+                .start_timer()
+        });
+
+        let envelopes = store_snapshot.unpersisted_envelopes();
+
+        match storage.append_execution_payload_envelopes(envelopes) {
+            Ok(persisted_block_roots) => {
+                MutatorMessage::FinishedPersistingExecutionPayloadEnvelopes {
+                    wait_group,
+                    persisted_block_roots,
+                }
+                .send(&mutator_tx);
+            }
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to persist execution payload envelopes to storage: {error:?}"
+                );
             }
         }
     }
