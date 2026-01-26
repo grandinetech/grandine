@@ -194,6 +194,7 @@ pub enum MutatorRejectionReason {
     InvalidDataColumnSidecar {
         data_column_identifier: DataColumnIdentifier,
     },
+    InvalidPayloadBid,
 }
 
 #[derive(Clone, Copy, Debug)]

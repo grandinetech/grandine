@@ -2331,6 +2331,7 @@ pub async fn beacon_events<P: Preset>(
                 Event::PayloadAttributes(data) => ssevent.json_data(data),
                 Event::ProposerSlashing(data) => ssevent.json_data(data),
                 Event::VoluntaryExit(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
             }
             .map_err(Into::into)
         })
