@@ -23,7 +23,7 @@ use types::{
     fulu::containers::{
         BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
     },
-    gloas::containers::BeaconBlock as GloasBeaconBlock,
+    gloas::containers::{BeaconBlock as GloasBeaconBlock, ExecutionPayloadEnvelope},
     phase0::{
         containers::{
             AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
@@ -70,6 +70,7 @@ pub enum SigningMessage<'block, P: Preset> {
     AggregateAndProof(Box<AggregateAndProof<P>>),
     Attestation(AttestationData),
     BeaconBlock(SigningBlock<'block, P>),
+    ExecutionPayloadEnvelope(&'block ExecutionPayloadEnvelope<P>),
     RandaoReveal {
         #[serde(with = "serde_utils::string_or_native")]
         epoch: Epoch,
