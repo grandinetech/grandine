@@ -22,6 +22,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -814,6 +815,11 @@ where
         self.store_snapshot()
             .unfinalized_chain_link_by_execution_block_hash(block_hash)
             .cloned()
+    }
+
+    #[must_use]
+    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid> {
+        self.store_snapshot().accepted_payload_bid_at_slot(slot)
     }
 
     pub fn validate_blob_sidecar_with_state(

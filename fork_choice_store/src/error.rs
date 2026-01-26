@@ -7,7 +7,8 @@ use types::{
     bellatrix::containers::PowBlock,
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    phase0::primitives::{Slot, SubnetId, ValidatorIndex},
+    gloas::containers::SignedExecutionPayloadBid,
+    phase0::primitives::{Epoch, Gwei, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -143,12 +144,29 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
+    ExecutionPayloadBidBuilderInactive {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+        epoch: Epoch,
+    },
+    #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
+    ExecutionPayloadBidOffProtocolPaymentDisallowed {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
+    #[error("execution payload bid's signature for self-build is not empty")]
+    ExecutionPayloadBidSignatureNotEmpty,
+    #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
+    ExecutionPayloadBidValueNonZero { value: Gwei },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
     },
     #[error("block has invalid execution payload")]
     InvalidExecutionPayload,
+    #[error("execution payload bid has invalid signature: {payload_bid:?}")]
+    InvalidExecutionPayloadBidSignature {
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+    },
     #[error("aggregate has invalid selection proof: {aggregate_and_proof:?}")]
     InvalidSelectionProof {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,

@@ -10,6 +10,7 @@ use std::{
 
 use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
+use bls::traits::SignatureBytes as _;
 use clock::Tick;
 use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
@@ -53,7 +54,10 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
         primitives::ColumnIndex,
     },
-    gloas::containers::{DataColumnSidecar as GloasDataColumnSidecar, SignedExecutionPayloadBid},
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{DataColumnSidecar as GloasDataColumnSidecar, SignedExecutionPayloadBid},
+    },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
@@ -74,9 +78,10 @@ use crate::{
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint,
         ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
-        Difference, DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId, Storage,
-        UnfinalizedBlock, ValidAttestation,
+        Difference, DifferenceAtLocation, DissolvedDifference, ExecutionPayloadBidAction,
+        ExecutionPayloadBidOrigin, LatestMessage, Location, PartialAttestationAction,
+        PartialBlockAction, PayloadAction, Score, SegmentId, Storage, UnfinalizedBlock,
+        ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -84,6 +89,8 @@ use crate::{
     supersets::MultiPhaseAggregateAndProofSets as AggregateAndProofSupersets,
     validations::validate_merge_block,
 };
+
+const MIN_BID_INCREASE_PERCENTAGE: u64 = 3;
 
 /// [`Store`] from the Fork Choice specification.
 ///
@@ -391,6 +398,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         data_column_id: DataColumnIdentifier,
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         self.data_column_cache.get(data_column_id)
+    }
+
+    #[must_use]
+    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid> {
+        Some(
+            *self
+                .accepted_payload_bids
+                .get(&slot)?
+                .values()
+                .max_by_key(|bid| bid.message.value)?,
+        )
     }
 
     #[must_use]
@@ -1290,6 +1308,118 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         //
         // > Add new state for this block to the store
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
+    }
+
+    pub fn validate_execution_payload_bid(
+        &self,
+        payload_bid: Arc<SignedExecutionPayloadBid>,
+        origin: &ExecutionPayloadBidOrigin,
+    ) -> Result<ExecutionPayloadBidAction> {
+        let bid = payload_bid.message;
+        let builder_index = bid.builder_index;
+
+        // > off-protocol payment is disallowed to gossip via p2p and API, the `bid.execution_payment` MUST be zero
+        if origin.off_protocol_bid_disallowed() {
+            ensure!(
+                bid.execution_payment == 0,
+                Error::<P>::ExecutionPayloadBidOffProtocolPaymentDisallowed { payload_bid }
+            );
+        }
+
+        // > the `bid.slot` is the current slot or the next slot
+        if bid.slot < self.slot() || bid.slot > self.slot() + 1 {
+            return Ok(ExecutionPayloadBidAction::Ignore(false));
+        }
+
+        // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
+        if !self
+            .execution_payload_locations
+            .contains_key(&bid.parent_block_hash)
+        {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        }
+
+        // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
+        if !self.contains_block(bid.parent_block_root) {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        }
+
+        let Some(state) =
+            self.state_cache
+                .existing_state_at_slot(self, bid.parent_block_root, bid.slot)
+        else {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        };
+
+        if builder_index == BUILDER_INDEX_SELF_BUILD {
+            ensure!(
+                payload_bid.signature.is_empty(),
+                Error::<P>::ExecutionPayloadBidSignatureNotEmpty
+            );
+
+            ensure!(
+                bid.value == 0,
+                Error::<P>::ExecutionPayloadBidValueNonZero { value: bid.value }
+            );
+        } else {
+            let Some(post_gloas_state) = state.post_gloas() else {
+                return Ok(ExecutionPayloadBidAction::Ignore(true));
+            };
+            let builder = post_gloas_state.builders().get(builder_index)?;
+
+            // > the `bid.builder_index` is a valid/active builder index
+            let current_epoch = accessors::get_current_epoch(&state);
+            ensure!(
+                predicates::is_active_builder(builder, state.finalized_checkpoint().epoch),
+                Error::<P>::ExecutionPayloadBidBuilderInactive {
+                    payload_bid,
+                    epoch: current_epoch
+                }
+            );
+
+            // > the `bid.value` is less or equal than the builder's excess balance
+            if !predicates::can_builder_cover_bid(post_gloas_state, builder_index, bid.value)? {
+                return Ok(ExecutionPayloadBidAction::Ignore(false));
+            }
+
+            if origin.verify_signatures() {
+                let pubkey = self.pubkey_cache.get_or_insert(builder.pubkey)?;
+
+                // > `signed_execution_payload_bid.signature` is valid builder's signature
+                if let Err(error) =
+                    bid.verify(&self.chain_config, &state, payload_bid.signature, pubkey)
+                {
+                    bail!(
+                        error.context(Error::<P>::InvalidExecutionPayloadBidSignature {
+                            payload_bid
+                        })
+                    );
+                }
+            }
+        }
+
+        if let Some(payload_bids) = self.accepted_payload_bids.get(&bid.slot) {
+            // > this is the first signed bid seen from the given builder for this slot
+            if payload_bids.contains_key(&builder_index) {
+                return Ok(ExecutionPayloadBidAction::Ignore(true));
+            }
+
+            // > this bid is the highest value bid seen for the corresponding slot and the given parent block hash.
+            // Only accept and forward bid that is greater than the highest bid at least the minimum threshold (e.g. 3%)
+            if let Some(highest_bid) = payload_bids
+                .values()
+                .filter(|b| b.message.parent_block_hash == bid.parent_block_hash)
+                .max_by_key(|b| b.message.value)
+                && bid.value
+                    < highest_bid.message.value
+                        + (highest_bid.message.value * MIN_BID_INCREASE_PERCENTAGE)
+                            .saturating_div(100)
+            {
+                return Ok(ExecutionPayloadBidAction::Ignore(false));
+            }
+        }
+
+        Ok(ExecutionPayloadBidAction::Accept(payload_bid))
     }
 
     #[expect(clippy::too_many_lines)]
@@ -2844,6 +2974,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.blob_cache.insert(blob_sidecar);
     }
 
+    pub fn apply_execution_payload_bid(&mut self, payload_bid: SignedExecutionPayloadBid) {
+        let bid = payload_bid.message;
+        let accepted_bids = self.accepted_payload_bids.entry(bid.slot).or_default();
+
+        accepted_bids.insert(bid.builder_index, payload_bid);
+    }
+
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
         if let Some(data_sidecar) = data_sidecar.pre_gloas() {
             let block_header = data_sidecar.signed_block_header.message;
@@ -3276,6 +3413,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_gloas_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
+        // TODO: (gloas): prune after block imported, as it's no longer relevant
+        self.accepted_payload_bids
+            .retain(|slot, _| finalized_slot <= *slot);
         self.sidecars_construction_started
             .retain_sync(|_, slot| finalized_slot <= *slot);
         self.delayed_block_at_slot

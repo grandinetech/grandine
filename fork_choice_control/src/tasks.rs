@@ -11,7 +11,7 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -31,6 +31,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -494,6 +495,29 @@ impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
     #[instrument(skip_all, level = "debug", name = "RetryDataColumnSidecarTask::run")]
     fn run(self) {
         self.task.run()
+    }
+}
+
+pub struct ExecutionPayloadBidTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub payload_bid: Arc<SignedExecutionPayloadBid>,
+    pub origin: ExecutionPayloadBidOrigin,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadBidTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "ExecutionPayloadBidTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            payload_bid,
+            origin,
+        } = self;
+
+        let result = store_snapshot.validate_execution_payload_bid(payload_bid, &origin);
+
+        MutatorMessage::PayloadBid { result, origin }.send(&mutator_tx);
     }
 }
 

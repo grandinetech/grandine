@@ -26,9 +26,9 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
-        DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, PruneStateCacheTask,
-        RetryDataColumnSidecarTask, Run, StateAtSlotCacheFlushTask,
+        DataColumnSidecarTask, ExecutionPayloadBidTask, PersistBlobSidecarsTask,
+        PersistDataColumnSidecarsTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        PruneStateCacheTask, RetryDataColumnSidecarTask, Run, StateAtSlotCacheFlushTask,
     },
     wait::Wait,
 };
@@ -146,6 +146,8 @@ enum LowPriorityTask<P: Preset, W> {
     Attestation(AttestationTask<P, W>),
     BlockAttestations(BlockAttestationsTask<P, W>),
     AttesterSlashing(AttesterSlashingTask<P, W>),
+    // TODO: (gloas): figure out whether it should be low or mid priority
+    PayloadBid(ExecutionPayloadBidTask<P, W>),
     PersistBlobSidecarsTask(PersistBlobSidecarsTask<P, W>),
     PersistPubkeyCacheTask(PersistPubkeyCacheTask<P, W>),
     PruneStateCacheTask(PruneStateCacheTask<P, W>),
@@ -160,6 +162,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::Attestation(task) => task.run(),
             Self::BlockAttestations(task) => task.run(),
             Self::AttesterSlashing(task) => task.run(),
+            Self::PayloadBid(task) => task.run(),
             Self::PersistBlobSidecarsTask(task) => task.run(),
             Self::PersistPubkeyCacheTask(task) => task.run(),
             Self::PruneStateCacheTask(task) => task.run(),
@@ -228,6 +231,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for BlockAttestationsTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for AttesterSlashingTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for ExecutionPayloadBidTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
     }
