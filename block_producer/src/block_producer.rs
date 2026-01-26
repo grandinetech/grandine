@@ -1688,7 +1688,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // > [Modified in Capella] Removed `is_merge_transition_complete` check in Capella
         //
         // See <https://github.com/ethereum/consensus-specs/pull/3350>.
-        let parent_hash = if let Some(state) = state.post_capella() {
+        let parent_hash = if let Some(state) = state.post_gloas() {
+            state.latest_block_hash()
+        } else if let Some(state) = state.post_capella() {
             state.latest_execution_payload_header().block_hash()
         } else if let Some(state) = post_merge_state(state) {
             state.latest_execution_payload_header().block_hash()
