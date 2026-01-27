@@ -18,6 +18,7 @@ use builder_api::{
 };
 use clock::{Tick, TickKind};
 use debug_info::HealthCheck;
+use dedicated_executor::DedicatedExecutor;
 use derive_more::Display;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
@@ -97,6 +98,7 @@ use crate::{
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
+    tasks::{UpdateBeaconCommitteeSubscriptionsTask, update_beacon_committee_subscriptions},
     validator_config::ValidatorConfig,
 };
 
@@ -171,6 +173,8 @@ pub struct Validator<P: Preset, W: Wait> {
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
     last_cgc_update_epoch: Option<Epoch>,
+    dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
+    dedicated_executor_low_priority: Arc<DedicatedExecutor>,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -192,6 +196,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P, W>,
         _network_dir: Option<&Path>,
+        dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
+        dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     ) -> Self {
         let Channels {
             api_to_validator_rx,
@@ -247,6 +253,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             validator_to_liveness_tx,
             validator_to_slasher_tx,
             last_cgc_update_epoch: None,
+            dedicated_executor_normal_priority,
+            dedicated_executor_low_priority,
         }
     }
 
@@ -774,8 +782,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .await;
 
                 if misc::is_epoch_start::<P>(slot) {
-                    let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-                    self.spawn_slashing_protection_pruning(current_epoch);
+                    self.spawn_pruning(slot);
                 }
             }
             _ => {}
@@ -1237,14 +1244,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_ref()
             .map(|metrics| metrics.validator_attest_times.start_timer());
 
+        let dependent_root = self
+            .controller
+            .attestation_committee_dependent_root_for_slot(
+                &slot_head.beacon_state,
+                slot_head.slot(),
+            )?;
+
         let needs_to_update_subscriptions = self
             .own_beacon_committee_members
-            .needs_to_compute_members_at_slot(slot_head.slot())
+            .needs_to_compute_members_at_slot(dependent_root, slot_head.slot())
             .await;
 
         let Some(own_members) = self
             .own_beacon_committee_members
-            .get_or_init_at_slot(&slot_head.beacon_state, slot_head.slot())
+            .get_or_init_at_slot(&slot_head.beacon_state, dependent_root, slot_head.slot())
             .await
         else {
             return Ok(());
@@ -1268,7 +1282,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        info_with_peers!(
+        debug_with_peers!(
             "validators [{}] attesting in slot {}",
             own_singular_attestations
                 .iter()
@@ -2047,56 +2061,40 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn spawn_slashing_protection_pruning(&self, current_epoch: Epoch) {
+    fn spawn_pruning(&self, current_slot: Slot) {
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+        let own_members = self.own_beacon_committee_members.clone_arc();
         let slashing_protector = self.slashing_protector.clone_arc();
-        tokio::spawn(async move { slashing_protector.lock().await.prune::<P>(current_epoch) });
+
+        self.dedicated_executor_low_priority
+            .spawn(async move {
+                if let Err(error) = slashing_protector.lock().await.prune::<P>(current_epoch) {
+                    warn_with_peers!("error while pruning slashing protection history: {error:?}");
+                }
+
+                let up_to_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
+                own_members.prune(up_to_slot).await;
+            })
+            .detach()
     }
 
-    fn update_beacon_committee_subscriptions(
+    fn spawn_update_beacon_committee_subscriptions(
         &self,
         wait_group: W,
-        mut beacon_state: Arc<BeaconState<P>>,
+        beacon_state: Arc<BeaconState<P>>,
     ) {
-        let chain_config = self.chain_config.clone_arc();
-        let controller = self.controller.clone_arc();
-        let current_slot = beacon_state.slot();
-        let own_members = self.own_beacon_committee_members.clone_arc();
-        let subnet_service_tx = self.subnet_service_tx.clone();
+        let task = UpdateBeaconCommitteeSubscriptionsTask {
+            chain_config: self.chain_config.clone_arc(),
+            controller: self.controller.clone_arc(),
+            beacon_state,
+            own_beacon_committee_members: self.own_beacon_committee_members.clone_arc(),
+            subnet_service_tx: self.subnet_service_tx.clone(),
+            wait_group,
+        };
 
-        tokio::task::spawn(async move {
-            for slot in OwnBeaconCommitteeMembers::slots_to_compute_in_advance(current_slot) {
-                let phase_at_slot = chain_config.phase_at_slot::<P>(slot);
-
-                if chain_config.phase_at_slot::<P>(current_slot) != phase_at_slot {
-                    beacon_state = match controller
-                        .preprocessed_state_at_epoch(chain_config.fork_epoch(phase_at_slot))
-                        .await
-                    {
-                        Ok(with_status) => with_status.value,
-                        Err(error) => {
-                            warn_with_peers!(
-                                "failed to preprocess next fork beacon state for beacon committee subscriptions: {error:?}"
-                            );
-                            break;
-                        }
-                    }
-                }
-
-                if own_members.needs_to_compute_members_at_slot(slot).await
-                    && let Some(members) =
-                        own_members.get_or_init_at_slot(&beacon_state, slot).await
-                {
-                    update_beacon_committee_subscriptions(
-                        current_slot,
-                        &members,
-                        &subnet_service_tx,
-                    )
-                    .await;
-                }
-            }
-
-            drop(wait_group);
-        });
+        self.dedicated_executor_normal_priority
+            .spawn(task.run())
+            .detach()
     }
 
     fn update_sync_committee_subscriptions(&mut self, beacon_state: &BeaconState<P>) {
@@ -2146,7 +2144,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             },
         };
 
-        self.update_beacon_committee_subscriptions(wait_group.clone(), beacon_state.clone_arc());
+        self.spawn_update_beacon_committee_subscriptions(
+            wait_group.clone(),
+            beacon_state.clone_arc(),
+        );
+
         self.update_sync_committee_subscriptions(&beacon_state);
     }
 
@@ -2350,6 +2352,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .unwrap_or(0),
             );
 
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "own_beacon_committee_member_slots",
+                self.own_beacon_committee_members.len(),
+            );
+
             self.block_producer.track_collection_metrics().await;
         }
 
@@ -2401,25 +2410,4 @@ fn group_into_btreemap<K: Ord, V>(pairs: impl IntoIterator<Item = (K, V)>) -> BT
     }
 
     groups
-}
-
-async fn update_beacon_committee_subscriptions(
-    current_slot: Slot,
-    members: &[BeaconCommitteeMember],
-    subnet_service_tx: &UnboundedSender<ToSubnetService>,
-) {
-    if members.is_empty() {
-        return;
-    }
-
-    let subscriptions = members.iter().copied().map(Into::into).collect();
-
-    let (sender, receiver) = futures::channel::oneshot::channel();
-
-    ToSubnetService::UpdateBeaconCommitteeSubscriptions(current_slot, subscriptions, sender)
-        .send(subnet_service_tx);
-
-    if let Err(error) = receiver.await {
-        warn_with_peers!("failed to update beacon committee subscriptions: {error:?}");
-    }
 }

@@ -16,6 +16,7 @@ builder_api = { workspace = true }
 clock = { workspace = true }
 constant_time_eq = { workspace = true }
 debug_info = { workspace = true }
+dedicated_executor = { workspace = true }
 derivative = { workspace = true }
 derive_more = { workspace = true }
 directories = { workspace = true }
@@ -42,6 +43,7 @@ prometheus_metrics = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
+scc = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 signer = { workspace = true }

@@ -353,7 +353,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             );
                         }
                     } else {
-                        debug_with_peers!("EL doesn't has all blobs to response back");
+                        debug_with_peers!(
+                            "The EL blob response does not include all necessary blobs"
+                        );
                     }
                 }
                 Err(error) => warn_with_peers!("engine_getBlobsV2 call failed: {error}"),
