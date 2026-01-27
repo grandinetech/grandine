@@ -10,7 +10,7 @@ use fork_choice_store::{
     DataColumnSidecarAction, DataColumnSidecarOrigin, StateCacheProcessor, Store,
 };
 use futures::Future;
-use helper_functions::misc;
+use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use serde::Serialize;
@@ -25,7 +25,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnSidecar},
         primitives::ColumnIndex,
     },
-    nonstandard::{PayloadStatus, Phase, WithStatus},
+    nonstandard::{PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds},
@@ -761,6 +761,24 @@ where
     pub fn dependent_root(&self, state: &BeaconState<P>, epoch: Epoch) -> Result<H256> {
         self.storage()
             .dependent_root(self.store_snapshot().as_ref(), state, epoch)
+    }
+
+    #[instrument(skip_all, level = "debug", fields(slot = slot))]
+    pub fn attestation_committee_dependent_root_for_slot(
+        &self,
+        state: &BeaconState<P>,
+        slot: Slot,
+    ) -> Result<H256> {
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let state_epoch = misc::compute_epoch_at_slot::<P>(state.slot());
+
+        let dependent_root_epoch = match accessors::relative_epoch(state, epoch)? {
+            RelativeEpoch::Next => state_epoch,
+            RelativeEpoch::Current => misc::previous_epoch(state_epoch),
+            RelativeEpoch::Previous => misc::previous_epoch(misc::previous_epoch(state_epoch)),
+        };
+
+        self.dependent_root(state, dependent_root_epoch)
     }
 
     #[must_use]

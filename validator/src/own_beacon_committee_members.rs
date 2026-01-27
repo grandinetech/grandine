@@ -5,10 +5,12 @@ use bls::{PublicKeyBytes, SignatureBytes};
 use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork as _};
 use logging::warn_with_peers;
 use p2p::BeaconCommitteeSubscription;
+use scc::HashMap as SccHashMap;
 use signer::{Signer, SigningMessage, SigningTriple};
-use std_ext::ArcExt as _;
+use ssz::H256;
+use std_ext::ArcExt;
 use tap::{Conv as _, Pipe as _};
-use tokio::sync::Mutex;
+use tracing::instrument;
 use typenum::{True, U1, U8, Unsigned as _, assert_type, op};
 use types::{
     combined::BeaconState,
@@ -18,9 +20,6 @@ use types::{
 };
 
 type ComputeInAdvanceSlots = U8;
-
-#[expect(clippy::declare_interior_mutable_const)]
-const NONE_MUTEX: Mutex<Option<SlotBeaconCommitteeMembers>> = Mutex::const_new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BeaconCommitteeMember {
@@ -56,72 +55,72 @@ impl From<BeaconCommitteeMember> for BeaconCommitteeSubscription {
     }
 }
 
-#[derive(Debug)]
-struct SlotBeaconCommitteeMembers {
-    slot: Slot,
-    members: Arc<[BeaconCommitteeMember]>,
-}
-
 pub struct OwnBeaconCommitteeMembers {
     config: Arc<ChainConfig>,
     signer: Arc<Signer>,
-    slots: [Mutex<Option<SlotBeaconCommitteeMembers>>; ComputeInAdvanceSlots::USIZE],
+    members: SccHashMap<(H256, Slot), Arc<[BeaconCommitteeMember]>>,
 }
 
 impl OwnBeaconCommitteeMembers {
-    pub const fn new(config: Arc<ChainConfig>, signer: Arc<Signer>) -> Self {
+    pub fn new(config: Arc<ChainConfig>, signer: Arc<Signer>) -> Self {
         Self {
             config,
             signer,
-            slots: [NONE_MUTEX; ComputeInAdvanceSlots::USIZE],
+            members: SccHashMap::new(),
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.members.len()
+    }
+
+    #[instrument(skip_all, level = "debug", fields(slot = slot, dependent_root = ?dependent_root))]
     pub async fn get_or_init_at_slot<P: Preset>(
         &self,
         state: &BeaconState<P>,
+        dependent_root: H256,
         slot: Slot,
     ) -> Option<Arc<[BeaconCommitteeMember]>> {
-        let slot_index = slot_index_from_slot(slot);
-        let mut slot_members_opt = self.slots[slot_index].lock().await;
-
-        if let Some(slot_members) = slot_members_opt.as_ref()
-            && slot_members.slot == slot
-        {
-            return Some(slot_members.members.clone_arc());
+        if let Some(members) = self.members.get_async(&(dependent_root, slot)).await {
+            return Some(members.clone_arc());
         }
 
-        *slot_members_opt = match self.compute_members_at_slot(state, slot).await {
-            Ok(members) => members.map(|members| SlotBeaconCommitteeMembers { slot, members }),
+        match self.compute_members_at_slot(state, slot).await {
+            Ok(members) => {
+                if let Some(members) = members {
+                    self.members
+                        .upsert_async((dependent_root, slot), members.clone_arc())
+                        .await;
+
+                    Some(members)
+                } else {
+                    None
+                }
+            }
             Err(error) => {
                 warn_with_peers!(
                     "failed to compute own beacon committee members at slot {slot}: {error:?}"
                 );
                 None
             }
-        };
-
-        slot_members_opt
-            .as_ref()
-            .map(|slot_members| slot_members.members.clone_arc())
-    }
-
-    pub async fn needs_to_compute_members_at_slot(&self, slot: Slot) -> bool {
-        let slot_index = slot_index_from_slot(slot);
-
-        if let Some(slot_members) = self.slots[slot_index].lock().await.as_ref()
-            && slot_members.slot == slot
-        {
-            return false;
         }
-
-        true
     }
 
     pub fn slots_to_compute_in_advance(current_slot: Slot) -> impl Iterator<Item = Slot> {
         current_slot..current_slot + ComputeInAdvanceSlots::U64
     }
 
+    pub async fn needs_to_compute_members_at_slot(&self, dependent_root: H256, slot: Slot) -> bool {
+        !self.members.contains_async(&(dependent_root, slot)).await
+    }
+
+    pub async fn prune(&self, up_to_slot: Slot) {
+        self.members
+            .retain_async(|(_, slot), _| *slot >= up_to_slot)
+            .await
+    }
+
+    #[instrument(skip_all, level = "debug", fields(slot = slot))]
     async fn compute_members_at_slot<P: Preset>(
         &self,
         state: &BeaconState<P>,
@@ -235,12 +234,6 @@ assert_type!(op!(ComputeInAdvanceSlots < U1 << U32));
 #[cfg(target_pointer_width = "64")]
 assert_type!(op!(ComputeInAdvanceSlots < U1 << U64));
 
-fn slot_index_from_slot(slot: Slot) -> usize {
-    usize::try_from(slot % ComputeInAdvanceSlots::U64).expect(
-        "ComputeInAdvanceSlots should always fit in usize due to compile-time assertions above",
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use bls::traits::SecretKey as _;
@@ -287,17 +280,22 @@ mod tests {
         let (state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         let own_members = OwnBeaconCommitteeMembers::new(config, signer);
+        let dependent_root = H256::zero();
 
-        assert!(own_members.needs_to_compute_members_at_slot(1).await);
+        assert!(
+            own_members
+                .needs_to_compute_members_at_slot(dependent_root, 1)
+                .await
+        );
 
         let members_at_slot_1 = own_members
-            .get_or_init_at_slot(&state, 1)
+            .get_or_init_at_slot(&state, dependent_root, 1)
             .await
             .expect("there should be 2 own beacon committee members at slot 1");
 
         assert_eq!(
-            members_at_slot_1.as_ref(),
-            [
+            *members_at_slot_1,
+            vec![
                 BeaconCommitteeMember {
                     public_key: public_key_2,
                     validator_index: 41,
@@ -329,22 +327,34 @@ mod tests {
             ],
         );
 
-        assert!(!own_members.needs_to_compute_members_at_slot(1).await);
-
-        for slot in OwnBeaconCommitteeMembers::slots_to_compute_in_advance(2) {
-            assert!(own_members.needs_to_compute_members_at_slot(slot).await);
-        }
-
-        let members_at_slot_2 = own_members.get_or_init_at_slot(&state, 2).await;
-
-        assert_eq!(
-            members_at_slot_2
-                .expect("should return empty collection")
-                .as_ref(),
-            [],
+        assert!(
+            !own_members
+                .needs_to_compute_members_at_slot(dependent_root, 1)
+                .await
         );
 
-        assert!(!own_members.needs_to_compute_members_at_slot(2).await);
+        for slot in OwnBeaconCommitteeMembers::slots_to_compute_in_advance(2) {
+            assert!(
+                own_members
+                    .needs_to_compute_members_at_slot(dependent_root, slot)
+                    .await
+            );
+        }
+
+        let members_at_slot_2 = own_members
+            .get_or_init_at_slot(&state, dependent_root, 2)
+            .await;
+
+        assert_eq!(
+            *members_at_slot_2.expect("should return empty collection"),
+            vec![],
+        );
+
+        assert!(
+            !own_members
+                .needs_to_compute_members_at_slot(dependent_root, 2)
+                .await
+        );
 
         Ok(())
     }

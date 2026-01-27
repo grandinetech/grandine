@@ -643,6 +643,8 @@ pub async fn run_after_genesis<P: Preset>(
         validator_statistics.clone(),
         validator_channels,
         network_config.network_dir.as_deref(),
+        dedicated_executor_normal_priority.clone_arc(),
+        dedicated_executor_low_priority.clone_arc(),
     );
 
     let p2p_channels = Channels {

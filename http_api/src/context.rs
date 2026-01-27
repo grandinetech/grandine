@@ -289,7 +289,7 @@ impl<P: Preset> Context<P> {
             keymanager.proposer_configs().clone_arc(),
             None,
             controller.clone_arc(),
-            dedicated_executor,
+            dedicated_executor.clone_arc(),
             execution_engine,
             attestation_agg_pool.clone_arc(),
             bls_to_execution_change_pool.clone_arc(),
@@ -331,6 +331,8 @@ impl<P: Preset> Context<P> {
             None,
             validator_channels,
             network_config.network_dir.as_deref(),
+            dedicated_executor.clone_arc(),
+            dedicated_executor,
         );
 
         let subnet_service = SubnetService::new(
