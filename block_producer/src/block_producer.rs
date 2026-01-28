@@ -9,7 +9,7 @@ use bls::{AggregateSignature, PublicKeyBytes, SignatureBytes, traits::Signature 
 use builder_api::{BuilderApi, combined::SignedBuilderBid};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
-use eth1_api::{ApiController, Eth1ExecutionEngine, WithClientVersions};
+use eth1_api::{ApiController, ClientVersions, Eth1ExecutionEngine, WithClientVersions};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
     PayloadAttributesV3, PayloadId,
@@ -673,6 +673,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         wait_for_result(produce_beacon_block_join_handle).await
     }
 
+    fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+        self.producer_context.execution_engine.client_versions()
+    }
+
     pub async fn build_blinded_beacon_block(
         &self,
         randao_reveal: SignatureBytes,
@@ -700,9 +704,18 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 .await
         });
 
+        let client_versions = self
+            .client_versions()
+            .next()
+            .map(|version| version.clone_arc());
+
         let produce_blinded_block_join_handle = self.spawn_job(|build_context| async move {
             build_context
-                .produce_blinded_block(block_without_state_root, execution_payload_header_handle)
+                .produce_blinded_block(
+                    block_without_state_root,
+                    execution_payload_header_handle,
+                    client_versions,
+                )
                 .await
         });
 
@@ -1202,6 +1215,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         mut block_without_state_root: BeaconBlock<P>,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
+        client_versions: Option<Arc<ClientVersions>>,
     ) -> Result<Option<(BlindedBeaconBlock<P>, Option<BlockRewards>, Uint256)>> {
         let Some(header_handle) = execution_payload_header_handle else {
             return Ok(None);
@@ -1214,7 +1228,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let builder_mev = response.mev();
 
                 if !self.options.disable_blockprint_graffiti {
-                    let graffiti = build_graffiti(self.options.graffiti, None);
+                    let graffiti = build_graffiti(self.options.graffiti, client_versions);
+
                     block_without_state_root.set_graffiti(graffiti);
                 }
 

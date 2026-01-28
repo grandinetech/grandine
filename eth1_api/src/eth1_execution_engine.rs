@@ -19,7 +19,7 @@ use types::{
 };
 use web3::types::U64;
 
-use crate::{WithClientVersions, eth1_api::Eth1Api};
+use crate::{ClientVersions, WithClientVersions, eth1_api::Eth1Api};
 
 #[derive(Constructor)]
 pub struct Eth1ExecutionEngine<P: Preset> {
@@ -135,6 +135,10 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
 }
 
 impl<P: Preset> Eth1ExecutionEngine<P> {
+    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+        self.eth1_api.client_versions()
+    }
+
     pub async fn get_execution_payload(
         &self,
         payload_id: PayloadId,

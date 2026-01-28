@@ -35,7 +35,7 @@ use types::{
 use web3::types::{BlockId, BlockNumber, Filter, FilterBuilder, Log, U64};
 
 use crate::{
-    Eth1ApiToMetrics, WithClientVersions,
+    ClientVersions, Eth1ApiToMetrics, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
     endpoints::Endpoint,
@@ -158,6 +158,11 @@ impl Eth1Api {
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
         Self { config, metrics }
+    }
+
+    // TODO: Add support for ClientVersions in Nethermind plugin
+    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+        core::iter::empty()
     }
 
     async fn exec<T: Send + Sync + 'static>(

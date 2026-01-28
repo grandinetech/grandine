@@ -41,7 +41,7 @@ use crate::{
     Eth1ApiToMetrics, Eth1ConnectionData, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
-    endpoints::{Endpoint, Endpoints},
+    endpoints::{ClientVersions, Endpoint, Endpoints},
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
@@ -85,6 +85,10 @@ impl Eth1Api {
             eth1_api_to_metrics_tx,
             metrics,
         }
+    }
+
+    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+        self.endpoints.client_versions()
     }
 
     pub async fn current_head_number(&self) -> Result<ExecutionBlockNumber> {
