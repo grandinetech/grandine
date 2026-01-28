@@ -133,21 +133,20 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalContributionTask<P, W> {
     type Output = ValidationOutcome;
 
     async fn run(self) -> Result<Self::Output> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .sync_pool_handle_external_contribution_times
+                .start_timer()
+        });
+
         let result = self.handle_external_contribution().await;
 
         let Self {
             signed_contribution_and_proof,
             origin,
-            metrics,
             ref pool_to_p2p_tx,
             ..
         } = self;
-
-        let _timer = metrics.as_ref().map(|metrics| {
-            metrics
-                .sync_pool_handle_external_contribution_times
-                .start_timer()
-        });
 
         if let Origin::Gossip(gossip_id) = origin {
             let message = match &result {
