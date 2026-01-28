@@ -211,6 +211,10 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             validator_statistics,
         } = self;
 
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.att_pool_insert_attestation_task_times.start_timer());
+
         if let CombinedAttestation::Single(single_attestation) = attestation.as_ref() {
             attester_index = Some(single_attestation.attester_index);
         }
@@ -257,10 +261,6 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
                 return Ok(());
             }
         }
-
-        let _timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.att_pool_insert_attestation_task_times.start_timer());
 
         let singular_attestations = pool.singular_attestations(data).await;
         let aggregates = pool.aggregates(data).await;
