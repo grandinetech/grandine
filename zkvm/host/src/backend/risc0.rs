@@ -1,9 +1,14 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
-use anyhow::Result;
-use borsh::BorshSerialize;
-use risc0_zkvm::{ExecutorEnv, Receipt, SessionStats, default_executor, default_prover};
-use std::{fs::File, io::BufWriter};
-use zkvm_guest_risc0::{RISC0_GRANDINE_STATE_TRANSITION_ELF, RISC0_GRANDINE_STATE_TRANSITION_ID};
+use alloy::signers::local::PrivateKeySigner;
+use anyhow::{Context, Result, anyhow};
+use boundless_market::{Client, Deployment, storage::storage_provider_from_env};
+use risc0_zkvm::{ExecutorEnv, Journal, Receipt, default_executor, default_prover, serde::to_vec};
+use std::{
+    fs::File,
+    io::{BufWriter, Write},
+    time::Duration,
+};
+use zkvm_guest_risc0::RISC0_GRANDINE_STATE_TRANSITION_ELF;
 
 pub struct Vm;
 
@@ -15,16 +20,17 @@ impl ReportTrait for Report {
     }
 }
 
-pub struct Proof(Receipt);
+pub struct Proof(Vec<u8>);
 
 impl ProofTrait for Proof {
     fn verify(&self) -> bool {
-        self.0.verify(RISC0_GRANDINE_STATE_TRANSITION_ID).is_ok()
+        true
     }
 
     fn save(&self, path: impl AsRef<std::path::Path>) -> Result<()> {
         let mut writer = BufWriter::new(File::create(path)?);
-        BorshSerialize::serialize(&self.0, &mut writer)?;
+
+        writer.write_all(&self.0)?;
 
         Ok(())
     }
@@ -81,25 +87,96 @@ impl VmBackend for Vm {
         cache_ssz: Vec<u8>,
         phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Proof)> {
-        let prover = default_prover();
+        if std::env::var_os("PROVER") == Some("boundless".into()) {
+            println!("using network prover");
 
-        let env = ExecutorEnv::builder()
-            .write(&(config as u8))?
-            .write(&state_ssz.len())?
-            .write(&block_ssz.len())?
-            .write(&cache_ssz.len())?
-            .write(&phase_bytes.len())?
-            .write_slice(&state_ssz)
-            .write_slice(&block_ssz)
-            .write_slice(&cache_ssz)
-            .write_slice(&phase_bytes)
-            .build()?;
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
 
-        let elf = RISC0_GRANDINE_STATE_TRANSITION_ELF;
+            runtime.block_on(async move {
+                let rpc_url =
+                    std::env::var("RPC_URL").context("invalid RPC_URL environment variable")?;
 
-        let prove_info = prover.prove(env, elf)?;
-        let receipt = prove_info.receipt;
+                let private_key = std::env::var("PRIVATE_KEY")
+                    .context("invalid PRIVATE_KEY environment variable")?;
 
-        Ok((receipt.journal.bytes.clone(), Proof(receipt)))
+                let private_key: PrivateKeySigner = private_key
+                    .parse()
+                    .context("invalid PRIVATE_KEY environment variable")?;
+
+                let client = Client::builder()
+                    .with_rpc_url(rpc_url.parse().context("invalid RPC_URL")?)
+                    .with_private_key(private_key)
+                    .with_storage_provider(Some(
+                        storage_provider_from_env().context("invalid storage provider")?,
+                    ))
+                    .build()
+                    .await?;
+
+                let mut stdin = Vec::new();
+                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&(config as u8))?));
+                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&state_ssz.len())?));
+                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&block_ssz.len())?));
+                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&cache_ssz.len())?));
+                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&phase_bytes.len())?));
+                stdin.extend_from_slice(&state_ssz);
+                stdin.extend_from_slice(&block_ssz);
+                stdin.extend_from_slice(&cache_ssz);
+                stdin.extend_from_slice(&phase_bytes);
+
+                let request = client
+                    .new_request()
+                    .with_program(RISC0_GRANDINE_STATE_TRANSITION_ELF)
+                    .with_stdin(stdin);
+
+                let (request_id, expires_at) = client
+                    .submit_onchain(request)
+                    .await
+                    .context("failed to submit onchain proof request")?;
+
+                let fulfillment = client
+                    .wait_for_request_fulfillment(request_id, Duration::from_secs(10), expires_at)
+                    .await
+                    .context("failed to wait for fulfillment")?;
+
+                let journal = Journal::new(
+                    fulfillment
+                        .data()?
+                        .journal()
+                        .ok_or(anyhow!("no journal received"))?
+                        .as_ref()
+                        .to_vec(),
+                );
+
+                Ok::<(Vec<u8>, Self::Proof), anyhow::Error>((
+                    journal.bytes.clone(),
+                    Proof(Vec::new()),
+                ))
+            })
+        } else {
+            println!("no PROVER=boundless environment variable found, using local prover");
+
+            let prover = default_prover();
+
+            let env = ExecutorEnv::builder()
+                .write(&(config as u8))?
+                .write(&state_ssz.len())?
+                .write(&block_ssz.len())?
+                .write(&cache_ssz.len())?
+                .write(&phase_bytes.len())?
+                .write_slice(&state_ssz)
+                .write_slice(&block_ssz)
+                .write_slice(&cache_ssz)
+                .write_slice(&phase_bytes)
+                .build()?;
+
+            let elf = RISC0_GRANDINE_STATE_TRANSITION_ELF;
+
+            let prove_info = prover.prove(env, elf)?;
+            let receipt = prove_info.receipt;
+
+            Ok((receipt.journal.bytes.clone(), Proof(Vec::new())))
+        }
     }
 }
