@@ -78,6 +78,10 @@ impl Endpoints {
         self.endpoints.iter().all(|endpoint| !endpoint.is_online())
     }
 
+    pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
+        self.endpoints.iter().map(Endpoint::get_client_versions)
+    }
+
     pub fn endpoints_for_request(
         &self,
         capability: Option<&str>,
