@@ -8,10 +8,12 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
+alloy = { workspace = true, optional = true }
 anyhow = { workspace = true }
 bls = { workspace = true, features = ['zkcrypto'] }
 bls-zkcrypto = { workspace = true, optional = true }
-borsh = { workspace = true, optional = true }
+boundless-market = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
 clap = { workspace = true, features = ['derive'] }
 database = { workspace = true }
 enum-iterator = { workspace = true }
@@ -29,6 +31,7 @@ types = { workspace = true }
 xz2 = { workspace = true }
 zkvm_guest_risc0 = { workspace = true, optional = true }
 zkm-sdk = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 # For pico zkvm
 pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.2.2" , optional = true }
@@ -40,8 +43,11 @@ zkm-build = { workspace = true, optional = true }
 
 [features]
 risc0 = [
-    "dep:borsh",
+    "dep:alloy",
+    "dep:boundless-market",
+    "dep:bytemuck",
     "dep:risc0-zkvm",
+    "dep:tokio",
     "dep:tracing-subscriber",
     "dep:zkvm_guest_risc0",
     "bls-zkcrypto/zkvm-risc0",

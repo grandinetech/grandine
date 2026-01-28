@@ -18,16 +18,16 @@
 2. **Prove using local prover:**
 
    ```sh
-   RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test <test_case> prove
+   RISC0_DEV_MODE=0 cargo run -p zkvm_host --features risc0 --release -- --test <test_case> prove
    ```
 
    Replace `<test_case>` with one of the four test cases mentioned above.
 
 3. **Prove using network prover:**
    ```sh
-   RISC0_DEV_MODE=0 BONSAI_API_URL=https://api.bonsai.xyz/ BONSAI_TIMEOUT_MS=30000000 BONSAI_API_KEY=<api_key> cargo run -p zkvm_host --features risc0 --release -- --test <test_case> prove
+   RISC0_DEV_MODE=0 PROVER=boundless RPC_URL=<rpc_url> PRIVATE_KEY=<private_key> PINATA_JWT=<pinata_jwt> cargo run -p zkvm_host --features risc0 --release -- --test <test_case> prove
    ```
-   As with execution, you can prefix command with `RUST_LOG=info` and/or `RISC0_INFO=1` to include enhanced usage stats. Replace `<test_case>` with needed test case, and `<api_key>` with your api key.
+   As with execution, you can prefix command with `RUST_LOG=info` and/or `RISC0_INFO=1` to include enhanced usage stats. Replace `<test_case>` with needed test case, and `<private_key>`/`<pinata_jwt>`/`<rpc_url>` with needed params as described [in the boundless documentation](https://docs.boundless.network/developers/tutorials/request).
 
 ## sp1 implementation
 
