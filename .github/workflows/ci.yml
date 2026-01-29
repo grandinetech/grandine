@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 env:
   TEST_CASES: |
-    consensus spec tests mainnet electra empty block transition
+    consensus spec tests mainnet fulu empty block transition
     pectra-devnet-6 without epoch transition
 
 jobs:
