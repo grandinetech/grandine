@@ -31,11 +31,11 @@ pub enum Error {
     )]
     DataColumnSidecarsForPreFuluBlock { root: H256, slot: Slot },
     #[error(
-        "attempted to construct fulu data column sidecars for post-Gloas block: slot: {slot}, root: {root:?}"
+        "attempted to construct Fulu data column sidecars for post-Gloas block: slot: {slot}, root: {root:?}"
     )]
     FuluDataColumnSidecarsForPostGloasBlock { root: H256, slot: Slot },
     #[error(
-        "attempted to construct gloas data column sidecars for pre-Gloas block: slot: {slot}, root: {root:?}"
+        "attempted to construct Gloas data column sidecars for pre-Gloas block: slot: {slot}, root: {root:?}"
     )]
     GloasDataColumnSidecarsForPreGloasBlock { root: H256, slot: Slot },
 }
