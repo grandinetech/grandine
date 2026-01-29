@@ -128,25 +128,25 @@ fn main() -> Result<()> {
         Test {
             name: "mainnet without epoch transition",
 
-            block: "../data/mainnet/beacon_block_slot_11893759_root_0x3a74cd235bf22d0d637b41b320f9162c6a7c81639b3fff28d1bceb1627fe82fb.ssz",
-            block_url: "https://assets.grandine.io/beacon_block_slot_11893759_root_0x3a74cd235bf22d0d637b41b320f91.xz",
-            state: "../data/mainnet/beacon_state_slot_11893758_root_0x6ae5cfd675459d878fc43a4205967660abc21e8e399195da5013af6b0547420b.ssz",
-            state_url: "https://assets.grandine.io/beacon_state_slot_11893758_root_0x6ae5cfd675459d878fc43a4205967.xz",
+            block: "../data/mainnet/beacon_block_slot_13571043_root_0x32f7feba53ee7769a4648140ee32a856f3c89884e7763a89d6750faeb72cf58f.ssz",
+            block_url: "https://assets.grandine.io/beacon_block_slot_13571043_root_0x32f7feba53ee7769a4648140ee32a.xz",
+            state: "../data/mainnet/beacon_state_slot_13571042_root_0x86b2bfe87c92cddd65b32049dcfd06e9da00025573ab6cb5bf2a632ae3c260f3.ssz",
+            state_url: "https://assets.grandine.io/beacon_state_slot_13571042_root_0x86b2bfe87c92cddd65b32049dcfd0.xz",
 
             container_params: ContainerParams::default(),
 
             config: ConfigKind::Mainnet,
         },
         Test {
-            name: "consensus spec tests mainnet electra empty block transition",
+            name: "consensus spec tests mainnet fulu empty block transition",
 
-            block: "../data/consensus-spec-tests/tests/mainnet/electra/sanity/blocks/pyspec_tests/empty_block_transition/blocks_0.ssz_snappy",
-            block_url: "https://raw.githubusercontent.com/ethereum/consensus-spec-tests/refs/tags/v1.6.0-alpha.3/tests/mainnet/electra/sanity/blocks/pyspec_tests/empty_block_transition/blocks_0.ssz_snappy",
-            state: "../data/consensus-spec-tests/tests/mainnet/electra/sanity/blocks/pyspec_tests/empty_block_transition/pre.ssz_snappy",
-            state_url: "https://raw.githubusercontent.com/ethereum/consensus-spec-tests/refs/tags/v1.6.0-alpha.3/tests/mainnet/electra/sanity/blocks/pyspec_tests/empty_block_transition/pre.ssz_snappy",
+            block: "../data/empty_block_transition/beacon_block_mainnet_fulu_sanity_blocks_pyspec_tests_empty_block_transition.ssz_snappy",
+            block_url: "https://assets.grandine.io/beacon_block_mainnet_fulu_sanity_blocks_pyspec_tests_empty_block.ssz_snappy",
+            state: "../data/empty_block_transition/beacon_state_mainnet_fulu_sanity_blocks_pyspec_tests_empty_block_transition.ssz_snappy",
+            state_url: "https://assets.grandine.io/beacon_state_mainnet_fulu_sanity_blocks_pyspec_tests_empty_block.ssz_snappy",
 
             container_params: ContainerParams {
-                phase: Some(Phase::Electra),
+                phase: Some(Phase::Fulu),
                 decompress_snappy: true,
             },
 
