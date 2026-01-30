@@ -25,12 +25,12 @@ use ssz::SszHash as _;
 use tracing::{Span, instrument};
 use types::{
     combined::{
-        AttesterSlashing, BeaconState as CombinedBeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        AttesterSlashing, BeaconState as CombinedBeaconState, DataColumnSidecar,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::containers::{DataColumnIdentifier, DataColumnSidecar},
+    fulu::containers::DataColumnIdentifier,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -439,11 +439,6 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             metrics,
         } = self;
 
-        let block_root = data_column_sidecar
-            .signed_block_header
-            .message
-            .hash_tree_root();
-
         let _data_column_sidecar_verification_timer = metrics
             .as_ref()
             .map(|metrics| metrics.data_column_sidecar_verification_times.start_timer());
@@ -452,8 +447,10 @@ impl<P: Preset, W> Run for DataColumnSidecarTask<P, W> {
             .as_ref()
             .map(|metrics| metrics.fc_data_column_sidecar_task_times.start_timer());
 
-        let index = data_column_sidecar.index;
-        let data_column_identifier = DataColumnIdentifier { block_root, index };
+        let data_column_identifier = DataColumnIdentifier {
+            block_root: data_column_sidecar.beacon_block_root(),
+            index: data_column_sidecar.index(),
+        };
 
         let result = store_snapshot.validate_data_column_sidecar(
             data_column_sidecar,

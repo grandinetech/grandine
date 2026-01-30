@@ -51,11 +51,14 @@ use tokio_stream::wrappers::IntervalStream;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     capella::containers::SignedBlsToExecutionChange,
-    combined::{Attestation, AttesterSlashing, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
     nonstandard::{CustodyMode, Phase, RelativeEpoch, WithStatus},
@@ -764,7 +767,7 @@ impl<P: Preset> Network<P> {
     fn publish_data_column_sidecar(&self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
         let subnet_id = misc::compute_subnet_for_data_column_sidecar(
             self.controller.chain_config(),
-            data_column_sidecar.index,
+            data_column_sidecar.index(),
         );
 
         let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();

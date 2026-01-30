@@ -53,12 +53,9 @@ use std_ext::ArcExt as _;
 use tracing::{Span, instrument};
 use typenum::Unsigned as _;
 use types::{
-    combined::{BeaconState, ExecutionPayloadParams, SignedBeaconBlock},
+    combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -441,9 +438,11 @@ where
         if tick.is_end_of_interval() {
             let head = self.store.head();
 
+            // TODO: (gloas): get `execution_payload` from post-gloas payload envelope
             if head.is_optimistic()
                 && let Some(execution_payload) = head.block.as_ref().clone().execution_payload()
             {
+                // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
                 let params =
                     if let Some(body) = head.block.message().body().with_blob_kzg_commitments() {
                         let versioned_hashes = body
@@ -453,6 +452,7 @@ where
                             .map(misc::kzg_commitment_to_versioned_hash)
                             .collect();
 
+                        // TODO: (gloas): get `execution_requests` from post-gloas payload envelope
                         if let Some(body) = body.with_execution_requests() {
                             Some(ExecutionPayloadParams::Electra {
                                 versioned_hashes,
@@ -1603,18 +1603,15 @@ where
                     ));
                 }
 
-                if self.store.accepted_data_column_sidecar(
-                    data_column_sidecar.signed_block_header.message,
-                    data_column_sidecar.index,
-                ) {
+                if self
+                    .store
+                    .accepted_data_column_sidecar(&data_column_sidecar)
+                {
                     let (_, sender) = origin.split();
 
                     reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
                 } else {
-                    let block_root = data_column_sidecar
-                        .signed_block_header
-                        .message
-                        .hash_tree_root();
+                    let block_root = data_column_sidecar.beacon_block_root();
 
                     if self.store.is_forward_synced()
                         && !matches!(
@@ -1673,7 +1670,7 @@ where
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
             Ok(DataColumnSidecarAction::DelayUntilState(data_column_sidecar, block_root)) => {
-                let slot = data_column_sidecar.signed_block_header.message.slot;
+                let slot = data_column_sidecar.slot();
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
@@ -1722,7 +1719,12 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilParent(data_column_sidecar)) => {
-                let parent_root = data_column_sidecar.signed_block_header.message.parent_root;
+                let Some(parent_root) = data_column_sidecar
+                    .pre_gloas()
+                    .map(|sidecar| sidecar.signed_block_header.message.parent_root)
+                else {
+                    return;
+                };
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
@@ -1731,6 +1733,7 @@ where
                     submission_time,
                 };
 
+                // TODO: (gloas): gloas block can be imported without sidecars
                 if self.store.contains_block(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
@@ -1753,7 +1756,7 @@ where
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar)) => {
-                let slot = data_column_sidecar.signed_block_header.message.slot;
+                let slot = data_column_sidecar.slot();
 
                 let pending_data_column_sidecar = PendingDataColumnSidecar {
                     data_column_sidecar,
@@ -1895,14 +1898,14 @@ where
         }
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
-        data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index));
+        data_column_sidecars.sort_by_key(|sidecar| (sidecar.slot(), sidecar.index()));
 
         debug_with_peers!(
             "storing data column sidecars from reconstruction (block: {block_root:?}, columns: {missing_indices:?})",
         );
 
         for data_column_sidecar in data_column_sidecars {
-            if missing_indices.contains(&data_column_sidecar.index) {
+            if missing_indices.contains(&data_column_sidecar.index()) {
                 self.accept_data_column_sidecar(
                     wait_group,
                     &data_column_sidecar,
@@ -2488,15 +2491,16 @@ where
         data_column_sidecar: &Arc<DataColumnSidecar<P>>,
         origin: DataColumnSidecarOrigin,
     ) -> DataColumnSidecarOrigin {
-        let block_header = data_column_sidecar.signed_block_header.message;
-        let block_root = block_header.hash_tree_root();
+        let block_root = data_column_sidecar.beacon_block_root();
 
         self.store_mut()
             .apply_data_column_sidecar(data_column_sidecar.clone_arc());
 
         self.update_store_snapshot();
 
-        let accepted_data_columns = self.store.accepted_data_column_sidecars_count(block_header);
+        let accepted_data_columns = self
+            .store
+            .accepted_data_column_sidecars_count(data_column_sidecar);
         let reconstruction_or_early_import_available = self
             .store
             .is_reconstruction_or_early_import_available_for(&block_root, accepted_data_columns);
@@ -2510,8 +2514,8 @@ where
             reconstruction or early import available: {reconstruction_or_early_import_available}, \
             should_retry_block: {should_retry_block}, \
             reconstruction started: {}, origin: {origin:?}",
-            data_column_sidecar.index,
-            block_header.slot,
+            data_column_sidecar.index(),
+            data_column_sidecar.slot(),
             self.store.sampling_columns_count(),
             self.store.is_sidecars_construction_started(&block_root),
         );
@@ -2885,11 +2889,7 @@ where
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
         block_root: H256,
     ) {
-        let slot = pending_data_column_sidecar
-            .data_column_sidecar
-            .signed_block_header
-            .message
-            .slot;
+        let slot = pending_data_column_sidecar.data_column_sidecar.slot();
 
         self.delayed_until_state
             .entry((block_root, slot))
@@ -2902,14 +2902,15 @@ where
         &mut self,
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
     ) {
+        let Some(parent_root) = pending_data_column_sidecar
+            .data_column_sidecar
+            .pre_gloas()
+            .map(|sidecar| sidecar.signed_block_header.message.parent_root)
+        else {
+            return;
+        };
         self.delayed_until_block
-            .entry(
-                pending_data_column_sidecar
-                    .data_column_sidecar
-                    .signed_block_header
-                    .message
-                    .parent_root,
-            )
+            .entry(parent_root)
             .or_default()
             .data_column_sidecars
             .push(pending_data_column_sidecar);
@@ -2920,13 +2921,7 @@ where
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
     ) {
         self.delayed_until_slot
-            .entry(
-                pending_data_column_sidecar
-                    .data_column_sidecar
-                    .signed_block_header
-                    .message
-                    .slot,
-            )
+            .entry(pending_data_column_sidecar.data_column_sidecar.slot())
             .or_default()
             .data_column_sidecars
             .push(pending_data_column_sidecar);
@@ -3228,8 +3223,7 @@ where
                 data_column_sidecars
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.data_column_sidecar.signed_block_header.message.slot - 1
-                            <= finalized_slot
+                        pending.data_column_sidecar.slot() - 1 <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -3814,6 +3808,7 @@ where
             return BlockDataColumnAvailability::Irrelevant;
         }
 
+        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(body) = block.message().body().with_blob_kzg_commitments() else {
             return BlockDataColumnAvailability::Irrelevant;
         };
@@ -3830,8 +3825,8 @@ where
             .saturating_sub(missing_indices.len());
 
         let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
-            missing_indices.contains(&data_column_sidecar.index)
-                && data_column_sidecar.kzg_commitments == *body.blob_kzg_commitments()
+            missing_indices.contains(&data_column_sidecar.index())
+                && data_column_sidecar.kzg_commitments() == body.blob_kzg_commitments()
         });
 
         if any_pending_columns {
