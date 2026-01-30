@@ -2201,7 +2201,7 @@ impl<P: Preset> SszSize for DataColumnSidecar<P> {
 
 impl<P: Preset> SszRead<Config> for DataColumnSidecar<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        // There are 3 varialbe offsets, 1 fixed part before `sidecar.slot`:
+        // There are 3 variable offsets, 1 fixed part before `sidecar.slot`:
         // - The contents of `sidecar.column_index`.
         // - The offset of `sidecar.column`.
         // - The offset of `sidecar.kzg_commitments`.
