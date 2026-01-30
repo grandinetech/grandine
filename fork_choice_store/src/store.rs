@@ -32,7 +32,7 @@ use scc::HashMap as SccHashMap;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
-use tracing::instrument;
+use tracing::{debug_span, instrument};
 use transition_functions::{
     combined,
     unphased::{self, ProcessSlots, StateRootPolicy},
@@ -1182,6 +1182,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if self.should_check_data_availability_at_slot(block.message().slot())
             && data_availability_policy.check()
         {
+            let _span = debug_span!("validate_block_data_availability_check");
+
             if state.phase().is_peerdas_activated() {
                 let missing_indices = self.indices_of_missing_data_columns(block);
 
@@ -1212,6 +1214,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
+        let slashings_span = debug_span!("validate_block_validate_attester_slashing");
+
         let attester_slashing_results = block
             .message()
             .body()
@@ -1220,6 +1224,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 self.validate_attester_slashing(&attester_slashing, AttesterSlashingOrigin::Block)
             })
             .collect();
+
+        drop(slashings_span);
 
         let justified_checkpoint = state.current_justified_checkpoint();
         let finalized_checkpoint = state.finalized_checkpoint();
@@ -1233,6 +1239,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         //                      Specializing the `statistics` functions might help too.
         // > Eagerly compute unrealized justification and finality
         let (unrealized_justified_checkpoint, unrealized_finalized_checkpoint) = {
+            let _span = debug_span!("validate_block_process_justification_and_finalization");
             let mut state = state.clone_arc();
 
             // > Pull up the post-state of the block to the next epoch boundary
