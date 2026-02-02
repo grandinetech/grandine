@@ -667,6 +667,12 @@ pub async fn run_after_genesis<P: Preset>(
     let mut registry = network_config.metrics_enabled.then_some(gossip_registry);
     let network_config = Arc::new(network_config);
 
+    if let Some(metrics) = metrics.as_ref()
+        && let Some(grandine_version) = network_config.identify_agent_version.as_ref()
+    {
+        metrics.set_grandine_version(grandine_version);
+    }
+
     let network = Network::new(
         network_config.clone_arc(),
         controller.clone_arc(),

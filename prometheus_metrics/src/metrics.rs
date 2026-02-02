@@ -21,6 +21,7 @@ pub static METRICS: OnceCell<Arc<Metrics>> = OnceCell::new();
 pub struct Metrics {
     // Overview
     beacon_clock_slot: IntGauge,
+    grandine_version: IntGaugeVec,
     live: IntGauge,
     pub metrics_requests_since_last_update: IntCounter,
 
@@ -215,6 +216,12 @@ impl Metrics {
         Ok(Self {
             // Overview
             beacon_clock_slot: IntGauge::new("beacon_clock_slot", "Beacon clock slot")?,
+
+            grandine_version: IntGaugeVec::new(
+                opts!("GRANDINE_VERSION", "Grandine client version"),
+                &["version"],
+            )?,
+
             live: IntGauge::new("IS_LIVE", "Grandine status")?,
 
             metrics_requests_since_last_update: IntCounter::new(
@@ -872,6 +879,7 @@ impl Metrics {
         let default_registry = prometheus::default_registry();
 
         default_registry.register(Box::new(self.beacon_clock_slot.clone()))?;
+        default_registry.register(Box::new(self.grandine_version.clone()))?;
         default_registry.register(Box::new(self.live.clone()))?;
         default_registry.register(Box::new(self.cores.clone()))?;
         default_registry.register(Box::new(self.disk_usage.clone()))?;
@@ -1069,6 +1077,16 @@ impl Metrics {
     // Overview
     pub fn set_beacon_clock_slot(&self, slot: Slot) {
         self.beacon_clock_slot.set(slot as i64);
+    }
+
+    pub fn set_grandine_version(&self, version: &str) {
+        self.grandine_version
+            .get_metric_with_label_values(&[version])
+            .expect(
+                "the number of label values should match the number \
+                 of labels that grandine_version was created with",
+            )
+            .set(1)
     }
 
     pub fn set_live(&self) {
