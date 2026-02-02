@@ -6,7 +6,7 @@
 //
 //                      The most time-consuming parts of epoch processing in Phase 0 are
 //                      (slowest to fastest):
-//                      1. `phase0::epoch_intermediates::statistics`.
+//                      1. `phase0::epoch_intermediates::statistics_and_summaries`.
 //                      2. `PersistentList::update` in `process_effective_balance_updates`.
 //                      3. `phase0::epoch_intermediates::epoch_deltas`.
 //                      4. `process_registry_updates`.
@@ -15,7 +15,7 @@
 //                      The most time-consuming parts of epoch processing in Altair are
 //                      (slowest to fastest):
 //                      1. `PersistentList::update` in `process_effective_balance_updates`.
-//                      2. `altair::epoch_intermediates::statistics`.
+//                      2. `altair::epoch_intermediates::statistics_and_summaries`.
 //                      3. `altair::epoch_intermediates::epoch_deltas`.
 //                      4. `PersistentList::update` in `process_rewards_and_penalties`.
 //                      5. `process_registry_updates`.
@@ -25,7 +25,7 @@
 //                      enough overhead to slow it down further. An `IndexedParallelIterator` for
 //                      `PersistentList` might help, but it's hard to implement.
 //
-//                      Using `AtomicU64` in `altair::epoch_intermediates::statistics` breaks it
+//                      Using `AtomicU64` in `altair::epoch_intermediates::statistics_and_summaries` breaks it
 //                      somehow (even with `Ordering::SeqCst`). Using Rayon in
 //                      `altair::epoch_intermediates::epoch_deltas` does the same.
 
@@ -86,7 +86,7 @@ pub mod phase0 {
     pub(crate) use block_processing::{
         count_required_signatures, process_block, process_block_for_gossip, process_deposit_data,
     };
-    pub(crate) use epoch_intermediates::{StatisticsForTransition, statistics};
+    pub(crate) use epoch_intermediates::{StatisticsForTransition, statistics_and_summaries};
     pub(crate) use epoch_processing::{
         epoch_report, process_epoch, process_justification_and_finalization,
     };
@@ -113,6 +113,7 @@ pub mod altair {
     };
     pub(crate) use epoch_intermediates::{
         AltairEpochDeltas as EpochDeltas, EpochDeltasForTransition, statistics,
+        statistics_and_summaries,
     };
     pub(crate) use epoch_processing::{
         epoch_report, process_epoch, process_inactivity_updates,

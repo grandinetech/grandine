@@ -527,35 +527,36 @@ pub fn process_slots<P: Preset>(
 pub fn process_justification_and_finalization(state: &mut BeaconState<impl Preset>) -> Result<()> {
     match state {
         BeaconState::Phase0(state) => {
-            let (statistics, _, _) = phase0::statistics::<_, StatisticsForTransition>(state)?;
+            let (statistics, _, _) =
+                phase0::statistics_and_summaries::<_, StatisticsForTransition>(state)?;
             phase0::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Altair(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Bellatrix(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Capella(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Deneb(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Electra(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Fulu(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
         BeaconState::Gloas(state) => {
-            let (statistics, _, _) = altair::statistics(state);
+            let statistics = altair::statistics(state);
             altair::process_justification_and_finalization(state, statistics);
         }
     }
@@ -986,37 +987,17 @@ pub fn process_deposit_data(
 pub fn statistics<P: Preset>(state: &BeaconState<P>) -> Result<Statistics> {
     let statistics = match state {
         BeaconState::Phase0(state) => {
-            let (statistics, _, _) = phase0::statistics::<P, StatisticsForReport>(state)?;
+            let (statistics, _, _) =
+                phase0::statistics_and_summaries::<P, StatisticsForReport>(state)?;
             statistics.into()
         }
-        BeaconState::Altair(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
-        BeaconState::Bellatrix(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
-        BeaconState::Capella(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
-        BeaconState::Deneb(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
-        BeaconState::Electra(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
-        BeaconState::Fulu(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
-        BeaconState::Gloas(state) => {
-            let (statistics, _, _) = altair::statistics(state);
-            statistics.into()
-        }
+        BeaconState::Altair(state) => altair::statistics(state).into(),
+        BeaconState::Bellatrix(state) => altair::statistics(state).into(),
+        BeaconState::Capella(state) => altair::statistics(state).into(),
+        BeaconState::Deneb(state) => altair::statistics(state).into(),
+        BeaconState::Electra(state) => altair::statistics(state).into(),
+        BeaconState::Fulu(state) => altair::statistics(state).into(),
+        BeaconState::Gloas(state) => altair::statistics(state).into(),
     };
 
     Ok(statistics)

@@ -127,7 +127,7 @@ mod spec_tests {
     fn run_case<P: Preset>(case: Case) {
         let state = case.ssz_default::<BeaconState<P>>("pre");
 
-        let (statistics, summaries, participation) = altair::statistics(&state);
+        let (statistics, summaries, participation) = altair::statistics_and_summaries(&state);
 
         let epoch_deltas: Vec<EpochDeltasForReport> = epoch_deltas(
             &P::default_config(),

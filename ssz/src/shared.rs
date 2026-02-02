@@ -137,7 +137,7 @@ pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>>
         let first_offset_subslice = subslice(bytes, 0..BYTES_PER_LENGTH_OFFSET)?;
         let first_offset = read_offset_unchecked(first_offset_subslice)?;
 
-        if first_offset % BYTES_PER_LENGTH_OFFSET != 0 {
+        if first_offset % BYTES_PER_LENGTH_OFFSET != 0 || first_offset < BYTES_PER_LENGTH_OFFSET {
             return Err(ReadError::ListFirstOffsetUnaligned { first_offset });
         }
 
