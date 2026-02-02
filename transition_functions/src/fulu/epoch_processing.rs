@@ -34,7 +34,7 @@ pub fn process_epoch(
 
     // TODO(Grandine Team): Some parts of epoch processing could be done in parallel.
 
-    let (statistics, mut summaries, participation) = altair::statistics(state);
+    let (statistics, mut summaries, participation) = altair::statistics_and_summaries(state);
 
     altair::process_justification_and_finalization(state, statistics);
 
@@ -335,7 +335,15 @@ mod spec_tests {
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (statistics, _, _) = altair::statistics(state);
+            let (statistics, _, _) = altair::statistics_and_summaries(state);
+
+            altair::process_justification_and_finalization(state, statistics);
+
+            Ok(())
+        });
+
+        run_case::<P>(case, |_, state| {
+            let statistics = altair::statistics(state);
 
             altair::process_justification_and_finalization(state, statistics);
 
@@ -345,7 +353,7 @@ mod spec_tests {
 
     fn run_inactivity_updates_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (_, summaries, participation) = altair::statistics(state);
+            let (_, summaries, participation) = altair::statistics_and_summaries(state);
 
             altair::process_inactivity_updates(
                 &P::default_config(),
@@ -360,7 +368,7 @@ mod spec_tests {
 
     fn run_rewards_and_penalties_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (statistics, summaries, participation) = altair::statistics(state);
+            let (statistics, summaries, participation) = altair::statistics_and_summaries(state);
 
             let deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
                 &P::default_config(),
@@ -386,7 +394,7 @@ mod spec_tests {
 
     fn run_slashings_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (_, summaries, _) = altair::statistics(state);
+            let (_, summaries, _) = altair::statistics_and_summaries(state);
 
             electra::process_slashings::<_, ()>(state, summaries);
 

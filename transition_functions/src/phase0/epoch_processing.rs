@@ -40,7 +40,7 @@ pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> R
         .map(|metrics| metrics.epoch_processing_times.start_timer());
 
     let (statistics, mut summaries, performance) =
-        epoch_intermediates::statistics::<_, StatisticsForTransition>(state)?;
+        epoch_intermediates::statistics_and_summaries::<_, StatisticsForTransition>(state)?;
 
     process_justification_and_finalization(state, statistics);
 
@@ -72,7 +72,7 @@ pub fn process_epoch(config: &Config, state: &mut BeaconState<impl Preset>) -> R
 
 pub fn epoch_report<P: Preset>(config: &Config, state: &mut BeaconState<P>) -> Result<EpochReport> {
     let (statistics, mut summaries, performance) =
-        epoch_intermediates::statistics::<_, StatisticsForReport>(state)?;
+        epoch_intermediates::statistics_and_summaries::<_, StatisticsForReport>(state)?;
 
     process_justification_and_finalization(state, statistics);
 
@@ -345,7 +345,7 @@ mod spec_tests {
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case(case, |state| {
             let (statistics, _, _) =
-                epoch_intermediates::statistics::<P, StatisticsForReport>(state)?;
+                epoch_intermediates::statistics_and_summaries::<P, StatisticsForReport>(state)?;
 
             process_justification_and_finalization(state, statistics);
 
@@ -356,7 +356,7 @@ mod spec_tests {
     fn run_rewards_and_penalties_case<P: Preset>(case: Case) {
         run_case(case, |state| {
             let (statistics, summaries, performance) =
-                epoch_intermediates::statistics::<P, StatisticsForTransition>(state)?;
+                epoch_intermediates::statistics_and_summaries::<P, StatisticsForTransition>(state)?;
 
             let deltas: Vec<EpochDeltasForTransition> =
                 epoch_intermediates::epoch_deltas(state, statistics, summaries, performance)?;
@@ -382,7 +382,7 @@ mod spec_tests {
     fn run_slashings_case<P: Preset>(case: Case) {
         run_case(case, |state| {
             let (statistics, summaries, _) =
-                epoch_intermediates::statistics::<P, StatisticsForTransition>(state)?;
+                epoch_intermediates::statistics_and_summaries::<P, StatisticsForTransition>(state)?;
 
             process_slashings::<_, ()>(state, statistics.current_epoch_active_balance(), summaries);
 

@@ -50,7 +50,8 @@ pub fn process_epoch(
         .map(|metrics| metrics.epoch_processing_times.start_timer());
 
     // TODO(Grandine Team): Some parts of epoch processing could be done in parallel.
-    let (statistics, mut summaries, participation) = epoch_intermediates::statistics(state);
+    let (statistics, mut summaries, participation) =
+        epoch_intermediates::statistics_and_summaries(state);
 
     process_justification_and_finalization(state, statistics);
 
@@ -95,7 +96,8 @@ pub fn epoch_report<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut AltairBeaconState<P>,
 ) -> Result<EpochReport> {
-    let (statistics, mut summaries, participation) = epoch_intermediates::statistics(state);
+    let (statistics, mut summaries, participation) =
+        epoch_intermediates::statistics_and_summaries(state);
 
     process_justification_and_finalization(state, statistics);
 
@@ -462,7 +464,15 @@ mod spec_tests {
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (statistics, _, _) = epoch_intermediates::statistics(state);
+            let (statistics, _, _) = epoch_intermediates::statistics_and_summaries(state);
+
+            process_justification_and_finalization(state, statistics);
+
+            Ok(())
+        });
+
+        run_case::<P>(case, |_, state| {
+            let statistics = epoch_intermediates::statistics(state);
 
             process_justification_and_finalization(state, statistics);
 
@@ -472,7 +482,8 @@ mod spec_tests {
 
     fn run_inactivity_updates_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (_, summaries, participation) = epoch_intermediates::statistics(state);
+            let (_, summaries, participation) =
+                epoch_intermediates::statistics_and_summaries(state);
 
             process_inactivity_updates(&P::default_config(), state, summaries, participation);
 
@@ -482,7 +493,8 @@ mod spec_tests {
 
     fn run_rewards_and_penalties_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (statistics, summaries, participation) = epoch_intermediates::statistics(state);
+            let (statistics, summaries, participation) =
+                epoch_intermediates::statistics_and_summaries(state);
 
             let deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
                 &P::default_config(),
@@ -512,7 +524,7 @@ mod spec_tests {
 
     fn run_slashings_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (_, summaries, _) = epoch_intermediates::statistics(state);
+            let (_, summaries, _) = epoch_intermediates::statistics_and_summaries(state);
 
             process_slashings::<_, ()>(state, summaries);
 

@@ -1,3 +1,4 @@
+use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
         combined_participation, compute_base_reward, get_base_reward_per_increment,
@@ -12,7 +13,9 @@ use types::{
     altair::{
         beacon_state::BeaconState,
         consts::{
-            TIMELY_HEAD_WEIGHT, TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_WEIGHT, WEIGHT_DENOMINATOR,
+            TIMELY_HEAD_FLAG_INDEX, TIMELY_HEAD_WEIGHT, TIMELY_SOURCE_FLAG_INDEX,
+            TIMELY_SOURCE_WEIGHT, TIMELY_TARGET_FLAG_INDEX, TIMELY_TARGET_WEIGHT,
+            WEIGHT_DENOMINATOR,
         },
     },
     config::Config,
@@ -171,7 +174,7 @@ impl AltairEpochDeltas for EpochDeltasForReport {
     }
 }
 
-pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(
+pub fn statistics_and_summaries<P: Preset, S: PostAltairBeaconState<P>>(
     state: &S,
 ) -> (Statistics, Vec<AltairValidatorSummary>, Vec<Participation>) {
     let current_epoch = get_current_epoch(state);
@@ -234,6 +237,52 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(
     statistics.clamp_balances::<P>();
 
     (statistics, summaries, participation)
+}
+
+pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Statistics {
+    let current_epoch = get_current_epoch(state);
+    let previous_epoch = get_previous_epoch(state);
+
+    let mut statistics = Statistics::default();
+
+    state
+        .validators()
+        .into_iter()
+        .zip(state.previous_epoch_participation())
+        .zip(state.current_epoch_participation())
+        .filter(|((validator, _), _)| !validator.slashed)
+        .for_each(
+            |((validator, previous_epoch_participation), current_epoch_participation)| {
+                let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
+                let active_in_current_epoch = is_active_validator(validator, current_epoch);
+
+                let effective_balance = validator.effective_balance;
+
+                if active_in_previous_epoch {
+                    if previous_epoch_participation.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
+                        statistics.previous_epoch_source_participating_balance += effective_balance;
+                    }
+
+                    if previous_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX) {
+                        statistics.previous_epoch_target_participating_balance += effective_balance;
+                    }
+
+                    if previous_epoch_participation.get_bit(TIMELY_HEAD_FLAG_INDEX) {
+                        statistics.previous_epoch_head_participating_balance += effective_balance;
+                    }
+                }
+
+                if active_in_current_epoch
+                    && current_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX)
+                {
+                    statistics.current_epoch_target_participating_balance += effective_balance;
+                }
+            },
+        );
+
+    statistics.clamp_balances::<P>();
+
+    statistics
 }
 
 pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
@@ -345,7 +394,7 @@ mod spec_tests {
     fn run_case<P: Preset>(case: Case) {
         let state = case.ssz_default::<BeaconState<P>>("pre");
 
-        let (statistics, summaries, participation) = statistics(&state);
+        let (statistics, summaries, participation) = statistics_and_summaries(&state);
 
         let epoch_deltas: Vec<EpochDeltasForReport> = epoch_deltas(
             &P::default_config(),

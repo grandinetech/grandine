@@ -76,7 +76,7 @@ pub fn process_registry_updates<P: Preset>(
     // The indices collected in these do not overlap.
     // See <https://github.com/protolambda/eth2-docs/tree/de65f38857f1e27ffb6f25107d61e795cf1a5ad7#registry-updates>
     //
-    // These could be computed in `epoch_intermediates::statistics`, but doing so causes a slowdown.
+    // These could be computed in `epoch_intermediates::statistics_and_summaries`, but doing so causes a slowdown.
     let mut eligible_for_activation_queue = vec![];
     let mut ejections = vec![];
     let mut activation_queue = vec![];

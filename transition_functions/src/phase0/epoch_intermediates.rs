@@ -549,7 +549,7 @@ impl Phase0EpochDeltas for EpochDeltasForReport {
     }
 }
 
-pub fn statistics<P: Preset, S: Statistics>(
+pub fn statistics_and_summaries<P: Preset, S: Statistics>(
     state: &BeaconState<P>,
 ) -> Result<(S, Vec<Phase0ValidatorSummary>, Vec<S::Performance>)> {
     let current_epoch = get_current_epoch(state);
@@ -791,8 +791,9 @@ mod spec_tests {
     fn run_case<P: Preset>(case: Case) {
         let state = case.ssz_default("pre");
 
-        let (statistics, summaries, performance) = statistics::<P, StatisticsForReport>(&state)
-            .expect("every rewards test should calculate statistics successfully");
+        let (statistics, summaries, performance) =
+            statistics_and_summaries::<P, StatisticsForReport>(&state)
+                .expect("every rewards test should calculate statistics successfully");
 
         let deltas: Vec<EpochDeltasForReport> =
             epoch_deltas(&state, statistics, summaries, performance)
