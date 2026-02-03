@@ -56,7 +56,10 @@ use types::{
     },
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
-        containers::{DataColumnSidecar as GloasDataColumnSidecar, SignedExecutionPayloadBid},
+        containers::{
+            DataColumnSidecar as GloasDataColumnSidecar, ProposerPreferences,
+            SignedExecutionPayloadBid,
+        },
     },
     nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
     phase0::{
@@ -236,6 +239,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
         ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     >,
     accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, SignedExecutionPayloadBid>>,
+    proposer_preferences: HashMap<Slot, ProposerPreferences>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -326,6 +330,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             accepted_data_column_sidecars: HashMap::default(),
             accepted_gloas_data_column_sidecars: HashMap::default(),
             accepted_payload_bids: HashMap::default(),
+            proposer_preferences: HashMap::default(),
             blob_cache: BlobCache::default(),
             state_cache: Arc::new(StateCacheProcessor::new(
                 store_config.state_cache_lock_timeout,
@@ -1312,12 +1317,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let builder_index = bid.builder_index;
 
         // > off-protocol payment is disallowed to gossip via p2p and API, the `bid.execution_payment` MUST be zero
-        if origin.off_protocol_bid_disallowed() {
-            ensure!(
-                bid.execution_payment == 0,
-                Error::<P>::ExecutionPayloadBidOffProtocolPaymentDisallowed { payload_bid }
-            );
-        }
+        ensure!(
+            bid.execution_payment == 0,
+            Error::<P>::ExecutionPayloadBidOffProtocolPaymentDisallowed { payload_bid }
+        );
 
         // > the `bid.slot` is the current slot or the next slot
         if bid.slot < self.slot() || bid.slot > self.slot() + 1 {
@@ -1336,6 +1339,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if !self.contains_block(bid.parent_block_root) {
             return Ok(ExecutionPayloadBidAction::Ignore(true));
         }
+
+        // > the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen.
+        let Some(proposer_preference) = self.proposer_preferences.get(&bid.slot) else {
+            return Ok(ExecutionPayloadBidAction::Ignore(true));
+        };
+
+        // > `bid.fee_recipient` matches the `fee_recipient` from the proposer's `SignedProposerPreferences` associated with `bid.slot`.
+        ensure!(
+            bid.fee_recipient == proposer_preference.fee_recipient,
+            Error::<P>::ExecutionPayloadBidFeeRecipientMismatch {
+                in_preference: Box::new(proposer_preference.fee_recipient),
+                in_bid: Box::new(bid.fee_recipient),
+            }
+        );
+
+        // > `bid.gas_limit` matches the `gas_limit` from the proposer's `SignedProposerPreferences` associated with `bid.slot`.
+        ensure!(
+            bid.gas_limit == proposer_preference.gas_limit,
+            Error::<P>::ExecutionPayloadBidGasLimitMismatch {
+                in_preference: proposer_preference.gas_limit,
+                in_bid: bid.gas_limit
+            }
+        );
 
         let Some(state) =
             self.state_cache
