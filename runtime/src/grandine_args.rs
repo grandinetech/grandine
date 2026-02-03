@@ -287,6 +287,12 @@ struct BeaconNodeOptions {
     #[clap(long, requires = "checkpoint_sync_url")]
     force_checkpoint_sync: bool,
 
+    /// Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync.
+    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases.
+    /// [default: disabled]
+    #[clap(long)]
+    force_reset_beacon_db: bool,
+
     /// List of Eth1 RPC URLs
     #[clap(long, num_args = 1..)]
     eth1_rpc_urls: Vec<RedactingUrl>,
@@ -1025,6 +1031,7 @@ impl GrandineArgs {
             checkpoint_sync_url,
             eth1_rpc_urls,
             force_checkpoint_sync,
+            force_reset_beacon_db,
             data_dir,
             store_directory,
             network_dir,
@@ -1423,6 +1430,7 @@ impl GrandineArgs {
             directories: directories.clone_arc(),
             eth1_db_size: eth1_database_size,
             archival_epoch_interval,
+            reset_databases: force_reset_beacon_db,
             storage_mode,
         };
 

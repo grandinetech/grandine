@@ -26,6 +26,7 @@ pub struct StorageConfig {
     pub directories: Arc<Directories>,
     pub eth1_db_size: ByteSize,
     pub archival_epoch_interval: NonZeroU64,
+    pub reset_databases: bool,
     pub storage_mode: StorageMode,
 }
 
@@ -33,15 +34,20 @@ impl StorageConfig {
     pub fn eth1_database(&self, restart_tx: UnboundedSender<RestartMessage>) -> Result<Database> {
         Database::persistent(
             "eth1",
-            self.directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .join("eth1_cache"),
+            self.eth1_database_path(),
             self.eth1_db_size,
             DatabaseMode::ReadWrite,
             Some(restart_tx),
         )
+    }
+
+    #[must_use]
+    pub fn eth1_database_path(&self) -> PathBuf {
+        self.directories
+            .store_directory
+            .clone()
+            .unwrap_or_default()
+            .join("eth1_cache")
     }
 
     pub fn beacon_fork_choice_database(
@@ -50,13 +56,7 @@ impl StorageConfig {
         mode: DatabaseMode,
         restart_tx: Option<UnboundedSender<RestartMessage>>,
     ) -> Result<Database> {
-        let path = custom_path.unwrap_or_else(|| {
-            self.directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .join("beacon_fork_choice")
-        });
+        let path = custom_path.unwrap_or_else(|| self.beacon_fork_choice_database_path());
 
         if mode.is_read_only() {
             ensure!(
@@ -69,19 +69,22 @@ impl StorageConfig {
         Database::persistent("beacon_fork_choice", path, self.db_size, mode, restart_tx)
     }
 
+    #[must_use]
+    pub fn beacon_fork_choice_database_path(&self) -> PathBuf {
+        self.directories
+            .store_directory
+            .clone()
+            .unwrap_or_default()
+            .join("beacon_fork_choice")
+    }
+
     pub fn pubkey_cache_database(
         &self,
         custom_path: Option<PathBuf>,
         mode: DatabaseMode,
         restart_tx: Option<UnboundedSender<RestartMessage>>,
     ) -> Result<Database> {
-        let path = custom_path.unwrap_or_else(|| {
-            self.directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .join("pubkey_cache")
-        });
+        let path = custom_path.unwrap_or_else(|| self.pubkey_cache_database_path());
 
         if mode.is_read_only() {
             ensure!(
@@ -94,18 +97,21 @@ impl StorageConfig {
         Database::persistent("pubkey_cache", path, self.db_size, mode, restart_tx)
     }
 
+    #[must_use]
+    pub fn pubkey_cache_database_path(&self) -> PathBuf {
+        self.directories
+            .store_directory
+            .clone()
+            .unwrap_or_default()
+            .join("pubkey_cache")
+    }
+
     pub fn sync_database(
         &self,
         custom_path: Option<PathBuf>,
         mode: DatabaseMode,
     ) -> Result<Database> {
-        let path = custom_path.unwrap_or_else(|| {
-            self.directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .join("sync")
-        });
+        let path = custom_path.unwrap_or_else(|| self.sync_database_path());
 
         if mode.is_read_only() {
             ensure!(
@@ -119,6 +125,15 @@ impl StorageConfig {
     }
 
     #[must_use]
+    pub fn sync_database_path(&self) -> PathBuf {
+        self.directories
+            .store_directory
+            .clone()
+            .unwrap_or_default()
+            .join("sync")
+    }
+
+    #[must_use]
     pub fn with_increased_db_sizes(self, modifier: u64) -> Self {
         let Self {
             in_memory,
@@ -126,6 +141,7 @@ impl StorageConfig {
             directories,
             eth1_db_size,
             archival_epoch_interval,
+            reset_databases,
             storage_mode,
         } = self;
 
@@ -149,6 +165,7 @@ impl StorageConfig {
             directories,
             eth1_db_size: new_eth1_db_size,
             archival_epoch_interval,
+            reset_databases,
             storage_mode,
         }
     }
@@ -176,6 +193,7 @@ mod tests {
             directories: Arc::new(Directories::default()),
             eth1_db_size: ByteSize::gb(2),
             archival_epoch_interval: nonzero!(1_u64),
+            reset_databases: false,
             storage_mode: StorageMode::Standard,
         };
 
@@ -197,6 +215,7 @@ mod tests {
             directories: Arc::new(Directories::default()),
             eth1_db_size: ByteSize::b(u64::MAX),
             archival_epoch_interval: nonzero!(1_u64),
+            reset_databases: false,
             storage_mode: StorageMode::Standard,
         };
 

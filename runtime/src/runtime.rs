@@ -6,8 +6,9 @@ use core::{
 use std::sync::LazyLock;
 use std::{
     collections::HashSet,
+    io::ErrorKind,
     net::{TcpListener, UdpSocket},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -72,6 +73,7 @@ use thiserror::Error;
 use tokio::{runtime::Builder, select};
 #[cfg(feature = "embed")]
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 use types::{
     config::Config as ChainConfig,
     phase0::{
@@ -980,6 +982,8 @@ impl Context {
 
                 if db_size_modifier > 1 {
                     context.storage_config.print_db_sizes();
+                    // don't reset database on restart
+                    context.storage_config.reset_databases = false;
                 }
 
                 let run = context.run::<P>();
@@ -1048,6 +1052,28 @@ impl Context {
             reconstruction_delay,
             report_validator_performance,
         } = self;
+
+        if storage_config.reset_databases {
+            match remove_database_dir(storage_config.eth1_database_path().as_path()) {
+                Ok(()) => info!("successfully removed eth1 database"),
+                Err(error) => warn!("failed to remove eth1 database: {error:?}"),
+            }
+
+            match remove_database_dir(storage_config.beacon_fork_choice_database_path().as_path()) {
+                Ok(()) => info!("successfully removed beacon_fork_choice database"),
+                Err(error) => warn!("failed to remove beacon_fork_choice database: {error:?}"),
+            }
+
+            match remove_database_dir(storage_config.pubkey_cache_database_path().as_path()) {
+                Ok(()) => info!("successfully removed pubkey_cache database"),
+                Err(error) => warn!("failed to remove pubkey_cache database: {error:?}"),
+            }
+
+            match remove_database_dir(storage_config.sync_database_path().as_path()) {
+                Ok(()) => info!("successfully removed sync database"),
+                Err(error) => warn!("failed to remove sync database: {error:?}"),
+            }
+        }
 
         // Load keys early so we can validate `eth1_rpc_urls`.
         signer.load_keys_from_web3signer().await;
@@ -1760,4 +1786,14 @@ fn block_on(future: impl Future<Output = Result<()>>) -> Result<()> {
         .enable_all()
         .build()?
         .block_on(future)
+}
+
+fn remove_database_dir(path: &Path) -> std::io::Result<()> {
+    if let Err(error) = fs_err::remove_dir_all(path)
+        && error.kind() != ErrorKind::NotFound
+    {
+        return Err(error);
+    }
+
+    Ok(())
 }
