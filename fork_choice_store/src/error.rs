@@ -4,11 +4,11 @@ use anyhow::Error as AnyhowError;
 use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
-    bellatrix::containers::PowBlock,
+    bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadBid,
-    phase0::primitives::{Epoch, Gwei, Slot, SubnetId, ValidatorIndex},
+    phase0::primitives::{Epoch, ExecutionAddress, Gwei, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -149,6 +149,17 @@ pub enum Error<P: Preset> {
         payload_bid: Arc<SignedExecutionPayloadBid>,
         epoch: Epoch,
     },
+    #[error(
+        "execution payload bid's fee recipient mismatch (in_bid: {in_bid:?}, in_preference: {in_preference:?})"
+    )]
+    ExecutionPayloadBidFeeRecipientMismatch {
+        in_preference: Box<ExecutionAddress>,
+        in_bid: Box<ExecutionAddress>,
+    },
+    #[error(
+        "execution payload bid's gas limit mismatch (in_bid: {in_bid}, in_preference: {in_preference})"
+    )]
+    ExecutionPayloadBidGasLimitMismatch { in_preference: Gas, in_bid: Gas },
     #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
         payload_bid: Arc<SignedExecutionPayloadBid>,
