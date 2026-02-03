@@ -1166,10 +1166,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         // Start from Gloas, proposer no longer required to build execution payload data
-        // unless they choose to self-build
+        // unless they choose to self-build, as favor or no active builders
         let mut payload_with_data = None;
-        if (!self.beacon_state.is_post_gloas() || self.options.enable_payload_build)
-            && let Some(handle) = local_execution_payload_handle
+        if self.beacon_state.post_gloas().is_none_or(|state| {
+            self.options.enable_payload_build
+                || accessors::get_active_builder_indices(state).count() == 0
+        }) && let Some(handle) = local_execution_payload_handle
         {
             payload_with_data = handle
                 .await?
