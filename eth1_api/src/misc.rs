@@ -1,3 +1,4 @@
+use core::{convert::Infallible, str::FromStr};
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -58,6 +59,32 @@ impl ClientCode {
     }
 }
 
+impl FromStr for ClientCode {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "BU" => Self::Besu,
+            "EJ" => Self::EthereumJS,
+            "EG" => Self::Erigon,
+            "GE" => Self::GoEthereum,
+            "GR" => Self::Grandine,
+            "LH" => Self::Lighthouse,
+            "LS" => Self::Lodestar,
+            "NM" => Self::Nethermind,
+            "NB" => Self::Nimbus,
+            "TE" => Self::TrinExecution,
+            "TK" => Self::Teku,
+            "PM" => Self::Prysm,
+            "RH" => Self::Reth,
+            other => {
+                info_with_peers!("received unknown client code from execution client: {other}");
+                Self::Unknown(other.to_owned())
+            }
+        })
+    }
+}
+
 impl Serialize for ClientCode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -85,27 +112,7 @@ impl<'de> Deserialize<'de> for ClientCode {
             where
                 E: serde::de::Error,
             {
-                Ok(match value {
-                    "BU" => ClientCode::Besu,
-                    "EJ" => ClientCode::EthereumJS,
-                    "EG" => ClientCode::Erigon,
-                    "GE" => ClientCode::GoEthereum,
-                    "GR" => ClientCode::Grandine,
-                    "LH" => ClientCode::Lighthouse,
-                    "LS" => ClientCode::Lodestar,
-                    "NM" => ClientCode::Nethermind,
-                    "NB" => ClientCode::Nimbus,
-                    "TE" => ClientCode::TrinExecution,
-                    "TK" => ClientCode::Teku,
-                    "PM" => ClientCode::Prysm,
-                    "RH" => ClientCode::Reth,
-                    other => {
-                        info_with_peers!(
-                            "received unknown client code from execution client: {other}"
-                        );
-                        ClientCode::Unknown(other.to_owned())
-                    }
-                })
+                value.parse().map_err(E::custom)
             }
         }
 

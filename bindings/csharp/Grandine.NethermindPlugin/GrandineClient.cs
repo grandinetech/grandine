@@ -48,6 +48,12 @@ internal delegate CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1Delegate(
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2Delegate(CVec_CH256 versionedHashes);
 
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate CResult_CVec_CGrandineString EngineExchangeCapabilitiesDelegate(CVec_CGrandineString clCapabilities);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate CResult_CVec_CClientVersionV1 EngineGetClientVersionV1Delegate(CClientVersionV1 clVersion);
+
 public class GrandineClient : IAsyncDisposable
 {
     private static bool initialized = false;
@@ -66,6 +72,8 @@ public class GrandineClient : IAsyncDisposable
     private readonly EngineGetPayloadV5Delegate engineGetPayloadV5;
     private readonly EngineGetBlobsV1Delegate engineGetBlobsV1;
     private readonly EngineGetBlobsV2Delegate engineGetBlobsV2;
+    private readonly EngineExchangeCapabilitiesDelegate engineExchangeCapabilities;
+    private readonly EngineGetClientVersionV1Delegate engineGetClientVersionV1;
 
     private readonly IGrandineEngineApi engineApi;
     private Task? process;
@@ -96,6 +104,8 @@ public class GrandineClient : IAsyncDisposable
             this.engineGetPayloadV5 = this.engineApi.EngineGetPayloadV5;
             this.engineGetBlobsV1 = this.engineApi.EngineGetBlobsV1;
             this.engineGetBlobsV2 = this.engineApi.EngineGetBlobsV2;
+            this.engineExchangeCapabilities = this.engineApi.EngineExchangeCapabilities;
+            this.engineGetClientVersionV1 = this.engineApi.EngineGetClientVersionV1;
             IntPtr engine_newPayloadV1Ptr = Marshal.GetFunctionPointerForDelegate(this.engineNewPayloadV1);
             IntPtr engine_newPayloadV2Ptr = Marshal.GetFunctionPointerForDelegate(this.engineNewPayloadV2);
             IntPtr engine_newPayloadV3Ptr = Marshal.GetFunctionPointerForDelegate(this.engineNewPayloadV3);
@@ -110,6 +120,8 @@ public class GrandineClient : IAsyncDisposable
             IntPtr engine_getPayloadV5Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV5);
             IntPtr engine_getBlobsV1Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetBlobsV1);
             IntPtr engine_getBlobsV2Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetBlobsV2);
+            IntPtr engine_exchangeCapabilitiesPtr = Marshal.GetFunctionPointerForDelegate(this.engineExchangeCapabilities);
+            IntPtr engine_getClientVersionV1 = Marshal.GetFunctionPointerForDelegate(this.engineGetClientVersionV1);
             res = NativeMethods.grandine_set_execution_layer_adapter(new CEmbedAdapter
             {
                 engine_new_payload_v1 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV1, CResult_CPayloadStatusV1>)engine_newPayloadV1Ptr,
@@ -126,6 +138,8 @@ public class GrandineClient : IAsyncDisposable
                 engine_get_payload_v5 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV5Response>)engine_getPayloadV5Ptr,
                 engine_get_blobs_v1 = (delegate* unmanaged[Cdecl]<CVec_CH256, CResult_CVec_COption_CBlobAndProofV1>)engine_getBlobsV1Ptr,
                 engine_get_blobs_v2 = (delegate* unmanaged[Cdecl]<CVec_CH256, CResult_COption_CVec_CBlobAndProofV2>)engine_getBlobsV2Ptr,
+                engine_exchange_capabilities = (delegate* unmanaged[Cdecl]<CVec_CGrandineString, CResult_CVec_CGrandineString>)engine_exchangeCapabilitiesPtr,
+                engine_get_client_version_v1 = (delegate* unmanaged[Cdecl]<CClientVersionV1, CResult_CVec_CClientVersionV1>)engine_getClientVersionV1,
             });
         }
 

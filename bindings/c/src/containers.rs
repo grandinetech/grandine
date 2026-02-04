@@ -1,5 +1,7 @@
 use std::{ffi::CString, sync::Arc};
 
+use anyhow::{Context, Error, anyhow};
+use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
@@ -16,8 +18,8 @@ use types::{
 };
 
 use crate::{
-    arrays::{CH64, CH160, CH256, CH384},
-    generic::{CErrorMessage, COption, CVec},
+    arrays::{CH16, CH32, CH64, CH160, CH256, CH384},
+    generic::{CGrandineString, COption, CVec},
 };
 
 #[derive(Debug)]
@@ -433,7 +435,7 @@ impl Into<PayloadValidationStatus> for CPayloadValidationStatus {
 pub struct CPayloadStatusV1 {
     status: CPayloadValidationStatus,
     latest_valid_hash: COption<CH256>,
-    validation_error: CErrorMessage,
+    validation_error: CGrandineString,
 }
 
 impl Into<PayloadStatusV1> for CPayloadStatusV1 {
@@ -735,5 +737,56 @@ impl TryInto<Blob<Mainnet>> for CVec<u8> {
 
     fn try_into(self) -> Result<Blob<Mainnet>, Self::Error> {
         Ok(Box::new(self.try_into()?))
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CClientVersionV1 {
+    code: CH16,
+    name: CGrandineString,
+    version: CGrandineString,
+    commit: CH32,
+}
+
+impl TryFrom<ClientVersionV1> for CClientVersionV1 {
+    type Error = Error;
+
+    fn try_from(value: ClientVersionV1) -> Result<Self, Self::Error> {
+        Ok(CClientVersionV1 {
+            code: value.code.try_into().context("invalid client code")?,
+            name: CString::new(value.name)
+                .context("invalid client name")?
+                .into(),
+            version: CString::new(value.version)
+                .context("invalid client version")?
+                .into(),
+            commit: value.commit.into(),
+        })
+    }
+}
+
+impl TryInto<ClientVersionV1> for CClientVersionV1 {
+    type Error = Error;
+
+    fn try_into(self) -> Result<ClientVersionV1, Self::Error> {
+        let name: Option<CString> = self.name.try_into().context("invalid client name")?;
+        let name = name
+            .ok_or(anyhow!("client name is missing"))?
+            .into_string()
+            .context("invalid client name")?;
+
+        let version: Option<CString> = self.version.try_into().context("invalid client version")?;
+        let version = version
+            .ok_or(anyhow!("client version is missing"))?
+            .into_string()
+            .context("invalid client version")?;
+
+        Ok(ClientVersionV1 {
+            code: self.code.try_into().context("invalid client code")?,
+            name,
+            version,
+            commit: self.commit.into(),
+        })
     }
 }

@@ -4,8 +4,8 @@ use anyhow::Result;
 
 use crate::{
     arrays::{CH256, CH384},
-    containers::{CBlobAndProofV1, CBlobAndProofV2, CTransaction, CWithdrawalV1},
-    generic::{COption, CVec},
+    containers::{CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CTransaction, CWithdrawalV1},
+    generic::{CGrandineString, COption, CVec},
 };
 
 #[repr(C)]
@@ -73,6 +73,16 @@ pub extern "C" fn grandine_layout_option_blob_and_proof_v1() -> CLayout {
 #[unsafe(no_mangle)]
 pub extern "C" fn grandine_layout_blob_and_proof_v2() -> CLayout {
     CLayout::new(Layout::new::<CBlobAndProofV2>())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn grandine_layout_string() -> CLayout {
+    CLayout::new(Layout::new::<CGrandineString>())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn grandine_layout_client_version() -> CLayout {
+    CLayout::new(Layout::new::<CClientVersionV1>())
 }
 
 // this is just straight copy-paste from rust std library

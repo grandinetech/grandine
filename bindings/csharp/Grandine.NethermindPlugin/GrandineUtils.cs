@@ -1,10 +1,16 @@
 namespace Grandine.NethermindPlugin;
 
 using System;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
 using Grandine.Native;
 using Nethermind.Consensus.Producers;
 using Nethermind.Core;
+using Nethermind.Logging;
 using Nethermind.Merge.Plugin.Data;
 
 public static class GrandineUtils
@@ -243,5 +249,63 @@ public static class GrandineUtils
             Withdrawals = WithdrawalsFromNative(attr.value.withdrawals),
             ParentBeaconBlockRoot = attr.value.parent_beacon_block_root.ToHash256(),
         };
+    }
+
+    public static IEnumerable<string> ConvertCapabilities(CVec_CGrandineString capabilities)
+    {
+        var span = capabilities.AsSpan();
+        if (span.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var result = new string[span.Length];
+
+        for (int i = 0; i < span.Length; ++i)
+        {
+            result[i] = span[i].ToString();
+        }
+
+        return result;
+    }
+
+    public static ClientVersionV1 ConvertClientVersion(CClientVersionV1 version)
+    {
+        var temp = new ClientVersionV1Intermediate
+        {
+            Code = version.code.ToString(),
+            Name = version.name.ToString(),
+            Version = version.version.ToString(),
+            Commit = version.commit.ToString(),
+        };
+
+        var result = Unsafe.As<ClientVersionV1Intermediate, ClientVersionV1>(ref temp);
+
+        if (result.Code != version.code.ToString() ||
+            result.Name != version.name.ToString() ||
+            result.Version != version.version.ToString() ||
+            result.Commit != version.commit.ToString())
+        {
+            throw new UnreachableException("Construction of ClientVersionV1 failed");
+        }
+
+        return result;
+    }
+
+    // a struct needed to bypass issue on nethermind side, where their
+    // ClientVersionV1 is defined with readonly fields, without "init"
+    // attribute, and without proper constructor available - so there is no way
+    // to construct ClientVersionV1 with custom values. Thus, we use this
+    // intermediatery struct, to construct needed values & then unsafely cast it
+    // to ClientVersionV1.
+    public readonly struct ClientVersionV1Intermediate
+    {
+        public string Code { get; init; }
+
+        public string Name { get; init; }
+
+        public string Version { get; init; }
+
+        public string Commit { get; init; }
     }
 }
