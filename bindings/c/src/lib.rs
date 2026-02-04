@@ -1,11 +1,12 @@
 use std::{
     alloc::{self, Layout},
-    ffi::{CStr, c_char, c_void},
+    ffi::{CStr, CString, c_char, c_void},
 };
 
 use allocator as _;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Error as ClapError, Parser};
+use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
@@ -23,13 +24,13 @@ use web3::types::{BlockNumber, H64, H256};
 use crate::{
     arrays::{CH64, CH256},
     containers::{
-        CBlobAndProofV1, CBlobAndProofV2, CEngineGetPayloadV2Response, CEngineGetPayloadV3Response,
-        CEngineGetPayloadV4Response, CEngineGetPayloadV5Response, CExecutionPayloadV1,
-        CExecutionPayloadV2, CExecutionPayloadV3, CExecutionRequests, CForkChoiceStateV1,
-        CForkChoiceUpdatedResponse, CPayloadAttributesV1, CPayloadAttributesV2,
+        CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CEngineGetPayloadV2Response,
+        CEngineGetPayloadV3Response, CEngineGetPayloadV4Response, CEngineGetPayloadV5Response,
+        CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3, CExecutionRequests,
+        CForkChoiceStateV1, CForkChoiceUpdatedResponse, CPayloadAttributesV1, CPayloadAttributesV2,
         CPayloadAttributesV3, CPayloadStatusV1,
     },
-    generic::{CErrorMessage, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
+    generic::{CGrandineString, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
     layout::{CLayout, repeat_layout},
 };
 
@@ -82,6 +83,10 @@ pub struct CEmbedAdapter {
     engine_get_blobs_v2: unsafe extern "C" fn(
         versioned_hashes: CVec<CH256>,
     ) -> CResult<COption<CVec<CBlobAndProofV2>>>,
+    engine_exchange_capabilities:
+        unsafe extern "C" fn(capabilities: CVec<CGrandineString>) -> CResult<CVec<CGrandineString>>,
+    engine_get_client_version_v1:
+        unsafe extern "C" fn(version: CClientVersionV1) -> CResult<CVec<CClientVersionV1>>,
 }
 
 impl eth1_api::EmbedAdapter for CEmbedAdapter {
@@ -304,6 +309,49 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             ))
         })
     }
+
+    fn engine_exchange_capabilities(&self, capabilities: &[&str]) -> Result<Vec<String>> {
+        let capabilities = capabilities
+            .iter()
+            .map(|v| CString::new(*v).map(Into::into))
+            .collect::<Result<_, _>>()
+            .context("invalid capabilities")?;
+
+        let result = unsafe { (self.engine_exchange_capabilities)(capabilities) };
+        let result: Result<_> = result.into();
+
+        result.and_then(|v| {
+            v.into_iter()
+                .map(|v| {
+                    let str: Option<CString> = v.into();
+
+                    let Some(str) = str else {
+                        bail!("invalid capability - null is not a valid value");
+                    };
+
+                    let str = str.to_str()?;
+
+                    Ok(str.to_owned())
+                })
+                .collect()
+        })
+    }
+
+    fn engine_get_client_version_v1(
+        &self,
+        own_version: ClientVersionV1,
+    ) -> Result<Vec<ClientVersionV1>> {
+        let result = unsafe { (self.engine_get_client_version_v1)(own_version.try_into()?) };
+
+        let result: Result<_> = result.into();
+
+        result.and_then(|versions| {
+            versions
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -334,8 +382,8 @@ pub extern "C" fn grandine_vec_alloc(item_layout: CLayout, size: usize) -> *mut 
 /// Copies string to a pointer managed by grandine.
 /// CErrorMessage must be passed back to grandine, where it will be automatically cleaned up.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn grandine_error_message(str: *const c_char) -> CErrorMessage {
-    unsafe { CErrorMessage::new(str) }
+pub unsafe extern "C" fn grandine_string(str: *const c_char) -> CGrandineString {
+    unsafe { CGrandineString::new(str) }
 }
 
 #[unsafe(no_mangle)]

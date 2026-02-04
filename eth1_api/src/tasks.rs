@@ -35,7 +35,38 @@ pub fn spawn_exchange_capabilities_and_versions_task(
 
 async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
     #[cfg(feature = "embed")]
-    return Ok(());
+    {
+        let response = eth1_api
+            .exec(|adapter| adapter.engine_exchange_capabilities(CAPABILITIES))
+            .await;
+
+        match response {
+            Ok(capabilities) => {
+                let capabilities = HashSet::from_iter(capabilities);
+
+                let supports_client_version =
+                    capabilities.contains(&ENGINE_GET_CLIENT_VERSION_V1.to_owned());
+
+                eth1_api.set_capabilities(capabilities);
+
+                info_with_peers!("updated capabilities for embedded EL");
+
+                if supports_client_version {
+                    exchange_client_versions(eth1_api).await?;
+                } else {
+                    debug_with_peers!(
+                        "cannot get client version: embedded EL does not support \
+                        {ENGINE_GET_CLIENT_VERSION_V1}",
+                    );
+                }
+            }
+            Err(error) => {
+                warn_with_peers!("unable to update capabilities for embedded el: {error:?}",);
+            }
+        }
+
+        Ok(())
+    }
 
     #[cfg(not(feature = "embed"))]
     {
@@ -93,44 +124,59 @@ async fn exchange_capabilities_and_versions(eth1_api: &Eth1Api) -> Result<()> {
     }
 }
 
+#[cfg(feature = "embed")]
+async fn exchange_client_versions(eth1_api: &Eth1Api) -> Result<()> {
+    let response = eth1_api
+        .exec(|adapter| adapter.engine_get_client_version_v1(ClientVersionV1::own()))
+        .await;
+
+    match response {
+        Ok(client_versions) => {
+            eth1_api.set_client_versions(client_versions);
+
+            info_with_peers!("updated client version for embedded EL",);
+        }
+        Err(error) => {
+            warn_with_peers!("unable to update client version for embedded EL: {error:?}",);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "embed"))]
 async fn exchange_client_versions(
     eth1_api: &Eth1Api,
     api: &Eth<Http>,
     endpoint: &Endpoint,
 ) -> Result<()> {
-    #[cfg(feature = "embed")]
-    return Ok(());
+    let response = CallFuture::new(api.transport().execute_with_headers(
+        ENGINE_GET_CLIENT_VERSION_V1,
+        vec![serde_json::to_value(ClientVersionV1::own())?],
+        eth1_api.auth.headers()?,
+        Some(ENGINE_GET_CLIENT_VERSION_V1_TIMEOUT),
+    ))
+    .await;
 
-    #[cfg(not(feature = "embed"))]
-    {
-        let response = CallFuture::new(api.transport().execute_with_headers(
-            ENGINE_GET_CLIENT_VERSION_V1,
-            vec![serde_json::to_value(ClientVersionV1::own())?],
-            eth1_api.auth.headers()?,
-            Some(ENGINE_GET_CLIENT_VERSION_V1_TIMEOUT),
-        ))
-        .await;
+    match response {
+        Ok(client_versions) => {
+            eth1_api.on_ok_response(endpoint);
+            endpoint.set_client_versions(client_versions);
 
-        match response {
-            Ok(client_versions) => {
-                eth1_api.on_ok_response(endpoint);
-                endpoint.set_client_versions(client_versions);
-
-                info_with_peers!(
-                    "updated client version for eth1 endpoint: {}",
-                    endpoint.url()
-                );
-            }
-            Err(error) => {
-                eth1_api.on_error_response(endpoint);
-
-                warn_with_peers!(
-                    "unable to update client version for eth1 endpoint: {} {error:?}",
-                    endpoint.url(),
-                );
-            }
+            info_with_peers!(
+                "updated client version for eth1 endpoint: {}",
+                endpoint.url()
+            );
         }
+        Err(error) => {
+            eth1_api.on_error_response(endpoint);
 
-        Ok(())
+            warn_with_peers!(
+                "unable to update client version for eth1 endpoint: {} {error:?}",
+                endpoint.url(),
+            );
+        }
     }
+
+    Ok(())
 }

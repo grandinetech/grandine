@@ -1,6 +1,8 @@
 use std::fmt::{self, Debug};
 
-use ethereum_types::H64;
+use anyhow::{Context, Error};
+use eth1_api::ClientCode;
+use ethereum_types::{H32, H64};
 use primitive_types::{H160, H256, H384};
 use ssz::Uint256;
 
@@ -111,5 +113,73 @@ impl Into<H64> for CH64 {
 impl From<H64> for CH64 {
     fn from(value: H64) -> Self {
         Self(value.0)
+    }
+}
+
+#[derive(Clone, Default)]
+#[repr(C)]
+pub struct CH32([u8; 4]);
+
+impl Debug for CH32 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CH32")
+            .field(&format!("0x{}", hex::encode(self.0)))
+            .finish()
+    }
+}
+
+impl Into<H32> for CH32 {
+    fn into(self) -> H32 {
+        H32(self.0)
+    }
+}
+
+impl From<H32> for CH32 {
+    fn from(value: H32) -> Self {
+        Self(value.0)
+    }
+}
+
+#[derive(Clone, Default)]
+#[repr(C)]
+pub struct CH16([u8; 2]);
+
+impl Debug for CH16 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CH16")
+            .field(&format!("0x{}", hex::encode(self.0)))
+            .finish()
+    }
+}
+
+impl Into<[u8; 2]> for CH16 {
+    fn into(self) -> [u8; 2] {
+        self.0
+    }
+}
+
+impl TryFrom<ClientCode> for CH16 {
+    type Error = Error;
+
+    fn try_from(value: ClientCode) -> Result<Self, Self::Error> {
+        let str = value.as_str();
+
+        let bytes: [u8; 2] = str
+            .as_bytes()
+            .try_into()
+            .context("client code is not valid 2-byte ASCII string")?;
+
+        Ok(Self(bytes))
+    }
+}
+
+impl TryInto<ClientCode> for CH16 {
+    type Error = Error;
+
+    fn try_into(self) -> Result<ClientCode, Self::Error> {
+        let str =
+            str::from_utf8(&self.0).context("client code cannot be converted to UTF-8 string")?;
+
+        str.parse().context("invalid code")
     }
 }

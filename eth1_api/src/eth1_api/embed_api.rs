@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use arc_swap::ArcSwap;
 use core::ops::RangeInclusive;
 use either::Either;
 use enum_iterator::Sequence as _;
@@ -17,10 +18,10 @@ use serde::Deserialize;
 use ssz::H256;
 use static_assertions::const_assert_eq;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     sync::{Arc, OnceLock},
 };
-use std_ext::CopyExt;
+use std_ext::{ArcExt, CopyExt};
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
@@ -35,7 +36,7 @@ use types::{
 use web3::types::{BlockId, BlockNumber, Filter, FilterBuilder, Log, U64};
 
 use crate::{
-    ClientVersions, Eth1ApiToMetrics, WithClientVersions,
+    ClientVersionV1, ClientVersions, Eth1ApiToMetrics, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
     endpoints::Endpoint,
@@ -118,6 +119,12 @@ pub trait EmbedAdapter: Send + Sync {
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Option<Vec<BlobAndProofV2<Mainnet>>>>;
+
+    fn engine_exchange_capabilities(&self, capabilities: &[&str]) -> Result<Vec<String>>;
+    fn engine_get_client_version_v1(
+        &self,
+        own_version: ClientVersionV1,
+    ) -> Result<Vec<ClientVersionV1>>;
 }
 
 static CURRENT_ADAPTER: OnceLock<Arc<Box<dyn EmbedAdapter>>> = OnceLock::new();
@@ -145,6 +152,8 @@ pub fn set_adapter(adapter: Box<dyn EmbedAdapter>) -> Result<()> {
 pub struct Eth1Api {
     config: Arc<Config>,
     pub(crate) metrics: Option<Arc<Metrics>>,
+    versions: ArcSwap<ClientVersions>,
+    capabilities: ArcSwap<HashSet<String>>,
 }
 
 impl Eth1Api {
@@ -157,15 +166,27 @@ impl Eth1Api {
         _eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
-        Self { config, metrics }
+        Self {
+            config,
+            metrics,
+            versions: ArcSwap::from_pointee(vec![]),
+            capabilities: ArcSwap::from_pointee(HashSet::new()),
+        }
     }
 
-    // TODO: Add support for ClientVersions in Nethermind plugin
+    pub(crate) fn set_capabilities(&self, capabilities: HashSet<String>) {
+        self.capabilities.store(Arc::new(capabilities));
+    }
+
+    pub(crate) fn set_client_versions(&self, versions: ClientVersions) {
+        self.versions.store(Arc::new(versions));
+    }
+
     pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
-        core::iter::empty()
+        core::iter::once(self.versions.load().clone_arc())
     }
 
-    async fn exec<T: Send + Sync + 'static>(
+    pub async fn exec<T: Send + Sync + 'static>(
         &self,
         fun: impl FnOnce(&Box<dyn EmbedAdapter>) -> Result<T> + Send + Sync + 'static,
     ) -> Result<T> {
@@ -569,7 +590,7 @@ impl Eth1Api {
         &self,
         payload_id: PayloadId,
     ) -> Result<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
-        match payload_id {
+        let result: WithBlobsAndMev<ExecutionPayload<P>, P> = match payload_id {
             PayloadId::Bellatrix(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
                     prometheus_metrics::start_timer_vec(
@@ -587,7 +608,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value).map(Into::into))
+                value.into()
             }
             PayloadId::Capella(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
@@ -606,7 +627,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value).map(Into::into))
+                value.into()
             }
             PayloadId::Deneb(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
@@ -625,7 +646,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value).map(Into::into))
+                value.into()
             }
             PayloadId::Electra(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
@@ -644,7 +665,7 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value).map(Into::into))
+                value.into()
             }
             PayloadId::Fulu(payload_id) | PayloadId::Gloas(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
@@ -663,9 +684,14 @@ impl Eth1Api {
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
-                Ok(WithClientVersions::none(value).map(Into::into))
+                value.into()
             }
-        }
+        };
+
+        Ok(WithClientVersions {
+            client_versions: Some(self.versions.load().clone_arc()),
+            result,
+        })
     }
 
     pub(crate) async fn get_blobs_v1<P: Preset>(

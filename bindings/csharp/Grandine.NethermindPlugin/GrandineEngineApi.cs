@@ -453,4 +453,60 @@ public class GrandineEngineApi : IGrandineEngineApi
             return CResult_COption_CVec_CBlobAndProofV2.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
         }
     }
+
+    public CResult_CVec_CGrandineString EngineExchangeCapabilities(CVec_CGrandineString capabilities)
+    {
+        this.logger.Debug("Received engine_exchangeCapabilities request from grandine");
+
+        try
+        {
+            var outputCapabilities = this.engineRpc.engine_exchangeCapabilities(GrandineUtils.ConvertCapabilities(capabilities));
+
+            if (outputCapabilities.Result != Result.Success)
+            {
+                return CResult_CVec_CGrandineString.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, outputCapabilities.Result.Error);
+            }
+
+            var outputCapabilitiesArray = new CVec_CGrandineString(outputCapabilities.Data.Select(capability =>
+            {
+                return new CGrandineString(capability);
+            }));
+
+            return CResult_CVec_CGrandineString.Success(outputCapabilitiesArray);
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_exchangeCapabilities function invocation", e);
+            return CResult_CVec_CGrandineString.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
+    public CResult_CVec_CClientVersionV1 EngineGetClientVersionV1(CClientVersionV1 version)
+    {
+        this.logger.Debug("Received engine_getClientVersionV1 request from grandine");
+
+        try
+        {
+            var clClientVersion = GrandineUtils.ConvertClientVersion(version);
+
+            var response = this.engineRpc.engine_getClientVersionV1(clClientVersion);
+
+            if (response.Result != Result.Success)
+            {
+                return CResult_CVec_CClientVersionV1.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, response.Result.Error);
+            }
+
+            var clientVersions = new CVec_CClientVersionV1(response.Data.Select(version =>
+            {
+                return new CClientVersionV1(version);
+            }));
+
+            return CResult_CVec_CClientVersionV1.Success(clientVersions);
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_exchangeCapabilities function invocation", e);
+            return CResult_CVec_CClientVersionV1.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
 }

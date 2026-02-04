@@ -19,7 +19,7 @@ public unsafe partial struct CPayloadStatusV1
     {
         this.status = GrandineUtils.ConvertPayloadValidationStatus(status.Status);
         this.latest_valid_hash = CH256.FromOptionalHash256(status.LatestValidHash);
-        this.validation_error = new CErrorMessage(status.ValidationError);
+        this.validation_error = new CGrandineString(status.ValidationError);
     }
 }
 
@@ -234,6 +234,17 @@ public unsafe partial struct CExecutionRequests
     }
 }
 
+public unsafe partial struct CClientVersionV1
+{
+    public CClientVersionV1(ClientVersionV1 version)
+    {
+        this.code = CH16.FromClientCode(version.Code);
+        this.name = new CGrandineString(version.Name);
+        this.version = new CGrandineString(version.Version);
+        this.commit = new CH32(version.Commit);
+    }
+}
+
 public unsafe partial struct CH384
 {
     public CH384(byte[] bytes)
@@ -376,6 +387,82 @@ public unsafe partial struct CH64
     }
 
     public unsafe readonly byte[] ToArray() => this.AsSpan().ToArray();
+}
+
+public unsafe partial struct CH32
+{
+    public CH32(string value)
+    {
+        if (value.StartsWith("0x"))
+        {
+            value = value[2..];
+        }
+
+        var raw = Convert.FromHexString(value);
+
+        if (raw.Length != 4)
+        {
+            throw new ArgumentException("Hex payloadmust decode to exactly 4 bytes.");
+        }
+
+        fixed (byte* destinationPtr = this._0)
+        fixed (byte* sourcePtr = raw)
+        {
+            Buffer.MemoryCopy(sourcePtr, destinationPtr, 4, 4);
+        }
+    }
+
+    public unsafe readonly ReadOnlySpan<byte> AsSpan()
+    {
+        fixed (byte* data = this._0)
+        {
+            return new ReadOnlySpan<byte>(data, 4);
+        }
+    }
+
+    public readonly byte[] ToArray() => this.AsSpan().ToArray();
+
+    public override readonly string ToString()
+    {
+        return Convert.ToHexString(this.ToArray());
+    }
+}
+
+public unsafe partial struct CH16
+{
+    public static CH16 FromClientCode(string code)
+    {
+        if (code.Length != 2)
+        {
+            throw new ArgumentException("Client code must be exactly 2 characters long");
+        }
+
+        byte[] bytes = [(byte)code[0], (byte)code[1]];
+
+        var result = new CH16 { };
+
+        fixed (byte* sourcePtr = bytes)
+        {
+            Buffer.MemoryCopy(sourcePtr, result._0, 2, 2);
+        }
+
+        return result;
+    }
+
+    public unsafe readonly ReadOnlySpan<byte> AsSpan()
+    {
+        fixed (byte* data = this._0)
+        {
+            return new ReadOnlySpan<byte>(data, 2);
+        }
+    }
+
+    public readonly byte[] ToArray() => this.AsSpan().ToArray();
+
+    public override readonly string ToString()
+    {
+        return System.Text.Encoding.ASCII.GetString(this.ToArray());
+    }
 }
 
 public unsafe partial struct CVec_u8
@@ -764,85 +851,212 @@ public unsafe partial struct CVec_CH256
         throw new OverflowException("data_len exceeds Int32.MaxValue");
 }
 
+public unsafe partial struct CVec_CGrandineString
+{
+    public CVec_CGrandineString(nuint length)
+    {
+        if (length == 0)
+        {
+            this.data = null;
+            this.data_len = 0;
+            return;
+        }
+
+        IntPtr pointer;
+        unsafe
+        {
+            pointer = (IntPtr)NativeMethods.grandine_vec_alloc(NativeMethods.grandine_layout_string(), length);
+        }
+
+        this.data = (CGrandineString*)pointer.ToPointer();
+        this.data_len = length;
+    }
+
+    public CVec_CGrandineString(CGrandineString[] input)
+        : this((uint)input.Length)
+    {
+        if (input.Length == 0)
+        {
+            return;
+        }
+
+        unsafe
+        {
+            var ptr = (IntPtr)this.data;
+
+            for (var i = 0; i < input.Length; ++i)
+            {
+                Marshal.StructureToPtr(input[i], IntPtr.Add(ptr, i * Marshal.SizeOf<CGrandineString>()), false);
+            }
+        }
+    }
+
+    public CVec_CGrandineString(IEnumerable<CGrandineString> enumerator)
+        : this(enumerator?.ToArray() ?? Array.Empty<CGrandineString>())
+    {
+    }
+
+    public static CVec_CGrandineString Empty() => new (0);
+
+    public readonly ReadOnlySpan<CGrandineString> AsSpan()
+    {
+        if (sizeof(nuint) > sizeof(int) && this.data_len > int.MaxValue)
+        {
+            ThrowLengthTooLarge();
+        }
+
+        return new ReadOnlySpan<CGrandineString>(this.data, checked((int)this.data_len));
+    }
+
+    private static void ThrowLengthTooLarge() =>
+        throw new OverflowException("data_len exceeds Int32.MaxValue");
+}
+
+public unsafe partial struct CVec_CClientVersionV1
+{
+    public CVec_CClientVersionV1(nuint length)
+    {
+        if (length == 0)
+        {
+            this.data = null;
+            this.data_len = 0;
+            return;
+        }
+
+        IntPtr pointer;
+        unsafe
+        {
+            pointer = (IntPtr)NativeMethods.grandine_vec_alloc(NativeMethods.grandine_layout_client_version(), length);
+        }
+
+        this.data = (CClientVersionV1*)pointer.ToPointer();
+        this.data_len = length;
+    }
+
+    public CVec_CClientVersionV1(CClientVersionV1[] input)
+        : this((uint)input.Length)
+    {
+        if (input.Length == 0)
+        {
+            return;
+        }
+
+        unsafe
+        {
+            var ptr = (IntPtr)this.data;
+
+            for (var i = 0; i < input.Length; ++i)
+            {
+                Marshal.StructureToPtr(input[i], IntPtr.Add(ptr, i * Marshal.SizeOf<CClientVersionV1>()), false);
+            }
+        }
+    }
+
+    public CVec_CClientVersionV1(IEnumerable<CClientVersionV1> enumerator)
+        : this(enumerator?.ToArray() ?? Array.Empty<CClientVersionV1>())
+    {
+    }
+
+    public static CVec_CClientVersionV1 Empty() => new (0);
+}
+
 public unsafe partial struct CResult_COption_CVec_CBlobAndProofV2
 {
     public static CResult_COption_CVec_CBlobAndProofV2 Success(COption_CVec_CBlobAndProofV2 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_COption_CVec_CBlobAndProofV2 Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_COption_CVec_CBlobAndProofV2 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_COption_CVec_CBlobAndProofV2 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_COption_CVec_CBlobAndProofV2 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CVec_COption_CBlobAndProofV1
 {
     public static CResult_CVec_COption_CBlobAndProofV1 Success(CVec_COption_CBlobAndProofV1 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CEngineGetPayloadV5Response
 {
     public static CResult_CEngineGetPayloadV5Response Success(CEngineGetPayloadV5Response value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CEngineGetPayloadV5Response Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CEngineGetPayloadV5Response Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CEngineGetPayloadV5Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CEngineGetPayloadV5Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CEngineGetPayloadV4Response
 {
     public static CResult_CEngineGetPayloadV4Response Success(CEngineGetPayloadV4Response value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CEngineGetPayloadV4Response Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CEngineGetPayloadV4Response Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CEngineGetPayloadV4Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CEngineGetPayloadV4Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CEngineGetPayloadV3Response
 {
     public static CResult_CEngineGetPayloadV3Response Success(CEngineGetPayloadV3Response value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CEngineGetPayloadV3Response Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CEngineGetPayloadV3Response Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CEngineGetPayloadV3Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CEngineGetPayloadV3Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CEngineGetPayloadV2Response
 {
     public static CResult_CEngineGetPayloadV2Response Success(CEngineGetPayloadV2Response value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CEngineGetPayloadV2Response Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CEngineGetPayloadV2Response Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CEngineGetPayloadV2Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CEngineGetPayloadV2Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CExecutionPayloadV1
 {
     public static CResult_CExecutionPayloadV1 Success(CExecutionPayloadV1 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CExecutionPayloadV1 Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CExecutionPayloadV1 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CExecutionPayloadV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CExecutionPayloadV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CForkChoiceUpdatedResponse
 {
     public static CResult_CForkChoiceUpdatedResponse Success(CForkChoiceUpdatedResponse value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CForkChoiceUpdatedResponse Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CForkChoiceUpdatedResponse Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CForkChoiceUpdatedResponse Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CForkChoiceUpdatedResponse Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CPayloadStatusV1
 {
     public static CResult_CPayloadStatusV1 Success(CPayloadStatusV1 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
 
-    public static CResult_CPayloadStatusV1 Fail(uint errorCode) => new () { code = errorCode, message = CErrorMessage.Empty };
+    public static CResult_CPayloadStatusV1 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
-    public static CResult_CPayloadStatusV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CErrorMessage(message) };
+    public static CResult_CPayloadStatusV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
+}
+
+public unsafe partial struct CResult_CVec_CGrandineString
+{
+    public static CResult_CVec_CGrandineString Success(CVec_CGrandineString value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
+
+    public static CResult_CVec_CGrandineString Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
+
+    public static CResult_CVec_CGrandineString Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
+}
+
+public unsafe partial struct CResult_CVec_CClientVersionV1
+{
+    public static CResult_CVec_CClientVersionV1 Success(CVec_CClientVersionV1 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
+
+    public static CResult_CVec_CClientVersionV1 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
+
+    public static CResult_CVec_CClientVersionV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct COption_CVec_CBlobAndProofV2
@@ -859,9 +1073,9 @@ public unsafe partial struct COption_CBlobAndProofV1
     public static COption_CBlobAndProofV1 Some(CBlobAndProofV1 value) => new () { is_something = true, value = value };
 }
 
-public unsafe partial struct CErrorMessage
+public unsafe partial struct CGrandineString
 {
-    public CErrorMessage(string? message)
+    public CGrandineString(string? message)
     {
         if (message == null)
         {
@@ -874,13 +1088,13 @@ public unsafe partial struct CErrorMessage
             fixed (byte* bytesPtr = strBytes)
             unsafe
             {
-                var msg = NativeMethods.grandine_error_message(bytesPtr);
+                var msg = NativeMethods.grandine_string(bytesPtr);
                 this._0 = msg._0;
             }
         }
     }
 
-    public static CErrorMessage Empty => new (null);
+    public static CGrandineString Empty => new (null);
 
     public override readonly string ToString()
     {

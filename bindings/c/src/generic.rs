@@ -20,9 +20,9 @@ pub const GRANDINE_ERROR_ENGINE_API: u32 = 2;
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct CErrorMessage(*mut c_char);
+pub struct CGrandineString(*mut c_char);
 
-impl Drop for CErrorMessage {
+impl Drop for CGrandineString {
     fn drop(&mut self) {
         if self.0 != ptr::null_mut() {
             let _ = unsafe { CString::from_raw(self.0) };
@@ -30,7 +30,7 @@ impl Drop for CErrorMessage {
     }
 }
 
-impl Into<Option<CString>> for CErrorMessage {
+impl Into<Option<CString>> for CGrandineString {
     fn into(self) -> Option<CString> {
         if self.0 == ptr::null_mut() {
             None
@@ -43,7 +43,7 @@ impl Into<Option<CString>> for CErrorMessage {
     }
 }
 
-impl CErrorMessage {
+impl CGrandineString {
     pub fn empty() -> Self {
         Self(ptr::null_mut())
     }
@@ -55,11 +55,17 @@ impl CErrorMessage {
     }
 }
 
+impl From<CString> for CGrandineString {
+    fn from(value: CString) -> Self {
+        Self(value.into_raw())
+    }
+}
+
 #[repr(C)]
 pub struct CResult<T> {
     pub value: T,
     pub code: u32,
-    pub message: CErrorMessage,
+    pub message: CGrandineString,
 }
 
 impl<T: Debug> Debug for CResult<T> {
@@ -80,7 +86,7 @@ impl<T: Default> CResult<T> {
         Self {
             value,
             code: GRANDINE_SUCCESS,
-            message: CErrorMessage::empty(),
+            message: CGrandineString::empty(),
         }
     }
 
@@ -89,8 +95,8 @@ impl<T: Default> CResult<T> {
             value: Default::default(),
             code,
             message: message
-                .and_then(|v| Some(CErrorMessage(CString::new(v).ok()?.into_raw())))
-                .unwrap_or(CErrorMessage::empty()),
+                .and_then(|v| Some(CGrandineString(CString::new(v).ok()?.into_raw())))
+                .unwrap_or(CGrandineString::empty()),
         }
     }
 }
