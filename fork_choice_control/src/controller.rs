@@ -157,6 +157,7 @@ where
         ));
 
         let sidecars_pending_reconstruction = Arc::new(SccHashMap::new());
+        let state_at_slot_cache = Arc::new(StateAtSlotCache::build());
 
         let mut mutator = Mutator::new(
             pubkey_cache.clone_arc(),
@@ -166,6 +167,7 @@ where
             event_channels,
             execution_engine.clone(),
             sidecars_pending_reconstruction.clone_arc(),
+            state_at_slot_cache.clone_arc(),
             storage.clone_arc(),
             thread_pool.clone(),
             metrics.clone(),
@@ -191,8 +193,6 @@ where
                 .context(Error::MutatorPanicked)?
                 .context(Error::MutatorFailed)
         })?;
-
-        let state_at_slot_cache = Arc::new(StateAtSlotCache::build());
 
         let controller = Arc::new(Self {
             store_snapshot,
