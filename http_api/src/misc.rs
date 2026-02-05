@@ -54,6 +54,7 @@ use types::{
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock,
         },
+        primitives::Slot,
     },
     preset::Preset,
 };
@@ -463,6 +464,19 @@ pub enum SignedAPIBlock<P: Preset> {
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Phase0(block) => block.message.slot,
+            Self::Altair(block) => block.message.slot,
+            Self::Bellatrix(block) => block.message.slot,
+            Self::Capella(block) => block.message.slot,
+            Self::Deneb(block) => block.signed_block.message.slot,
+            Self::Electra(block) => block.signed_block.message.slot,
+            Self::Fulu(block) => block.signed_block.message.slot,
+            Self::Gloas(block) => block.signed_block.message.slot,
+        }
+    }
+
     pub fn split(self) -> SignedBeaconBlockWithBlobsAndProofs<P> {
         match self {
             Self::Phase0(block) => (block.into(), None, None),

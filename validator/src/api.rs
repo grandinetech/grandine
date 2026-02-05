@@ -45,6 +45,7 @@ use ssz::H256;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
+use tracing::instrument;
 use types::{
     bellatrix::primitives::Gas,
     phase0::{
@@ -156,6 +157,7 @@ impl Error {
 }
 
 impl IntoResponse for Error {
+    #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let status_code = self.status_code();
         let body = Json(self.body()).into_response();
@@ -199,6 +201,7 @@ impl<T> EthResponse<T> {
 }
 
 impl<T: Serialize> IntoResponse for EthResponse<T> {
+    #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let run = || {
             let response_body = self.into_json();

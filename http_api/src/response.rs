@@ -10,6 +10,7 @@ use mime::APPLICATION_OCTET_STREAM;
 use serde::Serialize;
 use ssz::SszWrite;
 use tap::Pipe as _;
+use tracing::instrument;
 use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::H256};
 
 use crate::error::Error;
@@ -54,6 +55,7 @@ pub struct EthResponse<T, M = (), F = AlwaysJson> {
 }
 
 impl<T: Serialize, M: Serialize> IntoResponse for EthResponse<T, M, AlwaysJson> {
+    #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let run = || {
             let response_headers = self.response_headers()?;
@@ -66,6 +68,7 @@ impl<T: Serialize, M: Serialize> IntoResponse for EthResponse<T, M, AlwaysJson> 
 }
 
 impl<T: SszWrite + Serialize, M: Serialize> IntoResponse for EthResponse<T, M, JsonOrSsz> {
+    #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let run = || {
             let response_headers = self.response_headers()?;

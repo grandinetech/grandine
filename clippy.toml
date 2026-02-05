@@ -54,6 +54,7 @@ disallowed-methods = [
 
     { path = 'axum::Router::nest', reason = 'specify full resource paths for searchability' },
 
+    { path = 'itertools::Itertools::format', reason = 'use itertools::join as itertools::format panics when used with tracing' },
     { path = 'itertools::repeat_n', reason = 'use core::iter::repeat_n' },
 ]
 disallowed-types = [

@@ -473,6 +473,7 @@ pub struct ValidatorLivenessResponse {
 }
 
 /// `GET /eth/v1/beacon/genesis`
+#[instrument(skip_all, level = "debug", name = "http_api::genesis")]
 pub async fn genesis<P: Preset>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -489,6 +490,7 @@ pub async fn genesis<P: Preset>(
 }
 
 /// `GET /eth/v1/builder/states/{state_id}/expected_withdrawals`
+#[instrument(skip_all, level = "debug", name = "http_api::expected_withdrawals")]
 pub async fn expected_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -530,6 +532,7 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/root`
+#[instrument(skip_all, level = "debug", name = "http_api::state_root")]
 pub async fn state_root<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -549,6 +552,7 @@ pub async fn state_root<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/fork`
+#[instrument(skip_all, level = "debug", name = "http_api::state_fork")]
 pub async fn state_fork<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -566,6 +570,11 @@ pub async fn state_fork<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/finality_checkpoints`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::state_finality_checkpoints"
+)]
 pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -589,6 +598,7 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators`
+#[instrument(skip_all, level = "debug", name = "http_api::get_state_validators")]
 pub async fn get_state_validators<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -604,6 +614,7 @@ pub async fn get_state_validators<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/states/{state_id}/validators`
+#[instrument(skip_all, level = "debug", name = "http_api::post_state_validators")]
 pub async fn post_state_validators<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -619,6 +630,12 @@ pub async fn post_state_validators<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/states/{state_id}/validator_identities`
+#[expect(clippy::type_complexity)]
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::state_validator_identities"
+)]
 pub async fn state_validator_identities<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -671,6 +688,7 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validators/{validator_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::state_validator")]
 pub async fn state_validator<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -710,6 +728,11 @@ pub async fn state_validator<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validator_balances`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::get_state_validator_balances"
+)]
 pub async fn get_state_validator_balances<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -725,6 +748,11 @@ pub async fn get_state_validator_balances<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/states/{state_id}/validator_balances`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::post_state_validator_balances"
+)]
 pub async fn post_state_validator_balances<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -739,6 +767,7 @@ pub async fn post_state_validator_balances<P: Preset, W: Wait>(
     )
 }
 
+#[instrument(skip_all, level = "debug")]
 fn state_validator_balances<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
@@ -772,6 +801,7 @@ fn state_validator_balances<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/committees`
+#[instrument(skip_all, level = "debug", name = "http_api::state_committees")]
 pub async fn state_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -844,6 +874,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/sync_committees`
+#[instrument(skip_all, level = "debug", name = "http_api::state_sync_committees")]
 pub async fn state_sync_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -900,6 +931,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/proposer_lookahead`
+#[instrument(skip_all, level = "debug", name = "http_api::state_proposer_lookahead")]
 pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -926,6 +958,11 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_consolidations`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::state_pending_consolidations"
+)]
 pub async fn state_pending_consolidations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -951,6 +988,7 @@ pub async fn state_pending_consolidations<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_deposits`
+#[instrument(skip_all, level = "debug", name = "http_api::state_pending_deposits")]
 pub async fn state_pending_deposits<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -976,6 +1014,11 @@ pub async fn state_pending_deposits<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_partial_withdrawals`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::state_pending_partial_withdrawals"
+)]
 pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1001,6 +1044,7 @@ pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/randao`
+#[instrument(skip_all, level = "debug", name = "http_api::state_randao")]
 pub async fn state_randao<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1042,6 +1086,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
 //                      [Lighthouse]:        https://github.com/sigp/lighthouse/blob/441fc1691b69f9edc4bbdc6665f3efab16265c9b/beacon_node/http_api/src/lib.rs#L1129-L1136
 //                      [Nimbus]:            https://github.com/status-im/nimbus-eth2/blob/d19ffcaa0d9505d81a83d7be0049154cae871c7b/beacon_chain/rpc/rest_beacon_api.nim#L781-L822
 /// `GET /eth/v1/beacon/headers`
+#[instrument(skip_all, level = "debug", name = "http_api::block_headers")]
 pub async fn block_headers<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     EthQuery(query): EthQuery<BlockHeadersQuery>,
@@ -1108,6 +1153,7 @@ pub async fn block_headers<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/headers/{block_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::block_id_headers")]
 pub async fn block_id_headers<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1136,6 +1182,7 @@ pub async fn block_id_headers<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/beacon/blocks/{block_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::block")]
 pub async fn block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1157,6 +1204,7 @@ pub async fn block<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/blocks/{block_id}/root`
+#[instrument(skip_all, level = "debug", name = "http_api::block_root")]
 pub async fn block_root<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1174,6 +1222,7 @@ pub async fn block_root<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/blocks/{block_id}/attestations`
+#[instrument(skip_all, level = "debug", name = "http_api::block_attestations")]
 pub async fn block_attestations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1196,6 +1245,7 @@ pub async fn block_attestations<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/beacon/blocks/{block_id}/attestations`
+#[instrument(skip_all, level = "debug", name = "http_api::block_attestations_v2")]
 pub async fn block_attestations_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1219,6 +1269,7 @@ pub async fn block_attestations_v2<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/blinded_blocks/{block_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::blinded_block")]
 pub async fn blinded_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1244,6 +1295,8 @@ pub async fn blinded_block<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/blob_sidecars/{block_id}`
+#[expect(clippy::type_complexity)]
+#[instrument(skip_all, level = "debug", name = "http_api::blob_sidecars")]
 pub async fn blob_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
@@ -1327,6 +1380,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/blobs/{block_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::blobs")]
 pub async fn blobs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
@@ -1427,13 +1481,10 @@ pub async fn blobs<P: Preset, W: Wait>(
 
 /// `POST /eth/v1/beacon/blocks`
 #[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api"
-    ),
-    name = "http_api",
     skip_all,
+    level = "debug",
+    name = "http_api::publish_block",
+    fields(slot = %signed_api_block.slot())
 )]
 pub async fn publish_block<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
@@ -1499,14 +1550,10 @@ pub async fn publish_block<P: Preset, W: Wait>(
 
 /// `POST /eth/v1/beacon/blinded_blocks`
 #[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        block_slot = %signed_blinded_block.message().slot()
-    ),
-    name = "http_api",
     skip_all,
+    level = "debug",
+    name = "http_api::publish_blinded_block",
+    fields(slot = %signed_blinded_block.message().slot())
 )]
 pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
@@ -1584,6 +1631,12 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/blinded_blocks`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::publish_blinded_block_v2",
+    fields(slot = %signed_blinded_block.message().slot())
+)]
 pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
@@ -1634,6 +1687,12 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/blocks`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::publish_block_v2",
+    fields(slot = %signed_api_block.slot())
+)]
 pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -1695,6 +1754,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/rewards/blocks/{block_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::block_rewards")]
 pub async fn block_rewards<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -1749,6 +1809,7 @@ pub async fn block_rewards<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/rewards/sync_committee/{block_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::sync_committee_rewards")]
 pub async fn sync_committee_rewards<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
@@ -1814,6 +1875,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/pool/attestations`
+#[instrument(skip_all, level = "debug", name = "http_api::pool_attestations")]
 pub async fn pool_attestations<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
@@ -1832,6 +1894,7 @@ pub async fn pool_attestations<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/beacon/pool/attestations`
+#[instrument(skip_all, level = "debug", name = "http_api::pool_attestations_v2")]
 pub async fn pool_attestations_v2<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(attestation_agg_pool): State<Arc<AttestationAggPool<P, W>>>,
@@ -1850,6 +1913,11 @@ pub async fn pool_attestations_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/proposer_slashings`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_proposer_slashing"
+)]
 pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -1873,6 +1941,7 @@ pub async fn submit_pool_proposer_slashing<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/pool/proposer_slashings`
+#[instrument(skip_all, level = "debug", name = "http_api::pool_proposer_slashings")]
 pub async fn pool_proposer_slashings<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
 ) -> Result<EthResponse<Vec<ProposerSlashing>>, Error> {
@@ -1882,6 +1951,11 @@ pub async fn pool_proposer_slashings<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/voluntary_exits`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_voluntary_exit"
+)]
 pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -1905,6 +1979,7 @@ pub async fn submit_pool_voluntary_exit<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/pool/voluntary_exits`
+#[instrument(skip_all, level = "debug", name = "http_api::pool_voluntary_exits")]
 pub async fn pool_voluntary_exits<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
 ) -> Result<EthResponse<Vec<SignedVoluntaryExit>>, Error> {
@@ -1914,6 +1989,11 @@ pub async fn pool_voluntary_exits<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/attester_slashings`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_attester_slashing"
+)]
 pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -1939,6 +2019,11 @@ pub async fn submit_pool_attester_slashing<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/pool/attester_slashings`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_attester_slashing_v2"
+)]
 pub async fn submit_pool_attester_slashing_v2<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -1962,6 +2047,7 @@ pub async fn submit_pool_attester_slashing_v2<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/pool/attester_slashings`
+#[instrument(skip_all, level = "debug", name = "http_api::pool_attester_slashings")]
 pub async fn pool_attester_slashings<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
 ) -> Result<EthResponse<Vec<AttesterSlashing<P>>>, Error> {
@@ -1971,6 +2057,11 @@ pub async fn pool_attester_slashings<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/beacon/pool/attester_slashings`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::pool_attester_slashings_v2"
+)]
 pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
@@ -2000,15 +2091,7 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/attestations`
-#[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-    ),
-    name = "http_api",
-    skip_all
-)]
+#[instrument(skip_all, level = "debug", name = "http_api::submit_pool_attestations")]
 pub async fn submit_pool_attestations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -2025,6 +2108,11 @@ pub async fn submit_pool_attestations<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/pool/attestations`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_attestations_v2"
+)]
 pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
@@ -2046,6 +2134,11 @@ pub async fn submit_pool_attestations_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/beacon/pool/sync_committees`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_sync_committees"
+)]
 pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(sync_committee_agg_pool): State<Arc<SyncCommitteeAggPool<P, W>>>,
@@ -2115,6 +2208,11 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/pool/bls_to_execution_changes`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::pool_bls_to_execution_changes"
+)]
 pub async fn pool_bls_to_execution_changes(
     State(bls_to_execution_change_pool): State<Arc<BlsToExecutionChangePool>>,
 ) -> Result<EthResponse<Vec<SignedBlsToExecutionChange>>, Error> {
@@ -2126,6 +2224,11 @@ pub async fn pool_bls_to_execution_changes(
 }
 
 /// `POST /eth/v1/beacon/pool/bls_to_execution_change`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::submit_pool_bls_to_execution_change"
+)]
 pub async fn submit_pool_bls_to_execution_change(
     State(bls_to_execution_change_pool): State<Arc<BlsToExecutionChangePool>>,
     EthJson(json_vec): EthJson<Vec<Value>>,
@@ -2168,6 +2271,7 @@ pub async fn submit_pool_bls_to_execution_change(
 }
 
 /// `GET /eth/v1/config/fork_schedule`
+#[instrument(skip_all, level = "debug", name = "http_api::fork_schedule")]
 pub async fn fork_schedule<P: Preset>(
     State(chain_config): State<Arc<ChainConfig>>,
 ) -> EthResponse<Vec<Fork>> {
@@ -2186,6 +2290,7 @@ pub async fn fork_schedule<P: Preset>(
 }
 
 /// `GET /eth/v1/config/spec`
+#[instrument(skip_all, level = "debug", name = "http_api::config_spec")]
 pub async fn config_spec<P: Preset>(
     State(chain_config): State<Arc<ChainConfig>>,
 ) -> EthResponse<FullConfig> {
@@ -2193,6 +2298,7 @@ pub async fn config_spec<P: Preset>(
 }
 
 /// `GET /eth/v1/config/deposit_contract`
+#[instrument(skip_all, level = "debug", name = "http_api::deposit_contract")]
 pub async fn deposit_contract(
     State(chain_config): State<Arc<ChainConfig>>,
 ) -> EthResponse<DepositContractResponse> {
@@ -2203,6 +2309,7 @@ pub async fn deposit_contract(
 }
 
 /// `GET /eth/v1/debug/fork_choice`
+#[instrument(skip_all, level = "debug", name = "http_api::debug_fork_choice")]
 pub async fn debug_fork_choice<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
 ) -> Json<ForkChoiceContext> {
@@ -2212,6 +2319,12 @@ pub async fn debug_fork_choice<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/debug/beacon/data_column_sidecars/{block_id}`
+#[expect(clippy::type_complexity)]
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::debug_beacon_data_column_sidecars"
+)]
 pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -2288,6 +2401,7 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/debug/beacon/states/{state_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::beacon_state")]
 pub async fn beacon_state<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -2309,6 +2423,7 @@ pub async fn beacon_state<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/debug/beacon/heads`
+#[instrument(skip_all, level = "debug", name = "http_api::beacon_heads")]
 pub async fn beacon_heads<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
 ) -> EthResponse<Vec<ForkTip>> {
@@ -2361,6 +2476,7 @@ pub async fn beacon_events<P: Preset>(
 }
 
 /// `GET /eth/v1/node/identity`
+#[instrument(skip_all, level = "debug", name = "http_api::node_identity")]
 pub async fn node_identity<P: Preset>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
 ) -> Result<EthResponse<NodeIdentity>, Error> {
@@ -2374,6 +2490,7 @@ pub async fn node_identity<P: Preset>(
 }
 
 /// `GET /eth/v1/node/peers`
+#[instrument(skip_all, level = "debug", name = "http_api::node_peers")]
 pub async fn node_peers<P: Preset>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthQuery(query): EthQuery<NodePeersQuery>,
@@ -2389,6 +2506,7 @@ pub async fn node_peers<P: Preset>(
 }
 
 /// `GET /eth/v1/node/peers/{peer_id}`
+#[instrument(skip_all, level = "debug", name = "http_api::node_peer")]
 pub async fn node_peer<P: Preset>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthPath(peer_id): EthPath<PeerId>,
@@ -2403,6 +2521,7 @@ pub async fn node_peer<P: Preset>(
 }
 
 /// `GET /eth/v1/node/peer_count`
+#[instrument(skip_all, level = "debug", name = "http_api::node_peer_count")]
 pub async fn node_peer_count<P: Preset>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
 ) -> Result<EthResponse<NodePeerCountResponse>, Error> {
@@ -2416,6 +2535,7 @@ pub async fn node_peer_count<P: Preset>(
 }
 
 /// `GET /eth/v1/node/version`
+#[instrument(skip_all, level = "debug", name = "http_api::node_version")]
 pub async fn node_version(State(network_config): State<Arc<NetworkConfig>>) -> Response {
     let data = NodeVersionResponse {
         version: network_config.identify_agent_version.as_deref(),
@@ -2438,6 +2558,7 @@ pub async fn node_version_v2(State(eth1_api): State<Arc<Eth1Api>>) -> Response {
 }
 
 /// `GET /eth/v1/node/syncing`
+#[instrument(skip_all, level = "debug", name = "http_api::node_syncing_status")]
 pub async fn node_syncing_status<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(eth1_api): State<Arc<Eth1Api>>,
@@ -2463,6 +2584,7 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/node/health`
+#[instrument(skip_all, level = "debug", name = "http_api::node_health")]
 pub async fn node_health<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(is_synced): State<Arc<SyncedStatus>>,
@@ -2478,6 +2600,11 @@ pub async fn node_health<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/validator/duties/attester/{epoch}`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_attester_duties"
+)]
 pub async fn validator_attester_duties<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -2555,6 +2682,11 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/duties/proposer/{epoch}`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_proposer_duties"
+)]
 pub async fn validator_proposer_duties<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
@@ -2662,6 +2794,11 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
 //
 //                      [Altair Honest Validator specification]: https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/altair/validator.md#sync-committee-subnet-stability
 /// `POST /eth/v1/validator/duties/sync/{epoch}`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_sync_committee_duties"
+)]
 pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
@@ -2748,6 +2885,11 @@ fn state_sync_committee<P: Preset>(
 }
 
 /// `GET /eth/v1/validator/aggregate_attestation`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_aggregate_attestation"
+)]
 pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
@@ -2786,6 +2928,11 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v2/validator/aggregate_attestation`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_aggregate_attestation_v2"
+)]
 pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
@@ -2830,16 +2977,7 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/blinded_blocks/{slot}`
-#[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        slot = %slot
-    ),
-    name = "http_api",
-    skip_all,
-)]
+#[instrument(skip_all, level = "debug", name = "http_api::validator_blinded_block")]
 pub async fn validator_blinded_block<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
@@ -2910,16 +3048,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
 
 /// `GET /eth/v2/validator/blocks/{slot}`
 #[expect(clippy::type_complexity)]
-#[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        slot = %slot
-    ),
-    name = "http_api",
-    skip_all,
-)]
+#[instrument(skip_all, level = "debug", name = "http_api::validator_block")]
 pub async fn validator_block<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
@@ -2970,6 +3099,8 @@ pub async fn validator_block<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v3/validator/blocks/{slot}`
+#[expect(clippy::type_complexity)]
+#[instrument(skip_all, level = "debug", name = "http_api::validator_block_v3")]
 pub async fn validator_block_v3<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
@@ -3060,15 +3191,9 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/validator/attestation_data`
 #[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        slot = %query.slot,
-        committee_index = %query.committee_index
-    ),
-    name = "http_api",
     skip_all,
+    level = "debug",
+    name = "http_api::validator_attestation_data"
 )]
 pub async fn validator_attestation_data<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
@@ -3188,6 +3313,11 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/validator/beacon_committee_subscriptions`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_subscribe_to_beacon_committee"
+)]
 pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
@@ -3251,6 +3381,11 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/validator/sync_committee_subscriptions`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_subscribe_to_sync_committees"
+)]
 pub async fn validator_subscribe_to_sync_committees<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(subnet_service_tx): State<UnboundedSender<ToSubnetService>>,
@@ -3265,6 +3400,11 @@ pub async fn validator_subscribe_to_sync_committees<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/sync_committee_contribution`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_sync_committee_contribution"
+)]
 pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
     State(sync_committee_agg_pool): State<Arc<SyncCommitteeAggPool<P, W>>>,
     EthQuery(query): EthQuery<SyncCommitteeContributionQuery>,
@@ -3297,6 +3437,11 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 /// [the specification]: https://ethereum.github.io/beacon-APIs/
 // We box aggregates to reduce the size of various enums.
 // It's probably faster to deserialize them directly into `Vec<Box<_>>`.
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_publish_aggregate_and_proofs_v1"
+)]
 pub async fn validator_publish_aggregate_and_proofs_v1<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
@@ -3316,6 +3461,11 @@ pub async fn validator_publish_aggregate_and_proofs_v1<P: Preset, W: Wait>(
 /// [the specification]: https://ethereum.github.io/beacon-APIs/
 // We box aggregates to reduce the size of various enums.
 // It's probably faster to deserialize them directly into `Vec<Box<_>>`.
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_publish_aggregate_and_proofs_v2"
+)]
 pub async fn validator_publish_aggregate_and_proofs_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
@@ -3411,6 +3561,11 @@ pub async fn validator_publish_contributions_and_proofs<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v1/validator/prepare_beacon_proposer`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_prepare_beacon_proposer"
+)]
 pub async fn validator_prepare_beacon_proposer<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     EthJson(proposers): EthJson<Vec<ProposerData>>,
@@ -3425,6 +3580,11 @@ pub async fn validator_prepare_beacon_proposer<P: Preset, W: Wait>(
 /// This deviates from [the specification] by returning errors as [`IndexedError`].
 ///
 /// [the specification]: https://ethereum.github.io/beacon-APIs/
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_register_validator"
+)]
 pub async fn validator_register_validator<P: Preset>(
     State(api_to_validator_tx): State<UnboundedSender<ApiToValidator<P>>>,
     EthJson(registrations): EthJson<Vec<SignedValidatorRegistrationV1>>,
@@ -3461,6 +3621,7 @@ pub async fn validator_register_validator<P: Preset>(
 }
 
 /// `POST /eth/v1/validator/liveness/{epoch}`
+#[instrument(skip_all, level = "debug", name = "http_api::validator_liveness")]
 pub async fn validator_liveness<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_liveness_tx): State<Option<UnboundedSender<ApiToLiveness>>>,
@@ -3496,6 +3657,7 @@ pub async fn validator_sync_committee_selections() -> Error {
 }
 
 /// `POST /eth/v2/debug/tracing/log_level`
+#[instrument(skip_all, level = "debug", name = "http_api::post_log_level")]
 pub async fn post_log_level(
     State(handle): State<Option<TracingHandle>>,
     Json(req): Json<LogLevelRequest>,
@@ -3527,6 +3689,7 @@ pub async fn post_log_level(
 }
 
 /// `POST /eth/v2/debug/tracing/trace_level`
+#[instrument(skip_all, level = "debug", name = "http_api::post_trace_level")]
 pub async fn post_trace_level(
     State(handle): State<Option<TracingHandle>>,
     Json(req): Json<TraceLevelRequest>,
@@ -3629,16 +3792,7 @@ fn state_validators<P: Preset, W: Wait>(
         .finalized(finalized))
 }
 
-#[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        block_root = %block.message().hash_tree_root()
-    ),
-    name = "http_api",
-    skip_all,
-)]
+#[instrument(skip_all, level = "debug")]
 async fn publish_signed_block<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,
@@ -3694,6 +3848,7 @@ async fn publish_signed_block<P: Preset, W: Wait>(
     Ok(status_code)
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     event_channels: Arc<EventChannels<P>>,
@@ -3734,6 +3889,7 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
     Ok(None)
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     event_channels: Arc<EventChannels<P>>,
@@ -3782,6 +3938,7 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
     Ok(None)
 }
 
+#[instrument(skip_all, level = "debug")]
 fn publish_block_to_network<P: Preset>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: &[Arc<BlobSidecar<P>>],
@@ -3794,6 +3951,7 @@ fn publish_block_to_network<P: Preset>(
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
+#[instrument(skip_all, level = "debug")]
 fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
@@ -3807,6 +3965,7 @@ fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
 }
 
 // TODO(feature/fulu): merge with `publish_signed_block`
+#[instrument(skip_all, level = "debug")]
 async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
@@ -3865,6 +4024,7 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     Ok(status_code)
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn publish_signed_block_v2<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     blob_sidecars: Vec<BlobSidecar<P>>,
@@ -3959,6 +4119,7 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
 }
 
 // TODO(feature/fulu): merge with `publish_signed_block_v2`
+#[instrument(skip_all, level = "debug")]
 async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
@@ -4062,6 +4223,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     Ok(status_code)
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn get_pool_attestations<P: Preset, W: Wait>(
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     slot: Slot,
@@ -4097,6 +4259,7 @@ async fn get_pool_attestations<P: Preset, W: Wait>(
         .collect()
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn wait_for_validation<P: Preset>(
     attestation: Arc<Attestation<P>>,
     index: usize,
@@ -4112,6 +4275,7 @@ async fn wait_for_validation<P: Preset>(
 }
 
 #[expect(clippy::type_complexity)]
+#[instrument(skip_all, level = "debug")]
 fn build_attestation_item<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     index: usize,
@@ -4158,15 +4322,7 @@ fn build_attestation_item<P: Preset, W: Wait>(
     ))
 }
 
-#[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api"
-    ),
-    name = "http_api",
-    skip_all,
-)]
+#[instrument(skip_all, level = "debug")]
 async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     event_channels: Arc<EventChannels<P>>,
@@ -4277,6 +4433,7 @@ async fn submit_attestations_to_pool<P: Preset, W: Wait>(
     Ok(())
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn submit_blob_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     blob_sidecar: Arc<BlobSidecar<P>>,
@@ -4288,6 +4445,7 @@ async fn submit_blob_sidecar<P: Preset, W: Wait>(
     receiver.await?
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn submit_blob_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     blob_sidecars: Vec<Arc<BlobSidecar<P>>>,
@@ -4313,6 +4471,7 @@ async fn submit_blob_sidecars<P: Preset, W: Wait>(
     }
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn submit_data_column_sidecar<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     data_column_sidecar: Arc<DataColumnSidecar<P>>,
@@ -4326,6 +4485,7 @@ async fn submit_data_column_sidecar<P: Preset, W: Wait>(
     receiver.await?
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn submit_data_column_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
@@ -4353,6 +4513,7 @@ async fn submit_data_column_sidecars<P: Preset, W: Wait>(
     }
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     event_channels: &EventChannels<P>,
@@ -4396,6 +4557,7 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
     Ok(())
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     block: Arc<SignedBeaconBlock<P>>,
@@ -4473,6 +4635,7 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
         .collect::<Result<Vec<_>>>()
 }
 
+#[instrument(skip_all, level = "debug")]
 fn construct_blob_sidecars_from_blobs_and_commitments<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     block: &SignedBeaconBlock<P>,
@@ -4493,6 +4656,7 @@ fn construct_blob_sidecars_from_blobs_and_commitments<P: Preset, W: Wait>(
     })
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     signed_beacon_block: Arc<SignedBeaconBlock<P>>,

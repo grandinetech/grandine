@@ -13,10 +13,6 @@ use tracing::Span;
 
 use crate::{ApiError, misc::ApiMetrics};
 
-// `TraceLayer` already logs most of this out of the box, but we still use `log`.
-// We have to duplicate some of the information because `log` does not have spans.
-//
-// Enabling the `log` feature of the `tracing` crate isn't enough.
 // By default, `TraceLayer` emits events at `DEBUG` with the default target.
 // Our application filters them out.
 

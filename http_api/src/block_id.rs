@@ -4,6 +4,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::BlockId;
+use tracing::instrument;
 use types::{
     combined::SignedBeaconBlock, nonstandard::WithStatus, phase0::primitives::H256, preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -11,6 +12,7 @@ use types::{
 
 use crate::error::Error;
 
+#[instrument(level = "debug", skip_all, fields(%block_id))]
 pub fn block<P: Preset, W: Wait>(
     block_id: BlockId,
     controller: &ApiController<P, W>,
@@ -32,6 +34,7 @@ pub fn block<P: Preset, W: Wait>(
     .ok_or(Error::BlockNotFound)
 }
 
+#[instrument(level = "debug", skip_all, fields(%block_id))]
 pub fn block_root<P: Preset, W: Wait>(
     block_id: BlockId,
     controller: &ApiController<P, W>,

@@ -1192,7 +1192,7 @@ impl GrandineArgs {
         if !unknown.is_empty() {
             warn_with_peers!(
                 "unknown configuration variables: [{:?}]",
-                unknown.keys().format(", "),
+                unknown.keys().join(", "),
             );
         }
 
@@ -1530,7 +1530,7 @@ enum Error {
     MissingEth1RpcUrlsForCustomWithoutGenesisState,
     #[error(
         "{phase} variables in {preset_name} preset do not match file ({})",
-        differences.iter().format(", "),
+        differences.iter().join(", "),
     )]
     PresetMismatch {
         preset_name: PresetName,
@@ -1539,7 +1539,7 @@ enum Error {
     },
     #[error(
         "variables in configuration do not match file ({})",
-        differences.iter().format(", "),
+        differences.iter().join(", "),
     )]
     ConfigMismatch { differences: Vec<Difference> },
     #[error("--unfinalized-states-in-memory must be at least {minimum}")]

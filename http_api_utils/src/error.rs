@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use thiserror::Error;
+use tracing::instrument;
 
 use crate::{misc::Direction, traits::ApiError};
 
@@ -33,6 +34,7 @@ impl ApiError for Error {
 }
 
 impl IntoResponse for Error {
+    #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let status_code = self.status_code();
         let extension = Extension(Arc::new(self));

@@ -78,7 +78,7 @@ impl<'path> Case<'path> {
                 "{}/{} requests failed{separator}{:?}",
                 failures.len(),
                 successes.len() + failures.len(),
-                failures.into_iter().format(separator),
+                failures.into_iter().join(separator),
             );
 
             Ok(())

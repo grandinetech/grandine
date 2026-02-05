@@ -16,6 +16,7 @@ use serde::{Serialize, Serializer};
 use ssz::{H256, ReadError};
 use thiserror::Error;
 use tokio::task::JoinError;
+use tracing::instrument;
 use types::{
     altair::primitives::SubcommitteeIndex,
     deneb::primitives::{BlobIndex, VersionedHash},
@@ -197,6 +198,7 @@ impl Serialize for Error {
 }
 
 impl IntoResponse for Error {
+    #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let status_code = self.status_code();
         let body = Json(self.body()).into_response();
