@@ -9,7 +9,7 @@ pub trait ApiError {
     // - <https://github.com/dtolnay/thiserror/issues/98>
     // - <https://github.com/dtolnay/thiserror/issues/214>
     fn format_sources(&self) -> impl Display + '_ {
-        self.sources().format(": ")
+        self.sources().join(": ")
     }
 
     // `StdError::sources` is not stable as of Rust 1.92.0.

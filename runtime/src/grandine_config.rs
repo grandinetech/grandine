@@ -131,7 +131,7 @@ impl GrandineConfig {
 
         self.storage_config.print_db_sizes();
 
-        info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().format(", "));
+        info!("Eth1 RPC URLs: [{}]", eth1_rpc_urls.iter().join(", "));
         info!("graffiti: {graffiti:?}");
 
         if *disable_blockprint_graffiti {
@@ -200,7 +200,7 @@ impl GrandineConfig {
         if !web3signer_config.urls.is_empty() {
             info!(
                 "using Web3Signer API to sign validator messages (API URLs: [{}])",
-                web3signer_config.urls.iter().format(", "),
+                web3signer_config.urls.iter().join(", "),
             );
         }
 

@@ -4,10 +4,12 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use genesis::AnchorCheckpointProvider;
 use http_api_utils::StateId;
+use tracing::instrument;
 use types::{combined::BeaconState, nonstandard::WithStatus, preset::Preset};
 
 use crate::error::Error;
 
+#[instrument(level = "debug", skip_all, fields(%state_id))]
 pub fn state<P: Preset, W: Wait>(
     state_id: &StateId,
     controller: &ApiController<P, W>,

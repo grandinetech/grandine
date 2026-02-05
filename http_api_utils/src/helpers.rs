@@ -1,7 +1,7 @@
 use core::time::Duration;
 
 use anyhow::{Error as AnyhowError, Result};
-use axum::{Router, error_handling::HandleErrorLayer, http::StatusCode};
+use axum::{Router, error_handling::HandleErrorLayer, extract::Request, http::StatusCode};
 use features::Feature;
 use http::{HeaderMap, HeaderValue};
 use thiserror::Error;
@@ -10,6 +10,7 @@ use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     trace::TraceLayer,
 };
+use tracing::debug_span;
 use types::nonstandard::Phase;
 
 use crate::{ApiError, ETH_CONSENSUS_VERSION, logging, middleware, misc::ApiMetrics};
@@ -38,6 +39,14 @@ pub fn extend_router_with_middleware<E: ApiError + Send + Sync + 'static>(
 
     router = router.layer(
         TraceLayer::new_for_http()
+            .make_span_with(move |request: &Request<_>| {
+                debug_span!(
+                    "http_request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                    version = ?request.version(),
+                )
+            })
             .on_request(logging::log_request)
             .on_response(logging::log_response::<E>(api_metrics)),
     );
