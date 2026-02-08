@@ -22,6 +22,7 @@ use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
+use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
@@ -1240,6 +1241,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthPath(block_id): EthPath<BlockId>,
     EthQuery(query): EthQuery<BlobSidecarsQuery>,
     headers: HeaderMap,
@@ -1282,6 +1284,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
             block.clone_arc(),
             block_root,
             metrics.as_ref(),
+            dedicated_executor,
         )
         .await?;
 
@@ -1321,6 +1324,7 @@ pub async fn blobs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthPath(block_id): EthPath<BlockId>,
     EthQuery(query): EthQuery<BlobsQuery>,
     headers: HeaderMap,
@@ -1376,6 +1380,7 @@ pub async fn blobs<P: Preset, W: Wait>(
             block,
             block_root,
             metrics.as_ref(),
+            dedicated_executor,
         )
         .await?;
 
@@ -1428,6 +1433,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
     State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthJsonOrSszWithOptionalPhase(signed_api_block, _): EthJsonOrSszWithOptionalPhase<
         Box<SignedAPIBlock<P>>,
         SignedAPIBlockPhaseDeserializer<P>,
@@ -1449,6 +1455,7 @@ pub async fn publish_block<P: Preset, W: Wait>(
             blobs,
             proofs,
             metrics,
+            dedicated_executor,
         )
         .await?;
 
@@ -1500,6 +1507,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthJsonOrSszWithOptionalPhase(signed_blinded_block, _): EthJsonOrSszWithOptionalPhase<
         Box<SignedBlindedBeaconBlock<P>>,
         SignedBlindedBeaconPhaseDeserializer<P>,
@@ -1538,6 +1546,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
             blobs,
             proofs,
             metrics,
+            dedicated_executor,
         )
         .await?;
 
@@ -1623,6 +1632,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
     EthJsonOrSsz(signed_api_block, _): EthJsonOrSsz<
         Box<SignedAPIBlock<P>>,
@@ -1645,6 +1655,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
             blobs,
             proofs,
             metrics,
+            dedicated_executor,
         )
         .await?;
 
@@ -4325,74 +4336,76 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
     block_root: H256,
     metrics: Option<&Arc<Metrics>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<Blob<P>>> {
     let metrics = metrics.cloned();
 
-    tokio::task::spawn_blocking(move || {
-        let mut data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
+    let mut data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
 
-        if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
-            return Ok(vec![]);
-        }
+    if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
+        return Ok(vec![]);
+    }
 
-        let half_columns = P::NumberOfColumns::U64.saturating_div(2);
+    let half_columns = P::NumberOfColumns::U64.saturating_div(2);
 
-        if (0..half_columns).any(|index| {
-            !data_column_sidecars
-                .iter()
-                .any(|sidecar| sidecar.index() == index)
-        }) {
-            let partial_matrix = data_column_sidecars
-                .iter()
-                .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(sidecar))
-                .collect::<Vec<_>>();
+    if (0..half_columns).any(|index| {
+        !data_column_sidecars
+            .iter()
+            .any(|sidecar| sidecar.index() == index)
+    }) {
+        let partial_matrix = data_column_sidecars
+            .iter()
+            .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(sidecar))
+            .collect::<Vec<_>>();
 
-            let reconstruction_timer = metrics
-                .as_ref()
-                .map(|metrics| metrics.columns_reconstruction_time.start_timer());
+        let reconstruction_timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.columns_reconstruction_time.start_timer());
 
-            let full_matrix =
-                eip_7594::recover_matrix(&partial_matrix, controller.store_config().kzg_backend)?;
+        let full_matrix = eip_7594::recover_matrix(
+            partial_matrix,
+            controller.store_config().kzg_backend,
+            dedicated_executor,
+        )
+        .await?;
 
-            prometheus_metrics::stop_and_record(reconstruction_timer);
+        prometheus_metrics::stop_and_record(reconstruction_timer);
 
-            let _timer = metrics
-                .as_ref()
-                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
-            let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
+        let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
-            data_column_sidecars =
-                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
-        }
+        data_column_sidecars =
+            eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
+    }
 
-        let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
-        for matrix in data_column_sidecars
-            .into_iter()
-            .take_while(|sidecar| (0..half_columns).contains(&sidecar.index()))
-            .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
-        {
-            blobs_matrix_map
-                .entry(matrix.row_index)
-                .or_default()
-                .push(matrix);
-        }
-
+    let mut blobs_matrix_map = BTreeMap::<BlobIndex, Vec<MatrixEntry<P>>>::new();
+    for matrix in data_column_sidecars
+        .into_iter()
+        .take_while(|sidecar| (0..half_columns).contains(&sidecar.index()))
+        .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar).into_iter())
+    {
         blobs_matrix_map
-            .into_values()
-            .map(|entries| {
-                ContiguousVector::try_from_iter(
-                    entries
-                        .into_iter()
-                        .flat_map(|entry| entry.cell.as_bytes().to_vec().into_iter()),
-                )
-                .map(ByteVector::from)
-                .map(Blob::<P>::from)
-                .map_err(Into::into)
-            })
-            .collect::<Result<Vec<_>>>()
-    })
-    .await?
+            .entry(matrix.row_index)
+            .or_default()
+            .push(matrix);
+    }
+
+    blobs_matrix_map
+        .into_values()
+        .map(|entries| {
+            ContiguousVector::try_from_iter(
+                entries
+                    .into_iter()
+                    .flat_map(|entry| entry.cell.as_bytes().to_vec().into_iter()),
+            )
+            .map(ByteVector::from)
+            .map(Blob::<P>::from)
+            .map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>>>()
 }
 
 fn construct_blob_sidecars_from_blobs_and_commitments<P: Preset, W: Wait>(
@@ -4421,6 +4434,7 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
     blobs: Option<ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>>,
     proofs: Option<KzgProofs<P>>,
     metrics: Option<Arc<Metrics>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     eip_7594::construct_data_column_sidecars_from_blobs(
         signed_beacon_block.into(),
@@ -4431,6 +4445,7 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
             .collect_vec(),
         controller.store_config().kzg_backend,
         metrics,
+        dedicated_executor,
     )
     .await
 }

@@ -332,7 +332,7 @@ impl<P: Preset> Context<P> {
             validator_channels,
             network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
-            dedicated_executor,
+            dedicated_executor.clone_arc(),
         );
 
         let subnet_service = SubnetService::new(
@@ -371,6 +371,7 @@ impl<P: Preset> Context<P> {
             channels,
             metrics: None,
             tracing_handle: None,
+            dedicated_executor,
         };
 
         let test_state = TestState {

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
+use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
@@ -20,6 +21,7 @@ pub struct ReconstructDataColumnSidecarsTask<P: Preset, W: Wait> {
     pub block_root: H256,
     pub block: Arc<SignedBeaconBlock<P>>,
     pub metrics: Option<Arc<Metrics>>,
+    pub dedicated_executor: Arc<DedicatedExecutor>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
@@ -32,6 +34,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             block_root,
             block,
             metrics,
+            dedicated_executor,
         } = self;
 
         let Ok(available_columns) = controller.accepted_data_column_sidecars_by_ids(
@@ -82,24 +85,27 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             .flat_map(|sidecar| misc::compute_matrix_for_data_column_sidecar(&sidecar))
             .collect::<Vec<_>>();
 
-        let reconstruction_result =
-            eip_7594::recover_matrix(&partial_matrix, controller.store_config().kzg_backend)
-                .tap(|_| prometheus_metrics::stop_and_record(columns_reconstruction_timer))
-                .and_then(|full_matrix| {
-                    let timer = metrics
-                        .as_ref()
-                        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+        let reconstruction_result = eip_7594::recover_matrix(
+            partial_matrix,
+            controller.store_config().kzg_backend,
+            dedicated_executor,
+        )
+        .await
+        .tap(|_| prometheus_metrics::stop_and_record(columns_reconstruction_timer))
+        .and_then(|full_matrix| {
+            let timer = metrics
+                .as_ref()
+                .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
-                    let cells_and_kzg_proofs =
-                        eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
+            let cells_and_kzg_proofs = eip_7594::construct_cells_and_kzg_proofs(full_matrix)?;
 
-                    let data_column_sidecars =
-                        eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
+            let data_column_sidecars =
+                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?;
 
-                    prometheus_metrics::stop_and_record(timer);
+            prometheus_metrics::stop_and_record(timer);
 
-                    Ok(data_column_sidecars)
-                });
+            Ok(data_column_sidecars)
+        });
 
         match reconstruction_result {
             Ok(data_column_sidecars) => {

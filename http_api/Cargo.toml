@@ -16,6 +16,7 @@ block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }
 byteorder = { workspace = true }
+dedicated_executor = { workspace = true }
 derive_more = { workspace = true }
 enum-iterator = { workspace = true }
 eip_7594 = { workspace = true }
