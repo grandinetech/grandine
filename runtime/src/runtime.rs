@@ -346,6 +346,7 @@ pub async fn run_after_genesis<P: Preset>(
         metrics.clone(),
         blob_fetcher_to_p2p_tx,
         execution_service_to_blob_fetcher_rx,
+        dedicated_executor_normal_priority.clone_arc(),
     );
 
     let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
@@ -577,6 +578,7 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         dedicated_executor_for_reconstruction,
         metrics.clone(),
+        dedicated_executor_low_priority.clone_arc(),
     );
 
     let sync_committee_agg_pool = SyncCommitteeAggPool::new(
@@ -721,7 +723,7 @@ pub async fn run_after_genesis<P: Preset>(
         received_data_column_sidecars,
         data_dumper,
         network.network_globals().clone_arc(),
-        dedicated_executor_low_priority,
+        dedicated_executor_low_priority.clone_arc(),
     )
     .await?;
 
@@ -761,6 +763,7 @@ pub async fn run_after_genesis<P: Preset>(
                 channels: http_api_channels,
                 metrics: metrics.clone(),
                 tracing_handle,
+                dedicated_executor: dedicated_executor_low_priority,
             };
 
             Either::Left(http_api.run())

@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::Result;
+use dedicated_executor::DedicatedExecutor;
 use eth2_libp2p::PeerId;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetBlobsParams, EngineGetBlobsV1Params,
@@ -43,9 +44,11 @@ pub struct ExecutionBlobFetcher<P: Preset, W: Wait> {
     metrics: Option<Arc<Metrics>>,
     p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
     rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
 }
 
 impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
+    #[expect(clippy::too_many_arguments)]
     pub const fn new(
         api: Arc<Eth1Api>,
         controller: ApiController<P, W>,
@@ -54,6 +57,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         metrics: Option<Arc<Metrics>>,
         p2p_tx: UnboundedSender<BlobFetcherToP2p<P>>,
         rx: UnboundedReceiver<Eth1ApiToBlobFetcher<P>>,
+        dedicated_executor: Arc<DedicatedExecutor>,
     ) -> Self {
         Self {
             api,
@@ -63,6 +67,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             metrics,
             p2p_tx,
             rx,
+            dedicated_executor,
         }
     }
 
@@ -237,9 +242,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         };
 
-        let missing_columns_indices = futures::stream::iter(data_column_identifiers)
+        let missing_columns_indices = futures::stream::iter(&data_column_identifiers)
             .filter(|identifier| {
-                let identifier = *identifier;
+                let identifier = **identifier;
                 let received_data_column_sidecars = self.received_data_column_sidecars.clone_arc();
 
                 async move {
@@ -296,6 +301,30 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                 "received all {expected_blobs_count} blob sidecars from EL at slot: {slot}",
                             );
 
+                            let missing_columns_indices =
+                                futures::stream::iter(data_column_identifiers)
+                                    .filter(|identifier| {
+                                        let identifier = *identifier;
+                                        let received_data_column_sidecars =
+                                            self.received_data_column_sidecars.clone_arc();
+
+                                        async move {
+                                            !received_data_column_sidecars
+                                                .contains_async(&identifier)
+                                                .await
+                                        }
+                                    })
+                                    .map(|identifier| identifier.index)
+                                    .collect::<HashSet<ColumnIndex>>()
+                                    .await;
+
+                            if missing_columns_indices.is_empty() {
+                                debug_with_peers!(
+                                    "fetched blobs from EL are discarded: all missing data column sidecars have been received"
+                                );
+                                return;
+                            }
+
                             let cells_proofs = received_proofs
                                 .into_iter()
                                 .flat_map(IntoIterator::into_iter)
@@ -308,6 +337,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     cells_proofs,
                                     self.controller.store_config().kzg_backend,
                                     self.metrics.clone(),
+                                    self.dedicated_executor.clone_arc(),
                                 )
                                 .await;
 

@@ -3,7 +3,9 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
+use dedicated_executor::DedicatedExecutor;
+use futures::future::join_all;
 use helper_functions::{misc, predicates::is_valid_merkle_branch};
 use itertools::Itertools as _;
 use kzg_utils::{
@@ -12,10 +14,6 @@ use kzg_utils::{
 };
 use num_traits::One as _;
 use prometheus_metrics::Metrics;
-use rayon::iter::{
-    IndexedParallelIterator as _, IntoParallelIterator as _, IntoParallelRefIterator as _,
-    ParallelIterator as _,
-};
 use sha2::{Digest as _, Sha256};
 use ssz::{ContiguousList, ContiguousVector, H256, SszHash as _, Uint256};
 use tracing::instrument;
@@ -245,9 +243,10 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     )
 }
 
-pub fn recover_matrix<P: Preset>(
-    partial_matrix: &[MatrixEntry<P>],
+pub async fn recover_matrix<P: Preset>(
+    partial_matrix: Vec<MatrixEntry<P>>,
     backend: KzgBackend,
+    dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<MatrixEntry<P>>> {
     let mut partial_matrix_map = BTreeMap::new();
     for matrix in partial_matrix {
@@ -257,15 +256,25 @@ pub fn recover_matrix<P: Preset>(
             .push(matrix);
     }
 
-    partial_matrix_map
-        .into_par_iter()
-        .map(|(_, entries)| {
-            let (cell_indices, cells): (Vec<_>, Vec<_>) =
-                entries.iter().map(|e| (e.column_index, &e.cell)).unzip();
+    let jobs = partial_matrix_map
+        .into_values()
+        .map(|entries| {
+            let (cell_indices, cells): (Vec<_>, Vec<_>) = entries
+                .into_iter()
+                .map(|e| (e.column_index, e.cell))
+                .unzip();
 
-            recover_cells_and_kzg_proofs::<P>(cell_indices, cells, backend)
+            dedicated_executor.spawn(async move {
+                recover_cells_and_kzg_proofs::<P>(cell_indices, &cells, backend)
+            })
         })
-        .collect::<Result<Vec<_>>>()
+        .collect::<Vec<_>>();
+
+    join_all(jobs)
+        .await
+        .into_iter()
+        .map(|job| job.map_err(|err| anyhow!(err)).flatten())
+        .collect::<Result<_>>()
         .map(construct_full_matrix)
 }
 
@@ -407,10 +416,11 @@ pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
     }
 }
 
-pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
-    blobs: &[Blob<P>],
+pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
+    blobs: impl ExactSizeIterator<Item = Blob<P>>,
     cell_proofs: &[KzgProof],
     backend: KzgBackend,
+    dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<CellsAndKzgProofs<P>>> {
     let expected_proofs_length = blobs.len() * P::CellsPerExtBlob::USIZE;
     ensure!(
@@ -421,18 +431,29 @@ pub fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
         }
     );
 
-    blobs
-        .par_iter()
+    let jobs = blobs
+        .into_iter()
         .enumerate()
         .map(|(i, blob)| {
-            compute_cells::<P>(blob, backend).and_then(|cells| {
-                let start = P::CellsPerExtBlob::USIZE.saturating_mul(i);
-                let end = P::CellsPerExtBlob::USIZE.saturating_add(start);
-                ContiguousVector::try_from_iter(cell_proofs[start..end].iter().copied())
-                    .map(|proofs| (cells, proofs))
-                    .map_err(Into::into)
-            })
+            let start = P::CellsPerExtBlob::USIZE.saturating_mul(i);
+            let end = P::CellsPerExtBlob::USIZE.saturating_add(start);
+            let cell_proofs =
+                ContiguousVector::try_from_iter(cell_proofs[start..end].iter().copied());
+
+            Ok(dedicated_executor.spawn(async move {
+                compute_cells::<P>(&blob, backend).and_then(|cells| {
+                    cell_proofs
+                        .map(|proofs| (cells, proofs))
+                        .map_err(Into::into)
+                })
+            }))
         })
+        .collect::<Result<Vec<_>>>()?;
+
+    join_all(jobs)
+        .await
+        .into_iter()
+        .map(|outer| outer.map_err(|err| anyhow!(err)).flatten())
         .collect::<Result<Vec<_>>>()
 }
 
@@ -442,27 +463,30 @@ pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
     cells_proofs: Vec<KzgProof>,
     kzg_backend: KzgBackend,
     metrics: Option<Arc<Metrics>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
-    tokio::task::spawn_blocking(move || {
-        let _timer = metrics
-            .as_ref()
-            .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
+    let _timer = metrics
+        .as_ref()
+        .map(|metrics| metrics.data_column_sidecar_computation.start_timer());
 
-        let cells_and_kzg_proofs =
-            try_convert_to_cells_and_kzg_proofs::<P>(&received_blobs, &cells_proofs, kzg_backend)?;
+    let cells_and_kzg_proofs = try_convert_to_cells_and_kzg_proofs::<P>(
+        received_blobs.into_iter(),
+        &cells_proofs,
+        kzg_backend,
+        dedicated_executor,
+    )
+    .await?;
 
-        let data_column_sidecars = match block_or_sidecar {
-            BlockOrDataColumnSidecar::Block(block) => {
-                construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?
-            }
-            BlockOrDataColumnSidecar::Sidecar(sidecar) => {
-                construct_data_column_sidecars_from_sidecar(&sidecar, &cells_and_kzg_proofs)?
-            }
-        };
+    let data_column_sidecars = match block_or_sidecar {
+        BlockOrDataColumnSidecar::Block(block) => {
+            construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?
+        }
+        BlockOrDataColumnSidecar::Sidecar(sidecar) => {
+            construct_data_column_sidecars_from_sidecar(&sidecar, &cells_and_kzg_proofs)?
+        }
+    };
 
-        Ok(data_column_sidecars)
-    })
-    .await?
+    Ok(data_column_sidecars)
 }
 
 pub fn construct_cells_and_kzg_proofs<P: Preset>(

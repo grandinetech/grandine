@@ -6,6 +6,7 @@ use axum::Router;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
+use dedicated_executor::DedicatedExecutor;
 use eth1_api::{ApiController, Eth1Api};
 use fork_choice_control::{EventChannels, Wait};
 use futures::{
@@ -59,6 +60,7 @@ pub struct HttpApi<P: Preset, W: Wait> {
     pub channels: Channels<P>,
     pub metrics: Option<Arc<Metrics>>,
     pub tracing_handle: Option<TracingHandle>,
+    pub dedicated_executor: Arc<DedicatedExecutor>,
 }
 
 impl<P: Preset, W: Wait> HttpApi<P, W> {
@@ -94,6 +96,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             channels,
             metrics,
             tracing_handle,
+            dedicated_executor,
         } = self;
 
         let HttpApiConfig {
@@ -132,6 +135,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
             api_to_validator_tx,
             subnet_service_tx,
             tracing_handle,
+            dedicated_executor,
         };
 
         let router = extend_router(state.clone(), routing::normal_routes(state));

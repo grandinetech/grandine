@@ -9,6 +9,7 @@ use axum::{
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
+use dedicated_executor::DedicatedExecutor;
 use eth1_api::{ApiController, Eth1Api};
 use features::Feature;
 use fork_choice_control::{EventChannels, Wait};
@@ -90,9 +91,16 @@ pub struct NormalState<P: Preset, W: Wait> {
     pub api_to_validator_tx: UnboundedSender<ApiToValidator<P>>,
     pub subnet_service_tx: UnboundedSender<ToSubnetService>,
     pub tracing_handle: Option<TracingHandle>,
+    pub dedicated_executor: Arc<DedicatedExecutor>,
 }
 
 // The `FromRef` derive macro cannot handle type parameters as of `axum` version 0.6.7.
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<DedicatedExecutor> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.dedicated_executor.clone_arc()
+    }
+}
 
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<ChainConfig> {
     fn from_ref(state: &NormalState<P, W>) -> Self {

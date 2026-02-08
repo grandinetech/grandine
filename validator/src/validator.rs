@@ -1165,16 +1165,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let block = block.clone_arc();
             let kzg_backend = self.controller.store_config().kzg_backend;
 
-            let data_column_sidecars = tokio::task::spawn_blocking(move || {
+            let data_column_sidecars = {
                 let cells_and_kzg_proofs = eip_7594::try_convert_to_cells_and_kzg_proofs::<P>(
-                    blobs.as_ref(),
+                    blobs.into_iter(),
                     block_proofs.unwrap_or_else(KzgProofs::empty_fulu).as_ref(),
                     kzg_backend,
-                )?;
+                    self.dedicated_executor_normal_priority.clone_arc(),
+                )
+                .await?;
 
-                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)
-            })
-            .await??;
+                eip_7594::construct_data_column_sidecars(&block, &cells_and_kzg_proofs)?
+            };
 
             prometheus_metrics::stop_and_record(timer);
 
