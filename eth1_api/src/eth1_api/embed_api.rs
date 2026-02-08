@@ -36,10 +36,9 @@ use types::{
 use web3::types::{BlockId, BlockNumber, Filter, FilterBuilder, Log, U64};
 
 use crate::{
-    ClientVersionV1, ClientVersions, Eth1ApiToMetrics, WithClientVersions,
+    ClientVersionV1, ClientVersions, Eth1ApiToMetrics, Eth1ConnectionData, WithClientVersions,
     auth::Auth,
     deposit_event::DepositEvent,
-    endpoints::Endpoint,
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
@@ -154,6 +153,7 @@ pub struct Eth1Api {
     pub(crate) metrics: Option<Arc<Metrics>>,
     versions: ArcSwap<ClientVersions>,
     capabilities: ArcSwap<HashSet<String>>,
+    eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
 }
 
 impl Eth1Api {
@@ -163,7 +163,7 @@ impl Eth1Api {
         _client: Client,
         _auth: Arc<Auth>,
         _eth1_rpc_urls: Vec<RedactingUrl>,
-        _eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
+        eth1_api_to_metrics_tx: Option<UnboundedSender<Eth1ApiToMetrics>>,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
         Self {
@@ -171,6 +171,7 @@ impl Eth1Api {
             metrics,
             versions: ArcSwap::from_pointee(vec![]),
             capabilities: ArcSwap::from_pointee(HashSet::new()),
+            eth1_api_to_metrics_tx,
         }
     }
 
@@ -196,7 +197,28 @@ impl Eth1Api {
             .ok_or(Error::AdapterNotInitialized)?;
         let res = tokio::task::spawn_blocking(move || fun(&adapter));
 
-        res.await.map_err(Into::into).flatten()
+        res.await
+            .map_err(Into::into)
+            .flatten()
+            .inspect(|_| {
+                if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
+                    Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData {
+                        sync_eth1_connected: true,
+                        sync_eth1_fallback_connected: false,
+                    })
+                    .send(metrics_tx);
+                }
+            })
+            .inspect_err(|_| {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.eth1_api_errors_count.inc();
+                }
+
+                if let Some(metrics_tx) = self.eth1_api_to_metrics_tx.as_ref() {
+                    Eth1ApiToMetrics::Eth1Connection(Eth1ConnectionData::default())
+                        .send(metrics_tx);
+                }
+            })
     }
 
     pub async fn current_head_number(&self) -> Result<ExecutionBlockNumber> {
@@ -758,13 +780,5 @@ impl Eth1Api {
 
     pub fn el_offline(&self) -> bool {
         false
-    }
-
-    pub(crate) fn on_ok_response(&self, _endpoint: &Endpoint) {
-        // do nothing
-    }
-
-    pub(crate) fn on_error_response(&self, _endpoint: &Endpoint) {
-        // do nothing
     }
 }
