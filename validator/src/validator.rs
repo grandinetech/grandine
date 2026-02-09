@@ -1282,7 +1282,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        debug_with_peers!(
+        info_with_peers!(
             "validators [{}] attesting in slot {}",
             own_singular_attestations
                 .iter()
