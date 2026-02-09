@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
 use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork as _};
-use logging::warn_with_peers;
+use logging::{debug_with_peers, exception, warn_with_peers};
 use p2p::BeaconCommitteeSubscription;
 use scc::HashMap as SccHashMap;
 use signer::{Signer, SigningMessage, SigningTriple};
@@ -74,15 +74,46 @@ impl OwnBeaconCommitteeMembers {
         self.members.len()
     }
 
-    #[instrument(skip_all, level = "debug", fields(slot = slot, dependent_root = ?dependent_root))]
     pub async fn get_or_init_at_slot<P: Preset>(
         &self,
         state: &BeaconState<P>,
         dependent_root: H256,
         slot: Slot,
     ) -> Option<Arc<[BeaconCommitteeMember]>> {
+        self.get_or_init_at_slot_internal(state, dependent_root, slot, true)
+            .await
+    }
+
+    pub async fn get_or_init_at_slot_quiet<P: Preset>(
+        &self,
+        state: &BeaconState<P>,
+        dependent_root: H256,
+        slot: Slot,
+    ) -> Option<Arc<[BeaconCommitteeMember]>> {
+        self.get_or_init_at_slot_internal(state, dependent_root, slot, false)
+            .await
+    }
+
+    #[instrument(skip_all, level = "debug", fields(slot = slot, dependent_root = ?dependent_root))]
+    async fn get_or_init_at_slot_internal<P: Preset>(
+        &self,
+        state: &BeaconState<P>,
+        dependent_root: H256,
+        slot: Slot,
+        warn_on_cache_miss: bool,
+    ) -> Option<Arc<[BeaconCommitteeMember]>> {
         if let Some(members) = self.members.get_async(&(dependent_root, slot)).await {
             return Some(members.clone_arc());
+        }
+
+        debug_with_peers!(
+            "computing own beacon committee members at slot {slot} with dependent root {dependent_root:?}",
+        );
+
+        if warn_on_cache_miss {
+            exception!(
+                "computing own missing beacon committee members at slot {slot} with dependent root {dependent_root:?}",
+            );
         }
 
         match self.compute_members_at_slot(state, slot).await {

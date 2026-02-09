@@ -81,7 +81,7 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
                 debug_with_peers!("updating beacon committee subscriptions {slot} {current_slot}");
 
                 if let Some(members) = own_beacon_committee_members
-                    .get_or_init_at_slot(&beacon_state, dependent_root, slot)
+                    .get_or_init_at_slot_quiet(&beacon_state, dependent_root, slot)
                     .await
                 {
                     update_beacon_committee_subscriptions(
