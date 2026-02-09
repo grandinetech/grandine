@@ -49,11 +49,12 @@ use crate::{
         validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
         validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
-        validator_proposer_duties, validator_publish_aggregate_and_proofs_v1,
-        validator_publish_aggregate_and_proofs_v2, validator_publish_contributions_and_proofs,
-        validator_register_validator, validator_subscribe_to_beacon_committee,
-        validator_subscribe_to_sync_committees, validator_sync_committee_contribution,
-        validator_sync_committee_duties, validator_sync_committee_selections,
+        validator_proposer_duties, validator_proposer_duties_v2,
+        validator_publish_aggregate_and_proofs_v1, validator_publish_aggregate_and_proofs_v2,
+        validator_publish_contributions_and_proofs, validator_register_validator,
+        validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
+        validator_sync_committee_contribution, validator_sync_committee_duties,
+        validator_sync_committee_selections,
     },
 };
 
@@ -609,6 +610,10 @@ fn eth_v2_validator_routes<P: Preset, W: Wait>(
             post(validator_publish_aggregate_and_proofs_v2),
         )
         .route("/eth/v2/validator/blocks/{slot}", get(validator_block))
+        .route(
+            "/eth/v2/validator/duties/proposer/{epoch}",
+            get(validator_proposer_duties_v2),
+        )
         .layer(axum::middleware::map_request_with_state(
             state,
             middleware::is_synced,

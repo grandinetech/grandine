@@ -2530,6 +2530,42 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
 ) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
+    get_proposer_duties(
+        chain_config,
+        controller,
+        anchor_checkpoint_provider,
+        epoch,
+        false,
+    )
+    .await
+}
+
+// This endpoint is introduced to account for deterministic proposer lookahead
+// and return a different `dependent_root` based on current fork.
+/// `GET /eth/v2/validator/duties/proposer/{epoch}`
+pub async fn validator_proposer_duties_v2<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(epoch): EthPath<Epoch>,
+) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
+    get_proposer_duties(
+        chain_config,
+        controller,
+        anchor_checkpoint_provider,
+        epoch,
+        true,
+    )
+    .await
+}
+
+async fn get_proposer_duties<P: Preset, W: Wait>(
+    chain_config: Arc<ChainConfig>,
+    controller: ApiController<P, W>,
+    anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
+    epoch: Epoch,
+    post_fulu_check: bool,
+) -> Result<EthResponse<Vec<ValidatorProposerDutyResponse>>, Error> {
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let head = controller.head();
 
@@ -2556,7 +2592,16 @@ pub async fn validator_proposer_duties<P: Preset, W: Wait>(
         (state, status)
     };
 
-    let dependent_root = controller.dependent_root(&state, epoch)?;
+    let dependent_root = if post_fulu_check && chain_config.phase_at_epoch(epoch) >= Phase::Fulu {
+        // Post-Fulu get dependent root for the previous epoch because proposer suffling is done at
+        // the last slot of epoch N - 2 with proposer lookahead. We should note that `dependent_root`
+        // itself will return block root of the last slot in epoch `epoch` - 1.
+        controller.dependent_root(&state, misc::previous_epoch(epoch))?
+    } else {
+        // Pre-Fulu get dependent root for the epoch because proposer suffling is done at
+        // the last slot of epoch N - 1
+        controller.dependent_root(&state, epoch)?
+    };
 
     let response = misc::slots_in_epoch::<P>(epoch)
         .map(|slot| {
