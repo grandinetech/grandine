@@ -121,14 +121,6 @@ pub struct SignedFuluBlockWithBlobs<P: Preset> {
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
-#[derive(Deserialize, Ssz)]
-#[serde(bound = "")]
-pub struct SignedGloasBlockWithBlobs<P: Preset> {
-    pub signed_block: GloasSignedBeaconBlock<P>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-}
-
 #[derive(Serialize, Ssz)]
 #[serde(bound = "")]
 #[ssz(derive_read = false, derive_hash = false)]
@@ -187,11 +179,7 @@ impl<P: Preset> From<WithBlobsAndMev<BeaconBlock<P>, P>> for APIBlock<BeaconBloc
                 kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
                 blobs: blobs.unwrap_or_default(),
             }),
-            BeaconBlock::Gloas(block) => Self::WithBlobs(BlockWithBlobs {
-                block: block.into(),
-                kzg_proofs: proofs.unwrap_or_else(KzgProofs::empty_fulu),
-                blobs: blobs.unwrap_or_default(),
-            }),
+            BeaconBlock::Gloas(block) => Self::Other(block.into()),
         }
     }
 }
@@ -440,7 +428,7 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAPIBlockPhaseDeserializer<P>
             Phase::Deneb => SignedDenebBlockWithBlobs::deserialize(deserializer)?.into(),
             Phase::Electra => SignedElectraBlockWithBlobs::deserialize(deserializer)?.into(),
             Phase::Fulu => SignedFuluBlockWithBlobs::deserialize(deserializer)?.into(),
-            Phase::Gloas => SignedGloasBlockWithBlobs::deserialize(deserializer)?.into(),
+            Phase::Gloas => GloasSignedBeaconBlock::deserialize(deserializer)?.into(),
         };
 
         Ok(Box::new(result))
@@ -460,7 +448,7 @@ pub enum SignedAPIBlock<P: Preset> {
     Deneb(SignedDenebBlockWithBlobs<P>),
     Electra(SignedElectraBlockWithBlobs<P>),
     Fulu(SignedFuluBlockWithBlobs<P>),
-    Gloas(SignedGloasBlockWithBlobs<P>),
+    Gloas(GloasSignedBeaconBlock<P>),
 }
 
 impl<P: Preset> SignedAPIBlock<P> {
@@ -473,7 +461,7 @@ impl<P: Preset> SignedAPIBlock<P> {
             Self::Deneb(block) => block.signed_block.message.slot,
             Self::Electra(block) => block.signed_block.message.slot,
             Self::Fulu(block) => block.signed_block.message.slot,
-            Self::Gloas(block) => block.signed_block.message.slot,
+            Self::Gloas(block) => block.message.slot,
         }
     }
 
@@ -522,19 +510,7 @@ impl<P: Preset> SignedAPIBlock<P> {
                     Some(blobs),
                 )
             }
-            Self::Gloas(block) => {
-                let SignedGloasBlockWithBlobs {
-                    signed_block,
-                    kzg_proofs,
-                    blobs,
-                } = block;
-
-                (
-                    signed_block.into(),
-                    Some(KzgProofs::Fulu(kzg_proofs)),
-                    Some(blobs),
-                )
-            }
+            Self::Gloas(block) => (block.into(), None, None),
         }
     }
 }
@@ -550,7 +526,7 @@ impl<P: Preset> SszSize for SignedAPIBlock<P> {
         SignedDenebBlockWithBlobs::<P>::SIZE,
         SignedElectraBlockWithBlobs::<P>::SIZE,
         SignedFuluBlockWithBlobs::<P>::SIZE,
-        SignedGloasBlockWithBlobs::<P>::SIZE,
+        GloasSignedBeaconBlock::<P>::SIZE,
     ]);
 }
 
