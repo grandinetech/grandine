@@ -23,7 +23,7 @@ use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBl
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use enum_iterator::Sequence as _;
-use eth1_api::{ApiController, Eth1Api};
+use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{Event, EventChannels, ForkChoiceContext, ForkTip, Topic, Wait};
 use fork_choice_store::{AttestationItem, AttestationOrigin};
@@ -409,6 +409,13 @@ impl From<NodePeerCount> for NodePeerCountResponse {
 #[derive(Serialize)]
 struct NodeVersionResponse<'version> {
     version: Option<&'version str>,
+}
+
+#[derive(Serialize)]
+struct NodeVersionV2Response {
+    beacon_node: ClientVersionV1,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_client: Option<ClientVersionV1>,
 }
 
 #[derive(Serialize)]
@@ -2401,6 +2408,19 @@ pub async fn node_peer_count<P: Preset>(
 pub async fn node_version(State(network_config): State<Arc<NetworkConfig>>) -> Response {
     let data = NodeVersionResponse {
         version: network_config.identify_agent_version.as_deref(),
+    };
+
+    EthResponse::json(data).into_response()
+}
+
+/// `GET /eth/v2/node/version`
+pub async fn node_version_v2(State(eth1_api): State<Arc<Eth1Api>>) -> Response {
+    let data = NodeVersionV2Response {
+        beacon_node: ClientVersionV1::own(),
+        execution_client: eth1_api
+            .client_versions()
+            .next()
+            .and_then(|versions| versions.first().cloned()),
     };
 
     EthResponse::json(data).into_response()
