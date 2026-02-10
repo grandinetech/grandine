@@ -1707,12 +1707,20 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
 ) -> Result<StatusCode, Error> {
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
+    let phase = controller.chain_config().phase_at_slot::<P>(slot);
 
-    if controller
-        .chain_config()
-        .phase_at_slot::<P>(slot)
-        .is_peerdas_activated()
-    {
+    if phase >= Phase::Gloas {
+        // Only publish signed beacon block for post-Gloas
+        publish_signed_block_v2(
+            Arc::new(signed_beacon_block),
+            vec![],
+            query.broadcast_validation.unwrap_or_default(),
+            controller,
+            event_channels,
+            api_to_p2p_tx,
+        )
+        .await
+    } else if phase.is_peerdas_activated() {
         let signed_beacon_block = Arc::new(signed_beacon_block);
 
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
@@ -3921,7 +3929,7 @@ async fn publish_beacon_block_with_gossip_checks<P: Preset, W: Wait>(
 }
 
 #[instrument(skip_all, level = "debug")]
-async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset, W: Wait>(
+async fn publish_beacon_block_with_data_column_sidecars_and_gossip_checks<P: Preset, W: Wait>(
     controller: ApiController<P, W>,
     event_channels: Arc<EventChannels<P>>,
     block: Arc<SignedBeaconBlock<P>>,
@@ -3938,7 +3946,7 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
             event_channels
                 .send_block_gossip_event(block.message().slot(), block.message().hash_tree_root());
 
-            publish_block_to_network_with_data_column_sidecars(
+            publish_block_with_data_column_sidecars_to_network(
                 block,
                 data_column_sidecars,
                 api_to_p2p_tx,
@@ -3946,7 +3954,7 @@ async fn publish_beacon_block_with_gossip_checks_data_column_sidecars<P: Preset,
         }
         Ok(Some(ValidationOutcome::Ignore(publishable))) => {
             if publishable {
-                publish_block_to_network_with_data_column_sidecars(
+                publish_block_with_data_column_sidecars_to_network(
                     block,
                     data_column_sidecars,
                     api_to_p2p_tx,
@@ -3983,7 +3991,7 @@ fn publish_block_to_network<P: Preset>(
 }
 
 #[instrument(skip_all, level = "debug")]
-fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
+fn publish_block_with_data_column_sidecars_to_network<P: Preset>(
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
@@ -3995,7 +4003,6 @@ fn publish_block_to_network_with_data_column_sidecars<P: Preset>(
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
-// TODO(feature/fulu): merge with `publish_signed_block`
 #[instrument(skip_all, level = "debug")]
 async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
@@ -4007,7 +4014,7 @@ async fn publish_signed_block_with_data_column_sidecar<P: Preset, W: Wait>(
     let data_column_sidecars =
         submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars).await?;
 
-    if let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
+    if let Some(status_code) = publish_beacon_block_with_data_column_sidecars_and_gossip_checks(
         controller.clone_arc(),
         event_channels,
         block.clone_arc(),
@@ -4149,7 +4156,6 @@ async fn publish_signed_block_v2<P: Preset, W: Wait>(
     Ok(status_code)
 }
 
-// TODO(feature/fulu): merge with `publish_signed_block_v2`
 #[instrument(skip_all, level = "debug")]
 async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
     block: Arc<SignedBeaconBlock<P>>,
@@ -4163,7 +4169,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
         submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars).await?;
 
     if broadcast_validation == BroadcastValidation::Gossip
-        && let Some(status_code) = publish_beacon_block_with_gossip_checks_data_column_sidecars(
+        && let Some(status_code) = publish_beacon_block_with_data_column_sidecars_and_gossip_checks(
             controller.clone_arc(),
             event_channels,
             block.clone_arc(),
@@ -4185,7 +4191,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                 ValidationOutcome::Accept => match broadcast_validation {
                     BroadcastValidation::Gossip => StatusCode::OK,
                     BroadcastValidation::Consensus => {
-                        publish_block_to_network_with_data_column_sidecars(
+                        publish_block_with_data_column_sidecars_to_network(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
@@ -4199,7 +4205,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                             )));
                         }
 
-                        publish_block_to_network_with_data_column_sidecars(
+                        publish_block_with_data_column_sidecars_to_network(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
@@ -4218,7 +4224,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                     );
 
                     if broadcast_validation != BroadcastValidation::Gossip && publishable {
-                        publish_block_to_network_with_data_column_sidecars(
+                        publish_block_with_data_column_sidecars_to_network(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
