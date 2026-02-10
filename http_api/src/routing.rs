@@ -33,14 +33,14 @@ use crate::{
         block_root, config_spec, debug_beacon_data_column_sidecars, debug_fork_choice,
         deposit_contract, expected_withdrawals, fork_schedule, genesis,
         get_state_validator_balances, get_state_validators, node_health, node_identity, node_peer,
-        node_peer_count, node_peers, node_syncing_status, node_version, pool_attestations,
-        pool_attestations_v2, pool_attester_slashings, pool_attester_slashings_v2,
-        pool_bls_to_execution_changes, pool_proposer_slashings, pool_voluntary_exits,
-        post_log_level, post_state_validator_balances, post_state_validators, post_trace_level,
-        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
-        state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
-        state_randao, state_root, state_sync_committees, state_validator,
+        node_peer_count, node_peers, node_syncing_status, node_version, node_version_v2,
+        pool_attestations, pool_attestations_v2, pool_attester_slashings,
+        pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_proposer_slashings,
+        pool_voluntary_exits, post_log_level, post_state_validator_balances, post_state_validators,
+        post_trace_level, publish_blinded_block, publish_blinded_block_v2, publish_block,
+        publish_block_v2, state_committees, state_finality_checkpoints, state_fork,
+        state_pending_consolidations, state_pending_deposits, state_pending_partial_withdrawals,
+        state_proposer_lookahead, state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_pool_attestations, submit_pool_attestations_v2,
         submit_pool_attester_slashing, submit_pool_attester_slashing_v2,
         submit_pool_bls_to_execution_change, submit_pool_proposer_slashing,
@@ -228,6 +228,7 @@ pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
         .merge(eth_v2_debug_routes())
         .route("/eth/v1/events", get(beacon_events))
         .merge(eth_v1_node_routes())
+        .merge(eth_v2_node_routes())
         .merge(eth_v1_validator_routes(state.clone()))
         .merge(eth_v1_validator_routes_no_sync_check())
         .merge(eth_v2_validator_routes(state.clone()))
@@ -516,6 +517,10 @@ fn eth_v1_node_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route("/eth/v1/node/version", get(node_version))
         .route("/eth/v1/node/syncing", get(node_syncing_status))
         .route("/eth/v1/node/health", get(node_health))
+}
+
+fn eth_v2_node_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
+    Router::new().route("/eth/v2/node/version", get(node_version_v2))
 }
 
 fn eth_v1_validator_routes<P: Preset, W: Wait>(
