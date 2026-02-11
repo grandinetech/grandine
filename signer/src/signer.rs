@@ -22,7 +22,7 @@ use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tracing::instrument;
+use tracing::{Instrument, debug_span, instrument};
 use types::{
     combined::BeaconState,
     phase0::primitives::{H256, Slot},
@@ -251,6 +251,7 @@ impl Snapshot {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub async fn sign_without_slashing_protection<P: Preset>(
         &self,
         message: SigningMessage<'_, P>,
@@ -422,11 +423,14 @@ impl Snapshot {
         Ok(answer.into_iter())
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub async fn sign_triples_without_slashing_protection<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
         fork_info: Option<ForkInfo<P>>,
     ) -> Result<impl Iterator<Item = Signature>> {
+        tracing::debug!("test");
+
         let mut sign_locally = vec![];
         let mut sign_remotely = vec![];
 
@@ -456,6 +460,7 @@ impl Snapshot {
                 })
                 .collect::<Vec<_>>()
         })
+        .instrument(debug_span!("local signing"))
         .map_err(Into::into);
 
         let sign_remotely_future = async {
@@ -474,7 +479,8 @@ impl Snapshot {
                 .collect::<FuturesUnordered<_>>()
                 .try_collect::<Vec<_>>()
                 .await
-        };
+        }
+        .instrument(debug_span!("remote signing"));
 
         let (local, remote) = try_join!(sign_locally_future, sign_remotely_future)?;
 
