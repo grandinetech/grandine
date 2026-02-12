@@ -24,7 +24,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
-    gloas::containers::ExecutionPayloadBid,
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -70,7 +70,7 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
-    ExecutionPayloadBid(ExecutionPayloadBidEvent),
+    ExecutionPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttributes(PayloadAttributesEvent),
@@ -258,7 +258,7 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
-    pub fn send_execution_payload_bid_event(&self, payload_bid: &ExecutionPayloadBid<P>) {
+    pub fn send_execution_payload_bid_event(&self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
         if let Err(error) = self.send_execution_payload_bid_event_internal(payload_bid) {
             warn_with_peers!("unable to send execution payload bid event: {error}");
         }
@@ -473,11 +473,10 @@ impl<P: Preset> EventChannels<P> {
 
     fn send_execution_payload_bid_event_internal(
         &self,
-        payload_bid: &ExecutionPayloadBid<P>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     ) -> Result<()> {
         if self.execution_payload_bids.receiver_count() > 0 {
-            let payload_bid_event = ExecutionPayloadBidEvent::new::<P>(payload_bid);
-            let event = Event::ExecutionPayloadBid(payload_bid_event);
+            let event = Event::ExecutionPayloadBid(payload_bid);
             self.execution_payload_bids.send(event)?;
         }
 
@@ -697,30 +696,6 @@ impl ChainReorgEvent {
             new_head_state: new_head.block.message().state_root(),
             epoch: misc::compute_epoch_at_slot::<P>(new_slot),
             execution_optimistic: new_head.is_optimistic(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ExecutionPayloadBidEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub builder_index: ValidatorIndex,
-    pub parent_block_root: H256,
-    pub block_hash: ExecutionBlockHash,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub value: Gwei,
-}
-
-impl ExecutionPayloadBidEvent {
-    const fn new<P: Preset>(payload_bid: &ExecutionPayloadBid<P>) -> Self {
-        Self {
-            slot: payload_bid.slot,
-            builder_index: payload_bid.builder_index,
-            parent_block_root: payload_bid.parent_block_root,
-            block_hash: payload_bid.block_hash,
-            value: payload_bid.value,
         }
     }
 }
