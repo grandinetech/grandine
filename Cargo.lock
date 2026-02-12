@@ -2475,6 +2475,7 @@ dependencies = [
  "opentelemetry_sdk",
  "panics",
  "rayon",
+ "scc 3.4.8",
  "serial_test",
  "tempfile",
  "tokio",

@@ -10,15 +10,18 @@ use std::{
     io::{self, IsTerminal},
     path::Path,
     sync::{Arc, OnceLock},
+    time::{Duration, Instant},
 };
 use tokio::runtime::Runtime;
-use tracing::Level;
+use tracing::{Level, Subscriber, span};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
-    EnvFilter, Registry,
+    EnvFilter, Layer, Registry,
     filter::LevelFilter,
     fmt::{self, format::Writer, time::FormatTime},
+    layer::Context,
     prelude::*,
+    registry::LookupSpan,
     reload::{self, Handle},
 };
 use types::redacting_url::RedactingUrl;
@@ -204,7 +207,8 @@ pub fn initialize_tracing_logger(
             }
         }
 
-        let (telemetry_filter_layer, handle) = reload::Layer::new(telemetry_filter);
+        let (telemetry_filter_layer, handle) = reload::Layer::new(telemetry_filter.clone());
+        let long_span_layer = LongSpanDetector::new(Duration::from_secs(10));
 
         telemetry_handle = Some(handle);
 
@@ -237,7 +241,10 @@ pub fn initialize_tracing_logger(
                 .with_tracer(tracer)
                 .with_filter(telemetry_filter_layer);
 
+            let long_span_layer = long_span_layer.with_filter(telemetry_filter);
+
             layers.push(telemetry_layer.boxed());
+            layers.push(long_span_layer.boxed());
 
             Ok::<(), ExporterBuildError>(())
         })?;
@@ -310,6 +317,86 @@ pub fn initialize_rayon() -> Result<()> {
         .panic_handler(panics::log)
         .build_global()
         .map_err(Into::into)
+}
+
+#[derive(Debug)]
+struct SpanInfo {
+    name: &'static str,
+    target: &'static str,
+    created_at: Instant,
+}
+
+#[derive(Debug)]
+struct ClosedLongSpan {
+    id: u64,
+    name: &'static str,
+    target: &'static str,
+    age: Duration,
+}
+
+struct LongSpanDetector {
+    spans: scc::HashMap<u64, SpanInfo>,
+    closed: scc::Queue<ClosedLongSpan>,
+    threshold: Duration,
+}
+
+impl LongSpanDetector {
+    fn new(threshold: Duration) -> Self {
+        Self {
+            spans: scc::HashMap::new(),
+            closed: scc::Queue::default(),
+            threshold,
+        }
+    }
+
+    fn sweep(&self) {
+        let now = Instant::now();
+
+        // Report still-open long spans
+        self.spans.iter_sync(|key, info| {
+            let age = now.duration_since(info.created_at);
+            if age > self.threshold {
+                println!("long-lived span detected: {info:?}, {key}, {age:?}",);
+            }
+            true
+        });
+
+        // Drain and report long spans that closed since last sweep
+        while let Some(entry) = self.closed.pop() {
+            println!("long-lived span closed: {:?}", *entry);
+        }
+    }
+}
+
+impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for LongSpanDetector {
+    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, _ctx: Context<'_, S>) {
+        if self.spans.len() % 100 == 0 && !self.spans.is_empty() {
+            self.sweep();
+        }
+
+        let _ = self.spans.insert_sync(
+            id.into_u64(),
+            SpanInfo {
+                name: attrs.metadata().name(),
+                target: attrs.metadata().target(),
+                created_at: Instant::now(),
+            },
+        );
+    }
+
+    fn on_close(&self, id: span::Id, _ctx: Context<'_, S>) {
+        if let Some((key, info)) = self.spans.remove_sync(&id.into_u64()) {
+            let age = info.created_at.elapsed();
+            if age > self.threshold {
+                self.closed.push(ClosedLongSpan {
+                    id: key,
+                    name: info.name,
+                    target: info.target,
+                    age,
+                });
+            }
+        }
+    }
 }
 
 #[cfg(test)]
