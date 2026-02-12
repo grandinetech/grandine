@@ -1815,7 +1815,7 @@ where
                 trace_with_peers!("payload bid accepted (payload_bid: {payload_bid:?})");
 
                 self.event_channels
-                    .send_execution_payload_bid_event(&payload_bid.message);
+                    .send_execution_payload_bid_event(payload_bid.clone_arc());
 
                 let (gossip_id, sender) = origin.split();
 
