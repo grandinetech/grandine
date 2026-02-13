@@ -184,6 +184,39 @@ impl Database {
         Ok(())
     }
 
+    pub fn delete_batch(&self, keys: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Result<()> {
+        match self.kind() {
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database_name,
+                environment,
+                restart_tx: _,
+            } => {
+                let transaction = environment.begin_rw_txn()?;
+                let database = transaction.open_db(Some(database_name))?;
+
+                let mut cursor = transaction.cursor(database.dbi())?;
+
+                for key in keys {
+                    if cursor.set::<()>(key.as_ref())?.is_some() {
+                        cursor.del(WriteFlags::default())?;
+                    }
+                }
+
+                transaction.commit()?;
+            }
+            DatabaseKind::InMemory { map } => {
+                let mut map = map.lock().expect("in-memory database mutex is poisoned");
+
+                for key in keys {
+                    map.remove(key.as_ref());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn delete_range(&self, range: Range<impl AsRef<[u8]>>) -> Result<()> {
         let start = range.start.as_ref();
         let end = range.end.as_ref();
@@ -436,7 +469,6 @@ impl Database {
             } => {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
-
                 let mut cursor = transaction.cursor(database.dbi())?;
 
                 let first = if let Some((is_next, key, value)) = cursor.set_lowerbound(end)? {
@@ -500,14 +532,22 @@ impl Database {
                 environment,
                 restart_tx,
             } => {
+                let compressed_pairs = pairs
+                    .into_iter()
+                    .map(|(key, value)| Ok((key, compress(value.as_ref())?)))
+                    .collect::<Result<Vec<_>>>()?;
+
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                for (key, value) in pairs {
-                    let key = key.as_ref();
-                    let compressed = compress(value.as_ref())?;
+                for (key, compressed) in &compressed_pairs {
                     transaction
-                        .put(database.dbi(), key, compressed, WriteFlags::default())
+                        .put(
+                            database.dbi(),
+                            key.as_ref(),
+                            compressed,
+                            WriteFlags::default(),
+                        )
                         .map_err(|error| {
                             handle_write_error(database_name, error, restart_tx.as_ref())
                         })?;
@@ -704,6 +744,21 @@ mod tests {
         assert_pairs_eq(
             database.iterator_ascending("A"..)?,
             [("A", "1"), ("B", "2"), ("E", "5")],
+        )?;
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn test_delete_batch(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+
+        database.delete_batch(["A", "C", "D"])?;
+
+        assert_pairs_eq(
+            database.iterator_ascending("A"..)?,
+            [("B", "2"), ("E", "5")],
         )?;
 
         Ok(())
