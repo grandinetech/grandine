@@ -409,72 +409,47 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_blob_sidecars(&self, up_to_slot: Slot) -> Result<()> {
-        let mut blobs_to_remove: Vec<BlobIdentifier> = vec![];
-        let mut keys_to_remove = vec![];
-
         let results = self
             .database
             .iterator_descending(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
+        let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
+            itertools::process_results(results, |iter| {
+                iter.take_while(|(key_bytes, _)| SlotBlobId::has_prefix(key_bytes))
+                    .map(|(k, v)| (k.into_owned(), v))
+                    .unzip()
+            })?;
 
-            if !SlotBlobId::has_prefix(&key_bytes) {
-                break;
-            }
+        for blob_bytes in blobs_to_remove {
+            let BlobIdentifier { block_root, index } =
+                BlobIdentifier::from_ssz_default(blob_bytes)?;
 
-            // Deserialize-serialize BlobIdentifier as an additional measure
-            // to prevent other types of data getting accidentally deleted.
-            blobs_to_remove.push(BlobIdentifier::from_ssz_default(value_bytes)?);
-            keys_to_remove.push(key_bytes.into_owned());
+            keys_to_remove.push(BlobSidecarByBlobId(block_root, index).to_string().into());
         }
 
-        for blob_id in blobs_to_remove {
-            let BlobIdentifier { block_root, index } = blob_id;
-            let key = BlobSidecarByBlobId(block_root, index).to_string();
-
-            self.database.delete(key)?;
-        }
-
-        for key in keys_to_remove {
-            self.database.delete(key)?;
-        }
-
-        Ok(())
+        self.database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
-        let mut block_roots_to_remove = vec![];
-        let mut keys_to_remove = vec![];
-
         let results = self
             .database
             .iterator_descending(..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string())?;
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
+        let (mut keys_to_remove, block_roots_to_remove): (Vec<_>, Vec<_>) =
+            itertools::process_results(results, |iter| {
+                iter.take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
+                    .map(|(k, v)| (k.into_owned(), v))
+                    .unzip()
+            })?;
 
-            if !BlockRootBySlot::has_prefix(&key_bytes) {
-                break;
-            }
+        for block_root_bytes in block_roots_to_remove {
+            let block_root = H256::from_ssz_default(block_root_bytes)?;
 
-            block_roots_to_remove.push(H256::from_ssz_default(value_bytes)?);
-            keys_to_remove.push(key_bytes.into_owned());
+            keys_to_remove.push(FinalizedBlockByRoot(block_root).to_string().into());
+            keys_to_remove.push(StateByBlockRoot(block_root).to_string().into());
         }
 
-        for block_root in block_roots_to_remove {
-            let key = FinalizedBlockByRoot(block_root).to_string();
-            self.database.delete(key)?;
-
-            let key = StateByBlockRoot(block_root).to_string();
-            self.database.delete(key)?;
-        }
-
-        for key in keys_to_remove {
-            self.database.delete(key)?;
-        }
-
-        Ok(())
+        self.database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn prune_old_state_roots(&self, up_to_slot: Slot) -> Result<()> {
@@ -484,25 +459,21 @@ impl<P: Preset> Storage<P> {
             .database
             .iterator_ascending(SlotByStateRoot(H256::zero()).to_string()..)?;
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
+        let results = itertools::process_results(results, |iter| {
+            iter.take_while(|(key_bytes, _)| SlotByStateRoot::has_prefix(key_bytes))
+                .map(|(k, v)| (k.into_owned(), v))
+                .collect::<Vec<_>>()
+        })?;
 
-            if !SlotByStateRoot::has_prefix(&key_bytes) {
-                break;
-            }
-
+        for (key_bytes, value_bytes) in results {
             let slot = Slot::from_ssz_default(value_bytes)?;
 
             if slot < up_to_slot {
-                keys_to_remove.push(key_bytes.into_owned());
+                keys_to_remove.push(key_bytes);
             }
         }
 
-        for key in keys_to_remove {
-            self.database.delete(key)?;
-        }
-
-        Ok(())
+        self.database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn prune_unfinalized_blocks(&self, last_finalized_slot: Slot) -> Result<Vec<Slot>> {
@@ -513,19 +484,19 @@ impl<P: Preset> Storage<P> {
             .database
             .iterator_ascending(serialize_key(UnfinalizedBlockByRoot(H256::zero()))..)?;
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
+        let results = itertools::process_results(results, |iter| {
+            iter.take_while(|(key_bytes, _)| UnfinalizedBlockByRoot::has_prefix(key_bytes))
+                .map(|(k, v)| (k.into_owned(), v))
+                .collect::<Vec<_>>()
+        })?;
 
-            if !UnfinalizedBlockByRoot::has_prefix(&key_bytes) {
-                break;
-            }
-
+        for (key_bytes, value_bytes) in results {
             let unfinalized_block = SignedBeaconBlock::<P>::from_ssz(&self.config, value_bytes)?;
             let block_slot = unfinalized_block.message().slot();
 
             if block_slot <= last_finalized_slot {
                 slots.push(block_slot);
-                keys_to_remove.push(key_bytes.into_owned());
+                keys_to_remove.push(key_bytes);
             }
         }
 
@@ -539,9 +510,7 @@ impl<P: Preset> Storage<P> {
             }
         }
 
-        for key in keys_to_remove {
-            self.database.delete(key)?;
-        }
+        self.database.delete_batch(keys_to_remove)?;
 
         Ok(slots)
     }
@@ -591,38 +560,29 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
-        let mut columns_to_remove: Vec<DataColumnIdentifier> = vec![];
-        let mut keys_to_remove = vec![];
-
         let results = self
             .database
             .iterator_descending(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
+        let (mut keys_to_remove, columns_to_remove): (Vec<_>, Vec<_>) =
+            itertools::process_results(results, |iter| {
+                iter.take_while(|(key_bytes, _)| SlotColumnId::has_prefix(key_bytes))
+                    .map(|(k, v)| (k.into_owned(), v))
+                    .unzip()
+            })?;
 
-            if !SlotColumnId::has_prefix(&key_bytes) {
-                break;
-            }
+        for column_bytes in columns_to_remove {
+            let DataColumnIdentifier { block_root, index } =
+                DataColumnIdentifier::from_ssz_default(column_bytes)?;
 
-            // Deserialize-serialize DataColumnIdentifier as an additional measure
-            // to prevent other types of data getting accidentally deleted.
-            columns_to_remove.push(DataColumnIdentifier::from_ssz_default(value_bytes)?);
-            keys_to_remove.push(key_bytes.into_owned());
+            keys_to_remove.push(
+                DataColumnSidecarByColumnId(block_root, index)
+                    .to_string()
+                    .into(),
+            )
         }
 
-        for column_id in columns_to_remove {
-            let DataColumnIdentifier { block_root, index } = column_id;
-            let key = DataColumnSidecarByColumnId(block_root, index).to_string();
-
-            self.database.delete(key)?;
-        }
-
-        for key in keys_to_remove {
-            self.database.delete(key)?;
-        }
-
-        Ok(())
+        self.database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn checkpoint_state_slot(&self) -> Result<Option<Slot>> {
@@ -874,15 +834,15 @@ impl<P: Preset> Storage<P> {
             .database
             .iterator_descending(..=BlockRootBySlot(start_from_slot).to_string())?;
 
+        let results = itertools::process_results(results, |iter| {
+            iter.take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
+                .map(|(_, v)| v)
+                .collect::<Vec<_>>()
+        })?;
+
         let mut block_roots = vec![];
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
-
-            if !BlockRootBySlot::has_prefix(&key_bytes) {
-                break;
-            }
-
+        for value_bytes in results {
             let block_root = H256::from_ssz_default(value_bytes)?;
 
             if self.contains_key(StateByBlockRoot(block_root))? {
