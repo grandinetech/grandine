@@ -343,7 +343,7 @@ fn apply_pending_deposit<P: Preset>(
     Ok(())
 }
 
-fn is_valid_deposit_signature(
+pub fn is_valid_deposit_signature(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     deposit: &PendingDeposit,
