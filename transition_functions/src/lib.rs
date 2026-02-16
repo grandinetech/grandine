@@ -202,7 +202,7 @@ pub mod electra {
         process_operations, process_withdrawal_request, process_withdrawals,
     };
     pub(crate) use epoch_processing::{
-        epoch_report, process_effective_balance_updates, process_epoch,
+        epoch_report, is_valid_deposit_signature, process_effective_balance_updates, process_epoch,
         process_pending_consolidations, process_pending_deposits, process_registry_updates,
         process_slashings,
     };

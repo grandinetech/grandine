@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use bls::PublicKeyBytes;
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     error::SignatureKind,
@@ -297,7 +298,8 @@ pub fn process_deposit_request<P: Preset>(
             && !state
                 .validators()
                 .into_iter()
-                .any(|validator| validator.pubkey == pubkey))
+                .any(|validator| validator.pubkey == pubkey)
+            && !is_pending_validator(config, pubkey_cache, state, pubkey))
     {
         apply_deposit_for_builder(
             config,
@@ -322,6 +324,25 @@ pub fn process_deposit_request<P: Preset>(
     }
 
     Ok(())
+}
+
+fn is_pending_validator<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &impl PostGloasBeaconState<P>,
+    pubkey: PublicKeyBytes,
+) -> bool {
+    for deposit in state.pending_deposits() {
+        if deposit.pubkey != pubkey {
+            continue;
+        }
+
+        if electra::is_valid_deposit_signature(config, pubkey_cache, deposit) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
