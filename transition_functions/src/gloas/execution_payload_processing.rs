@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use anyhow::{Result, ensure};
-use bls::PublicKeyBytes;
+use bls::{PublicKeyBytes, SignatureBytes};
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     error::SignatureKind,
@@ -22,11 +24,14 @@ use types::{
             BuilderPendingPayment, ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope,
         },
     },
+    phase0::containers::DepositMessage,
     preset::{Preset, SlotsPerHistoricalRoot},
     traits::PostGloasBeaconState,
 };
 
 use crate::{electra, unphased::Error};
+
+type DepositSignatureCache = HashMap<(DepositMessage, SignatureBytes), bool>;
 
 pub fn verify_execution_payload_envelope_signature<P: Preset>(
     config: &Config,
@@ -258,8 +263,16 @@ fn process_execution_requests<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
     execution_requests: &ExecutionRequests<P>,
 ) -> Result<()> {
+    let mut signature_cache = DepositSignatureCache::new();
+
     for deposit_request in &execution_requests.deposits {
-        process_deposit_request(config, pubkey_cache, state, *deposit_request)?;
+        process_deposit_request(
+            config,
+            pubkey_cache,
+            state,
+            *deposit_request,
+            &mut signature_cache,
+        )?;
     }
 
     for withdrawal_request in &execution_requests.withdrawals {
@@ -279,6 +292,7 @@ pub fn process_deposit_request<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
     deposit_request: DepositRequest,
+    signature_cache: &mut DepositSignatureCache,
 ) -> Result<()> {
     let DepositRequest {
         pubkey,
@@ -299,7 +313,7 @@ pub fn process_deposit_request<P: Preset>(
                 .validators()
                 .into_iter()
                 .any(|validator| validator.pubkey == pubkey)
-            && !is_pending_validator(config, pubkey_cache, state, pubkey))
+            && !is_pending_validator(config, pubkey_cache, state, pubkey, signature_cache))
     {
         apply_deposit_for_builder(
             config,
@@ -331,13 +345,31 @@ fn is_pending_validator<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &impl PostGloasBeaconState<P>,
     pubkey: PublicKeyBytes,
+    signature_cache: &mut DepositSignatureCache,
 ) -> bool {
     for deposit in state.pending_deposits() {
         if deposit.pubkey != pubkey {
             continue;
         }
 
-        if electra::is_valid_deposit_signature(config, pubkey_cache, deposit) {
+        let PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            ..
+        } = *deposit;
+
+        let deposit_message = DepositMessage {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+        };
+
+        if *signature_cache
+            .entry((deposit_message, signature))
+            .or_insert_with(|| electra::is_valid_deposit_signature(config, pubkey_cache, deposit))
+        {
             return true;
         }
     }
@@ -395,7 +427,7 @@ mod spec_tests {
 
     processing_tests! {
         process_deposit_request,
-        |config, pubkey_cache, state, deposit_request, _| process_deposit_request(config, pubkey_cache, state, deposit_request),
+        |config, pubkey_cache, state, deposit_request, _| process_deposit_request(config, pubkey_cache, state, deposit_request, &mut HashMap::new()),
         "deposit_request",
         "consensus-spec-tests/tests/mainnet/gloas/operations/deposit_request/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/deposit_request/*/*",

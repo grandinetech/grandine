@@ -120,7 +120,7 @@ pub struct DepositData {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct DepositMessage {
     pub pubkey: PublicKeyBytes,
