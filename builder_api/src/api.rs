@@ -327,7 +327,7 @@ impl Api {
         let url = self.url("/eth/v1/builder/blinded_blocks")?;
 
         let (next_interval, remaining_time) =
-            clock::next_interval_with_remaining_time(chain_config, genesis_time)?;
+            clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
 
         let use_json = self.config.builder_api_format == BuilderApiFormat::Json
             || self
@@ -410,7 +410,7 @@ impl Api {
         let url = self.url("/eth/v2/builder/blinded_blocks")?;
 
         let (next_interval, remaining_time) =
-            clock::next_interval_with_remaining_time(chain_config, genesis_time)?;
+            clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
 
         let use_json = self.config.builder_api_format == BuilderApiFormat::Json
             || self
