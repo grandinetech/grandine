@@ -3,6 +3,7 @@ use core::ops::{Range, RangeFrom, RangeToInclusive};
 use std::path::Path;
 use std::{
     borrow::Cow,
+    io::{Read, Write},
     sync::{Arc, Mutex},
 };
 
@@ -18,12 +19,12 @@ use itertools::Either;
 use libmdbx::{DatabaseFlags, Environment, Geometry, ObjectLength, Stat, WriteFlags};
 #[cfg(not(target_os = "zkvm"))]
 use logging::{debug_with_peers, error_with_peers};
-use snap::raw::{Decoder, Encoder};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 #[cfg(not(target_os = "zkvm"))]
 use thiserror::Error;
 use unwrap_none::UnwrapNone as _;
+use zstd::{Decoder, Encoder};
 
 #[cfg(not(target_os = "zkvm"))]
 const GROWTH_STEP: ByteSize = ByteSize::mib(256);
@@ -625,12 +626,26 @@ struct Error;
 
 pub type InMemoryMap = OrdMap<Arc<[u8]>, Arc<[u8]>>;
 
+const COMPRESSION_LVL: i32 = 1;
+const COMPRESSION_EST: usize = 2;
+
 fn compress(data: &[u8]) -> Result<Vec<u8>> {
-    Encoder::new().compress_vec(data).map_err(Into::into)
+    let mut compressed = Vec::with_capacity(data.len() / COMPRESSION_EST);
+    let mut encoder = Encoder::new(&mut compressed, COMPRESSION_LVL)?;
+
+    encoder.write_all(data)?;
+    encoder.finish()?;
+
+    Ok(compressed)
 }
 
 fn decompress(data: &[u8]) -> Result<Vec<u8>> {
-    Decoder::new().decompress_vec(data).map_err(Into::into)
+    let mut decompressed = Vec::with_capacity(data.len() * COMPRESSION_EST);
+    let mut decoder = Decoder::new(data)?;
+
+    decoder.read_to_end(&mut decompressed)?;
+
+    Ok(decompressed)
 }
 
 #[cfg(not(target_os = "zkvm"))]
@@ -808,7 +823,7 @@ mod tests {
             .collect::<Result<Vec<_>>>()?;
 
         let compressed_len = compress(b"A")?.len();
-        assert_eq!(compressed_len, 3);
+        assert_eq!(compressed_len, 10);
 
         let expected = [
             ("A".to_owned(), compressed_len),

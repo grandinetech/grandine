@@ -477,6 +477,7 @@ xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
 zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.3' }
 zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.3' }
+zstd = '0.13.3'
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
