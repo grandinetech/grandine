@@ -133,6 +133,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     thread_pool: ThreadPool<P, E, W>,
     metrics: Option<Arc<Metrics>>,
     finished_loading_from_storage: bool,
+    has_pending_archive_tasks: bool,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
     attestation_verifier_tx: TS,
@@ -197,6 +198,7 @@ where
             thread_pool,
             metrics,
             finished_loading_from_storage: false,
+            has_pending_archive_tasks: false,
             mutator_tx,
             mutator_rx,
             attestation_verifier_tx,
@@ -496,6 +498,10 @@ where
         );
 
         if changes.is_finalized_checkpoint_updated() {
+            self.has_pending_archive_tasks = true;
+        } else if self.has_pending_archive_tasks && tick.kind == TickKind::Aggregate {
+            self.has_pending_archive_tasks = false;
+
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
@@ -2386,6 +2392,8 @@ where
         self.maybe_spawn_block_attestations_task(wait_group, block_root, &block);
 
         if changes.is_finalized_checkpoint_updated() {
+            self.has_pending_archive_tasks = false;
+
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
