@@ -18,6 +18,7 @@ use strum::AsRefStr;
 use thiserror::Error;
 use transition_functions::unphased::StateRootPolicy;
 use types::{
+    Validators,
     combined::{
         Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
         SignedBeaconBlock,
@@ -1076,7 +1077,12 @@ impl DataAvailabilityPolicy {
     }
 }
 
-pub trait Storage<P: Preset>: Sync {
+pub trait Storage<P: Preset>: Sync + Sized {
     fn storage_mode(&self) -> StorageMode;
-    fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>>;
+
+    fn stored_state_by_block_root(
+        &self,
+        block_root: H256,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<Option<Arc<BeaconState<P>>>>;
 }

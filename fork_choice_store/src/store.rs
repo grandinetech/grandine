@@ -43,6 +43,7 @@ use transition_functions::{
 };
 use typenum::Unsigned as _;
 use types::{
+    Validators,
     combined::{
         Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
         SignedAggregateAndProof, SignedBeaconBlock,
@@ -1032,6 +1033,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.last_finalized()
             .execution_block_hash()
             .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn finalized_validators(&self) -> Validators<P> {
+        self.last_finalized().state(self).validators().clone()
     }
 
     pub fn validate_block(
@@ -3430,7 +3436,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // `Vector` has no `resize` method as of `im` version 15.1.0.
     fn extend_latest_messages_after_finalization(&mut self) {
         let old_length = self.latest_messages.len();
-        let new_length = self.last_finalized().state(self).validators().len_usize();
+        let new_length = self.finalized_validators().len_usize();
         let added_vacancies = core::iter::repeat_n(None, new_length - old_length);
 
         self.latest_messages.extend(added_vacancies);
@@ -3973,7 +3979,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block_root: H256,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
-        self.storage.stored_state_by_block_root(block_root)
+        // Do not call `self.finalized_validators()` here.
+        //
+        // `finalized_validators()` tries to load the finalized state when it is
+        // not already in memory. That load path eventually calls this function
+        // again, which would cause infinite recursion.
+        //
+        // Instead, use a best-effort approach: read finalized validators only
+        // when the finalized state is already present, and fall back to loading
+        // validators from disk otherwise.
+        let finalized_validators = self
+            .last_finalized()
+            .state
+            .as_ref()
+            .map(types::traits::BeaconState::validators);
+
+        self.storage
+            .stored_state_by_block_root(block_root, finalized_validators)
     }
 
     #[must_use]

@@ -100,7 +100,7 @@ pub mod gloas {
     mod spec_tests;
 }
 
-pub use collections::ProposerLookahead;
+pub use collections::{ProposerLookahead, Validators};
 
 mod collections;
 
