@@ -680,11 +680,14 @@ where
         anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
         is_exiting: &Arc<AtomicBool>,
     ) -> Result<()> {
+        let store = self.store_snapshot();
+
         self.storage.archive_back_sync_states(
             start_slot,
             end_slot,
             anchor_checkpoint_provider,
             is_exiting,
+            &store.finalized_validators(),
         )
     }
 

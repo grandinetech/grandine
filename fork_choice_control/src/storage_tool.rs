@@ -30,7 +30,7 @@ pub fn export_state_and_blocks<P: Preset>(
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
 ) -> Result<()> {
     let export_state = |state_slot| -> Result<()> {
-        let state = match storage.stored_state(state_slot)? {
+        let state = match storage.stored_state(state_slot, None)? {
             Some(found_state) => found_state,
             None => {
                 let mut temporary_state =

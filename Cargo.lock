@@ -5896,6 +5896,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "bls",
  "bytesize",
  "cached",
  "clock",
@@ -5943,6 +5944,7 @@ dependencies = [
  "tokio",
  "tracing",
  "transition_functions",
+ "try_from_iterator",
  "tynm",
  "typenum",
  "types",

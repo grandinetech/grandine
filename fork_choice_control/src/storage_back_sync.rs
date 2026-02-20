@@ -10,6 +10,7 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
+    Validators,
     combined::{DataColumnSidecar, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
@@ -41,6 +42,7 @@ impl<P: Preset> Storage<P> {
         end_slot: Slot,
         anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
         is_exiting: &Arc<AtomicBool>,
+        finalized_validators: &Validators<P>,
     ) -> Result<()> {
         let WithOrigin { value, origin } = anchor_checkpoint_provider.checkpoint();
 
@@ -54,7 +56,9 @@ impl<P: Preset> Storage<P> {
 
         // check whether archiving was interrupted
         if let Some(slot) = get_latest_archived_slot(&self.database)?
-            && self.stored_state(slot)?.is_some()
+            && self
+                .stored_state(slot, Some(finalized_validators))?
+                .is_some()
             && slot > start_slot
             && slot <= end_slot
         {
@@ -69,9 +73,10 @@ impl<P: Preset> Storage<P> {
 
             anchor_state
         } else {
-            self.stored_state(start_slot)?.ok_or(Error::StateNotFound {
-                state_slot: start_slot,
-            })?
+            self.stored_state(start_slot, Some(finalized_validators))?
+                .ok_or(Error::StateNotFound {
+                    state_slot: start_slot,
+                })?
         };
 
         let mut previous_block = None;
@@ -185,6 +190,7 @@ mod tests {
     use eth2_cache_utils::mainnet;
     use itertools::{EitherOrBoth, Itertools as _};
     use pubkey_cache::PubkeyCache;
+    use types::traits::BeaconState as _;
     use types::{nonstandard::StorageMode, phase0::consts::GENESIS_SLOT};
 
     use super::*;
@@ -244,11 +250,14 @@ mod tests {
             );
         }
 
+        let finalized_validators = genesis_state.validators().clone();
+
         storage.archive_back_sync_states(
             0,
             128,
             &AnchorCheckpointProvider::custom_from_genesis(genesis_state),
             &Arc::new(AtomicBool::new(false)),
+            &finalized_validators,
         )?;
 
         // Assert that the mappings from state root to slot are stored.
@@ -261,7 +270,7 @@ mod tests {
         for state_root in [state_1_root, state_22_root, state_96_root, state_128_root] {
             assert_eq!(
                 storage
-                    .stored_state_by_state_root(state_root)?
+                    .stored_state_by_state_root(state_root, &finalized_validators)?
                     .map(|state| state.hash_tree_root()),
                 Some(state_root),
             );

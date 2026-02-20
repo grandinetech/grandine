@@ -2,22 +2,25 @@ use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
+use bls::PublicKeyBytes;
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
-use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
+use ssz::{PersistentList, Ssz, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::info;
 use transition_functions::combined;
+use try_from_iterator::TryFromIterator;
 use types::{
+    Validators,
     combined::{BeaconState, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::{
@@ -118,8 +121,8 @@ impl<P: Preset> Storage<P> {
             } => 'block: {
                 // Attempt to load local state first: either latest or from specified slot.
                 let local_state_storage = match state_slot {
-                    Some(slot) => self.load_state_by_iteration(slot)?,
-                    None => self.load_latest_state()?,
+                    Some(slot) => self.load_state_by_iteration(slot, None)?,
+                    None => self.load_latest_state(None)?,
                 };
 
                 if let Some(url) = checkpoint_sync_url {
@@ -218,20 +221,32 @@ impl<P: Preset> Storage<P> {
 
         info_with_peers!("loaded state at slot {anchor_slot}");
 
-        self.database.put_batch([
+        let mut batch = vec![
             serialize(FinalizedBlockByRoot(anchor_block_root), &anchor_block)?,
             serialize(BlockRootBySlot(anchor_slot), anchor_block_root)?,
             serialize(SlotByStateRoot(anchor_state_root), anchor_slot)?,
-            serialize(StateByBlockRoot(anchor_block_root), &anchor_state)?,
-        ])?;
+            serialize(
+                StateByBlockRoot(anchor_block_root),
+                prepare_state(anchor_state.clone_arc()),
+            )?,
+        ];
+
+        self.append_finalized_validator_pubkeys_to_batch(&mut batch, anchor_state.validators())?;
+
+        self.database.put_batch(batch)?;
 
         let state_storage = (anchor_state, anchor_block, unfinalized_blocks);
 
         Ok((state_storage, loaded_from_remote))
     }
 
-    fn load_latest_state(&self) -> Result<OptionalStateStorage<'_, P>> {
-        if let Some((state, block, blocks)) = self.load_state_and_blocks_from_checkpoint()? {
+    fn load_latest_state(
+        &self,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<OptionalStateStorage<'_, P>> {
+        if let Some((state, block, blocks)) =
+            self.load_state_and_blocks_from_checkpoint(finalized_validators)?
+        {
             Ok(OptionalStateStorage::Full((state, block, blocks)))
         } else {
             info_with_peers!(
@@ -239,7 +254,7 @@ impl<P: Preset> Storage<P> {
                  attempting to find stored state by iteration",
             );
 
-            self.load_state_by_iteration(Slot::MAX)
+            self.load_state_by_iteration(Slot::MAX, finalized_validators)
         }
     }
 
@@ -255,6 +270,11 @@ impl<P: Preset> Storage<P> {
         let mut archival_state_appended = false;
         let mut batch = vec![];
 
+        self.append_finalized_validator_pubkeys_to_batch(
+            &mut batch,
+            &store.finalized_validators(),
+        )?;
+
         let unfinalized = unfinalized.zip(core::iter::repeat(false));
         let finalized = finalized.rev().zip(core::iter::repeat(true));
 
@@ -263,7 +283,9 @@ impl<P: Preset> Storage<P> {
             .filter(|(chain_link, is_finalized)| *is_finalized || chain_link.is_valid())
             .peekable();
 
-        if let Some(StateCheckpoint { head_slot, .. }) = self.load_state_checkpoint()? {
+        if let Some(StateCheckpoint { head_slot, .. }) =
+            self.load_state_checkpoint(Some(&store.finalized_validators()))?
+        {
             store_head_slot = head_slot;
         }
 
@@ -321,7 +343,9 @@ impl<P: Preset> Storage<P> {
                         StateCheckpoint {
                             block_root,
                             head_slot: store_head_slot,
-                            state: state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                            state: prepare_state(
+                                state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                            ),
                         },
                     )?);
 
@@ -336,7 +360,7 @@ impl<P: Preset> Storage<P> {
 
                     batch.push(serialize(
                         StateByBlockRoot(block_root),
-                        state.get_or_init(|| chain_link.state(store)),
+                        prepare_state(state.get_or_init(|| chain_link.state(store)).clone_arc()),
                     )?);
 
                     archival_state_appended = true;
@@ -384,14 +408,21 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn append_states(
         &self,
         states_with_block_roots: impl Iterator<Item = (Arc<BeaconState<P>>, H256)>,
+        finalized_validators: &Validators<P>,
     ) -> Result<Vec<Slot>> {
         let mut slots = vec![];
         let mut batch = vec![];
+        self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
 
         for (state, block_root) in states_with_block_roots {
             if !self.contains_key(StateByBlockRoot(block_root))? {
+                let archival_state = state.clone_arc();
+
                 slots.push(state.slot());
-                batch.push(serialize(StateByBlockRoot(block_root), state)?);
+                batch.push(serialize(
+                    StateByBlockRoot(block_root),
+                    prepare_state(archival_state),
+                )?);
             }
         }
 
@@ -586,8 +617,13 @@ impl<P: Preset> Storage<P> {
         self.database.delete_batch(keys_to_remove)
     }
 
-    pub(crate) fn checkpoint_state_slot(&self) -> Result<Option<Slot>> {
-        if let Some(StateCheckpoint { head_slot, .. }) = self.load_state_checkpoint()? {
+    pub(crate) fn checkpoint_state_slot(
+        &self,
+        finalized_validators: &Validators<P>,
+    ) -> Result<Option<Slot>> {
+        if let Some(StateCheckpoint { head_slot, .. }) =
+            self.load_state_checkpoint(Some(finalized_validators))?
+        {
             return Ok(Some(head_slot));
         }
 
@@ -626,8 +662,19 @@ impl<P: Preset> Storage<P> {
         self.get(BlockRootBySlot(slot))
     }
 
-    fn state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
-        self.get(StateByBlockRoot(block_root))
+    fn state_by_block_root(
+        &self,
+        block_root: H256,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
+        let Some(mut state) = self.get::<Arc<BeaconState<P>>>(StateByBlockRoot(block_root))? else {
+            return Ok(None);
+        };
+
+        // Restore validators if they were removed
+        self.restore_validators_to_state(state.make_mut(), finalized_validators)?;
+
+        Ok(Some(state))
     }
 
     pub(crate) fn slot_by_state_root(&self, state_root: H256) -> Result<Option<Slot>> {
@@ -678,13 +725,18 @@ impl<P: Preset> Storage<P> {
         Ok(Some((block, block_root)))
     }
 
-    pub(crate) fn stored_state(&self, slot: Slot) -> Result<Option<Arc<BeaconState<P>>>> {
-        let (mut state, state_block, blocks) = match self.load_state_by_iteration(slot)? {
-            OptionalStateStorage::None | OptionalStateStorage::UnfinalizedOnly(_) => {
-                return Ok(None);
-            }
-            OptionalStateStorage::Full(state_storage) => state_storage,
-        };
+    pub(crate) fn stored_state(
+        &self,
+        slot: Slot,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
+        let (mut state, state_block, blocks) =
+            match self.load_state_by_iteration(slot, finalized_validators)? {
+                OptionalStateStorage::None | OptionalStateStorage::UnfinalizedOnly(_) => {
+                    return Ok(None);
+                }
+                OptionalStateStorage::Full(state_storage) => state_storage,
+            };
 
         state.set_cached_root(state_block.message().state_root());
 
@@ -710,11 +762,12 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn state_post_block(
         &self,
         mut block_root: H256,
+        finalized_validators: &Validators<P>,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         let mut blocks = vec![];
 
         let mut state = loop {
-            if let Some(state) = self.state_by_block_root(block_root)? {
+            if let Some(state) = self.state_by_block_root(block_root, Some(finalized_validators))? {
                 let slot = state.slot();
 
                 ensure!(
@@ -755,9 +808,10 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn stored_state_by_state_root(
         &self,
         state_root: H256,
+        finalized_validators: &Validators<P>,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         if let Some(state_slot) = self.slot_by_state_root(state_root)? {
-            return self.stored_state(state_slot);
+            return self.stored_state(state_slot, Some(finalized_validators));
         }
 
         Ok(None)
@@ -778,8 +832,11 @@ impl<P: Preset> Storage<P> {
         .context(Error::DependentRootLookupFailed)
     }
 
-    fn load_state_and_blocks_from_checkpoint(&self) -> Result<Option<StateStorage<'_, P>>> {
-        if let Some(checkpoint) = self.load_state_checkpoint()? {
+    fn load_state_and_blocks_from_checkpoint(
+        &self,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<Option<StateStorage<'_, P>>> {
+        if let Some(checkpoint) = self.load_state_checkpoint(finalized_validators)? {
             let StateCheckpoint {
                 block_root, state, ..
             } = checkpoint;
@@ -830,6 +887,7 @@ impl<P: Preset> Storage<P> {
     fn load_state_by_iteration(
         &self,
         start_from_slot: Slot,
+        finalized_validators: Option<&Validators<P>>,
     ) -> Result<OptionalStateStorage<'_, P>> {
         let results = self
             .database
@@ -852,7 +910,7 @@ impl<P: Preset> Storage<P> {
                     continue;
                 };
 
-                if let Some(state) = self.state_by_block_root(block_root)? {
+                if let Some(state) = self.state_by_block_root(block_root, finalized_validators)? {
                     let slot = state.slot();
 
                     ensure!(
@@ -882,8 +940,19 @@ impl<P: Preset> Storage<P> {
         self.get(BlockCheckpoint::<P>::KEY)
     }
 
-    fn load_state_checkpoint(&self) -> Result<Option<StateCheckpoint<P>>> {
-        self.get(StateCheckpoint::<P>::KEY)
+    fn load_state_checkpoint(
+        &self,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<Option<StateCheckpoint<P>>> {
+        let Some(mut checkpoint) = self.get::<StateCheckpoint<P>>(StateCheckpoint::<P>::KEY)?
+        else {
+            return Ok(None);
+        };
+
+        // Restore validators if they were removed
+        self.restore_validators_to_state(checkpoint.state.make_mut(), finalized_validators)?;
+
+        Ok(Some(checkpoint))
     }
 
     fn contains_key(&self, key: impl core::fmt::Display) -> Result<bool> {
@@ -919,6 +988,63 @@ impl<P: Preset> Storage<P> {
 
     pub(crate) fn epoch_at_slot(slot: Slot) -> Epoch {
         misc::compute_epoch_at_slot::<P>(slot)
+    }
+
+    fn restore_validators_to_state(
+        &self,
+        state: &mut BeaconState<P>,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<()> {
+        let finalized_validators = finalized_validators.map(|v| Ok(Either::Left(v))).unwrap_or_else(|| {
+            info_with_peers!("loading validators from disk");
+
+            let Some(validators) = self.get::<PersistentList<PublicKeyBytes, P::ValidatorRegistryLimit>>(FinalizedValidators)? else {
+                bail!(
+                    "Unable to restore validators into state - no saved validators on disk found."
+                );
+            };
+
+            Ok(Either::Right(validators))
+        })?;
+
+        for (index, validator) in state.validators_mut().into_iter().enumerate() {
+            if validator.pubkey.is_zero() {
+                // restore validator pubkey, by taking pubkey from the finalized validators list
+                let finalized_validator_pubkey = finalized_validators
+                    .as_ref()
+                    .either(
+                        |v| v.get(index as u64).map(|v| v.pubkey),
+                        |v| v.get(index as u64).copied(),
+                    )
+                    .context("Invalid finalized validators list")?;
+                validator.pubkey = finalized_validator_pubkey;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn append_finalized_validator_pubkeys_to_batch(
+        &self,
+        batch: &mut Vec<(String, Vec<u8>)>,
+        validators: &Validators<P>,
+    ) -> Result<()> {
+        let current_validator_count = self.get::<u64>(FinalizedValidatorCount)?.unwrap_or(0);
+
+        if validators.len_u64() <= current_validator_count {
+            return Ok(());
+        }
+
+        let validator_pubkeys = PersistentList::<_, P::ValidatorRegistryLimit>::try_from_iter(
+            validators.into_iter().map(|v| v.pubkey),
+        )?;
+
+        batch.extend_from_slice(&[
+            serialize(FinalizedValidatorCount, validators.len_u64())?,
+            serialize(FinalizedValidators, validator_pubkeys)?,
+        ]);
+
+        Ok(())
     }
 }
 
@@ -1015,8 +1141,12 @@ impl<P: Preset> fork_choice_store::Storage<P> for Storage<P> {
         self.storage_mode
     }
 
-    fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
-        self.state_by_block_root(block_root)
+    fn stored_state_by_block_root(
+        &self,
+        block_root: H256,
+        finalized_validators: Option<&Validators<P>>,
+    ) -> Result<Option<Arc<BeaconState<P>>>> {
+        self.state_by_block_root(block_root, finalized_validators)
     }
 }
 
@@ -1147,6 +1277,30 @@ impl PrefixableKey for SlotByStateRoot {
 }
 
 #[derive(Display)]
+#[display("{}", Self::PREFIX)]
+pub struct FinalizedValidators;
+
+impl FinalizedValidators {
+    const KEY: &'static str = "finalized_validators";
+}
+
+impl PrefixableKey for FinalizedValidators {
+    const PREFIX: &'static str = Self::KEY;
+}
+
+#[derive(Display)]
+#[display("{}", Self::PREFIX)]
+pub struct FinalizedValidatorCount;
+
+impl FinalizedValidatorCount {
+    const KEY: &'static str = "finalized_validator_count";
+}
+
+impl PrefixableKey for FinalizedValidatorCount {
+    const PREFIX: &'static str = Self::KEY;
+}
+
+#[derive(Display)]
 #[display("{}{_0:x}{_1}", Self::PREFIX)]
 pub struct BlobSidecarByBlobId(pub H256, pub BlobIndex);
 
@@ -1257,6 +1411,15 @@ pub fn print_beacon_database_info(database: &Database) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn prepare_state<P: Preset>(mut state: Arc<BeaconState<P>>) -> Arc<BeaconState<P>> {
+    for validator in &mut *state.make_mut().validators_mut() {
+        // pubkey never changes, so we can restore it later from finalized validator list
+        validator.pubkey = PublicKeyBytes::zero();
+    }
+
+    state
 }
 
 #[cfg(test)]

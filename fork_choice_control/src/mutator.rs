@@ -368,7 +368,7 @@ where
 
         let head_slot = self
             .storage
-            .checkpoint_state_slot()?
+            .checkpoint_state_slot(&self.store.finalized_validators())?
             .unwrap_or_else(|| last_block.message().slot());
 
         self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
@@ -2260,6 +2260,7 @@ where
             let store = self.owned_store();
             let storage = self.storage.clone_arc();
             let wait_group = wait_group.clone();
+            let finalized_validators = store.finalized_validators();
 
             if !unloaded.is_empty() {
                 Builder::new()
@@ -2271,7 +2272,7 @@ where
                         .iter()
                         .map(|chain_link| (chain_link.state(&store), chain_link.block_root));
 
-                    match storage.append_states(states_with_block_roots) {
+                    match storage.append_states(states_with_block_roots, &finalized_validators) {
                         Ok(slots) => {
                             debug_with_peers!(
                                 "unloaded old beacon states persisted \
