@@ -11580,10 +11580,10 @@ dependencies = [
  "logging",
  "once_cell",
  "prometheus",
+ "serde",
  "tokio",
  "tokio-stream",
  "tracing",
- "types",
 ]
 
 [[package]]
@@ -14691,6 +14691,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "primitive-types",
+ "prometheus_metrics",
  "replace_with",
  "serde",
  "serde_utils",

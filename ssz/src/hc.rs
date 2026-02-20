@@ -17,6 +17,9 @@ use crate::{
     size::Size,
 };
 
+#[cfg(feature = "metrics")]
+use prometheus_metrics::METRICS;
+
 /// A "Hash Cell". Or a "Hash Cache", if you prefer.
 #[derive(Default, Deref, AsRef, Derivative, Deserialize, Serialize)]
 #[derivative(PartialEq, Eq, Debug)]
@@ -108,9 +111,14 @@ impl<T: SszHash> SszHash for Hc<T> {
     type PackingFactor = T::PackingFactor;
 
     fn hash_tree_root(&self) -> H256 {
-        *self
-            .cached_root
-            .get_or_init(|| Box::new(self.value.hash_tree_root()))
+        *self.cached_root.get_or_init(|| {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = METRICS.get() {
+                metrics.hash_cell_root_init_count.inc();
+            }
+
+            Box::new(self.value.hash_tree_root())
+        })
     }
 }
 

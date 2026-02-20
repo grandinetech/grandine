@@ -8,12 +8,9 @@ use prometheus::{
     Gauge, GaugeVec, Histogram, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
     exponential_buckets, histogram_opts, opts,
 };
-use types::{
-    nonstandard::SystemStats,
-    phase0::primitives::{Epoch, Gwei, Slot, UnixSeconds},
-};
+use serde::Serialize;
 
-use crate::helpers;
+use crate::{Epoch, Gwei, Slot, UnixSeconds, helpers};
 
 pub static METRICS: OnceCell<Arc<Metrics>> = OnceCell::new();
 
@@ -162,6 +159,7 @@ pub struct Metrics {
     pub ptc_cache_init_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
     pub validator_indices_init_count: IntCounter,
+    pub hash_cell_root_init_count: IntCounter,
 
     // Transition function metrics
     pub blinded_block_transition_times: Histogram,
@@ -725,6 +723,11 @@ impl Metrics {
                 "Validator indices cache init count",
             )?,
 
+            hash_cell_root_init_count: IntCounter::new(
+                "HASH_CELL_ROOT_INIT_COUNT",
+                "Hash cell root init count",
+            )?,
+
             // Transition function metrics
             blinded_block_transition_times: Histogram::with_opts(histogram_opts!(
                 "BLINDED_BLOCK_TRANSITION_TIMES",
@@ -1020,6 +1023,7 @@ impl Metrics {
         default_registry.register(Box::new(self.ptc_cache_init_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
         default_registry.register(Box::new(self.validator_indices_init_count.clone()))?;
+        default_registry.register(Box::new(self.hash_cell_root_init_count.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
         default_registry.register(Box::new(self.block_transition_times.clone()))?;
         default_registry.register(Box::new(self.epoch_processing_times.clone()))?;
@@ -1363,4 +1367,16 @@ impl Metrics {
             )
             .set(delay.as_secs_f64())
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct SystemStats {
+    pub core_count: usize,
+    pub grandine_used_memory: u64,
+    pub grandine_total_cpu_percentage: f32,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub system_cpu_percentage: f32,
+    pub system_used_memory: u64,
+    pub system_total_memory: u64,
 }

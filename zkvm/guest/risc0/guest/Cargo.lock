@@ -2574,10 +2574,10 @@ dependencies = [
  "logging",
  "once_cell",
  "prometheus",
+ "serde",
  "tokio",
  "tokio-stream",
  "tracing",
- "types",
 ]
 
 [[package]]

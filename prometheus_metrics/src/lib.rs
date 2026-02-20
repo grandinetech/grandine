@@ -5,3 +5,8 @@ pub use crate::{
 
 mod helpers;
 mod metrics;
+
+pub type Epoch = u64;
+pub type Gwei = u64;
+pub type Slot = u64;
+pub type UnixSeconds = u64;

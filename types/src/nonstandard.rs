@@ -593,18 +593,6 @@ pub struct OwnAttestation<P: Preset> {
     pub signature: Signature,
 }
 
-#[derive(Debug, Serialize)]
-pub struct SystemStats {
-    pub core_count: usize,
-    pub grandine_used_memory: u64,
-    pub grandine_total_cpu_percentage: f32,
-    pub rx_bytes: u64,
-    pub tx_bytes: u64,
-    pub system_cpu_percentage: f32,
-    pub system_used_memory: u64,
-    pub system_total_memory: u64,
-}
-
 #[derive(Clone)]
 pub struct FinalizedCheckpoint<P: Preset> {
     pub block: Arc<SignedBeaconBlock<P>>,

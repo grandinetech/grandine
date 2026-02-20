@@ -3,7 +3,8 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use logging::warn_with_peers;
 use prometheus::{Histogram, HistogramTimer, HistogramVec};
-use types::phase0::primitives::UnixSeconds;
+
+use crate::UnixSeconds;
 
 pub fn start_timer_vec(histogram_vec: &HistogramVec, label: &str) -> Option<HistogramTimer> {
     match histogram_vec
