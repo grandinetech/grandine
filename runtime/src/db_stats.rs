@@ -6,7 +6,7 @@ use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
     FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId, StateByBlockRoot,
-    StateCheckpoint, UnfinalizedBlockByRoot,
+    StateCheckpoint, StateDeltaByBlockRoot, UnfinalizedBlockByRoot,
 };
 use tracing::{info, warn};
 use types::preset::Preset;
@@ -66,6 +66,7 @@ pub fn print<P: Preset>(
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");
     let mut unfinalized_block_root_entries = EntriesInfo::new("unfinalized_block_roots");
     let mut state_by_block_root_entries = EntriesInfo::new("states_by_block_root");
+    let mut state_delta_by_block_root_entries = EntriesInfo::new("state_deltas_by_block_root");
     let mut slot_by_state_root_entries = EntriesInfo::new("slots_by_state_root");
     let mut slot_by_blob_id_entries = EntriesInfo::new("slots_by_blob_id");
     let mut blob_sidecar_by_blob_id_entries = EntriesInfo::new("blob_sidecars_by_blob_id");
@@ -87,6 +88,8 @@ pub fn print<P: Preset>(
             finalized_block_root_entries.track(&key, length);
         } else if StateByBlockRoot::has_prefix(&key) {
             state_by_block_root_entries.track(&key, length);
+        } else if StateDeltaByBlockRoot::has_prefix(&key) {
+            state_delta_by_block_root_entries.track(&key, length);
         } else if SlotByStateRoot::has_prefix(&key) {
             slot_by_state_root_entries.track(&key, length);
         } else if SlotBlobId::has_prefix(&key) {
@@ -117,6 +120,7 @@ pub fn print<P: Preset>(
         finalized_block_root_entries,
         unfinalized_block_root_entries,
         state_by_block_root_entries,
+        state_delta_by_block_root_entries,
         slot_by_state_root_entries,
         slot_by_blob_id_entries,
         blob_sidecar_by_blob_id_entries,
