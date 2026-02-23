@@ -299,7 +299,7 @@ impl<P: Preset> Storage<P> {
 
                 let state = OnceCell::new();
 
-                if !checkpoint_state_appended {
+                if !checkpoint_state_appended && store.is_forward_synced() {
                     let append_state = misc::is_epoch_start::<P>(state_slot);
 
                     if append_state {
