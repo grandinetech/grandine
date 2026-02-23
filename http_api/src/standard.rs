@@ -3190,6 +3190,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/attestation_data`
+#[expect(clippy::too_many_lines)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -3265,7 +3266,10 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         status.is_optimistic()
     };
 
-    if is_optimistic
+    let should_wait_for_late_block = !validator_config.disable_wait_for_late_blocks
+        && controller.has_current_slot_blocks_in_processing();
+
+    if (is_optimistic || should_wait_for_late_block)
         && let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
             loop {
                 let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
@@ -3277,7 +3281,19 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
                     }
                 };
 
-                if block_event.block == block_root && !block_event.execution_optimistic {
+                if block_event.execution_optimistic {
+                    continue;
+                }
+
+                if block_event.block == block_root {
+                    debug_with_peers!(
+                        "fork choice head became fully validated (block event: {block_event:?})",
+                    );
+                    break;
+                }
+
+                if block_event.block == controller.head().value.block_root {
+                    debug_with_peers!("fork choice head changed (block event: {block_event:?})");
                     break;
                 }
             }

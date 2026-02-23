@@ -23,4 +23,5 @@ pub struct ValidatorConfig {
     #[derivative(Default(value = "true"))]
     pub backfill_custody_groups: bool,
     pub custody_mode: CustodyMode,
+    pub disable_wait_for_late_blocks: bool,
 }

@@ -79,6 +79,7 @@ pub struct GrandineConfig {
     pub backfill_custody_groups: bool,
     pub sync_without_reconstruction: bool,
     pub custody_mode: CustodyMode,
+    pub disable_wait_for_late_blocks: bool,
 }
 
 impl GrandineConfig {

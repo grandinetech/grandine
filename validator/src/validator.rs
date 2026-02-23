@@ -2372,7 +2372,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn wait_for_fully_validated_head(&self, slot_head: &SlotHead<P>) -> Result<()> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
-        if !slot_head.is_optimistic(&self.controller)? {
+        if !slot_head.is_optimistic(&self.controller)? && !self.should_wait_for_late_block() {
             return Ok(());
         }
 
@@ -2388,15 +2388,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                 };
 
-                if block_event.block == slot_head.beacon_block_root
-                    && !block_event.execution_optimistic
-                {
+                if block_event.execution_optimistic {
+                    continue;
+                }
+
+                if block_event.block == slot_head.beacon_block_root {
+                    debug_with_peers!(
+                        "fork choice head became fully validated (block event: {block_event:?})",
+                    );
+                    break;
+                } else if block_event.block == self.controller.head().value.block_root {
+                    debug_with_peers!("fork choice head changed (block event: {block_event:?})");
                     break;
                 }
             }
         })
         .await
         .map_err(Into::into)
+    }
+
+    fn should_wait_for_late_block(&self) -> bool {
+        !self.validator_config.disable_wait_for_late_blocks
+            && self.controller.has_current_slot_blocks_in_processing()
     }
 }
 

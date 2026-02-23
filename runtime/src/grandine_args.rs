@@ -893,6 +893,10 @@ struct ValidatorOptions {
     /// Backfill custody groups
     #[clap(long)]
     no_custody_groups_backfill: bool,
+
+    /// Disable additional 1 second wait before attesting for late blocks that are being processed at the start of the attest duty
+    #[clap(long)]
+    disable_wait_for_late_blocks: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1098,6 +1102,7 @@ impl GrandineArgs {
             slashing_protection_history_limit,
             report_validator_performance,
             no_custody_groups_backfill,
+            disable_wait_for_late_blocks,
         } = validator_options;
 
         if in_memory {
@@ -1490,6 +1495,7 @@ impl GrandineArgs {
             backfill_custody_groups: !no_custody_groups_backfill,
             sync_without_reconstruction,
             custody_mode,
+            disable_wait_for_late_blocks,
         })
     }
 

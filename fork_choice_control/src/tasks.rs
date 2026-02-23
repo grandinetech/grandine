@@ -106,7 +106,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             prometheus_metrics::start_timer_vec(&metrics.fc_block_task_times, origin.as_ref())
         });
 
-        // TODO(Grandine Team): Consider moving the `match` into `Store`.
         let result = match origin {
             BlockOrigin::Gossip(_) | BlockOrigin::Requested(_) | BlockOrigin::Api(_) => {
                 block_processor.validate_block(
@@ -148,6 +147,10 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 NullVerifier,
             ),
         };
+
+        if block.message().slot() == store_snapshot.slot() {
+            store_snapshot.dec_current_slot_blocks_in_processing();
+        }
 
         let block_root = block.message().hash_tree_root();
 
