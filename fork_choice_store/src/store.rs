@@ -1,4 +1,7 @@
-use core::ops::{AddAssign as _, Bound, SubAssign as _};
+use core::{
+    ops::{AddAssign as _, Bound, SubAssign as _},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use std::{
     backtrace::Backtrace,
     collections::{
@@ -250,6 +253,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     delayed_block_at_slot: HashMap<Slot, H256>,
     requested_blobs_from_el: HashMap<H256, Slot>,
+    current_slot_blocks_in_processing: Arc<AtomicUsize>,
 }
 
 impl<P: Preset, S: Storage<P>> Store<P, S> {
@@ -343,6 +347,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             sidecars_construction_started,
             delayed_block_at_slot: HashMap::default(),
             requested_blobs_from_el: HashMap::default(),
+            current_slot_blocks_in_processing: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1192,6 +1197,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let Some(parent) = self.chain_link(block.message().parent_root()) else {
             return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
         };
+
+        if block.message().slot() == self.slot() {
+            self.inc_current_slot_blocks_in_processing();
+        }
 
         // > Check the block is valid and compute the post-state
         let (state, block_action) = state_transition(block_root, parent)?;
@@ -2713,6 +2722,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.blob_cache.on_slot(new_tick.slot);
+        self.reset_current_slot_blocks_in_processing();
 
         let changes = if self.reorganized(old_head_segment_id) {
             ApplyTickChanges::Reorganized {
@@ -4331,6 +4341,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn mark_requested_blobs_from_el(&mut self, block_root: H256, slot: Slot) {
         self.requested_blobs_from_el.insert(block_root, slot);
+    }
+
+    pub fn has_current_slot_blocks_in_processing(&self) -> bool {
+        self.current_slot_blocks_in_processing
+            .load(Ordering::SeqCst)
+            > 0
+    }
+
+    pub fn dec_current_slot_blocks_in_processing(&self) {
+        let _ = self.current_slot_blocks_in_processing.fetch_update(
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+            |count| count.checked_sub(1),
+        );
+    }
+
+    fn inc_current_slot_blocks_in_processing(&self) {
+        self.current_slot_blocks_in_processing
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn reset_current_slot_blocks_in_processing(&self) {
+        self.current_slot_blocks_in_processing
+            .store(0, Ordering::SeqCst);
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {

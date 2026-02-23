@@ -1293,6 +1293,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         backfill_custody_groups,
         sync_without_reconstruction,
         custody_mode,
+        disable_wait_for_late_blocks,
         ..
     } = config;
 
@@ -1331,6 +1332,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         keystore_storage_password_file,
         backfill_custody_groups,
         custody_mode,
+        disable_wait_for_late_blocks,
     });
 
     let store_config = StoreConfig {

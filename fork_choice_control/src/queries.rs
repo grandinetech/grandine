@@ -229,6 +229,12 @@ where
     }
 
     #[must_use]
+    pub fn has_current_slot_blocks_in_processing(&self) -> bool {
+        self.store_snapshot()
+            .has_current_slot_blocks_in_processing()
+    }
+
+    #[must_use]
     pub fn head(&self) -> WithStatus<ChainLink<P>> {
         let store = self.store_snapshot();
         let head = store.head();
