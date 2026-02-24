@@ -167,6 +167,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     type MaxBlobCommitmentsPerBlock: MerkleElements<Blob<Self>>
         + MerkleElements<Cell<Self>>
         + MerkleElements<KzgCommitment>
+        + MerkleBits
         + Eq
         + Debug
         + Send

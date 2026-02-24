@@ -24,6 +24,7 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
+    fulu::containers::{PartialDataColumn, PartialDataColumnHeader},
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
     phase0::{
@@ -639,6 +640,7 @@ pub enum DataColumnSidecarOrigin {
     Gossip(SubnetId, GossipId),
     Requested(PeerId),
     Own,
+    Merged,
 }
 
 impl DataColumnSidecarOrigin {
@@ -652,7 +654,11 @@ impl DataColumnSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
-            Self::BackSync | Self::ExecutionLayer | Self::Own | Self::Requested(_) => (None, None),
+            Self::BackSync
+            | Self::ExecutionLayer
+            | Self::Own
+            | Self::Requested(_)
+            | Self::Merged => (None, None),
         }
     }
 
@@ -664,7 +670,8 @@ impl DataColumnSidecarOrigin {
             | Self::BackSync
             | Self::ExecutionLayer
             | Self::Own
-            | Self::Requested(_) => None,
+            | Self::Requested(_)
+            | Self::Merged => None,
         }
     }
 
@@ -673,7 +680,7 @@ impl DataColumnSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => Some(*peer_id),
-            Self::Api(_) | Self::BackSync | Self::ExecutionLayer | Self::Own => None,
+            Self::Api(_) | Self::BackSync | Self::ExecutionLayer | Self::Own | Self::Merged => None,
         }
     }
 
@@ -685,7 +692,8 @@ impl DataColumnSidecarOrigin {
             | Self::BackSync
             | Self::ExecutionLayer
             | Self::Own
-            | Self::Requested(_) => None,
+            | Self::Requested(_)
+            | Self::Merged => None,
         }
     }
 
@@ -702,6 +710,16 @@ impl DataColumnSidecarOrigin {
     #[must_use]
     pub const fn is_from_el(&self) -> bool {
         matches!(self, Self::ExecutionLayer)
+    }
+
+    #[must_use]
+    pub const fn is_from_merged(&self) -> bool {
+        matches!(self, Self::Merged)
+    }
+
+    #[must_use]
+    pub const fn is_from_el_or_merged(&self) -> bool {
+        matches!(self, Self::ExecutionLayer | Self::Merged)
     }
 }
 
@@ -807,6 +825,33 @@ impl<P: Preset> DataColumnSidecarAction<P> {
     #[must_use]
     pub const fn ignored(&self) -> bool {
         matches!(self, Self::Ignore(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum PartialDataColumnSidecarAction<P: Preset> {
+    Accept(Arc<PartialDataColumn<P>>),
+    Ignore(Publishable),
+    DelayUntilState(Arc<PartialDataColumnHeader<P>>, H256),
+    DelayUntilParent(Arc<PartialDataColumnHeader<P>>),
+    DelayUntilSlot(Arc<PartialDataColumnHeader<P>>),
+}
+
+impl<P: Preset> PartialDataColumnSidecarAction<P> {
+    #[must_use]
+    pub const fn accepted(&self) -> bool {
+        matches!(self, Self::Accept(_))
+    }
+
+    #[must_use]
+    pub const fn ignored(&self) -> bool {
+        matches!(self, Self::Ignore(_))
+    }
+
+    #[must_use]
+    /// Use in check header validation result
+    pub const fn valid_header(&self) -> bool {
+        matches!(self, Self::Ignore(true))
     }
 }
 

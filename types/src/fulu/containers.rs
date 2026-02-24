@@ -1,7 +1,7 @@
 use bls::SignatureBytes;
 use serde::{Deserialize, Serialize};
 use ssz::{ContiguousList, ContiguousVector, Hc, Ssz};
-use typenum::Log2;
+use typenum::{Log2, U1};
 
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
@@ -14,7 +14,7 @@ use crate::{
         consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
         containers::{Attestation, AttesterSlashing, ExecutionRequests},
     },
-    fulu::primitives::{BlobCommitmentsInclusionProof, Cell, ColumnIndex, RowIndex},
+    fulu::primitives::{BlobCommitmentsInclusionProof, Cell, CellBitmap, ColumnIndex, RowIndex},
     phase0::{
         containers::{
             BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing, SignedBeaconBlockHeader,
@@ -204,4 +204,35 @@ pub struct BlobsBundle<P: Preset> {
 pub struct ExecutionPayloadAndBlobsBundle<P: Preset> {
     pub execution_payload: ExecutionPayload<P>,
     pub blobs_bundle: BlobsBundle<P>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct PartialDataColumnSidecar<P: Preset> {
+    pub cells_present_bitmap: CellBitmap<P>,
+    pub partial_column: ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub header: ContiguousList<PartialDataColumnHeader<P>, U1>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct PartialDataColumnHeader<P: Preset> {
+    pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub signed_block_header: SignedBeaconBlockHeader,
+    pub kzg_commitments_inclusion_proof: BlobCommitmentsInclusionProof<P>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct PartialDataColumnPartsMetadata<P: Preset> {
+    pub available: CellBitmap<P>,
+    pub requests: CellBitmap<P>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartialDataColumn<P: Preset> {
+    pub block_root: H256,
+    pub index: ColumnIndex,
+    pub sidecar: PartialDataColumnSidecar<P>,
 }

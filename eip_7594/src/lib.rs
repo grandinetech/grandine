@@ -24,7 +24,10 @@ use types::{
     config::Config,
     deneb::primitives::{Blob, KzgCommitment, KzgProof},
     fulu::{
-        containers::{DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry},
+        containers::{
+            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry, PartialDataColumnHeader,
+            PartialDataColumnSidecar,
+        },
         primitives::{BlobCommitmentsInclusionProof, CellsAndKzgProofs, ColumnIndex, CustodyIndex},
     },
     gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
@@ -234,12 +237,71 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
     // Fields in BeaconBlockBody before blob KZG commitments
     let index_at_commitment_depth = 11;
 
-    // is_valid_blob_sidecar_inclusion_proof
+    // is_valid_data_column_sidecar_inclusion_proof
     is_valid_merkle_branch(
         kzg_commitments.hash_tree_root(),
         *kzg_commitments_inclusion_proof,
         index_at_commitment_depth,
         signed_block_header.message.body_root,
+    )
+}
+
+pub fn verify_partial_data_column_header_inclusion_proof<P: Preset>(
+    header: &PartialDataColumnHeader<P>,
+    metrics: Option<&Arc<Metrics>>,
+) -> bool {
+    let PartialDataColumnHeader {
+        kzg_commitments,
+        signed_block_header,
+        kzg_commitments_inclusion_proof,
+    } = header;
+
+    // Fields in BeaconBlockBody before blob KZG commitments
+    let index_at_commitment_depth = 11;
+
+    is_valid_merkle_branch(
+        kzg_commitments.hash_tree_root(),
+        *kzg_commitments_inclusion_proof,
+        index_at_commitment_depth,
+        signed_block_header.message.body_root,
+    )
+}
+
+pub fn verify_partial_data_column_sidecar_kzg_proofs<P: Preset>(
+    sidecar: &PartialDataColumnSidecar<P>,
+    kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    column_index: ColumnIndex,
+    backend: KzgBackend,
+    metrics: Option<&Arc<Metrics>>,
+) -> Result<bool> {
+    let PartialDataColumnSidecar {
+        cells_present_bitmap,
+        partial_column,
+        kzg_proofs,
+        ..
+    } = sidecar;
+
+    ensure!(
+        !partial_column.is_empty(),
+        Error::PartialDataColumnEmptyCells { column_index }
+    );
+
+    // Get the blob indices from the bitmap
+    let mut blob_indices = cells_present_bitmap.iter_ones();
+    let cell_indices = vec![column_index; blob_indices.len()];
+
+    let commitments = kzg_commitments
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| blob_indices.contains(index))
+        .map(|(_, commitment)| commitment);
+
+    verify_cell_kzg_proof_batch::<P>(
+        commitments,
+        cell_indices,
+        partial_column,
+        kzg_proofs,
+        backend,
     )
 }
 

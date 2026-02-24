@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use eth2_libp2p::GossipId;
+use eth2_libp2p::{GossipId, GossipTopic, PeerId};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
@@ -30,7 +30,7 @@ use types::{
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::containers::DataColumnIdentifier,
+    fulu::containers::{DataColumnIdentifier, PartialDataColumn},
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
@@ -790,5 +790,48 @@ impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
         if let Err(error) = state_at_slot_cache.flush() {
             warn_with_peers!("failed to flush state at slot cache: {error:?}");
         }
+    }
+}
+
+pub struct PartialDataColumnTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub column: Arc<PartialDataColumn<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
+    pub peer_id: PeerId,
+    pub topic: GossipTopic,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PartialDataColumnTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PartialDataColumnTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            column,
+            state,
+            peer_id,
+            topic,
+            submission_time,
+            metrics,
+        } = self;
+
+        let data_column_identifier: DataColumnIdentifier = column.as_ref().into();
+
+        let result = store_snapshot.validate_partial_data_column(column, state, metrics.as_ref());
+
+        MutatorMessage::PartialDataColumnSidecar {
+            wait_group,
+            result,
+            data_column_identifier,
+            peer_id,
+            topic,
+            submission_time,
+        }
+        .send(&mutator_tx);
     }
 }

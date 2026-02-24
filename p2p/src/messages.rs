@@ -25,7 +25,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumn},
         primitives::ColumnIndex,
     },
     gloas::containers::SignedExecutionPayloadBid,
@@ -75,10 +75,12 @@ pub enum P2pToSync<P: Preset> {
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
+    GossipPartialDataColumn(Arc<PartialDataColumn<P>>, PeerId, GossipTopic),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
+    DataColumnSidecarMerged(Arc<DataColumnSidecar<P>>),
     Stop,
 }
 
@@ -255,8 +257,10 @@ pub enum ServiceInboundMessage<P: Preset> {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
     Publish(PubsubMessage<P>),
+    PublishPartialMessages(Vec<Arc<PartialDataColumn<P>>>),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
+    ReportPartialMessageValidationFailure(PeerId, GossipTopic),
     SendErrorResponse(PeerId, InboundRequestId, RpcErrorResponse, &'static str),
     SendRequest(PeerId, AppRequestId, RequestType<P>),
     SendResponse(PeerId, InboundRequestId, Box<Response<P>>),

@@ -15,7 +15,11 @@ use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
 use bls::traits::SignatureBytes as _;
 use clock::Tick;
-use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
+use eip_7594::{
+    verify_data_column_sidecar, verify_kzg_proofs,
+    verify_partial_data_column_header_inclusion_proof,
+    verify_partial_data_column_sidecar_kzg_proofs, verify_sidecar_inclusion_proof,
+};
 use execution_engine::ExecutionEngine;
 use features::Feature;
 use hash_hasher::HashedMap;
@@ -55,7 +59,10 @@ use types::{
     },
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
+        containers::{
+            DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumn,
+            PartialDataColumnHeader,
+        },
         primitives::ColumnIndex,
     },
     gloas::{
@@ -90,9 +97,10 @@ use crate::{
         ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
         Difference, DifferenceAtLocation, DissolvedDifference, ExecutionPayloadBidAction,
         ExecutionPayloadBidOrigin, LatestMessage, Location, PartialAttestationAction,
-        PartialBlockAction, PayloadAction, Score, SegmentId, Storage, UnfinalizedBlock,
-        ValidAttestation,
+        PartialBlockAction, PartialDataColumnSidecarAction, PayloadAction, Score, SegmentId,
+        Storage, UnfinalizedBlock, ValidAttestation,
     },
+    partial_data_column_cache::PartialDataColumnCache,
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
     store_config::StoreConfig,
@@ -257,6 +265,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     delayed_block_at_slot: HashMap<Slot, H256>,
     requested_blobs_from_el: HashMap<H256, Slot>,
     current_slot_blocks_in_processing: Arc<AtomicUsize>,
+    partial_data_column_cache: PartialDataColumnCache<P>,
 }
 
 impl<P: Preset, S: Storage<P>> Store<P, S> {
@@ -351,6 +360,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             delayed_block_at_slot: HashMap::default(),
             requested_blobs_from_el: HashMap::default(),
             current_slot_blocks_in_processing: Arc::new(AtomicUsize::new(0)),
+            partial_data_column_cache: PartialDataColumnCache::default(),
         }
     }
 
@@ -2377,13 +2387,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // [REJECT] The proposer signature of sidecar.signed_block_header, is valid with respect to the block_header.proposer_index pubkey.
-        SingleVerifier.verify_singular(
-            block_header.signing_root(&self.chain_config, &state),
-            block_signature,
-            self.pubkey_cache
-                .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
-            SignatureKind::BlockInBlobSidecar,
-        )?;
+        if !origin.is_from_merged() {
+            SingleVerifier.verify_singular(
+                block_header.signing_root(&self.chain_config, &state),
+                block_signature,
+                self.pubkey_cache
+                    .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
+                SignatureKind::BlockInBlobSidecar,
+            )?;
+        }
 
         // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
         // Part 1/2:
@@ -2443,7 +2455,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         }
 
-        if !origin.is_from_el() {
+        if !origin.is_from_el_or_merged() {
             if let Some(fulu_data_column_sidecar) = data_column_sidecar.pre_gloas() {
                 // [REJECT] The sidecar's kzg_commitments field inclusion proof is valid as verified by verify_data_column_sidecar_inclusion_proof(sidecar).
                 ensure!(
@@ -2600,7 +2612,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(DataColumnSidecarAction::Ignore(true));
         }
 
-        if !origin.is_from_el() {
+        if !origin.is_from_el_or_merged() {
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
             let verify_result = verify_kzg_proofs(
                 &data_column_sidecar,
@@ -2675,6 +2687,243 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     metrics,
                 ),
         }
+    }
+
+    #[instrument(level = "debug", skip_all)]
+    pub fn validate_partial_data_column(
+        &self,
+        column: Arc<PartialDataColumn<P>>,
+        state: Option<Arc<BeaconState<P>>>,
+        metrics: Option<&Arc<Metrics>>,
+    ) -> Result<PartialDataColumnSidecarAction<P>> {
+        // validate header if in the message, otherwise get from cache by `block_root`
+        let header = if let Some(header) = column.sidecar.header.first() {
+            let header = Arc::new(header.clone());
+            let block_header = header.signed_block_header.message;
+
+            let parent_info = || {
+                self.chain_link(block_header.parent_root)
+                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+            };
+
+            let header_result = self.validate_partial_data_column_header(
+                column.block_root,
+                header.clone_arc(),
+                parent_info,
+                || {
+                    state.or_else(|| {
+                        self.state_cache.existing_state_at_slot(
+                            self,
+                            block_header.parent_root,
+                            block_header.slot,
+                        )
+                    })
+                },
+                metrics,
+            )?;
+
+            // If invalid header, return early with the validation result
+            if !header_result.valid_header() {
+                return Ok(header_result);
+            }
+
+            header
+        } else {
+            self.partial_data_column_cache
+                .header(column.block_root)
+                .ok_or(Error::PartialColumnNoHeaderCached {
+                    column: column.clone_arc(),
+                })?
+        };
+
+        // Ignore non-sampling data column sidecars
+        if !self.sampling_columns.contains(&column.index) {
+            return Ok(PartialDataColumnSidecarAction::Ignore(true));
+        }
+
+        // > [IGNORE] If the received partial message contains only cell data, the node has seen a valid corresponding `PartialDataColumnHeader`.
+        if !self.partial_data_column_cache.has_missing(&column) {
+            return Ok(PartialDataColumnSidecarAction::Ignore(true));
+        }
+
+        // > [REJECT] The cells present bitmap length is equal to the number of KZG commitments in the `PartialDataColumnHeader`.
+        let cells_bitmap_length = column.sidecar.cells_present_bitmap.len();
+        let commitment_length = header.kzg_commitments.len();
+        ensure!(
+            cells_bitmap_length == commitment_length,
+            Error::<P>::PartialColumnCellsBitmapLengthMismatch {
+                cells_bitmap_length,
+                commitment_length
+            }
+        );
+
+        // > [REJECT] For cells the receiver already has, The sidecar's cell and proof data are equal to the local copy.
+        let cells_length = column.sidecar.partial_column.len();
+        let proofs_length = column.sidecar.kzg_proofs.len();
+        let cells_present_count = column.sidecar.cells_present_bitmap.count_ones();
+        ensure!(
+            [cells_present_count, cells_length, proofs_length]
+                .iter()
+                .all_equal(),
+            Error::<P>::PartialColumnCellsProofsLengthMismatch {
+                cells_present_count,
+                cells_length,
+                proofs_length
+            }
+        );
+
+        // [REJECT] The sidecar's cell and proof data is valid as verified by verify_partial_data_column_sidecar_kzg_proofs(sidecar, header.kzg_commitments, column_index).
+        let verify_result = verify_partial_data_column_sidecar_kzg_proofs(
+            &column.sidecar,
+            &header.kzg_commitments,
+            column.index,
+            self.store_config.kzg_backend,
+            metrics,
+        )
+        .map_err(|error| Error::PartialColumnInvalidKzgProofs {
+            column: column.clone_arc(),
+            error,
+        })?;
+
+        ensure!(
+            verify_result,
+            Error::PartialColumnInvalidKzgProofs {
+                column,
+                error: anyhow!("invalid KZG proofs verification result"),
+            }
+        );
+
+        Ok(PartialDataColumnSidecarAction::Accept(column))
+    }
+
+    fn validate_partial_data_column_header(
+        &self,
+        block_root: H256,
+        header: Arc<PartialDataColumnHeader<P>>,
+        parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+        metrics: Option<&Arc<Metrics>>,
+    ) -> Result<PartialDataColumnSidecarAction<P>> {
+        // > [REJECT] The hash of the block header in `signed_block_header` MUST be the same as the partial message's group id.
+        let block_header = header.signed_block_header.message;
+        ensure!(
+            block_root == block_header.hash_tree_root(),
+            Error::PartialGroupIdMismatch { header }
+        );
+
+        // > [REJECT] If a valid header was previously received, the received header MUST equal the previously valid header.
+        if let Some(header_cached) = self.partial_data_column_cache.header(block_root) {
+            ensure!(
+                *header_cached == *header,
+                Error::PartialHeaderMismatch { header }
+            );
+
+            // Return Ignore with `publishable` to `true` to signal the header is valid as it is the
+            // same as the verified header
+            return Ok(PartialDataColumnSidecarAction::Ignore(true));
+        }
+
+        // > [REJECT] The header's `kzg_commitments` list is non-empty.
+        ensure!(
+            !header.kzg_commitments.is_empty(),
+            Error::<P>::PartialHeaderNoBlob { header }
+        );
+
+        // > [IGNORE] The header is not from a future slot (with a `MAXIMUM_GOSSIP_CLOCK_DISPARITY` allowance) -- i.e. validate that
+        // > `block_header.slot <= current_slot` (a client MAY queue future headers for processing at the appropriate slot).
+        if self.slot() < block_header.slot {
+            return Ok(PartialDataColumnSidecarAction::DelayUntilSlot(header));
+        }
+
+        // > [IGNORE] The header is from a slot greater than the latest finalized slot --i.e. validate that
+        // > `block_header.slot > compute_start_slot_at_epoch(state.finalized_checkpoint.epoch)`
+        if block_header.slot <= self.finalized_slot() {
+            return Ok(PartialDataColumnSidecarAction::Ignore(false));
+        }
+
+        let Some(state) = state_fn() else {
+            // Delay data column validations until the state is available.
+            // Alternatively, we could allow slot processing to obtain states for data column sidecar validations,
+            // however, that introduces opportunity for DoS attacks with fake data column sidecars.
+            return Ok(PartialDataColumnSidecarAction::DelayUntilState(
+                header, block_root,
+            ));
+        };
+
+        // > [REJECT] The proposer signature of `signed_block_header` is valid with respect to the `block_header.proposer_index` pubkey.
+        SingleVerifier.verify_singular(
+            block_header.signing_root(&self.chain_config, &state),
+            header.signed_block_header.signature,
+            self.pubkey_cache
+                .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
+            SignatureKind::BlockInBlobSidecar,
+        )?;
+
+        // [REJECT] The header's block's parent (defined by `block_header.parent_root`) passes validation.
+        // Part 1/2:
+        // Since our fork choice store's implementation doesn't preserve invalid blocks,
+        // it needs to check this before sidecar's block's parent's presence check
+        ensure!(
+            !self
+                .rejected_block_roots
+                .contains(&block_header.parent_root),
+            Error::PartialHeaderInvalidParentOfBlock { header },
+        );
+
+        // > [IGNORE] The header's block's parent (defined by `block_header.parent_root`) has been seen (via gossip or non-gossip sources)
+        // > (a client MAY queue header for processing once the parent block is retrieved).
+        let Some((parent, parent_payload_status)) = parent_info() else {
+            return Ok(PartialDataColumnSidecarAction::DelayUntilParent(header));
+        };
+
+        // [REJECT] The header's block's parent (defined by `block_header.parent_root`) passes validation.
+        // Part 2/2:
+        ensure!(
+            !parent_payload_status.is_invalid(),
+            Error::PartialHeaderInvalidParentOfBlock { header },
+        );
+
+        // [REJECT] The header is from a higher slot than the header's block's parent (defined by block_header.parent_root).
+        let parent_slot = parent.message().slot();
+        ensure!(
+            block_header.slot > parent_slot,
+            Error::PartialHeaderNotNewerThanBlockParent {
+                header,
+                parent_slot,
+            }
+        );
+
+        // [REJECT] The current finalized_checkpoint is an ancestor of the header's block
+        // -- i.e. get_checkpoint_block(store, block_header.parent_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root.
+        let ancestor_at_finalized_slot = self
+            .ancestor(block_header.parent_root, self.finalized_slot())
+            .expect("every block in the store should have an ancestor at the last finalized slot");
+
+        ensure!(
+            ancestor_at_finalized_slot == self.finalized_checkpoint.root,
+            Error::PartialHeaderBlockNotADescendantOfFinalized { header },
+        );
+
+        // [REJECT] The header's kzg_commitments field inclusion proof is valid as verified by verify_partial_data_column_header_inclusion_proof.
+        ensure!(
+            verify_partial_data_column_header_inclusion_proof(&header, metrics),
+            Error::PartialHeaderInvalidInclusionProof { header }
+        );
+
+        // [REJECT] The header is proposed by the expected proposer_index for the block's slot in the context of the current shuffling
+        // (defined by block_header.parent_root/block_header.slot).
+        // If the proposer_index cannot immediately be verified against the expected shuffling,
+        // the header MAY be queued for later processing while proposers for the block's branch are calculated --
+        // in such a case do not REJECT, instead IGNORE this message.
+        let computed = accessors::get_beacon_proposer_index(&self.chain_config, &state)?;
+
+        ensure!(
+            block_header.proposer_index == computed,
+            Error::PartialHeaderProposerIndexMismatch { header, computed }
+        );
+
+        // Return Ignore with `publishable` to `true` to signal the header is verified
+        Ok(PartialDataColumnSidecarAction::Ignore(true))
     }
 
     /// [`on_tick`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_tick)
@@ -3062,6 +3311,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.data_column_cache.insert(data_sidecar);
+    }
+
+    pub fn apply_partial_data_column_sidecar(
+        &mut self,
+        partial_column: Arc<PartialDataColumn<P>>,
+    ) -> Option<Arc<DataColumnSidecar<P>>> {
+        self.partial_data_column_cache
+            .upsert_partial_column(partial_column)
     }
 
     pub fn accepted_data_column_sidecars_count(
@@ -3479,6 +3736,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.prune_checkpoint_states();
         self.aggregate_and_proof_supersets
             .prune(self.finalized_epoch());
+        self.partial_data_column_cache.prune(finalized_slot);
     }
 
     pub fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) {

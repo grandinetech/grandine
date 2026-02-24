@@ -7,6 +7,7 @@ use types::{
     bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
+    fulu::containers::{PartialDataColumn, PartialDataColumnHeader},
     gloas::containers::SignedExecutionPayloadBid,
     phase0::primitives::{Epoch, ExecutionAddress, Gwei, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
@@ -192,6 +193,74 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("partial message's group id is not hash of block header: {header:?}")]
+    PartialGroupIdMismatch {
+        header: Arc<PartialDataColumnHeader<P>>,
+    },
+    #[error("partial data column header with empty commitments: {header:?}")]
+    PartialHeaderNoBlob {
+        header: Arc<PartialDataColumnHeader<P>>,
+    },
+    #[error("partial data column header's block's parent is invalid: {header:?}")]
+    PartialHeaderInvalidParentOfBlock {
+        header: Arc<PartialDataColumnHeader<P>>,
+    },
+    #[error(
+        "partial data column header is not newer than block parent \
+         (header: {header:?}, parent_slot: {parent_slot})"
+    )]
+    PartialHeaderNotNewerThanBlockParent {
+        header: Arc<PartialDataColumnHeader<P>>,
+        parent_slot: Slot,
+    },
+    #[error(
+        "the current finalized_checkpoint is not an ancestor of the header's block: {header:?}"
+    )]
+    PartialHeaderBlockNotADescendantOfFinalized {
+        header: Arc<PartialDataColumnHeader<P>>,
+    },
+    #[error("partial data column header contains invalid inclusion proof: {header:?}")]
+    PartialHeaderInvalidInclusionProof {
+        header: Arc<PartialDataColumnHeader<P>>,
+    },
+    #[error(
+        "partial data column header has incorrect proposer index \
+         (header: {header:?}, computed: {computed})"
+    )]
+    PartialHeaderProposerIndexMismatch {
+        header: Arc<PartialDataColumnHeader<P>>,
+        computed: ValidatorIndex,
+    },
+    #[error(
+        "The cells present bitmap length is not equal to the number of KZG commitments \
+            (cells_bitmap_length: {cells_bitmap_length}, commitment_length: {commitment_length})"
+    )]
+    PartialColumnCellsBitmapLengthMismatch {
+        cells_bitmap_length: usize,
+        commitment_length: usize,
+    },
+    #[error(
+        "The cells length is not equal to the kzg proofs length (cells_present_count: {cells_present_count}, \
+            cells_length: {cells_length}, proofs_length: {proofs_length})"
+    )]
+    PartialColumnCellsProofsLengthMismatch {
+        cells_present_count: usize,
+        cells_length: usize,
+        proofs_length: usize,
+    },
+    #[error("partial data column sidecar's kzg proofs is invalid: {column:?} error: {error}")]
+    PartialColumnInvalidKzgProofs {
+        column: Arc<PartialDataColumn<P>>,
+        error: AnyhowError,
+    },
+    #[error("received no header partial data column sidecar with no header cached: {column:?}")]
+    PartialColumnNoHeaderCached { column: Arc<PartialDataColumn<P>> },
+    #[error(
+        "received partial data column sidecar with header mismatch with the verified header: {header:?}"
+    )]
+    PartialHeaderMismatch {
+        header: Arc<PartialDataColumnHeader<P>>,
+    },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

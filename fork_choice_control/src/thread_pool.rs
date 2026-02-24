@@ -26,9 +26,10 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
-        DataColumnSidecarTask, ExecutionPayloadBidTask, PersistBlobSidecarsTask,
-        PersistDataColumnSidecarsTask, PersistPubkeyCacheTask, PreprocessStateTask,
-        PruneStateCacheTask, RetryDataColumnSidecarTask, Run, StateAtSlotCacheFlushTask,
+        DataColumnSidecarTask, ExecutionPayloadBidTask, PartialDataColumnTask,
+        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask, PersistPubkeyCacheTask,
+        PreprocessStateTask, PruneStateCacheTask, RetryDataColumnSidecarTask, Run,
+        StateAtSlotCacheFlushTask,
     },
     wait::Wait,
 };
@@ -118,6 +119,7 @@ enum HighPriorityTask<P: Preset, E, W> {
 #[derive(From)]
 enum MidPriorityTask<P: Preset, W> {
     DataColumnSidecar(DataColumnSidecarTask<P, W>),
+    PartialDataColumn(PartialDataColumnTask<P, W>),
 }
 
 impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, W> {
@@ -137,6 +139,7 @@ impl<P: Preset, W> Run for MidPriorityTask<P, W> {
     fn run(self) {
         match self {
             Self::DataColumnSidecar(task) => task.run(),
+            Self::PartialDataColumn(task) => task.run(),
         }
     }
 }
@@ -196,6 +199,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for BlobSidecarTask<P, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for DataColumnSidecarTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.mid_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for PartialDataColumnTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.mid_priority_tasks.push_back(self.into())
     }

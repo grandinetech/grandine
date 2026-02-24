@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Instant};
 use anyhow::Result;
 use clock::Tick;
 use derivative::Derivative;
-use eth2_libp2p::GossipId;
+use eth2_libp2p::{GossipId, GossipTopic};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
@@ -195,6 +195,10 @@ pub enum MutatorRejectionReason {
         data_column_identifier: DataColumnIdentifier,
     },
     InvalidPayloadBid,
+    #[strum(serialize = "invalid_partial_message")]
+    InvalidPartialMessage {
+        topic: GossipTopic,
+    },
 }
 
 pub enum BlockBlobAvailability {

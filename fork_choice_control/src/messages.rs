@@ -6,13 +6,13 @@ use std::{
 
 use anyhow::Result;
 use clock::Tick;
-use eth2_libp2p::{GossipId, PeerId};
+use eth2_libp2p::{GossipId, GossipTopic, PeerId};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin,
+    ExecutionPayloadBidOrigin, PartialDataColumnSidecarAction,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -149,6 +149,14 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
         slot: Slot,
     },
+    PartialDataColumnSidecar {
+        wait_group: W,
+        result: Result<PartialDataColumnSidecarAction<P>>,
+        data_column_identifier: DataColumnIdentifier,
+        peer_id: PeerId,
+        topic: GossipTopic,
+        submission_time: Instant,
+    },
     PayloadBid {
         result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
@@ -212,9 +220,11 @@ pub enum P2pMessage<P: Preset> {
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
+    RejectPartial(PeerId, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadChanged(H256),
+    DataColumnSidecarMerged(Arc<DataColumnSidecar<P>>),
     Stop,
 }
 

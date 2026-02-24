@@ -10,9 +10,10 @@ use crate::{
     electra::containers::ExecutionRequests,
     fulu::containers::{
         BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
-        DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier,
+        DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier, PartialDataColumn,
+        PartialDataColumnHeader, PartialDataColumnSidecar,
     },
-    phase0::primitives::H256,
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 
@@ -191,5 +192,121 @@ impl<P: Preset> From<DataColumnsByRootIdentifier<P>> for Vec<DataColumnIdentifie
             .into_iter()
             .map(|index| DataColumnIdentifier { block_root, index })
             .collect()
+    }
+}
+
+impl<P: Preset> From<&DataColumnSidecar<P>> for PartialDataColumnHeader<P> {
+    fn from(sidecar: &DataColumnSidecar<P>) -> Self {
+        Self {
+            kzg_commitments: sidecar.kzg_commitments.clone(),
+            signed_block_header: sidecar.signed_block_header,
+            kzg_commitments_inclusion_proof: sidecar.kzg_commitments_inclusion_proof.clone(),
+        }
+    }
+}
+
+impl<P: Preset> From<&PartialDataColumn<P>> for DataColumnIdentifier {
+    fn from(column: &PartialDataColumn<P>) -> Self {
+        Self {
+            block_root: column.block_root,
+            index: column.index,
+        }
+    }
+}
+
+impl<P: Preset> PartialDataColumnSidecar<P> {
+    pub fn is_full(&self) -> bool {
+        self.cells_present_bitmap.all()
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        let mut cells = Vec::new();
+        let mut proofs = Vec::new();
+
+        // iterate over `partial_column` and `kzg_proofs` which has different size from the bitmap
+        let mut self_cell_index = 0;
+        let mut other_cell_index = 0;
+
+        for (self_present, other_present) in self
+            .cells_present_bitmap
+            .iter()
+            .zip(other.cells_present_bitmap.iter())
+        {
+            match (*self_present, *other_present) {
+                (true, other) => {
+                    cells.push(self.partial_column.get(self_cell_index).cloned().expect(
+                        "self partial column contains cells less than attached present bitmap",
+                    ));
+                    proofs.push(*self.kzg_proofs.get(self_cell_index).expect(
+                        "self partial kzg proofs contains proofs less than attached present bitmap",
+                    ));
+                    self_cell_index += 1;
+
+                    if other {
+                        other_cell_index += 1;
+                    }
+                }
+                (false, true) => {
+                    cells.push(other.partial_column.get(other_cell_index).cloned().expect(
+                        "other partial column contains cells less than attached present bitmap",
+                    ));
+                    proofs.push(*other.kzg_proofs.get(other_cell_index).expect(
+                        "other partial kzg proofs contains proofs less than attached present bitmap",
+                    ));
+                    other_cell_index += 1;
+                }
+                _ => {}
+            }
+        }
+
+        // merge cells present bitmap after compare with other
+        self.cells_present_bitmap |= &other.cells_present_bitmap;
+        self.partial_column = ContiguousList::try_from(cells).expect("should be within bound");
+        self.kzg_proofs = ContiguousList::try_from(proofs).expect("should be within bound");
+
+        if self.header.is_empty() && !other.header.is_empty() {
+            self.header = other.header.clone();
+        }
+    }
+
+    pub fn clone_filter<F: Fn(usize) -> bool>(&self, filter: F) -> Option<Self> {
+        // create new partial sidecar that only include cells being filter
+        let mut cells_present_bitmap = self.cells_present_bitmap.clone();
+        let mut cells = Vec::new();
+        let mut proofs = Vec::new();
+
+        // iterate over `partial_column` and `kzg_proofs` which has different size from the bitmap
+        let mut cell_index = 0;
+
+        for (blob_index, present) in self.cells_present_bitmap.iter().enumerate() {
+            if *present {
+                let is_included = filter(blob_index);
+                cells_present_bitmap.set(blob_index, is_included);
+
+                if is_included {
+                    cells.push(self.partial_column.get(cell_index).cloned()?);
+                    proofs.push(*self.kzg_proofs.get(cell_index)?);
+                }
+
+                cell_index += 1;
+            }
+        }
+
+        if cells.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            cells_present_bitmap,
+            partial_column: ContiguousList::try_from(cells).expect("should be within bound"),
+            kzg_proofs: ContiguousList::try_from(proofs).expect("should be within bound"),
+            header: self.header.clone(),
+        })
+    }
+}
+
+impl<P: Preset> PartialDataColumnHeader<P> {
+    pub fn slot(&self) -> Slot {
+        self.signed_block_header.message.slot
     }
 }

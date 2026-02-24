@@ -19,7 +19,7 @@ use std::{
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
 use clock::Tick;
-use eth2_libp2p::{GossipId, PeerId};
+use eth2_libp2p::{GossipId, GossipTopic, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
@@ -42,7 +42,10 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    fulu::{
+        containers::{DataColumnIdentifier, PartialDataColumn},
+        primitives::ColumnIndex,
+    },
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::ValidationOutcome,
     phase0::primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
@@ -67,7 +70,7 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
-        StateAtSlotCacheFlushTask,
+        PartialDataColumnTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -599,6 +602,38 @@ where
             DataColumnSidecarOrigin::Gossip(subnet_id, gossip_id),
         )
         .await
+    }
+
+    pub async fn on_merged_data_column_sidecar(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+    ) {
+        self.spawn_data_column_sidecar_task(
+            data_column_sidecar,
+            block_seen,
+            DataColumnSidecarOrigin::Merged,
+        )
+        .await
+    }
+
+    pub async fn on_gossip_partial_data_column(
+        &self,
+        column: Arc<PartialDataColumn<P>>,
+        peer_id: PeerId,
+        topic: GossipTopic,
+    ) {
+        self.spawn(PartialDataColumnTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            column,
+            state: None,
+            peer_id,
+            topic,
+            submission_time: Instant::now(),
+            metrics: self.metrics.clone(),
+        })
     }
 
     pub fn on_requested_blob_sidecar(

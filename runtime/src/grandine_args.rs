@@ -605,6 +605,10 @@ struct NetworkConfigOptions {
     /// List of trusted peers
     #[clap(long, value_delimiter = ',')]
     trusted_peers: Vec<PeerIdSerialized>,
+
+    /// Enable partial message for data column sidecars
+    #[clap(long)]
+    enable_partial_columns: bool,
 }
 
 impl BeaconNodeOptions {
@@ -659,6 +663,7 @@ impl NetworkConfigOptions {
             target_peers,
             target_subnet_peers,
             trusted_peers,
+            enable_partial_columns,
         } = self;
 
         let mut network_config = network
@@ -676,6 +681,7 @@ impl NetworkConfigOptions {
         network_config.target_subnet_peers = target_subnet_peers;
         network_config.trusted_peers = trusted_peers;
         network_config.libp2p_private_key_file = libp2p_private_key_file;
+        network_config.enable_partial_columns = enable_partial_columns;
 
         if !disable_rate_limiting {
             network_config.inbound_rate_limiter_config = Some(InboundRateLimiterConfig::default());

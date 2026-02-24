@@ -25,7 +25,7 @@ use eth2_libp2p::{
         },
     },
     service::{Network as Service, api_types::AppRequestId},
-    types::{EnrForkId, ForkContext, GossipEncoding, core_topics_to_subscribe},
+    types::{EnrForkId, ForkContext, GossipEncoding, GossipKind, core_topics_to_subscribe},
 };
 use features::Feature;
 use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage};
@@ -499,6 +499,21 @@ impl<P: Preset> Network<P> {
                                 );
                             }
                         }
+                        P2pMessage::RejectPartial(peer_id, reason) => {
+                            match reason {
+                                MutatorRejectionReason::InvalidPartialMessage { ref topic } => {
+                                    ServiceInboundMessage::ReportPartialMessageValidationFailure(peer_id, topic.clone()).send(&self.network_to_service_tx);
+                                },
+                                _ => {}
+                            }
+
+                            self.report_peer(
+                                peer_id,
+                                PeerAction::LowToleranceError,
+                                ReportSource::Processor,
+                                reason,
+                            );
+                        }
                         P2pMessage::BlockNeeded(root, peer_id) => {
                             P2pToSync::BlockNeeded(root, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
@@ -509,6 +524,10 @@ impl<P: Preset> Network<P> {
                         }
                         P2pMessage::HeadChanged(_root) => {
                             // This message is only used in tests
+                        }
+                        P2pMessage::DataColumnSidecarMerged(data_column_sidecar) => {
+                            P2pToSync::DataColumnSidecarMerged(data_column_sidecar.clone_arc())
+                                .send(&self.channels.p2p_to_sync_tx);
                         }
                         P2pMessage::Stop => {
                             ServiceInboundMessage::Stop.send(&self.network_to_service_tx);
@@ -1203,6 +1222,28 @@ impl<P: Preset> Network<P> {
                 message,
                 ..
             } => self.handle_pubsub_message(id, source, message),
+            NetworkEvent::PartialDataColumnSidecar {
+                source,
+                column,
+                topic,
+            } => {
+                if let GossipKind::DataColumnSidecar(subnet_id) = topic.kind() {
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        metrics.register_gossip_object(&["partial_data_column_sidecar"]);
+                    }
+
+                    let column = Arc::new(column);
+                    let data_column_identifier: DataColumnIdentifier = column.as_ref().into();
+
+                    debug_with_peers!(
+                        "received partial data column sidecar as gossip in subnet {subnet_id}: {data_column_identifier:?} \
+                            from {source}",
+                    );
+
+                    P2pToSync::GossipPartialDataColumn(column, source, topic)
+                        .send(&self.channels.p2p_to_sync_tx);
+                }
+            }
             NetworkEvent::StatusPeer(peer_id) => self.init_status_peer_request(peer_id),
             NetworkEvent::NewListenAddr(multiaddr) => {
                 // These come from `libp2p`. We don't use them anywhere. `eth2_libp2p` outputs them
@@ -2706,6 +2747,10 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::Publish(message) => {
                             service.publish(message);
                         }
+                        ServiceInboundMessage::PublishPartialMessages(columns) => {
+                            debug_with_peers!("Publishing {} partial data column sidecars", columns.len());
+                            service.publish_partial(columns);
+                        }
                         ServiceInboundMessage::ReportPeer(peer_id, action, source, msg) => {
                             service.report_peer(&peer_id, action, source, msg);
                         }
@@ -2715,6 +2760,9 @@ fn run_network_service<P: Preset>(
                                 gossip_id.message_id,
                                 message_acceptance,
                             );
+                        }
+                        ServiceInboundMessage::ReportPartialMessageValidationFailure(propagation_source, topic) => {
+                            service.report_partial_message_validation_failure(propagation_source, topic);
                         }
                         ServiceInboundMessage::SendErrorResponse(peer_id, inbound_request_id, rpc_error_response, reason) => {
                             service.send_response(

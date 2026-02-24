@@ -495,6 +495,13 @@ impl<P: Preset> BlockSyncService<P> {
                                 block_seen,
                             ).await;
                         }
+                        P2pToSync::GossipPartialDataColumn(column, peer_id, topic) => {
+                            self.controller.on_gossip_partial_data_column(
+                                column,
+                                peer_id,
+                                topic,
+                            ).await;
+                        }
                         P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id, request_id, request_type) => {
                             let data_column_identifier = data_column_sidecar.as_ref().into();
 
@@ -631,6 +638,24 @@ impl<P: Preset> BlockSyncService<P> {
                             ) {
                                 warn_with_peers!("failed to start data column backfill: {error}");
                             }
+                        }
+                        P2pToSync::DataColumnSidecarMerged(data_column_sidecar) => {
+                            let data_column_identifier: DataColumnIdentifier = data_column_sidecar.as_ref().into();
+                            let data_column_sidecar_slot = data_column_sidecar.slot();
+
+                            self.register_new_received_data_column_sidecar(
+                                data_column_identifier,
+                                data_column_sidecar_slot,
+                            ).await;
+
+                            let block_seen = self
+                                .received_block_roots
+                                .contains_key(&data_column_identifier.block_root);
+
+                            self.controller.on_merged_data_column_sidecar(
+                                data_column_sidecar,
+                                block_seen,
+                            ).await;
                         }
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
