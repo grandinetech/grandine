@@ -298,48 +298,47 @@ impl<P: Preset> Storage<P> {
                 }
 
                 let state = OnceCell::new();
+                let state_epoch = Self::epoch_at_slot(state_slot);
+                let is_epoch_start = misc::is_epoch_start::<P>(state_slot);
+                let is_archival_epoch_start = is_epoch_start
+                    && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
 
-                if !checkpoint_state_appended && store.is_forward_synced() {
-                    let append_state = misc::is_epoch_start::<P>(state_slot);
+                if !checkpoint_state_appended
+                    && ((store.is_forward_synced() && is_epoch_start) || is_archival_epoch_start)
+                {
+                    info_with_peers!("saving checkpoint block & state in slot {state_slot}");
 
-                    if append_state {
-                        info_with_peers!("saving checkpoint block & state in slot {state_slot}");
+                    batch.push(serialize(
+                        BlockCheckpoint::<P>::KEY,
+                        BlockCheckpoint {
+                            block: block.clone_arc(),
+                        },
+                    )?);
 
-                        batch.push(serialize(
-                            BlockCheckpoint::<P>::KEY,
-                            BlockCheckpoint {
-                                block: block.clone_arc(),
-                            },
-                        )?);
+                    batch.push(serialize(
+                        StateCheckpoint::<P>::KEY,
+                        StateCheckpoint {
+                            block_root,
+                            head_slot: store_head_slot,
+                            state: state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                        },
+                    )?);
 
-                        batch.push(serialize(
-                            StateCheckpoint::<P>::KEY,
-                            StateCheckpoint {
-                                block_root,
-                                head_slot: store_head_slot,
-                                state: state.get_or_init(|| chain_link.state(store)).clone_arc(),
-                            },
-                        )?);
-
-                        checkpoint_state_appended = true;
-                    }
+                    checkpoint_state_appended = true;
                 }
 
-                if !archival_state_appended && !self.prune_storage_enabled() {
-                    let state_epoch = Self::epoch_at_slot(state_slot);
-                    let append_state = misc::is_epoch_start::<P>(state_slot)
-                        && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
+                if !archival_state_appended
+                    && !self.prune_storage_enabled()
+                    && is_archival_epoch_start
+                {
+                    info_with_peers!("saving state in slot {state_slot}");
 
-                    if append_state {
-                        info_with_peers!("saving state in slot {state_slot}");
+                    batch.push(serialize(
+                        StateByBlockRoot(block_root),
+                        state.get_or_init(|| chain_link.state(store)),
+                    )?);
 
-                        batch.push(serialize(
-                            StateByBlockRoot(block_root),
-                            state.get_or_init(|| chain_link.state(store)),
-                        )?);
-
-                        archival_state_appended = true;
-                    }
+                    archival_state_appended = true;
                 }
             }
         }

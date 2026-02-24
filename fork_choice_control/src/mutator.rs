@@ -3774,6 +3774,16 @@ where
             metrics.set_collection_length(
                 module_path!(),
                 &type_name,
+                "delayed_until_block_data_columns",
+                self.delayed_until_block
+                    .values()
+                    .map(|delayed| delayed.data_column_sidecars.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
                 "delayed_until_block_blocks",
                 self.delayed_until_block
                     .values()
