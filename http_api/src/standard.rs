@@ -3246,7 +3246,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         return Err(Error::EpochBeforePrevious);
     }
 
-    let block_root;
+    let mut block_root;
     let mut state;
 
     let is_optimistic = if slot < head_slot {
@@ -3292,16 +3292,31 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
                     break;
                 }
 
-                if block_event.block == controller.head().value.block_root {
+                let head = controller.head().value;
+
+                if block_event.block == head.block_root {
                     debug_with_peers!("fork choice head changed (block event: {block_event:?})");
+
+                    block_root = head.block_root;
+                    state = controller.state_by_chain_link(&head);
+
                     break;
                 }
             }
         })
         .await
     {
-        debug_with_peers!("timeout while waiting for block event: {error:?}");
-        return Err(Error::HeadIsOptimistic);
+        if is_optimistic {
+            debug_with_peers!(
+                "timed out while waiting for chain head to become fully validated: {error:?}",
+            );
+
+            return Err(Error::HeadIsOptimistic);
+        }
+
+        debug_with_peers!(
+            "timed out while waiting for current slot block to be processed: {error:?}",
+        );
     }
 
     if state.slot() < slot {
