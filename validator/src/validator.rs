@@ -739,8 +739,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_propose_tick_times.start_timer());
 
+                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+
                 self.discard_previous_slot_attestations();
-                self.propose(wait_group, &slot_head).await?;
+                self.propose(wait_group, slot_head.as_ref()).await?;
                 self.published_own_sync_committee_messages_for = None;
             }
             TickKind::Attest => {
@@ -749,8 +751,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
+                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+
                 if let Err(error) = self
-                    .attest_and_start_aggregating(&wait_group, &slot_head)
+                    .attest_and_start_aggregating(&wait_group, slot_head.as_ref())
                     .await
                 {
                     error_with_peers!("failed to produce and publish own attestations: {error:?}");
@@ -771,13 +775,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_aggregate_tick_times.start_timer());
 
-                self.publish_aggregates_and_proofs(&wait_group, &slot_head)
+                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+
+                self.publish_aggregates_and_proofs(&wait_group, slot_head.as_ref())
                     .await;
 
                 self.publish_contributions_and_proofs(
                     self.published_own_sync_committee_messages_for
                         .as_ref()
-                        .unwrap_or(&slot_head),
+                        .or(slot_head.as_ref()),
                 )
                 .await;
 
@@ -847,18 +853,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    async fn propose(&mut self, wait_group: W, slot_head: &SlotHead<P>) -> Result<()> {
-        if slot_head.slot() == GENESIS_SLOT {
-            // All peers should already have the genesis block.
-            // It would fail multiple validations if it were published like non-genesis blocks.
-            return Ok(());
-        }
-
-        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
+    async fn propose(&mut self, wait_group: W, slot_head: Option<&SlotHead<P>>) -> Result<()> {
+        let Some(slot_head) = slot_head else {
             warn_with_peers!(
                 "validator cannot produce a block because \
                  chain head has not been fully verified by an execution engine",
             );
+            return Ok(());
+        };
+
+        if slot_head.slot() == GENESIS_SLOT {
+            // All peers should already have the genesis block.
+            // It would fail multiple validations if it were published like non-genesis blocks.
             return Ok(());
         }
 
@@ -1224,16 +1230,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn attest_and_start_aggregating(
         &mut self,
         wait_group: &W,
-        slot_head: &SlotHead<P>,
+        slot_head: Option<&SlotHead<P>>,
     ) -> Result<()> {
-        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
+        let Some(slot_head) = slot_head else {
             warn_with_peers!(
                 "validator cannot participate in attestation because \
                  chain head has not been fully verified by an execution engine",
             );
-
             return Ok(());
-        }
+        };
 
         // Skip attesting if validators already attested at slot
         if self.attested_in_current_slot() {
@@ -1380,14 +1385,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: &SlotHead<P>) {
-        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
+    async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: Option<&SlotHead<P>>) {
+        let Some(slot_head) = slot_head else {
             warn_with_peers!(
                 "validators cannot participate in aggregation because \
                  chain head has not been fully verified by an execution engine",
             );
             return;
-        }
+        };
 
         let config = &self.chain_config;
         let phase = slot_head.phase();
@@ -1523,8 +1528,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn publish_sync_committee_messages(
         &mut self,
         wait_group: &W,
-        slot_head: SlotHead<P>,
+        slot_head: Option<SlotHead<P>>,
     ) -> Result<()> {
+        let Some(slot_head) = slot_head else {
+            warn_with_peers!(
+                "validator cannot participate in sync committees because \
+                 chain head has not been fully verified by an execution engine",
+            );
+            return Ok(());
+        };
+
         // > To reduce complexity during the Altair fork, sync committees are not expected to
         // > produce signatures for `compute_epoch_at_slot(ALTAIR_FORK_EPOCH) - 1`.
         if !slot_head.has_sync_committee() {
@@ -1536,18 +1549,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_ref()
             .is_some_and(|published| published.slot() == slot_head.slot())
         {
-            return Ok(());
-        }
-
-        if self
-            .wait_for_fully_validated_head(&slot_head)
-            .await
-            .is_err()
-        {
-            warn_with_peers!(
-                "validator cannot participate in sync committees because \
-                 chain head has not been fully verified by an execution engine",
-            );
             return Ok(());
         }
 
@@ -1594,20 +1595,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
     #[instrument(level = "debug", skip_all)]
-    async fn publish_contributions_and_proofs(&self, slot_head: &SlotHead<P>) {
+    async fn publish_contributions_and_proofs(&self, slot_head: Option<&SlotHead<P>>) {
+        let Some(slot_head) = slot_head else {
+            warn_with_peers!(
+                "validator cannot participate in sync committees because \
+                 chain head has not been fully verified by an execution engine",
+            );
+            return;
+        };
+
         if !self.controller.is_forward_synced() {
             return;
         }
 
         if !slot_head.has_sync_committee() {
-            return;
-        }
-
-        if self.wait_for_fully_validated_head(slot_head).await.is_err() {
-            warn_with_peers!(
-                "validator cannot participate in sync committees because \
-                 chain head has not been fully verified by an execution engine",
-            );
             return;
         }
 
@@ -1674,7 +1675,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishAttestationsEarly.is_enabled()
             && let Err(error) = self
-                .attest_and_start_aggregating(wait_group, &slot_head)
+                .attest_and_start_aggregating(wait_group, Some(&slot_head))
                 .await
         {
             error_with_peers!("failed to produce and publish own attestations: {error:?}");
@@ -1685,7 +1686,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishSyncCommitteeMessagesEarly.is_enabled()
             && let Err(error) = self
-                .publish_sync_committee_messages(wait_group, slot_head)
+                .publish_sync_committee_messages(wait_group, Some(slot_head))
                 .await
         {
             error_with_peers!(
@@ -2369,14 +2370,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[instrument(level = "debug", skip_all)]
-    async fn wait_for_fully_validated_head(&self, slot_head: &SlotHead<P>) -> Result<()> {
+    async fn wait_for_fully_validated_head(&self, slot_head: SlotHead<P>) -> Option<SlotHead<P>> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
-        if !slot_head.is_optimistic(&self.controller)? && !self.should_wait_for_late_block() {
-            return Ok(());
+        let is_optimistic = match slot_head.is_optimistic(&self.controller) {
+            Ok(is_optimistic) => is_optimistic,
+            Err(error) => {
+                warn_with_peers!("error while checking if slot head is optimistic: {error:?}");
+                return None;
+            }
+        };
+
+        if !is_optimistic && !self.should_wait_for_late_block() {
+            return Some(slot_head);
         }
 
-        timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+        let result = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
             loop {
                 let block_event = match self.event_channels.receiver_for(Topic::Block).recv().await
                 {
@@ -2396,15 +2405,42 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     debug_with_peers!(
                         "fork choice head became fully validated (block event: {block_event:?})",
                     );
-                    break;
-                } else if block_event.block == self.controller.head().value.block_root {
+                    break None;
+                }
+
+                let head = self.controller.head().value;
+
+                if block_event.block == head.block_root && self.controller.slot() == head.slot() {
                     debug_with_peers!("fork choice head changed (block event: {block_event:?})");
-                    break;
+
+                    break Some(SlotHead {
+                        config: self.chain_config.clone_arc(),
+                        beacon_block_root: head.block_root,
+                        beacon_state: self.controller.state_by_chain_link(&head),
+                        optimistic: head.is_optimistic(),
+                    });
                 }
             }
         })
-        .await
-        .map_err(Into::into)
+        .await;
+
+        match result {
+            Ok(Some(new_slot_head)) => Some(new_slot_head),
+            Ok(None) => Some(slot_head),
+            Err(error) => {
+                if is_optimistic {
+                    debug_with_peers!(
+                        "timed out while waiting for chain head to become fully validated: {error:?}",
+                    );
+                    None
+                } else {
+                    debug_with_peers!(
+                        "timed out while waiting for current slot block to be processed: {error:?}",
+                    );
+                    Some(slot_head)
+                }
+            }
+        }
     }
 
     fn should_wait_for_late_block(&self) -> bool {
