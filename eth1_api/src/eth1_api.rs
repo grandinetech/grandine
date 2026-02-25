@@ -66,6 +66,7 @@ pub const ENGINE_NEW_PAYLOAD_V1: &str = "engine_newPayloadV1";
 pub const ENGINE_NEW_PAYLOAD_V2: &str = "engine_newPayloadV2";
 pub const ENGINE_NEW_PAYLOAD_V3: &str = "engine_newPayloadV3";
 pub const ENGINE_NEW_PAYLOAD_V4: &str = "engine_newPayloadV4";
+pub const ENGINE_NEW_PAYLOAD_V5: &str = "engine_newPayloadV5";
 
 pub const CAPABILITIES: &[&str] = &[
     ENGINE_FORKCHOICE_UPDATED_V1,
@@ -83,6 +84,7 @@ pub const CAPABILITIES: &[&str] = &[
     ENGINE_NEW_PAYLOAD_V2,
     ENGINE_NEW_PAYLOAD_V3,
     ENGINE_NEW_PAYLOAD_V4,
+    ENGINE_NEW_PAYLOAD_V5,
 ];
 
 #[expect(clippy::struct_field_names)]
@@ -346,6 +348,34 @@ impl Eth1Api {
 
                 self.execute(
                     ENGINE_NEW_PAYLOAD_V4,
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(WithClientVersions::result)
+            }
+            (
+                // execute using ENGINE_NEW_PAYLOAD_V5 for gloas
+                ExecutionPayload::Deneb(payload),
+                Some(ExecutionPayloadParams::Gloas {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                    execution_requests,
+                }),
+            ) => {
+                let payload_v3 = ExecutionPayloadV3::from(payload);
+                let raw_execution_requests = RawExecutionRequests::from(execution_requests);
+
+                let params = vec![
+                    serde_json::to_value(payload_v3)?,
+                    serde_json::to_value(versioned_hashes)?,
+                    serde_json::to_value(parent_beacon_block_root)?,
+                    serde_json::to_value(raw_execution_requests)?,
+                ];
+
+                self.execute(
+                    ENGINE_NEW_PAYLOAD_V5,
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
                     None,

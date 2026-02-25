@@ -120,6 +120,8 @@ pub struct Config {
     // Fork choice
     #[serde(with = "serde_utils::string_or_native")]
     pub proposer_score_boost: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub reorg_head_weight_threshold: u64,
 
     // Deposit contract
     #[serde(with = "serde_utils::string_or_native")]
@@ -265,6 +267,7 @@ impl Default for Config {
 
             // Fork choice
             proposer_score_boost: 40,
+            reorg_head_weight_threshold: 20,
 
             // Deposit contract
             deposit_chain_id: 0,

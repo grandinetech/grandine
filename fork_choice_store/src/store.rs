@@ -11,7 +11,7 @@ use std::{
 use anyhow::{anyhow, bail, ensure, Result};
 use arithmetic::NonZeroExt as _;
 use bls::traits::SignatureBytes as _;
-use clock::Tick;
+use clock::{Tick, TickKind};
 use dashmap::DashMap;
 use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
@@ -30,7 +30,7 @@ use itertools::{izip, Either, EitherOrBoth, Itertools as _};
 use logging::{error_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use ssz::{ContiguousList, SszHash as _};
+use ssz::{BitVector, ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tracing::instrument;
@@ -61,7 +61,9 @@ use types::{
             SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
     },
-    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
+    nonstandard::{
+        BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, RelativeEpoch, WithStatus,
+    },
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, Checkpoint},
@@ -82,9 +84,9 @@ use crate::{
         AttestationAction, AttestationItem, AttestationValidationError, AttesterSlashingOrigin,
         BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint, ChainLink,
         DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin, Difference,
-        DifferenceAtLocation, DissolvedDifference, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId, Storage,
-        UnfinalizedBlock, ValidAttestation,
+        DifferenceAtLocation, DissolvedDifference, ForkChoicePayloadStatus, LatestMessage,
+        Location, PartialAttestationAction, PartialBlockAction, PayloadAction, Score, SegmentId,
+        Storage, UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -227,6 +229,23 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // Attestations cannot affect fork choice until their slots have passed.
     // This field is used to store them in the meantime.
     current_slot_attestations: Vector<ValidAttestation<P>>,
+
+    // ePBS:(dual location map) Both empty and full variants keyed by beacon_block_root
+    // - Empty variants: beacon block without execution payload
+    // - Full variants: beacon block + execution payload (envelope.beacon_block_root)
+    unfinalized_locations_empty: HashMap<H256, Location>,
+    unfinalized_locations_full: HashMap<H256, Location>,
+    // ePBS: Tracks PTC (Payload Timeliness Committee) votes for each block root.
+    // Used to determine if payload arrived on time.
+    // Not mentioned in the spec to use BitVector
+    // spec(gloas): https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L148
+    ptc_vote: HashMap<H256, BitVector<P::PtcSize>>,
+    // spec(gloas): https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L139
+    // Blocks that arrived before the PTC deadline (current slot + before tick 12).
+    // Used by should_apply_proposer_boost() to detect equivocations.
+    // Unlike attestation timeliness (computed inline), PTC timeliness must be stored
+    // because should_apply_proposer_boost() scans past blocks.
+    ptc_timely_blocks: HashSet<H256>,
     execution_payload_locations: HashMap<ExecutionBlockHash, Location>,
     aggregate_and_proof_supersets: Arc<AggregateAndProofSupersets<P>>,
     accepted_blob_sidecars:
@@ -288,10 +307,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             root: block_root,
         };
 
+        // For Gloas, genesis/anchor is conceptually a "full" block with execution state
+        // spec(gloas): https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L175
+        let execution_payload_state = if anchor_state.phase() >= Phase::Gloas {
+            Some(anchor_state.clone_arc())
+        } else {
+            None
+        };
+
         let anchor = ChainLink {
             block_root,
             block: anchor_block,
-            state: Some(anchor_state.clone_arc()),
+            block_state: Some(anchor_state.clone_arc()),
+            execution_payload_state,
             current_justified_checkpoint: checkpoint,
             finalized_checkpoint: checkpoint,
             unrealized_justified_checkpoint: checkpoint,
@@ -323,8 +351,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             justified_active_balances: Self::active_balances(&anchor_state),
             timely_proposer_score: OnceLock::new(),
             latest_messages,
-            checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             current_slot_attestations: vector![],
+            unfinalized_locations_empty: hashmap! {},
+            unfinalized_locations_full: hashmap! {},
+            // For Gloas, anchor block should be in ptc_vote map
+            // following every known block has a ptc_vote entry
+            // dev notes: check if not in the map will give all false so that initialization is not required
+            ptc_vote: if anchor_state.phase() >= Phase::Gloas {
+                HashMap::unit(block_root, BitVector::default())
+            } else {
+                HashMap::default()
+            },
+            // Anchor block is considered PTC-timely
+            ptc_timely_blocks: HashSet::unit(block_root),
+            checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
             accepted_blob_sidecars: HashMap::default(),
@@ -487,17 +527,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .unwrap_or(Ok(SegmentId::FIRST))
     }
 
+    /// Returns the chain link from the FULL-location map for unfinalized blocks,
+    /// or from finalized storage when already finalized.
+    ///
+    /// In Gloas, unfinalized blocks are inserted as FULL placeholders, so callers
+    /// that require the execution payload envelope must additionally check
+    /// `chain_link.execution_payload_state.is_some()`.
+    ///
+    /// Finalized blocks are included, but FULL/EMPTY variant distinction is not
+    /// retained after finalization. For strict unfinalized FULL-map checks, query
+    /// `unfinalized_locations_full` directly.
+    /// When this is used for envelope state, callers must handle payload-arrived
+    /// vs payload-not-arrived explicitly (for example via `is_some()`).
     #[must_use]
-    pub fn chain_link(&self, block_root: H256) -> Option<&ChainLink<P>> {
-        if let Some(location) = self.unfinalized_locations.get(&block_root) {
-            let Location {
-                segment_id,
-                position,
-            } = location;
-
-            return Some(&self.unfinalized[segment_id][*position].chain_link);
+    pub fn chain_link_full(&self, block_root: H256) -> Option<&ChainLink<P>> {
+        if let Some(loc) = self.unfinalized_locations_full.get(&block_root) {
+            return Some(&self.unfinalized[&loc.segment_id][loc.position].chain_link);
         }
-
+        // Finalized blocks included (variant not tracked after finalization)
         let index = self.finalized_indices.get(&block_root)?;
 
         Some(&self.finalized[*index])
@@ -505,7 +552,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn block(&self, block_root: H256) -> Option<WithStatus<&Arc<SignedBeaconBlock<P>>>> {
-        let chain_link = self.chain_link(block_root)?;
+        let chain_link = self.chain_link_full(block_root)?;
 
         Some(WithStatus {
             value: &chain_link.block,
@@ -520,8 +567,301 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             || self.finalized_indices.contains_key(&block_root)
     }
 
+    /// Returns true if the block exists AND all required data column sidecars
+    /// have been accepted. In pre-Gloas, block presence is sufficient since
+    /// sidecars arrive with the block. In Gloas, sidecars are decoupled
+    /// (they arrive with the envelope), so we must check separately.
+    pub fn contains_block_and_sidecars(&self, block_root: H256) -> bool {
+        let Some(chain_link) = self.chain_link_full(block_root) else {
+            return false;
+        };
+
+        let block_slot = chain_link.block.message().slot();
+
+        if chain_link.block.phase() < Phase::Gloas {
+            return true;
+        }
+
+        self.sampling_columns.iter().all(|index| {
+            self.accepted_gloas_data_column_sidecars
+                .contains_key(&(block_slot, block_root, *index))
+        })
+    }
+
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
-        self.unfinalized_locations.contains_key(&block_root)
+        self.unfinalized_locations_full.contains_key(&block_root)
+    }
+
+    /// Get payload status for a node at a specific location.
+    /// - EMPTY: location is in unfinalized_locations_empty
+    /// - PENDING: location is in unfinalized_locations_full but execution_payload_state is None
+    /// - FULL: location is in unfinalized_locations_full and execution_payload_state is Some
+    /// Uses local store view for the given location, not parent-bid inference.
+    /// For parent-variant inference, use `get_parent_payload_status`.
+    /// Pre-Gloas nodes are expected to be in `unfinalized_locations_full` and map to `Full`.
+    #[must_use]
+    fn node_payload_status_at(&self, location: Location) -> ForkChoicePayloadStatus {
+        let chain_link = &self.unfinalized[&location.segment_id][location.position].chain_link;
+        let block_root = chain_link.block_root;
+
+        // Check if this location is the EMPTY variant
+        if self.unfinalized_locations_empty.get(&block_root) == Some(&location) {
+            return ForkChoicePayloadStatus::Empty;
+        }
+
+        // FULL variant - check bid existence (pre-Gloas / no bid -> Full)
+        let has_bid = chain_link
+            .block
+            .message()
+            .body()
+            .with_payload_bid()
+            .is_some();
+        if !has_bid {
+            // Pre-Gloas block: payload is intrinsic to the beacon block.
+            return ForkChoicePayloadStatus::Full;
+        }
+
+        // Bid exists → Pending or Full based on payload arrival
+        if chain_link.execution_payload_state.is_some() {
+            ForkChoicePayloadStatus::Full
+        } else {
+            ForkChoicePayloadStatus::Pending
+        }
+    }
+
+    /// Get parent payload status for fork choice.
+    /// spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/gloas/fork-choice#get_parent_payload_status
+    /// FULL if current bid's parent_block_hash matches parent bid's block_hash.
+    /// EMPTY otherwise (child builds on parent's empty variant).
+    #[must_use]
+    fn get_parent_payload_status(&self, block_root: H256) -> ForkChoicePayloadStatus {
+        let Some(current) = self.chain_link_full(block_root) else {
+            return ForkChoicePayloadStatus::Empty;
+        };
+
+        let Some(current_gloas_body) = current.block.message().body().with_payload_bid() else {
+            return ForkChoicePayloadStatus::Full; // Pre-Gloas
+        };
+
+        let parent_root = current.block.message().parent_root();
+        let Some(parent) = self.chain_link_full(parent_root) else {
+            return ForkChoicePayloadStatus::Empty;
+        };
+
+        let Some(parent_gloas_body) = parent.block.message().body().with_payload_bid() else {
+            return ForkChoicePayloadStatus::Full; // Pre-Gloas parent
+        };
+
+        let parent_bid = &parent_gloas_body.signed_execution_payload_bid().message;
+        let current_bid = &current_gloas_body.signed_execution_payload_bid().message;
+
+        // Parent is full if current bid's parent_block_hash matches parent bid's block_hash
+        if current_bid.parent_block_hash == parent_bid.block_hash {
+            ForkChoicePayloadStatus::Full
+        } else {
+            ForkChoicePayloadStatus::Empty
+        }
+    }
+
+    /// Check if parent node has execution payload processed (is full variant).
+    ///
+    /// spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/gloas/fork-choice#is_parent_node_full
+    #[must_use]
+    fn is_parent_node_full(&self, block_root: H256) -> bool {
+        self.get_parent_payload_status(block_root).is_full()
+    }
+
+    /// Checks if a block builds on the FULL variant of its consensus parent
+    /// by comparing bid's `parent_block_hash` against parent's `block_hash`.
+    /// Only called for Gloas blocks (callers guard with `with_payload_bid()`).
+    /// different from get_parent_payload_status as this is for blocks which are not in the store yet so cant use store maps for incoming block here
+    #[must_use]
+    pub fn is_parent_node_full_for_block(&self, block: &SignedBeaconBlock<P>) -> bool {
+        let parent_root = block.message().parent_root();
+
+        // Finalized parents are treated as FULL — no EMPTY segment exists for them.
+        if self.finalized_indices.contains_key(&parent_root) {
+            return true;
+        }
+
+        let Some(parent) = self.chain_link_full(parent_root) else {
+            return false;
+        };
+
+        let Some(parent_gloas_body) = parent.block.message().body().with_payload_bid() else {
+            return true; // Pre-Gloas parent
+        };
+
+        let Some(current_gloas_body) = block.message().body().with_payload_bid() else {
+            return false;
+        };
+
+        current_gloas_body
+            .signed_execution_payload_bid()
+            .message
+            .parent_block_hash
+            == parent_gloas_body
+                .signed_execution_payload_bid()
+                .message
+                .block_hash
+    }
+
+    /// Check if payload was timely.
+    /// spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/gloas/fork-choice#is_payload_timely
+    /// True if locally available AND PTC votes > THRESHOLD (256).
+    /// PAYLOAD_TIMELY_THRESHOLD = PTC_SIZE // 2 = 512 // 2 = 256.
+    #[must_use]
+    fn is_payload_timely(&self, block_root: H256) -> bool {
+        // Check if we have PTC votes for this block
+        let Some(ptc_votes) = self.ptc_vote.get(&block_root) else {
+            return false;
+        };
+
+        // Check if payload is locally available (has full variant with execution state)
+        // Note: Spec's `store.execution_payload_states` is never pruned, but our
+        // `unfinalized_locations_full` is pruned on finalization/orphaning. This is safe
+        // because the only caller (`should_extend_payload`) is used during head selection,
+        // which only considers unfinalized blocks.
+        let Some(loc) = self.unfinalized_locations_full.get(&block_root) else {
+            return false;
+        };
+        // Check payload actually arrived (not just FULL placeholder)
+        if self.unfinalized[&loc.segment_id][loc.position]
+            .chain_link
+            .execution_payload_state
+            .is_none()
+        {
+            return false;
+        }
+
+        // Count PTC votes (PAYLOAD_TIMELY_THRESHOLD = PTC_SIZE / 2 = 256)
+        let vote_count = ptc_votes.count_ones();
+        let threshold = P::PtcSize::USIZE / 2;
+
+        vote_count > threshold
+    }
+
+    /// Decides if payload from previous slot should be extended.
+    /// spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.2/specs/gloas/fork-choice.md?plain=1#L307
+    /// Used as tiebreaker between EMPTY/FULL variants from previous slot.
+    /// TRUE if timely, no boost, boost conflicts, or boost extends payload.
+    #[must_use]
+    fn should_extend_payload(&self, block_root: H256) -> bool {
+        // Condition 1: Payload was timely (PTC voted for it)
+        if self.is_payload_timely(block_root) {
+            return true;
+        }
+
+        let proposer_root = self.proposer_boost_root;
+
+        // Condition 2: No proposer boost set
+        if proposer_root == H256::zero() {
+            return true;
+        }
+
+        // Get proposer boost block
+        let Some(proposer_block) = self.chain_link_full(proposer_root) else {
+            return true; // Can't verify, default to extend
+        };
+
+        let proposer_parent = proposer_block.block.message().parent_root();
+
+        // Condition 3: Proposer boost does not build on this blokc
+        if proposer_parent != block_root {
+            return true;
+        }
+
+        // Condition 4: Proposer boost builds on FULL variant
+        self.is_parent_node_full(proposer_root)
+    }
+
+    /// Spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.0/specs/gloas/fork-choice.md?plain=1#L328
+    /// Previous-slot tiebreaker: FULL (timely) = 2 > EMPTY = 1 > FULL (late) = 0.
+    #[must_use]
+    fn get_payload_status_tiebreaker(
+        &self,
+        block_root: H256,
+        payload_status: ForkChoicePayloadStatus,
+    ) -> u8 {
+        if payload_status.is_pending() {
+            return payload_status as u8;
+        }
+
+        let is_previous_slot = self
+            .chain_link_full(block_root)
+            .is_some_and(|b| b.block.message().slot() + 1 == self.slot());
+
+        if !is_previous_slot {
+            return payload_status as u8;
+        }
+
+        if payload_status.is_empty() {
+            1
+        } else if self.should_extend_payload(block_root) {
+            2
+        } else {
+            0
+        }
+    }
+
+    /// ePBS: Extract PTC votes from block's payload_attestations.
+    /// spec(gloas): https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L181
+    /// Populates ptc_vote map used by is_payload_timely().
+    /// Called during on_block().
+    fn notify_ptc_messages(
+        &mut self,
+        block_root: H256,
+        block: &SignedBeaconBlock<P>,
+        state: &Arc<BeaconState<P>>,
+    ) -> Result<()> {
+        // Initialize empty BitVector for the root if it doesn't exist yet
+        self.ptc_vote
+            .entry(block_root)
+            .or_insert_with(BitVector::default);
+
+        // Only process Gloas blocks (pre-Gloas has no payload_attestations)
+        let Some(gloas_body) = block.message().body().with_payload_attestations() else {
+            return Ok(());
+        };
+
+        //using valid payload attestation as apply_payload_attestation_batch takes valid payload attestation.
+        let mut valid_payload_attestations = Vec::new();
+
+        // use the state(chainlink_full.block_state) at apply_block to get index payload attestsions
+        for payload_attestation in gloas_body.payload_attestations() {
+            let indexed = accessors::get_indexed_payload_attestation(state, payload_attestation)?;
+            //use the same loop to get ptc members for the slot to later check
+            let ptc_members = accessors::get_ptc(state, payload_attestation.data.slot)?;
+
+            // use the indexed attestation data to create valid payload attestation for the actual apply_payload_attestation_batch call + a ptc membership check for the validator index
+            for validator_index in indexed.attesting_indices {
+                let positions = ptc_members
+                    .iter()
+                    .positions(|&member| validator_index == member)
+                    .collect_vec();
+
+                // dev notes: in the gossip payload attestation flow, the ptc members check has been done before apply_payload_attestation_message inside validation_payload_attestation
+                // as we are not calling that validate function for block payload attestation, we need to do that check here to follow the spec. don't want to introduce a duplicate get ptc call
+                // to apply_payload_attestation_message. the validate_payload_attestation_message has extra steps (current-slot, signature)
+                ensure!(
+                    !positions.is_empty(),
+                    Error::<P>::PayloadAttestationNotInCommittee {
+                        validator_index,
+                        slot: payload_attestation.data.slot,
+                    }
+                );
+
+                valid_payload_attestations.push(ValidPayloadAttestation {
+                    data: payload_attestation.data,
+                    attesting_indices_positions: vec![(validator_index, positions)],
+                    is_from_block: true,
+                });
+            }
+        }
+
+        self.apply_payload_attestation_batch(valid_payload_attestations)?;
+
+        Ok(())
     }
 
     #[must_use]
@@ -551,7 +891,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         proposer_index: ValidatorIndex,
         block_root: H256,
     ) -> bool {
-        self.unfinalized_locations.values().any(|location| {
+        self.unfinalized_locations_full.values().any(|location| {
             let Location {
                 segment_id,
                 position,
@@ -578,7 +918,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[instrument(level = "debug", skip_all)]
     pub fn state_by_block_root(&self, block_root: H256) -> Option<Arc<BeaconState<P>>> {
-        self.chain_link(block_root)
+        self.chain_link_full(block_root)
             .map(|chain_link| chain_link.state(self))
     }
 
@@ -598,7 +938,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn justified_chain_link(&self) -> Option<&ChainLink<P>> {
-        self.chain_link(self.justified_checkpoint.root)
+        self.chain_link_full(self.justified_checkpoint.root)
     }
 
     #[must_use]
@@ -642,11 +982,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    /// Uses unfinalized_locations_full to ensure we only touch FULL variants,
     pub fn unfinalized_chain_link_mut(&mut self, block_root: H256) -> Option<&mut ChainLink<P>> {
         let Location {
             segment_id,
             position,
-        } = self.unfinalized_locations.get(&block_root)?;
+        } = self.unfinalized_locations_full.get(&block_root)?;
 
         Some(&mut self.unfinalized[segment_id][*position].chain_link)
     }
@@ -735,6 +1076,36 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.head_segment()?.last_non_invalid_block()
     }
 
+    #[must_use]
+    pub fn has_envelope(&self, block_root: H256) -> bool {
+        // Pre-Gloas blocks have no envelope concept — treat as always available
+        if self.phase() < Phase::Gloas {
+            return true;
+        }
+        // Check FULL location exists AND has execution_payload_state (envelope arrived)
+        let Some(loc) = self.unfinalized_locations_full.get(&block_root) else {
+            return false;
+        };
+        self.unfinalized[&loc.segment_id][loc.position]
+            .chain_link
+            .execution_payload_state
+            .is_some()
+    }
+
+    /// Get the slot of a block by its root.
+    #[must_use]
+    pub fn block_slot(&self, block_root: H256) -> Option<Slot> {
+        self.chain_link_full(block_root).map(ChainLink::slot)
+    }
+
+    /// [`is_data_available`](https://github.com/ethereum/consensus-specs/blob/7e33b9f9de37f02e711aa534dcc72e9880e551e2/specs/gloas/fork-choice.md?plain=1#L756)
+    /// note: this currently does not follow spec. resuses contains_block_and_sidecars
+    /// TBD: clarification on retrieve_column_sidecars_and_kzg_commitments function acc to spec. final chagnes(with is_data_available_for_envelope) after 1.7.2 becasue of major changes
+    #[must_use]
+    pub fn is_data_available(&self, block_root: H256) -> bool {
+        self.contains_block_and_sidecars(block_root)
+    }
+
     fn head_segment(&self) -> Option<&Segment<P>> {
         let segment_id = self.head_segment_id?;
         Some(&self.unfinalized[&segment_id])
@@ -761,7 +1132,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn chain_ending_with(&self, block_root: H256) -> impl Iterator<Item = &ChainLink<P>> {
-        if let Some(location) = self.unfinalized_locations.get(&block_root).copied() {
+        if let Some(location) = self.unfinalized_locations_full.get(&block_root).copied() {
             let segment = &self.unfinalized[&location.segment_id];
 
             return self
@@ -811,13 +1182,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     fn parent_location(&self, segment: &Segment<P>) -> Option<Location> {
-        let parent_root = segment
-            .first_block()
-            .chain_link
-            .block
-            .message()
-            .parent_root();
-        self.unfinalized_locations.get(&parent_root).copied()
+        segment.parent_location()
     }
 
     // Finality of a block or state can be determined by comparing its slot with the finalized slot.
@@ -918,8 +1283,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// Like [`get_weight`], but returns the full [`Score`] of a block including the tiebreaker.
     ///
     /// [`get_weight`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_weight
+    ///
+    /// Modified for Gloas (ePBS) to check `should_apply_proposer_boost` before applying boost.
+    /// This prevents equivocating proposers from using proposer boost to reorg builders' payloads.
     fn score(&self, unfinalized_block: &UnfinalizedBlock<P>) -> Score {
         let attestation_score = unfinalized_block.attesting_balance;
+        let tiebreaker = unfinalized_block.chain_link.block_root;
+
+        // [Gloas] Equivocation protection may suppress boost.
+        // Pre-Gloas: skip — should_apply_proposer_boost uses Gloas-specific checks
+        // dev notes: in spec there is a pending check as well n+1 slot check, not required here, as we keep both nodes empty or full placeholder with same
+        // slot votes, i.e update_head_segement_id will solve using payload status tiebreaker and root wont be a point of tiebreaking from here
+        if self.phase() >= Phase::Gloas && !self.should_apply_proposer_boost() {
+            return (attestation_score, tiebreaker);
+        }
 
         // > Boost is applied if ``root`` is an ancestor of ``proposer_boost_root``
         //
@@ -943,8 +1320,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > Ties broken by favoring block with lexicographically higher root
-        let tiebreaker = unfinalized_block.chain_link.block_root;
-
         (attestation_score + proposer_score, tiebreaker)
     }
 
@@ -956,13 +1331,159 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         })
     }
 
+    /// Calculate committee weight (total active balance / slots per epoch)
+    fn committee_weight(&self) -> Gwei {
+        let total_active_balance = self.justified_active_balances.iter().sum::<Gwei>();
+        total_active_balance / P::SlotsPerEpoch::non_zero()
+    }
+
+    /// [`is_head_weak`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/fork-choice.md#is_head_weak)
+    ///
+    /// Check if a block is weak (has less than REORG_HEAD_WEIGHT_THRESHOLD% of committee weight).
+    /// A weak head can be reorged by a timely proposer with proposer boost.
+    ///
+    /// Per spec, uses PAYLOAD_STATUS_PENDING (FULL placeholder) for weight calculation:
+    /// `head_node = ForkChoiceNode(root=head_root, payload_status=PAYLOAD_STATUS_PENDING)`
+    ///
+    /// Gloas update: Adds equivocating validator weight from head slot committees for monotonicity.
+    /// This ensures more attestations can only increase the weight, not decrease it.
+    fn is_head_weak(&self, head_root: H256) -> bool {
+        let committee_weight = self.committee_weight();
+        let reorg_threshold =
+            committee_weight * self.chain_config.reorg_head_weight_threshold / 100;
+
+        // Get FULL placeholder's balance (PENDING state per spec)
+        // Spec: head_node = ForkChoiceNode(root=head_root, payload_status=PAYLOAD_STATUS_PENDING)
+        let mut head_weight = self
+            .unfinalized_locations_full
+            .get(&head_root)
+            .map(|loc| self.unfinalized[&loc.segment_id][loc.position].attesting_balance)
+            .unwrap_or(0);
+
+        // Get chain_link for equivocating weight calculation
+        let Some(chain_link) = self.chain_link_full(head_root) else {
+            return head_weight < reorg_threshold;
+        };
+
+        // [Gloas] Add equivocating validator weight from head slot committees
+        // This ensures monotonicity: more attestations can only increase weight
+        if let Some(head_state) = &chain_link.block_state {
+            let head_slot = chain_link.slot();
+            let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
+            let relative_epoch = if epoch == accessors::get_current_epoch(head_state) {
+                RelativeEpoch::Current
+            } else {
+                RelativeEpoch::Previous
+            };
+
+            let justified_state = self.justified_state();
+            let committee_count =
+                accessors::get_committee_count_per_slot(head_state, relative_epoch);
+
+            for index in 0..committee_count {
+                if let Ok(committee) = accessors::beacon_committee(head_state, head_slot, index) {
+                    for validator_index in committee.into_iter() {
+                        if self.equivocating_indices.contains(&validator_index) {
+                            // Add effective balance from justified state
+                            if let Ok(validator) = justified_state.validators().get(validator_index)
+                            {
+                                head_weight += validator.effective_balance;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        head_weight < reorg_threshold
+    }
+
+    /// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/fork-choice.md#new-should_apply_proposer_boost                            
+    ///                                                                                                                                                           
+    /// Returns false when the boosted block's parent is weak AND another PTC-timely                                                                                
+    /// block from the same proposer exists (equivocation). True otherwise.
+    fn should_apply_proposer_boost(&self) -> bool {
+        // No boost root set means nothing to apply
+        if self.proposer_boost_root == H256::zero() {
+            return false;
+        }
+
+        // Get the boosted block
+        let Some(boosted_chain_link) = self.chain_link_full(self.proposer_boost_root) else {
+            return false;
+        };
+
+        let boosted_block = boosted_chain_link.block.message();
+        let parent_root = boosted_block.parent_root();
+        let slot = boosted_block.slot();
+
+        // Get the parent block
+        let Some(parent_chain_link) = self.chain_link_full(parent_root) else {
+            warn_with_peers!(
+                "missing parent for proposer boost evaluation: boost_root={:?}, parent_root={:?}",
+                self.proposer_boost_root,
+                parent_root,
+            );
+            return false; // Missing parent: cannot safely evaluate boost conditions
+        };
+
+        let parent_slot = parent_chain_link.slot();
+
+        // Case 1: Apply proposer boost if parent is not from the previous slot
+        // (i.e., there's a gap, so equivocation in previous slot doesn't affect us)
+        if parent_slot + 1 < slot {
+            return true;
+        }
+
+        // Case 2: Apply proposer boost if parent is not weak
+        // (strong parent means equivocation can't cause a reorg anyway)
+        // Per spec: is_head_weak uses PAYLOAD_STATUS_PENDING (FULL placeholder)
+        if !self.is_head_weak(parent_root) {
+            return true;
+        }
+
+        // Case 3: Parent is weak and from previous slot.
+        // Check for equivocations from the same proposer that arrived before PTC deadline.
+        let parent_proposer_index = parent_chain_link.block.message().proposer_index();
+
+        let has_equivocation = self.unfinalized.values().any(|segment| {
+            segment.into_iter().any(|unfinalized_block| {
+                let block = unfinalized_block.chain_link.block.message();
+                let equivocating_root = unfinalized_block.chain_link.block_root;
+                let ptc_timely = self.ptc_timely_blocks.contains(&equivocating_root);
+
+                ptc_timely
+                    && block.proposer_index() == parent_proposer_index
+                    && block.slot() == parent_slot
+                    && equivocating_root != parent_root
+            })
+        });
+
+        // Apply boost only if no equivocations detected
+        !has_equivocation
+    }
+
     /// [`get_ancestor`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_ancestor)
     ///
     /// This should never return `None` in normal operation, but the reasons for that are slightly
     /// different at each call site, so we call `Option::expect` every time we use this instead of
     /// changing the type.
+    ///
+    /// spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.0/specs/gloas/fork-choice.md#modified-get_ancestor
+    /// Returns the block root of the ancestor at `ancestor_slot` on the chain ending at
+    /// `descendant_root`. Returns `None` if no such ancestor exists.
+    ///
+    /// Note: The spec's ePBS version returns `(root, payload_status)`, but Grandine handles
+    /// payload status via variant-aware segment structure, so we only return the root.
+    /// This is not a major change, because even if an empty node is present, `extend_empty_segment`
+    /// makes it a sibling of FULL. So when it is not a same-slot case, it is okay to traverse
+    /// `unfinalized_full` (for the starting location); their parents/ancestors match.
     fn ancestor(&self, descendant_root: H256, ancestor_slot: Slot) -> Option<H256> {
-        if let Some(location) = self.unfinalized_locations.get(&descendant_root).copied() {
+        if let Some(location) = self
+            .unfinalized_locations_full
+            .get(&descendant_root)
+            .copied()
+        {
             let descendant_segment = &self.unfinalized[&location.segment_id];
 
             let chain_link = self
@@ -1138,7 +1659,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // > Parent block must be known
-        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+        let Some(parent) = self.chain_link_full(block.message().parent_root()) else {
             return Some(BlockAction::DelayUntilParent(block.clone_arc()));
         };
 
@@ -1170,7 +1691,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // > Parent block must be known
-        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+        let Some(parent) = self.chain_link_full(block.message().parent_root()) else {
             return Ok(Some(BlockAction::DelayUntilParent(block.clone_arc())));
         };
 
@@ -1200,10 +1721,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(action);
         }
 
-        // > Parent block must be known
-        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+        // > Parent(consensus parent) block must be known
+        let Some(parent) = self.chain_link_full(block.message().parent_root()) else {
             return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
         };
+
+        // ePBS: If block claims to build on parent's FULL variant,
+        // delay processing until the parent FULL chain_link has `execution_payload_state`.
+        // (A different path in `insert_block` may resolve FULL parent via
+        // `execution_payload_locations` using bid.parent_block_hash.)
+        // note: most likely will be added in the spec as a validation rule for beacon block
+        if block.message().body().with_payload_bid().is_some() {
+            // Block builds on FULL if parent_block_hash matches parent's bid.block_hash
+            let parent_full = self.is_parent_node_full_for_block(block);
+            let has_parent_exec = parent.execution_payload_state.is_some();
+
+            // Skip delay for pre-Gloas or finalized parents: their execution payload
+            // has already been processed, so no envelope will arrive separately.
+            let parent_root = block.message().parent_root();
+            let parent_is_pre_gloas = parent.block.phase() < Phase::Gloas;
+            let parent_is_finalized = self.finalized_indices.contains_key(&parent_root);
+
+            if parent_full && !has_parent_exec && !parent_is_pre_gloas && !parent_is_finalized {
+                return Ok(BlockAction::DelayUntilParentEnvelope(
+                    block.clone_arc(),
+                    block.message().parent_root(),
+                ));
+            }
+        }
 
         // > Check the block is valid and compute the post-state
         let (state, block_action) = state_transition(block_root, parent)?;
@@ -1261,7 +1806,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let chain_link = ChainLink {
             block_root,
             block: block.clone_arc(),
-            state: Some(state),
+            block_state: Some(state),
+            execution_payload_state: None,
             current_justified_checkpoint: justified_checkpoint,
             finalized_checkpoint,
             unrealized_justified_checkpoint,
@@ -1643,7 +2189,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     // During state transition, all block attestations are validated against block state.
                     // Same logic applies here.
                     target_state = self
-                        .chain_link(block_root)
+                        .chain_link_full(block_root)
                         .map(|chain_link| chain_link.state(self));
                 }
             }
@@ -1757,16 +2303,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         attestation: attestation.clone_arc()
                     }
                 );
-
-                // This validation is present in the fork choice rule but not the Networking specification.
-                if self.slot() == slot {
-                    ensure!(
-                        index == 0,
-                        Error::AttestationDataPayloadPresenceForCurrentSlot {
-                            attestation: attestation.clone_arc()
-                        }
-                    );
-                }
             } else if self.phase() >= Phase::Electra {
                 ensure!(
                     index == 0,
@@ -1848,6 +2384,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 block: ghost_vote_block.clone_arc(),
             },
         );
+
+        // [New in EIP7732]
+        // If the attested block is from the same slot as the attestation,
+        // the payload status is unknown so index must be 0.
+        if self.phase() >= Phase::Gloas && ghost_vote_block.message().slot() == slot {
+            ensure!(
+                index == 0,
+                Error::AttestationDataPayloadPresenceForCurrentSlot {
+                    attestation: attestation.clone_arc()
+                }
+            );
+        }
+        // deleted the previous rule for this it was comparing current slot with attestation's  slot and not attested block's slot
+        // Note: index < 2 is guaranteed here — enforced by !is_from_block check
+        // for gossip attestations, and by state transition for block attestations.
+        // (raise in review if incorrect)
 
         let ancestor_at_target_epoch_start = self
             .ancestor(beacon_block_root, Self::start_of_epoch(target.epoch))
@@ -2159,7 +2711,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let block_header = blob_sidecar.signed_block_header.message;
 
         let parent_info = || {
-            self.chain_link(block_header.parent_root)
+            self.chain_link_full(block_header.parent_root)
                 .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
         };
 
@@ -2424,7 +2976,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // where additional columns are being downloaded for blocks already in fork choice.
         // TODO: (gloas): gloas block can be imported without sidecars, change this to
         // `contains_block_and_sidecars` new function
-        if validate_block_presence && self.contains_block(block_root) {
+        if validate_block_presence && self.contains_block_and_sidecars(block_root) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
@@ -2460,11 +3012,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
-        let Some(payload_bid) = self.accepted_payload_bids.get(&slot).and_then(|bids| {
-            bids.values()
-                .filter(|bid| bid.message.parent_block_root == block_root)
-                .max_by_key(|bid| bid.message.value)
-        }) else {
+        // For Gloas, sidecars are keyed to the block root itself, so use the bid embedded in that block.
+        // safer than using max by key for mutliple builder_index per slot. (raise in review if recommend a revert)
+        let payload_bid_opt = self
+            .block(block_root)
+            .map(WithStatus::value)
+            .and_then(|block| {
+                block
+                    .message()
+                    .body()
+                    .with_payload_bid()
+                    .map(|body| body.signed_execution_payload_bid().message)
+            });
+        let Some(payload_bid) = payload_bid_opt else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
@@ -2474,7 +3034,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // [REJECT] The hash of the sidecar's kzg_commitments matches the blob_kzg_commitments_root in the corresponding builder's bid for sidecar.beacon_block_root.
         ensure!(
             data_column_sidecar.kzg_commitments().hash_tree_root()
-                == payload_bid.message.blob_kzg_commitments_root,
+                == payload_bid.blob_kzg_commitments_root,
             Error::DataColumnSidecarInvalidKzgCommitments {
                 data_column_sidecar
             }
@@ -2552,7 +3112,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let block_header = data_column_sidecar.signed_block_header.message;
 
                 let parent_info = || {
-                    self.chain_link(block_header.parent_root)
+                    self.chain_link_full(block_header.parent_root)
                         .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
                 };
 
@@ -2609,7 +3169,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             envelope,
             origin,
             || {
-                self.chain_link(block_root)
+                self.chain_link_full(block_root)
                     .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
             },
             || {
@@ -2667,11 +3227,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if origin.verify_signatures() {
             // [REJECT] The builder signature envelope.signature is valid
+            let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
+                let validator_index = state.latest_block_header().proposer_index;
+                accessors::public_key(&state, validator_index)?
+            } else {
+                // dev notes: changed the previous code as it was looking for builder index at accessors::public_key
+                // which checks the validator set from accessors::public_key i.e Ok(&state.validators().get(validator_index)?.pubkey). now uses state.builders
+                //(raise  in review if wrong)
+                let post_gloas_state = state
+                    .post_gloas()
+                    .ok_or_else(|| anyhow!("expected post-Gloas state for envelope validation"))?;
+                &post_gloas_state.builders().get(builder_index)?.pubkey
+            };
             SingleVerifier.verify_singular(
                 envelope.message.signing_root(&self.chain_config, &state),
                 envelope.signature,
-                self.pubkey_cache
-                    .get_or_insert(*accessors::public_key(&state, builder_index)?)?,
+                self.pubkey_cache.get_or_insert(*pubkey)?,
                 SignatureKind::ExecutionPayloadEnvelope,
             )?;
         }
@@ -2774,7 +3345,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The message's block data.beacon_block_root has been seen (via gossip or non-gossip sources)
         // (a client MAY queue attestation for processing once the block is retrieved. Note a client might want to request payload after).
-        let Some(chain_link) = self.chain_link(block_root) else {
+        let Some(chain_link) = self.chain_link_full(block_root) else {
             return Ok(PayloadAttestationAction::DelayUntilBlock(
                 payload_attestation,
                 block_root,
@@ -2791,7 +3362,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         }
 
-        let Some(ref state) = chain_link.state else {
+        let Some(ref state) = chain_link.block_state else {
             return Ok(PayloadAttestationAction::DelayUntilBlock(
                 payload_attestation,
                 block_root,
@@ -2954,9 +3525,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         let current_slot_attestations = core::mem::take(&mut self.current_slot_attestations);
-        let differences = self.attestation_balance_differences(current_slot_attestations)?;
+        let (differences_empty, differences_full) =
+            self.attestation_balance_differences(current_slot_attestations)?;
 
-        self.apply_balance_differences(differences)?;
+        self.apply_balance_differences(differences_empty, differences_full)?;
         self.update_head_segment_id();
 
         // Pruning the state cache requires the head slot, which depends on head_segment_id
@@ -3005,7 +3577,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // Apply proposer boost to first block in case of equivocation.
         // See <https://github.com/ethereum/consensus-specs/pull/3352>.
-        let is_before_attesting_interval = self.tick.is_before_attesting_interval();
+        // Check if we're in the first interval according to spec
+        // For Gloas: 16 ticks/slot, 4 intervals → first interval is ticks 0-4 (0-3s boundary)
+        // For pre-Gloas: 12 ticks/slot, 3 intervals → first interval is ticks 0-3 (0-4s)
+        //(temporary fix: needs change in TickKind to not follow strcict before attesting time for gloas)
+        let tick_index = self.tick.kind as usize;
+        let is_before_attesting_interval = if self.phase() >= Phase::Gloas {
+            // Gloas: At exactly 3s, tick_index = 4 (Attest), which should still get boost
+            tick_index <= 4
+        } else {
+            // Pre-Gloas: At exactly 4s, tick_index = 4 (Attest), which should NOT get boost
+            tick_index < 4
+        };
+
+        let is_current_slot = self.slot() == chain_link.slot();
+        let attestation_timely = is_current_slot && is_before_attesting_interval;
+
+        // [Gloas] Record PTC timeliness — block arrived before PayloadAttest deadline
+        if self.phase() >= Phase::Gloas
+            && is_current_slot
+            && self.tick.kind < TickKind::PayloadAttest
+        {
+            self.ptc_timely_blocks.insert(block_root);
+        }
+
         let is_first_block = self.proposer_boost_root.is_zero();
 
         // > Add proposer score boost if the block is timely
@@ -3014,8 +3609,52 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `Store::insert_block` can leave the `Store` in an inconsistent state if
         // `Store::insert_block` fails, but only if segment IDs or positions in a segment run out,
         // which is extremely unlikely and at which point the `Store` is unusable anyway.
-        if self.slot() == chain_link.slot() && is_before_attesting_interval && is_first_block {
-            self.proposer_boost_root = block_root;
+        if attestation_timely && is_first_block {
+            // Verify block's proposer matches expected proposer on canonical chain.
+            // Spec: update_proposer_boost_root checks block.proposer_index == get_beacon_proposer_index(head_state)
+            // This prevents boost for blocks from wrong proposers (e.g., on non-viable forks).
+            let mut head_state = self.head().state(self);
+            let slot = self.slot();
+            // dev notes: not completerly sure why tests fail when i remove process_slots given that in pre gloas the tests were working without it.
+            // but even this code is not wrong given its a spec(https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#modified-update_proposer_boost_root)
+            // step which can be skipped if called somewhere around same time.
+            // the same is true when i move self.proposer_boost_root = block_root out of the propser check. most probable answer is this part of code is now hitting before process_headaer
+            // and another factor is with gloas the new block is sent by the propser much earlier.
+            if head_state.slot() < slot {
+                let _unused = combined::process_slots(
+                    &self.chain_config,
+                    &self.pubkey_cache,
+                    head_state.make_mut(),
+                    slot,
+                );
+            }
+            let expected_proposer =
+                accessors::get_beacon_proposer_index(&self.chain_config, &head_state).ok();
+
+            if expected_proposer == Some(chain_link.block.message().proposer_index()) {
+                self.proposer_boost_root = block_root;
+
+                // [Gloas] Create EMPTY segment for parent if payload hasn't arrived yet.
+                // Both variants must exist in the tree for head selection to compare them.
+                if self.phase() >= Phase::Gloas {
+                    let parent_root = chain_link.block.message().parent_root();
+                    if let Some(loc) = self.unfinalized_locations_full.get(&parent_root).copied() {
+                        let parent_has_payload = self.unfinalized[&loc.segment_id][loc.position]
+                            .chain_link
+                            .execution_payload_state
+                            .is_some();
+                        if !parent_has_payload
+                            && !self.unfinalized_locations_empty.contains_key(&parent_root)
+                        {
+                            if let Err(error) = self.extend_empty_segment(parent_root) {
+                                error_with_peers!(
+                                    "failed to extend EMPTY segment for parent {parent_root:?}: {error:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         let old_justified_checkpoint = self.justified_checkpoint;
@@ -3071,6 +3710,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         log_imported_block_info();
+
+        // ePBS: Extract PTC votes from payload_attestations
+        if let Some(ref state) = chain_link.block_state {
+            if let Err(error) =
+                self.notify_ptc_messages(block_root, chain_link.block.as_ref(), state)
+            {
+                warn_with_peers!("failed to apply payload attestations from block: {error:?}");
+            }
+        }
 
         self.insert_block(chain_link)?;
 
@@ -3177,12 +3825,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &mut self,
         valid_attestations: impl IntoIterator<Item = ValidAttestation<P>>,
     ) -> Result<Option<ChainLink<P>>> {
-        let differences = self.attestation_balance_differences(valid_attestations)?;
+        let (differences_empty, differences_full) =
+            self.attestation_balance_differences(valid_attestations)?;
 
         let old_head_segment_id = self.head_segment_id;
         let old_head = self.head().clone();
 
-        self.apply_balance_differences(differences)?;
+        self.apply_balance_differences(differences_empty, differences_full)?;
         self.update_head_segment_id();
 
         self.reorganized(old_head_segment_id)
@@ -3206,8 +3855,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &mut self,
         valid_payload_attestations: impl IntoIterator<Item = ValidPayloadAttestation>,
     ) -> Result<()> {
-        // TODO: (gloas): update PTC votes into fork choice
         // spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-on_payload_attestation_message
+        let mut updated = false;
+
+        for valid in valid_payload_attestations {
+            let block_root = valid.data.beacon_block_root;
+            let ptc_votes = self
+                .ptc_vote
+                .entry(block_root)
+                .or_insert_with(BitVector::default);
+
+            for (_validator_index, positions) in valid.attesting_indices_positions {
+                for position in positions {
+                    let index = usize::try_from(position)?;
+                    ptc_votes.set(index, valid.data.payload_present);
+                    // TODO(gloas): https://github.com/ethereum/consensus-specs/blame/e8b77415ffce13ee2b14a5c22417a1f77f1dca34/specs/gloas/fork-choice.md#L153
+                    //Track blob-data-availability votes separately from payload-presence votes.
+                    updated = true;
+                }
+            }
+        }
+
+        if updated {
+            self.update_head_segment_id();
+        }
 
         Ok(())
     }
@@ -3217,7 +3888,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &mut self,
         slashable_indices: Vec<ValidatorIndex>,
     ) -> Result<Option<ChainLink<P>>> {
-        let mut differences = Self::difference_map();
+        let mut differences_empty = Self::difference_map();
+        let mut differences_full = Self::difference_map();
 
         for validator_index in slashable_indices {
             // Votes of slashed validators should not be used to compute the head.
@@ -3231,16 +3903,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let balance = self.justified_active_balance(index);
 
-            differences
-                .entry(latest_message.beacon_block_root)
-                .or_default()
-                .sub_assign(balance);
+            // [Gloas] Route to correct map based on payload_present
+            if latest_message.payload_present {
+                differences_full
+                    .entry(latest_message.beacon_block_root)
+                    .or_default()
+                    .sub_assign(balance);
+            } else {
+                differences_empty
+                    .entry(latest_message.beacon_block_root)
+                    .or_default()
+                    .sub_assign(balance);
+            }
         }
 
         let old_head_segment_id = self.head_segment_id;
         let old_head = self.head().clone();
 
-        self.apply_balance_differences(differences)?;
+        self.apply_balance_differences(differences_empty, differences_full)?;
         self.update_head_segment_id();
 
         self.reorganized(old_head_segment_id)
@@ -3306,6 +3986,198 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.data_column_cache.insert(data_sidecar);
+    }
+
+    /// Implements `on_execution_payload` from fork choice spec
+    ///
+    /// Spec: https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/gloas/fork-choice#on_execution_payload
+    /// ePBS: Apply execution payload envelope to create full variant.
+    /// Called after validation passes. Processes execution payload and inserts via insert_payload().
+    pub fn apply_execution_payload_envelope(
+        &mut self,
+        signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        execution_engine: impl ExecutionEngine<P>,
+    ) -> Result<()> {
+        let envelope = &signed_envelope.message;
+        let key = (
+            envelope.slot,
+            envelope.beacon_block_root,
+            envelope.builder_index,
+        );
+        let beacon_block_root = envelope.beacon_block_root;
+        let payload = &envelope.payload;
+
+        self.accepted_execution_payload_envelopes.insert(key);
+
+        // Get FULL placeholder (Pending state — payload not yet arrived)
+        let chain_link = self.chain_link_full(beacon_block_root).ok_or_else(|| {
+            anyhow::anyhow!(
+                "FULL placeholder not found for beacon_block_root {beacon_block_root:?}"
+            )
+        })?;
+
+        // Payload already processed — duplicate envelope
+        if chain_link.execution_payload_state.is_some() {
+            return Ok(());
+        }
+
+        // Get block_state from FULL placeholder (pre-execution state)
+        let block_state = chain_link.state(self);
+
+        ensure!(
+            self.is_data_available(beacon_block_root),
+            "blob/data not available for beacon_block_root {beacon_block_root:?}"
+        );
+
+        // Clone state for execution payload processing
+        let mut execution_state = block_state.clone_arc();
+
+        // Process execution payload (state transition)
+        // Spec: https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/gloas/fork-choice#on_execution_payload
+        // process_execution_payload()
+        // This validates payload consistency, processes for gossip, notifies EL, updates state
+        if let BeaconState::Gloas(gloas_state) = execution_state.make_mut() {
+            transition_functions::gloas::process_execution_payload(
+                &self.chain_config,
+                &self.pubkey_cache,
+                gloas_state,
+                &signed_envelope,
+                execution_engine,
+                NullVerifier, // Signature already verified in validate_execution_payload_envelope
+            )?;
+        } else {
+            bail!("Execution payload envelope requires Gloas state");
+        }
+        // Fill the FULL placeholder with execution_payload_state
+        self.insert_payload(beacon_block_root, execution_state, payload.block_hash)?;
+        // Re-run head selection - full variant may now win via tiebreaker
+        self.update_head_segment_id();
+
+        Ok(())
+    }
+
+    /// Fill existing FULL placeholder with execution payload state.
+    ///
+    /// The FULL placeholder was created by insert_block(). This method fills
+    /// the execution_payload_state on the existing UnfinalizedBlock.
+    /// No new segment is created - we just update the placeholder in place.
+    fn insert_payload(
+        &mut self,
+        beacon_block_root: H256,
+        execution_payload_state: Arc<BeaconState<P>>,
+        execution_block_hash: ExecutionBlockHash,
+    ) -> Result<()> {
+        // Find existing FULL placeholder
+        let Some(&location) = self.unfinalized_locations_full.get(&beacon_block_root) else {
+            bail!(
+                "insert_payload: FULL placeholder not found for beacon_block_root: {beacon_block_root:?}"
+            );
+        };
+
+        // Get the UnfinalizedBlock and fill execution_payload_state
+        let segment = self
+            .unfinalized
+            .get_mut(&location.segment_id)
+            .expect("segment should exist for location in unfinalized_locations_full");
+        let unfinalized_block = &mut segment[location.position];
+
+        // Fill the placeholder with execution state
+        unfinalized_block.chain_link.execution_payload_state = Some(execution_payload_state);
+
+        // Update execution_payload_locations map
+        self.execution_payload_locations
+            .insert(execution_block_hash, location);
+
+        Ok(())
+    }
+
+    /// Create EMPTY segment as sibling of existing FULL placeholder.
+    ///
+    /// Called lazily when EMPTY variant is needed:
+    /// 1. Attestation arrives with payload_present=false
+    /// 2. Proposer boost targets EMPTY variant
+    /// 3. Child block arrives with execution parent mismatch
+    /// 4. should_extend_payload returns false
+    ///
+    /// Caller should check unfinalized_locations_empty.contains_key() first.
+    fn extend_empty_segment(&mut self, block_root: H256) -> Result<()> {
+        // Guard: never create EMPTY segments for already-finalized blocks.
+        // Their FULL variant has already been processed and finalized;
+        // creating an EMPTY sibling would insert stale locations into
+        // unfinalized_locations_empty, causing position underflows during
+        // later finalization rounds.
+        if self.finalized_indices.contains_key(&block_root) {
+            // Already finalized — no-op if location still exists in maps.
+            if self
+                .unfinalized_locations_empty
+                .get(&block_root)
+                .or_else(|| self.unfinalized_locations_full.get(&block_root))
+                .is_some()
+            {
+                return Ok(());
+            }
+            bail!("extend_empty_segment: block {block_root:?} is already finalized");
+        }
+
+        // Find FULL placeholder
+        let Some(&full_location) = self.unfinalized_locations_full.get(&block_root) else {
+            bail!(
+                "extend_empty_segment: FULL placeholder not found for block_root: {block_root:?}"
+            );
+        };
+
+        // Get the FULL placeholder's chain_link
+        let full_segment = &self.unfinalized[&full_location.segment_id];
+        let full_block = &full_segment[full_location.position];
+        let chain_link = full_block.chain_link.clone();
+
+        // Guard: never create EMPTY segments for pre-Gloas blocks.
+        // Pre-Gloas blocks always include execution payloads and have no
+        // FULL/EMPTY variant semantics. Creating EMPTY siblings for them
+        // causes the head selection to follow dead-end branches.
+        if chain_link.block.phase() < Phase::Gloas {
+            bail!("extend_empty_segment: skipping pre-Gloas block {block_root:?}");
+        }
+
+        // EMPTY has same chain_link but execution_payload_state stays None
+        // (which it already is in the placeholder)
+        let empty_chain_link = ChainLink {
+            execution_payload_state: None,
+            ..chain_link
+        };
+
+        // Get parent location for the sibling segment
+        // EMPTY forks from the same parent as FULL
+        let parent_location = if full_location.position == Position::default() {
+            // FULL is first in its segment - use segment's parent_location
+            full_segment.parent_location()
+        } else {
+            // FULL extends a segment - parent is previous position in same segment
+            Some(Location {
+                segment_id: full_location.segment_id,
+                position: full_location.position.prev()?,
+            })
+        };
+
+        // Create EMPTY sibling segment
+        let empty_location = Location {
+            segment_id: self.lowest_unused_segment_id()?,
+            position: Position::default(),
+        };
+
+        let mut empty_segment = Segment::new(empty_chain_link);
+        empty_segment.set_parent_location(parent_location);
+
+        self.unfinalized
+            .insert(empty_location.segment_id, empty_segment)
+            .unwrap_none();
+
+        // Register EMPTY location
+        self.unfinalized_locations_empty
+            .insert(block_root, empty_location)
+            .unwrap_none();
+
+        Ok(())
     }
 
     pub fn accepted_data_column_sidecars_count(
@@ -3376,7 +4248,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let new_block_location;
 
-        if let Some(parent) = self.unfinalized_locations.get(&parent_root).copied() {
+        // ePBS: For Gloas blocks, determine if child builds on EMPTY or FULL variant of parent.
+        // Pre-Gloas blocks always use unfinalized_locations_full (where all blocks are stored).
+        let parent = if let Some(gloas_body) = block.message().body().with_payload_bid() {
+            let builds_on_full = self.is_parent_node_full_for_block(block);
+
+            if !builds_on_full {
+                // EMPTY: Create EMPTY segment for parent if needed
+                if !self.unfinalized_locations_empty.contains_key(&parent_root) {
+                    self.extend_empty_segment(parent_root)?;
+                }
+                self.unfinalized_locations_empty.get(&parent_root).copied()
+            } else {
+                self.unfinalized_locations_full.get(&parent_root).copied()
+            }
+        } else {
+            // Pre-Gloas: all blocks live in unfinalized_locations_full
+            self.unfinalized_locations_full.get(&parent_root).copied()
+        };
+
+        if let Some(parent) = parent {
             let parent_is_invalid =
                 self.unfinalized[&parent.segment_id][parent.position].is_invalid();
 
@@ -3403,9 +4294,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     segment_id: self.lowest_unused_segment_id()?,
                     position: Position::default(),
                 };
-
+                let mut segment = Segment::new(chain_link);
+                segment.set_parent_location(Some(parent));
                 self.unfinalized
-                    .insert(new_block_location.segment_id, Segment::new(chain_link))
+                    .insert(new_block_location.segment_id, segment)
                     .unwrap_none();
             }
         } else {
@@ -3416,12 +4308,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 position: Position::default(),
             };
 
+            // parent_location is None for segments rooted at finalized checkpoint
             self.unfinalized
                 .insert(new_block_location.segment_id, Segment::new(chain_link))
                 .unwrap_none();
         }
 
-        self.unfinalized_locations
+        // ePBS: Insert into unfinalized_locations_full (FULL placeholder)
+        // This is the default/optimistic path - payload expected to arrive.
+        // EMPTY variant created lazily via extend_empty_segment() when triggered.
+        self.unfinalized_locations_full
             .insert(block_root, new_block_location)
             .unwrap_none();
 
@@ -3434,13 +4330,38 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     fn finalize_blocks(&mut self) -> Option<Location> {
-        let locations_from_newest_to_root = core::iter::successors(
-            self.unfinalized_locations
-                .get(&self.finalized_checkpoint.root)
-                .copied(),
-            |location| self.parent_location(&self.unfinalized[&location.segment_id]),
-        )
-        .collect_vec();
+        let finalized_root = self.finalized_checkpoint.root;
+
+        // Collect canonical segment IDs by walking from head back through parent_locations.
+        // In Gloas without execution payload envelopes, the canonical chain flows through
+        // EMPTY segments. The FULL-only segment is orphaned and must not be finalized.
+        let canonical_segments: HashSet<SegmentId> =
+            core::iter::successors(self.head_segment_id, |seg_id| {
+                self.unfinalized
+                    .get(seg_id)
+                    .and_then(|seg| seg.parent_location())
+                    .map(|loc| loc.segment_id)
+            })
+            .collect();
+
+        // Find finalized root on the canonical chain. Check both EMPTY and FULL maps;
+        // use whichever location is on a canonical segment. If neither is canonical
+        // (shouldn't happen), fall back to the FULL map for pre-existing behavior.
+        let finalized_location = [
+            self.unfinalized_locations_empty.get(&finalized_root),
+            self.unfinalized_locations_full.get(&finalized_root),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|loc| canonical_segments.contains(&loc.segment_id))
+        .or_else(|| self.unfinalized_locations_full.get(&finalized_root))
+        .copied();
+
+        let locations_from_newest_to_root =
+            core::iter::successors(finalized_location, |location| {
+                self.parent_location(&self.unfinalized[&location.segment_id])
+            })
+            .collect_vec();
 
         // Updating the finalized checkpoint does not always result in new finalized blocks.
         let locations = locations_from_newest_to_root.split_first()?;
@@ -3451,7 +4372,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .unfinalized
                 .remove(&completely_finalized_location.segment_id)
                 .expect(
-                    "self.unfinalized_locations and Segment.parent \
+                    "self.unfinalized_locations_empty and Segment.parent \
                      should only refer to segments in self.unfinalized",
                 );
 
@@ -3469,6 +4390,32 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.move_to_finalized(finalized);
 
+        // Invalidate cached parent_locations that are stale:
+        // 1. Parent segment was removed (completely finalized or orphaned)
+        // 2. Parent segment's first_position advanced past the cached position
+        let segments_to_invalidate: Vec<_> = self
+            .unfinalized
+            .iter()
+            .filter_map(|(segment_id, segment)| {
+                segment.parent_location().and_then(|parent_loc| {
+                    let stale = match self.unfinalized.get(&parent_loc.segment_id) {
+                        None => true, // parent segment removed
+                        Some(parent_seg) => {
+                            parent_loc.position < parent_seg.first_position() // position finalized away
+                        }
+                    };
+                    stale.then_some(*segment_id)
+                })
+            })
+            .collect();
+
+        for segment_id in segments_to_invalidate {
+            self.unfinalized
+                .get_mut(&segment_id)
+                .expect("segment exists")
+                .set_parent_location(None);
+        }
+
         Some(*partially_finalized_location)
     }
 
@@ -3476,8 +4423,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let Self {
             finalized,
             finalized_indices,
-            unfinalized_locations,
+            unfinalized_locations_empty,
+            unfinalized_locations_full,
             execution_payload_locations,
+            ptc_vote,
+            ptc_timely_blocks,
             ..
         } = self;
 
@@ -3491,13 +4441,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     .insert(block_root, old_len + offset)
                     .unwrap_none();
 
-                unfinalized_locations.remove(&block_root).expect(
-                    "roots of unfinalized blocks should be present in self.unfinalized_locations",
-                );
+                // ePBS: Need to clean up ALL possible entries for this block:
+                // 1. Empty variant (if exists) - keyed by block_root
+                // 2. Full variant (if exists) - keyed by block_root
+                // 3. execution_payload_locations - keyed by execution_block_hash
+                // 4. Both EMPTY and FULL could exist for the same beacon block
+                //
+                // Use remove() without expect - gracefully handle missing entries
 
+                // Remove from both variant maps (both keyed by block_root)
+                unfinalized_locations_empty.remove(&block_root);
+                unfinalized_locations_full.remove(&block_root);
+
+                // Remove from execution_payload_locations (keyed by execution_block_hash)
                 if let Some(block_hash) = unfinalized_block.chain_link.execution_block_hash() {
                     execution_payload_locations.remove(&block_hash);
                 }
+
+                // ePBS: Clean up Gloas-specific maps (keyed by block_root)
+                ptc_vote.remove(&block_root);
+                ptc_timely_blocks.remove(&block_root);
 
                 unfinalized_block.chain_link
             },
@@ -3563,11 +4526,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     fn remove_orphaned(&mut self, orphaned_blocks: Vector<UnfinalizedBlock<P>>) {
         for block in orphaned_blocks {
-            self.unfinalized_locations
-                .remove(&block.chain_link.block_root)
-                .expect(
-                    "roots of unfinalized blocks should be present in self.unfinalized_locations",
-                );
+            let block_root = block.chain_link.block_root;
+
+            // ePBS: For each orphaned block, need to clean up ALL possible entries:
+            // 1. Empty variant (if exists) - keyed by block_root
+            // 2. Full variant (if exists) - keyed by block_root
+            // 3. execution_payload_locations - keyed by execution_block_hash
+            // 4. Both EMPTY and FULL could exist for the same beacon block
+            // Remove from both variant maps (both keyed by block_root) but only expect on FULL and debug_assert on empty.
+            // TODO: try on using `.expect`after testing more on post finalization cleanup. currently reaching this point multiple times.
+            self.unfinalized_locations_empty.remove(&block_root);
+            self.unfinalized_locations_full.remove(&block_root);
+
+            // Remove from execution_payload_locations (keyed by execution_block_hash)
+            if let Some(block_hash) = block.chain_link.execution_block_hash() {
+                self.execution_payload_locations.remove(&block_hash);
+            }
+
+            // ePBS: Clean up Gloas-specific maps (keyed by block_root)
+            self.ptc_vote.remove(&block_root);
+            self.ptc_timely_blocks.remove(&block_root);
         }
     }
 
@@ -3613,10 +4591,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // (as long as the justified block is not orphaned, which is possible according to
                 // the Fork Choice specification). It is not sufficient because it does not prevent
                 // `ChainLink`s with unloaded states from becoming justified or finalized later.
-                if let Some(state) = chain_link.state.take() {
+                if let Some(block_state) = chain_link.block_state.take() {
                     if misc::is_epoch_start::<P>(chain_link.slot()) {
+                        let execution_payload_state = chain_link.execution_payload_state.take();
                         to_persist.push(ChainLink {
-                            state: Some(state),
+                            block_state: Some(block_state),
+                            execution_payload_state,
                             ..chain_link.clone()
                         });
                     }
@@ -3635,7 +4615,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let old_balances = core::mem::replace(&mut self.justified_active_balances, new_balances);
         let new_balances = self.justified_active_balances.as_ref();
 
-        let mut differences = Self::difference_map();
+        let mut differences_empty = Self::difference_map();
+        let mut differences_full = Self::difference_map();
 
         for (validator_index, latest_message, old_balance, new_balance) in izip!(
             0..,
@@ -3659,9 +4640,28 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
-            let difference = differences
-                .entry(latest_message.beacon_block_root)
-                .or_default();
+            // [Gloas] Route to correct map based on payload_present
+            // Skip FULL-side latest message if FULL execution state is unavailable.
+            // If `payload_present = true` but `execution_payload_state` is missing,
+            // this vote weight was never applied to the FULL path.
+            if self.phase() >= Phase::Gloas && latest_message.payload_present {
+                let can_apply_full = self
+                    .chain_link_full(latest_message.beacon_block_root)
+                    .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
+                    .unwrap_or(false);
+                if !can_apply_full {
+                    continue;
+                }
+            }
+            let difference = if latest_message.payload_present {
+                differences_full
+                    .entry(latest_message.beacon_block_root)
+                    .or_default()
+            } else {
+                differences_empty
+                    .entry(latest_message.beacon_block_root)
+                    .or_default()
+            };
 
             *difference = difference
                 .checked_sub_unsigned(old_balance)
@@ -3672,7 +4672,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .expect("the combined balances of the planned validators fit in i64");
         }
 
-        self.apply_balance_differences(differences)
+        self.apply_balance_differences(differences_empty, differences_full)
     }
 
     // `Vector` has no `resize` method as of `im` version 15.1.0.
@@ -3778,8 +4778,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn attestation_balance_differences(
         &mut self,
         valid_attestations: impl IntoIterator<Item = ValidAttestation<P>>,
-    ) -> Result<HashedMap<H256, Difference>> {
-        let mut differences = Self::difference_map();
+    ) -> Result<(HashedMap<H256, Difference>, HashedMap<H256, Difference>)> {
+        let mut differences_empty: HashedMap<H256, Difference> = Self::difference_map();
+        let mut differences_full: HashedMap<H256, Difference> = Self::difference_map();
 
         // > Update latest messages for attesting indices
         for valid_attestation in valid_attestations {
@@ -3811,46 +4812,196 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
+            // [New in Gloas:EIP7732] payload_present based on attestation.data.index
+            // Pre-Gloas: blocks live in unfinalized_locations_full, so route diffs there
+            // Gloas: data.index indicates empty (0) or full (1) variant vote
+            let payload_present = if self.phase() >= Phase::Gloas {
+                data.index == 1
+            } else {
+                true // Pre-Gloas: all blocks in unfinalized_locations_full
+            };
+
             let latest_message = Arc::new(LatestMessage {
-                epoch,
+                slot,
                 beacon_block_root,
+                payload_present,
             });
 
             // The indices must be filtered here rather than in a task to avoid race conditions.
             // The filtering is not covered by `consensus-spec-tests` as of version 1.3.0.
-            let attesting_indices = attesting_indices
+            // [Gloas] Collect to Vec to allow mutable borrows (extend_empty_segment) in loop
+            let attesting_indices: Vec<ValidatorIndex> = attesting_indices
                 .into_iter()
                 .copied()
-                .filter(|index| !self.equivocating_indices.contains(index));
+                .filter(|index| !self.equivocating_indices.contains(index))
+                .collect();
 
             for validator_index in attesting_indices {
                 let index = usize::try_from(validator_index)?;
                 let balance = self.justified_active_balance(index);
 
-                if let Some(Some(old_message)) = &self.latest_messages.get(index) {
-                    let LatestMessage {
-                        epoch: old_epoch,
-                        beacon_block_root: old_beacon_block_root,
-                    } = **old_message;
-
-                    if epoch <= old_epoch {
-                        continue;
+                // [Gloas] Same-slot votes are pending and stay neutral until a later settled vote.
+                let mut same_slot_pending = false;
+                if self.phase() >= Phase::Gloas {
+                    if let Some(voted_block) = self.chain_link_full(beacon_block_root) {
+                        if slot <= voted_block.block.message().slot() {
+                            same_slot_pending = true;
+                        }
                     }
-
-                    if old_beacon_block_root == beacon_block_root {
-                        continue;
-                    }
-
-                    differences
-                        .entry(old_beacon_block_root)
-                        .or_default()
-                        .sub_assign(balance);
                 }
 
-                differences
-                    .entry(beacon_block_root)
-                    .or_default()
-                    .add_assign(balance);
+                if let Some(Some(old_message)) = &self.latest_messages.get(index) {
+                    let LatestMessage {
+                        slot: old_slot,
+                        beacon_block_root: old_beacon_block_root,
+                        payload_present: old_payload_present,
+                    } = **old_message;
+
+                    // Pre-Gloas: compare by epoch
+                    // Gloas: compare by slot (ePBS spec)
+                    let should_skip = if self.phase() >= Phase::Gloas {
+                        slot <= old_slot
+                    } else {
+                        epoch <= misc::compute_epoch_at_slot::<P>(old_slot)
+                    };
+                    if should_skip {
+                        continue;
+                    }
+
+                    // [Gloas] Only skip if BOTH root AND payload_present are same.
+                    // Pre-Gloas: payload_present is always true, so this is equivalent to old behavior.
+                    // Gloas: same root but different payload_present means vote moved between variants
+                    if old_beacon_block_root == beacon_block_root
+                        && old_payload_present == payload_present
+                    {
+                        continue;
+                    }
+                }
+
+                // Remove previously applied settled vote.
+                if let Some(Some(old_message)) = &self.latest_messages.get(index) {
+                    let old_root = old_message.beacon_block_root;
+                    let old_payload_present = old_message.payload_present;
+                    let old_slot = old_message.slot;
+
+                    // Re-derive same-slot status: was the old vote for the same slot as the block?
+                    let old_same_slot = self
+                        .chain_link_full(old_root)
+                        .map(|link| old_slot <= link.block.message().slot())
+                        .unwrap_or(false);
+
+                    // Pre-Gloas intuition was simple: latest-message update = subtract old + add new on one path.
+                    // With FULL placeholders, that is no longer always true.
+                    //
+                    // A validator can submit a valid latest-message attestation (valid by beacon root), but the
+                    // direct FULL vote target may still lack execution payload state locally. In that case:
+                    // - the attestation is still accepted,
+                    // - but FULL weight must not be credited yet.
+                    //
+                    // Therefore this block enforces:
+                    // 1) Old vote removal:
+                    //    - old same-slot vote: subtract BOTH FULL and EMPTY (both were credited earlier).
+                    //    - old FULL vote: subtract FULL only if FULL had actually been applied (`old_can_apply`).
+                    //    - old EMPTY vote: subtract EMPTY.
+                    // 2) New vote addition:
+                    //    - same-slot pending: add BOTH FULL and EMPTY.
+                    //    - new FULL vote: add FULL only when `can_apply_full` is true.
+                    //    - new EMPTY vote: add EMPTY.
+                    //
+                    // Net effect is intentionally possible:
+                    // "subtract old, skip add new FULL" when FULL payload state is not available yet.
+                    //
+                    // Important(for the TBS portion):
+                    // if later add EMPTY fallback for `payload_present = true`, we should track the actual
+                    // applied side (FULL/EMPTY/BOTH) and use that for all future subtractions. `payload_present` alone is intent, not guaranteed applied location.
+                    if old_same_slot {
+                        // [Gloas] Same-slot was added to both Full and Empty; subtract from both.
+                        // note that the additon logic is not here. because that is controlled by can_apply_full
+                        differences_full
+                            .entry(old_root)
+                            .or_default()
+                            .sub_assign(balance);
+                        differences_empty
+                            .entry(old_root)
+                            .or_default()
+                            .sub_assign(balance);
+                    } else if old_payload_present {
+                        // Only subtract from full if weight was actually applied
+                        let old_can_apply = if self.phase() >= Phase::Gloas {
+                            self.chain_link_full(old_root)
+                                .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
+                                .unwrap_or(false)
+                        } else {
+                            true
+                        };
+                        if old_can_apply {
+                            differences_full
+                                .entry(old_root)
+                                .or_default()
+                                .sub_assign(balance);
+                        }
+                    } else {
+                        differences_empty
+                            .entry(old_root)
+                            .or_default()
+                            .sub_assign(balance);
+                    }
+                }
+                // spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/fork-choice.md#new-is_supporting_vote
+                // The approach below inlines the behaviour of `is_supporting_vote``
+                if same_slot_pending {
+                    // [Gloas] Same-slot: apply to both Full and Empty.
+                    let had_empty = self
+                        .unfinalized_locations_empty
+                        .contains_key(&beacon_block_root);
+                    if !had_empty {
+                        if let Err(error) = self.extend_empty_segment(beacon_block_root) {
+                            error_with_peers!(
+                                "failed to extend EMPTY segment for block {beacon_block_root:?}: {error:?}"
+                            );
+                        }
+                    }
+                    differences_full
+                        .entry(beacon_block_root)
+                        .or_default()
+                        .add_assign(balance);
+                    differences_empty
+                        .entry(beacon_block_root)
+                        .or_default()
+                        .add_assign(balance);
+                } else if payload_present {
+                    let can_apply_full = if self.phase() >= Phase::Gloas {
+                        self.chain_link_full(beacon_block_root)
+                            .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
+                            .unwrap_or(false)
+                    } else {
+                        true
+                    };
+
+                    if can_apply_full {
+                        differences_full
+                            .entry(beacon_block_root)
+                            .or_default()
+                            .add_assign(balance);
+                    }
+                    // TBD: the replay non added(sub already done) votes for  payload_present = true and can_apply_full = false needs to be triggered at insert_payload step when payload finallyy arrives.
+                    // need some way to remember what was not applied. ideally, DelayUntilEnvelope for attestation is not correct, as we are sure about the substraction part(as beacon block is present). But without
+                    // that `EnvelopeNeeded` request would be somewhat of a new pattern. if no intention to request in this case, then storing it in store iteself is quite possible.
+
+                    // empty entry should be safe as in this spec "is_suporting_vote"(payload_present vote to pending will return true) will return true.
+                    // but currently fails:
+                    //spec_tests::gloas_mainnet_get_head_consensus_spec_tests_tests_mainnet_gloas_fork_choice_get_head_pyspec_tests_discard_equivocations_on_attester_slashing
+                    //spec_tests::gloas_minimal_get_head_consensus_spec_tests_tests_minimal_gloas_fork_choice_get_head_pyspec_tests_discard_equivocations_on_attester_slashing
+                    //  differences_empty
+                    //     .entry(beacon_block_root)
+                    //     .or_default()
+                    //     .add_assign(balance);
+                } else {
+                    differences_empty
+                        .entry(beacon_block_root)
+                        .or_default()
+                        .add_assign(balance);
+                }
 
                 // Note that we mutate `Store.latest_messages` as we go along.
                 // This prevents duplicate attestations from being counted more than once.
@@ -3860,18 +5011,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        Ok(differences)
+        Ok((differences_empty, differences_full))
     }
 
     fn apply_balance_differences(
         &mut self,
-        differences: impl IntoIterator<Item = (H256, Difference)>,
+        differences_empty: impl IntoIterator<Item = (H256, Difference)>,
+        differences_full: impl IntoIterator<Item = (H256, Difference)>,
     ) -> Result<()> {
         // This could be parallelized by making `Store::propagate_and_dissolve_differences` return
         // an `Ordmap<SegmentId, DissolvedDifference>`, but it would almost certainly not be worth
         // the overhead.
+
+        // [Gloas] Collect differences_empty and create EMPTY segments lazily
+        // We need to collect first because extend_empty_segment needs &mut self
+        let differences_empty: Vec<_> = differences_empty.into_iter().collect();
+
+        // Create EMPTY segments for any block receiving positive attestation balance
+        for &(block_root, difference) in &differences_empty {
+            if difference > 0 && !self.unfinalized_locations_empty.contains_key(&block_root) {
+                if let Err(error) = self.extend_empty_segment(block_root) {
+                    error_with_peers!(
+                        "failed to extend EMPTY segment for block {block_root:?}: {error:?}"
+                    );
+                }
+            }
+        }
+
         for (segment_id, group) in &self
-            .propagate_and_dissolve_differences(differences)?
+            .propagate_and_dissolve_differences(differences_empty, differences_full)?
             .into_iter()
             .chunk_by(|dissolved_difference| dissolved_difference.segment_id)
         {
@@ -3917,26 +5085,42 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(())
     }
 
-    // This could be rewritten to return an `Iterator` instead of a `Vec`,
-    // but the cost of using a `Vec` is probably negligible.
+    // ePBS: Propagate balance differences for both empty and full variants.
+    // Converts map keys to Locations using direct lookups, then processes segment tree.
     fn propagate_and_dissolve_differences(
         &self,
-        differences: impl IntoIterator<Item = (H256, Difference)>,
+        differences_empty: impl IntoIterator<Item = (H256, Difference)>,
+        differences_full: impl IntoIterator<Item = (H256, Difference)>,
     ) -> Result<Vec<DissolvedDifference>> {
-        let mut difference_queue = differences
-            .into_iter()
-            .filter(|(_, difference)| *difference != 0)
-            .filter_map(|(block_root, difference)| {
-                // `block_root` may refer to a finalized block.
-                // Changes to balances of finalized blocks are irrelevant.
-                let location = *self.unfinalized_locations.get(&block_root)?;
+        let mut difference_queue = BinaryHeap::new();
 
-                Some(DifferenceAtLocation {
-                    difference,
-                    location,
-                })
-            })
-            .collect::<BinaryHeap<_>>();
+        // Convert empty map: H256 → Location (direct lookup, tag as empty variant)
+        difference_queue.extend(
+            differences_empty
+                .into_iter()
+                .filter(|(_, difference)| *difference != 0)
+                .filter_map(|(block_root, difference)| {
+                    let location = *self.unfinalized_locations_empty.get(&block_root)?;
+                    Some(DifferenceAtLocation {
+                        difference,
+                        location,
+                    })
+                }),
+        );
+
+        // Convert full map: H256 → Location (direct lookup, tag as full variant)
+        difference_queue.extend(
+            differences_full
+                .into_iter()
+                .filter(|(_, difference)| *difference != 0)
+                .filter_map(|(beacon_block_root, difference)| {
+                    let location = *self.unfinalized_locations_full.get(&beacon_block_root)?;
+                    Some(DifferenceAtLocation {
+                        difference,
+                        location,
+                    })
+                }),
+        );
 
         let mut propagated_and_dissolved_differences = vec![];
 
@@ -3978,56 +5162,236 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         Ok(propagated_and_dissolved_differences)
     }
+    fn should_follow_branch_point(
+        &self,
+        segment_id: SegmentId,
+        segment: &Segment<P>,
+        branch_point: &BranchPoint,
+    ) -> bool {
+        let next_position_in_segment = branch_point
+            .parent
+            .position
+            .next()
+            .expect("next position in segment must be valid because it is already filled");
+        let sibling = &segment[next_position_in_segment];
+        let sibling_score = self.score(sibling);
+        let (sibling_bal, branch_bal) = (sibling_score.0, branch_point.score.0);
 
+        if sibling_bal < branch_bal || sibling.is_invalid() {
+            return true;
+        }
+
+        if sibling_bal > branch_bal {
+            return false;
+        }
+
+        // Equal balance:
+        // - same root (FULL/EMPTY variants): payload-status tiebreak, then root
+        // - different roots: root-only tiebreak (pre-Gloas behavior)
+        let sibling_root = sibling.chain_link.block_root;
+        let sibling_location = Location {
+            segment_id,
+            position: next_position_in_segment,
+        };
+        let sibling_status = self.node_payload_status_at(sibling_location);
+        let sibling_tiebreaker = self.get_payload_status_tiebreaker(sibling_root, sibling_status);
+
+        // Compare against the branch point entry root, not the deepest descendant root.
+        let branch_root = branch_point.score.1;
+        let branch_location = branch_point.root_location;
+        let branch_status = self.node_payload_status_at(branch_location);
+        let branch_tiebreaker = self.get_payload_status_tiebreaker(branch_root, branch_status);
+
+        if sibling_root == branch_root {
+            return (sibling_tiebreaker, sibling_root) < (branch_tiebreaker, branch_root);
+        }
+
+        sibling_root < branch_root
+    }
+
+    fn should_choose_next_branch_point(
+        &self,
+        best_branch_for_parent: &BranchPoint,
+        next_branch: &BranchPoint,
+    ) -> bool {
+        let next_viable = self.is_segment_viable(&self.unfinalized[&next_branch.best_descendant]);
+        let best_viable =
+            self.is_segment_viable(&self.unfinalized[&best_branch_for_parent.best_descendant]);
+
+        if next_viable && !best_viable {
+            return true;
+        }
+        if next_viable != best_viable {
+            return false;
+        }
+
+        if next_branch.score != best_branch_for_parent.score {
+            return next_branch.score > best_branch_for_parent.score;
+        }
+
+        let next_root = next_branch.score.1;
+        let best_root = best_branch_for_parent.score.1;
+        if next_root == best_root && self.phase() >= Phase::Gloas {
+            let next_status = self.node_payload_status_at(next_branch.root_location);
+            let best_status = self.node_payload_status_at(best_branch_for_parent.root_location);
+            let next_tiebreaker = self.get_payload_status_tiebreaker(next_root, next_status);
+            let best_tiebreaker = self.get_payload_status_tiebreaker(best_root, best_status);
+            return (next_tiebreaker, next_root) > (best_tiebreaker, best_root);
+        }
+
+        next_root > best_root
+    }
+
+    fn root_segment_tiebreaker(&self, segment_id: SegmentId, segment: &Segment<P>) -> u8 {
+        let root = segment.first_block_root();
+        let first_location = Location {
+            segment_id,
+            position: segment.first_position(),
+        };
+        let status = self.node_payload_status_at(first_location);
+        self.get_payload_status_tiebreaker(root, status)
+    }
+    // Head selection for the current `segment_id` (one-pass grouped branch-point comparison):
+    //
+    // Baseline:
+    // - Start with sibling/same-segment continuation when viable:
+    //   `best_descendant_of_segment = viable.then_some(*segment_id)`.
+    //(same as existing implementation)
+    //
+    // Single loop over branch points for this segment:
+    // - While heap top belongs to this `segment_id`, pop one entry (`next_branch`).
+    // - Maintain `best_branch_for_parent: Option<BranchPoint>` as running winner for the
+    //   current exact parent location (`Location`, not just parent segment id).
+    // Branch-point reduction for this segment:
+    // 1) Pop branch points while heap top belongs to this `segment_id`.
+    // 2) Reduce branch points that share the same parent `Location` using
+    //    `should_choose_next_branch_point`.
+    // 3) When parent group changes, compare that group winner against sibling once via
+    //    `should_follow_branch_point`, and update `best_descendant_of_segment` if it wins.
+    //
+    // Final group flush:
+    // - After loop, compare the last pending parent-group winner against sibling once.
+    //
+    // Why this structure:
+    // - Prevents order-dependent behavior where every popped branch point competes directly
+    //   with sibling.
+    // - Ensures per-parent branch points are first reduced to one best candidate before sibling
+    //   competition.
+    // - Preserves default sibling behavior: if branch candidate does not win, sibling remains best
+    //   without extra assignment.
+    // - operationally:  following the same sibling vs each branchpoint comparision was followed but it gave mulitple glaos test failures.
+    // - previous appraoch was more pop order sensitive within a segment. reducing the branch points locaiton first avoids low scoring later
+    //   pops replacing stronger earlier candidates better. this was more visible after EMPY/FULL expansion added branhcpoint no per segment.
+    // Complexity / heap traffic:
+    // - Each branch point is still popped exactly once.
+    // - Push/pop volume is effectively unchanged from prior approach.
+    // - Improvement is comparison ordering clarity/correctness, not heap cost.
+    //
+    // Output of this stage:
+    // - Chosen `best_descendant_of_segment` is pushed upward as the branch-point descendant for
+    //   parent comparison in higher segments (or used as root-segment candidate at top).
     fn update_head_segment_id(&mut self) {
         let mut branch_points = BinaryHeap::<BranchPoint>::new();
-        let mut best = None;
+        let mut best: Option<(Score, u8, SegmentId)> = None;
 
         for (segment_id, segment) in self.unfinalized.iter().rev() {
             let viable = self.is_segment_viable(segment);
 
+            // Default winner is the sibling/same-segment continuation when this segment is viable.
             let mut best_descendant_of_segment = viable.then_some(*segment_id);
 
+            // One-pass branch-point handling:
+            // keep a running best candidate for the current parent location, and only compare
+            // against sibling when that parent-group closes (or at loop end).
+            let mut best_branch_for_parent: Option<BranchPoint> = None;
             while let Some(branch_point) = branch_points.peek_mut() {
                 if branch_point.parent.segment_id != *segment_id {
                     break;
                 }
 
-                let branch_point = PeekMut::pop(branch_point);
-
-                if best_descendant_of_segment.is_none() {
-                    best_descendant_of_segment = Some(branch_point.best_descendant);
-                    continue;
+                let next_branch = PeekMut::pop(branch_point);
+                match best_branch_for_parent.take() {
+                    None => {
+                        best_branch_for_parent = Some(next_branch);
+                    }
+                    Some(current_best) if current_best.parent == next_branch.parent => {
+                        best_branch_for_parent = Some(
+                            if self.should_choose_next_branch_point(&current_best, &next_branch) {
+                                next_branch
+                            } else {
+                                current_best
+                            },
+                        );
+                    }
+                    Some(current_best) => {
+                        if best_descendant_of_segment.is_none() {
+                            best_descendant_of_segment = Some(current_best.best_descendant);
+                        } else if self.should_follow_branch_point(
+                            *segment_id,
+                            segment,
+                            &current_best,
+                        ) {
+                            best_descendant_of_segment = Some(current_best.best_descendant);
+                        }
+                        best_branch_for_parent = Some(next_branch);
+                    }
                 }
+            }
 
-                let next_position_in_segment =
-                    branch_point.parent.position.next().expect(
-                        "next position in segment must be valid because it is already filled",
-                    );
-
-                let sibling = &segment[next_position_in_segment];
-
-                if self.score(sibling) < branch_point.score || sibling.is_invalid() {
-                    best_descendant_of_segment = Some(branch_point.best_descendant);
+            if let Some(current_best) = best_branch_for_parent {
+                if best_descendant_of_segment.is_none() {
+                    best_descendant_of_segment = Some(current_best.best_descendant);
+                } else if self.should_follow_branch_point(*segment_id, segment, &current_best) {
+                    best_descendant_of_segment = Some(current_best.best_descendant);
                 }
             }
 
             if let Some(best_descendant) = best_descendant_of_segment {
-                let score = self.score(segment.first_block());
+                let first_block = segment.first_block();
+                let score = self.score(first_block);
+                // Use cached first block root.
+                let root = segment.first_block_root();
 
                 if let Some(parent) = self.parent_location(segment) {
+                    let root_location = Location {
+                        segment_id: *segment_id,
+                        position: segment.first_position(),
+                    };
                     branch_points.push(BranchPoint {
                         parent,
                         best_descendant,
-                        score,
+                        score: score.clone(),
+                        root_location,
                     });
                     continue;
                 }
 
-                let best_root_segment_score = best.map(|(score, _)| score);
+                // Root segment comparison: use score balance, then root.
+                let new_key = (score.0, root);
+                let mut new_tiebreaker = None;
 
-                if best_root_segment_score < Some(score) {
-                    best = Some((score, best_descendant));
+                // Replace current best when score is higher, then payload-status tiebreaker, then root.
+                let should_update = match &best {
+                    None => true,
+                    Some((best_score, best_tiebreaker, _best_seg)) => {
+                        let best_key = (best_score.0, best_score.1);
+                        if new_key > best_key {
+                            true
+                        } else if new_key < best_key {
+                            false
+                        } else {
+                            // Only compute tiebreaker when (balance, root) ties.
+                            let tiebreaker = self.root_segment_tiebreaker(*segment_id, segment);
+                            new_tiebreaker = Some(tiebreaker);
+                            tiebreaker > *best_tiebreaker
+                        }
+                    }
+                };
+
+                if should_update {
+                    let tiebreaker = new_tiebreaker
+                        .unwrap_or_else(|| self.root_segment_tiebreaker(*segment_id, segment));
+                    best = Some((score, tiebreaker, best_descendant));
                 }
             }
         }
@@ -4038,7 +5402,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // When that happens, it may be more useful to stay on the current fork.
         // That would arguably be a deviation from `consensus-specs`.
         // <https://github.com/ethereum/hive/pull/637#issuecomment-1219219657> claims otherwise.
-        self.head_segment_id = best.map(|(_, segment_id)| segment_id);
+        self.head_segment_id = best.map(|(_, _, segment_id)| segment_id);
     }
 
     fn active_balances(state: &BeaconState<P>) -> Arc<[Gwei]> {
@@ -4179,7 +5543,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut state = self
             .chain_ending_with(block_root)
             .find_map(|chain_link| {
-                let state = chain_link.state.clone().or_else(|| {
+                let state = chain_link.block_state.clone().or_else(|| {
                     match self.stored_state_by_block_root(chain_link.block_root) {
                         Ok(state_opt) => state_opt,
                         Err(error) => {
@@ -4360,6 +5724,74 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.update_head_segment_id();
     }
 
+    /// not used yet/ to be tested
+    /// brute force traversal approach for reference behaviour: root(source invalidation) to leaf
+    /// ePBS: Invalidate FULL variant and all its descendants.
+    /// for example in the original function the tree coming out of a valid empty node(as no envelope was seen) will be wiped out
+    /// because of using block_root. `  .contains(&block_root)` is satisfied by both.
+    /// note: the intended operation is not invalidate every full or every empty in the path. so a flag approach wouldn't help
+    ///
+    ///
+    /// Unlike `invalidate_block_and_descendant_payloads` which uses block_root (ambiguous
+    /// for EMPTY/FULL variants), this function:
+    /// 1. Starts from FULL's specific Location (via unfinalized_locations_full)
+    /// 2. Invalidates from that position to segment end
+    /// 3. Finds child segments that fork from the invalidated region
+    /// 4. Recursively invalidates those child segments
+    ///
+    /// This correctly handles the case where EMPTY and FULL variants have different
+    /// descendant chains - only FULL's descendants are invalidated.
+    pub fn invalidate_block_and_descendant_payloads2(&mut self, block_root: H256) {
+        // 1. Get FULL's specific location - only proceed if FULL exists
+        let Some(full_loc) = self.unfinalized_locations_full.get(&block_root).copied() else {
+            return;
+        };
+
+        // 2. Collect all (segment_id, start_position) pairs to invalidate
+        //    Using BFS: start from FULL's location, find children, recurse
+        let mut to_invalidate: Vec<(SegmentId, Position)> =
+            vec![(full_loc.segment_id, full_loc.position)];
+        let mut processed_segments: HashSet<SegmentId> = HashSet::new();
+        let mut i = 0;
+
+        while i < to_invalidate.len() {
+            let (seg_id, start_pos) = to_invalidate[i];
+            i += 1;
+
+            // im::HashSet::insert returns new set, use contains to check
+            if processed_segments.contains(&seg_id) {
+                continue; // Already processed this segment
+            }
+            processed_segments = processed_segments.update(seg_id);
+
+            // 3. Find child segments that fork from invalidated region
+            //    A segment is a child if its parent_location is in [start_pos, segment_end]
+            for (child_seg_id, child_segment) in self.unfinalized.iter() {
+                if let Some(parent_loc) = self.parent_location(child_segment) {
+                    // there is no index to map parent to child relationship. so iteratate all segments. get the parent location.
+                    // check the the segment id of the initial-to-be invalidated segment againt the current parent. push to queue
+                    if parent_loc.segment_id == seg_id && parent_loc.position >= start_pos {
+                        // This segment forks from the invalidated region
+                        // Invalidate entire child segment (from position 0)
+                        to_invalidate.push((*child_seg_id, child_segment.first_position()));
+                    }
+                }
+            }
+        }
+
+        // 4. Invalidate all collected regions
+        for (seg_id, start_pos) in to_invalidate {
+            if let Some(segment) = self.unfinalized.get_mut(&seg_id) {
+                let end_pos = segment.last_position();
+                for unfinalized_block in segment.iter_mut_range(start_pos..=end_pos) {
+                    unfinalized_block.chain_link.payload_status = PayloadStatus::Invalid;
+                }
+            }
+        }
+
+        self.update_head_segment_id();
+    }
+
     pub fn update_chain_payload_statuses(
         &mut self,
         latest_valid_hash: ExecutionBlockHash,
@@ -4475,6 +5907,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .collect()
     }
 
+    //note: one of the call sites for this is apply_execution_envelope(spec: https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L678)
+    // but we have the same check in validate_execution_envelope.
+    // TODO: needs changes as blob_kzg_commitments is now in bid: https://github.com/OffchainLabs/prysm/pull/16309
     pub fn is_data_available_for_envelope(
         &self,
         envelope: &SignedExecutionPayloadEnvelope<P>,
@@ -4676,11 +6111,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.finalized_indices.len(),
         );
 
+        // ePBS: Report both location maps
         metrics.set_collection_length(
             module_path!(),
             &type_name,
-            "unfinalized_locations",
-            self.unfinalized_locations.len(),
+            "unfinalized_locations_empty",
+            self.unfinalized_locations_empty.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "unfinalized_locations_full",
+            self.unfinalized_locations_full.len(),
         );
 
         metrics.set_collection_length(

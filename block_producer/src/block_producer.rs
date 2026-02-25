@@ -667,7 +667,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         randao_reveal: SignatureBytes,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<BeaconBlock<P>, P>,
+            Option<BlockRewards>,
+            Arc<BeaconState<P>>,
+        )>,
+    > {
         let _block_timer = self
             .producer_context
             .metrics
@@ -700,6 +706,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Option<(
             WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
             Option<BlockRewards>,
+            Option<Arc<BeaconState<P>>>,
         )>,
     > {
         let block_without_state_root =
@@ -729,7 +736,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         match (beacon_block_opt, blinded_block_opt) {
             (
-                Some((beacon_block, beacon_block_rewards)),
+                Some((beacon_block, beacon_block_rewards, post_state)),
                 Some((blinded_block, blinded_block_rewards, builder_mev)),
             ) => {
                 if let Some(local_mev) = beacon_block.mev {
@@ -749,6 +756,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         return Ok(Some((
                             beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
                             beacon_block_rewards,
+                            Some(post_state),
                         )));
                     }
                 }
@@ -758,11 +766,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 Ok(Some((
                     WithBlobsAndMev::new(block, None, None, None, Some(builder_mev), None),
                     blinded_block_rewards,
+                    None, // no post-state for builder produced blinded block
                 )))
             }
-            (Some((beacon_block, beacon_block_rewards)), None) => Ok(Some((
+            (Some((beacon_block, beacon_block_rewards, post_state)), None) => Ok(Some((
                 beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
                 beacon_block_rewards,
+                Some(post_state),
             ))),
             _ => Ok(None),
         }
@@ -897,34 +907,28 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     Vec<ElectraAttestation<P>>,
                 )> = Vec::new();
 
-                for (electra_attestation, committee_index) in
-                    attestations.into_iter().filter_map(|attestation| {
-                        let committee_index = attestation.data.index;
-
-                        match operation_pools::convert_to_electra_attestation(attestation) {
-                            Ok(electra_attestation) => Some((electra_attestation, committee_index)),
-                            Err(error) => {
-                                warn_with_peers!(
-                                    "unable to convert to electra attestation: {error:?}"
-                                );
-                                None
-                            }
-                        }
-                    })
-                {
-                    if let Some((_, indices, attestations)) =
-                        results.iter_mut().find(|(data, indices, _)| {
-                            *data == electra_attestation.data && !indices.contains(&committee_index)
-                        })
+                for attestation in attestations {
+                    if let Some((electra_attestation, committee_index)) = self
+                        .producer_context
+                        .attestation_agg_pool
+                        .electra_attestation_with_committee_for_block(attestation, phase)
+                        .await
                     {
-                        indices.insert(committee_index);
-                        attestations.push(electra_attestation);
-                    } else {
-                        results.push((
-                            electra_attestation.data,
-                            HashSet::from([committee_index]),
-                            vec![electra_attestation],
-                        ))
+                        if let Some((_, indices, attestations)) =
+                            results.iter_mut().find(|(data, indices, _)| {
+                                *data == electra_attestation.data
+                                    && !indices.contains(&committee_index)
+                            })
+                        {
+                            indices.insert(committee_index);
+                            attestations.push(electra_attestation);
+                        } else {
+                            results.push((
+                                electra_attestation.data,
+                                HashSet::from([committee_index]),
+                                vec![electra_attestation],
+                            ))
+                        }
                     }
                 }
 
@@ -1116,7 +1120,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     fn process_beacon_block(
         &self,
         without_state_root: BeaconBlock<P>,
-    ) -> Option<(BeaconBlock<P>, Option<BlockRewards>)> {
+    ) -> Option<(BeaconBlock<P>, Option<BlockRewards>, Arc<BeaconState<P>>)> {
         let block_processor = self.producer_context.controller.block_processor();
         let pre_state = self.beacon_state.clone_arc();
 
@@ -1146,14 +1150,20 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // the real RANDAO reveal and recompute the state root to make it valid.
         let beacon_block = without_state_root.with_state_root(post_state.hash_tree_root());
 
-        Some((beacon_block, block_rewards))
+        Some((beacon_block, block_rewards, post_state))
     }
 
     async fn produce_beacon_block(
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<BeaconBlock<P>, P>,
+            Option<BlockRewards>,
+            Arc<BeaconState<P>>,
+        )>,
+    > {
         // Start from Gloas, proposer no longer required to build execution payload data
         // unless they choose to self-build
         let mut payload_with_data = None;
@@ -1238,7 +1248,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
 
         self.process_beacon_block(without_state_root_with_payload)
-            .map(|(beacon_block, block_rewards)| {
+            .map(|(beacon_block, block_rewards, post_state)| {
                 (
                     WithBlobsAndMev::new(
                         beacon_block,
@@ -1251,6 +1261,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         None,
                     ),
                     block_rewards,
+                    post_state,
                 )
             })
             .pipe(Ok)
@@ -1793,7 +1804,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // > [Modified in Capella] Removed `is_merge_transition_complete` check in Capella
         //
         // See <https://github.com/ethereum/consensus-specs/pull/3350>.
-        let parent_hash = if let Some(state) = state.post_capella() {
+        let parent_hash = if let Some(state) = state.post_gloas() {
+            state.latest_block_hash()
+        } else if let Some(state) = state.post_capella() {
             state.latest_execution_payload_header().block_hash()
         } else if let Some(state) = post_merge_state(state) {
             state.latest_execution_payload_header().block_hash()
@@ -2047,6 +2060,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     pub async fn compute_execution_payload_envelope(
         &self,
         beacon_block_root: H256,
+        post_state: Arc<BeaconState<P>>,
     ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
         let Some((payload, execution_requests, blob_kzg_commitments)) =
             self.get_gloas_envelope_data().await
@@ -2054,7 +2068,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             return Ok(None);
         };
 
-        // Build envelope with placeholder state_root (will be set after processing)
+        // Build envelope with placeholder state_root (set after process_execution_payload)
         let mut envelope = ExecutionPayloadEnvelope {
             payload,
             execution_requests,
@@ -2062,7 +2076,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             beacon_block_root,
             slot: self.beacon_state.slot(),
             blob_kzg_commitments,
-            state_root: H256::zero(), // Placeholder
+            state_root: H256::zero(),
         };
 
         let signed_envelope = SignedExecutionPayloadEnvelope {
@@ -2070,7 +2084,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             signature: SignatureBytes::default(),
         };
 
-        match &*self.beacon_state {
+        // Use the post-block state produced by process_beacon_block.
+        // Using BlockBuildContext's beacon_state would be pre-block.
+        let mut execution_state = post_state;
+
+        match execution_state.make_mut() {
             BeaconState::Phase0(_)
             | BeaconState::Altair(_)
             | BeaconState::Bellatrix(_)
@@ -2083,20 +2101,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 ));
             }
             BeaconState::Gloas(gloas_state) => {
-                let mut post_execution_state = gloas_state.clone();
-
                 gloas::process_execution_payload(
                     &self.producer_context.chain_config,
                     &self.producer_context.pubkey_cache,
-                    &mut post_execution_state,
+                    gloas_state,
                     &signed_envelope,
                     &self.producer_context.execution_engine,
                     NullVerifier,
                 )?;
-
-                envelope.state_root = post_execution_state.hash_tree_root();
             }
         }
+
+        // Set the state root after execution payload processing
+        envelope.state_root = execution_state.hash_tree_root();
 
         Ok(Some(envelope))
     }
