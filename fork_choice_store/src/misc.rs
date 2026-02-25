@@ -105,9 +105,9 @@ impl<P: Preset> ChainLink<P> {
         &self,
         store: &Store<P, S>,
     ) -> Option<Arc<BeaconState<P>>> {
-        self.execution_payload_state.as_ref().map(|state_ref| {
-            store.load_beacon_state(self.block_root, self.slot(), Some(state_ref))
-        })
+        self.execution_payload_state
+            .as_ref()
+            .map(|state_ref| store.load_beacon_state(self.block_root, self.slot(), Some(state_ref)))
     }
 
     // TODO(feature/deneb): Confirm that post-Deneb states are always post-Merge. See:

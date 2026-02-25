@@ -667,7 +667,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         randao_reveal: SignatureBytes,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>, Arc<BeaconState<P>>)>> {
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<BeaconBlock<P>, P>,
+            Option<BlockRewards>,
+            Arc<BeaconState<P>>,
+        )>,
+    > {
         let _block_timer = self
             .producer_context
             .metrics
@@ -910,7 +916,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     {
                         if let Some((_, indices, attestations)) =
                             results.iter_mut().find(|(data, indices, _)| {
-                                *data == electra_attestation.data && !indices.contains(&committee_index)
+                                *data == electra_attestation.data
+                                    && !indices.contains(&committee_index)
                             })
                         {
                             indices.insert(committee_index);
@@ -1150,7 +1157,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>, Arc<BeaconState<P>>)>> {
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<BeaconBlock<P>, P>,
+            Option<BlockRewards>,
+            Arc<BeaconState<P>>,
+        )>,
+    > {
         // Start from Gloas, proposer no longer required to build execution payload data
         // unless they choose to self-build
         let mut payload_with_data = None;

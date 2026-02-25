@@ -55,10 +55,10 @@ use ssz::{BitList, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
-use typenum::Unsigned as _;
 use tokio::time::timeout;
 use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned as _;
 use types::{
     altair::{
         containers::{ContributionAndProof, SignedContributionAndProof, SyncCommitteeMessage},
@@ -1131,7 +1131,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             let block = block.clone_arc();
                             let kzg_backend = self.controller.store_config().kzg_backend;
-                            //clone as they are used inside spawn_blocking(move || ) closuree 
+                            //clone as they are used inside spawn_blocking(move || ) closuree
                             let commitments_opt = envelope_commitments.clone();
                             let block_proofs_for_columns = block_proofs.clone();
 
@@ -1190,8 +1190,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     }
 
                                     if !self.validator_config.withhold_data_columns_publishing {
-                                        ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
-                                            .send(&self.p2p_tx);
+                                        ValidatorToP2p::PublishDataColumnSidecar(
+                                            data_column_sidecar,
+                                        )
+                                        .send(&self.p2p_tx);
                                     }
                                 }
                             }
@@ -1478,7 +1480,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .own_aggregators
             .iter()
             .map(|(data, aggregators)| async {
-                let aggregate_opt = self.attestation_agg_pool.best_aggregate_attestation(*data).await;
+                let aggregate_opt = self
+                    .attestation_agg_pool
+                    .best_aggregate_attestation(*data)
+                    .await;
                 let electra_aggregate_opt = match (phase >= Phase::Electra, aggregate_opt.as_ref())
                 {
                     (true, Some(aggregate)) => {
@@ -1951,16 +1956,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         if phase >= Phase::Gloas {
                             // - Same-slot attestation (is_attestation_same_slot): data.index = 0
                             // - Previous-slot: data.index = execution_payload_availability[slot]
-                            let head_block_slot = self.controller.block_slot(slot_head.beacon_block_root);
+                            let head_block_slot =
+                                self.controller.block_slot(slot_head.beacon_block_root);
                             let is_same_slot = head_block_slot == Some(data.slot);
                             if is_same_slot {
                                 data.index = 0;
                             } else {
-                                let payload_status_bit = slot_head.beacon_state.post_gloas()
-                                    .and_then(|s| {
-                                        let slot = usize::try_from(
-                                            head_block_slot.unwrap_or(data.slot),
-                                        ).ok()?;
+                                let payload_status_bit =
+                                    slot_head.beacon_state.post_gloas().and_then(|s| {
+                                        let slot =
+                                            usize::try_from(head_block_slot.unwrap_or(data.slot))
+                                                .ok()?;
                                         s.execution_payload_availability()
                                             .get(slot % SlotsPerHistoricalRoot::<P>::USIZE)
                                     });
@@ -2218,7 +2224,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         // Query fork choice for envelope and data availability status
         let payload_present = self.controller.has_envelope(slot_head.beacon_block_root);
-        let blob_data_available = self.controller.is_data_available(slot_head.beacon_block_root);
+        let blob_data_available = self
+            .controller
+            .is_data_available(slot_head.beacon_block_root);
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let data = PayloadAttestationData {

@@ -2874,10 +2874,11 @@ pub async fn validator_block<P: Preset, W: Wait>(
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
-    let (beacon_block, _, _post_state) = block_build_context //ignore the new post state returned value
-        .build_beacon_block(randao_reveal, local_execution_payload_handle)
-        .await?
-        .ok_or(Error::UnableToProduceBeaconBlock)?;
+    let (beacon_block, _, _post_state) =
+        block_build_context //ignore the new post state returned value
+            .build_beacon_block(randao_reveal, local_execution_payload_handle)
+            .await?
+            .ok_or(Error::UnableToProduceBeaconBlock)?;
 
     let version = beacon_block.value.phase();
 

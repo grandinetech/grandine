@@ -216,9 +216,7 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
         let attestation_pre_pool = match attestation_pre_pool_data(attestation.as_ref()) {
             Ok(attestation_pre_pool) => attestation_pre_pool,
             Err(error) => {
-                warn_with_peers!(
-                    "failed to collect pre-pool attestation data: {error:?}"
-                );
+                warn_with_peers!("failed to collect pre-pool attestation data: {error:?}");
                 return Ok(());
             }
         };

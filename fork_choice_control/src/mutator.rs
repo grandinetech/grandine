@@ -2036,7 +2036,6 @@ where
         let beacon_block_root = envelope.message.beacon_block_root;
         let slot = envelope.message.slot;
 
-
         debug_with_peers!(
             "accepted execution payload envelope for beacon_block_root: {beacon_block_root:?}, \
              slot: {slot}, builder_index: {}",
@@ -2045,10 +2044,8 @@ where
 
         // Apply to store (calls process_execution_payload internally)
         let execution_engine = self.execution_engine.clone();
-        self.store_mut().apply_execution_payload_envelope(
-            envelope.clone_arc(),
-            execution_engine,
-        )?;
+        self.store_mut()
+            .apply_execution_payload_envelope(envelope.clone_arc(), execution_engine)?;
 
         self.update_store_snapshot();
 

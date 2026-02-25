@@ -93,7 +93,10 @@ pub fn convert_to_electra_attestation_use_pre_pool<P: Preset>(
     // Restore the correct data.index for the Electra attestation.
     // In the pool, data.index = committee_index. The caller provides the correct
     // restored_index: 0 for pre-Gloas Electra, payload_status for Gloas.
-    let data = AttestationData { index: restored_index, ..data };
+    let data = AttestationData {
+        index: restored_index,
+        ..data
+    };
 
     Ok(ElectraAttestation {
         aggregation_bits: aggregation_bits

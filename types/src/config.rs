@@ -120,10 +120,8 @@ pub struct Config {
     // Fork choice
     #[serde(with = "serde_utils::string_or_native")]
     pub proposer_score_boost: u64,
-    #[serde(with = "serde_utils::string_or_native", default = "default_reorg_head_weight_threshold")]
+    #[serde(with = "serde_utils::string_or_native")]
     pub reorg_head_weight_threshold: u64,
-    #[serde(with = "serde_utils::string_or_native", default = "default_reorg_parent_weight_threshold")]
-    pub reorg_parent_weight_threshold: u64,
 
     // Deposit contract
     #[serde(with = "serde_utils::string_or_native")]
@@ -270,7 +268,6 @@ impl Default for Config {
             // Fork choice
             proposer_score_boost: 40,
             reorg_head_weight_threshold: 20,
-            reorg_parent_weight_threshold: 160,
 
             // Deposit contract
             deposit_chain_id: 0,
@@ -1154,15 +1151,6 @@ pub enum Error {
     NameContainsIllegalCharacters,
     #[error("blob schedule is not defined")]
     BlobScheduleUndefined,
-}
-
-// Default functions for serde deserialization
-const fn default_reorg_head_weight_threshold() -> u64 {
-    20
-}
-
-const fn default_reorg_parent_weight_threshold() -> u64 {
-    160
 }
 
 #[expect(

@@ -355,7 +355,8 @@ impl Eth1Api {
                 .await
                 .map(WithClientVersions::result)
             }
-            (// execute using ENGINE_NEW_PAYLOAD_V5 for gloas   
+            (
+                // execute using ENGINE_NEW_PAYLOAD_V5 for gloas
                 ExecutionPayload::Deneb(payload),
                 Some(ExecutionPayloadParams::Gloas {
                     versioned_hashes,

@@ -236,7 +236,8 @@ pub fn process_execution_payload<P: Preset, V: Verifier>(
     execution_engine.notify_new_payload(
         envelope.beacon_block_root,
         payload.clone().into(),
-        Some(ExecutionPayloadParams::Gloas { //change for a separate gloas version to be used by engine_newPayloadV5(devnet-0 decision) in eth1_api.rs
+        Some(ExecutionPayloadParams::Gloas {
+            //change for a separate gloas version to be used by engine_newPayloadV5(devnet-0 decision) in eth1_api.rs
             versioned_hashes,
             parent_beacon_block_root: state.latest_block_header().parent_root,
             execution_requests: envelope.execution_requests.clone(),

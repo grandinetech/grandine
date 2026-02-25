@@ -13,7 +13,10 @@ use im::{
 #[cfg(target_os = "zkvm")]
 use std::vec::Vec as Vector;
 use thiserror::Error;
-use types::{phase0::primitives::{Slot, H256}, preset::Preset};
+use types::{
+    phase0::primitives::{Slot, H256},
+    preset::Preset,
+};
 
 use crate::misc::{ChainLink, Location, UnfinalizedBlock};
 

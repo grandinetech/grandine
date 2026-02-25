@@ -200,9 +200,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
         self.electra_attestation_with_pre_pool(attestation)
             .await
-            .map(|(electra_attestation, pre_pool)| {
-                (electra_attestation, pre_pool.committee_index)
-            })
+            .map(|(electra_attestation, pre_pool)| (electra_attestation, pre_pool.committee_index))
     }
 
     pub async fn best_proposable_attestations(
