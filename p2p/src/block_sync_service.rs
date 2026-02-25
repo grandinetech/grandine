@@ -1017,6 +1017,7 @@ impl<P: Preset> BlockSyncService<P> {
                         self.slot,
                         head_slot,
                         local_finalized_slot,
+                        self.is_forward_synced,
                         &sampling_columns,
                     )
                     .await

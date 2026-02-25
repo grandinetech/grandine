@@ -508,6 +508,7 @@ impl<P: Preset> SyncManager<P> {
         current_slot: Slot,
         local_head_slot: Slot,
         local_finalized_slot: Slot,
+        is_forward_synced: bool,
         sampling_columns: &HashSet<ColumnIndex>,
     ) -> Vec<SyncBatch<P>> {
         let Some(mut peers_to_sync) = self.find_peers_to_sync(false) else {
@@ -533,13 +534,15 @@ impl<P: Preset> SyncManager<P> {
         let slots_per_request = P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST;
         let mut redownloads_increased = false;
 
-        if self.sync_from_finalized && self.last_sync_range.end >= local_head_slot {
+        if self.sync_from_finalized
+            && (self.last_sync_range.end >= local_head_slot || is_forward_synced)
+        {
             self.sync_from_finalized = false;
         }
 
         let sync_start_slot = {
             if self.sync_from_finalized {
-                self.last_sync_range.end + 1
+                core::cmp::max(self.last_sync_range.end, local_finalized_slot) + 1
             } else if local_head_slot <= self.last_sync_head {
                 self.log(Level::Debug, "local head not progressing");
                 self.sequential_redownloads += 1;
@@ -1617,7 +1620,7 @@ mod tests {
         sync_manager.add_peer(PeerId::random(), status_message_v2(Slot::MAX));
 
         let batches = sync_manager
-            .build_forward_sync_batches(&config, 0, 0, 0, &sampling_columns)
+            .build_forward_sync_batches(&config, 0, 0, 0, false, &sampling_columns)
             .await;
 
         itertools::assert_equal(
@@ -1626,6 +1629,32 @@ mod tests {
                 .map(|batch| (batch.start_slot, batch.count, batch.target)),
             // no batches from peer with earliest_available_slot = Slot::MAX
             vec![(1, 64, SyncTarget::Block), (65, 64, SyncTarget::Block)],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_build_forward_sync_batches_with_when_forward_synced() {
+        let config = Arc::new(Config::mainnet());
+        let mut sync_manager = build_sync_manager::<Mainnet>(config.clone_arc());
+        let sampling_columns = HashSet::new();
+
+        sync_manager.add_peer(PeerId::random(), status_message_v1());
+        sync_manager.add_peer(PeerId::random(), status_message_v2(0));
+
+        // simulate old sync
+        sync_manager.last_sync_range = 20..30;
+        sync_manager.sync_from_finalized = true;
+
+        // out of sync for 3 slots
+        let batches = sync_manager
+            .build_forward_sync_batches(&config, 200, 197, 0, true, &sampling_columns)
+            .await;
+
+        itertools::assert_equal(
+            batches
+                .into_iter()
+                .map(|batch| (batch.start_slot, batch.count, batch.target)),
+            vec![(198, 3, SyncTarget::Block)],
         );
     }
 
@@ -1657,6 +1686,7 @@ mod tests {
                     current_slot,
                     local_head_slot + i,
                     local_finalized_slot,
+                    false,
                     &sampling_columns,
                 )
                 .await;
@@ -1707,6 +1737,7 @@ mod tests {
                 current_slot,
                 local_head_slot,
                 local_finalized_slot,
+                false,
                 &sampling_columns,
             )
             .await;
@@ -1720,6 +1751,7 @@ mod tests {
                     current_slot,
                     local_head_slot,
                     local_finalized_slot,
+                    false,
                     &sampling_columns,
                 )
                 .await;
@@ -1739,6 +1771,7 @@ mod tests {
                     current_slot,
                     local_head_slot,
                     local_finalized_slot,
+                    false,
                     &sampling_columns,
                 )
                 .await;
@@ -1761,6 +1794,7 @@ mod tests {
                     current_slot,
                     local_head_slot,
                     local_finalized_slot,
+                    false,
                     &sampling_columns,
                 )
                 .await;
@@ -1781,6 +1815,7 @@ mod tests {
                 current_slot,
                 local_head_slot,
                 local_finalized_slot,
+                false,
                 &sampling_columns,
             )
             .await;
