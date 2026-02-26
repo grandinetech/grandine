@@ -23,6 +23,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -187,6 +188,11 @@ pub enum MutatorMessage<P: Preset, W> {
         block_root: H256,
         block: Arc<SignedBeaconBlock<P>>,
         data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+    },
+    MockValidExecutionPayloadEnvelope {
+        wait_group: W,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        gossip_id: GossipId,
     },
 }
 
