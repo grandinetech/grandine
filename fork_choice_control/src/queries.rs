@@ -22,7 +22,10 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::{containers::SignedExecutionPayloadBid, primitives::BuilderIndex},
+    gloas::{
+        containers::SignedExecutionPayloadBid,
+        primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
+    },
     nonstandard::{PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -213,14 +216,14 @@ where
             .map(|unfinalized_block| {
                 let chain_link = &unfinalized_block.chain_link;
 
-                ForkChoiceNode {
+                FCNode {
                     slot: chain_link.slot(),
                     block_root: chain_link.block_root,
-                    parent_root: chain_link.block.message().parent_root(),
+                    parent_root: chain_link.parent_root(),
                     justified_epoch: chain_link.current_justified_checkpoint.epoch,
                     finalized_epoch: chain_link.finalized_checkpoint.epoch,
                     validity: chain_link.payload_status,
-                    weight: unfinalized_block.attesting_balance,
+                    weight: unfinalized_block.attesting_balances.pending,
                     execution_block_hash: chain_link.execution_block_hash().unwrap_or_default(),
                 }
             })
@@ -249,6 +252,14 @@ where
             status: head.payload_status,
             finalized: store.is_slot_finalized(head.slot()),
         }
+    }
+
+    #[must_use]
+    pub fn head_with_payload_status(&self) -> (ChainLink<P>, ExecutionPayloadStatus) {
+        let store = self.store_snapshot();
+        let (head, payload_status) = store.head_with_payload_status();
+
+        (head.clone(), payload_status)
     }
 
     #[must_use]
@@ -970,7 +981,7 @@ where
     pub fn attesting_balance(&self) -> Option<Gwei> {
         self.store_snapshot()
             .unfinalized_head()
-            .map(|unfinalized_block| unfinalized_block.attesting_balance)
+            .map(|unfinalized_block| unfinalized_block.attesting_balances.pending)
     }
 
     #[must_use]
@@ -1038,11 +1049,11 @@ pub struct ForkTip {
 pub struct ForkChoiceContext {
     justified_checkpoint: Checkpoint,
     finalized_checkpoint: Checkpoint,
-    fork_choice_nodes: Vec<ForkChoiceNode>,
+    fork_choice_nodes: Vec<FCNode>,
 }
 
 #[derive(Serialize)]
-struct ForkChoiceNode {
+struct FCNode {
     #[serde(with = "serde_utils::string_or_native")]
     slot: Slot,
     block_root: H256,

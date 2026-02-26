@@ -5,7 +5,7 @@ use core::{
 use std::{
     backtrace::Backtrace,
     collections::{
-        HashSet as StdHashSet,
+        BTreeMap, HashSet as StdHashSet,
         binary_heap::{BinaryHeap, PeekMut},
     },
     sync::{Arc, OnceLock},
@@ -14,7 +14,7 @@ use std::{
 use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
 use bls::traits::SignatureBytes as _;
-use clock::Tick;
+use clock::{Tick, TickKind};
 use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
 use features::Feature;
@@ -59,12 +59,15 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::{
-        consts::BUILDER_INDEX_SELF_BUILD,
+        consts::{
+            BUILDER_INDEX_SELF_BUILD, PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL,
+            PAYLOAD_STATUS_PENDING,
+        },
         containers::{
             DataColumnSidecar as GloasDataColumnSidecar, ProposerPreferences,
             SignedExecutionPayloadBid,
         },
-        primitives::BuilderIndex,
+        primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
     nonstandard::{
         BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, StorageMode, WithStatus,
@@ -86,12 +89,12 @@ use crate::{
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
-        AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BranchPoint,
-        ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
-        Difference, DifferenceAtLocation, DissolvedDifference, ExecutionPayloadBidAction,
-        ExecutionPayloadBidOrigin, LatestMessage, Location, PartialAttestationAction,
-        PartialBlockAction, PayloadAction, Score, SegmentId, Storage, UnfinalizedBlock,
-        ValidAttestation,
+        AttesterSlashingOrigin, AttestingBalances, BlobSidecarAction, BlobSidecarOrigin,
+        BlockAction, BranchPoint, ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction,
+        DataColumnSidecarOrigin, Difference, DifferenceAtLocation, Differences,
+        DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin, LatestMessage,
+        Location, PartialAttestationAction, PartialBlockAction, PayloadAction, PayloadPresence,
+        Score, SegmentId, Storage, UnfinalizedBlock, ValidAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -136,6 +139,10 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // and it is considered viable. Currently this fork is assumed to consist of a single block, but
     // that may no longer be true when persistence is implemented.
     unfinalized: OrdMap<SegmentId, Segment<P>>,
+    // In Gloas, it is necessary to track the last finalized block's balances for
+    // its empty and full payload states so fork choice could select successor unfinalized block
+    // (whether it is a child of finalized block with or without payload).
+    finalized_attesting_balances: BTreeMap<Slot, AttestingBalances>,
     finalized_indices: HashMap<H256, usize>,
     unfinalized_locations: HashMap<H256, Location>,
     // `Store.head_segment_id` holds the ID of the segment in `Store.unfinalized` whose last block
@@ -146,8 +153,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // Repeatedly looking them up in `BeaconState.validators` is costly because `PersistentList` is
     // implemented as a tree.
     justified_active_balances: Arc<[Gwei]>,
-    // Cached timely proposer score derived from `Store.justified_active_balances`.
-    timely_proposer_score: OnceLock<Gwei>,
+    // Cached total active balance derived from `Store.justified_active_balances`.
+    total_active_balance: OnceLock<Gwei>,
     // Long-lived forks can theoretically have different validator registries.
     // That makes validator indices ambiguous, but the fork choice store is unaffected.
     // The fork choice store only deals with active validator indices, which cannot diverge.
@@ -171,6 +178,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // - The optimization only applies if the first slot in the epoch as attested to was empty.
     // - Obtaining active balances from the justified state requires it to be in the right epoch.
     checkpoint_states: HashMap<Checkpoint, Arc<BeaconState<P>>>,
+    payload_states: HashMap<H256, Arc<BeaconState<P>>>,
     // TODO(Grandine Team): Process current slot attestations incrementally to speed up
     //                      `Store::apply_tick`. Update the comment to match the new design.
     //
@@ -301,6 +309,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
             payload_status: Self::initial_payload_status(&anchor_state),
+            parent_payload_presence: PayloadPresence::default(),
         };
 
         let validator_count = anchor_state.validators().len_usize();
@@ -322,12 +331,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             finalized: Vector::unit(anchor),
             unfinalized: ordmap! {},
             finalized_indices: HashMap::unit(block_root, 0),
+            finalized_attesting_balances: BTreeMap::new(),
             unfinalized_locations: hashmap! {},
             head_segment_id: None,
             justified_active_balances: Self::active_balances(&anchor_state),
-            timely_proposer_score: OnceLock::new(),
+            total_active_balance: OnceLock::new(),
             latest_messages,
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
+            payload_states: hashmap! {},
             current_slot_attestations: vector![],
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
@@ -602,6 +613,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn last_finalized_attesting_balances(&self) -> AttestingBalances {
+        let last_finalized_slot = self.last_finalized().slot();
+
+        self.finalized_attesting_balances
+            .get(&last_finalized_slot)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn last_finalized_attesting_balances_mut(&mut self) -> &mut AttestingBalances {
+        let last_finalized_slot = self.last_finalized().slot();
+
+        self.finalized_attesting_balances
+            .entry(last_finalized_slot)
+            .or_default()
+    }
+
+    #[must_use]
     pub fn justified_chain_link(&self) -> Option<&ChainLink<P>> {
         self.chain_link(self.justified_checkpoint.root)
     }
@@ -687,19 +717,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return &unfinalized_block.chain_link;
         }
 
-        let no_viable_segments = !self
-            .unfinalized
-            .values()
-            .any(|segment| self.is_segment_viable(segment));
+        // In Gloas, finalized block with one payload status may be more voted-for
+        // than any of the unfinalized segments descended from the finalized block with different payload status
+        if self.phase() < Phase::Gloas {
+            let no_viable_segments = !self
+                .unfinalized
+                .values()
+                .any(|segment| self.is_segment_viable(segment));
 
-        assert!(no_viable_segments);
+            assert!(no_viable_segments);
+        }
 
         if self.unfinalized.is_empty() {
             // This assertion may become incorrect if full persistence is ever implemented.
             assert_eq!(self.finalized.len(), 1);
         }
 
-        if !self.unfinalized.is_empty() && self.anchor_epoch() == GENESIS_EPOCH {
+        if !self.unfinalized.is_empty()
+            && self.anchor_epoch() == GENESIS_EPOCH
+            && self.phase() < Phase::Gloas
+        {
             // There are multiple reasons why a fork choice store may have no viable forks:
             // - There may be no blocks past the anchor.
             // - The anchor may be a non-genesis block.
@@ -736,8 +773,57 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn head_with_payload_status(&self) -> (&ChainLink<P>, ExecutionPayloadStatus) {
+        if let Some(unfinalized_block) = self.unfinalized_head() {
+            let attesting_balances = unfinalized_block.attesting_balances;
+            let has_payload = self
+                .payload_states
+                .contains_key(&unfinalized_block.block_root());
+
+            let payload_status = if unfinalized_block.slot() + 1 == self.slot() {
+                // TODO: add `should_extend_payload` check
+                if has_payload {
+                    PAYLOAD_STATUS_FULL
+                } else {
+                    PAYLOAD_STATUS_EMPTY
+                }
+            } else if attesting_balances.full >= attesting_balances.empty && has_payload {
+                PAYLOAD_STATUS_FULL
+            } else {
+                PAYLOAD_STATUS_EMPTY
+            };
+
+            (&unfinalized_block.chain_link, payload_status)
+        } else {
+            // TODO: review this
+            let chain_link = if let Some(justified_chain_link) = self.justified_chain_link() {
+                justified_chain_link
+            } else {
+                self.anchor()
+            };
+
+            (chain_link, PAYLOAD_STATUS_PENDING)
+        }
+    }
+
+    #[must_use]
     pub fn unfinalized_head(&self) -> Option<&UnfinalizedBlock<P>> {
-        self.head_segment()?.last_non_invalid_block()
+        let last_block = self.head_segment()?.last_non_invalid_block()?;
+
+        if self.phase() < Phase::Gloas {
+            return Some(last_block);
+        }
+
+        let has_boosted_block = last_block.block_root() == self.proposer_boost_root;
+
+        let applied_proposer_score = if has_boosted_block && self.should_apply_proposer_boost() {
+            self.timely_proposer_score()
+        } else {
+            0
+        };
+
+        self.head_segment()?
+            .best_block(applied_proposer_score, &self.payload_states)
     }
 
     fn head_segment(&self) -> Option<&Segment<P>> {
@@ -847,6 +933,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn is_segment_viable(&self, segment: &Segment<P>) -> bool {
+        let first_block = segment.first_block();
+        let parent_root = first_block.chain_link.parent_root();
+
+        if self.phase() >= Phase::Gloas && parent_root == self.last_finalized().block_root {
+            let parent_balances = self.last_finalized_attesting_balances();
+            let parent_has_payload_state = self.payload_states.contains_key(&parent_root);
+
+            match first_block.parent_payload_presence() {
+                PayloadPresence::Empty
+                    if parent_balances.empty < parent_balances.full && parent_has_payload_state =>
+                {
+                    return false;
+                }
+                PayloadPresence::Full if parent_balances.empty > parent_balances.full => {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
         segment
             .last_non_invalid_block()
             .is_some_and(|block| self.is_block_viable(block))
@@ -879,10 +985,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             let ancestor_at_finalized_slot = self
-                .ancestor(
-                    unfinalized_block.chain_link.block_root,
-                    self.finalized_slot(),
-                )
+                .ancestor(unfinalized_block.block_root(), self.finalized_slot())
                 .expect(
                     "every block in the store should have an ancestor at the last finalized slot",
                 );
@@ -904,6 +1007,99 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    fn calculate_committee_fraction(&self, committee_percent: u64) -> Gwei {
+        let total_active_balance = *self
+            .total_active_balance
+            .get_or_init(|| self.justified_active_balances.iter().sum::<Gwei>());
+
+        let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
+
+        committee_weight * committee_percent / 100
+    }
+
+    fn is_head_weak(&self, head_root: H256) -> Result<bool> {
+        let reorg_threshold =
+            self.calculate_committee_fraction(self.chain_config.reorg_head_weight_threshold);
+
+        let (head, mut head_weight) =
+            if let Some(location) = self.unfinalized_locations.get(&head_root) {
+                let Location {
+                    segment_id,
+                    position,
+                } = location;
+
+                let head = &self.unfinalized[segment_id][*position];
+
+                (&head.chain_link, head.attesting_balances.pending)
+            } else if let Some(index) = (self.last_finalized().block_root == head_root)
+                .then(|| self.finalized_indices.get(&head_root))
+                .flatten()
+            {
+                (
+                    &self.finalized[*index],
+                    self.last_finalized_attesting_balances().pending,
+                )
+            } else {
+                bail!(Error::<P>::BlockNotFound {
+                    block_root: head_root
+                });
+            };
+
+        if !self.equivocating_indices.is_empty() {
+            let head_state = head.state(self);
+
+            for committee in accessors::beacon_committees(&head_state, head.slot())? {
+                head_weight += committee
+                    .into_iter()
+                    .filter(|validator_index| self.equivocating_indices.contains(validator_index))
+                    .map(|validator_index| {
+                        let index: usize = validator_index
+                            .try_into()
+                            .expect("validator index should fit into usize");
+
+                        self.justified_active_balances
+                            .get(index)
+                            .copied()
+                            .unwrap_or_default()
+                    })
+                    .sum::<Gwei>();
+            }
+        }
+
+        Ok(head_weight < reorg_threshold)
+    }
+
+    fn should_apply_proposer_boost(&self) -> bool {
+        let Some(chain_link) = self.chain_link(self.proposer_boost_root) else {
+            return false;
+        };
+
+        let parent_root = chain_link.parent_root();
+
+        let Some(parent) = self.chain_link(parent_root) else {
+            return false;
+        };
+
+        if parent.slot() + 1 < chain_link.slot() {
+            return true;
+        }
+
+        let is_head_weak = match self.is_head_weak(parent_root) {
+            Ok(is_head_weak) => is_head_weak,
+            Err(error) => {
+                warn_with_peers!("should apply proposer boost check failed: {error:?}");
+                return false;
+            }
+        };
+
+        if !is_head_weak {
+            return true;
+        }
+
+        // TODO: check for equivocations
+        true
+    }
+
     fn should_wait_for_justified_state(&self, checkpoint: Checkpoint) -> bool {
         // The comparison with `self.anchor_epoch()` is needed for two reasons:
         // - All checkpoints in a genesis state have their `root` set to 0x00…00. In contrast, the
@@ -923,8 +1119,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// Like [`get_weight`], but returns the full [`Score`] of a block including the tiebreaker.
     ///
     /// [`get_weight`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_weight
-    fn score(&self, unfinalized_block: &UnfinalizedBlock<P>) -> Score {
-        let attestation_score = unfinalized_block.attesting_balance;
+    fn score(
+        &self,
+        unfinalized_block: &UnfinalizedBlock<P>,
+        parent: Option<&UnfinalizedBlock<P>>,
+        apply_proposer_boost: Option<bool>,
+    ) -> Score {
+        // Since Gloas, when comparing two competing blocks,
+        // first Score parameter is their parents' empty/full node score.
+        // I.e. if parent with an empty payload has highier score than with full,
+        // it does not matter if full node has a child with high score.
+        // Remember, this is only used to choose one of two competing segments
+        // by comparing two first blocks in those competing segments.
+        // In-segment best block is selected in `Segment::best_block` method.
+        let parent_attestation_score = if let Some(parent) = parent
+            && parent.slot() + 1 != self.slot()
+        {
+            let parent_has_payload_state = self.payload_states.contains_key(&parent.block_root());
+
+            match unfinalized_block.parent_payload_presence() {
+                PayloadPresence::Empty => parent.attesting_balances.empty,
+                PayloadPresence::Full if parent_has_payload_state => parent.attesting_balances.full,
+                PayloadPresence::Full | PayloadPresence::Pending => 0,
+            }
+        } else {
+            0
+        };
+
+        let attesting_balances = unfinalized_block.attesting_balances;
+        let attestation_score = attesting_balances.pending;
 
         // > Boost is applied if ``root`` is an ancestor of ``proposer_boost_root``
         //
@@ -933,13 +1156,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         //
         // The "unfinalized block" in the `expect` message refers to the boosted block,
         // not the `unfinalized_block` parameter.
-        let ancestor_of_boosted_block = self.contains_unfinalized_block(self.proposer_boost_root)
-            && self
-                .ancestor(self.proposer_boost_root, unfinalized_block.slot())
-                .expect("every unfinalized block has an ancestor at every unfinalized slot")
-                == unfinalized_block.chain_link.block_root;
 
-        let proposer_score = if ancestor_of_boosted_block {
+        let ancestor_of_boosted_block = if self.contains_unfinalized_block(self.proposer_boost_root)
+        {
+            let ancestor = self
+                .ancestor(self.proposer_boost_root, unfinalized_block.slot())
+                .expect("every unfinalized block has an ancestor at every unfinalized slot");
+
+            ancestor == unfinalized_block.block_root()
+        } else {
+            false
+        };
+
+        let proposer_score = if ancestor_of_boosted_block && apply_proposer_boost.unwrap_or(true) {
             // > Calculate proposer score if ``proposer_boost_root`` is set
             self.timely_proposer_score()
         } else {
@@ -948,17 +1177,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > Ties broken by favoring block with lexicographically higher root
-        let tiebreaker = unfinalized_block.chain_link.block_root;
+        let tiebreaker = unfinalized_block.block_root();
 
-        (attestation_score + proposer_score, tiebreaker)
+        (
+            parent_attestation_score,
+            attestation_score + proposer_score,
+            tiebreaker,
+        )
     }
 
     fn timely_proposer_score(&self) -> Gwei {
-        *self.timely_proposer_score.get_or_init(|| {
-            let total_active_balance = self.justified_active_balances.iter().sum::<Gwei>();
-            let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
-            committee_weight * self.chain_config.proposer_score_boost / 100
-        })
+        let total_active_balance = *self
+            .total_active_balance
+            .get_or_init(|| self.justified_active_balances.iter().sum::<Gwei>());
+
+        let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
+        committee_weight * self.chain_config.proposer_score_boost / 100
     }
 
     /// [`get_ancestor`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_ancestor)
@@ -986,6 +1220,41 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.finalized_before_or_at(ancestor_slot)
             .map(|chain_link| chain_link.block_root)
+    }
+
+    fn parent_payload_presence(
+        block: &SignedBeaconBlock<P>,
+        parent: &SignedBeaconBlock<P>,
+    ) -> PayloadPresence {
+        // TODO: use traits
+        let SignedBeaconBlock::Gloas(signed_block) = block else {
+            return PayloadPresence::Pending;
+        };
+
+        let block = &signed_block.message;
+
+        let SignedBeaconBlock::Gloas(parent) = parent else {
+            return PayloadPresence::Pending;
+        };
+
+        let parent_block_hash = block
+            .body
+            .signed_execution_payload_bid
+            .message
+            .parent_block_hash;
+
+        let message_block_hash = parent
+            .message
+            .body
+            .signed_execution_payload_bid
+            .message
+            .block_hash;
+
+        if parent_block_hash == message_block_hash {
+            PayloadPresence::Full
+        } else {
+            PayloadPresence::Empty
+        }
     }
 
     #[must_use]
@@ -1309,6 +1578,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             unrealized_justified_checkpoint,
             unrealized_finalized_checkpoint,
             payload_status,
+            parent_payload_presence: Self::parent_payload_presence(block, &parent.block),
         };
 
         // Ensure that the new justified state is present in the store when
@@ -2782,7 +3052,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // Apply proposer boost to first block in case of equivocation.
         // See <https://github.com/ethereum/consensus-specs/pull/3352>.
-        let is_before_attesting_interval = self.tick.is_before_attesting_interval();
+        let is_before_attesting_interval = if self.phase() >= Phase::Gloas {
+            let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(
+                &self.chain_config,
+                self.slot(),
+            ))?;
+            let tick_index: u64 = self.tick.kind as u64;
+
+            (tick_index + 1) * 10000 <= self.chain_config.attestation_due_bps * ticks_per_slot
+        } else {
+            self.tick.is_before_attesting_interval()
+        };
         let is_first_block = self.proposer_boost_root.is_zero();
 
         // > Add proposer score boost if the block is timely
@@ -2994,10 +3274,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let balance = self.justified_active_balance(index);
 
-            differences
-                .entry(latest_message.beacon_block_root)
-                .or_default()
-                .sub_assign(balance);
+            let differences_entry = differences.entry(latest_message.root).or_default();
+
+            differences_entry.pending.sub_assign(balance);
+
+            if latest_message.payload_present {
+                differences_entry.full.sub_assign(balance);
+            } else {
+                differences_entry.empty.sub_assign(balance);
+            }
         }
 
         let old_head_segment_id = self.head_segment_id;
@@ -3255,7 +3540,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         finalized.extend(unfinalized_blocks.into_iter().enumerate().map(
             |(offset, unfinalized_block)| {
-                let block_root = unfinalized_block.chain_link.block_root;
+                let block_root = unfinalized_block.block_root();
 
                 finalized_indices
                     .insert(block_root, old_len + offset)
@@ -3334,7 +3619,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn remove_orphaned(&mut self, orphaned_blocks: Vector<UnfinalizedBlock<P>>) {
         for block in orphaned_blocks {
             self.unfinalized_locations
-                .remove(&block.chain_link.block_root)
+                .remove(&block.block_root())
                 .expect(
                     "roots of unfinalized blocks should be present in self.unfinalized_locations",
                 );
@@ -3399,7 +3684,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     fn update_balances_after_justification(&mut self) -> Result<()> {
         // `Store.timely_proposer_score` is derived from `Store.justified_active_balances`.
-        self.timely_proposer_score.take();
+        self.total_active_balance.take();
 
         let new_balances = Self::active_balances(self.justified_state());
         let old_balances = core::mem::replace(&mut self.justified_active_balances, new_balances);
@@ -3429,16 +3714,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
-            let difference = differences
-                .entry(latest_message.beacon_block_root)
-                .or_default();
+            let differences_entry = differences.entry(latest_message.root).or_default();
 
-            *difference = difference
-                .checked_sub_unsigned(old_balance)
+            differences_entry
+                .checked_sub_balance_mut(old_balance)
                 .expect("the combined balances of the planned validators fit in i64");
-
-            *difference = difference
-                .checked_add_unsigned(new_balance)
+            differences_entry
+                .checked_add_balance_mut(new_balance)
                 .expect("the combined balances of the planned validators fit in i64");
         }
 
@@ -3461,6 +3743,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let finalized_slot = self.finalized_slot();
 
+        self.finalized_attesting_balances =
+            self.finalized_attesting_balances.split_off(&finalized_slot);
+        self.payload_states
+            .retain(|block_root, _| self.unfinalized_locations.contains_key(block_root));
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
@@ -3545,7 +3831,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn attestation_balance_differences(
         &mut self,
         valid_attestations: impl IntoIterator<Item = ValidAttestation<P>>,
-    ) -> Result<HashedMap<H256, Difference>> {
+    ) -> Result<HashedMap<H256, Differences>> {
         let mut differences = Self::difference_map();
 
         // > Update latest messages for attesting indices
@@ -3558,7 +3844,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let AttestationData {
                 slot,
-                beacon_block_root,
+                beacon_block_root: root,
                 target: Checkpoint { epoch, .. },
                 ..
             } = data;
@@ -3578,9 +3864,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
+            let payload_present = self.phase() >= Phase::Gloas && data.index == 1;
+
             let latest_message = Arc::new(LatestMessage {
-                epoch,
-                beacon_block_root,
+                slot,
+                root,
+                payload_present,
             });
 
             // The indices must be filtered here rather than in a task to avoid race conditions.
@@ -3596,28 +3885,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 if let Some(Some(old_message)) = &self.latest_messages.get(index) {
                     let LatestMessage {
-                        epoch: old_epoch,
-                        beacon_block_root: old_beacon_block_root,
+                        slot: old_slot,
+                        root: old_root,
+                        payload_present: old_payload_present,
                     } = **old_message;
 
-                    if epoch <= old_epoch {
+                    if slot <= old_slot {
                         continue;
                     }
 
-                    if old_beacon_block_root == beacon_block_root {
+                    if old_root == root && payload_present == old_payload_present {
                         continue;
                     }
 
-                    differences
-                        .entry(old_beacon_block_root)
-                        .or_default()
-                        .sub_assign(balance);
+                    let differences_entry = differences.entry(old_root).or_default();
+
+                    // Subtract balance from node for previous vote
+                    if old_root != root {
+                        differences_entry.pending.sub_assign(balance);
+                    }
+
+                    // Subtract balance from node for previous vote for its payload status
+                    if old_payload_present {
+                        differences_entry.full.sub_assign(balance);
+                    } else {
+                        differences_entry.empty.sub_assign(balance);
+                    }
                 }
 
-                differences
-                    .entry(beacon_block_root)
-                    .or_default()
-                    .add_assign(balance);
+                let differences_entry = differences.entry(root).or_default();
+
+                // Add balance to node for the new vote
+                differences_entry.pending.add_assign(balance);
+
+                // Add balance to node for the new vote for its payload status
+                if payload_present {
+                    differences_entry.full.add_assign(balance);
+                } else {
+                    differences_entry.empty.add_assign(balance);
+                }
 
                 // Note that we mutate `Store.latest_messages` as we go along.
                 // This prevents duplicate attestations from being counted more than once.
@@ -3632,13 +3938,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     fn apply_balance_differences(
         &mut self,
-        differences: impl IntoIterator<Item = (H256, Difference)>,
+        differences: impl IntoIterator<Item = (H256, Differences)>,
     ) -> Result<()> {
         // This could be parallelized by making `Store::propagate_and_dissolve_differences` return
         // an `Ordmap<SegmentId, DissolvedDifference>`, but it would almost certainly not be worth
         // the overhead.
-        for (segment_id, group) in &self
-            .propagate_and_dissolve_differences(differences)?
+        let (dissolved_differences, last_finalized_differences) =
+            self.propagate_and_dissolve_differences(differences)?;
+
+        // Apply balance differences for the last finalized block
+        if last_finalized_differences.non_zero() {
+            let new_balances = match self
+                .last_finalized_attesting_balances()
+                .add_differences(last_finalized_differences, None)
+            {
+                Some(balances) => balances,
+                None => {
+                    error_with_peers!(
+                        "{:?}",
+                        anyhow!("attesting balance should never go below zero"),
+                    );
+
+                    AttestingBalances::default()
+                }
+            };
+
+            *self.last_finalized_attesting_balances_mut() = new_balances;
+        }
+
+        for (segment_id, group) in &dissolved_differences
             .into_iter()
             .chunk_by(|dissolved_difference| dissolved_difference.segment_id)
         {
@@ -3648,35 +3976,40 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let DissolvedDifference {
                     start,
                     end,
-                    difference,
+                    differences,
+                    last_block_payload_presence,
                     ..
                 } = dissolved_difference;
 
-                assert_ne!(difference, 0);
+                assert_ne!(differences.pending, 0);
 
                 let start = start.unwrap_or_else(|| segment.first_position());
+
+                let mut payload_presence = last_block_payload_presence;
 
                 // Balance updates within a single segment can be easily parallelized with Rayon,
                 // but it adds enough overhead to slow down block processing by around 10% even with
                 // blocks from the Medalla roughtime incident.
-                for unfinalized_block in segment.iter_mut_range(start..=end) {
+                for unfinalized_block in segment.iter_mut_range_rev(start..=end) {
                     // TODO(Grandine Team): Investigate and fix issue why balances become negative
-                    let new_balance = match unfinalized_block
-                        .attesting_balance
-                        .checked_add_signed(difference)
+
+                    let new_balances = match unfinalized_block
+                        .attesting_balances
+                        .add_differences(differences, payload_presence)
                     {
-                        Some(balance) => balance,
+                        Some(balances) => balances,
                         None => {
                             error_with_peers!(
                                 "{:?}",
                                 anyhow!("attesting balance should never go below zero"),
                             );
 
-                            0
+                            AttestingBalances::default()
                         }
                     };
 
-                    unfinalized_block.attesting_balance = new_balance;
+                    unfinalized_block.attesting_balances = new_balances;
+                    payload_presence = Some(unfinalized_block.parent_payload_presence());
                 }
             }
         }
@@ -3688,19 +4021,31 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // but the cost of using a `Vec` is probably negligible.
     fn propagate_and_dissolve_differences(
         &self,
-        differences: impl IntoIterator<Item = (H256, Difference)>,
-    ) -> Result<Vec<DissolvedDifference>> {
+        differences: impl IntoIterator<Item = (H256, Differences)>,
+    ) -> Result<(Vec<DissolvedDifference>, Differences)> {
+        let last_finalized_block_root = self.last_finalized().block_root;
+        let mut last_finalized_differences = Differences::default();
+
         let mut difference_queue = differences
             .into_iter()
-            .filter(|(_, difference)| *difference != 0)
-            .filter_map(|(block_root, difference)| {
+            .filter(|(_, differences)| differences.non_zero())
+            .filter_map(|(block_root, differences)| {
                 // `block_root` may refer to a finalized block.
-                // Changes to balances of finalized blocks are irrelevant.
-                let location = *self.unfinalized_locations.get(&block_root)?;
+                let Some(&location) = self.unfinalized_locations.get(&block_root) else {
+                    if block_root == last_finalized_block_root {
+                        // If it's a vote for the last finalized block,
+                        // track it separately, as finalized block is not in any segment,
+                        // and its balance differences will be applied differently
+                        last_finalized_differences = differences;
+                    }
+
+                    return None;
+                };
 
                 Some(DifferenceAtLocation {
-                    difference,
+                    differences,
                     location,
+                    last_block_payload_presence: None,
                 })
             })
             .collect::<BinaryHeap<_>>();
@@ -3720,35 +4065,77 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let current = PeekMut::pop(current);
 
                 if previous.location.position != current.location.position {
-                    if previous.difference != 0 {
+                    if previous.differences.non_zero() {
                         propagated_and_dissolved_differences
                             .push(previous.apply_after(current.location.position)?);
                     }
 
+                    let in_segment_child_position = current
+                        .location
+                        .position
+                        .next()
+                        .expect(
+                            "current block's in-segment child's position should be valid, \
+                             because previous difference always has greater location than current difference",
+                        );
+
+                    // Current block's payload presence from in-segment child's perspective
+                    previous.last_block_payload_presence = Some(
+                        self.unfinalized[&segment_id][in_segment_child_position]
+                            .parent_payload_presence(),
+                    );
+
                     previous.location.position = current.location.position;
                 }
 
-                previous.difference += current.difference;
+                previous.differences.pending += current.differences.pending;
             }
 
-            if previous.difference != 0 {
+            if previous.differences.pending != 0 {
                 propagated_and_dissolved_differences.push(previous.apply_from_start());
 
-                if let Some(parent) = self.parent_location(&self.unfinalized[&segment_id]) {
+                let segment = &self.unfinalized[&segment_id];
+
+                if let Some(parent) = self.parent_location(segment) {
                     difference_queue.push(DifferenceAtLocation {
-                        difference: previous.difference,
+                        differences: previous.differences,
                         location: parent,
+                        last_block_payload_presence: previous.last_block_payload_presence,
                     });
+                } else {
+                    let first_block = segment.first_block();
+
+                    if first_block.chain_link.parent_root() == last_finalized_block_root {
+                        // Block is descended from finalized block - propagate balance
+                        // differences to the last finalized block
+                        last_finalized_differences.pending += previous.differences.pending;
+
+                        match first_block.parent_payload_presence() {
+                            PayloadPresence::Empty => {
+                                last_finalized_differences.empty += previous.differences.pending;
+                            }
+                            PayloadPresence::Full => {
+                                last_finalized_differences.full += previous.differences.pending;
+                            }
+                            PayloadPresence::Pending => {}
+                        }
+                    }
                 }
             }
         }
 
-        Ok(propagated_and_dissolved_differences)
+        Ok((
+            propagated_and_dissolved_differences,
+            last_finalized_differences,
+        ))
     }
 
     fn update_head_segment_id(&mut self) {
         let mut branch_points = BinaryHeap::<BranchPoint>::new();
         let mut best = None;
+
+        let apply_proposer_boost =
+            (self.phase() >= Phase::Gloas).then(|| self.should_apply_proposer_boost());
 
         for (segment_id, segment) in self.unfinalized.iter().rev() {
             let viable = self.is_segment_viable(segment);
@@ -3767,31 +4154,40 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     continue;
                 }
 
-                let next_position_in_segment =
-                    branch_point.parent.position.next().expect(
-                        "next position in segment must be valid because it is already filled",
-                    );
+                let parent_position = branch_point.parent.position;
 
+                let next_position_in_segment = parent_position
+                    .next()
+                    .expect("next position in segment must be valid because it is already filled");
+
+                let common_parent = &segment[parent_position];
                 let sibling = &segment[next_position_in_segment];
+                let first_branch_block = self.unfinalized[&branch_point.segment_id].first_block();
 
-                if self.score(sibling) < branch_point.score || sibling.is_invalid() {
+                let branch_point_score = self.score(
+                    first_branch_block,
+                    Some(common_parent),
+                    apply_proposer_boost,
+                );
+                let sibling_score = self.score(sibling, Some(common_parent), apply_proposer_boost);
+
+                if sibling_score < branch_point_score || sibling.is_invalid() {
                     best_descendant_of_segment = Some(branch_point.best_descendant);
                 }
             }
 
             if let Some(best_descendant) = best_descendant_of_segment {
-                let score = self.score(segment.first_block());
-
                 if let Some(parent) = self.parent_location(segment) {
                     branch_points.push(BranchPoint {
                         parent,
+                        segment_id: *segment_id,
                         best_descendant,
-                        score,
                     });
                     continue;
                 }
 
                 let best_root_segment_score = best.map(|(score, _)| score);
+                let score = self.score(segment.first_block(), None, apply_proposer_boost);
 
                 if best_root_segment_score < Some(score) {
                     best = Some((score, best_descendant));
@@ -3831,7 +4227,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .expect("the effective balance of a single validator should fit in i64")
     }
 
-    fn difference_map() -> HashedMap<H256, Difference> {
+    fn difference_map() -> HashedMap<H256, Differences> {
         // The original implementation used `im::OrdMap` based on findings in
         // `benches/benches/lookup_in_collection.rs`.
         //
@@ -4310,7 +4706,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn should_check_data_availability_at_slot(&self, slot: Slot) -> bool {
-        misc::compute_epoch_at_slot::<P>(slot) >= self.min_checked_data_availability_epoch(slot)
+        self.phase() < Phase::Gloas
+            && misc::compute_epoch_at_slot::<P>(slot)
+                >= self.min_checked_data_availability_epoch(slot)
     }
 
     pub fn state_cache(&self) -> Arc<StateCacheProcessor<P>> {
@@ -4497,5 +4895,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             "current_slot_attestations",
             self.current_slot_attestations.len(),
         );
+    }
+
+    pub fn insert_fake_payload_state(&mut self, block_root: H256) {
+        self.payload_states
+            .insert(block_root, self.anchor().state(self).clone_arc());
     }
 }

@@ -43,7 +43,7 @@ use types::{
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadBid,
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
     nonstandard::ValidationOutcome,
     phase0::primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
     preset::Preset,
@@ -400,6 +400,20 @@ where
         MutatorMessage::NotifiedForkChoiceUpdate {
             wait_group: self.owned_wait_group(),
             payload_status,
+        }
+        .send(&self.mutator_tx);
+    }
+
+    pub fn on_gossip_execution_payload(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        gossip_id: GossipId,
+    ) {
+        // TODO: mocked for tests, actually handle payload envelope
+        MutatorMessage::MockValidExecutionPayloadEnvelope {
+            wait_group: self.owned_wait_group(),
+            execution_payload_envelope,
+            gossip_id,
         }
         .send(&self.mutator_tx);
     }

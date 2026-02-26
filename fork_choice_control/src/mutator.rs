@@ -351,6 +351,19 @@ where
                     &block,
                     data_column_sidecars,
                 ),
+                // TODO: remove
+                MutatorMessage::MockValidExecutionPayloadEnvelope {
+                    wait_group,
+                    execution_payload_envelope,
+                    gossip_id,
+                } => {
+                    self.store_mut().insert_fake_payload_state(
+                        execution_payload_envelope.message.beacon_block_root,
+                    );
+                    self.update_store_snapshot();
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                    drop(wait_group);
+                }
             }
         }
     }
@@ -465,13 +478,13 @@ where
                         if let Some(body) = body.with_execution_requests() {
                             Some(ExecutionPayloadParams::Electra {
                                 versioned_hashes,
-                                parent_beacon_block_root: head.block.message().parent_root(),
+                                parent_beacon_block_root: head.parent_root(),
                                 execution_requests: body.execution_requests().clone(),
                             })
                         } else {
                             Some(ExecutionPayloadParams::Deneb {
                                 versioned_hashes,
-                                parent_beacon_block_root: head.block.message().parent_root(),
+                                parent_beacon_block_root: head.parent_root(),
                             })
                         }
                     } else {
@@ -640,7 +653,7 @@ where
         match *result {
             Ok(BlockAction::Accept(mut chain_link, attester_slashing_results)) => {
                 let block_root = chain_link.block_root;
-                let parent_root = chain_link.block.message().parent_root();
+                let parent_root = chain_link.parent_root();
 
                 if origin.should_send_gossip_event() {
                     self.event_channels
@@ -2368,6 +2381,14 @@ where
                     sender,
                     Ok(ValidationOutcome::Ignore(false)),
                 );
+            } else {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                }
+
+                reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Accept));
             }
         } else if self
             .store
