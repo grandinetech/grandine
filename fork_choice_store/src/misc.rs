@@ -24,7 +24,7 @@ use types::{
     },
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{PayloadStatus, Publishable, ValidationOutcome},
+    nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
@@ -1077,5 +1077,6 @@ impl DataAvailabilityPolicy {
 }
 
 pub trait Storage<P: Preset>: Sync {
+    fn storage_mode(&self) -> StorageMode;
     fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>>;
 }

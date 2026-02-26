@@ -5,12 +5,12 @@ use anyhow::{Result, ensure};
 use bytesize::ByteSize;
 use database::{Database, DatabaseMode, RestartMessage};
 use directories::Directories;
-use fork_choice_control::StorageMode;
 use fs_err::PathExt as _;
 use futures::channel::mpsc::UnboundedSender;
 use logging::info_with_peers;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
 use prometheus_metrics::Metrics;
+use types::nonstandard::StorageMode;
 
 #[derive(Clone, Debug)]
 pub struct MetricsConfig {
@@ -194,7 +194,7 @@ mod tests {
             eth1_db_size: ByteSize::gb(2),
             archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
-            storage_mode: StorageMode::Standard,
+            storage_mode: StorageMode::default(),
         };
 
         let StorageConfig {
@@ -216,7 +216,7 @@ mod tests {
             eth1_db_size: ByteSize::b(u64::MAX),
             archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
-            storage_mode: StorageMode::Standard,
+            storage_mode: StorageMode::default(),
         };
 
         assert_eq!(storage_config.db_size, ByteSize::b(u64::MAX));

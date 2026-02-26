@@ -20,6 +20,7 @@ use crate::{
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
     combined::{Attestation, BeaconState, DataColumnSidecar, SignedBeaconBlock},
+    config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
@@ -257,6 +258,56 @@ pub enum CustodyMode {
     Minimal,
     Semi,
     Super,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum StorageMode {
+    Prune,
+    Standard {
+        custom_data_availability_window: Option<u64>,
+    },
+    Archive,
+}
+
+impl Default for StorageMode {
+    #[inline]
+    fn default() -> Self {
+        Self::Standard {
+            custom_data_availability_window: None,
+        }
+    }
+}
+
+impl StorageMode {
+    #[must_use]
+    pub const fn is_prune(self) -> bool {
+        matches!(self, Self::Prune)
+    }
+
+    #[must_use]
+    pub const fn is_archive(self) -> bool {
+        matches!(self, Self::Archive)
+    }
+
+    pub fn min_epochs_for_blob_sidecars_requests(self, config: &Config) -> u64 {
+        match self {
+            Self::Standard {
+                custom_data_availability_window,
+            } => custom_data_availability_window
+                .unwrap_or(config.min_epochs_for_blob_sidecars_requests),
+            Self::Archive | Self::Prune => config.min_epochs_for_blob_sidecars_requests,
+        }
+    }
+
+    pub fn min_epochs_for_data_column_sidecars_requests(self, config: &Config) -> u64 {
+        match self {
+            Self::Standard {
+                custom_data_availability_window,
+            } => custom_data_availability_window
+                .unwrap_or(config.min_epochs_for_data_column_sidecars_requests),
+            Self::Archive | Self::Prune => config.min_epochs_for_data_column_sidecars_requests,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

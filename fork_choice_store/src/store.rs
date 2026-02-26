@@ -65,7 +65,9 @@ use types::{
         },
         primitives::BuilderIndex,
     },
-    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, WithStatus},
+    nonstandard::{
+        BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, StorageMode, WithStatus,
+    },
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, Checkpoint},
@@ -4241,7 +4243,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.chain_config.deneb_fork_epoch.max(
             self.tick
                 .epoch::<P>()
-                .checked_sub(self.chain_config.min_epochs_for_blob_sidecars_requests)
+                .checked_sub(
+                    self.storage_mode()
+                        .min_epochs_for_blob_sidecars_requests(&self.chain_config),
+                )
                 .unwrap_or(GENESIS_EPOCH),
         )
     }
@@ -4251,8 +4256,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.tick
                 .epoch::<P>()
                 .checked_sub(
-                    self.chain_config
-                        .min_epochs_for_data_column_sidecars_requests,
+                    self.storage_mode()
+                        .min_epochs_for_data_column_sidecars_requests(&self.chain_config),
                 )
                 .unwrap_or(GENESIS_EPOCH),
         )
@@ -4365,6 +4370,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn reset_current_slot_blocks_in_processing(&self) {
         self.current_slot_blocks_in_processing
             .store(0, Ordering::SeqCst);
+    }
+
+    fn storage_mode(&self) -> StorageMode {
+        self.storage.storage_mode()
     }
 
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {

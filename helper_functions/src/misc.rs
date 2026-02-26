@@ -30,6 +30,7 @@ use types::{
         primitives::{BlobCommitmentsInclusionProof, ColumnIndex},
     },
     gloas::{consts::BUILDER_INDEX_FLAG, primitives::BuilderIndex},
+    nonstandard::StorageMode,
     phase0::{
         consts::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
@@ -689,13 +690,27 @@ where
 }
 
 #[must_use]
-pub fn blob_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
+pub fn blob_serve_range_slot<P: Preset>(
+    config: &Config,
+    current_slot: Slot,
+    storage_mode: StorageMode,
+) -> Slot {
     let current_epoch = compute_epoch_at_slot::<P>(current_slot);
+
     let epoch = config.deneb_fork_epoch.max(
         current_epoch
-            .checked_sub(config.min_epochs_for_blob_sidecars_requests)
+            .checked_sub(storage_mode.min_epochs_for_blob_sidecars_requests(config))
             .unwrap_or(GENESIS_EPOCH),
     );
+
+    compute_start_slot_at_epoch::<P>(epoch)
+}
+
+#[must_use]
+pub fn block_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
+    let epoch = compute_epoch_at_slot::<P>(current_slot)
+        .checked_sub(config.min_epochs_for_block_requests)
+        .unwrap_or(GENESIS_EPOCH);
 
     compute_start_slot_at_epoch::<P>(epoch)
 }
@@ -819,11 +834,15 @@ pub fn parse_graffiti(string: &str) -> Result<H256> {
 }
 
 #[must_use]
-pub fn data_column_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
+pub fn data_column_serve_range_slot<P: Preset>(
+    config: &Config,
+    current_slot: Slot,
+    storage_mode: StorageMode,
+) -> Slot {
     let current_epoch = compute_epoch_at_slot::<P>(current_slot);
     let epoch = config.fulu_fork_epoch.max(
         current_epoch
-            .checked_sub(config.min_epochs_for_data_column_sidecars_requests)
+            .checked_sub(storage_mode.min_epochs_for_data_column_sidecars_requests(config))
             .unwrap_or(GENESIS_EPOCH),
     );
 

@@ -197,25 +197,6 @@ pub enum MutatorRejectionReason {
     InvalidPayloadBid,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum StorageMode {
-    Prune,
-    Standard,
-    Archive,
-}
-
-impl StorageMode {
-    #[must_use]
-    pub const fn is_prune(self) -> bool {
-        matches!(self, Self::Prune)
-    }
-
-    #[must_use]
-    pub const fn is_archive(self) -> bool {
-        matches!(self, Self::Archive)
-    }
-}
-
 pub enum BlockBlobAvailability {
     Complete,
     CompleteWithPending,

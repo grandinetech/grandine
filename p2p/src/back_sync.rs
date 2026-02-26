@@ -28,7 +28,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    nonstandard::{PayloadStatus, WithStatus},
+    nonstandard::{PayloadStatus, StorageMode, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{H256, Slot},
@@ -45,10 +45,11 @@ pub struct BackSync<P: Preset> {
     data: Data,
     archiving: bool,
     sync_mode: SyncMode,
+    storage_mode: StorageMode,
 }
 
 impl<P: Preset> BackSync<P> {
-    pub fn load(database: &Database) -> Result<Option<Self>> {
+    pub fn load(database: &Database, storage_mode: StorageMode) -> Result<Option<Self>> {
         let data = Data::find(database)?;
 
         debug_with_peers!("loaded back-sync: {data:?}");
@@ -66,15 +67,16 @@ impl<P: Preset> BackSync<P> {
             data.low.slot
         );
 
-        Ok(Some(Self::new(data, sync_mode)))
+        Ok(Some(Self::new(data, sync_mode, storage_mode)))
     }
 
-    pub fn new(data: Data, sync_mode: SyncMode) -> Self {
+    pub fn new(data: Data, sync_mode: SyncMode, storage_mode: StorageMode) -> Self {
         Self {
             data,
             batch: Batch::default(),
             archiving: false,
             sync_mode,
+            storage_mode,
         }
     }
 
@@ -98,8 +100,26 @@ impl<P: Preset> BackSync<P> {
         self.data.low.slot.checked_sub(1).unwrap_or(GENESIS_SLOT)
     }
 
-    pub const fn is_finished(&self) -> bool {
+    pub fn is_finished(&self, controller: &RealController<P>) -> bool {
         self.data.is_finished()
+            || match self.sync_mode() {
+                SyncMode::Default => {
+                    !self.storage_mode.is_archive()
+                        && self.data.current.slot
+                            <= misc::block_serve_range_slot::<P>(
+                                controller.chain_config(),
+                                controller.slot(),
+                            )
+                }
+                SyncMode::DataColumnsOnly { .. } => {
+                    self.data.current.slot
+                        <= misc::data_column_serve_range_slot::<P>(
+                            controller.chain_config(),
+                            controller.slot(),
+                            self.storage_mode,
+                        )
+                }
+            }
     }
 
     pub fn remove(&self, database: &Database) -> Result<()> {
@@ -111,10 +131,14 @@ impl<P: Preset> BackSync<P> {
         self.batch = Batch::default();
     }
 
-    pub fn push_blob_sidecar(&mut self, blob_sidecar: Arc<BlobSidecar<P>>) {
+    pub fn push_blob_sidecar(
+        &mut self,
+        controller: &RealController<P>,
+        blob_sidecar: Arc<BlobSidecar<P>>,
+    ) {
         let slot = blob_sidecar.signed_block_header.message.slot;
 
-        if slot <= self.high_slot() && !self.is_finished() {
+        if slot <= self.high_slot() && !self.is_finished(controller) {
             self.batch.push_blob_sidecar(blob_sidecar);
         } else {
             let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
@@ -122,20 +146,24 @@ impl<P: Preset> BackSync<P> {
         }
     }
 
-    pub fn push_block(&mut self, block: Arc<SignedBeaconBlock<P>>) {
+    pub fn push_block(&mut self, controller: &RealController<P>, block: Arc<SignedBeaconBlock<P>>) {
         let slot = block.message().slot();
 
-        if slot <= self.high_slot() && !self.is_finished() {
+        if slot <= self.high_slot() && !self.is_finished(controller) {
             self.batch.push_block(block);
         } else {
             debug_with_peers!("ignoring block: {slot}");
         }
     }
 
-    pub fn push_data_column_sidecar(&mut self, data_column_sidecar: Arc<DataColumnSidecar<P>>) {
+    pub fn push_data_column_sidecar(
+        &mut self,
+        controller: &RealController<P>,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+    ) {
         let slot = data_column_sidecar.slot();
 
-        if slot <= self.high_slot() && !self.is_finished() {
+        if slot <= self.high_slot() && !self.is_finished(controller) {
             self.batch.push_data_column_sidecar(data_column_sidecar);
         } else {
             let data_column_id: DataColumnIdentifier = data_column_sidecar.as_ref().into();
@@ -159,7 +187,7 @@ impl<P: Preset> BackSync<P> {
         is_exiting: Arc<AtomicBool>,
         sync_tx: UnboundedSender<ArchiverToSync>,
     ) -> Result<()> {
-        if !self.is_finished() {
+        if !self.is_finished(&controller) {
             debug_with_peers!("not spawning state archiver: back-sync not yet finished");
             return Ok(());
         }
@@ -208,10 +236,12 @@ impl<P: Preset> BackSync<P> {
         let last_block_checkpoint = self.data.current;
 
         let (checkpoint, blocks, blob_sidecars, data_column_sidecars) = match &self.sync_mode {
-            SyncMode::Default => {
-                self.batch
-                    .verify_from_checkpoint(config, controller, last_block_checkpoint)?
-            }
+            SyncMode::Default => self.batch.verify_from_checkpoint(
+                config,
+                controller,
+                last_block_checkpoint,
+                self.storage_mode,
+            )?,
             SyncMode::DataColumnsOnly { column_indices, .. } => {
                 self.batch.verify_extra_data_columns_from_checkpoint(
                     config,
@@ -219,6 +249,7 @@ impl<P: Preset> BackSync<P> {
                     last_block_checkpoint,
                     column_indices,
                     self.low_slot(),
+                    self.storage_mode,
                 )?
             }
         };
@@ -280,6 +311,7 @@ impl<P: Preset> Batch<P> {
         controller: &RealController<P>,
         block: &Arc<SignedBeaconBlock<P>>,
         parent: &Arc<SignedBeaconBlock<P>>,
+        storage_mode: StorageMode,
     ) -> Result<Vec<Arc<BlobSidecar<P>>>> {
         let block = block.message();
 
@@ -292,7 +324,7 @@ impl<P: Preset> Batch<P> {
         let slot = block.slot();
         let head_slot = head_state.slot();
 
-        if slot < misc::blob_serve_range_slot::<P>(config, head_slot) {
+        if slot < misc::blob_serve_range_slot::<P>(config, head_slot, storage_mode) {
             return Ok(vec![]);
         }
 
@@ -335,12 +367,14 @@ impl<P: Preset> Batch<P> {
             .collect()
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn valid_data_column_sidecars_for(
         &self,
         config: &Config,
         controller: &RealController<P>,
         block: &Arc<SignedBeaconBlock<P>>,
         parent: &Arc<SignedBeaconBlock<P>>,
+        storage_mode: StorageMode,
         validatable_columns: &HashSet<ColumnIndex>,
         validate_block_presence: bool,
     ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
@@ -360,7 +394,7 @@ impl<P: Preset> Batch<P> {
         let slot = block.slot();
         let head_slot = head_state.slot();
 
-        if slot < misc::data_column_serve_range_slot::<P>(config, head_slot) {
+        if slot < misc::data_column_serve_range_slot::<P>(config, head_slot, storage_mode) {
             return Ok(vec![]);
         }
 
@@ -410,6 +444,7 @@ impl<P: Preset> Batch<P> {
         config: &Config,
         controller: &RealController<P>,
         mut checkpoint: SyncCheckpoint,
+        storage_mode: StorageMode,
     ) -> Result<(
         SyncCheckpoint,
         Vec<Arc<SignedBeaconBlock<P>>>,
@@ -461,14 +496,20 @@ impl<P: Preset> Batch<P> {
                         controller,
                         block,
                         parent,
+                        storage_mode,
                         &controller.sampling_columns(),
                         false,
                     )?;
 
                     verified_data_column_sidecars.append(&mut data_columns);
                 } else {
-                    let mut blobs =
-                        self.valid_blob_sidecars_for(config, controller, block, parent)?;
+                    let mut blobs = self.valid_blob_sidecars_for(
+                        config,
+                        controller,
+                        block,
+                        parent,
+                        storage_mode,
+                    )?;
 
                     verified_blob_sidecars.append(&mut blobs);
                 }
@@ -508,6 +549,7 @@ impl<P: Preset> Batch<P> {
         mut checkpoint: SyncCheckpoint,
         column_indices: &HashSet<ColumnIndex>,
         low_slot: Slot,
+        storage_mode: StorageMode,
     ) -> Result<(
         SyncCheckpoint,
         Vec<Arc<SignedBeaconBlock<P>>>,
@@ -558,6 +600,7 @@ impl<P: Preset> Batch<P> {
                 controller,
                 block,
                 parent,
+                storage_mode,
                 column_indices,
                 false,
             )?;

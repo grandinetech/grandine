@@ -5,12 +5,22 @@ use database::DatabaseMode;
 
 use crate::StorageConfig;
 use crate::commands::AppDatabase;
+
 pub fn print(
     storage_config: &StorageConfig,
     database: AppDatabase,
     custom_path: Option<PathBuf>,
 ) -> Result<()> {
     match database {
+        AppDatabase::Beacon => {
+            let database = storage_config.beacon_fork_choice_database(
+                custom_path,
+                DatabaseMode::ReadOnly,
+                None,
+            )?;
+
+            fork_choice_control::print_beacon_database_info(&database)?;
+        }
         AppDatabase::Sync => {
             let database = storage_config.sync_database(custom_path, DatabaseMode::ReadOnly)?;
             p2p::print_sync_database_info(&database)?;

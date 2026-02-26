@@ -185,9 +185,7 @@ mod tests {
     use eth2_cache_utils::mainnet;
     use itertools::{EitherOrBoth, Itertools as _};
     use pubkey_cache::PubkeyCache;
-    use types::phase0::consts::GENESIS_SLOT;
-
-    use crate::StorageMode;
+    use types::{nonstandard::StorageMode, phase0::consts::GENESIS_SLOT};
 
     use super::*;
 
@@ -278,7 +276,7 @@ mod tests {
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
             NonZeroU64::MIN,
-            StorageMode::Standard,
+            StorageMode::default(),
         )
     }
 }

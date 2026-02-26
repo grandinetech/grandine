@@ -73,7 +73,7 @@ use thiserror::Error;
 use tokio::{runtime::Builder, select};
 #[cfg(feature = "embed")]
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use types::{
     config::Config as ChainConfig,
     phase0::{
@@ -690,6 +690,7 @@ pub async fn run_after_genesis<P: Preset>(
         data_dumper.clone_arc(),
         validator_config.backfill_custody_groups,
         validator_config.custody_mode,
+        storage_mode,
     )
     .await?;
 
@@ -1148,7 +1149,8 @@ impl Context {
                 command,
                 &anchor_checkpoint_provider,
                 slashing_protection_history_limit,
-            );
+            )
+            .inspect_err(|error| error!("error occurred while executing command: {error:?}"));
         }
 
         let state_load_strategy = if force_checkpoint_sync {

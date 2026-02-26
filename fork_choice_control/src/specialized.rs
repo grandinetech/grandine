@@ -15,12 +15,12 @@ use tap::Pipe as _;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
+    nonstandard::StorageMode,
     phase0::primitives::Slot,
     preset::Preset,
 };
 
 use crate::{
-    StorageMode,
     controller::{Controller, MutatorHandle},
     events::EventChannels,
     messages::{AttestationVerifierMessage, P2pMessage},
@@ -109,7 +109,9 @@ where
             pubkey_cache.clone_arc(),
             database,
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            StorageMode::Standard,
+            StorageMode::Standard {
+                custom_data_availability_window: None,
+            },
         ));
 
         let event_channels = Arc::new(EventChannels::default());
