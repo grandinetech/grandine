@@ -7,6 +7,7 @@ use types::phase0::primitives::Slot;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, EnumString)]
 #[strum(serialize_all = "snake_case")]
 pub enum AppDatabase {
+    Beacon,
     Sync,
 }
 

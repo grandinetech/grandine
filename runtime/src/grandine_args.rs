@@ -31,7 +31,7 @@ use eth2_libp2p::{
     rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig},
 };
 use features::Feature;
-use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS, StorageMode};
+use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS};
 use fork_choice_store::{DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
@@ -56,7 +56,7 @@ use tracing::Level;
 use types::{
     bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
-    nonstandard::{CustodyMode, Phase},
+    nonstandard::{CustodyMode, Phase, StorageMode},
     phase0::primitives::{
         Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot,
     },
@@ -281,6 +281,17 @@ struct BeaconNodeOptions {
     /// [default: None]
     #[clap(long)]
     checkpoint_sync_url: Option<RedactingUrl>,
+
+    /// Number of epochs to keep blob or data column sidecars available for peer requests.
+    /// Overrides `Config::min_epochs_for_blob_sidecars_requests` and
+    /// `Config::min_epochs_for_data_column_sidecars_requests`.
+    /// Intended primarily for testing. Use with caution.
+    #[clap(
+        long,
+        conflicts_with("archive_storage"),
+        conflicts_with("prune_storage")
+    )]
+    data_availability_window: Option<u64>,
 
     /// Force checkpoint sync. Requires --checkpoint-sync-url
     /// [default: disabled]
@@ -1033,6 +1044,7 @@ impl GrandineArgs {
             max_empty_slots,
             max_events,
             checkpoint_sync_url,
+            data_availability_window,
             eth1_rpc_urls,
             force_checkpoint_sync,
             force_reset_beacon_db,
@@ -1426,7 +1438,9 @@ impl GrandineArgs {
         } else if archive_storage {
             StorageMode::Archive
         } else {
-            StorageMode::Standard
+            StorageMode::Standard {
+                custom_data_availability_window: data_availability_window,
+            }
         };
 
         let storage_config = StorageConfig {

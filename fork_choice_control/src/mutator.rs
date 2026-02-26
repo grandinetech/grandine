@@ -558,7 +558,7 @@ where
         }
 
         if self.store.is_forward_synced() && misc::slots_since_epoch_start::<P>(tick.slot) == 0 {
-            if tick.kind == TickKind::AttestFourth && self.store.is_back_synced() {
+            if tick.kind == TickKind::AttestFourth {
                 self.prune_old_records()?;
             }
 

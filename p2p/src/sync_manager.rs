@@ -34,6 +34,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
+    nonstandard::StorageMode,
     phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
 };
@@ -102,6 +103,7 @@ pub struct SyncManager<P: Preset> {
     last_sync_range: Range<Slot>,
     sequential_redownloads: usize,
     status_updates_cache: TimedSizedCache<Epoch, ()>,
+    storage_mode: StorageMode,
     not_enough_peers_message_shown_at: Option<Instant>,
     sync_from_finalized: bool,
     // store peers that don't serve blocks prior to `MIN_EPOCHS_FOR_BLOCK_REQUESTS`
@@ -117,6 +119,7 @@ impl<P: Preset> SyncManager<P> {
         network_globals: Arc<NetworkGlobals>,
         target_peers: usize,
         received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
+        storage_mode: StorageMode,
     ) -> Self {
         Self {
             peers: HashMap::new(),
@@ -127,6 +130,7 @@ impl<P: Preset> SyncManager<P> {
             last_sync_head: 0,
             sequential_redownloads: 0,
             status_updates_cache: TimedSizedCache::with_size_and_lifespan(5, PEER_UPDATE_COOLDOWN),
+            storage_mode,
             not_enough_peers_message_shown_at: None,
             sync_from_finalized: false,
             back_sync_black_list: LruCache::new(
@@ -613,9 +617,10 @@ impl<P: Preset> SyncManager<P> {
 
         let slot_distance = remote_head_slot.saturating_sub(sync_start_slot);
         let batches_in_front = slot_distance / slots_per_request + 1;
-        let blob_serve_range_slot = misc::blob_serve_range_slot::<P>(config, current_slot);
+        let blob_serve_range_slot =
+            misc::blob_serve_range_slot::<P>(config, current_slot, self.storage_mode);
         let data_column_serve_range_slot =
-            misc::data_column_serve_range_slot::<P>(config, current_slot);
+            misc::data_column_serve_range_slot::<P>(config, current_slot, self.storage_mode);
 
         let mut max_slot = local_head_slot;
         let mut sync_batches = vec![];
@@ -1478,7 +1483,13 @@ mod tests {
         let network_globals =
             NetworkGlobals::new_test_globals::<P>(chain_config, vec![], network_config);
         let received_data_column_sidecars = Arc::new(SccHashMap::new());
-        SyncManager::new(network_globals.into(), 100, received_data_column_sidecars)
+
+        SyncManager::new(
+            network_globals.into(),
+            100,
+            received_data_column_sidecars,
+            StorageMode::default(),
+        )
     }
 
     // `SyncBatch.count` is either 2 (blocks & blobs) or 16 (blocks only) because the test cases use `Minimal`.
@@ -1836,8 +1847,14 @@ mod tests {
         let network_globals =
             NetworkGlobals::new_test_globals::<Minimal>(chain_config, vec![], network_config);
         let received_data_column_sidecars = Arc::new(SccHashMap::new());
-        let mut sync_manager =
-            SyncManager::new(network_globals.into(), 100, received_data_column_sidecars);
+
+        let mut sync_manager = SyncManager::new(
+            network_globals.into(),
+            100,
+            received_data_column_sidecars,
+            StorageMode::default(),
+        );
+
         sync_manager.peers_custodial = peers_custodial;
         sync_manager.peers = peer_statuses;
         sync_manager

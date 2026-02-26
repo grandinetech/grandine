@@ -18,7 +18,7 @@ use eth1_api::RealController;
 use eth2_libp2p::{
     NetworkGlobals, PeerAction, PeerId, ReportSource, service::api_types::AppRequestId,
 };
-use fork_choice_control::{StorageMode, SyncMessage};
+use fork_choice_control::SyncMessage;
 use futures::{
     StreamExt as _,
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -35,12 +35,14 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
+use tracing::info;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+    nonstandard::StorageMode,
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{H256, Slot},
@@ -96,6 +98,7 @@ pub struct BlockSyncService<P: Preset> {
     validator_statistics: Option<Arc<ValidatorStatistics>>,
     next_request_id: usize,
     slot: Slot,
+    storage_mode: StorageMode,
     is_back_synced: bool,
     is_forward_synced: bool,
     is_exiting: Arc<AtomicBool>,
@@ -125,6 +128,7 @@ impl<P: Preset> Drop for BlockSyncService<P> {
 
 impl<P: Preset> BlockSyncService<P> {
     #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_lines)]
     pub async fn new(
         config: Arc<Config>,
         db: Database,
@@ -185,9 +189,10 @@ impl<P: Preset> BlockSyncService<P> {
                         low: back_sync_terminus,
                     },
                     BackSyncMode::Default,
+                    storage_mode,
                 );
 
-                if !back_sync_process.is_finished() {
+                if !back_sync_process.is_finished(&controller) {
                     back_sync_process.save(&db)?;
                 }
 
@@ -196,7 +201,7 @@ impl<P: Preset> BlockSyncService<P> {
                 }
             }
 
-            back_sync = BackSync::load(&db)?;
+            back_sync = BackSync::load(&db, storage_mode)?;
 
             let (sync_tx, sync_rx) = futures::channel::mpsc::unbounded();
 
@@ -235,11 +240,13 @@ impl<P: Preset> BlockSyncService<P> {
                 network_globals.clone_arc(),
                 target_peers,
                 received_data_column_sidecars.clone_arc(),
+                storage_mode,
             ),
             metrics,
             validator_statistics,
             next_request_id: 0,
             slot,
+            storage_mode,
             is_back_synced,
             // Initialize `is_forward_synced` to `false`. This is needed to make
             // `BlockSyncService::set_forward_synced` subscribe to core topics on startup.
@@ -409,7 +416,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                                 SyncDirection::Back => {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
-                                        back_sync.push_blob_sidecar(blob_sidecar);
+                                        back_sync.push_blob_sidecar(&self.controller, blob_sidecar);
                                     }
                                 }
                             }
@@ -463,7 +470,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                                 SyncDirection::Back => {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
-                                        back_sync.push_block(block);
+                                        back_sync.push_block(&self.controller, block);
                                     }
                                 }
                             }
@@ -534,7 +541,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 }
                                 SyncDirection::Back => {
                                     if let Some(back_sync) = self.back_sync.as_mut() {
-                                        back_sync.push_data_column_sidecar(data_column_sidecar);
+                                        back_sync.push_data_column_sidecar(&self.controller, data_column_sidecar);
                                     }
                                 }
                             }
@@ -593,6 +600,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 let availability_slot = misc::data_column_serve_range_slot::<P>(
                                     self.controller.chain_config(),
                                     self.slot,
+                                    self.storage_mode,
                                 );
 
                                 let sidecars_pending_reconstruction = self
@@ -676,6 +684,7 @@ impl<P: Preset> BlockSyncService<P> {
         let config = self.config.clone_arc();
         let database = self.database.clone_arc();
         let controller = self.controller.clone_arc();
+        let storage_mode = self.storage_mode;
 
         self.dedicated_executor
             .spawn(async move {
@@ -691,7 +700,7 @@ impl<P: Preset> BlockSyncService<P> {
                             );
                         }
 
-                        match BackSync::load(&database) {
+                        match BackSync::load(&database, storage_mode) {
                             Ok(mut back_sync) => {
                                 if let Some(back_sync) = back_sync.as_mut() {
                                     back_sync.reset_batch();
@@ -749,7 +758,7 @@ impl<P: Preset> BlockSyncService<P> {
                 }
             }
 
-            if let Some(sync) = BackSync::load(&self.database)? {
+            if let Some(sync) = BackSync::load(&self.database, self.storage_mode)? {
                 self.back_sync = Some(sync);
                 self.try_to_spawn_back_sync_states_archiver()?;
                 self.request_blobs_and_blocks_if_ready();
@@ -770,7 +779,7 @@ impl<P: Preset> BlockSyncService<P> {
                     self.is_exiting.clone_arc(),
                     archiver_to_sync_tx.clone(),
                 )?;
-            } else if back_sync.is_finished() {
+            } else if back_sync.is_finished(&self.controller) {
                 // Trigger back sync finish & clean-up without archiving
                 self.finish_back_sync()?;
             }
@@ -804,9 +813,13 @@ impl<P: Preset> BlockSyncService<P> {
                     .phase_at_slot::<P>(start_slot)
                     .is_peerdas_activated()
                 {
-                    misc::data_column_serve_range_slot::<P>(chain_config, self.slot)
+                    misc::data_column_serve_range_slot::<P>(
+                        chain_config,
+                        self.slot,
+                        self.storage_mode,
+                    )
                 } else {
-                    misc::blob_serve_range_slot::<P>(chain_config, self.slot)
+                    misc::blob_serve_range_slot::<P>(chain_config, self.slot, self.storage_mode)
                 };
 
                 if start_slot + count < data_serve_range_slot {
@@ -1031,15 +1044,20 @@ impl<P: Preset> BlockSyncService<P> {
                     misc::data_column_serve_range_slot::<P>(
                         self.controller.chain_config(),
                         self.slot,
+                        self.storage_mode,
                     )
                 } else {
-                    misc::blob_serve_range_slot::<P>(self.controller.chain_config(), self.slot)
+                    misc::blob_serve_range_slot::<P>(
+                        self.controller.chain_config(),
+                        self.slot,
+                        self.storage_mode,
+                    )
                 };
 
                 if let Some(back_sync) = self
                     .back_sync
                     .as_ref()
-                    .filter(|back_sync| !back_sync.is_finished())
+                    .filter(|back_sync| !back_sync.is_finished(&self.controller))
                 {
                     self.sync_manager
                         .build_back_sync_batches(
@@ -1163,10 +1181,13 @@ impl<P: Preset> BlockSyncService<P> {
             }
         };
 
-        let back_sync_process =
-            BackSync::<P>::new(BackSyncData { current, high, low }, back_sync_mode);
+        let back_sync_process = BackSync::<P>::new(
+            BackSyncData { current, high, low },
+            back_sync_mode,
+            self.storage_mode,
+        );
 
-        if !back_sync_process.is_finished() {
+        if !back_sync_process.is_finished(&self.controller) {
             back_sync_process.save(&self.database)?;
         }
 
@@ -1191,6 +1212,7 @@ impl<P: Preset> BlockSyncService<P> {
         let blob_serve_slot = misc::blob_serve_range_slot::<P>(
             self.controller.chain_config(),
             self.controller.slot(),
+            self.storage_mode,
         );
 
         if slot < blob_serve_slot {
@@ -1284,6 +1306,7 @@ impl<P: Preset> BlockSyncService<P> {
         let data_column_serve_range_slot = misc::data_column_serve_range_slot::<P>(
             self.controller.chain_config(),
             self.controller.slot(),
+            self.storage_mode,
         );
 
         if slot < data_column_serve_range_slot {
@@ -1619,7 +1642,8 @@ fn save_latest_finalized_back_sync_checkpoint(
 }
 
 pub fn print_sync_database_info(database: &Database) -> Result<()> {
-    info_with_peers!(
+    info!("sync database info:");
+    info!(
         "latest finalized back-sync checkpoint: {:#?}",
         get_latest_finalized_back_sync_checkpoint(database)?,
     );
@@ -1633,9 +1657,11 @@ pub fn print_sync_database_info(database: &Database) -> Result<()> {
             break;
         }
 
-        let back_sync = BackSyncData::from_ssz_default(value_bytes)?;
-
-        info_with_peers!("{} : {back_sync:#?}", String::from_utf8_lossy(&key_bytes));
+        info!(
+            "{} : {:#?}",
+            String::from_utf8_lossy(&key_bytes),
+            BackSyncData::from_ssz_default(value_bytes)?,
+        );
     }
 
     Ok(())

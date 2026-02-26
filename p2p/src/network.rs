@@ -61,7 +61,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    nonstandard::{CustodyMode, Phase, RelativeEpoch, WithStatus},
+    nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
@@ -142,6 +142,7 @@ pub struct Network<P: Preset> {
     earliest_available_slot: Slot,
     last_nfd_update_epoch: Option<Epoch>,
     backfill_custody_groups: bool,
+    storage_mode: StorageMode,
 }
 
 impl<P: Preset> Network<P> {
@@ -164,6 +165,7 @@ impl<P: Preset> Network<P> {
         data_dumper: Arc<DataDumper>,
         backfill_custody_groups: bool,
         custody_mode: CustodyMode,
+        storage_mode: StorageMode,
     ) -> Result<Self> {
         let chain_config = controller.chain_config();
         let head_state = controller.head_state().value;
@@ -283,6 +285,7 @@ impl<P: Preset> Network<P> {
             earliest_available_slot,
             last_nfd_update_epoch: None,
             backfill_custody_groups,
+            storage_mode,
         };
 
         Ok(network)
@@ -1112,7 +1115,29 @@ impl<P: Preset> Network<P> {
         Ok(sampling_columns)
     }
 
-    const fn update_earliest_available_slot(&mut self, slot: Slot) {
+    fn update_earliest_available_slot(&mut self, mut slot: Slot) {
+        let config = self.controller.chain_config();
+
+        // `If the node is able to serve all blocks throughout the entire sidecars
+        // retention period (as defined by both `MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS`
+        // and `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS`), but is NOT able to serve
+        // all sidecars during this period, it should advertise the earliest slot from
+        // which it can serve all sidecars.`
+        if let StorageMode::Standard {
+            custom_data_availability_window: Some(epochs),
+        } = self.storage_mode
+            && epochs < config.min_epochs_for_data_column_sidecars_requests
+        {
+            slot = core::cmp::max(
+                misc::data_column_serve_range_slot::<P>(
+                    config,
+                    self.controller.head_slot(),
+                    self.storage_mode,
+                ),
+                slot,
+            );
+        }
+
         self.earliest_available_slot = slot;
     }
 

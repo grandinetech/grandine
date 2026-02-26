@@ -15,7 +15,7 @@ use database::Database;
 use easy_ext::ext;
 use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
-use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage, StorageMode};
+use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage};
 use fork_choice_store::{
     ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
     BlockAction, DataAvailabilityPolicy, Store, StoreConfig, ValidAttestation,
@@ -29,6 +29,7 @@ use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
     combined::{Attestation, SignedBeaconBlock},
     config::Config,
+    nonstandard::StorageMode,
     phase0::primitives::Slot,
     preset::{Mainnet, Preset},
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -73,7 +74,7 @@ impl Criterion {
                     pubkey_cache.clone_arc(),
                     Database::in_memory(),
                     DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-                    StorageMode::Standard,
+                    StorageMode::default(),
                 ));
 
                 let mut store = Store::new(

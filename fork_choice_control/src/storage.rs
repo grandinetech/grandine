@@ -15,6 +15,7 @@ use reqwest::Client;
 use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tracing::info;
 use transition_functions::combined;
 use types::{
     combined::{BeaconState, DataColumnSidecar, SignedBeaconBlock},
@@ -24,7 +25,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint},
+    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint, StorageMode},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Epoch, H256, Slot},
@@ -34,7 +35,7 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-use crate::{StorageMode, checkpoint_sync};
+use crate::checkpoint_sync;
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 
@@ -1010,6 +1011,10 @@ impl<P: Preset> Storage<P> {
 }
 
 impl<P: Preset> fork_choice_store::Storage<P> for Storage<P> {
+    fn storage_mode(&self) -> StorageMode {
+        self.storage_mode
+    }
+
     fn stored_state_by_block_root(&self, block_root: H256) -> Result<Option<Arc<BeaconState<P>>>> {
         self.state_by_block_root(block_root)
     }
@@ -1233,6 +1238,27 @@ pub fn serialize(key: impl core::fmt::Display, value: impl SszWrite) -> Result<(
     Ok((serialize_key(key), serialize_value(value)?))
 }
 
+// Add more info when needed
+pub fn print_beacon_database_info(database: &Database) -> Result<()> {
+    info!("beacon_fork_choice database info:");
+
+    match database
+        .iterator_ascending(SlotColumnId(0, H256::zero(), 0).to_string()..)?
+        .next()
+        .transpose()?
+    {
+        Some((key_bytes, value_bytes)) if SlotColumnId::has_prefix(&key_bytes) => {
+            info!(
+                "oldest data column entry: {:?}",
+                DataColumnIdentifier::from_ssz_default(value_bytes)?,
+            );
+        }
+        _ => info!("no data column entries found"),
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use bytesize::ByteSize;
@@ -1304,7 +1330,7 @@ mod tests {
             Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
-            StorageMode::Standard,
+            StorageMode::default(),
         );
 
         // slots 1, 3, 10
@@ -1369,7 +1395,7 @@ mod tests {
             Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
-            StorageMode::Standard,
+            StorageMode::default(),
         );
 
         assert_eq!(storage.finalized_block_count()?, 2);
@@ -1409,7 +1435,7 @@ mod tests {
             Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
-            StorageMode::Standard,
+            StorageMode::default(),
         );
 
         let blob_id_0 = BlobIdentifier {
@@ -1478,7 +1504,7 @@ mod tests {
             Arc::new(PubkeyCache::default()),
             database,
             nonzero!(64_u64),
-            StorageMode::Standard,
+            StorageMode::default(),
         );
 
         assert_eq!(storage.block_root_before_or_at_slot(1)?, None);

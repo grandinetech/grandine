@@ -17,7 +17,6 @@ use eth2_cache_utils::mainnet;
 use features::Feature;
 use fork_choice_control::{
     Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, StateLoadStrategy, Storage,
-    StorageMode,
 };
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
@@ -39,7 +38,7 @@ use tokio::runtime::Builder;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
-    nonstandard::{FinalizedCheckpoint, Phase},
+    nonstandard::{FinalizedCheckpoint, Phase, StorageMode},
     phase0::primitives::{H256, NodeId},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
@@ -142,7 +141,7 @@ impl<P: Preset> Context<P> {
             pubkey_cache.clone_arc(),
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            StorageMode::Standard,
+            StorageMode::default(),
         ));
 
         let state_load_strategy = StateLoadStrategy::Anchor {
