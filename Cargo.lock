@@ -2888,7 +2888,7 @@ dependencies = [
 [[package]]
 name = "bls12_381"
 version = "0.8.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "ff 0.13.1",
  "group 0.13.0",
@@ -7956,7 +7956,7 @@ dependencies = [
 [[package]]
 name = "kzg"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "arbitrary",
  "dirs 6.0.0",
@@ -12902,7 +12902,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-arkworks5"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "arbitrary",
  "ark-bls12-381",
@@ -12920,7 +12920,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-blst"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "arbitrary",
  "blst",
@@ -12935,7 +12935,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-constantine"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "arbitrary",
  "blst",
@@ -12953,7 +12953,7 @@ dependencies = [
 [[package]]
 name = "rust-kzg-mcl"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "arbitrary",
  "blst",
@@ -12969,10 +12969,10 @@ dependencies = [
 [[package]]
 name = "rust-kzg-zkcrypto"
 version = "0.1.0"
-source = "git+https://github.com/grandinetech/rust-kzg.git#d47acbdf587753f466a5e6842395e03930ae1f96"
+source = "git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e#bf57df7cdb2e38ecc92332fa2e16b121de2f625e"
 dependencies = [
  "arbitrary",
- "bls12_381 0.8.0 (git+https://github.com/grandinetech/rust-kzg.git)",
+ "bls12_381 0.8.0 (git+https://github.com/grandinetech/rust-kzg.git?rev=bf57df7cdb2e38ecc92332fa2e16b121de2f625e)",
  "byteorder",
  "ff 0.13.1",
  "hex",
