@@ -500,7 +500,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 column,
                                 peer_id,
                                 topic,
-                            ).await;
+                            );
                         }
                         P2pToSync::RequestedDataColumnSidecar(data_column_sidecar, peer_id, request_id, request_type) => {
                             let data_column_identifier = data_column_sidecar.as_ref().into();

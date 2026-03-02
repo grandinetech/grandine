@@ -97,8 +97,8 @@ use crate::{
         ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin,
         Difference, DifferenceAtLocation, DissolvedDifference, ExecutionPayloadBidAction,
         ExecutionPayloadBidOrigin, LatestMessage, Location, PartialAttestationAction,
-        PartialBlockAction, PartialDataColumnSidecarAction, PayloadAction, Score, SegmentId,
-        Storage, UnfinalizedBlock, ValidAttestation,
+        PartialBlockAction, PartialDataColumnOrigin, PartialDataColumnSidecarAction, PayloadAction,
+        Score, SegmentId, Storage, UnfinalizedBlock, ValidAttestation,
     },
     partial_data_column_cache::PartialDataColumnCache,
     segment::{Position, Segment},
@@ -2694,6 +2694,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         column: Arc<PartialDataColumn<P>>,
         state: Option<Arc<BeaconState<P>>>,
+        origin: &PartialDataColumnOrigin,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<PartialDataColumnSidecarAction<P>> {
         // validate header if in the message, otherwise get from cache by `block_root`
@@ -2709,6 +2710,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let header_result = self.validate_partial_data_column_header(
                 column.block_root,
                 header.clone_arc(),
+                origin,
                 parent_info,
                 || {
                     state.or_else(|| {
@@ -2773,25 +2775,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The sidecar's cell and proof data is valid as verified by verify_partial_data_column_sidecar_kzg_proofs(sidecar, header.kzg_commitments, column_index).
-        let verify_result = verify_partial_data_column_sidecar_kzg_proofs(
-            &column.sidecar,
-            &header.kzg_commitments,
-            column.index,
-            self.store_config.kzg_backend,
-            metrics,
-        )
-        .map_err(|error| Error::PartialColumnInvalidKzgProofs {
-            column: column.clone_arc(),
-            error,
-        })?;
+        if !origin.is_from_el() {
+            let verify_result = verify_partial_data_column_sidecar_kzg_proofs(
+                &column.sidecar,
+                &header.kzg_commitments,
+                column.index,
+                self.store_config.kzg_backend,
+                metrics,
+            )
+            .map_err(|error| Error::PartialColumnInvalidKzgProofs {
+                column: column.clone_arc(),
+                error,
+            })?;
 
-        ensure!(
-            verify_result,
-            Error::PartialColumnInvalidKzgProofs {
-                column,
-                error: anyhow!("invalid KZG proofs verification result"),
-            }
-        );
+            ensure!(
+                verify_result,
+                Error::PartialColumnInvalidKzgProofs {
+                    column,
+                    error: anyhow!("invalid KZG proofs verification result"),
+                }
+            );
+        }
 
         Ok(PartialDataColumnSidecarAction::Accept(column))
     }
@@ -2800,6 +2804,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block_root: H256,
         header: Arc<PartialDataColumnHeader<P>>,
+        origin: &PartialDataColumnOrigin,
         parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
@@ -2905,10 +2910,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The header's kzg_commitments field inclusion proof is valid as verified by verify_partial_data_column_header_inclusion_proof.
-        ensure!(
-            verify_partial_data_column_header_inclusion_proof(&header, metrics),
-            Error::PartialHeaderInvalidInclusionProof { header }
-        );
+        if !origin.is_from_el() {
+            ensure!(
+                verify_partial_data_column_header_inclusion_proof(&header, metrics),
+                Error::PartialHeaderInvalidInclusionProof { header }
+            );
+        }
 
         // [REJECT] The header is proposed by the expected proposer_index for the block's slot in the context of the current shuffling
         // (defined by block_header.parent_root/block_header.slot).
@@ -3315,7 +3322,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn apply_partial_data_column_sidecar(
         &mut self,
-        partial_column: Arc<PartialDataColumn<P>>,
+        partial_column: &Arc<PartialDataColumn<P>>,
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         self.partial_data_column_cache
             .upsert_partial_column(partial_column)

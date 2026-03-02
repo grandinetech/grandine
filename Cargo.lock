@@ -4857,6 +4857,7 @@ dependencies = [
  "anyhow",
  "dedicated_executor",
  "duplicate",
+ "execution_engine",
  "futures",
  "helper_functions",
  "itertools 0.14.0",

@@ -6,13 +6,13 @@ use std::{
 
 use anyhow::Result;
 use clock::Tick;
-use eth2_libp2p::{GossipId, GossipTopic, PeerId};
+use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin, PartialDataColumnSidecarAction,
+    ExecutionPayloadBidOrigin, PartialDataColumnOrigin, PartialDataColumnSidecarAction,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -152,9 +152,8 @@ pub enum MutatorMessage<P: Preset, W> {
     PartialDataColumnSidecar {
         wait_group: W,
         result: Result<PartialDataColumnSidecarAction<P>>,
+        origin: PartialDataColumnOrigin,
         data_column_identifier: DataColumnIdentifier,
-        peer_id: PeerId,
-        topic: GossipTopic,
         submission_time: Instant,
     },
     PayloadBid {

@@ -5,13 +5,13 @@ use std::{
 };
 
 use anyhow::Result;
-use eth2_libp2p::{GossipId, GossipTopic, PeerId};
+use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    ExecutionPayloadBidOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, PartialDataColumnOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -797,10 +797,9 @@ pub struct PartialDataColumnTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub column: Arc<PartialDataColumn<P>>,
+    pub partial_column: Arc<PartialDataColumn<P>>,
     pub state: Option<Arc<CombinedBeaconState<P>>>,
-    pub peer_id: PeerId,
-    pub topic: GossipTopic,
+    pub origin: PartialDataColumnOrigin,
     pub submission_time: Instant,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -812,24 +811,26 @@ impl<P: Preset, W> Run for PartialDataColumnTask<P, W> {
             store_snapshot,
             mutator_tx,
             wait_group,
-            column,
+            partial_column,
             state,
-            peer_id,
-            topic,
+            origin,
             submission_time,
             metrics,
         } = self;
 
-        let data_column_identifier: DataColumnIdentifier = column.as_ref().into();
-
-        let result = store_snapshot.validate_partial_data_column(column, state, metrics.as_ref());
+        let data_column_identifier = partial_column.as_ref().into();
+        let result = store_snapshot.validate_partial_data_column(
+            partial_column,
+            state,
+            &origin,
+            metrics.as_ref(),
+        );
 
         MutatorMessage::PartialDataColumnSidecar {
             wait_group,
             result,
+            origin,
             data_column_identifier,
-            peer_id,
-            topic,
             submission_time,
         }
         .send(&mutator_tx);

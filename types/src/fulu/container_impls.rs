@@ -1,5 +1,6 @@
 use core::fmt;
 
+use anyhow::Error as AnyError;
 use ssz::{ContiguousList, Hc, SszHash as _};
 
 use crate::{
@@ -13,6 +14,7 @@ use crate::{
         DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier, PartialDataColumn,
         PartialDataColumnHeader, PartialDataColumnSidecar,
     },
+    nonstandard::BlockOrDataColumnSidecar,
     phase0::primitives::{H256, Slot},
     preset::Preset,
 };
@@ -308,5 +310,25 @@ impl<P: Preset> PartialDataColumnSidecar<P> {
 impl<P: Preset> PartialDataColumnHeader<P> {
     pub fn slot(&self) -> Slot {
         self.signed_block_header.message.slot
+    }
+}
+
+impl<P: Preset> TryFrom<&BlockOrDataColumnSidecar<P>> for PartialDataColumnHeader<P> {
+    type Error = AnyError;
+
+    fn try_from(value: &BlockOrDataColumnSidecar<P>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            signed_block_header: value
+                .signed_block_header()
+                .ok_or(AnyError::msg("value without block header"))?,
+            kzg_commitments: value
+                .kzg_commitments()
+                .cloned()
+                .ok_or(AnyError::msg("value without kzg commitments"))?,
+            kzg_commitments_inclusion_proof: value
+                .kzg_commitments_inclusion_proof()
+                .cloned()
+                .ok_or(AnyError::msg("value without inclusion proofs"))?,
+        })
     }
 }

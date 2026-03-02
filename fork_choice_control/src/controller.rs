@@ -24,7 +24,7 @@ use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    StateCacheProcessor, Store, StoreConfig,
+    PartialDataColumnOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -617,23 +617,23 @@ where
         .await
     }
 
-    pub async fn on_gossip_partial_data_column(
+    pub fn on_gossip_partial_data_column(
         &self,
-        column: Arc<PartialDataColumn<P>>,
+        partial_column: Arc<PartialDataColumn<P>>,
         peer_id: PeerId,
         topic: GossipTopic,
     ) {
-        self.spawn(PartialDataColumnTask {
-            store_snapshot: self.owned_store_snapshot(),
-            mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
-            column,
-            state: None,
-            peer_id,
-            topic,
-            submission_time: Instant::now(),
-            metrics: self.metrics.clone(),
-        })
+        self.spawn_partial_data_column_task(
+            partial_column,
+            PartialDataColumnOrigin::Gossip(peer_id, topic),
+        );
+    }
+
+    pub fn on_el_partial_data_colums(&self, partial_column: Arc<PartialDataColumn<P>>) {
+        self.spawn_partial_data_column_task(
+            partial_column,
+            PartialDataColumnOrigin::ExecutionLayer,
+        );
     }
 
     pub fn on_requested_blob_sidecar(
@@ -814,6 +814,23 @@ where
             origin,
             submission_time: Instant::now(),
             validate_block_presence,
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    fn spawn_partial_data_column_task(
+        &self,
+        partial_column: Arc<PartialDataColumn<P>>,
+        origin: PartialDataColumnOrigin,
+    ) {
+        self.spawn(PartialDataColumnTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            partial_column,
+            state: None,
+            origin,
+            submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
     }

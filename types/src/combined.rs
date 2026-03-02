@@ -92,7 +92,7 @@ use crate::{
             LightClientUpdate as FuluLightClientUpdate, SignedBeaconBlock as FuluSignedBeaconBlock,
             SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
         },
-        primitives::{Cell, ColumnIndex},
+        primitives::{BlobCommitmentsInclusionProof, Cell, ColumnIndex},
     },
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
@@ -2265,6 +2265,15 @@ impl<P: Preset> DataColumnSidecar<P> {
         match self {
             Self::Fulu(sidecar) => &sidecar.kzg_proofs,
             Self::Gloas(sidecar) => &sidecar.kzg_proofs,
+        }
+    }
+
+    pub const fn kzg_commitments_inclusion_proof(
+        &self,
+    ) -> Option<&BlobCommitmentsInclusionProof<P>> {
+        match self {
+            Self::Fulu(sidecar) => Some(&sidecar.kzg_commitments_inclusion_proof),
+            Self::Gloas(_) => None,
         }
     }
 

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Error as AnyhowError, Result};
 use derivative::Derivative;
 use derive_more::Debug;
-use eth2_libp2p::{GossipId, PeerId};
+use eth2_libp2p::{GossipId, GossipTopic, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
@@ -720,6 +720,27 @@ impl DataColumnSidecarOrigin {
     #[must_use]
     pub const fn is_from_el_or_merged(&self) -> bool {
         matches!(self, Self::ExecutionLayer | Self::Merged)
+    }
+}
+
+#[derive(Debug)]
+pub enum PartialDataColumnOrigin {
+    Gossip(PeerId, GossipTopic),
+    ExecutionLayer,
+}
+
+impl PartialDataColumnOrigin {
+    #[must_use]
+    pub const fn peer_id(&self) -> Option<PeerId> {
+        match self {
+            Self::Gossip(peer_id, _) => Some(*peer_id),
+            Self::ExecutionLayer => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_el(&self) -> bool {
+        matches!(self, Self::ExecutionLayer)
     }
 }
 

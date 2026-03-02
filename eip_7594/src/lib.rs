@@ -3,8 +3,9 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Ok, Result, anyhow, ensure};
 use dedicated_executor::DedicatedExecutor;
+use execution_engine::BlobAndProofV2;
 use futures::future::join_all;
 use helper_functions::{misc, predicates::is_valid_merkle_branch};
 use itertools::Itertools as _;
@@ -25,10 +26,12 @@ use types::{
     deneb::primitives::{Blob, KzgCommitment, KzgProof},
     fulu::{
         containers::{
-            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry, PartialDataColumnHeader,
-            PartialDataColumnSidecar,
+            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry, PartialDataColumn,
+            PartialDataColumnHeader, PartialDataColumnSidecar,
         },
-        primitives::{BlobCommitmentsInclusionProof, CellsAndKzgProofs, ColumnIndex, CustodyIndex},
+        primitives::{
+            BlobCommitmentsInclusionProof, CellBitmap, CellsAndKzgProofs, ColumnIndex, CustodyIndex,
+        },
     },
     gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
     nonstandard::BlockOrDataColumnSidecar,
@@ -478,6 +481,24 @@ pub fn construct_data_column_sidecars_from_sidecar<P: Preset>(
     }
 }
 
+pub fn construct_data_column_sidecars_from_partial_header<P: Preset>(
+    header: &PartialDataColumnHeader<P>,
+    cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
+    let PartialDataColumnHeader {
+        kzg_commitments,
+        signed_block_header,
+        kzg_commitments_inclusion_proof,
+    } = header;
+
+    get_fulu_data_column_sidecars(
+        *signed_block_header,
+        kzg_commitments,
+        *kzg_commitments_inclusion_proof,
+        cells_and_kzg_proofs,
+    )
+}
+
 pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
     blobs: impl ExactSizeIterator<Item = Blob<P>>,
     cell_proofs: &[KzgProof],
@@ -519,6 +540,35 @@ pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
         .collect::<Result<Vec<_>>>()
 }
 
+pub async fn try_convert_to_cells_and_kzg_proofs_with_opt<P: Preset>(
+    mut blobs_and_proofs: impl ExactSizeIterator<Item = Option<BlobAndProofV2<P>>>,
+    backend: KzgBackend,
+    dedicated_executor: Arc<DedicatedExecutor>,
+) -> Result<Vec<Option<CellsAndKzgProofs<P>>>> {
+    if blobs_and_proofs.all(|opt| opt.is_none()) {
+        return Ok(vec![]);
+    }
+
+    let jobs = blobs_and_proofs
+        .into_iter()
+        .map(|blob_and_proofs_opt| {
+            Ok(dedicated_executor.spawn(async move {
+                let Some(BlobAndProofV2 { blob, proofs }) = blob_and_proofs_opt else {
+                    return Ok(None);
+                };
+
+                compute_cells::<P>(&blob, backend).map(|cells| Some((cells, proofs)))
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    join_all(jobs)
+        .await
+        .into_iter()
+        .map(|outer| outer.map_err(|err| anyhow!(err)).flatten())
+        .collect::<Result<Vec<_>>>()
+}
+
 pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
     block_or_sidecar: BlockOrDataColumnSidecar<P>,
     received_blobs: Vec<Blob<P>>,
@@ -546,9 +596,29 @@ pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
         BlockOrDataColumnSidecar::Sidecar(sidecar) => {
             construct_data_column_sidecars_from_sidecar(&sidecar, &cells_and_kzg_proofs)?
         }
+        BlockOrDataColumnSidecar::PartialHeader(header) => {
+            construct_data_column_sidecars_from_partial_header(&header, &cells_and_kzg_proofs)?
+        }
     };
 
     Ok(data_column_sidecars)
+}
+
+pub async fn convert_blobs_to_partial_data_columns<P: Preset>(
+    header: &PartialDataColumnHeader<P>,
+    blobs_and_proofs: Vec<Option<BlobAndProofV2<P>>>,
+    kzg_backend: KzgBackend,
+    metrics: Option<Arc<Metrics>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
+) -> Result<Vec<Arc<PartialDataColumn<P>>>> {
+    let cells_and_kzg_proofs_opt = try_convert_to_cells_and_kzg_proofs_with_opt::<P>(
+        blobs_and_proofs.into_iter(),
+        kzg_backend,
+        dedicated_executor,
+    )
+    .await?;
+
+    construct_partial_data_columns(header, cells_and_kzg_proofs_opt)
 }
 
 pub fn construct_cells_and_kzg_proofs<P: Preset>(
@@ -618,4 +688,51 @@ fn construct_full_matrix<P: Preset>(
                 })
         })
         .collect()
+}
+
+fn construct_partial_data_columns<P: Preset>(
+    header: &PartialDataColumnHeader<P>,
+    cells_and_kzg_proofs_opt: Vec<Option<CellsAndKzgProofs<P>>>,
+) -> Result<Vec<Arc<PartialDataColumn<P>>>> {
+    let block_root = header.signed_block_header.message.hash_tree_root();
+    let mut cells_present_bitmap = CellBitmap::<P>::with_length(cells_and_kzg_proofs_opt.len());
+    let cells_and_kzg_proofs = cells_and_kzg_proofs_opt
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, opt)| {
+            cells_present_bitmap.set(index, opt.is_some());
+            opt
+        })
+        .collect::<Vec<_>>();
+
+    let header_list = ContiguousList::full(header.clone());
+
+    (0..P::NumberOfColumns::USIZE)
+        .map(|column_index| {
+            let partial_column = ContiguousList::try_from_iter(
+                cells_and_kzg_proofs
+                    .iter()
+                    .map(|(cells, _)| cells[column_index].clone()),
+            )?;
+            let kzg_proofs = ContiguousList::try_from_iter(
+                cells_and_kzg_proofs
+                    .iter()
+                    .map(|(_, proofs)| proofs[column_index]),
+            )?;
+
+            Ok(Arc::new(
+                PartialDataColumn {
+                    index: ColumnIndex::try_from(column_index)?,
+                    block_root,
+                    sidecar: PartialDataColumnSidecar {
+                        cells_present_bitmap: cells_present_bitmap.clone(),
+                        partial_column,
+                        kzg_proofs,
+                        header: header_list.clone(),
+                    },
+                }
+                .into(),
+            ))
+        })
+        .collect::<Result<Vec<_>>>()
 }

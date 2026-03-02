@@ -22,7 +22,7 @@ use types::{
     combined::SignedBeaconBlock,
     deneb::{containers::BlobIdentifier, primitives::BlobIndex},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumnHeader},
         primitives::ColumnIndex,
     },
     nonstandard::BlockOrDataColumnSidecar,
@@ -33,6 +33,7 @@ use types::{
 
 use crate::{
     ApiController, Eth1Api,
+    eth1_api::{ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_EL_BLOBS_V3},
     messages::{BlobFetcherToP2p, Eth1ApiToBlobFetcher},
 };
 
@@ -84,7 +85,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                         block_or_sidecar,
                         data_column_identifiers,
                     }) => {
-                        self.get_blobs_v2(block_or_sidecar, data_column_identifiers)
+                        self.get_blobs_v2_or_v3(block_or_sidecar, data_column_identifiers)
                             .await
                     }
                 },
@@ -217,7 +218,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
     }
 
     #[expect(clippy::too_many_lines)]
-    async fn get_blobs_v2(
+    async fn get_blobs_v2_or_v3(
         &self,
         block_or_sidecar: BlockOrDataColumnSidecar<P>,
         data_column_identifiers: Vec<DataColumnIdentifier>,
@@ -265,15 +266,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         }
 
         if self.controller.is_forward_synced() {
-            let request_timer = self
-                .metrics
-                .as_ref()
-                .map(|metrics| metrics.engine_get_blobs_v2_request_time.start_timer());
-
-            if let Some(metrics) = self.metrics.as_ref() {
-                metrics.engine_get_blobs_v2_requests_count.inc();
-            }
-
             let expected_blobs_count = kzg_commitments.len();
             let versioned_hashes = kzg_commitments
                 .iter()
@@ -281,50 +273,80 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .map(misc::kzg_commitment_to_versioned_hash)
                 .collect::<Vec<_>>();
 
-            match self.api.get_blobs_v2::<P>(versioned_hashes).await {
-                Ok(blobs_and_proofs_opt) => {
-                    prometheus_metrics::stop_and_record(request_timer);
+            let support_get_blobs_v3 = self.api.has_capability(ENGINE_GET_EL_BLOBS_V3);
+            let response = if support_get_blobs_v3 {
+                self.api.get_blobs_v3::<P>(versioned_hashes).await
+            } else {
+                let _timer = self
+                    .metrics
+                    .as_ref()
+                    .map(|metrics| metrics.engine_get_blobs_v2_request_time.start_timer());
 
-                    if let Some(blobs_and_proofs) = blobs_and_proofs_opt {
-                        if blobs_and_proofs.len() == expected_blobs_count {
-                            if let Some(metrics) = self.metrics.as_ref() {
-                                metrics.engine_get_blobs_v2_responses_count.inc();
-                            }
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.engine_get_blobs_v2_requests_count.inc();
+                }
 
+                let result = self
+                    .api
+                    .get_blobs_v2::<P>(versioned_hashes)
+                    .await
+                    .map(|blobs_opt| {
+                        blobs_opt
+                            .map(|blobs| blobs.into_iter().map(Some).collect())
+                            .unwrap_or_default()
+                    });
+
+                if result.is_ok() {
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        metrics.engine_get_blobs_v2_responses_count.inc();
+                    }
+                }
+
+                result
+            };
+
+            match response {
+                Ok(blobs_and_proofs) => {
+                    let received_blob_count =
+                        blobs_and_proofs.iter().filter(|opt| opt.is_some()).count();
+
+                    if received_blob_count > 0 {
+                        debug_with_peers!(
+                            "received {received_blob_count}, expect {expected_blobs_count} blob sidecars from EL at slot: {slot}",
+                        );
+
+                        let missing_columns_indices =
+                            futures::stream::iter(data_column_identifiers)
+                                .filter(|identifier| {
+                                    let identifier = *identifier;
+                                    let received_data_column_sidecars =
+                                        self.received_data_column_sidecars.clone_arc();
+
+                                    async move {
+                                        !received_data_column_sidecars
+                                            .contains_async(&identifier)
+                                            .await
+                                    }
+                                })
+                                .map(|identifier| identifier.index)
+                                .collect::<HashSet<ColumnIndex>>()
+                                .await;
+
+                        if missing_columns_indices.is_empty() {
+                            debug_with_peers!(
+                                "fetched blobs from EL are discarded: all missing data column sidecars have been received"
+                            );
+                            return;
+                        }
+
+                        if received_blob_count == expected_blobs_count {
                             let (received_blobs, received_proofs): (Vec<_>, Vec<_>) =
                                 blobs_and_proofs
                                     .into_iter()
-                                    .map(|BlobAndProofV2 { blob, proofs }| (blob, proofs))
-                                    .unzip();
-
-                            debug_with_peers!(
-                                "received all {expected_blobs_count} blob sidecars from EL at slot: {slot}",
-                            );
-
-                            let missing_columns_indices =
-                                futures::stream::iter(data_column_identifiers)
-                                    .filter(|identifier| {
-                                        let identifier = *identifier;
-                                        let received_data_column_sidecars =
-                                            self.received_data_column_sidecars.clone_arc();
-
-                                        async move {
-                                            !received_data_column_sidecars
-                                                .contains_async(&identifier)
-                                                .await
-                                        }
+                                    .filter_map(|opt| {
+                                        opt.map(|BlobAndProofV2 { blob, proofs }| (blob, proofs))
                                     })
-                                    .map(|identifier| identifier.index)
-                                    .collect::<HashSet<ColumnIndex>>()
-                                    .await;
-
-                            if missing_columns_indices.is_empty() {
-                                debug_with_peers!(
-                                    "fetched blobs from EL are discarded: all missing data column sidecars have been received"
-                                );
-                                return;
-                            }
-
+                                    .unzip();
                             let cells_proofs = received_proofs
                                 .into_iter()
                                 .flat_map(IntoIterator::into_iter)
@@ -378,19 +400,59 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                 }
                             }
                         } else {
-                            warn_with_peers!(
-                                "EL must response all blobs or null (expected: {}, got: {})",
-                                expected_blobs_count,
-                                blobs_and_proofs.len(),
-                            );
+                            match PartialDataColumnHeader::try_from(&block_or_sidecar) {
+                                Ok(header) => {
+                                    let partial_columns_result =
+                                        eip_7594::convert_blobs_to_partial_data_columns(
+                                            &header,
+                                            blobs_and_proofs,
+                                            self.controller.store_config().kzg_backend,
+                                            self.metrics.clone(),
+                                            self.dedicated_executor.clone_arc(),
+                                        )
+                                        .await;
+
+                                    match partial_columns_result {
+                                        Ok(partial_columns) => {
+                                            for partial_column in &partial_columns {
+                                                self.controller.on_el_partial_data_colums(
+                                                    partial_column.clone_arc(),
+                                                );
+                                            }
+
+                                            BlobFetcherToP2p::PublishPartialDataColumns(
+                                                partial_columns,
+                                            )
+                                            .send(&self.p2p_tx);
+                                        }
+                                        Err(error) => {
+                                            warn_with_peers!(
+                                                "failed to convert received blobs to partial columns: {error}"
+                                            )
+                                        }
+                                    }
+                                }
+                                Err(error) => {
+                                    warn_with_peers!(
+                                        "failed to convert block or sidecar into partial header: {error}"
+                                    )
+                                }
+                            }
                         }
                     } else {
                         debug_with_peers!(
-                            "The EL blob response does not include all necessary blobs"
-                        );
+                            "not received any blobs from EL for request at block {block_root}"
+                        )
                     }
                 }
-                Err(error) => warn_with_peers!("engine_getBlobsV2 call failed: {error}"),
+                Err(error) => {
+                    let method = if support_get_blobs_v3 {
+                        ENGINE_GET_EL_BLOBS_V3
+                    } else {
+                        ENGINE_GET_EL_BLOBS_V2
+                    };
+                    warn_with_peers!("{method} call failed: {error}")
+                }
             }
         }
 

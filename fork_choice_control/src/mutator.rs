@@ -27,7 +27,7 @@ use std::{
 use anyhow::{Error as AnyhowError, Result, anyhow};
 use arc_swap::ArcSwap;
 use clock::{Tick, TickKind};
-use eth2_libp2p::{GossipId, GossipTopic, PeerId};
+use eth2_libp2p::GossipId;
 use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionEngine,
     PayloadStatusV1,
@@ -37,8 +37,8 @@ use fork_choice_store::{
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin, PartialDataColumnSidecarAction, PayloadAction, StateCacheProcessor,
-    Store, ValidAttestation,
+    ExecutionPayloadBidOrigin, PartialDataColumnOrigin, PartialDataColumnSidecarAction,
+    PayloadAction, StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -317,16 +317,14 @@ where
                 MutatorMessage::PartialDataColumnSidecar {
                     wait_group,
                     result,
+                    origin,
                     data_column_identifier,
-                    peer_id,
-                    topic,
                     submission_time,
                 } => self.handle_partial_data_column_sidecar(
                     wait_group,
                     result,
+                    origin,
                     data_column_identifier,
-                    peer_id,
-                    topic,
                     submission_time,
                 ),
                 MutatorMessage::PayloadBid { result, origin } => {
@@ -1832,18 +1830,49 @@ where
         &mut self,
         wait_group: W,
         result: Result<PartialDataColumnSidecarAction<P>>,
+        origin: PartialDataColumnOrigin,
         data_column_identifier: DataColumnIdentifier,
-        peer_id: PeerId,
-        topic: GossipTopic,
         submission_time: Instant,
     ) {
         match result {
             Ok(PartialDataColumnSidecarAction::Accept(partial_column)) => {
                 if let Some(data_column_sidecar) = self
                     .store_mut()
-                    .apply_partial_data_column_sidecar(partial_column)
+                    .apply_partial_data_column_sidecar(&partial_column)
                 {
                     self.send_to_p2p(P2pMessage::DataColumnSidecarMerged(data_column_sidecar));
+                }
+
+                if let Some(header) = partial_column.sidecar.header.first() {
+                    let block_root = partial_column.block_root;
+
+                    if self.store.is_forward_synced()
+                        && !origin.is_from_el()
+                        && !self.store.has_requested_blobs_from_el(&block_root)
+                        && !self.store.is_sidecars_construction_started(&block_root)
+                    {
+                        self.store_mut()
+                            .mark_requested_blobs_from_el(block_root, header.slot());
+                        self.update_store_snapshot();
+
+                        let data_column_identifiers = self
+                            .store
+                            .sampling_columns()
+                            .iter()
+                            .map(|index| DataColumnIdentifier {
+                                block_root,
+                                index: *index,
+                            })
+                            .collect::<Vec<_>>();
+
+                        self.request_blobs_from_execution_engine(
+                            EngineGetBlobsV2Params {
+                                block_or_sidecar: Arc::new(header.clone()).into(),
+                                data_column_identifiers,
+                            }
+                            .into(),
+                        )
+                    }
                 }
             }
             Ok(PartialDataColumnSidecarAction::Ignore(_)) => {
@@ -1856,13 +1885,15 @@ where
             }
             Err(error) => {
                 warn_with_peers!(
-                    "partial data column sidecar rejected (error: {error}, peer_id: {peer_id})"
+                    "partial data column sidecar rejected (identifier: {data_column_identifier:?}, origin: {origin:?}, error: {error})"
                 );
 
-                self.send_to_p2p(P2pMessage::RejectPartial(
-                    peer_id,
-                    MutatorRejectionReason::InvalidPartialMessage { topic },
-                ));
+                if let PartialDataColumnOrigin::Gossip(peer_id, topic) = origin {
+                    self.send_to_p2p(P2pMessage::RejectPartial(
+                        peer_id,
+                        MutatorRejectionReason::InvalidPartialMessage { topic },
+                    ));
+                }
             }
         }
     }

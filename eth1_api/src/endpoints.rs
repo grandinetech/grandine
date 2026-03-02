@@ -36,6 +36,10 @@ impl Endpoint {
         self.capabilities.store(Arc::new(capabilities));
     }
 
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.load().contains(capability)
+    }
+
     pub fn set_client_versions(&self, client_versions: Vec<ClientVersionV1>) {
         self.client_versions.store(Arc::new(client_versions));
     }
@@ -76,6 +80,12 @@ impl Endpoints {
 
     pub fn el_offline(&self) -> bool {
         self.endpoints.iter().all(|endpoint| !endpoint.is_online())
+    }
+
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.endpoints
+            .iter()
+            .any(|endpoint| endpoint.has_capability(capability))
     }
 
     pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {

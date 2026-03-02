@@ -39,7 +39,7 @@ impl<P: Preset> PartialDataColumnCache<P> {
 
     pub fn upsert_partial_column(
         &mut self,
-        partial_column: Arc<PartialDataColumn<P>>,
+        partial_column: &Arc<PartialDataColumn<P>>,
     ) -> Option<Arc<DataColumnSidecar<P>>> {
         let id: DataColumnIdentifier = partial_column.as_ref().into();
 

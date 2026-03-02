@@ -352,6 +352,12 @@ impl<P: Preset> Network<P> {
                             P2pToSync::DataColumnsNeeded(data_columns_by_root, slot)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
+                        BlobFetcherToP2p::PublishPartialDataColumns(partial_columns) => {
+                            debug_with_peers!("publishing partial data column sidecars: {}", partial_columns.len());
+
+                            ServiceInboundMessage::PublishPartialMessages(partial_columns)
+                                .send(&self.network_to_service_tx);
+                        }
                     }
 
                     debug_info.handle();
@@ -2748,7 +2754,6 @@ fn run_network_service<P: Preset>(
                             service.publish(message);
                         }
                         ServiceInboundMessage::PublishPartialMessages(columns) => {
-                            debug_with_peers!("Publishing {} partial data column sidecars", columns.len());
                             service.publish_partial(columns);
                         }
                         ServiceInboundMessage::ReportPeer(peer_id, action, source, msg) => {

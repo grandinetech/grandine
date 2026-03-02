@@ -9,7 +9,7 @@ use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
+use ssz::{ContiguousList, Size, SszHash, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -26,7 +26,10 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
-    fulu::containers::DataColumnIdentifier,
+    fulu::{
+        containers::{DataColumnIdentifier, PartialDataColumnHeader},
+        primitives::BlobCommitmentsInclusionProof,
+    },
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -430,6 +433,7 @@ impl<P: Preset> KzgProofs<P> {
 pub enum BlockOrDataColumnSidecar<P: Preset> {
     Block(Arc<SignedBeaconBlock<P>>),
     Sidecar(Arc<DataColumnSidecar<P>>),
+    PartialHeader(Arc<PartialDataColumnHeader<P>>),
 }
 
 impl<P: Preset> BlockOrDataColumnSidecar<P> {
@@ -438,6 +442,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().slot(),
             Self::Sidecar(sidecar) => sidecar.slot(),
+            Self::PartialHeader(header) => header.slot(),
         }
     }
 
@@ -446,6 +451,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
             Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
+            Self::PartialHeader(header) => header.signed_block_header.message.hash_tree_root(),
         }
     }
 
@@ -456,6 +462,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Sidecar(sidecar) => sidecar
                 .pre_gloas()
                 .map(|sidecar| sidecar.signed_block_header),
+            Self::PartialHeader(header) => Some(header.signed_block_header),
         }
     }
 
@@ -469,6 +476,16 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
             Self::Sidecar(sidecar) => sidecar.kzg_commitments(),
+            Self::PartialHeader(header) => Some(&header.kzg_commitments),
+        }
+    }
+
+    // TODO(feature/partial-columns: derive from blob commitments)
+    pub fn kzg_commitments_inclusion_proof(&self) -> Option<&BlobCommitmentsInclusionProof<P>> {
+        match self {
+            Self::Block(block) => None,
+            Self::Sidecar(sidecar) => sidecar.kzg_commitments_inclusion_proof(),
+            Self::PartialHeader(header) => Some(&header.kzg_commitments_inclusion_proof),
         }
     }
 }
