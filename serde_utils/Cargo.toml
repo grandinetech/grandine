@@ -18,6 +18,5 @@ serde_with = { workspace = true }
 try_from_iterator = { workspace = true }
 
 [dev-dependencies]
-bincode = { workspace = true }
 ssz = { workspace = true }
 test-case = { workspace = true }

@@ -3,7 +3,7 @@ use bls::SignatureBytes;
 use database::Database;
 use derive_more::Constructor;
 use helper_functions::misc;
-use serde::{Deserialize, Serialize};
+use ssz::{Ssz, SszReadDefault, SszWrite};
 use types::{
     combined::SignedBeaconBlock,
     phase0::{
@@ -33,7 +33,7 @@ fn build_block_record_key(proposer_index: ValidatorIndex, slot: Slot) -> BlockRe
     key
 }
 
-#[derive(PartialEq, Eq, Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Ssz)]
 #[cfg_attr(test, derive(Debug))]
 struct BlockRecord {
     signature: SignatureBytes,
@@ -105,8 +105,7 @@ impl Blocks {
             body_root: block.message().body().hash_tree_root(),
         };
 
-        self.blocks_db
-            .put(key, bincode::serialize(&block_record)?)?;
+        self.blocks_db.put(key, block_record.to_ssz()?)?;
 
         Ok(())
     }
@@ -141,7 +140,7 @@ impl Blocks {
         let bytes = self.blocks_db.get(key)?;
 
         if let Some(bytes) = bytes {
-            return Ok(Some(bincode::deserialize(&bytes)?));
+            return Ok(Some(BlockRecord::from_ssz_default(&bytes)?));
         }
 
         Ok(None)

@@ -55,15 +55,7 @@ pub async fn post_take_messages<P: Preset>(
     async fn take<T: Send>(rx: SpyReceiver<T>) -> Vec<T> {
         let mut rx = rx.lock().await;
 
-        core::iter::from_fn(|| {
-            // Sending to a closed channel returns `Err(_)`.
-            // Receiving from a closed channel with `try_next` returns `Ok(None)`.
-            rx.try_next()
-                .transpose()
-                .expect("UnboundedReceiver::try_next failed because the sender was dropped")
-                .ok()
-        })
-        .collect()
+        core::iter::from_fn(|| rx.try_recv().ok()).collect()
     }
 
     let TestState {

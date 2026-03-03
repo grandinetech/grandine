@@ -22,7 +22,7 @@ Rust is needed in order to build Grandine. We recommend to use [rustup](https://
 Some system dependencies are needed, the command below should install it on Ubuntu:
 
 ```
-apt-get install ca-certificates libssl-dev clang cmake unzip protobuf-compiler libz-dev
+apt-get install ca-certificates libssl-dev clang cmake unzip protobuf-compiler libprotobuf-dev libz-dev
 ```
 
 Then the build may take a few minutes:

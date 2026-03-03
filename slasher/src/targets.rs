@@ -89,7 +89,7 @@ impl<P: Preset> Targets<P> {
         let key = Self::key(validator_index);
 
         Ok(match self.min_targets_db.get(key)? {
-            Some(bytes) => bincode::deserialize(&bytes)?,
+            Some(bytes) => wincode::deserialize(&bytes)?,
             None => vec![u16::MAX; usize::try_from(TARGETS_LENGTH)?],
         })
     }
@@ -98,7 +98,7 @@ impl<P: Preset> Targets<P> {
         let key = Self::key(validator_index);
 
         Ok(match self.max_targets_db.get(key)? {
-            Some(bytes) => bincode::deserialize(&bytes)?,
+            Some(bytes) => wincode::deserialize(&bytes)?,
             None => vec![0; usize::try_from(TARGETS_LENGTH)?],
         })
     }
@@ -127,7 +127,7 @@ impl<P: Preset> Targets<P> {
         }
 
         self.min_targets_db
-            .put(key, bincode::serialize(&min_targets)?)?;
+            .put(key, wincode::serialize(&min_targets)?)?;
 
         Ok(())
     }
@@ -154,7 +154,7 @@ impl<P: Preset> Targets<P> {
         }
 
         self.max_targets_db
-            .put(key, bincode::serialize(&max_targets)?)?;
+            .put(key, wincode::serialize(&max_targets)?)?;
 
         Ok(())
     }

@@ -37,7 +37,7 @@ pub trait ReportTrait {
 }
 
 pub trait ProofTrait {
-    fn verify(&self) -> bool;
+    async fn verify(&self) -> bool;
 
     fn save(&self, path: impl AsRef<Path>) -> Result<()>;
 }
@@ -48,7 +48,7 @@ pub trait VmBackend: Sized {
 
     fn new() -> Result<Self>;
 
-    fn execute(
+    async fn execute(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -57,7 +57,7 @@ pub trait VmBackend: Sized {
         phase_bytes: Vec<u8>,
     ) -> Result<(Vec<u8>, Self::Report)>;
 
-    fn prove(
+    async fn prove(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,

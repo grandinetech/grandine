@@ -60,12 +60,10 @@ pub fn serialize<S: Serializer>(
 
 #[cfg(test)]
 mod tests {
-    use bincode::{DefaultOptions, Options as _, Result as BincodeResult};
     use serde_json::{Result as JsonResult, json};
 
     use super::*;
 
-    // `bincode::Deserializer` and `bincode::Serializer` are hard to use directly.
     #[derive(PartialEq, Eq, Debug, Deserialize, Serialize)]
     #[serde(transparent)]
     struct Numbers(#[serde(with = "super")] Vec<u64>);
@@ -87,18 +85,6 @@ mod tests {
         let json = json!([3, 4, 5]);
 
         assert_eq!(serde_json::from_value::<Numbers>(json)?, numbers);
-
-        Ok(())
-    }
-
-    #[test]
-    fn serializes_to_numbers_in_bincode() -> BincodeResult<()> {
-        let options = DefaultOptions::new();
-        let numbers = Numbers(vec![3, 4, 5]);
-        let bytes = [3, 3, 4, 5];
-
-        assert_eq!(options.deserialize::<Numbers>(&bytes)?, numbers);
-        assert_eq!(options.serialize(&numbers)?, bytes);
 
         Ok(())
     }

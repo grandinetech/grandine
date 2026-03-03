@@ -16,7 +16,6 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
-use serde::{Deserialize, Serialize};
 use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
@@ -36,6 +35,7 @@ use types::{
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::messages::ArchiverToSync;
 
@@ -682,7 +682,7 @@ impl Data {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, SchemaWrite, SchemaRead)]
 pub enum SyncMode {
     Default,
     DataColumnsOnly {
@@ -711,7 +711,7 @@ impl SyncMode {
             return Ok(());
         }
 
-        database.put(Self::db_key(low_slot), bincode::serialize(&self)?)
+        database.put(Self::db_key(low_slot), wincode::serialize(&self)?)
     }
 
     fn remove(&self, database: &Database, low_slot: Slot) -> Result<()> {
@@ -726,7 +726,7 @@ impl SyncMode {
         database
             .get(Self::db_key(low_slot))?
             .as_deref()
-            .map(bincode::deserialize)
+            .map(wincode::deserialize)
             .unwrap_or(Ok(Self::Default))
             .map_err(Into::into)
     }

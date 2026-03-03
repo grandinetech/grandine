@@ -10,5 +10,6 @@ exec apt-get install  \
     moreutils         \
     pkg-config        \
     protobuf-compiler \
+    libprotobuf-dev   \
     ruby              \
     zlib1g-dev

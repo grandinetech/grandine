@@ -99,7 +99,8 @@ fn get_or_download(path: impl AsRef<Path>, url: impl IntoUrl, decode_xz: bool) -
         })
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let tests = [
         Test {
             name: "pectra-devnet-6 with epoch transition",
@@ -215,13 +216,17 @@ fn main() -> Result<()> {
         Command::Execute => {
             let started_at = Instant::now();
             let vm = Vm::new()?;
-            let (output_bytes, report) = vm.execute(
-                selected_test.config,
-                state_ssz,
-                block_ssz,
-                cache,
-                vec![phase_byte],
-            )?;
+
+            let (output_bytes, report) = vm
+                .execute(
+                    selected_test.config,
+                    state_ssz,
+                    block_ssz,
+                    cache,
+                    vec![phase_byte],
+                )
+                .await?;
+
             let state_root = H256(output_bytes.try_into().unwrap());
 
             println!("elapsed: {:?}", started_at.elapsed());
@@ -233,20 +238,25 @@ fn main() -> Result<()> {
         Command::Prove => {
             let started_at = Instant::now();
             let vm = Vm::new()?;
-            let (output_bytes, proof) = vm.prove(
-                selected_test.config,
-                state_ssz,
-                block_ssz,
-                cache,
-                vec![phase_byte],
-            )?;
+
+            let (output_bytes, proof) = vm
+                .prove(
+                    selected_test.config,
+                    state_ssz,
+                    block_ssz,
+                    cache,
+                    vec![phase_byte],
+                )
+                .await?;
+
             let state_root = H256(output_bytes.try_into().unwrap());
+
             println!("elapsed: {:?}", started_at.elapsed());
             println!("state root after state transition: {:?}", state_root);
 
             proof.save(Path::new(env!("CARGO_MANIFEST_DIR")).join("proof.bin"))?;
 
-            assert!(proof.verify());
+            assert!(proof.verify().await);
             assert_eq!(state_root, expected_root);
         }
     }

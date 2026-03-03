@@ -41,7 +41,6 @@ variant_count = { workspace = true }
 im = { workspace = true }
 
 [dev-dependencies]
-bincode = { workspace = true }
 itertools = { workspace = true }
 serde_json = { workspace = true }
 spec_test_utils = { workspace = true }
