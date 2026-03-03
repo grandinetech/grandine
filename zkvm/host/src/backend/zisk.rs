@@ -24,7 +24,7 @@ impl ReportTrait for Report {
 pub struct Proof;
 
 impl ProofTrait for Proof {
-    fn verify(&self) -> bool {
+    async fn verify(&self) -> bool {
         // Verify proof, run the command:
         //   cargo-zisk verify -p ./proofs/vadcop_final_proof.bin
         let proof_path = Vm::get_artifacts_dir().join(PROOF_PATH_SUFFIX);
@@ -146,7 +146,7 @@ impl VmBackend for Vm {
         Ok(Self)
     }
 
-    fn execute(
+    async fn execute(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -204,7 +204,7 @@ impl VmBackend for Vm {
         Ok((state_root, Report(cycles)))
     }
 
-    fn prove(
+    async fn prove(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -216,7 +216,9 @@ impl VmBackend for Vm {
         //   1. Zisk prove mode doesn't generate the public output
         //   2. We need to compile the guest program, which is run inside Self::execute()
         //   3. Input is serialized
-        let (state_root, _) = self.execute(config, state_ssz, block_ssz, cache_ssz, phase_bytes)?;
+        let (state_root, _) = self
+            .execute(config, state_ssz, block_ssz, cache_ssz, phase_bytes)
+            .await?;
 
         // Refer to https://0xpolygonhermez.github.io/zisk/getting_started/writing_programs.html#prove
         // 1. Run cmd for program setup

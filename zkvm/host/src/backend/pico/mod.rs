@@ -26,7 +26,7 @@ pub struct Proof {
 }
 
 impl ProofTrait for Proof {
-    fn verify(&self) -> bool {
+    async fn verify(&self) -> bool {
         match self.prover.verify(&self.proof_set) {
             Ok(()) => true,
             Err(err) => {
@@ -68,7 +68,7 @@ impl VmBackend for Vm {
         Ok(Self)
     }
 
-    fn execute(
+    async fn execute(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -105,7 +105,7 @@ impl VmBackend for Vm {
         Ok((output, Report(total_num_cycles)))
     }
 
-    fn prove(
+    async fn prove(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,

@@ -13,8 +13,8 @@ pubkey_cache = { path = '../../../pubkey_cache' }
 ssz = { path = '../../../ssz' }
 transition_functions = { path = '../../../transition_functions' }
 types = { path = '../../../types' }
-zkm-primitives = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.3' }
-zkm-zkvm = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.3' }
+zkm-primitives = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.4' }
+zkm-zkvm = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.4' }
 
 [patch.crates-io]
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }

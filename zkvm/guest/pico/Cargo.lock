@@ -272,9 +272,9 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.70.1"
+version = "0.71.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
 dependencies = [
  "bitflags",
  "cexpr",
@@ -851,6 +851,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "darling"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25ae13da2f202d56bd7f91c25fba009e7717a1e4a1cc98a76d844b65ae912e9d"
+dependencies = [
+ "darling_core 0.23.0",
+ "darling_macro 0.23.0",
+]
+
+[[package]]
 name = "darling_core"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -871,6 +881,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d25b7912bc28a04ab1b7715a68ea03aaa15662b43a1a4b2c480531fd19f8bf7e"
 dependencies = [
  "fnv",
+ "ident_case",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "darling_core"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9865a50f7c335f53564bb694ef660825eb8610e0a53d3e11bf1b0d3df31e03b0"
+dependencies = [
  "ident_case",
  "proc-macro2",
  "quote",
@@ -896,6 +918,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce154b9bea7fb0c8e8326e62d00354000c36e79770ff21b8c84e3aa267d9d531"
 dependencies = [
  "darling_core 0.21.2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "darling_macro"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac3984ec7bd6cfa798e62b4a642426a5be0e68f9401cfc2a01e3fa9ea2fcdb8d"
+dependencies = [
+ "darling_core 0.23.0",
  "quote",
  "syn 2.0.106",
 ]
@@ -2183,14 +2216,13 @@ dependencies = [
 
 [[package]]
 name = "libp2p-identity"
-version = "0.2.12"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3104e13b51e4711ff5738caa1fb54467c8604c2e94d607e27745bcf709068774"
+checksum = "f0c7892c221730ba55f7196e98b0b8ba5e04b4155651736036628e9f73ed6fc3"
 dependencies = [
  "bs58",
  "hkdf",
  "multihash",
- "quick-protobuf",
  "sha2 0.10.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.16",
  "tracing",
@@ -2518,22 +2550,22 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
 ]
 
 [[package]]
 name = "p3-baby-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-monty-31 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-monty-31 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
 ]
@@ -2556,24 +2588,24 @@ dependencies = [
 [[package]]
 name = "p3-blake3"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "blake3",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
 ]
 
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "ff 0.13.1",
  "halo2curves",
  "num-bigint 0.4.6",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
 ]
@@ -2581,29 +2613,29 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "tracing",
 ]
 
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "p3-fri",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "serde",
  "tracing",
 ]
@@ -2611,27 +2643,27 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "serde",
 ]
 
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "tracing",
 ]
 
@@ -2664,15 +2696,15 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
  "num-integer",
  "num-traits",
  "nums",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -2712,17 +2744,17 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "p3-interpolation",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -2731,15 +2763,15 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "num-bigint 0.4.6",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
 ]
@@ -2747,49 +2779,49 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
 ]
 
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "tiny-keccak",
 ]
 
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-air",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "tracing",
 ]
 
 [[package]]
 name = "p3-koala-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-monty-31 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-monty-31 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
 ]
@@ -2811,12 +2843,12 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -2856,7 +2888,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "rayon",
 ]
@@ -2875,14 +2907,14 @@ checksum = "c3968ad1160310296eb04f91a5f4edfa38fe1d6b2b8cd6b5c64e6f9b7370979e"
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
 ]
 
@@ -2918,15 +2950,15 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -2935,18 +2967,18 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
 ]
@@ -2954,18 +2986,18 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
  "serde",
  "tracing",
@@ -2997,12 +3029,12 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "gcd",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "rand 0.8.5",
 ]
 
@@ -3036,10 +3068,10 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "serde",
 ]
 
@@ -3067,17 +3099,17 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
  "p3-challenger",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "serde",
  "tracing",
 ]
@@ -3085,7 +3117,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=411a80d#411a80deafb89335b5571f9925d584d7f51317e9"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "serde",
 ]
@@ -3258,7 +3290,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "pico-derive"
 version = "1.2.2"
-source = "git+https://github.com/brevis-network/pico.git?tag=v1.2.2#57ff6c5c0755f38bfa55a54eda053eae664ebcd2"
+source = "git+https://github.com/brevis-network/pico.git?tag=v1.3.0#f8617c9c4b540cf31f8b07f6144c93d04799f0f4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3277,7 +3309,7 @@ dependencies = [
 [[package]]
 name = "pico-patch-libs"
 version = "1.2.2"
-source = "git+https://github.com/brevis-network/pico.git?tag=v1.2.2#57ff6c5c0755f38bfa55a54eda053eae664ebcd2"
+source = "git+https://github.com/brevis-network/pico.git?tag=v1.3.0#f8617c9c4b540cf31f8b07f6144c93d04799f0f4"
 dependencies = [
  "bincode",
  "serde",
@@ -3286,7 +3318,7 @@ dependencies = [
 [[package]]
 name = "pico-sdk"
 version = "1.2.2"
-source = "git+https://github.com/brevis-network/pico.git?tag=v1.2.2#57ff6c5c0755f38bfa55a54eda053eae664ebcd2"
+source = "git+https://github.com/brevis-network/pico.git?tag=v1.3.0#f8617c9c4b540cf31f8b07f6144c93d04799f0f4"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3298,8 +3330,8 @@ dependencies = [
  "log",
  "p3-baby-bear 0.1.0",
  "p3-challenger",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-koala-bear 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-koala-bear 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "p3-mersenne-31",
  "pico-patch-libs 1.2.2",
  "pico-vm",
@@ -3312,7 +3344,7 @@ dependencies = [
 [[package]]
 name = "pico-vm"
 version = "1.2.2"
-source = "git+https://github.com/brevis-network/pico.git?tag=v1.2.2#57ff6c5c0755f38bfa55a54eda053eae664ebcd2"
+source = "git+https://github.com/brevis-network/pico.git?tag=v1.3.0#f8617c9c4b540cf31f8b07f6144c93d04799f0f4"
 dependencies = [
  "anyhow",
  "arrayref",
@@ -3354,22 +3386,22 @@ dependencies = [
  "p3-challenger",
  "p3-circle",
  "p3-commit",
- "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-dft 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-field 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "p3-fri",
  "p3-goldilocks",
  "p3-keccak",
  "p3-keccak-air",
- "p3-koala-bear 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-koala-bear 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-matrix 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-maybe-rayon 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-mds 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "p3-merkle-tree",
  "p3-mersenne-31",
- "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
- "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-poseidon2 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
+ "p3-symmetric 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "p3-uni-stark",
- "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=411a80d)",
+ "p3-util 0.1.0 (git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9)",
  "paste",
  "pico-derive",
  "rand 0.8.5",
@@ -3604,15 +3636,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick-protobuf"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d6da84cc204722a989e01ba2f6e1e276e190f22263d0cb6ce8526fcdb0d2e1f"
-dependencies = [
- "byteorder",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3829,13 +3852,12 @@ checksum = "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884"
 
 [[package]]
 name = "reth-libmdbx"
-version = "1.3.12"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=6f8e7258f4733279080e4bd8345ce50538a40d6e#6f8e7258f4733279080e4bd8345ce50538a40d6e"
+version = "1.10.2"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=8e3b5e6a99439561b73c5dd31bd3eced2e994d60#8e3b5e6a99439561b73c5dd31bd3eced2e994d60"
 dependencies = [
  "bitflags",
  "byteorder",
  "derive_more 2.0.1",
- "indexmap 2.10.0",
  "parking_lot",
  "reth-mdbx-sys",
  "smallvec",
@@ -3845,8 +3867,8 @@ dependencies = [
 
 [[package]]
 name = "reth-mdbx-sys"
-version = "1.3.12"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=6f8e7258f4733279080e4bd8345ce50538a40d6e#6f8e7258f4733279080e4bd8345ce50538a40d6e"
+version = "1.10.2"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=8e3b5e6a99439561b73c5dd31bd3eced2e994d60#8e3b5e6a99439561b73c5dd31bd3eced2e994d60"
 dependencies = [
  "bindgen",
  "cc",
@@ -3891,9 +3913,9 @@ checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
 
 [[package]]
 name = "rustc-hash"
-version = "1.1.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
 
 [[package]]
 name = "rustc-hex"
@@ -4308,7 +4330,7 @@ dependencies = [
 name = "ssz_derive"
 version = "0.0.0"
 dependencies = [
- "darling 0.21.2",
+ "darling 0.23.0",
  "easy-ext",
  "itertools 0.14.0",
  "proc-macro-crate 3.3.0",
@@ -4383,11 +4405,11 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+checksum = "9628de9b8791db39ceda2b119bbe13134770b56c138ec1d3af810d045c04f9bd"
 dependencies = [
- "strum_macros 0.27.2",
+ "strum_macros 0.28.0",
 ]
 
 [[package]]
@@ -4405,9 +4427,9 @@ dependencies = [
 
 [[package]]
 name = "strum_macros"
-version = "0.27.2"
+version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+checksum = "ab85eea0270ee17587ed4156089e10b9e6880ee688791d45a905f5b1ca36f664"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -4841,7 +4863,7 @@ dependencies = [
  "ssz",
  "static_assertions",
  "std_ext",
- "strum 0.27.2",
+ "strum 0.28.0",
  "thiserror 2.0.16",
  "typenum",
  "url",

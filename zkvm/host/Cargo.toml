@@ -22,7 +22,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 risc0-zkvm = { workspace = true, optional = true, features = ['unstable', 'heap-embedded-alloc'] }
 serde_json = { workspace = true, optional = true  }
 snap = { workspace = true }
-sp1-sdk = { workspace = true, optional = true }
+sp1-sdk = { workspace = true, optional = true, features = ['network'] }
 ssz = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
@@ -31,11 +31,11 @@ types = { workspace = true }
 xz2 = { workspace = true }
 zkvm_guest_risc0 = { workspace = true, optional = true }
 zkm-sdk = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true }
 
 # For pico zkvm
-pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.2.2" , optional = true }
-pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.2.2" , optional = true }
+pico-sdk = { git = "https://github.com/brevis-network/pico.git", tag = "v1.3.0" , optional = true }
+pico-vm =  { git = "https://github.com/brevis-network/pico.git", tag = "v1.3.0" , optional = true }
 
 [build-dependencies]
 sp1-helper = { workspace = true, optional = true }
@@ -47,7 +47,6 @@ risc0 = [
     "dep:boundless-market",
     "dep:bytemuck",
     "dep:risc0-zkvm",
-    "dep:tokio",
     "dep:tracing-subscriber",
     "dep:zkvm_guest_risc0",
     "bls-zkcrypto/zkvm-risc0",

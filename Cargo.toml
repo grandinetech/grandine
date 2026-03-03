@@ -282,7 +282,7 @@ private_intra_doc_links = 'allow'
 
 [workspace.dependencies]
 aes = { version = '0.8', features = ['zeroize'] }
-alloy = '1.5'
+alloy = '1.7'
 alloy-rlp = '0.3'
 anyhow = { version = '1', features = ['backtrace'] }
 arc-swap = '1'
@@ -290,7 +290,6 @@ assert-json-diff = '2'
 axum = { version = '0.8' }
 axum-extra = { version = '0.12', features = ['typed-header', 'query'] }
 base64 = '0.22'
-bincode = '1'
 bindgen = '0.72'
 bit_field = '0.10'
 bitvec = '1'
@@ -310,13 +309,13 @@ clap = { version = '4', features = ['derive'] }
 const-hex = '1.14'
 const_format = '0.2'
 constant_time_eq = '0.4'
-convert_case = '0.10'
-criterion = '0.7'
+convert_case = '0.11'
+criterion = '0.8'
 crossbeam-skiplist = '0.1'
 crossbeam-utils = '0.8'
 csbindgen = '1.9'
 ctr = { version = '0.9', features = ['zeroize'] }
-darling = '0.21'
+darling = '0.23'
 dedicated_executor = { path = 'dedicated_executor' }
 delay_map = '0.4'
 derivative = '2'
@@ -404,7 +403,7 @@ rc-box = '1'
 refinery = { version = '0.9',  features = ['rusqlite'] }
 regex = '1'
 replace_with = '0.1'
-reqwest = { version = '0.12', features = ['json', 'native-tls-vendored'] }
+reqwest = { version = '0.13', features = ['json', 'native-tls-vendored'] }
 risc0-build = { version = '3.0.4', features = ['unstable'] }
 risc0-zkvm = { version = '3.0.4', features = ['unstable', 'heap-embedded-alloc'] }
 rusqlite = { version = '0.37', features = ['bundled'] }
@@ -420,7 +419,7 @@ serial_test = '3'
 serde = { version = '1', features = ['derive', 'rc'] }
 serde-aux = '4'
 serde_json = { version = '1', features = ['preserve_order'] }
-serde_qs = { version = '0.15', features = ['axum'] }
+serde_qs = { version = '1', features = ['axum'] }
 serde_repr = '0.1'
 serde_with = '3'
 # TODO: replace serde_yaml with alternative, since it is deprecated:
@@ -435,13 +434,13 @@ slog-stdlog = '4'
 slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
-sp1-helper = '5.2.4'
-sp1-sdk = '5.2.4'
-sp1-zkvm = { version = '5.2.4', features = ['embedded'] }
+sp1-helper = '6.0.2'
+sp1-sdk = '6.0.2'
+sp1-zkvm = { version = '6.0.2' }
 static_assertions = '1'
-strum = { version = '0.27', features = ['derive'] }
+strum = { version = '0.28', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
-sysinfo = '0.37'
+sysinfo = '0.38'
 tap = '1'
 tempfile = '3'
 test-case = '3'
@@ -454,7 +453,7 @@ tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal'
 tokio-io-timeout = '1'
 tokio-stream = { version = '0.1', features = ['sync'] }
 tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
-toml = '0.5'
+toml = '1'
 tower = { version = '0.5', features = ['timeout'] }
 tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
@@ -471,12 +470,13 @@ unwrap_none = '0.1'
 url = '2'
 uuid = { version = '1', features = ['serde', 'v4'] }
 variant_count = '1'
-web3 = { git = 'https://github.com/grandinetech/rust-web3.git' }
+web3 = { git = 'https://github.com/grandinetech/rust-web3.git', default-features = false, features = ['http-native-tls-vendored'] }
+wincode = { version = '0', features = ['derive'] }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
-zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.3' }
-zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.3' }
+zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.4' }
+zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.4' }
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }

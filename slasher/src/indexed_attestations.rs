@@ -2,7 +2,7 @@ use core::marker::PhantomData;
 
 use anyhow::Result;
 use database::Database;
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszReadDefault as _, SszWrite as _};
 use types::{
     phase0::{
         containers::IndexedAttestation,
@@ -47,7 +47,7 @@ impl<P: Preset> IndexedAttestations<P> {
         let bytes = self.db.get(key)?;
 
         if let Some(bytes) = bytes {
-            return Ok(Some(bincode::deserialize(&bytes)?));
+            return Ok(Some(IndexedAttestation::from_ssz_default(&bytes)?));
         }
 
         Ok(None)
@@ -60,9 +60,7 @@ impl<P: Preset> IndexedAttestations<P> {
     ) -> Result<()> {
         let attestation_data_root = indexed_attestation.data.hash_tree_root();
         let key = Self::key(target_epoch, attestation_data_root);
-
-        self.db
-            .put(key, bincode::serialize(&indexed_attestation)?)?;
+        self.db.put(key, indexed_attestation.to_ssz()?)?;
         Ok(())
     }
 

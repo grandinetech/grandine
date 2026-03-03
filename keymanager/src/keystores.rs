@@ -64,7 +64,7 @@ pub struct KeystoreManager {
 
 impl KeystoreManager {
     #[must_use]
-    pub fn new_in_memory(
+    pub const fn new_in_memory(
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,

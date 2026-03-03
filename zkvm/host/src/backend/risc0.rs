@@ -1,8 +1,9 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
 use alloy::signers::local::PrivateKeySigner;
 use anyhow::{Context, Result, anyhow};
-use boundless_market::{Client, Deployment, storage::storage_provider_from_env};
-use risc0_zkvm::{ExecutorEnv, Journal, Receipt, default_executor, default_prover, serde::to_vec};
+use boundless_market::{Client, storage::StorageUploaderConfig};
+use clap::{Args as _, FromArgMatches as _};
+use risc0_zkvm::{ExecutorEnv, Journal, default_executor, default_prover, serde::to_vec};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -23,7 +24,7 @@ impl ReportTrait for Report {
 pub struct Proof(Vec<u8>);
 
 impl ProofTrait for Proof {
-    fn verify(&self) -> bool {
+    async fn verify(&self) -> bool {
         true
     }
 
@@ -48,7 +49,7 @@ impl VmBackend for Vm {
         Ok(Self)
     }
 
-    fn execute(
+    async fn execute(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -79,7 +80,7 @@ impl VmBackend for Vm {
         Ok((receipt.journal.bytes, Report(cycles)))
     }
 
-    fn prove(
+    async fn prove(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -90,70 +91,71 @@ impl VmBackend for Vm {
         if std::env::var_os("PROVER") == Some("boundless".into()) {
             println!("using network prover");
 
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
+            let rpc_url =
+                std::env::var("RPC_URL").context("invalid RPC_URL environment variable")?;
 
-            runtime.block_on(async move {
-                let rpc_url =
-                    std::env::var("RPC_URL").context("invalid RPC_URL environment variable")?;
+            let private_key =
+                std::env::var("PRIVATE_KEY").context("invalid PRIVATE_KEY environment variable")?;
 
-                let private_key = std::env::var("PRIVATE_KEY")
-                    .context("invalid PRIVATE_KEY environment variable")?;
+            let private_key: PrivateKeySigner = private_key
+                .parse()
+                .context("invalid PRIVATE_KEY environment variable")?;
 
-                let private_key: PrivateKeySigner = private_key
-                    .parse()
-                    .context("invalid PRIVATE_KEY environment variable")?;
+            let storage_config = {
+                let cmd = StorageUploaderConfig::augment_args(clap::Command::new(""));
 
-                let client = Client::builder()
-                    .with_rpc_url(rpc_url.parse().context("invalid RPC_URL")?)
-                    .with_private_key(private_key)
-                    .with_storage_provider(Some(
-                        storage_provider_from_env().context("invalid storage provider")?,
-                    ))
-                    .build()
-                    .await?;
+                let matches = cmd
+                    .try_get_matches_from([""])
+                    .context("invalid storage provider")?;
 
-                let mut stdin = Vec::new();
-                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&(config as u8))?));
-                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&state_ssz.len())?));
-                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&block_ssz.len())?));
-                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&cache_ssz.len())?));
-                stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&phase_bytes.len())?));
-                stdin.extend_from_slice(&state_ssz);
-                stdin.extend_from_slice(&block_ssz);
-                stdin.extend_from_slice(&cache_ssz);
-                stdin.extend_from_slice(&phase_bytes);
+                StorageUploaderConfig::from_arg_matches(&matches)
+                    .context("invalid storage provider")?
+            };
 
-                let request = client
-                    .new_request()
-                    .with_program(RISC0_GRANDINE_STATE_TRANSITION_ELF)
-                    .with_stdin(stdin);
+            let client = Client::builder()
+                .with_rpc_url(rpc_url.parse().context("invalid RPC_URL")?)
+                .with_private_key(private_key)
+                .with_uploader_config(&storage_config)
+                .await?
+                .build()
+                .await?;
 
-                let (request_id, expires_at) = client
-                    .submit_onchain(request)
-                    .await
-                    .context("failed to submit onchain proof request")?;
+            let mut stdin = Vec::new();
+            stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&(config as u8))?));
+            stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&state_ssz.len())?));
+            stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&block_ssz.len())?));
+            stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&cache_ssz.len())?));
+            stdin.extend_from_slice(bytemuck::cast_slice(&to_vec(&phase_bytes.len())?));
+            stdin.extend_from_slice(&state_ssz);
+            stdin.extend_from_slice(&block_ssz);
+            stdin.extend_from_slice(&cache_ssz);
+            stdin.extend_from_slice(&phase_bytes);
 
-                let fulfillment = client
-                    .wait_for_request_fulfillment(request_id, Duration::from_secs(10), expires_at)
-                    .await
-                    .context("failed to wait for fulfillment")?;
+            let request = client
+                .new_request()
+                .with_program(RISC0_GRANDINE_STATE_TRANSITION_ELF)
+                .with_stdin(stdin);
 
-                let journal = Journal::new(
-                    fulfillment
-                        .data()?
-                        .journal()
-                        .ok_or(anyhow!("no journal received"))?
-                        .as_ref()
-                        .to_vec(),
-                );
+            let (request_id, expires_at) = client
+                .submit_onchain(request)
+                .await
+                .context("failed to submit onchain proof request")?;
 
-                Ok::<(Vec<u8>, Self::Proof), anyhow::Error>((
-                    journal.bytes.clone(),
-                    Proof(Vec::new()),
-                ))
-            })
+            let fulfillment = client
+                .wait_for_request_fulfillment(request_id, Duration::from_secs(10), expires_at)
+                .await
+                .context("failed to wait for fulfillment")?;
+
+            let journal = Journal::new(
+                fulfillment
+                    .data()?
+                    .journal()
+                    .ok_or(anyhow!("no journal received"))?
+                    .as_ref()
+                    .to_vec(),
+            );
+
+            Ok::<(Vec<u8>, Self::Proof), anyhow::Error>((journal.bytes.clone(), Proof(Vec::new())))
         } else {
             println!("no PROVER=boundless environment variable found, using local prover");
 

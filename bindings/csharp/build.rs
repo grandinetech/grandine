@@ -8,7 +8,7 @@ use std::{
 use clap::{Arg, CommandFactory, builder::ValueParser};
 use convert_case::{Case, Casing};
 use runtime::grandine_args::GrandineArgs;
-use toml::Value;
+use toml::Table;
 
 fn main() {
     let package_name_of_c_crate = get_package_name_of_c_crate();
@@ -206,7 +206,9 @@ fn get_package_name_of_c_crate() -> String {
         fs::read_to_string(path_to_c_crate_cargo_toml).expect("Failed to read Cargo.toml");
 
     // Parse the Cargo.toml content
-    let cargo_toml: Value = cargo_toml.parse().expect("Failed to parse Cargo.toml");
+    let cargo_toml = cargo_toml
+        .parse::<Table>()
+        .expect("Failed to parse Cargo.toml");
 
     // Access the library name from the parsed Cargo.toml
     let package_name = cargo_toml["lib"]["name"]

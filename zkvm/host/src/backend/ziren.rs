@@ -16,7 +16,7 @@ impl ReportTrait for Report {
 pub struct Proof(zkm_sdk::ZKMVerifyingKey, ZKMProofWithPublicValues);
 
 impl ProofTrait for Proof {
-    fn verify(&self) -> bool {
+    async fn verify(&self) -> bool {
         let client = ProverClient::new();
 
         client.verify(&self.1, &self.0).is_ok()
@@ -40,7 +40,7 @@ impl VmBackend for Vm {
         Ok(Vm)
     }
 
-    fn execute(
+    async fn execute(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,
@@ -62,7 +62,7 @@ impl VmBackend for Vm {
         Ok((output.as_slice().to_vec(), Report(report)))
     }
 
-    fn prove(
+    async fn prove(
         &self,
         config: ConfigKind,
         state_ssz: Vec<u8>,

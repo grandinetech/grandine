@@ -684,7 +684,7 @@ impl<P: Preset> Context<P> {
     }
 
     fn next_execution_service_message(&mut self) -> Option<ExecutionServiceMessage<P>> {
-        self.service_rx.try_next().ok().flatten()
+        self.service_rx.try_recv().ok()
     }
 
     fn next_p2p_message(&mut self) -> Option<P2pMessage<P>> {
@@ -703,7 +703,7 @@ impl<P: Preset> Context<P> {
     }
 
     fn next_p2p_message_verbose(&mut self) -> Option<P2pMessage<P>> {
-        self.p2p_rx.try_next().ok().flatten()
+        self.p2p_rx.try_recv().ok()
     }
 
     fn execution_block_hash(block: &SignedBeaconBlock<P>) -> ExecutionBlockHash {
