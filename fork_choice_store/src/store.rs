@@ -2731,6 +2731,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             header
         } else {
+            ensure!(
+                !column.sidecar.partial_column.is_empty(),
+                Error::PartialColumnEmpty { column }
+            );
+
             self.partial_data_column_cache
                 .header(column.block_root)
                 .ok_or(Error::PartialColumnNoHeaderCached {
