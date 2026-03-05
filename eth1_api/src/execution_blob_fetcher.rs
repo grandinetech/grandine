@@ -274,8 +274,29 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 .collect::<Vec<_>>();
 
             let support_get_blobs_v3 = self.api.has_capability(ENGINE_GET_EL_BLOBS_V3);
+            debug_with_peers!(
+                "call engine_getBlobs from {block_or_sidecar} (v3 supported: {support_get_blobs_v3})"
+            );
+
             let response = if support_get_blobs_v3 {
-                self.api.get_blobs_v3::<P>(versioned_hashes).await
+                let _timer = self
+                    .metrics
+                    .as_ref()
+                    .map(|metrics| metrics.engine_get_blobs_v3_request_time.start_timer());
+
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.engine_get_blobs_v3_requests_count.inc();
+                }
+
+                let result = self.api.get_blobs_v3::<P>(versioned_hashes).await;
+
+                if result.is_ok()
+                    && let Some(metrics) = self.metrics.as_ref()
+                {
+                    metrics.engine_get_blobs_v3_responses_count.inc();
+                }
+
+                result
             } else {
                 let _timer = self
                     .metrics
@@ -296,10 +317,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             .unwrap_or_default()
                     });
 
-                if result.is_ok() {
-                    if let Some(metrics) = self.metrics.as_ref() {
-                        metrics.engine_get_blobs_v2_responses_count.inc();
-                    }
+                if result.is_ok()
+                    && let Some(metrics) = self.metrics.as_ref()
+                {
+                    metrics.engine_get_blobs_v2_responses_count.inc();
                 }
 
                 result
@@ -312,7 +333,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                     if received_blob_count > 0 {
                         debug_with_peers!(
-                            "received {received_blob_count}, expect {expected_blobs_count} blob sidecars from EL at slot: {slot}",
+                            "received {received_blob_count}/{expected_blobs_count} blob sidecars from EL at slot: {slot}",
                         );
 
                         let missing_columns_indices =
@@ -339,6 +360,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             return;
                         }
 
+                        // TODO(feature/partial-columns): check if can be merge into single path
                         if received_blob_count == expected_blobs_count {
                             let (received_blobs, received_proofs): (Vec<_>, Vec<_>) =
                                 blobs_and_proofs
@@ -368,13 +390,25 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     self.controller
                                         .mark_sidecar_construction_started(block_root, slot);
 
-                                    for data_column_sidecar in
-                                        data_column_sidecars.into_iter().filter(|column| {
+                                    let data_column_sidecars = data_column_sidecars
+                                        .into_iter()
+                                        .filter(|column| {
                                             self.controller
                                                 .sampling_columns()
                                                 .contains(&column.index())
                                         })
-                                    {
+                                        .collect::<Vec<_>>();
+
+                                    // Publish partial data column sidecars
+                                    BlobFetcherToP2p::PublishPartialDataColumns(
+                                        data_column_sidecars
+                                            .iter()
+                                            .map(|sidecar| Arc::new(sidecar.as_ref().into()))
+                                            .collect(),
+                                    )
+                                    .send(&self.p2p_tx);
+
+                                    for data_column_sidecar in data_column_sidecars {
                                         let identifier = DataColumnIdentifier {
                                             block_root,
                                             index: data_column_sidecar.index(),
@@ -400,8 +434,8 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                 }
                             }
                         } else {
-                            match PartialDataColumnHeader::try_from(&block_or_sidecar) {
-                                Ok(header) => {
+                            match block_or_sidecar_to_header(&block_or_sidecar) {
+                                Some(header) => {
                                     let partial_columns_result =
                                         eip_7594::convert_blobs_to_partial_data_columns(
                                             &header,
@@ -414,8 +448,17 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                                     match partial_columns_result {
                                         Ok(partial_columns) => {
+                                            let partial_columns = partial_columns
+                                                .into_iter()
+                                                .filter(|sidecar| {
+                                                    self.controller
+                                                        .sampling_columns()
+                                                        .contains(&sidecar.index)
+                                                })
+                                                .collect::<Vec<_>>();
+
                                             for partial_column in &partial_columns {
-                                                self.controller.on_el_partial_data_colums(
+                                                self.controller.on_el_partial_data_column(
                                                     partial_column.clone_arc(),
                                                 );
                                             }
@@ -432,16 +475,16 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                         }
                                     }
                                 }
-                                Err(error) => {
+                                None => {
                                     warn_with_peers!(
-                                        "failed to convert block or sidecar into partial header: {error}"
+                                        "failed to convert block or sidecar into partial header"
                                     )
                                 }
                             }
                         }
                     } else {
                         debug_with_peers!(
-                            "not received any blobs from EL for request at block {block_root}"
+                            "not received any blobs from EL for request at slot: {slot}"
                         )
                     }
                 }
@@ -495,4 +538,31 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             }
         }
     }
+}
+
+fn block_or_sidecar_to_header<P: Preset>(
+    block_or_sidecar: &BlockOrDataColumnSidecar<P>,
+) -> Option<PartialDataColumnHeader<P>> {
+    let kzg_commitments_inclusion_proof = match block_or_sidecar {
+        BlockOrDataColumnSidecar::Block(block) => match block.as_ref() {
+            SignedBeaconBlock::Fulu(block) => {
+                misc::kzg_commitments_inclusion_proof(&block.message.body)
+            }
+            SignedBeaconBlock::Phase0(_)
+            | SignedBeaconBlock::Altair(_)
+            | SignedBeaconBlock::Bellatrix(_)
+            | SignedBeaconBlock::Capella(_)
+            | SignedBeaconBlock::Deneb(_)
+            | SignedBeaconBlock::Electra(_)
+            | SignedBeaconBlock::Gloas(_) => return None,
+        },
+        BlockOrDataColumnSidecar::Sidecar(sidecar) => sidecar.kzg_commitments_inclusion_proof()?,
+        BlockOrDataColumnSidecar::PartialHeader(header) => header.kzg_commitments_inclusion_proof,
+    };
+
+    Some(PartialDataColumnHeader {
+        signed_block_header: block_or_sidecar.signed_block_header()?,
+        kzg_commitments: block_or_sidecar.kzg_commitments().cloned()?,
+        kzg_commitments_inclusion_proof,
+    })
 }

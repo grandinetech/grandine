@@ -89,10 +89,11 @@ use crate::{
             LightClientBootstrap as FuluLightClientBootstrap,
             LightClientFinalityUpdate as FuluLightClientFinalityUpdate,
             LightClientOptimisticUpdate as FuluLightClientOptimisticUpdate,
-            LightClientUpdate as FuluLightClientUpdate, SignedBeaconBlock as FuluSignedBeaconBlock,
+            LightClientUpdate as FuluLightClientUpdate, PartialDataColumn, PartialDataColumnHeader,
+            PartialDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
             SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
         },
-        primitives::{BlobCommitmentsInclusionProof, Cell, ColumnIndex},
+        primitives::{BlobCommitmentsInclusionProof, Cell, CellBitmap, ColumnIndex},
     },
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
@@ -2270,9 +2271,9 @@ impl<P: Preset> DataColumnSidecar<P> {
 
     pub const fn kzg_commitments_inclusion_proof(
         &self,
-    ) -> Option<&BlobCommitmentsInclusionProof<P>> {
+    ) -> Option<BlobCommitmentsInclusionProof<P>> {
         match self {
-            Self::Fulu(sidecar) => Some(&sidecar.kzg_commitments_inclusion_proof),
+            Self::Fulu(sidecar) => Some(sidecar.kzg_commitments_inclusion_proof),
             Self::Gloas(_) => None,
         }
     }
@@ -2281,6 +2282,17 @@ impl<P: Preset> DataColumnSidecar<P> {
         match self {
             Self::Fulu(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
             Self::Gloas(sidecar) => sidecar.beacon_block_root,
+        }
+    }
+
+    pub fn partial_data_column_header(&self) -> Option<PartialDataColumnHeader<P>> {
+        match self {
+            Self::Fulu(sidecar) => Some(PartialDataColumnHeader {
+                kzg_commitments: sidecar.kzg_commitments.clone(),
+                signed_block_header: sidecar.signed_block_header,
+                kzg_commitments_inclusion_proof: sidecar.kzg_commitments_inclusion_proof,
+            }),
+            Self::Gloas(_) => None,
         }
     }
 
@@ -2319,6 +2331,30 @@ impl<P: Preset> From<&DataColumnSidecar<P>> for DataColumnIdentifier {
         let block_root = sidecar.beacon_block_root();
 
         Self { block_root, index }
+    }
+}
+
+impl<P: Preset> From<&DataColumnSidecar<P>> for PartialDataColumn<P> {
+    fn from(sidecar: &DataColumnSidecar<P>) -> Self {
+        let blob_count = sidecar.column().len();
+        let cells_present_bitmap = CellBitmap::<P>::new(true, blob_count);
+        let header = if let Some(header) = sidecar.partial_data_column_header() {
+            ContiguousList::full(header)
+        } else {
+            ContiguousList::default()
+        };
+        let partial_sidecar = PartialDataColumnSidecar {
+            cells_present_bitmap,
+            partial_column: sidecar.column().clone(),
+            kzg_proofs: sidecar.kzg_proofs().clone(),
+            header,
+        };
+
+        Self {
+            block_root: sidecar.beacon_block_root(),
+            index: sidecar.index(),
+            sidecar: partial_sidecar,
+        }
     }
 }
 

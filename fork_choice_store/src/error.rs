@@ -263,6 +263,10 @@ pub enum Error<P: Preset> {
     },
     #[error("received empty partial data column sidecar")]
     PartialColumnEmpty { column: Arc<PartialDataColumn<P>> },
+    #[error(
+        "partial data column sidecar contains conflicted cells and proofs with cached: {column:?}"
+    )]
+    PartialColumnConflictedCells { column: Arc<PartialDataColumn<P>> },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },
     #[error(

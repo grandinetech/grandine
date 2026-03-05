@@ -9,6 +9,7 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
+    PartialDataColumnOrigin,
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
@@ -21,7 +22,10 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    fulu::{
+        containers::{DataColumnIdentifier, PartialDataColumn, PartialDataColumnHeader},
+        primitives::ColumnIndex,
+    },
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -39,6 +43,7 @@ pub struct Delayed<P: Preset> {
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
+    pub partial_data_columns: Vec<PendingPartialDataColumn<P>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +100,7 @@ impl<P: Preset> Delayed<P> {
             attestations,
             blob_sidecars,
             data_column_sidecars,
+            partial_data_columns,
         } = self;
 
         blocks.is_empty()
@@ -103,6 +109,7 @@ impl<P: Preset> Delayed<P> {
             && attestations.is_empty()
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
+            && partial_data_columns.is_empty()
     }
 }
 
@@ -168,6 +175,14 @@ pub struct PendingDataColumnSidecar<P: Preset> {
     pub data_column_sidecar: Arc<DataColumnSidecar<P>>,
     pub block_seen: bool,
     pub origin: DataColumnSidecarOrigin,
+    pub submission_time: Instant,
+}
+
+#[derive(Debug)]
+pub struct PendingPartialDataColumn<P: Preset> {
+    pub column: Arc<PartialDataColumn<P>>,
+    pub header: Arc<PartialDataColumnHeader<P>>,
+    pub origin: PartialDataColumnOrigin,
     pub submission_time: Instant,
 }
 

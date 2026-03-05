@@ -2689,6 +2689,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
     pub fn validate_partial_data_column(
         &self,
@@ -2710,6 +2711,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let header_result = self.validate_partial_data_column_header(
                 column.block_root,
                 header.clone_arc(),
+                &column,
                 origin,
                 parent_info,
                 || {
@@ -2731,25 +2733,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             header
         } else {
+            // > [REJECT] A header and/or cells are present in the message (it is not semantically empty).
             ensure!(
                 !column.sidecar.partial_column.is_empty(),
                 Error::PartialColumnEmpty { column }
             );
 
-            self.partial_data_column_cache
-                .header(column.block_root)
-                .ok_or(Error::PartialColumnNoHeaderCached {
-                    column: column.clone_arc(),
-                })?
+            let Some(header) = self.partial_data_column_cache.header(column.block_root) else {
+                warn_with_peers!(
+                    "received partial data column sidecar without header or cached header, ignoring. column: {:?}",
+                    column
+                );
+
+                return Ok(PartialDataColumnSidecarAction::Ignore(true));
+            };
+
+            header
         };
 
         // Ignore non-sampling data column sidecars
         if !self.sampling_columns.contains(&column.index) {
-            return Ok(PartialDataColumnSidecarAction::Ignore(true));
-        }
-
-        // > [IGNORE] If the received partial message contains only cell data, the node has seen a valid corresponding `PartialDataColumnHeader`.
-        if !self.partial_data_column_cache.has_missing(&column) {
             return Ok(PartialDataColumnSidecarAction::Ignore(true));
         }
 
@@ -2764,7 +2767,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         );
 
-        // > [REJECT] For cells the receiver already has, The sidecar's cell and proof data are equal to the local copy.
+        // > [REJECT] There are the same number of cells and proofs in the message.
         let cells_length = column.sidecar.partial_column.len();
         let proofs_length = column.sidecar.kzg_proofs.len();
         let cells_present_count = column.sidecar.cells_present_bitmap.count_ones();
@@ -2779,8 +2782,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         );
 
+        // > [IGNORE] If the received partial message contains only cell data, the node has seen a valid corresponding `PartialDataColumnHeader`.
+        if !self.partial_data_column_cache.has_missing(&column) {
+            return Ok(PartialDataColumnSidecarAction::Ignore(true));
+        }
+
+        // > [REJECT] For cells the receiver already has, The sidecar's cell and proof data are equal to the local copy.
+        ensure!(
+            !self
+                .partial_data_column_cache
+                .has_conflicting_cells(&column),
+            Error::PartialColumnConflictedCells { column }
+        );
+
+        // [IGNORE] The corresponding header is not from a future slot.
+        if self.slot() < header.slot() {
+            return Ok(PartialDataColumnSidecarAction::DelayUntilSlot(
+                column, header,
+            ));
+        }
+
+        // [IGNORE] The corresponding header is from a slot greater than the latest finalized slot.
+        if header.slot() <= self.finalized_slot() {
+            return Ok(PartialDataColumnSidecarAction::Ignore(false));
+        }
+
         // [REJECT] The sidecar's cell and proof data is valid as verified by verify_partial_data_column_sidecar_kzg_proofs(sidecar, header.kzg_commitments, column_index).
-        if !origin.is_from_el() {
+        // Ignore this check if partial message contains only the header
+        if !origin.is_from_el() && cells_length > 0 {
             let verify_result = verify_partial_data_column_sidecar_kzg_proofs(
                 &column.sidecar,
                 &header.kzg_commitments,
@@ -2805,10 +2834,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(PartialDataColumnSidecarAction::Accept(column))
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn validate_partial_data_column_header(
         &self,
         block_root: H256,
         header: Arc<PartialDataColumnHeader<P>>,
+        column: &Arc<PartialDataColumn<P>>,
         origin: &PartialDataColumnOrigin,
         parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
@@ -2842,7 +2873,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > [IGNORE] The header is not from a future slot (with a `MAXIMUM_GOSSIP_CLOCK_DISPARITY` allowance) -- i.e. validate that
         // > `block_header.slot <= current_slot` (a client MAY queue future headers for processing at the appropriate slot).
         if self.slot() < block_header.slot {
-            return Ok(PartialDataColumnSidecarAction::DelayUntilSlot(header));
+            return Ok(PartialDataColumnSidecarAction::DelayUntilSlot(
+                column.clone_arc(),
+                header,
+            ));
         }
 
         // > [IGNORE] The header is from a slot greater than the latest finalized slot --i.e. validate that
@@ -2856,7 +2890,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // Alternatively, we could allow slot processing to obtain states for data column sidecar validations,
             // however, that introduces opportunity for DoS attacks with fake data column sidecars.
             return Ok(PartialDataColumnSidecarAction::DelayUntilState(
-                header, block_root,
+                column.clone_arc(),
+                header,
+                block_root,
             ));
         };
 
@@ -2883,7 +2919,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > [IGNORE] The header's block's parent (defined by `block_header.parent_root`) has been seen (via gossip or non-gossip sources)
         // > (a client MAY queue header for processing once the parent block is retrieved).
         let Some((parent, parent_payload_status)) = parent_info() else {
-            return Ok(PartialDataColumnSidecarAction::DelayUntilParent(header));
+            return Ok(PartialDataColumnSidecarAction::DelayUntilParent(
+                column.clone_arc(),
+                header,
+            ));
         };
 
         // [REJECT] The header's block's parent (defined by `block_header.parent_root`) passes validation.
@@ -4634,6 +4673,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.sidecars_construction_started
             .remove_async(block_root)
             .await;
+    }
+
+    pub fn partial_header(&self, block_root: H256) -> Option<Arc<PartialDataColumnHeader<P>>> {
+        self.partial_data_column_cache.header(block_root)
     }
 
     pub fn delay_block_at_slot(&mut self, slot: Slot, block_root: H256) {

@@ -52,8 +52,7 @@ impl<P: Preset> Eth1ApiToBlobFetcher<P> {
 pub enum BlobFetcherToP2p<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
-    #[serde(skip)]
-    PublishPartialDataColumns(Vec<Arc<PartialDataColumn<P>>>),
+    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>),
 }
 
 impl<P: Preset> BlobFetcherToP2p<P> {

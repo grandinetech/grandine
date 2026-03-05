@@ -22,7 +22,10 @@ use types::{
         Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    fulu::{
+        containers::{DataColumnIdentifier, PartialDataColumn},
+        primitives::ColumnIndex,
+    },
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -217,6 +220,7 @@ pub enum P2pMessage<P: Preset> {
     Ignore(GossipId),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
+    PublishPartialDataColumn(#[serde(skip)] Arc<PartialDataColumn<P>>),
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
     RejectPartial(PeerId, MutatorRejectionReason),

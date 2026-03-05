@@ -853,9 +853,13 @@ impl<P: Preset> DataColumnSidecarAction<P> {
 pub enum PartialDataColumnSidecarAction<P: Preset> {
     Accept(Arc<PartialDataColumn<P>>),
     Ignore(Publishable),
-    DelayUntilState(Arc<PartialDataColumnHeader<P>>, H256),
-    DelayUntilParent(Arc<PartialDataColumnHeader<P>>),
-    DelayUntilSlot(Arc<PartialDataColumnHeader<P>>),
+    DelayUntilState(
+        Arc<PartialDataColumn<P>>,
+        Arc<PartialDataColumnHeader<P>>,
+        H256,
+    ),
+    DelayUntilParent(Arc<PartialDataColumn<P>>, Arc<PartialDataColumnHeader<P>>),
+    DelayUntilSlot(Arc<PartialDataColumn<P>>, Arc<PartialDataColumnHeader<P>>),
 }
 
 impl<P: Preset> PartialDataColumnSidecarAction<P> {

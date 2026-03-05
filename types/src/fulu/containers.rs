@@ -230,7 +230,7 @@ pub struct PartialDataColumnPartsMetadata<P: Preset> {
     pub requests: CellBitmap<P>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartialDataColumn<P: Preset> {
     pub block_root: H256,
     pub index: ColumnIndex,

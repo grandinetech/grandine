@@ -1,6 +1,5 @@
 use core::fmt;
 
-use anyhow::Error as AnyError;
 use ssz::{ContiguousList, Hc, SszHash as _};
 
 use crate::{
@@ -14,7 +13,6 @@ use crate::{
         DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier, PartialDataColumn,
         PartialDataColumnHeader, PartialDataColumnSidecar,
     },
-    nonstandard::BlockOrDataColumnSidecar,
     phase0::primitives::{H256, Slot},
     preset::Preset,
 };
@@ -197,16 +195,6 @@ impl<P: Preset> From<DataColumnsByRootIdentifier<P>> for Vec<DataColumnIdentifie
     }
 }
 
-impl<P: Preset> From<&DataColumnSidecar<P>> for PartialDataColumnHeader<P> {
-    fn from(sidecar: &DataColumnSidecar<P>) -> Self {
-        Self {
-            kzg_commitments: sidecar.kzg_commitments.clone(),
-            signed_block_header: sidecar.signed_block_header,
-            kzg_commitments_inclusion_proof: sidecar.kzg_commitments_inclusion_proof.clone(),
-        }
-    }
-}
-
 impl<P: Preset> From<&PartialDataColumn<P>> for DataColumnIdentifier {
     fn from(column: &PartialDataColumn<P>) -> Self {
         Self {
@@ -216,9 +204,16 @@ impl<P: Preset> From<&PartialDataColumn<P>> for DataColumnIdentifier {
     }
 }
 
+impl<P: Preset> PartialDataColumnHeader<P> {
+    pub const fn slot(&self) -> Slot {
+        self.signed_block_header.message.slot
+    }
+}
+
 impl<P: Preset> PartialDataColumnSidecar<P> {
+    #[must_use]
     pub fn is_full(&self) -> bool {
-        self.cells_present_bitmap.all()
+        self.cells_present_bitmap.iter().all(|bit| *bit)
     }
 
     pub fn merge(&mut self, other: &Self) {
@@ -235,18 +230,13 @@ impl<P: Preset> PartialDataColumnSidecar<P> {
             .zip(other.cells_present_bitmap.iter())
         {
             match (*self_present, *other_present) {
-                (true, other) => {
+                (true, _) => {
                     cells.push(self.partial_column.get(self_cell_index).cloned().expect(
                         "self partial column contains cells less than attached present bitmap",
                     ));
                     proofs.push(*self.kzg_proofs.get(self_cell_index).expect(
                         "self partial kzg proofs contains proofs less than attached present bitmap",
                     ));
-                    self_cell_index += 1;
-
-                    if other {
-                        other_cell_index += 1;
-                    }
                 }
                 (false, true) => {
                     cells.push(other.partial_column.get(other_cell_index).cloned().expect(
@@ -255,9 +245,16 @@ impl<P: Preset> PartialDataColumnSidecar<P> {
                     proofs.push(*other.kzg_proofs.get(other_cell_index).expect(
                         "other partial kzg proofs contains proofs less than attached present bitmap",
                     ));
-                    other_cell_index += 1;
                 }
                 _ => {}
+            }
+
+            if *self_present {
+                self_cell_index += 1;
+            }
+
+            if *other_present {
+                other_cell_index += 1;
             }
         }
 
@@ -303,32 +300,6 @@ impl<P: Preset> PartialDataColumnSidecar<P> {
             partial_column: ContiguousList::try_from(cells).expect("should be within bound"),
             kzg_proofs: ContiguousList::try_from(proofs).expect("should be within bound"),
             header: self.header.clone(),
-        })
-    }
-}
-
-impl<P: Preset> PartialDataColumnHeader<P> {
-    pub fn slot(&self) -> Slot {
-        self.signed_block_header.message.slot
-    }
-}
-
-impl<P: Preset> TryFrom<&BlockOrDataColumnSidecar<P>> for PartialDataColumnHeader<P> {
-    type Error = AnyError;
-
-    fn try_from(value: &BlockOrDataColumnSidecar<P>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            signed_block_header: value
-                .signed_block_header()
-                .ok_or(AnyError::msg("value without block header"))?,
-            kzg_commitments: value
-                .kzg_commitments()
-                .cloned()
-                .ok_or(AnyError::msg("value without kzg commitments"))?,
-            kzg_commitments_inclusion_proof: value
-                .kzg_commitments_inclusion_proof()
-                .cloned()
-                .ok_or(AnyError::msg("value without inclusion proofs"))?,
         })
     }
 }

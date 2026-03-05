@@ -818,6 +818,19 @@ impl<P: Preset, W> Run for PartialDataColumnTask<P, W> {
             metrics,
         } = self;
 
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .partial_data_column_sidecar_verification_times
+                .start_timer()
+        });
+
+        if let Some(metrics) = metrics.as_ref() {
+            metrics.register_partial_message_cells_received(&[partial_column
+                .index
+                .to_string()
+                .as_str()]);
+        }
+
         let data_column_identifier = partial_column.as_ref().into();
         let result = store_snapshot.validate_partial_data_column(
             partial_column,

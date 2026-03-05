@@ -73,9 +73,24 @@ pub struct Metrics {
     pub data_column_sidecar_kzg_verification_single: Histogram,
     beacon_custody_groups: IntGauge,
     beacon_custody_groups_backfilled: IntGauge,
+
+    // Partial Data Column
+    pub partial_data_column_sidecar_computation: Histogram,
+    pub partial_data_column_sidecar_verification_times: Histogram,
+    pub partial_sidecar_inclusion_proof_verification: Histogram,
+    pub partial_sidecar_kzg_verification: Histogram,
+    partial_message_useful_cells_total: IntCounterVec,
+    partial_message_cells_received_total: IntCounterVec,
+    paritial_message_column_complementation_total: IntCounterVec,
+    useful_full_columns_received_total: IntCounterVec,
+
+    // Engine API
     pub engine_get_blobs_v2_requests_count: IntCounter,
     pub engine_get_blobs_v2_responses_count: IntCounter,
     pub engine_get_blobs_v2_request_time: Histogram,
+    pub engine_get_blobs_v3_requests_count: IntCounter,
+    pub engine_get_blobs_v3_responses_count: IntCounter,
+    pub engine_get_blobs_v3_request_time: Histogram,
 
     // Extra Network stats
     gossip_block_slot_start_delay_time: Histogram,
@@ -393,6 +408,61 @@ impl Metrics {
                 "Total number of custody groups backfilled by a node",
             )?,
 
+            // Partial Data Column
+            partial_data_column_sidecar_computation: Histogram::with_opts(histogram_opts!(
+                "beacon_partial_data_column_sidecar_computation_seconds",
+                "Time taken to compute partial data column sidecar from blobs and proofs",
+                vec![0.1, 0.15, 0.25, 0.35, 0.5, 0.7, 1.0, 2.5, 5.0, 10.0],
+            ))?,
+
+            partial_data_column_sidecar_verification_times: Histogram::with_opts(histogram_opts!(
+                "beacon_partial_data_column_sidecar_verification_seconds",
+                "Runtime of partial data column sidecar verification",
+            ))?,
+
+            partial_sidecar_inclusion_proof_verification: Histogram::with_opts(histogram_opts!(
+                "beacon_partial_data_column_sidecar_inclusion_proof_verification_seconds",
+                "Time taken to verify partial data column sidecar inclusion proof",
+            ))?,
+
+            partial_sidecar_kzg_verification: Histogram::with_opts(histogram_opts!(
+                "beacon_partial_data_column_sidecar_kzg_verification_seconds",
+                "Runtime of partial data column sidecar kzg verification",
+            ))?,
+
+            partial_message_useful_cells_total: IntCounterVec::new(
+                opts!(
+                    "beacon_partial_message_useful_cells_total",
+                    "Number of useful cells received via a partial message",
+                ),
+                &["column_index"],
+            )?,
+
+            partial_message_cells_received_total: IntCounterVec::new(
+                opts!(
+                    "beacon_partial_message_cells_received_total",
+                    "Number of total cells received via a partial message",
+                ),
+                &["column_index"],
+            )?,
+
+            paritial_message_column_complementation_total: IntCounterVec::new(
+                opts!(
+                    "beacon_partial_message_column_complementation_total",
+                    "How often the partial message first completed the column",
+                ),
+                &["column_index"],
+            )?,
+
+            useful_full_columns_received_total: IntCounterVec::new(
+                opts!(
+                    "beacon_useful_full_columns_received_total",
+                    "Number of useful full columns (any cell being useful) received",
+                ),
+                &["column_index"],
+            )?,
+
+            // Engine API
             engine_get_blobs_v2_requests_count: IntCounter::new(
                 "beacon_engine_getBlobsV2_requests_total",
                 "Total number of engine_getBlobsV2 requests sent",
@@ -406,6 +476,21 @@ impl Metrics {
             engine_get_blobs_v2_request_time: Histogram::with_opts(histogram_opts!(
                 "beacon_engine_getBlobsV2_request_duration_seconds",
                 "Duration of engine_getBlobsV2 requests",
+            ))?,
+
+            engine_get_blobs_v3_requests_count: IntCounter::new(
+                "beacon_engine_getBlobsV3_requests_total",
+                "Total number of engine_getBlobsV3 requests sent",
+            )?,
+
+            engine_get_blobs_v3_responses_count: IntCounter::new(
+                "beacon_engine_getBlobsV3_complete_responses_total",
+                "Total number of complete engine_getBlobsV3 successful responses received",
+            )?,
+
+            engine_get_blobs_v3_request_time: Histogram::with_opts(histogram_opts!(
+                "beacon_engine_getBlobsV3_request_duration_seconds",
+                "Duration of engine_getBlobsV3 requests",
             ))?,
 
             // Extra Network stats
@@ -926,9 +1011,28 @@ impl Metrics {
         ))?;
         default_registry.register(Box::new(self.beacon_custody_groups.clone()))?;
         default_registry.register(Box::new(self.beacon_custody_groups_backfilled.clone()))?;
+        default_registry.register(Box::new(
+            self.partial_data_column_sidecar_computation.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.partial_data_column_sidecar_verification_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.partial_sidecar_inclusion_proof_verification.clone(),
+        ))?;
+        default_registry.register(Box::new(self.partial_sidecar_kzg_verification.clone()))?;
+        default_registry.register(Box::new(self.partial_message_useful_cells_total.clone()))?;
+        default_registry.register(Box::new(self.partial_message_cells_received_total.clone()))?;
+        default_registry.register(Box::new(
+            self.paritial_message_column_complementation_total.clone(),
+        ))?;
+        default_registry.register(Box::new(self.useful_full_columns_received_total.clone()))?;
         default_registry.register(Box::new(self.engine_get_blobs_v2_requests_count.clone()))?;
         default_registry.register(Box::new(self.engine_get_blobs_v2_responses_count.clone()))?;
         default_registry.register(Box::new(self.engine_get_blobs_v2_request_time.clone()))?;
+        default_registry.register(Box::new(self.engine_get_blobs_v3_requests_count.clone()))?;
+        default_registry.register(Box::new(self.engine_get_blobs_v3_responses_count.clone()))?;
+        default_registry.register(Box::new(self.engine_get_blobs_v3_request_time.clone()))?;
         default_registry.register(Box::new(self.gossip_block_slot_start_delay_time.clone()))?;
         default_registry.register(Box::new(self.mutator_attestations.clone()))?;
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
@@ -1251,6 +1355,63 @@ impl Metrics {
                 .gossip_block_slot_start_delay_time
                 .observe(duration.as_secs_f64()),
             Err(error) => warn_with_peers!("unable to observe block duration to slot: {error:?}"),
+        }
+    }
+
+    // Partial messages
+    pub fn register_partial_message_useful_cells(&self, labels: &[&str]) {
+        match self
+            .partial_message_useful_cells_total
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register useful cell for partial message with labels {labels:?}: {error:?}"
+                )
+            }
+        }
+    }
+
+    pub fn register_partial_message_cells_received(&self, labels: &[&str]) {
+        match self
+            .partial_message_cells_received_total
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register received cell for partial message with labels {labels:?}: {error:?}"
+                )
+            }
+        }
+    }
+
+    pub fn register_partial_message_column_complementation(&self, labels: &[&str]) {
+        match self
+            .paritial_message_column_complementation_total
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register column complementation for partial message with labels {labels:?}: {error:?}"
+                )
+            }
+        }
+    }
+
+    pub fn register_useful_full_column_received(&self, labels: &[&str]) {
+        match self
+            .useful_full_columns_received_total
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register useful full column received with labels {labels:?}: {error:?}"
+                )
+            }
         }
     }
 

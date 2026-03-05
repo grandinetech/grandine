@@ -4066,6 +4066,12 @@ fn publish_block_with_data_column_sidecars_to_network<P: Preset>(
         ApiToP2p::PublishDataColumnSidecar(data_column_sidecar.clone_arc()).send(api_to_p2p_tx);
     }
 
+    let partial_data_columns = data_column_sidecars
+        .iter()
+        .map(|sidecar| Arc::new(sidecar.as_ref().into()))
+        .collect::<Vec<_>>();
+    ApiToP2p::PublishPartialDataColumns(partial_data_columns).send(api_to_p2p_tx);
+
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
@@ -4582,7 +4588,7 @@ async fn submit_data_column_sidecar<P: Preset, W: Wait>(
     let (sender, receiver) = futures::channel::oneshot::channel();
 
     controller
-        .on_api_data_column_sidecar(data_column_sidecar.clone_arc(), Some(sender))
+        .on_api_data_column_sidecar(data_column_sidecar, Some(sender))
         .await;
 
     receiver.await?

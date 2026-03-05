@@ -629,7 +629,7 @@ where
         );
     }
 
-    pub fn on_el_partial_data_colums(&self, partial_column: Arc<PartialDataColumn<P>>) {
+    pub fn on_el_partial_data_column(&self, partial_column: Arc<PartialDataColumn<P>>) {
         self.spawn_partial_data_column_task(
             partial_column,
             PartialDataColumnOrigin::ExecutionLayer,

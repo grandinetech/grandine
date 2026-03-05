@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::fmt::{self, Debug};
 use std::sync::Arc;
 
 use bit_field::BitField as _;
@@ -26,10 +26,7 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
-    fulu::{
-        containers::{DataColumnIdentifier, PartialDataColumnHeader},
-        primitives::BlobCommitmentsInclusionProof,
-    },
+    fulu::containers::{DataColumnIdentifier, PartialDataColumnHeader},
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -479,14 +476,16 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::PartialHeader(header) => Some(&header.kzg_commitments),
         }
     }
+}
 
-    // TODO(feature/partial-columns: derive from blob commitments)
-    pub fn kzg_commitments_inclusion_proof(&self) -> Option<&BlobCommitmentsInclusionProof<P>> {
-        match self {
-            Self::Block(block) => None,
-            Self::Sidecar(sidecar) => sidecar.kzg_commitments_inclusion_proof(),
-            Self::PartialHeader(header) => Some(&header.kzg_commitments_inclusion_proof),
-        }
+impl<P: Preset> fmt::Display for BlockOrDataColumnSidecar<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let variant = match self {
+            Self::Block(_) => "Block",
+            Self::Sidecar(_) => "Sidecar",
+            Self::PartialHeader(_) => "PartialHeader",
+        };
+        write!(f, "{variant}")
     }
 }
 

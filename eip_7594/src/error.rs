@@ -1,6 +1,6 @@
 use ssz::H256;
 use thiserror::Error;
-use types::{fulu::primitives::ColumnIndex, phase0::primitives::Slot};
+use types::phase0::primitives::Slot;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -30,6 +30,4 @@ pub enum Error {
         "attempted to construct data column sidecars for pre-Fulu block: slot: {slot}, root: {root:?}"
     )]
     DataColumnSidecarsForPreFuluBlock { root: H256, slot: Slot },
-    #[error("empty cells in partial data column sidecar: {column_index}")]
-    PartialDataColumnEmptyCells { column_index: ColumnIndex },
 }

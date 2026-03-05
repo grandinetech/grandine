@@ -105,6 +105,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
+    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),
@@ -214,6 +215,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
+    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>),
     UpdateDataColumnSubnets(u64),
 }
 

@@ -28,13 +28,52 @@ impl<P: Preset> PartialDataColumnCache<P> {
     pub fn has_missing(&self, partial_column: &Arc<PartialDataColumn<P>>) -> bool {
         let id: DataColumnIdentifier = partial_column.as_ref().into();
         let Some((sidecar, _)) = self.partial_columns.get(&id) else {
-            return false;
+            return true;
         };
 
         partial_column
             .sidecar
             .cells_present_bitmap
             .any_not_in(&sidecar.cells_present_bitmap)
+    }
+
+    pub fn has_conflicting_cells(&self, partial_column: &Arc<PartialDataColumn<P>>) -> bool {
+        let id: DataColumnIdentifier = partial_column.as_ref().into();
+        let Some((cached_sidecar, _)) = self.partial_columns.get(&id) else {
+            return false;
+        };
+
+        let mut cached_cell_index = 0;
+        let mut incoming_cell_index = 0;
+        for (is_cached, is_present) in cached_sidecar
+            .cells_present_bitmap
+            .iter()
+            .zip(partial_column.sidecar.cells_present_bitmap.iter())
+        {
+            if *is_cached && *is_present {
+                let cached_cell = cached_sidecar.partial_column.get(cached_cell_index);
+                let cached_proof = cached_sidecar.kzg_proofs.get(cached_cell_index);
+                let new_cell = partial_column
+                    .sidecar
+                    .partial_column
+                    .get(incoming_cell_index);
+                let new_proof = partial_column.sidecar.kzg_proofs.get(incoming_cell_index);
+
+                if new_cell != cached_cell || new_proof != cached_proof {
+                    return true;
+                }
+            }
+
+            if *is_cached {
+                cached_cell_index += 1;
+            }
+
+            if *is_present {
+                incoming_cell_index += 1;
+            }
+        }
+
+        false
     }
 
     pub fn upsert_partial_column(

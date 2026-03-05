@@ -88,6 +88,7 @@ impl Eth1Api {
         }
     }
 
+    #[must_use]
     pub fn has_capability(&self, capability: &str) -> bool {
         self.endpoints.has_capability(capability)
     }

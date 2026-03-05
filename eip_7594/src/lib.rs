@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Ok, Result, anyhow, ensure};
+use anyhow::{Result, anyhow, ensure};
 use dedicated_executor::DedicatedExecutor;
 use execution_engine::BlobAndProofV2;
 use futures::future::join_all;
@@ -253,6 +253,12 @@ pub fn verify_partial_data_column_header_inclusion_proof<P: Preset>(
     header: &PartialDataColumnHeader<P>,
     metrics: Option<&Arc<Metrics>>,
 ) -> bool {
+    let _timer = metrics.as_ref().map(|metrics| {
+        metrics
+            .partial_sidecar_inclusion_proof_verification
+            .start_timer()
+    });
+
     let PartialDataColumnHeader {
         kzg_commitments,
         signed_block_header,
@@ -277,6 +283,10 @@ pub fn verify_partial_data_column_sidecar_kzg_proofs<P: Preset>(
     backend: KzgBackend,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<bool> {
+    let _timer = metrics
+        .as_ref()
+        .map(|metrics| metrics.partial_sidecar_kzg_verification.start_timer());
+
     let PartialDataColumnSidecar {
         cells_present_bitmap,
         partial_column,
@@ -284,20 +294,13 @@ pub fn verify_partial_data_column_sidecar_kzg_proofs<P: Preset>(
         ..
     } = sidecar;
 
-    ensure!(
-        !partial_column.is_empty(),
-        Error::PartialDataColumnEmptyCells { column_index }
-    );
-
     // Get the blob indices from the bitmap
-    let mut blob_indices = cells_present_bitmap.iter_ones();
-    let cell_indices = vec![column_index; blob_indices.len()];
+    let blob_count = cells_present_bitmap.count_ones();
+    let cell_indices = vec![column_index; blob_count];
 
-    let commitments = kzg_commitments
-        .into_iter()
-        .enumerate()
-        .filter(|(index, _)| blob_indices.contains(index))
-        .map(|(_, commitment)| commitment);
+    let commitments = cells_present_bitmap
+        .iter_ones()
+        .filter_map(|index| kzg_commitments.get(index));
 
     verify_cell_kzg_proof_batch::<P>(
         commitments,
@@ -541,14 +544,10 @@ pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
 }
 
 pub async fn try_convert_to_cells_and_kzg_proofs_with_opt<P: Preset>(
-    mut blobs_and_proofs: impl ExactSizeIterator<Item = Option<BlobAndProofV2<P>>>,
+    blobs_and_proofs: impl ExactSizeIterator<Item = Option<BlobAndProofV2<P>>>,
     backend: KzgBackend,
     dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<Option<CellsAndKzgProofs<P>>>> {
-    if blobs_and_proofs.all(|opt| opt.is_none()) {
-        return Ok(vec![]);
-    }
-
     let jobs = blobs_and_proofs
         .into_iter()
         .map(|blob_and_proofs_opt| {
@@ -611,6 +610,16 @@ pub async fn convert_blobs_to_partial_data_columns<P: Preset>(
     metrics: Option<Arc<Metrics>>,
     dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<Arc<PartialDataColumn<P>>>> {
+    if blobs_and_proofs.iter().all(Option::is_none) {
+        return Ok(vec![]);
+    }
+
+    let _timer = metrics.as_ref().map(|metrics| {
+        metrics
+            .partial_data_column_sidecar_computation
+            .start_timer()
+    });
+
     let cells_and_kzg_proofs_opt = try_convert_to_cells_and_kzg_proofs_with_opt::<P>(
         blobs_and_proofs.into_iter(),
         kzg_backend,
@@ -720,19 +729,17 @@ fn construct_partial_data_columns<P: Preset>(
                     .map(|(_, proofs)| proofs[column_index]),
             )?;
 
-            Ok(Arc::new(
-                PartialDataColumn {
-                    index: ColumnIndex::try_from(column_index)?,
-                    block_root,
-                    sidecar: PartialDataColumnSidecar {
-                        cells_present_bitmap: cells_present_bitmap.clone(),
-                        partial_column,
-                        kzg_proofs,
-                        header: header_list.clone(),
-                    },
-                }
-                .into(),
-            ))
+            Ok(PartialDataColumn {
+                index: ColumnIndex::try_from(column_index)?,
+                block_root,
+                sidecar: PartialDataColumnSidecar {
+                    cells_present_bitmap: cells_present_bitmap.clone(),
+                    partial_column,
+                    kzg_proofs,
+                    header: header_list.clone(),
+                },
+            }
+            .into())
         })
         .collect::<Result<Vec<_>>>()
 }
