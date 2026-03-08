@@ -70,7 +70,6 @@ use helper_functions::misc;
 use serde::Deserialize;
 use strum::AsRefStr;
 use thiserror::Error;
-use tokio_stream::wrappers::IntervalStream;
 use types::{
     config::Config,
     nonstandard::Phase,
@@ -357,21 +356,36 @@ pub fn ticks<P: Preset>(
         false,
     )?;
 
-    let tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
-    let interval = tokio::time::interval_at(next_instant.into(), tick_duration);
+    let next_fire: tokio::time::Instant = next_instant.into();
 
-    Ok(IntervalStream::new(interval)
-        .map(move |_| {
-            let current_tick = next_tick;
-            next_tick = current_tick.next::<P>(config)?;
-            Ok(current_tick)
-        })
+    //temp approach: instead of interval used next tick + (next fire, sleep_until) and compute tick duration per iteration.
+    //                                                                                                                                         
+    // Use `unfold` + `sleep_until` instead of `IntervalStream` to support                                                               
+    // variable tick durations across slots.
+    //                                                                                                                                   
+    // unfold(initial_state, |state| async move { Some((item, next_state)) or None to end the stream })
+    //   - initial_state: (next_tick, next_fire) - pre computed
+    //   - `move` captures `config`as its as &Config - reference.
+    //   - `Box::pin` required because `sleep_until()` await is inside the closure 
+    //
+    // Alternative: `async-stream` crate's `try_stream!` generator macro for yield-based syntax instead of try_filter.
+    // Alternative: `IntervalStream` if tick duration is fixed across all slots.
+    // didnt try to restart the stream at new phase detection, even though it might give the results as scheduling the next stream separately 
+    // would maybe give closer result then closinga nd restaring at the Now. 
+    Ok(Box::pin(
+        futures::stream::unfold(
+            (next_tick, next_fire),
+            move |(current_tick, fire_at)| async move {
+                tokio::time::sleep_until(fire_at).await;
+                let next = current_tick.next::<P>(config).ok()?;
+                let next_fire = fire_at + tick_duration_at_slot::<P>(config, next.slot);
+                Some((Ok(current_tick), (next, next_fire)))
+            },
+        )
         .try_filter(|tick| {
-            // Emit only ticks that the application currently uses.
-            //
-            // This could be written as an `async` block, but that makes the stream `!Unpin`.
             core::future::ready(tick.is_start_of_interval() || tick.is_end_of_interval())
-        }))
+        }),
+    ))
 }
 
 pub fn next_interval_with_remaining_time<P: Preset>(

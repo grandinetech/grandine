@@ -1342,9 +1342,7 @@ pub async fn execution_payload_envelope<P: Preset, W: Wait>(
     let root = block.message().hash_tree_root();
 
     let envelope = controller
-        .execution_payload_envelopes_by_roots(vec![root])?
-        .into_iter()
-        .next()
+        .execution_payload_envelope_by_root(root)?
         .ok_or(Error::ExecutionPayloadEnvelopeNotFound)?;
 
     Ok(EthResponse::json_or_ssz(envelope, &headers)?
