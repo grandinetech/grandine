@@ -1229,9 +1229,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                 // Set block_mev value to the in-protocol builder bid value to be compare with
                 // `boosted_builder_mev` in case we still want to support the off-protocol builders
-                block_mev = selected_bid.map(|bid| Wei::from_u64(bid.message.value) * WEI_IN_GWEI);
+                block_mev = selected_bid
+                    .as_ref()
+                    .map(|bid| Wei::from_u64(bid.message.value) * WEI_IN_GWEI);
 
-                selected_bid
+                selected_bid.map(|bid| (*bid).clone())
             };
 
             block_without_state_root.with_signed_execution_payload_bid(signed_payload_bid)
@@ -1598,14 +1600,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         blob_kzg_commitments_opt: Option<
             ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
         >,
-    ) -> Result<Option<SignedExecutionPayloadBid>> {
+    ) -> Result<Option<SignedExecutionPayloadBid<P>>> {
         let Some(payload) = execution_payload_opt else {
             return Ok(None);
         };
 
-        let blob_kzg_commitments_root = blob_kzg_commitments_opt
-            .map(|commitments| commitments.hash_tree_root())
-            .unwrap_or(H256::zero());
+        let blob_kzg_commitments = blob_kzg_commitments_opt.unwrap_or_default();
 
         let fee_recipient = self.fee_recipient().await?;
 
@@ -1620,7 +1620,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments_root,
+            blob_kzg_commitments,
         };
 
         Ok(Some(SignedExecutionPayloadBid {
@@ -2062,7 +2062,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         beacon_block_root: H256,
         post_state: Arc<BeaconState<P>>,
     ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
-        let Some((payload, execution_requests, blob_kzg_commitments)) =
+        let Some((payload, execution_requests, _blob_kzg_commitments)) =
             self.get_gloas_envelope_data().await
         else {
             return Ok(None);
@@ -2075,7 +2075,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             builder_index: BUILDER_INDEX_SELF_BUILD,
             beacon_block_root,
             slot: self.beacon_state.slot(),
-            blob_kzg_commitments,
             state_root: H256::zero(),
         };
 

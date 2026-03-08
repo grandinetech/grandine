@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use bit_field::BitField as _;
 use bls::Signature;
-use derive_more::Constructor;
+use derive_more::{Constructor, From};
 use enum_iterator::Sequence;
 use enum_map::Enum;
 use serde::Serialize;
@@ -26,8 +26,12 @@ use crate::{
     },
     electra::containers::ExecutionRequests,
     fulu::containers::DataColumnIdentifier,
-    phase0::primitives::{Gwei, Uint256, UnixSeconds, ValidatorIndex, H256},
+    phase0::{
+        containers::SignedBeaconBlockHeader,
+        primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
+    },
     preset::Preset,
+    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 pub use smallvec::smallvec;
@@ -359,6 +363,53 @@ impl<P: Preset> KzgProofs<P> {
     #[must_use]
     pub fn empty_fulu() -> Self {
         Self::Fulu(ContiguousList::default())
+    }
+}
+
+#[derive(Clone, Debug, From)]
+pub enum BlockOrDataColumnSidecar<P: Preset> {
+    Block(Arc<SignedBeaconBlock<P>>),
+    Sidecar(Arc<DataColumnSidecar<P>>),
+}
+
+impl<P: Preset> BlockOrDataColumnSidecar<P> {
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Block(block) => block.message().slot(),
+            Self::Sidecar(sidecar) => sidecar.slot(),
+        }
+    }
+
+    #[must_use]
+    pub fn block_root(&self) -> H256 {
+        match self {
+            Self::Block(block) => block.message().hash_tree_root(),
+            Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
+        }
+    }
+
+    #[must_use]
+    pub fn signed_block_header(&self) -> Option<SignedBeaconBlockHeader> {
+        match self {
+            Self::Block(block) => Some(block.to_header()),
+            Self::Sidecar(sidecar) => sidecar
+                .pre_gloas()
+                .map(|sidecar| sidecar.signed_block_header),
+        }
+    }
+
+    pub fn kzg_commitments(
+        &self,
+    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
+        match self {
+            Self::Block(block) => block
+                .message()
+                .body()
+                .with_blob_kzg_commitments()
+                .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
+            Self::Sidecar(sidecar) => sidecar.kzg_commitments(),
+        }
     }
 }
 

@@ -248,7 +248,7 @@ impl Default for Config {
 
             // Time parameters
             eth1_follow_distance: 2048,
-            min_builder_withdrawability_delay: 4096,
+            min_builder_withdrawability_delay: 64,
             min_validator_withdrawability_delay: 256,
             seconds_per_eth1_block: 14,
             seconds_per_slot: nonzero!(12_u64),
@@ -405,7 +405,7 @@ impl Config {
 
             // Time parameters
             eth1_follow_distance: 16,
-            min_builder_withdrawability_delay: 8,
+            min_builder_withdrawability_delay: 2,
             seconds_per_slot: nonzero!(6_u64),
             shard_committee_period: 64,
             slot_duration_ms: Duration::from_millis(6000),

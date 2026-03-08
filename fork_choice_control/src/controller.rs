@@ -387,7 +387,7 @@ where
 
     pub fn on_gossip_execution_payload_bid(
         &self,
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         gossip_id: GossipId,
     ) {
         self.spawn_execution_payload_bid_task(
@@ -398,7 +398,7 @@ where
 
     pub fn on_api_execution_payload_bid(
         &self,
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         sender: OneshotSender<Result<ValidationOutcome>>,
     ) {
         self.spawn_execution_payload_bid_task(payload_bid, ExecutionPayloadBidOrigin::Api(sender))
@@ -876,7 +876,7 @@ where
 
     fn spawn_execution_payload_bid_task(
         &self,
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         origin: ExecutionPayloadBidOrigin,
     ) {
         self.spawn(ExecutionPayloadBidTask {

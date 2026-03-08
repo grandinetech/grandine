@@ -81,6 +81,7 @@ use types::{
         containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{
         BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WithBlobsAndMev,
         WithStatus, WEI_IN_GWEI,
@@ -1317,6 +1318,31 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/blobs/{block_id}`
+/// `GET /eth/v1/beacon/execution_payload_envelope/{block_id}`
+pub async fn execution_payload_envelope<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(block_id): EthPath<BlockId>,
+    headers: HeaderMap,
+) -> Result<EthResponse<Arc<SignedExecutionPayloadEnvelope<P>>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: root,
+        status,
+        finalized,
+    } = block_id::block_root(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let envelope = controller
+        .execution_payload_envelopes_by_roots(vec![root])?
+        .into_iter()
+        .next()
+        .ok_or(Error::BlockNotFound)?;
+
+    Ok(EthResponse::json_or_ssz(envelope, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(Phase::Gloas))
+}
+
 pub async fn blobs<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(metrics): State<Option<Arc<Metrics>>>,

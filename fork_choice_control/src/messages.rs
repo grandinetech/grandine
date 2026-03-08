@@ -175,7 +175,7 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     PayloadBid {
         wait_group: W,
-        result: Result<ExecutionPayloadBidAction>,
+        result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
     },
     PreprocessedBeaconState {

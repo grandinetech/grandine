@@ -60,6 +60,7 @@ use types::{
             CombinedPayloadAttestation, DataColumnSidecar as GloasDataColumnSidecar,
             SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{
         BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, RelativeEpoch, WithStatus,
@@ -254,11 +255,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
         (Slot, ValidatorIndex, ColumnIndex),
         HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
     >,
-    accepted_gloas_data_column_sidecars: HashMap<
-        (Slot, H256, ColumnIndex),
-        ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
-    >,
-    accepted_payload_bids: HashMap<Slot, HashMap<ValidatorIndex, SignedExecutionPayloadBid>>,
+    accepted_gloas_data_column_sidecars: HashMap<(H256, ColumnIndex), Slot>,
+    accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, Arc<SignedExecutionPayloadBid<P>>>>,
     accepted_execution_payload_envelopes: HashSet<(Slot, H256, ValidatorIndex)>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
@@ -455,14 +453,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid> {
-        Some(
-            self.accepted_payload_bids
-                .get(&slot)?
-                .values()
-                .max_by_key(|bid| bid.message.value)?
-                .clone(),
-        )
+    pub fn accepted_payload_bid_at_slot(
+        &self,
+        slot: Slot,
+    ) -> Option<&Arc<SignedExecutionPayloadBid<P>>> {
+        self.accepted_payload_bids
+            .get(&slot)?
+            .values()
+            .max_by_key(|bid| bid.message.value)
     }
 
     #[must_use]
@@ -567,25 +565,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             || self.finalized_indices.contains_key(&block_root)
     }
 
-    /// Returns true if the block exists AND all required data column sidecars
-    /// have been accepted. In pre-Gloas, block presence is sufficient since
-    /// sidecars arrive with the block. In Gloas, sidecars are decoupled
-    /// (they arrive with the envelope), so we must check separately.
-    pub fn contains_block_and_sidecars(&self, block_root: H256) -> bool {
-        let Some(chain_link) = self.chain_link_full(block_root) else {
-            return false;
-        };
+    pub fn contains_block_and_data_available(&self, block_root: H256) -> bool {
+        let is_block_imported = self.contains_block(block_root);
+        let is_pre_gloas = self
+            .block(block_root)
+            .map(|chain_link| chain_link.value.phase() < Phase::Gloas)
+            .unwrap_or(false);
 
-        let block_slot = chain_link.block.message().slot();
-
-        if chain_link.block.phase() < Phase::Gloas {
-            return true;
-        }
-
-        self.sampling_columns.iter().all(|index| {
-            self.accepted_gloas_data_column_sidecars
-                .contains_key(&(block_slot, block_root, *index))
-        })
+        is_block_imported
+            && (is_pre_gloas
+                || self
+                    .cached_execution_payload_envelope_by_root(block_root)
+                    .is_some())
     }
 
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
@@ -1099,11 +1090,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     /// [`is_data_available`](https://github.com/ethereum/consensus-specs/blob/7e33b9f9de37f02e711aa534dcc72e9880e551e2/specs/gloas/fork-choice.md?plain=1#L756)
-    /// note: this currently does not follow spec. resuses contains_block_and_sidecars
+    /// note: this currently does not follow spec. reuses contains_block_and_data_available
     /// TBD: clarification on retrieve_column_sidecars_and_kzg_commitments function acc to spec. final chagnes(with is_data_available_for_envelope) after 1.7.2 becasue of major changes
     #[must_use]
     pub fn is_data_available(&self, block_root: H256) -> bool {
-        self.contains_block_and_sidecars(block_root)
+        self.contains_block_and_data_available(block_root)
     }
 
     fn head_segment(&self) -> Option<&Segment<P>> {
@@ -1843,12 +1834,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         Ok(BlockAction::Accept(chain_link, attester_slashing_results))
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn validate_execution_payload_bid(
         &self,
-        payload_bid: Arc<SignedExecutionPayloadBid>,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         origin: &ExecutionPayloadBidOrigin,
-    ) -> Result<ExecutionPayloadBidAction> {
-        let bid = payload_bid.message;
+    ) -> Result<ExecutionPayloadBidAction<P>> {
+        let bid = &payload_bid.message;
         let builder_index = bid.builder_index;
 
         // > off-protocol payment is disallowed in gossip, the `bid.execution_payment` MUST be zero
@@ -1863,6 +1855,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if bid.slot > self.slot() + 1 {
             return Ok(ExecutionPayloadBidAction::Ignore(false));
         }
+
+        let bid_epoch = misc::compute_epoch_at_slot::<P>(bid.slot);
+        let in_bid = bid.blob_kzg_commitments.len();
+        let maximum = self
+            .chain_config
+            .get_blob_schedule_entry(bid_epoch)
+            .max_blobs_per_block;
+        ensure!(
+            in_bid <= maximum,
+            Error::<P>::TooManyBlobKzgCommitments { maximum, in_bid }
+        );
 
         // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
         if !self
@@ -2754,6 +2757,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let column_index = data_column_sidecar.index;
+        let kzg_commitments = data_column_sidecar.kzg_commitments.clone();
         let block_header = data_column_sidecar.signed_block_header.message;
         let block_signature = data_column_sidecar.signed_block_header.signature;
         let block_root = block_header.hash_tree_root();
@@ -2784,7 +2788,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
         ensure!(
-            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar),
+            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar, &kzg_commitments),
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar
             },
@@ -2915,12 +2919,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            let verify_result =
-                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
-                        data_column_sidecar: data_column_sidecar.clone_arc(),
-                        error,
-                    })?;
+            let verify_result = verify_kzg_proofs(
+                &data_column_sidecar,
+                &kzg_commitments,
+                self.store_config.kzg_backend,
+                metrics,
+            )
+            .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
+            })?;
 
             ensure!(
                 verify_result,
@@ -2962,7 +2970,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         validate_block_presence: bool,
-        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         let block_root = data_column_sidecar.beacon_block_root;
@@ -2974,9 +2981,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // i.e. already have all the data columns validated
         // The exception to this is data column sidecars from custody group column backfill,
         // where additional columns are being downloaded for blocks already in fork choice.
-        // TODO: (gloas): gloas block can be imported without sidecars, change this to
-        // `contains_block_and_sidecars` new function
-        if validate_block_presence && self.contains_block_and_sidecars(block_root) {
+        // TODO: (gloas): gloas block can be imported without sidecars
+        if validate_block_presence && self.contains_block_and_data_available(block_root) {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
@@ -2995,7 +3001,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        let Some(state) = state_fn() else {
+        let Some(block) = self.block(block_root).map(WithStatus::value) else {
             return Ok(DataColumnSidecarAction::DelayUntilState(
                 data_column_sidecar,
                 block_root,
@@ -3004,45 +3010,28 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [REJECT] The sidecars's `slot` matches the slot of the block with root `beacon_block_root`.
         ensure!(
-            slot == state.slot(),
+            slot == block.message().slot(),
             Error::DataColumnSidecarSlotMismatch {
                 data_column_sidecar,
-                block_slot: state.slot(),
+                block_slot: block.message().slot(),
             }
         );
 
-        // [IGNORE] The sidecar's beacon_block_root has been seen via a valid signed execution payload bid.
-        // For Gloas, sidecars are keyed to the block root itself, so use the bid embedded in that block.
-        // safer than using max by key for mutliple builder_index per slot. (raise in review if recommend a revert)
-        let payload_bid_opt = self
-            .block(block_root)
-            .map(WithStatus::value)
-            .and_then(|block| {
-                block
-                    .message()
-                    .body()
-                    .with_payload_bid()
-                    .map(|body| body.signed_execution_payload_bid().message)
-            });
-        let Some(payload_bid) = payload_bid_opt else {
-            return Ok(DataColumnSidecarAction::DelayUntilState(
-                data_column_sidecar,
-                block_root,
-            ));
-        };
-
-        // [REJECT] The hash of the sidecar's kzg_commitments matches the blob_kzg_commitments_root in the corresponding builder's bid for sidecar.beacon_block_root.
-        ensure!(
-            data_column_sidecar.kzg_commitments().hash_tree_root()
-                == payload_bid.blob_kzg_commitments_root,
-            Error::DataColumnSidecarInvalidKzgCommitments {
+        let Some(kzg_commitments) = block
+            .message()
+            .body()
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().blob_kzg_commitments())
+        else {
+            return Err(Error::DataColumnSidecarBlockWithoutPayloadBid {
                 data_column_sidecar
             }
-        );
+            .into());
+        };
 
         // [REJECT] The sidecar is valid as verified by verify_data_column_sidecar(sidecar)
         ensure!(
-            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar),
+            verify_data_column_sidecar(&self.chain_config, &data_column_sidecar, kzg_commitments),
             Error::DataColumnSidecarInvalid {
                 data_column_sidecar
             },
@@ -3064,23 +3053,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar is the first sidecar for the tuple (sidecar.beacon_block_root, sidecar.index) with valid kzg proof
         // Adjustment: Ignore data column sidecars for unseen blocks only
-        if self.accepted_gloas_data_column_sidecars.contains_key(&(
-            data_column_sidecar.slot(),
-            block_root,
-            column_index,
-        )) && !block_seen
+        if self
+            .accepted_gloas_data_column_sidecars
+            .contains_key(&(block_root, column_index))
+            && !block_seen
         {
             return Ok(DataColumnSidecarAction::Ignore(true));
         }
 
         if !origin.is_from_el() {
             // [REJECT] The sidecar's column data is valid as verified by verify_data_column_sidecar_kzg_proofs(sidecar).
-            let verify_result =
-                verify_kzg_proofs(&data_column_sidecar, self.store_config.kzg_backend, metrics)
-                    .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
-                        data_column_sidecar: data_column_sidecar.clone_arc(),
-                        error,
-                    })?;
+            let verify_result = verify_kzg_proofs(
+                &data_column_sidecar,
+                kzg_commitments,
+                self.store_config.kzg_backend,
+                metrics,
+            )
+            .map_err(|error| Error::DataColumnSidecarInvalidKzgProofs {
+                data_column_sidecar: data_column_sidecar.clone_arc(),
+                error,
+            })?;
 
             ensure!(
                 verify_result,
@@ -3134,24 +3126,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     metrics,
                 )
             }
-            DataColumnSidecar::Gloas(data_column_sidecar) => {
-                let slot = data_column_sidecar.slot;
-                let block_root = data_column_sidecar.beacon_block_root;
-
-                self.validate_gloas_data_column_sidecar_with_state(
+            DataColumnSidecar::Gloas(data_column_sidecar) => self
+                .validate_gloas_data_column_sidecar_with_state(
                     data_column_sidecar,
                     block_seen,
                     origin,
                     true,
-                    || {
-                        state.or_else(|| {
-                            self.state_cache
-                                .existing_state_at_slot(self, block_root, slot)
-                        })
-                    },
                     metrics,
-                )
-            }
+                ),
         }
     }
 
@@ -3285,7 +3267,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .message()
             .body()
             .with_payload_bid()
-            .map(|body| body.signed_execution_payload_bid().message)
+            .map(|body| body.signed_execution_payload_bid().message.clone())
         else {
             return Err(Error::PayloadEnvelopeInvalidBlock {
                 payload_envelope: envelope,
@@ -3683,8 +3665,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let finalized_checkpoint_updated = old_finalized_checkpoint != self.finalized_checkpoint;
 
         let log_imported_block_info = || {
-            // TODO: (gloas): glaas block can be imported without sidecars, so it would not know
-            // about the blob count from the block, but later when `on_execution_payload` called
             if let Some(post_deneb_block_body) = chain_link
                 .block
                 .message()
@@ -3717,6 +3697,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 self.notify_ptc_messages(block_root, chain_link.block.as_ref(), state)
             {
                 warn_with_peers!("failed to apply payload attestations from block: {error:?}");
+            }
+        }
+
+        // Ensure the block's payload bid is in accepted_payload_bids so that
+        // is_data_available_for_envelope can find commitments for any block,
+        // including self-built blocks (BUILDER_INDEX_SELF_BUILD) which bypass
+        // the gossip bid path and never call apply_execution_payload_bid.
+        if let Some(body) = chain_link.block.message().body().with_payload_bid() {
+            let bid = body.signed_execution_payload_bid();
+            let slot = bid.message.slot;
+            let builder_index = bid.message.builder_index;
+            if !self
+                .accepted_payload_bids
+                .get(&slot)
+                .is_some_and(|bids| bids.contains_key(&builder_index))
+            {
+                self.apply_execution_payload_bid(Arc::new(bid.clone()));
             }
         }
 
@@ -3953,11 +3950,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.blob_cache.insert(blob_sidecar);
     }
 
-    pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid>) {
-        let bid = payload_bid.message;
-        let accepted_bids = self.accepted_payload_bids.entry(bid.slot).or_default();
+    pub fn apply_execution_payload_bid(&mut self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
+        let accepted_bids = self
+            .accepted_payload_bids
+            .entry(payload_bid.message.slot)
+            .or_default();
 
-        accepted_bids.insert(bid.builder_index, *payload_bid);
+        accepted_bids.insert(payload_bid.message.builder_index, payload_bid);
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
@@ -3979,10 +3978,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let block_root = data_sidecar.beacon_block_root();
             let column_index = data_sidecar.index();
 
-            self.accepted_gloas_data_column_sidecars.insert(
-                (data_sidecar.slot(), block_root, column_index),
-                data_sidecar.kzg_commitments().clone(),
-            );
+            self.accepted_gloas_data_column_sidecars
+                .insert((block_root, column_index), data_sidecar.slot());
         }
 
         self.data_column_cache.insert(data_sidecar);
@@ -4008,6 +4005,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let payload = &envelope.payload;
 
         self.accepted_execution_payload_envelopes.insert(key);
+
+        // Cache envelope so is_data_available() can find it.
+        // Must happen before the is_data_available check below (TODO from handle payload PR step 2).
+        // TODO: handle apply fail early insert scenario
+        self.execution_payload_envelope_cache
+            .insert(signed_envelope.clone());
 
         // Get FULL placeholder (Pending state — payload not yet arrived)
         let chain_link = self.chain_link_full(beacon_block_root).ok_or_else(|| {
@@ -4198,8 +4201,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .count()
         } else {
             self.accepted_gloas_data_column_sidecars
-                .keys()
-                .filter(|(_, root, _)| *root == block_root)
+                .iter()
+                .filter(|((root, _), slot)| {
+                    *root == block_root && **slot == data_column_sidecar.slot()
+                })
                 .count()
         }
     }
@@ -4222,11 +4227,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             false
         } else {
-            self.accepted_gloas_data_column_sidecars.contains_key(&(
-                data_column_sidecar.slot(),
-                block_root,
-                data_column_sidecar.index(),
-            ))
+            self.accepted_gloas_data_column_sidecars
+                .contains_key(&(block_root, data_column_sidecar.index()))
         }
     }
 
@@ -4698,7 +4700,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.accepted_data_column_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_gloas_data_column_sidecars
-            .retain(|(slot, _, _), _| finalized_slot <= *slot);
+            .retain(|(_, _), slot| finalized_slot <= *slot);
         // TODO: (gloas): prune after block imported, as it's no longer relevant
         self.accepted_payload_bids
             .retain(|slot, _| finalized_slot <= *slot);
@@ -4812,13 +4814,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
-            // [New in Gloas:EIP7732] payload_present based on attestation.data.index
-            // Pre-Gloas: blocks live in unfinalized_locations_full, so route diffs there
-            // Gloas: data.index indicates empty (0) or full (1) variant vote
-            let payload_present = if self.phase() >= Phase::Gloas {
+            // Route vote semantics by voted block phase, not store phase.
+            // At the Fulu->Gloas boundary, attestations can still reference pre-Gloas roots.
+            let voted_block_phase_and_slot = self
+                .chain_link_full(beacon_block_root)
+                .map(|link| (link.block.phase(), link.block.message().slot()));
+            let supports_empty_variant = voted_block_phase_and_slot
+                .map(|(phase, _)| phase >= Phase::Gloas)
+                .unwrap_or(false);
+            let payload_present = if supports_empty_variant {
                 data.index == 1
             } else {
-                true // Pre-Gloas: all blocks in unfinalized_locations_full
+                true
             };
 
             let latest_message = Arc::new(LatestMessage {
@@ -4842,9 +4849,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // [Gloas] Same-slot votes are pending and stay neutral until a later settled vote.
                 let mut same_slot_pending = false;
-                if self.phase() >= Phase::Gloas {
-                    if let Some(voted_block) = self.chain_link_full(beacon_block_root) {
-                        if slot <= voted_block.block.message().slot() {
+                if supports_empty_variant {
+                    if let Some((_, voted_block_slot)) = voted_block_phase_and_slot {
+                        if slot <= voted_block_slot {
                             same_slot_pending = true;
                         }
                     }
@@ -4883,12 +4890,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     let old_root = old_message.beacon_block_root;
                     let old_payload_present = old_message.payload_present;
                     let old_slot = old_message.slot;
+                    let old_supports_empty_variant = self
+                        .chain_link_full(old_root)
+                        .map(|link| link.block.phase() >= Phase::Gloas)
+                        .unwrap_or(false);
 
                     // Re-derive same-slot status: was the old vote for the same slot as the block?
-                    let old_same_slot = self
-                        .chain_link_full(old_root)
-                        .map(|link| old_slot <= link.block.message().slot())
-                        .unwrap_or(false);
+                    let old_same_slot = if old_supports_empty_variant {
+                        self.chain_link_full(old_root)
+                            .map(|link| old_slot <= link.block.message().slot())
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
 
                     // Pre-Gloas intuition was simple: latest-message update = subtract old + add new on one path.
                     // With FULL placeholders, that is no longer always true.
@@ -4921,13 +4935,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             .entry(old_root)
                             .or_default()
                             .sub_assign(balance);
-                        differences_empty
-                            .entry(old_root)
-                            .or_default()
-                            .sub_assign(balance);
-                    } else if old_payload_present {
+                        if old_supports_empty_variant {
+                            differences_empty
+                                .entry(old_root)
+                                .or_default()
+                                .sub_assign(balance);
+                        }
+                    } else if old_payload_present || !old_supports_empty_variant {
                         // Only subtract from full if weight was actually applied
-                        let old_can_apply = if self.phase() >= Phase::Gloas {
+                        let old_can_apply = if old_supports_empty_variant {
                             self.chain_link_full(old_root)
                                 .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
                                 .unwrap_or(false)
@@ -4950,27 +4966,31 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // spec(gloas): https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/fork-choice.md#new-is_supporting_vote
                 // The approach below inlines the behaviour of `is_supporting_vote``
                 if same_slot_pending {
-                    // [Gloas] Same-slot: apply to both Full and Empty.
-                    let had_empty = self
-                        .unfinalized_locations_empty
-                        .contains_key(&beacon_block_root);
-                    if !had_empty {
-                        if let Err(error) = self.extend_empty_segment(beacon_block_root) {
-                            error_with_peers!(
-                                "failed to extend EMPTY segment for block {beacon_block_root:?}: {error:?}"
-                            );
+                    // [Gloas] Same-slot: apply to both Full and Empty only for post-Gloas blocks.
+                    if supports_empty_variant {
+                        let had_empty = self
+                            .unfinalized_locations_empty
+                            .contains_key(&beacon_block_root);
+                        if !had_empty {
+                            if let Err(error) = self.extend_empty_segment(beacon_block_root) {
+                                error_with_peers!(
+                                    "failed to extend EMPTY segment for block {beacon_block_root:?}: {error:?}"
+                                );
+                            }
                         }
                     }
                     differences_full
                         .entry(beacon_block_root)
                         .or_default()
                         .add_assign(balance);
-                    differences_empty
-                        .entry(beacon_block_root)
-                        .or_default()
-                        .add_assign(balance);
-                } else if payload_present {
-                    let can_apply_full = if self.phase() >= Phase::Gloas {
+                    if supports_empty_variant {
+                        differences_empty
+                            .entry(beacon_block_root)
+                            .or_default()
+                            .add_assign(balance);
+                    }
+                } else if payload_present || !supports_empty_variant {
+                    let can_apply_full = if supports_empty_variant {
                         self.chain_link_full(beacon_block_root)
                             .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
                             .unwrap_or(false)
@@ -5870,10 +5890,33 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Vec<ColumnIndex> {
         let phase = block.phase();
         let block = block.message();
+        let block_root = block.hash_tree_root();
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        //
-        // `block.phase` has already been checked
+        if phase >= Phase::Gloas {
+            let Some(blob_kzg_commitments) = block
+                .body()
+                .with_payload_bid()
+                .map(|body| body.signed_execution_payload_bid().blob_kzg_commitments())
+            else {
+                return vec![];
+            };
+
+            if blob_kzg_commitments.is_empty() {
+                return vec![];
+            }
+
+            return self
+                .sampling_columns
+                .iter()
+                .filter(|index| {
+                    self.accepted_gloas_data_column_sidecars
+                        .get(&(block_root, **index))
+                        .is_none_or(|slot| *slot != block.slot())
+                })
+                .copied()
+                .collect();
+        }
+
         let Some(body) = block.body().with_blob_kzg_commitments() else {
             return vec![];
         };
@@ -5882,50 +5925,66 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return vec![];
         }
 
-        let block_root = block.hash_tree_root();
-
         self.sampling_columns
             .iter()
             .filter(|index| {
-                if phase >= Phase::Gloas {
-                    !self
-                        .accepted_gloas_data_column_sidecars
-                        .get(&(block.slot(), block_root, **index))
-                        .is_some_and(|kzg_commitments| {
-                            kzg_commitments == body.blob_kzg_commitments()
-                        })
-                } else {
-                    !self
-                        .accepted_data_column_sidecars
-                        .get(&(block.slot(), block.proposer_index(), **index))
-                        .is_some_and(|kzg_commitments| {
-                            kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
-                        })
-                }
+                !self
+                    .accepted_data_column_sidecars
+                    .get(&(block.slot(), block.proposer_index(), **index))
+                    .is_some_and(|kzg_commitments| {
+                        kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
+                    })
             })
             .copied()
             .collect()
     }
 
-    //note: one of the call sites for this is apply_execution_envelope(spec: https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L678)
-    // but we have the same check in validate_execution_envelope.
-    // TODO: needs changes as blob_kzg_commitments is now in bid: https://github.com/OffchainLabs/prysm/pull/16309
+    // note: one of the call sites for this is apply_execution_envelope(spec:
+    // https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L678)
+    // Avoid requiring the block from store here to prevent circular dependency:
+    // envelope may arrive before block import in Gloas paths.
     pub fn is_data_available_for_envelope(
         &self,
         envelope: &SignedExecutionPayloadEnvelope<P>,
     ) -> bool {
-        let slot = envelope.message.slot;
         let block_root = envelope.message.beacon_block_root;
-        let blob_kzg_commitments = &envelope.message.blob_kzg_commitments;
+        let slot = envelope.message.slot;
+        let builder_index = envelope.message.builder_index;
+        let phase = self.chain_config.phase_at_slot::<P>(slot);
 
-        if blob_kzg_commitments.is_empty() {
+        if phase < Phase::Gloas {
+            return true;
+        }
+
+        // Look up commitments from accepted bids. For self-built blocks
+        // (BUILDER_INDEX_SELF_BUILD), the bid may not be in the map yet because
+        // the envelope arrives before apply_block inserts it. In that case,
+        // treat as zero commitments (data available).
+        let blob_kzg_commitments = self
+            .accepted_payload_bids
+            .get(&slot)
+            .and_then(|bids_at_slot| {
+                bids_at_slot
+                    .get(&builder_index)
+                    .or_else(|| bids_at_slot.values().max_by_key(|bid| bid.message.value))
+            })
+            .map(|bid| bid.blob_kzg_commitments());
+
+        let Some(blob_kzg_commitments) = blob_kzg_commitments else {
+            if builder_index == BUILDER_INDEX_SELF_BUILD {
+                return true;
+            }
+            return false;
+        };
+
+        if blob_kzg_commitments.as_ref().is_empty() {
             return true;
         }
 
         self.sampling_columns.iter().all(|index| {
             self.accepted_gloas_data_column_sidecars
-                .get(&(slot, block_root, *index))
-                .is_some_and(|kzg_commitments| kzg_commitments == blob_kzg_commitments)
+                .get(&(block_root, *index))
+                .is_some_and(|imported_slot| *imported_slot == slot)
         })
     }
 

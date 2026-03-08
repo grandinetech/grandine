@@ -1101,9 +1101,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     None
                 };
-                let envelope_commitments = envelope_opt
-                    .as_ref()
-                    .map(|envelope| envelope.blob_kzg_commitments.clone());
+                let envelope_commitments = block
+                    .message()
+                    .body()
+                    .with_payload_bid()
+                    .map(|body| body.signed_execution_payload_bid().blob_kzg_commitments().clone());
                 if block.phase() >= Phase::Gloas
                     && self.validator_config.enable_payload_build
                     && post_state_opt.is_some()
@@ -1166,7 +1168,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                             &cells_and_kzg_proofs,
                                         )
                                     } else {
-                                        eip_7594::construct_fulu_data_column_sidecars(
+                                        eip_7594::construct_data_column_sidecars(
                                             &block,
                                             &cells_and_kzg_proofs,
                                         )
@@ -1986,8 +1988,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                     let triple = SigningTriple {
                         message: SigningMessage::<P>::Attestation(data),
-                        signing_root: data
-                            .signing_root(&self.chain_config, &slot_head.beacon_state),
+                        signing_root: data.signing_root(&self.chain_config, &slot_head.beacon_state),
                         public_key: member.public_key,
                     };
 

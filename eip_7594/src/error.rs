@@ -10,7 +10,7 @@ pub enum Error {
         proofs_length: usize,
     },
     #[error(
-        "custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}", 
+        "custody group count is invalid: {custody_group_count} expected <= {number_of_custody_groups}"
     )]
     InvalidCustodyGroupCount {
         custody_group_count: u64,
@@ -30,12 +30,4 @@ pub enum Error {
         "attempted to construct data column sidecars for pre-Fulu block: slot: {slot}, root: {root:?}"
     )]
     DataColumnSidecarsForPreFuluBlock { root: H256, slot: Slot },
-    #[error(
-        "attempted to construct fulu data column sidecars for post-Gloas block: slot: {slot}, root: {root:?}"
-    )]
-    FuluDataColumnSidecarsForPostGloasBlock { root: H256, slot: Slot },
-    #[error(
-        "attempted to construct gloas data column sidecars for pre-Gloas block: slot: {slot}, root: {root:?}"
-    )]
-    GloasDataColumnSidecarsForPreGloasBlock { root: H256, slot: Slot },
 }

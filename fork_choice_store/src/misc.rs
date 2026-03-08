@@ -994,8 +994,8 @@ impl<P: Preset> PayloadAttestationAction<P> {
     }
 }
 
-pub enum ExecutionPayloadBidAction {
-    Accept(Arc<SignedExecutionPayloadBid>),
+pub enum ExecutionPayloadBidAction<P: Preset> {
+    Accept(Arc<SignedExecutionPayloadBid<P>>),
     Ignore(Publishable),
 }
 

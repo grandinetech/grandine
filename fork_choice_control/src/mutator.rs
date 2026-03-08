@@ -1019,7 +1019,9 @@ where
                     }
                 }
             }
-            Err(error) => self.reject_block(error, block_root, origin),
+            Err(error) => {
+                self.reject_block(error, block_root, origin)
+            }
         }
 
         Ok(())
@@ -1076,7 +1078,7 @@ where
                 };
 
                 let old_head = self.store_mut().apply_attestation(valid_attestation)?;
-
+               
                 self.update_store_snapshot();
 
                 if let Some(old_head) = old_head {
@@ -1262,7 +1264,7 @@ where
                 };
 
                 let old_head = self.store_mut().apply_attestation(valid_attestation)?;
-
+                
                 self.update_store_snapshot();
 
                 if let Some(old_head) = old_head {
@@ -2179,7 +2181,7 @@ where
     fn handle_payload_bid(
         &mut self,
         wait_group: &W,
-        result: Result<ExecutionPayloadBidAction>,
+        result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
     ) {
         match result {
@@ -2187,7 +2189,7 @@ where
                 trace_with_peers!("payload bid accepted (payload_bid: {payload_bid:?})");
 
                 self.event_channels
-                    .send_execution_payload_bid_event(payload_bid.message);
+                    .send_execution_payload_bid_event(&payload_bid.message);
 
                 let (gossip_id, sender) = origin.split();
 
@@ -2742,11 +2744,26 @@ where
         // > - otherwise:
         // >   - [IGNORE] The block's parent (defined by `block.parent_root`) passes all validation
         // >     (including execution node verification of the `block.body.execution_payload`).
-        if self
-            .store
-            .chain_link_full(block_root)
-            .is_some_and(ChainLink::is_invalid)
-        {
+        // > Changes in Gloas:
+        // > - If `execution_payload` verification of block's execution payload parent by an execution node **is complete**:
+        // >   - [REJECT] The block's execution payload parent (defined by `bid.parent_block_hash`) passes all validation.
+        let should_ignore = if let Some(body) = block.message().body().with_payload_bid() {
+            let parent_block_hash = body
+                .signed_execution_payload_bid()
+                .message
+                .parent_block_hash;
+
+            // Only check in unfinalized path
+            self.store
+                .unfinalized_chain_link_by_execution_block_hash(parent_block_hash)
+                .is_some_and(ChainLink::is_invalid)
+        } else {
+            self.store
+                .chain_link_full(block_root)
+                .is_some_and(ChainLink::is_invalid)
+        };
+
+        if should_ignore {
             let (gossip_id, sender) = origin.split();
 
             if let Some(gossip_id) = gossip_id {
@@ -2823,6 +2840,16 @@ where
                 "retrying objects delayed until state ({block_root:?}, {block_slot})",
             );
             self.retry_delayed(objects, wait_group);
+        }
+
+        // Retry payload envelope that was delayed waiting for this block's data to become available
+        if let Some(pending_payload_envelope) = self.take_delayed_until_data(block_root) {
+            debug_with_peers!("retrying payload envelope delayed until data for {block_root:?}");
+            self.retry_execution_payload_envelope(
+                wait_group.clone(),
+                pending_payload_envelope,
+                None,
+            );
         }
 
         if changes.is_finalized_checkpoint_updated() {
@@ -4503,20 +4530,32 @@ where
             return BlockDataColumnAvailability::Irrelevant;
         }
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
-        let Some(body) = block.message().body().with_blob_kzg_commitments() else {
-            return BlockDataColumnAvailability::Irrelevant;
-        };
-
         let missing_indices = self.store.indices_of_missing_data_columns(block);
 
         if missing_indices.is_empty() {
             return BlockDataColumnAvailability::Complete;
         }
 
+        let block_slot = block.message().slot();
+        let block_root = block.message().hash_tree_root();
         let any_pending_columns = pending_data_columns_for_block.any(|data_column_sidecar| {
-            missing_indices.contains(&data_column_sidecar.index())
-                && data_column_sidecar.kzg_commitments() == body.blob_kzg_commitments()
+            if !missing_indices.contains(&data_column_sidecar.index()) {
+                return false;
+            }
+
+            match data_column_sidecar.kzg_commitments() {
+                // Pre-Gloas sidecars carry commitments directly.
+                Some(kzg_commitments) => block
+                    .message()
+                    .body()
+                    .with_blob_kzg_commitments()
+                    .is_some_and(|body| kzg_commitments == body.blob_kzg_commitments()),
+                // Gloas sidecars don't embed commitments; match by identity.
+                None => {
+                    data_column_sidecar.slot() == block_slot
+                        && data_column_sidecar.beacon_block_root() == block_root
+                }
+            }
         });
 
         if any_pending_columns {

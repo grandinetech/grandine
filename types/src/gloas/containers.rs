@@ -55,7 +55,7 @@ pub struct BeaconBlockBody<P: Preset> {
     pub sync_aggregate: SyncAggregate<P>,
     pub bls_to_execution_changes:
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
-    pub signed_execution_payload_bid: SignedExecutionPayloadBid,
+    pub signed_execution_payload_bid: SignedExecutionPayloadBid<P>,
     pub payload_attestations: ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
 }
 
@@ -98,16 +98,15 @@ pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub index: ColumnIndex,
     pub column: ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
-    pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
     pub beacon_block_root: H256,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-pub struct ExecutionPayloadBid {
+pub struct ExecutionPayloadBid<P: Preset> {
     pub parent_block_hash: ExecutionBlockHash,
     pub parent_block_root: H256,
     pub block_hash: ExecutionBlockHash,
@@ -123,7 +122,7 @@ pub struct ExecutionPayloadBid {
     pub value: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub execution_payment: Gwei,
-    pub blob_kzg_commitments_root: H256,
+    pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -136,7 +135,6 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     pub beacon_block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
-    pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub state_root: H256,
 }
 
@@ -252,10 +250,10 @@ pub struct SignedBeaconBlock<P: Preset> {
     pub signature: SignatureBytes,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-pub struct SignedExecutionPayloadBid {
-    pub message: ExecutionPayloadBid,
+pub struct SignedExecutionPayloadBid<P: Preset> {
+    pub message: ExecutionPayloadBid<P>,
     pub signature: SignatureBytes,
 }
 

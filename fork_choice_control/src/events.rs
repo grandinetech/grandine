@@ -258,7 +258,7 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
-    pub fn send_execution_payload_bid_event(&self, payload_bid: ExecutionPayloadBid) {
+    pub fn send_execution_payload_bid_event(&self, payload_bid: &ExecutionPayloadBid<P>) {
         if let Err(error) = self.send_execution_payload_bid_event_internal(payload_bid) {
             warn_with_peers!("unable to send execution payload bid event: {error}");
         }
@@ -475,10 +475,10 @@ impl<P: Preset> EventChannels<P> {
 
     fn send_execution_payload_bid_event_internal(
         &self,
-        payload_bid: ExecutionPayloadBid,
+        payload_bid: &ExecutionPayloadBid<P>,
     ) -> Result<()> {
         if self.execution_payload_bids.receiver_count() > 0 {
-            let payload_bid_event = ExecutionPayloadBidEvent::new(payload_bid);
+            let payload_bid_event = ExecutionPayloadBidEvent::new::<P>(payload_bid);
             let event = Event::ExecutionPayloadBid(payload_bid_event);
             self.execution_payload_bids.send(event)?;
         }
@@ -663,7 +663,10 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
             block_root,
             index: data_column_sidecar.index(),
             slot: data_column_sidecar.slot(),
-            kzg_commitments: data_column_sidecar.kzg_commitments().clone(),
+            kzg_commitments: data_column_sidecar
+                .kzg_commitments()
+                .cloned()
+                .unwrap_or_default(),
         }
     }
 }
@@ -742,7 +745,7 @@ pub struct ExecutionPayloadBidEvent {
 }
 
 impl ExecutionPayloadBidEvent {
-    fn new(payload_bid: ExecutionPayloadBid) -> Self {
+    fn new<P: Preset>(payload_bid: &ExecutionPayloadBid<P>) -> Self {
         Self {
             slot: payload_bid.slot,
             builder_index: payload_bid.builder_index,

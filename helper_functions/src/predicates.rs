@@ -448,14 +448,6 @@ pub fn is_attestation_same_slot<P: Preset>(
     Ok(is_matching_blockroot && is_current_blockroot)
 }
 
-// > This function returns true if the last committed payload bid was fulfilled with a payload,
-//   this can only happen when both beacon block and payload were present.
-//   This function must be called on a beacon state before processing the execution payload bid in the block.
-#[must_use]
-pub fn is_parent_block_full<P: Preset>(state: &impl PostGloasBeaconState<P>) -> bool {
-    state.latest_execution_payload_bid().block_hash == state.latest_block_hash()
-}
-
 // This doesn't verify the signature when called directly with `MultiVerifier`.
 // When calling directly, use `SingleVerifier` or call `finalize` manually.
 pub fn validate_constructed_indexed_payload_attestation<P: Preset>(

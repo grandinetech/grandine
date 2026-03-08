@@ -372,7 +372,7 @@ pub fn singular_attestation<P: Preset>(
 
 fn signed_execution_payload_bid<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
-) -> SignedExecutionPayloadBid {
+) -> SignedExecutionPayloadBid<P> {
     let prev_randao = accessors::get_randao_mix(state, accessors::get_current_epoch(state));
 
     SignedExecutionPayloadBid {
@@ -385,7 +385,7 @@ fn signed_execution_payload_bid<P: Preset>(
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments_root: H256::zero(),
+            blob_kzg_commitments: ContiguousList::default(),
             ..Default::default()
         },
         signature: SignatureBytes::empty(),

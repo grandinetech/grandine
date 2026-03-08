@@ -684,7 +684,7 @@ pub struct ExecutionPayloadBidTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub payload_bid: Arc<SignedExecutionPayloadBid>,
+    pub payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     pub origin: ExecutionPayloadBidOrigin,
 }
 
