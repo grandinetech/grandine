@@ -34,6 +34,8 @@ pub enum Error {
     BlockNotFound,
     #[error("pre-fulu block has no data column sidecars")]
     BlockPreFulu,
+    #[error("pre-gloas block has no execution payload envelope")]
+    BlockPreGloas,
     #[error(transparent)]
     Canceled(#[from] Canceled),
     #[error("Content-Type header invalid")]
@@ -57,6 +59,8 @@ pub enum Error {
     EpochOutOfRangeForStateRandao,
     #[error("execution payload not available")]
     ExecutionPayloadNotAvailable,
+    #[error("execution payload envelope not found")]
+    ExecutionPayloadEnvelopeNotFound,
     #[error("no event topics specified")]
     EventTopicsEmpty,
     #[error("too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
@@ -216,12 +220,14 @@ impl Error {
             Self::InvalidBytesBody(rejection) => rejection.status(),
             Self::AttestationNotFound
             | Self::BlockNotFound
+            | Self::ExecutionPayloadEnvelopeNotFound
             | Self::MatchingAttestationHeadBlockNotFound
             | Self::PeerNotFound
             | Self::StateNotFound
             | Self::TargetStateNotFound
             | Self::ValidatorNotFound => StatusCode::NOT_FOUND,
             Self::BlockPreFulu
+            | Self::BlockPreGloas
             | Self::CommitteesAtSlotMismatch { .. }
             | Self::ContentTypeHeaderInvalid(_)
             | Self::CurrentSlotHasNoSyncCommittee
