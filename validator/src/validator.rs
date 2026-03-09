@@ -1808,10 +1808,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             slot_head.slot(),
         );
 
-        for own_payload_attestation in own_payload_attestations {
-            ValidatorToP2p::PublishPayloadAttestation(Arc::new(*own_payload_attestation))
-                .send(&self.p2p_tx);
-        }
+        // TODO: (gloas): temporarily disabled PTC gossip publishing for interop compatibility
+        // for own_payload_attestation in own_payload_attestations {
+        //     ValidatorToP2p::PublishPayloadAttestation(Arc::new(*own_payload_attestation))
+        //         .send(&self.p2p_tx);
+        // }
 
         // TODO: (gloas): it won't attest payload in pre-gloas slot, though this block won't run.
         // it should be called at the fork boundary to include its own payload attestations into

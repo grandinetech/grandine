@@ -991,7 +991,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         },
                     }),
                     Phase::Gloas => {
-                        let payload_attestations = self.prepare_payload_attestations().await?;
+                        // TODO: (gloas): temporarily disabled packing PTC attestations in blocks for interop compatibility
+                        let payload_attestations = ContiguousList::default();
 
                         BeaconBlock::from(GloasBeaconBlock {
                             slot,
