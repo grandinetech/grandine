@@ -178,7 +178,7 @@ grandine-nethermind-linux-arm64: ./build/grandine-$(GRANDINE_VERSION)-nethermind
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-linux-arm64/*
 
 ./build/nethermind-$(NETHERMIND_VERSION)-aarch64-unknown-linux-gnu.zip:
-	@make download-nethermind NETHERMIND_VERSION=$(NETHERMIND_VERSION) RID=linux-arm64 TARGET=aarch64-unknown-linux-gnu.zip
+	@make download-nethermind NETHERMIND_VERSION=$(NETHERMIND_VERSION) RID=linux-arm64 TARGET=aarch64-unknown-linux-gnu
 
 # ------ GRANDINE-NETHERMIND WINDOWS X64 ------
 
@@ -193,7 +193,7 @@ grandine-nethermind-windows-x64: ./build/grandine-$(GRANDINE_VERSION)-nethermind
 	zip -r ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64.zip ./build/grandine-$(GRANDINE_VERSION)-nethermind-$(NETHERMIND_VERSION)-windows-x64/*
 
 ./build/nethermind-$(NETHERMIND_VERSION)-x86_64-pc-windows-msvc.zip:
-	@make download-nethermind NETHERMIND_VERSION=$(NETHERMIND_VERSION) RID=windows-x64 TARGET=x86_64-pc-windows-msvc.zip
+	@make download-nethermind NETHERMIND_VERSION=$(NETHERMIND_VERSION) RID=windows-x64 TARGET=x86_64-pc-windows-msvc
 
 # ------ GRANDINE-NETHERMIND MACOS X64 ------
 

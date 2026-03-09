@@ -38,11 +38,60 @@ jobs:
           script: |
             const release = await github.rest.repos.getLatestRelease({ owner: 'NethermindEth', repo: 'nethermind' });
             return release.data.tag_name;
+
+      - name: Set matrix
+        uses: actions/github-script@v8
+        id: matrix-vars
+        with:
+          script: |
+            const matrix = [
+              {
+                target: 'x86_64-unknown-linux-gnu',
+                os: 'ubuntu-latest',
+                rid: 'linux-x64'
+              },
+              {
+                target: 'aarch64-unknown-linux-gnu',
+                os: 'ubuntu-latest',
+                rid: 'linux-arm64'
+              },
+            ];
+
+            if (
+              (context.eventName == 'push' && context.ref != 'refs/heads/develop') ||
+              context.eventName == 'workflow_dispatch') {
+
+              // add production targets, if we're building stable release, or build is requested manually
+              matrix.push(
+                {
+                  target: 'x86_64-pc-windows-msvc',
+                  os: 'windows-latest',
+                  rid: 'win-x64',
+                  alias: 'windows-x64',
+                },
+                {
+                  target: 'x86_64-apple-darwin',
+                  os: 'macos-latest',
+                  rid: 'osx-x64',
+                  alias: 'macos-x64',
+                },
+                {
+                  target: 'aarch64-apple-darwin',
+                  os: 'macos-latest',
+                  rid: 'osx-arm64',
+                  alias: 'macos-arm64',
+                }, 
+              );
+            }
+
+            return matrix;
+
     outputs:
       commit: ${{ steps.git-vars.outputs.sha_short }}
       version: ${{ (github.event_name == 'push' && github.event.ref != 'refs/heads/develop' && github.ref_name) || steps.git-vars.outputs.sha_short }}
       nethermind: ${{ inputs.nethermind_version || steps.nethermind-tag.outputs.result }}
       label: ${{ (github.event_name == 'push' && github.event.ref != 'refs/heads/develop' && 'stable') || 'unstable' }}
+      matrix: ${{ steps.matrix-vars.outputs.result }}
 
   build:
     name: Build binary for target ${{ matrix.target }}
@@ -50,26 +99,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            rid: linux-x64
-            
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            rid: linux-arm64
-
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            rid: win-x64
-            
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            rid: osx-x64
-
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            rid: osx-arm64
+        include: ${{ fromJSON(needs.version.outputs.matrix) }}
     env:
       GRANDINE_VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -259,20 +289,7 @@ jobs:
     if: needs.version.outputs.label == 'unstable'
     strategy:
       matrix:
-        include:
-          - rid: 'linux-x64'
-            target: 'x86_64-unknown-linux-gnu'
-          - rid: 'linux-arm64'
-            target: 'aarch64-unknown-linux-gnu'
-          - rid: 'osx-x64'
-            alias: 'macos-x64'
-            target: 'x86_64-apple-darwin'
-          - rid: 'osx-arm64'
-            alias: 'macos-arm64'
-            target: 'aarch64-apple-darwin'
-          - rid: 'win-x64'
-            alias: 'windows-x64'
-            target: 'x86_64-pc-windows-msvc'
+        include: ${{ fromJSON(needs.version.outputs.matrix) }}
     env:
       GRANDINE_VERSION: ${{ needs.version.outputs.version }}
       NETHERMIND_VERSION: ${{ needs.version.outputs.nethermind }}
@@ -339,6 +356,6 @@ jobs:
         with:
           files: build/**
           draft: true
-          tag_name: ${{ env.GRANDINE_VERSION }}
+          tag_name: ${{ needs.version.outputs.version }}
           preserve_order: true
           fail_on_unmatched_files: true
