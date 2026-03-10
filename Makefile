@@ -110,26 +110,35 @@ aarch64-apple-darwin: ./target/aarch64-apple-darwin/compact/grandine ./target/aa
 
 # ------ GRANDINE-NETHERMIND INTEGRATION ------
 
-NETHERMIND_VERSION ?= 1.36.0
+NETHERMIND_VERSION ?= 1.36.1
 # If empty, public authentication will happen. Public auth rate limits by ip address, so may fail unexpectedly.
 GITHUB_TOKEN ?=
+
+ifneq ($(GITHUB_TOKEN),)
+NETHERMIND_DOWNLOAD_EXTRA_ARGS = --header "Authorization: Bearer $(GITHUB_TOKEN)"
+endif
 
 .PHONY: nethermind-plugin
 nethermind-plugin: ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll
 ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/Grandine.NethermindPlugin.dll:
+	@mkdir -p build
+	curl $(NETHERMIND_DOWNLOAD_EXTRA_ARGS) -s "https://api.github.com/repos/NethermindEth/nethermind/releases/tags/$(NETHERMIND_VERSION)" | \
+	jq -r '.assets[] | select(.name | endswith("ref-assemblies.zip")) | .browser_download_url' | \
+	xargs -r -n1 curl $(NETHERMIND_DOWNLOAD_EXTRA_ARGS) -L -o "build/nethermind-$(NETHERMIND_VERSION)-ref-assemblies.zip"
+	mkdir -p ./bindings/csharp/.nethermind-ref-assemblies/$(NETHERMIND_VERSION)
+	rm -f ./bindings/csharp/.nethermind-ref-assemblies/$(NETHERMIND_VERSION)/*.dll
+	unzip -o ./build/nethermind-$(NETHERMIND_VERSION)-ref-assemblies.zip -d ./bindings/csharp/.nethermind-ref-assemblies/$(NETHERMIND_VERSION)
 	cd ./bindings/csharp && \
-	dotnet add ./Grandine.NethermindPlugin/Grandine.NethermindPlugin.csproj package Nethermind.ReferenceAssemblies --version $(NETHERMIND_VERSION) && \
-	dotnet publish -c Release
+	dotnet publish -c Release \
+		/p:NethermindReferenceAssembliesVersion=$(NETHERMIND_VERSION) \
+		/p:NethermindReferenceAssembliesDir="$(CURDIR)/bindings/csharp/.nethermind-ref-assemblies/$(NETHERMIND_VERSION)"
 
 .PHONY: clean-nethermind-plugin
 clean-nethermind-plugin:
 	rm -rf bindings/csharp/Grandine.NethermindPlugin/bin
 	rm -rf bindings/csharp/Grandine.NethermindPlugin/obj
 	rm -rf bindings/csharp/generated
-
-ifneq ($(GITHUB_TOKEN),)
-NETHERMIND_DOWNLOAD_EXTRA_ARGS = --header "Authorization: Bearer $(GITHUB_TOKEN)"
-endif
+	rm -rf bindings/csharp/.nethermind-ref-assemblies
 
 .PHONY: download-nethermind
 download-nethermind:
