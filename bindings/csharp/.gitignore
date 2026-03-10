@@ -4,3 +4,4 @@ nupkgs
 **/runtimes
 src/generated.rs
 generated/*
+.nethermind-ref-assemblies/
