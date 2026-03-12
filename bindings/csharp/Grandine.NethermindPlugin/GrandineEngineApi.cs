@@ -260,6 +260,27 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
+    public CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4(CForkChoiceStateV1 state, COption_CPayloadAttributesV4 payload)
+    {
+        this.logger.Debug("Received engine_forkchoiceUpdatedV4 request from grandine");
+
+        try
+        {
+            var forkchoiceUpdatedResult = this.engineRpc.engine_forkchoiceUpdatedV4(
+                state.ToForkchoiceStateV1(),
+                GrandineUtils.ConvertPayloadAttributes(payload)).Result;
+
+            return forkchoiceUpdatedResult.Result != Result.Success
+                ? CResult_CForkChoiceUpdatedResponse.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, forkchoiceUpdatedResult.Result.Error)
+                : CResult_CForkChoiceUpdatedResponse.Success(new CForkChoiceUpdatedResponse(forkchoiceUpdatedResult.Data));
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_forkchoiceUpdatedV4 function invocation", e);
+            return CResult_CForkChoiceUpdatedResponse.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
     public CResult_CExecutionPayloadV1 EngineGetPayloadV1(CH64 payloadId)
     {
         this.logger.Debug("Received engine_getPayloadV1 request from grandine");

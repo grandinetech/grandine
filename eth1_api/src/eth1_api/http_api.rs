@@ -44,9 +44,10 @@ use crate::{
     endpoints::{ClientVersions, Endpoint, Endpoints},
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
-        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
-        ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4, ENGINE_GET_PAYLOAD_V5,
-        ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
+        ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
+        ENGINE_GET_PAYLOAD_V5, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
+        ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
 };
@@ -333,7 +334,7 @@ impl Eth1Api {
         }
     }
 
-    /// Calls [`engine_forkchoiceUpdatedV1`] or [`engine_forkchoiceUpdatedV2`] or [`engine_forkchoiceUpdatedV3`] depending on `payload_attributes`.
+    /// Calls [`engine_forkchoiceUpdatedV1`] or [`engine_forkchoiceUpdatedV2`] or [`engine_forkchoiceUpdatedV3`] or [`engine_forkchoiceUpdatedV4`] depending on `payload_attributes`.
     ///
     /// Later versions of `engine_forkchoiceUpdated` accept parameters of all prior versions,
     /// but using the earlier versions allows the application to work with old execution clients.
@@ -341,6 +342,7 @@ impl Eth1Api {
     /// [`engine_forkchoiceUpdatedV1`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#engine_forkchoiceupdatedv1
     /// [`engine_forkchoiceUpdatedV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_forkchoiceupdatedv2
     /// [`engine_forkchoiceUpdatedV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_forkchoiceupdatedv3
+    /// [`engine_forkchoiceUpdatedV4`]: https://github.com/ethereum/execution-apis/blob/ffe6c839567f931ece3276d8242963744f09bf67/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
     pub async fn forkchoice_updated<P: Preset>(
         &self,
         head_block_hash: ExecutionBlockHash,
@@ -389,9 +391,19 @@ impl Eth1Api {
                 .await?
                 .result
             }
-            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu => {
                 self.execute(
                     ENGINE_FORKCHOICE_UPDATED_V3,
+                    params,
+                    Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
+                    None,
+                )
+                .await?
+                .result
+            }
+            Phase::Gloas => {
+                self.execute(
+                    ENGINE_FORKCHOICE_UPDATED_V4,
                     params,
                     Some(ENGINE_FORKCHOICE_UPDATED_TIMEOUT),
                     None,
