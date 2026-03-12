@@ -28,6 +28,9 @@ internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpda
 internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV3* attributes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV4 attributes);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate CResult_CExecutionPayloadV1 EngineGetPayloadV1Delegate(CH64 payloadId);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -65,6 +68,7 @@ public class GrandineClient : IAsyncDisposable
     private readonly EngineForkchoiceUpdatedV1Delegate engineForkchoiceUpdatedV1;
     private readonly EngineForkchoiceUpdatedV2Delegate engineForkchoiceUpdatedV2;
     private readonly EngineForkchoiceUpdatedV3Delegate engineForkchoiceUpdatedV3;
+    private readonly EngineForkchoiceUpdatedV4Delegate engineForkchoiceUpdatedV4;
     private readonly EngineGetPayloadV1Delegate engineGetPayloadV1;
     private readonly EngineGetPayloadV2Delegate engineGetPayloadV2;
     private readonly EngineGetPayloadV3Delegate engineGetPayloadV3;
@@ -97,6 +101,7 @@ public class GrandineClient : IAsyncDisposable
             this.engineForkchoiceUpdatedV1 = this.engineApi.EngineForkchoiceUpdatedV1;
             this.engineForkchoiceUpdatedV2 = this.engineApi.EngineForkchoiceUpdatedV2;
             this.engineForkchoiceUpdatedV3 = this.engineApi.EngineForkchoiceUpdatedV3;
+            this.engineForkchoiceUpdatedV4 = this.engineApi.EngineForkchoiceUpdatedV4;
             this.engineGetPayloadV1 = this.engineApi.EngineGetPayloadV1;
             this.engineGetPayloadV2 = this.engineApi.EngineGetPayloadV2;
             this.engineGetPayloadV3 = this.engineApi.EngineGetPayloadV3;
@@ -113,6 +118,7 @@ public class GrandineClient : IAsyncDisposable
             IntPtr engine_forkchoiceUpdatedV1Ptr = Marshal.GetFunctionPointerForDelegate(this.engineForkchoiceUpdatedV1);
             IntPtr engine_forkchoiceUpdatedV2Ptr = Marshal.GetFunctionPointerForDelegate(this.engineForkchoiceUpdatedV2);
             IntPtr engine_forkchoiceUpdatedV3Ptr = Marshal.GetFunctionPointerForDelegate(this.engineForkchoiceUpdatedV3);
+            IntPtr engine_forkchoiceUpdatedV4Ptr = Marshal.GetFunctionPointerForDelegate(this.engineForkchoiceUpdatedV4);
             IntPtr engine_getPayloadV1Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV1);
             IntPtr engine_getPayloadV2Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV2);
             IntPtr engine_getPayloadV3Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV3);
@@ -131,6 +137,7 @@ public class GrandineClient : IAsyncDisposable
                 engine_forkchoice_updated_v1 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV1, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV1Ptr,
                 engine_forkchoice_updated_v2 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV2*, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV2Ptr,
                 engine_forkchoice_updated_v3 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV3*, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV3Ptr,
+                engine_forkchoice_updated_v4 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV4*, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV4Ptr,
                 engine_get_payload_v1 = (delegate* unmanaged[Cdecl]<CH64, CResult_CExecutionPayloadV1>)engine_getPayloadV1Ptr,
                 engine_get_payload_v2 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV2Response>)engine_getPayloadV2Ptr,
                 engine_get_payload_v3 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV3Response>)engine_getPayloadV3Ptr,

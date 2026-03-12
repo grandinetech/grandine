@@ -9,11 +9,14 @@ use crate::{
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
-    gloas::{containers::{
-        CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope,
-        PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadBid,
-        SignedExecutionPayloadEnvelope,
-    }, primitives::BuilderIndex},
+    gloas::{
+        containers::{
+            CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload,
+            ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        },
+        primitives::BuilderIndex,
+    },
     phase0::primitives::Slot,
     preset::Preset,
 };

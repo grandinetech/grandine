@@ -33,7 +33,7 @@ use types::{
     fulu::containers::DataColumnIdentifier,
     nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
     phase0::primitives::{
-        ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, UnixSeconds,
+        ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot, UnixSeconds,
         ValidatorIndex,
     },
     preset::Preset,
@@ -488,6 +488,20 @@ pub struct PayloadAttributesV3<P: Preset> {
     pub parent_beacon_block_root: H256,
 }
 
+/// [`PayloadAttributesV4`](https://github.com/ethereum/execution-apis/blob/ffe6c839567f931ece3276d8242963744f09bf67/src/engine/amsterdam.md#payloadattributesv4)
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PayloadAttributesV4<P: Preset> {
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+    pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
+    pub parent_beacon_block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot_number: Slot,
+}
+
 /// [`engine_getPayloadV1` response](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#response-2).
 pub type EngineGetPayloadV1Response<P> = ExecutionPayloadV1<P>;
 
@@ -655,7 +669,7 @@ pub enum PayloadAttributes<P: Preset> {
     Deneb(PayloadAttributesV3<P>),
     Electra(PayloadAttributesV3<P>),
     Fulu(PayloadAttributesV3<P>),
-    Gloas(PayloadAttributesV3<P>),
+    Gloas(PayloadAttributesV4<P>),
 }
 
 impl<P: Preset> PayloadAttributes<P> {
