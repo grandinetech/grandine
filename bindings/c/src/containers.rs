@@ -6,8 +6,8 @@ use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadStatusV1,
-    PayloadValidationStatus, RawExecutionRequests, RequestType, WithdrawalV1,
+    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4,
+    PayloadStatusV1, PayloadValidationStatus, RawExecutionRequests, RequestType, WithdrawalV1,
 };
 use generic_array::ArrayLength;
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite};
@@ -403,6 +403,30 @@ impl From<PayloadAttributesV3<Mainnet>> for CPayloadAttributesV3 {
             suggested_fee_recipient: value.suggested_fee_recipient.into(),
             withdrawals: value.withdrawals.into_iter().map(Into::into).collect(),
             parent_beacon_block_root: value.parent_beacon_block_root.into(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+#[repr(C)]
+pub struct CPayloadAttributesV4 {
+    timestamp: u64,
+    prev_randao: CH256,
+    suggested_fee_recipient: CH160,
+    withdrawals: CVec<CWithdrawalV1>,
+    parent_beacon_block_root: CH256,
+    slot_number: u64,
+}
+
+impl From<PayloadAttributesV4<Mainnet>> for CPayloadAttributesV4 {
+    fn from(value: PayloadAttributesV4<Mainnet>) -> Self {
+        Self {
+            timestamp: value.timestamp,
+            prev_randao: value.prev_randao.into(),
+            suggested_fee_recipient: value.suggested_fee_recipient.into(),
+            withdrawals: value.withdrawals.into_iter().map(Into::into).collect(),
+            parent_beacon_block_root: value.parent_beacon_block_root.into(),
+            slot_number: value.slot_number,
         }
     }
 }

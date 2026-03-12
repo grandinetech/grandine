@@ -7,9 +7,9 @@ pub use crate::{
         EngineGetPayloadV2Response, EngineGetPayloadV3Response, EngineGetPayloadV4Response,
         EngineGetPayloadV5Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
         ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1,
-        PayloadAttributesV2, PayloadAttributesV3, PayloadId, PayloadStatus, PayloadStatusV1,
-        PayloadStatusWithBlockHash, PayloadValidationStatus, RawExecutionRequests, RequestType,
-        WithdrawalV1,
+        PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatus,
+        PayloadStatusV1, PayloadStatusWithBlockHash, PayloadValidationStatus, RawExecutionRequests,
+        RequestType, WithdrawalV1,
     },
 };
 
