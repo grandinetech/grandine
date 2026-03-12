@@ -9,7 +9,7 @@ use execution_engine::{
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
     ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadId, PayloadStatusV1,
+    PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1,
 };
 use futures::channel::mpsc::UnboundedSender;
 use prometheus_metrics::Metrics;
@@ -41,9 +41,10 @@ use crate::{
     deposit_event::DepositEvent,
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
-        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
-        ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4, ENGINE_GET_PAYLOAD_V5,
-        ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
+        ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
+        ENGINE_GET_PAYLOAD_V5, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
+        ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
 };
@@ -97,6 +98,11 @@ pub trait EmbedAdapter: Send + Sync {
         &self,
         state: ForkChoiceStateV1,
         payload: Option<PayloadAttributesV3<Mainnet>>,
+    ) -> Result<RawForkChoiceUpdatedResponse>;
+    fn engine_forkchoice_updated_v4(
+        &self,
+        state: ForkChoiceStateV1,
+        payload: Option<PayloadAttributesV4<Mainnet>>,
     ) -> Result<RawForkChoiceUpdatedResponse>;
 
     fn engine_get_payload_v1(&self, payload_id: H64)
@@ -451,7 +457,7 @@ impl Eth1Api {
         }
     }
 
-    /// Calls [`engine_forkchoiceUpdatedV1`] or [`engine_forkchoiceUpdatedV2`] or [`engine_forkchoiceUpdatedV3`] depending on `payload_attributes`.
+    /// Calls [`engine_forkchoiceUpdatedV1`] or [`engine_forkchoiceUpdatedV2`] or [`engine_forkchoiceUpdatedV3`] or [`engine_forkchoiceUpdatedV4`] depending on `payload_attributes`.
     ///
     /// Later versions of `engine_forkchoiceUpdated` accept parameters of all prior versions,
     /// but using the earlier versions allows the application to work with old execution clients.
@@ -459,6 +465,7 @@ impl Eth1Api {
     /// [`engine_forkchoiceUpdatedV1`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#engine_forkchoiceupdatedv1
     /// [`engine_forkchoiceUpdatedV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_forkchoiceupdatedv2
     /// [`engine_forkchoiceUpdatedV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_forkchoiceupdatedv3
+    /// [`engine_forkchoiceUpdatedV4`]: https://github.com/ethereum/execution-apis/blob/ffe6c839567f931ece3276d8242963744f09bf67/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
     pub async fn forkchoice_updated<P: Preset>(
         &self,
         head_block_hash: ExecutionBlockHash,
@@ -507,8 +514,7 @@ impl Eth1Api {
                             Err(Error::InvalidParameters)
                         }
                     })
-                    .transpose()?
-                    .clone();
+                    .transpose()?;
 
                 self.exec(move |adapter| {
                     adapter.engine_forkchoice_updated_v1(fork_choice_state, payload_attributes)
@@ -531,15 +537,14 @@ impl Eth1Api {
                             Err(Error::InvalidParameters)
                         }
                     })
-                    .transpose()?
-                    .clone();
+                    .transpose()?;
 
                 self.exec(move |adapter| {
                     adapter.engine_forkchoice_updated_v2(fork_choice_state, payload_attributes)
                 })
                 .await?
             }
-            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
                     prometheus_metrics::start_timer_vec(
                         &metrics.eth1_api_request_times,
@@ -551,19 +556,40 @@ impl Eth1Api {
                     .map(|value| {
                         if let PayloadAttributes::Deneb(value)
                         | PayloadAttributes::Electra(value)
-                        | PayloadAttributes::Fulu(value)
-                        | PayloadAttributes::Gloas(value) = value
+                        | PayloadAttributes::Fulu(value) = value
                         {
                             Ok(value)
                         } else {
                             Err(Error::InvalidParameters)
                         }
                     })
-                    .transpose()?
-                    .clone();
+                    .transpose()?;
 
                 self.exec(move |adapter| {
                     adapter.engine_forkchoice_updated_v3(fork_choice_state, payload_attributes)
+                })
+                .await?
+            }
+            Phase::Gloas => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_FORKCHOICE_UPDATED_V4,
+                    )
+                });
+
+                let payload_attributes = payload_attributes
+                    .map(|value| {
+                        if let PayloadAttributes::Gloas(value) = value {
+                            Ok(value)
+                        } else {
+                            Err(Error::InvalidParameters)
+                        }
+                    })
+                    .transpose()?;
+
+                self.exec(move |adapter| {
+                    adapter.engine_forkchoice_updated_v4(fork_choice_state, payload_attributes)
                 })
                 .await?
             }
