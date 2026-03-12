@@ -15,7 +15,7 @@ use dedicated_executor::{DedicatedExecutor, Job};
 use eth1_api::{ApiController, ClientVersions, Eth1ExecutionEngine, WithClientVersions};
 use execution_engine::{
     ExecutionEngine as _, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadId,
+    PayloadAttributesV3, PayloadAttributesV4, PayloadId,
 };
 use features::Feature;
 use fork_choice_control::Wait;
@@ -1737,12 +1737,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let parent_beacon_block_root =
                     accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
 
-                PayloadAttributes::Gloas(PayloadAttributesV3 {
+                PayloadAttributes::Gloas(PayloadAttributesV4 {
                     timestamp,
                     prev_randao,
                     suggested_fee_recipient,
                     withdrawals,
                     parent_beacon_block_root,
+                    slot_number: state.slot(),
                 })
             }
         };
