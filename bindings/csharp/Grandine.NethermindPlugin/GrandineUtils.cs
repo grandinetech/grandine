@@ -251,6 +251,24 @@ public static class GrandineUtils
         };
     }
 
+    public static PayloadAttributes? ConvertPayloadAttributes(COption_CPayloadAttributesV4 attr)
+    {
+        if (!attr.is_something)
+        {
+            return null;
+        }
+
+        return new PayloadAttributes
+        {
+            Timestamp = attr.value.timestamp,
+            PrevRandao = attr.value.prev_randao.ToHash256(),
+            SuggestedFeeRecipient = attr.value.suggested_fee_recipient.ToAddress(),
+            Withdrawals = WithdrawalsFromNative(attr.value.withdrawals),
+            ParentBeaconBlockRoot = attr.value.parent_beacon_block_root.ToHash256(),
+            SlotNumber = attr.value.slot_number,
+        };
+    }
+
     public static IEnumerable<string> ConvertCapabilities(CVec_CGrandineString capabilities)
     {
         var span = capabilities.AsSpan();

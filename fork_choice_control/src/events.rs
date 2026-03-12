@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use execution_engine::{
-    PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, WithdrawalV1,
+    PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3,
+    PayloadAttributesV4, WithdrawalV1,
 };
 use fork_choice_store::{ChainLink, Storage, Store};
 use helper_functions::misc;
@@ -782,7 +783,7 @@ pub enum CombinedPayloadAttributesEventData {
     Deneb(PayloadAttributesEventDataV3),
     Electra(PayloadAttributesEventDataV3),
     Fulu(PayloadAttributesEventDataV3),
-    Gloas(PayloadAttributesEventDataV3),
+    Gloas(PayloadAttributesEventDataV4),
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -810,6 +811,18 @@ pub struct PayloadAttributesEventDataV3 {
     pub suggested_fee_recipient: ExecutionAddress,
     pub withdrawals: Vec<WithdrawalEventDataV1>,
     pub parent_beacon_block_root: H256,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PayloadAttributesEventDataV4 {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub timestamp: UnixSeconds,
+    pub prev_randao: H256,
+    pub suggested_fee_recipient: ExecutionAddress,
+    pub withdrawals: Vec<WithdrawalEventDataV1>,
+    pub parent_beacon_block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot_number: Slot,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -895,6 +908,28 @@ impl<P: Preset> From<PayloadAttributesV3<P>> for PayloadAttributesEventDataV3 {
     }
 }
 
+impl<P: Preset> From<PayloadAttributesV4<P>> for PayloadAttributesEventDataV4 {
+    fn from(payload_attributes: PayloadAttributesV4<P>) -> Self {
+        let PayloadAttributesV4 {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+            withdrawals,
+            parent_beacon_block_root,
+            slot_number,
+        } = payload_attributes;
+
+        Self {
+            timestamp,
+            prev_randao,
+            suggested_fee_recipient,
+            withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
+            parent_beacon_block_root,
+            slot_number,
+        }
+    }
+}
+
 impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventData {
     fn from(payload_attributes: PayloadAttributes<P>) -> Self {
         match payload_attributes {
@@ -913,8 +948,8 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
             PayloadAttributes::Fulu(payload_attributes_v3) => {
                 Self::Fulu(payload_attributes_v3.into())
             }
-            PayloadAttributes::Gloas(payload_attributes_v3) => {
-                Self::Gloas(payload_attributes_v3.into())
+            PayloadAttributes::Gloas(payload_attributes_v4) => {
+                Self::Gloas(payload_attributes_v4.into())
             }
         }
     }
