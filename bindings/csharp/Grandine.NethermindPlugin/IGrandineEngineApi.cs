@@ -18,6 +18,8 @@ public interface IGrandineEngineApi
 
     CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3(CForkChoiceStateV1 state, COption_CPayloadAttributesV3 payload);
 
+    CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4(CForkChoiceStateV1 state, COption_CPayloadAttributesV4 payload);
+
     CResult_CExecutionPayloadV1 EngineGetPayloadV1(CH64 payloadId);
 
     CResult_CEngineGetPayloadV2Response EngineGetPayloadV2(CH64 payloadId);

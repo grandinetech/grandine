@@ -11,7 +11,8 @@ use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadStatusV1,
+    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4,
+    PayloadStatusV1,
 };
 use runtime::{grandine_args::GrandineArgs, run, shutdown};
 use tracing::error;
@@ -28,7 +29,7 @@ use crate::{
         CEngineGetPayloadV3Response, CEngineGetPayloadV4Response, CEngineGetPayloadV5Response,
         CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3, CExecutionRequests,
         CForkChoiceStateV1, CForkChoiceUpdatedResponse, CPayloadAttributesV1, CPayloadAttributesV2,
-        CPayloadAttributesV3, CPayloadStatusV1,
+        CPayloadAttributesV3, CPayloadAttributesV4, CPayloadStatusV1,
     },
     generic::{CGrandineString, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
     layout::CLayout,
@@ -67,6 +68,10 @@ pub struct CEmbedAdapter {
     engine_forkchoice_updated_v3: unsafe extern "C" fn(
         state: CForkChoiceStateV1,
         payload: COption<CPayloadAttributesV3>,
+    ) -> CResult<CForkChoiceUpdatedResponse>,
+    engine_forkchoice_updated_v4: unsafe extern "C" fn(
+        state: CForkChoiceStateV1,
+        payload: COption<CPayloadAttributesV4>,
     ) -> CResult<CForkChoiceUpdatedResponse>,
     engine_get_payload_v1: unsafe extern "C" fn(payload_id: CH64) -> CResult<CExecutionPayloadV1>,
     engine_get_payload_v2:
@@ -210,6 +215,19 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         let payload: Option<CPayloadAttributesV3> = payload.map(Into::into);
         let payload = payload.into();
         let result = unsafe { (self.engine_forkchoice_updated_v3)(state, payload) };
+
+        Result::<_>::from(result).map(Into::into)
+    }
+
+    fn engine_forkchoice_updated_v4(
+        &self,
+        state: ForkChoiceStateV1,
+        payload: Option<PayloadAttributesV4<types::preset::Mainnet>>,
+    ) -> Result<eth1_api::RawForkChoiceUpdatedResponse> {
+        let state: CForkChoiceStateV1 = state.into();
+        let payload: Option<CPayloadAttributesV4> = payload.map(Into::into);
+        let payload = payload.into();
+        let result = unsafe { (self.engine_forkchoice_updated_v4)(state, payload) };
 
         Result::<_>::from(result).map(Into::into)
     }
