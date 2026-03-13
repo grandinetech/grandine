@@ -137,7 +137,7 @@ jobs:
             install: |
               sudo DEBIAN_FRONTEND='noninteractive' apt-get update
               sudo DEBIAN_FRONTEND='noninteractive' apt-get install -y xz-utils jq curl build-essential qemu-system libomp-dev libgmp-dev nlohmann-json3-dev protobuf-compiler uuid-dev libgrpc++-dev libsecp256k1-dev libsodium-dev libpqxx-dev nasm libopenmpi-dev openmpi-bin openmpi-common libclang-dev clang gcc-riscv64-unknown-elf
-              curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | GH_RUNNER=true bash
+              curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | GH_RUNNER=true ZISK_VERSION=0.13.0 bash
               echo "/home/runner/.config/.zisk/bin" >> $GITHUB_PATH
               export PATH="/home/runner/.config/.zisk/bin:$PATH"
               cargo-zisk -V
