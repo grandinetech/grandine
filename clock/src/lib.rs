@@ -60,17 +60,16 @@
 //! [`timer`]:         https://crates.io/crates/timer
 //! [`white_rabbit`]:  https://crates.io/crates/white_rabbit
 
-use core::{error::Error, time::Duration};
+use core::{error::Error, pin::Pin, time::Duration};
 use std::time::{Instant, SystemTime, SystemTimeError};
 
 use anyhow::Result;
 use enum_iterator::Sequence;
-use futures::stream::{Stream, StreamExt as _, TryStreamExt as _};
+use futures::stream::Stream;
 use helper_functions::misc;
 use serde::Deserialize;
 use strum::AsRefStr;
 use thiserror::Error;
-use tokio_stream::wrappers::IntervalStream;
 use types::{
     config::Config,
     nonstandard::Phase,
@@ -312,21 +311,7 @@ impl TickKind {
     }
 
     fn pre_gloas_ticks() -> impl Iterator<Item = Self> {
-        [
-            Self::Propose,
-            Self::ProposeSecond,
-            Self::ProposeThird,
-            Self::ProposeFourth,
-            Self::Attest,
-            Self::AttestSecond,
-            Self::AttestThird,
-            Self::AttestFourth,
-            Self::Aggregate,
-            Self::AggregateSecond,
-            Self::AggregateThird,
-            Self::AggregateFourth,
-        ]
-        .into_iter()
+        enum_iterator::all::<Self>().take_while(|t| !matches!(t, Self::PayloadAttest))
     }
 }
 
@@ -342,14 +327,14 @@ pub enum ClockError {
 pub fn ticks<P: Preset>(
     config: &Config,
     genesis_time_in_ms: u64,
-) -> Result<impl Stream<Item = Result<Tick>>> {
+) -> Result<Pin<Box<dyn Stream<Item = Result<Tick>> + Send + '_>>> {
     // We assume the `Instant` and `SystemTime` obtained here correspond to the same point in time.
     // This is slightly inaccurate but the error will probably be negligible compared to clock
     // differences between different nodes in the network.
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
 
-    let (mut next_tick, next_instant) = next_tick_with_instant::<P, _, _>(
+    let (next_tick, next_instant) = next_tick_with_instant::<P, _, _>(
         config,
         now_instant,
         now_system_time,
@@ -357,21 +342,30 @@ pub fn ticks<P: Preset>(
         false,
     )?;
 
-    let tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
-    let interval = tokio::time::interval_at(next_instant.into(), tick_duration);
+    Ok(Box::pin(futures::stream::try_unfold(
+        (next_tick, next_instant.into()),
+        move |(mut next_tick, mut deadline)| {
+            async move {
+                loop {
+                    tokio::time::sleep_until(deadline).await;
 
-    Ok(IntervalStream::new(interval)
-        .map(move |_| {
-            let current_tick = next_tick;
-            next_tick = current_tick.next::<P>(config)?;
-            Ok(current_tick)
-        })
-        .try_filter(|tick| {
-            // Emit only ticks that the application currently uses.
-            //
-            // This could be written as an `async` block, but that makes the stream `!Unpin`.
-            core::future::ready(tick.is_start_of_interval() || tick.is_end_of_interval())
-        }))
+                    let current_tick = next_tick;
+                    next_tick = current_tick.next::<P>(config)?;
+
+                    // Recompute duration based on the *next* tick's slot so the sleep correctly accounts for a Gloas fork crossing.
+                    let tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
+                    deadline = deadline
+                        .checked_add(tick_duration)
+                        .ok_or(ClockError::NextInstantOverflow)?;
+
+                    // Emit only ticks that the application currently uses.
+                    if current_tick.is_start_of_interval() || current_tick.is_end_of_interval() {
+                        return Ok(Some((current_tick, (next_tick, deadline))));
+                    }
+                }
+            }
+        },
+    )))
 }
 
 pub fn next_interval_with_remaining_time<P: Preset>(
@@ -509,6 +503,7 @@ const fn slot_duration(config: &Config) -> Duration {
 mod tests {
     use core::{num::NonZeroU64, ops::Add as _};
 
+    use futures::StreamExt as _;
     use futures::future::FutureExt as _;
     use itertools::Itertools as _;
     use nonzero_ext::nonzero;
@@ -648,6 +643,89 @@ mod tests {
 
         assert_eq!(next_tick()?, Some(Tick::new(1, TickKind::Propose)));
         assert_eq!(next_tick()?, None);
+
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ticks_adjusts_duration_at_gloas_fork() -> Result<()> {
+        // This setup activates Gloas fork at epoch 1 with mainnet preset
+        let config = Config::mainnet().upgrade_once(Phase::Gloas, 1);
+        let one_second_duration = Duration::from_secs(1);
+        let post_gloas_tick_duration = Duration::from_millis(750);
+
+        // Genesis is 1 second from now
+        let genesis_time_in_ms = u64::try_from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)?
+                .as_millis()
+                .add(1000),
+        )
+        .expect("genesis_time_in_ms should fit in u64");
+        let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
+
+        assert_eq!(next_tick(&mut ticks).await?, None);
+
+        // Advance to genesis slot
+        tokio::time::advance(one_second_duration).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            Some(Tick::new(0, TickKind::Propose))
+        );
+
+        // Fast-forward through slots 0-31 (pre-Gloas)
+        // Each slot has 12 ticks at 1000 ms each = 12 000 ms. We skip 31 slots
+        // and 11 ticks in bulk and draining the stream.
+        tokio::time::advance(Duration::from_millis(32 * 12_000 - 2000)).await;
+        drain(&mut ticks).await?;
+
+        // Last tick in slot 31 (pre-Gloas)
+        tokio::time::advance(one_second_duration).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            Some(Tick::new(31, TickKind::AggregateFourth))
+        );
+        assert_eq!(next_tick(&mut ticks).await?, None);
+
+        // Fork transition to Gloas at slot 32
+        tokio::time::advance(one_second_duration).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            Some(Tick::new(32, TickKind::Propose))
+        );
+        assert_eq!(next_tick(&mut ticks).await?, None);
+
+        // Advance to next tick by 750ms (post-Gloas)
+        tokio::time::advance(post_gloas_tick_duration).await;
+        assert_eq!(next_tick(&mut ticks).await?, None); // ProposeSecond
+
+        tokio::time::advance(post_gloas_tick_duration).await;
+        assert_eq!(next_tick(&mut ticks).await?, None); // ProposeThird
+
+        // End of propose interval (post-Gloas)
+        tokio::time::advance(post_gloas_tick_duration).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            Some(Tick::new(32, TickKind::ProposeFourth))
+        );
+        assert_eq!(next_tick(&mut ticks).await?, None);
+
+        // Then, Start of attest interval
+        tokio::time::advance(post_gloas_tick_duration).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            Some(Tick::new(32, TickKind::Attest))
+        );
+        assert_eq!(next_tick(&mut ticks).await?, None);
+
+        // ── Regression guard: advancing only 250 ms more must NOT emit anything ───
+        // Under the old bug the interval would have fired at the 1000 ms mark (250 ms after Attest), producing a spurious tick.
+        tokio::time::advance(Duration::from_millis(250)).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            None,
+            "spurious tick at old 1000 ms boundary must not appear post-fork"
+        );
 
         Ok(())
     }
@@ -1127,5 +1205,35 @@ mod tests {
             slot_duration_ms: Duration::from_secs(seconds_per_slot.get()),
             ..Config::default()
         }
+    }
+
+    async fn next_tick<S>(stream: &mut S) -> Result<Option<Tick>>
+    where
+        S: Stream<Item = Result<Tick>> + Unpin,
+    {
+        tokio::time::timeout(Duration::ZERO, stream.next())
+            .await
+            .ok()
+            .flatten()
+            .transpose()
+    }
+
+    async fn drain<S>(stream: &mut S) -> Result<()>
+    where
+        S: Stream<Item = Result<Tick>> + Unpin,
+    {
+        // `FutureExt::now_or_never()` drives futures without ever yielding to the Tokio scheduler,
+        // this would exhaust coop task budget. By using `timeout(Duration::ZERO, ...)` allows
+        // driving the stream while yielding to the scheduler, and the task budget got reset every
+        // await points.
+        while tokio::time::timeout(Duration::ZERO, stream.next())
+            .await
+            .ok()
+            .flatten()
+            .transpose()?
+            .is_some()
+        {}
+
+        Ok(())
     }
 }
