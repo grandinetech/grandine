@@ -505,6 +505,7 @@ where
             self.archive_finalized(wait_group)?;
             self.prune_delayed_until_payload();
             self.persist_pubkey_cache(wait_group);
+            self.prune_delayed_after_finalization();
 
             let finalized_slot = self.store.finalized_slot();
 
@@ -2447,24 +2448,7 @@ where
 
         if changes.is_finalized_checkpoint_updated() {
             self.notify_about_finalized_checkpoint();
-        }
-
-        let pruned_gossip_ids = changes
-            .is_finalized_checkpoint_updated()
-            .then(|| {
-                let delayed = self.prune_delayed_until_block();
-                let delayed_until_blobs = self.prune_delayed_until_blobs();
-                let waiting = self.prune_waiting_for_checkpoint_states();
-                delayed
-                    .into_iter()
-                    .chain(delayed_until_blobs)
-                    .chain(waiting)
-            })
-            .into_iter()
-            .flatten();
-
-        for gossip_id in pruned_gossip_ids {
-            self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+            self.prune_delayed_after_finalization();
         }
 
         match changes {
@@ -3236,6 +3220,20 @@ where
         });
 
         gossip_ids
+    }
+
+    fn prune_delayed_after_finalization(&mut self) {
+        let delayed = self.prune_delayed_until_block();
+        let delayed_until_blobs = self.prune_delayed_until_blobs();
+        let waiting = self.prune_waiting_for_checkpoint_states();
+
+        for gossip_id in delayed
+            .into_iter()
+            .chain(delayed_until_blobs)
+            .chain(waiting)
+        {
+            self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+        }
     }
 
     // Some objects may be delayed until a block that is itself delayed.
