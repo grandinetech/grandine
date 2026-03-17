@@ -2,23 +2,20 @@
 //!
 //! # Implementation
 //!
-//! This is implemented using [`Interval`]. Some subtleties to keep in mind:
+//! This is implemented using [`try_unfold`] with [`sleep_until`]. Each iteration sleeps until the
+//! next tick's deadline, then advances the deadline by the current tick duration before looping.
+//! Some subtleties to keep in mind:
 //!
-//! - The API of [`Interval`] (as well as other timer utilities in [`tokio::time`]) uses
+//! - The API of [`sleep_until`] (as well as other timer utilities in [`tokio::time`]) uses
 //!   [`Instant`]s. [`Instant`]s are opaque. There is no way to directly convert a timestamp
 //!   (of any kind, not just Unix time) to an [`Instant`]. The hack in [`ticks`] may result in
 //!   unexpected behavior in extreme conditions.
 //!
-//! - An [`Interval`] may produce items late, but the delays do not accumulate by default.
-//!   The interval of time between consecutive items produced by [`Interval`] may be shorter than
-//!   the [`Duration`] passed to [`interval_at`]. This can be changed by setting a different
-//!   [`MissedTickBehavior`].
+//! - The tick duration is recomputed at every tick boundary so that fork transitions (e.g. from
+//!   pre-Gloas 12-tick slots to post-Gloas 16-tick slots) are handled correctly without any
+//!   accumulated error.
 //!
-//!   However, this doesn't always apply. If a consumer spends more than a third of a slot waiting
-//!   on a [`Sleep`], all subsequent [`Tick`]s will be delayed. This can be prevented with the use
-//!   of [`Timeout`].
-//!
-//! - It is unclear how [`Interval`] behaves around leap seconds.
+//! - It is unclear how [`sleep_until`] behaves around leap seconds.
 //!
 //! # Possible alternatives
 //!
@@ -46,13 +43,10 @@
 //! None of these libraries are designed to work with futures, but making them work together should
 //! be as simple as using a channel.
 //!
-//! [`tokio::time`]:        tokio::time
-//! [`Instant`]:            tokio::time::Instant
-//! [`Interval`]:           tokio::time::Interval
-//! [`MissedTickBehavior`]: tokio::time::MissedTickBehavior
-//! [`Sleep`]:              tokio::time::Sleep
-//! [`Timeout`]:            tokio::time::Timeout
-//! [`interval_at`]:        tokio::time::interval_at
+//! [`tokio::time`]:  tokio::time
+//! [`Instant`]:      tokio::time::Instant
+//! [`sleep_until`]:  tokio::time::sleep_until
+//! [`try_unfold`]:   futures::stream::try_unfold
 //!
 //! [`clokwerk`]:      https://crates.io/crates/clokwerk
 //! [`job_scheduler`]: https://crates.io/crates/job_scheduler
@@ -349,14 +343,14 @@ pub fn ticks<P: Preset>(
                 loop {
                     tokio::time::sleep_until(deadline).await;
 
-                    // Recompute duration based on the *next* tick's slot so the sleep correctly accounts for a Gloas fork crossing.
-                    let tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
+                    let current_tick = next_tick;
+                    next_tick = current_tick.next::<P>(config)?;
+
+                    // Recalculate tick duration because it can change at the fork boundary.
+                    let tick_duration = tick_duration_at_slot::<P>(config, current_tick.slot);
                     deadline = deadline
                         .checked_add(tick_duration)
                         .ok_or(ClockError::NextInstantOverflow)?;
-
-                    let current_tick = next_tick;
-                    next_tick = current_tick.next::<P>(config)?;
 
                     // Emit only ticks that the application currently uses.
                     if current_tick.is_start_of_interval() || current_tick.is_end_of_interval() {
@@ -401,7 +395,7 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
 ) -> Result<(Tick, I)> {
     let unix_epoch_to_now = now_system_time.duration_since(S::UNIX_EPOCH)?;
 
-    // Tick is now operate in milliseconds, so to prevent precision loss by rounding down to unix seconds,
+    // Tick now operates in milliseconds, so to prevent precision loss by rounding down to unix seconds,
     // We pass genesis time in milliseconds to prevent rounding error and precision calculation and
     // comparision.
     let unix_epoch_to_genesis = Duration::from_millis(genesis_time_in_ms);
