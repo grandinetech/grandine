@@ -114,7 +114,7 @@ use crate::{
     misc::{
         APIBlock, BroadcastValidation, SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
         SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
-        SignedExecutionPaylodBidPhaseDeserializer, SingleApiAttestation,
+        SignedExecutionPayloadBidPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
     response::{EthResponse, JsonOrSsz},
@@ -1769,7 +1769,7 @@ pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSsz(signed_payload_bid, _): EthJsonOrSsz<
         Arc<SignedExecutionPayloadBid<P>>,
-        SignedExecutionPaylodBidPhaseDeserializer<P>,
+        SignedExecutionPayloadBidPhaseDeserializer<P>,
     >,
 ) -> Result<StatusCode, Error> {
     let (sender, receiver) = futures::channel::oneshot::channel();

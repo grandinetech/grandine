@@ -322,12 +322,12 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SingleApiAttestationListPhaseDeser
     }
 }
 
-pub struct SignedExecutionPaylodBidPhaseDeserializer<P> {
+pub struct SignedExecutionPayloadBidPhaseDeserializer<P> {
     phase: Phase,
     phantom: PhantomData<P>,
 }
 
-impl<P: Preset> From<Phase> for SignedExecutionPaylodBidPhaseDeserializer<P> {
+impl<P: Preset> From<Phase> for SignedExecutionPayloadBidPhaseDeserializer<P> {
     fn from(phase: Phase) -> Self {
         Self {
             phase,
@@ -336,7 +336,7 @@ impl<P: Preset> From<Phase> for SignedExecutionPaylodBidPhaseDeserializer<P> {
     }
 }
 
-impl<'de, P: Preset> DeserializeSeed<'de> for SignedExecutionPaylodBidPhaseDeserializer<P> {
+impl<'de, P: Preset> DeserializeSeed<'de> for SignedExecutionPayloadBidPhaseDeserializer<P> {
     type Value = Arc<SignedExecutionPayloadBid<P>>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
