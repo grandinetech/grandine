@@ -645,6 +645,22 @@ where
         .await?
     }
 
+    pub async fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
+        let store = self.store_snapshot();
+        let pubkey_cache = self.pubkey_cache().clone_arc();
+        let state_cache = self.state_cache().clone_arc();
+
+        tokio::task::spawn_blocking(move || {
+            state_cache.state_at_slot(
+                &pubkey_cache,
+                &store,
+                store.head().block_root,
+                store.slot() + 1,
+            )
+        })
+        .await?
+    }
+
     pub fn preprocessed_state_at_current_slot_blocking(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();

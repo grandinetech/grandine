@@ -3509,10 +3509,14 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     EthPath(builder_index): EthPath<BuilderIndex>,
     headers: HeaderMap,
 ) -> Result<EthResponse<ExecutionPayloadBid<P>, (), JsonOrSsz>, Error> {
-    let block_root = controller.head().value.block_root;
-    let beacon_state = controller
-        .preprocessed_state_for_block_production(block_root, slot)
-        .await?;
+    let current_slot = controller.slot();
+    let beacon_state = if slot == current_slot {
+        controller.preprocessed_state_at_current_slot().await?
+    } else if slot == current_slot + 1 {
+        controller.preprocessed_state_at_next_slot().await?
+    } else {
+        return Err(Error::InvalidSlot(slot));
+    };
 
     // TODO(gloas): check builder exist with `builder_indices` cache in beacon state
     let _ = beacon_state

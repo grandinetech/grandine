@@ -131,6 +131,8 @@ pub enum Error {
     InvalidValidatorSignatures(Vec<IndexedError>),
     #[error("invalid BLS to execution changes")]
     InvalidSignedBlsToExecutionChanges(Vec<IndexedError>),
+    #[error("invalid slot: slot {0} is not the current slot or the next slot")]
+    InvalidSlot(Slot),
     #[error("liveness tracking not enabled")]
     LivenessTrackingNotEnabled,
     #[error("matching head block for attestation is not found")]
@@ -264,6 +266,7 @@ impl Error {
             | Self::InvalidRandaoReveal
             | Self::InvalidValidatorId(_)
             | Self::InvalidValidatorSignatures(_)
+            | Self::InvalidSlot(_)
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
             | Self::StatePreCapella
