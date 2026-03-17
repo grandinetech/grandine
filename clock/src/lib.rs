@@ -349,14 +349,14 @@ pub fn ticks<P: Preset>(
                 loop {
                     tokio::time::sleep_until(deadline).await;
 
-                    let current_tick = next_tick;
-                    next_tick = current_tick.next::<P>(config)?;
-
                     // Recompute duration based on the *next* tick's slot so the sleep correctly accounts for a Gloas fork crossing.
                     let tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
                     deadline = deadline
                         .checked_add(tick_duration)
                         .ok_or(ClockError::NextInstantOverflow)?;
+
+                    let current_tick = next_tick;
+                    next_tick = current_tick.next::<P>(config)?;
 
                     // Emit only ticks that the application currently uses.
                     if current_tick.is_start_of_interval() || current_tick.is_end_of_interval() {
@@ -688,7 +688,15 @@ mod tests {
         assert_eq!(next_tick(&mut ticks).await?, None);
 
         // Fork transition to Gloas at slot 32
-        tokio::time::advance(one_second_duration).await;
+        // tokio::time::advance(one_second_duration).await;
+        tokio::time::advance(post_gloas_tick_duration).await;
+        assert_eq!(
+            next_tick(&mut ticks).await?,
+            None,
+            "Propose tick at slot 32 should not appear yet"
+        );
+
+        tokio::time::advance(Duration::from_millis(250)).await;
         assert_eq!(
             next_tick(&mut ticks).await?,
             Some(Tick::new(32, TickKind::Propose))
