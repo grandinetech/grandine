@@ -1461,11 +1461,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 return Ok(ExecutionPayloadBidAction::Ignore(true));
             }
 
-            // > this bid is the highest value bid seen for the corresponding slot and the given parent block hash.
+            // > this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
             // Only accept and forward bid that is greater than the highest bid at least the minimum threshold (e.g. 3%)
             if let Some(highest_bid) = payload_bids
                 .values()
-                .filter(|b| b.message.parent_block_hash == bid.parent_block_hash)
+                .filter(|b| {
+                    b.message.parent_block_hash == bid.parent_block_hash
+                        && b.message.parent_block_root == bid.parent_block_root
+                })
                 .max_by_key(|b| b.message.value)
                 && bid.value
                     < highest_bid.message.value
@@ -4244,7 +4247,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {
         self.tick
             .epoch::<P>()
-            .checked_sub(self.chain_config.min_epochs_for_block_requests)
+            .checked_sub(self.chain_config.min_epochs_for_block_requests())
             .unwrap_or(GENESIS_EPOCH)
     }
 

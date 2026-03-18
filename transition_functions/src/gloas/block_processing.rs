@@ -1371,21 +1371,23 @@ mod spec_tests {
         "consensus-spec-tests/tests/minimal/gloas/operations/deposit/*/*",
     }
 
-    processing_tests! {
-        process_voluntary_exit,
-        |config, pubkey_cache, state, voluntary_exit, _| {
-            process_voluntary_exit(
-                config,
-                pubkey_cache,
-                state,
-                voluntary_exit,
-                SingleVerifier,
-            )
-        },
-        "voluntary_exit",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
-    }
+    // These tests are broken in v1.7.0-alpha3.
+    // TODO(gloas): uncomment once https://github.com/ethereum/consensus-specs/commit/1baa05e71148b0975e28918ac6022d2256b56f4a is released.
+    // processing_tests! {
+    //     process_voluntary_exit,
+    //     |config, pubkey_cache, state, voluntary_exit, _| {
+    //         process_voluntary_exit(
+    //             config,
+    //             pubkey_cache,
+    //             state,
+    //             voluntary_exit,
+    //             SingleVerifier,
+    //         )
+    //     },
+    //     "voluntary_exit",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
+    // }
 
     processing_tests! {
         process_sync_aggregate,
@@ -1455,15 +1457,17 @@ mod spec_tests {
         "consensus-spec-tests/tests/minimal/gloas/operations/attester_slashing/*/*",
     }
 
-    validation_tests! {
-        validate_voluntary_exit,
-        |config, pubkey_cache, state, voluntary_exit| {
-            validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
-        },
-        "voluntary_exit",
-        "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
-        "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
-    }
+    // These tests are broken in v1.7.0-alpha3.
+    // TODO(gloas): uncomment once https://github.com/ethereum/consensus-specs/commit/1baa05e71148b0975e28918ac6022d2256b56f4a is released.
+    // validation_tests! {
+    //     validate_voluntary_exit,
+    //     |config, pubkey_cache, state, voluntary_exit| {
+    //         validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
+    //     },
+    //     "voluntary_exit",
+    //     "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
+    //     "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
+    // }
 
     // TODO(feature/electra): comment this & run missing test script
     validation_tests! {

@@ -191,7 +191,7 @@ impl Tick {
             duration_since_unix_epoch.saturating_sub(unix_epoch_to_genesis);
 
         let Self { slot, kind } = self;
-        let slot_duration = slot_duration(config);
+        let slot_duration = config.slot_duration_ms;
         let tick_duration = tick_duration_at_slot::<P>(config, slot);
         let duration_before_slot = slot_duration.saturating_mul((slot - GENESIS_SLOT).try_into()?);
         let duration_after_slot = tick_duration.saturating_mul(kind as u32);
@@ -214,7 +214,7 @@ impl Tick {
             .as_nanos();
 
         // First, determine the slot based on unix epoch
-        let nanos_per_slot = slot_duration(config).as_nanos();
+        let nanos_per_slot = config.slot_duration_ms.as_nanos();
         let slots_since_genesis = u64::try_from(nanos_since_genesis / nanos_per_slot)?;
         let slot = GENESIS_SLOT + slots_since_genesis;
 
@@ -472,7 +472,7 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
 }
 
 fn tick_duration_at_slot<P: Preset>(config: &Config, slot: Slot) -> Duration {
-    let slot_duration = slot_duration(config);
+    let slot_duration = config.slot_duration_ms;
 
     let ticks_per_slot_u128 = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))
         .expect("number of ticks per slot should fit in u128");
@@ -487,20 +487,13 @@ fn tick_duration_at_slot<P: Preset>(config: &Config, slot: Slot) -> Duration {
     Duration::from_millis(tick_duration_in_ms)
 }
 
-// TODO: Remove this function and update all usages throughout the app to work with slot duration
-//       in ms (instead of seconds) once `Config::seconds_per_slot` is removed from the Config.
-const fn slot_duration(config: &Config) -> Duration {
-    config.slot_duration_ms
-}
-
 #[cfg(test)]
 mod tests {
-    use core::{num::NonZeroU64, ops::Add as _};
+    use core::ops::Add as _;
 
     use futures::StreamExt as _;
     use futures::future::FutureExt as _;
     use itertools::Itertools as _;
-    use nonzero_ext::nonzero;
     use test_case::test_case;
     use types::{
         gloas::consts::INTERVALS_PER_SLOT_GLOAS,
@@ -871,12 +864,12 @@ mod tests {
     #[tokio::test]
     async fn ticks_does_not_panic() {
         let configs = [
-            config_with_seconds_per_slot(NonZeroU64::MIN),
-            config_with_seconds_per_slot(nonzero!(2_u64)),
-            config_with_seconds_per_slot(nonzero!(3_u64)),
+            config_with_slot_duration(Duration::from_secs(1)),
+            config_with_slot_duration(Duration::from_secs(2)),
+            config_with_slot_duration(Duration::from_secs(3)),
             Config::minimal(),
             Config::mainnet(),
-            config_with_seconds_per_slot(nonzero!(18_u64)),
+            config_with_slot_duration(Duration::from_secs(18)),
         ];
 
         let genesis_times = [
@@ -896,12 +889,12 @@ mod tests {
     #[tokio::test]
     async fn ticks_does_not_panic_post_gloas() {
         let configs = [
-            config_with_seconds_per_slot(NonZeroU64::MIN).start_and_stay_in(Phase::Gloas),
-            config_with_seconds_per_slot(nonzero!(2_u64)).start_and_stay_in(Phase::Gloas),
-            config_with_seconds_per_slot(nonzero!(3_u64)).start_and_stay_in(Phase::Gloas),
+            config_with_slot_duration(Duration::from_secs(1)).start_and_stay_in(Phase::Gloas),
+            config_with_slot_duration(Duration::from_secs(2)).start_and_stay_in(Phase::Gloas),
+            config_with_slot_duration(Duration::from_secs(3)).start_and_stay_in(Phase::Gloas),
             Config::minimal().start_and_stay_in(Phase::Gloas),
             Config::mainnet().start_and_stay_in(Phase::Gloas),
-            config_with_seconds_per_slot(nonzero!(18_u64)).start_and_stay_in(Phase::Gloas),
+            config_with_slot_duration(Duration::from_secs(18)).start_and_stay_in(Phase::Gloas),
         ];
 
         let genesis_times = [
@@ -1126,24 +1119,24 @@ mod tests {
         next_tick_with_instant::<Minimal>(&Config::minimal(), time, true)
     }
 
-    #[test_case(nonzero!(3_u64) => Duration::from_millis(250))]
-    #[test_case(NonZeroU64::new(Config::minimal().slot_duration_ms.as_secs()).expect("Config::minimal slot_duration_ms is nonzero") => Duration::from_millis(500))]
-    #[test_case(NonZeroU64::new(Config::mainnet().slot_duration_ms.as_secs()).expect("Config::mainnet slot_duration_ms is nonzero") => Duration::from_secs(1))]
-    #[test_case(nonzero!(18_u64) => Duration::from_millis(1500))]
-    fn tick_duration_with_seconds_per_slot_pre_gloas(seconds_per_slot: NonZeroU64) -> Duration {
-        let config = config_with_seconds_per_slot(seconds_per_slot);
+    #[test_case(Duration::from_secs(3) => Duration::from_millis(250))]
+    #[test_case(Config::minimal().slot_duration_ms => Duration::from_millis(500))]
+    #[test_case(Config::mainnet().slot_duration_ms => Duration::from_secs(1))]
+    #[test_case(Duration::from_secs(18) => Duration::from_millis(1500))]
+    fn tick_duration_with_custom_slot_duration_pre_gloas(slot_duration: Duration) -> Duration {
+        let config = config_with_slot_duration(slot_duration);
         tick_duration_at_slot::<Mainnet>(&config, GENESIS_SLOT)
     }
 
-    #[test_case(nonzero!(2_u64) => Duration::from_millis(125))]
-    #[test_case(nonzero!(4_u64) => Duration::from_millis(250))]
-    #[test_case(NonZeroU64::new(Config::minimal().slot_duration_ms.as_secs()).expect("Config::minimal slot_duration_ms is nonzero") => Duration::from_millis(375))]
-    #[test_case(nonzero!(8_u64) => Duration::from_millis(500))]
-    #[test_case(NonZeroU64::new(Config::mainnet().slot_duration_ms.as_secs()).expect("Config::mainnet slot_duration_ms is nonzero") => Duration::from_millis(750))]
-    #[test_case(nonzero!(16_u64) => Duration::from_secs(1))]
-    #[test_case(nonzero!(18_u64) => Duration::from_millis(1125))]
-    fn tick_duration_with_seconds_per_slot_post_gloas(seconds_per_slot: NonZeroU64) -> Duration {
-        let config = config_with_seconds_per_slot(seconds_per_slot).start_and_stay_in(Phase::Gloas);
+    #[test_case(Duration::from_secs(2) => Duration::from_millis(125))]
+    #[test_case(Duration::from_secs(4) => Duration::from_millis(250))]
+    #[test_case(Config::minimal().slot_duration_ms => Duration::from_millis(375))]
+    #[test_case(Duration::from_secs(8) => Duration::from_millis(500))]
+    #[test_case(Config::mainnet().slot_duration_ms => Duration::from_millis(750))]
+    #[test_case(Duration::from_secs(16) => Duration::from_secs(1))]
+    #[test_case(Duration::from_secs(18) => Duration::from_millis(1125))]
+    fn tick_duration_with_seconds_per_slot_post_gloas(slot_duration: Duration) -> Duration {
+        let config = config_with_slot_duration(slot_duration).start_and_stay_in(Phase::Gloas);
         tick_duration_at_slot::<Mainnet>(&config, GENESIS_SLOT)
     }
 
@@ -1197,14 +1190,9 @@ mod tests {
         (actual_instant.0.as_secs(), actual_tick)
     }
 
-    fn config_with_seconds_per_slot(seconds_per_slot: NonZeroU64) -> Config {
-        #[expect(
-            deprecated,
-            reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
-        )]
+    fn config_with_slot_duration(slot_duration: Duration) -> Config {
         Config {
-            seconds_per_slot,
-            slot_duration_ms: Duration::from_secs(seconds_per_slot.get()),
+            slot_duration_ms: slot_duration,
             ..Config::default()
         }
     }

@@ -3393,7 +3393,6 @@ dependencies = [
  "futures",
  "helper_functions",
  "itertools 0.14.0",
- "nonzero_ext",
  "serde",
  "serde_utils",
  "strum 0.28.0",

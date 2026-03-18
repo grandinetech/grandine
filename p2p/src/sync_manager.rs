@@ -106,7 +106,7 @@ pub struct SyncManager<P: Preset> {
     storage_mode: StorageMode,
     not_enough_peers_message_shown_at: Option<Instant>,
     sync_from_finalized: bool,
-    // store peers that don't serve blocks prior to `MIN_EPOCHS_FOR_BLOCK_REQUESTS`
+    // store peers that don't serve blocks prior to `Config::min_epochs_for_block_requests`
     // so that we can filter them when back-syncing
     back_sync_black_list: LruCache<PeerId, ()>,
     network_globals: Arc<NetworkGlobals>,

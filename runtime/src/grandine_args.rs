@@ -416,7 +416,7 @@ struct BeaconNodeOptions {
 
     /// Enable syncing historical data.
     /// When used with --archive-storage, it will back-sync to genesis and reconstruct historical states.
-    /// When used without --archive-storage, it will back-sync blocks to the MIN_EPOCHS_FOR_BLOCK_REQUESTS epoch.
+    /// When used without --archive-storage, it will back-sync blocks to the `Config::min_epochs_for_block_requests` epoch.
     /// [default: disabled]
     #[clap(long = "back-sync", conflicts_with("prune_storage"))]
     back_sync_enabled: bool,
