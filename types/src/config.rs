@@ -1,6 +1,7 @@
 use core::{cmp::Ordering, num::NonZeroU64, time::Duration};
 use std::{borrow::Cow, collections::BTreeMap};
 
+use arithmetic::UsizeExt as _;
 use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
@@ -18,7 +19,7 @@ use crate::{
     fulu::containers::DataColumnsByRootIdentifier,
     nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
-        consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        consts::{AttestationSubnetCount, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         primitives::{
             ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H32, H160,
             H256, NetworkId, Slot, UnixSeconds, Version,
@@ -91,9 +92,6 @@ pub struct Config {
     pub min_validator_withdrawability_delay: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub seconds_per_eth1_block: u64,
-    #[deprecated = "use `Config::slot_duration_ms` instead"]
-    #[serde(with = "serde_utils::string_or_native")]
-    pub seconds_per_slot: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub shard_committee_period: u64,
     #[serde(with = "As::<DurationMilliSeconds<String>>")]
@@ -146,8 +144,6 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub attestation_subnet_extra_bits: u8,
     #[serde(with = "serde_utils::string_or_native")]
-    pub attestation_subnet_prefix_bits: u8,
-    #[serde(with = "serde_utils::string_or_native")]
     pub epochs_per_subnet_subscription: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_payload_size: usize,
@@ -166,21 +162,13 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_blocks_deneb: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    pub max_request_blob_sidecars: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub max_request_data_column_sidecars: u64,
-    #[serde(with = "serde_utils::string_or_native")]
     pub min_epochs_for_blob_sidecars_requests: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub min_epochs_for_block_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     pub min_epochs_for_data_column_sidecars_requests: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub data_column_sidecar_subnet_count: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub max_request_blob_sidecars_electra: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_sidecar_subnet_count_electra: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
@@ -227,10 +215,6 @@ pub struct Config {
 }
 
 impl Default for Config {
-    #[expect(
-        deprecated,
-        reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
-    )]
     fn default() -> Self {
         Self {
             // Meta
@@ -268,7 +252,6 @@ impl Default for Config {
             min_builder_withdrawability_delay: 64,
             min_validator_withdrawability_delay: 256,
             seconds_per_eth1_block: 14,
-            seconds_per_slot: nonzero!(12_u64),
             shard_committee_period: 256,
             slot_duration_ms: Duration::from_millis(12000),
             attestation_due_bps: 3333,
@@ -299,7 +282,6 @@ impl Default for Config {
 
             // Networking
             attestation_subnet_extra_bits: 0,
-            attestation_subnet_prefix_bits: 6,
             epochs_per_subnet_subscription: nonzero!(256_u64),
             max_payload_size: 10_485_760,
             maximum_gossip_clock_disparity: Duration::from_millis(500),
@@ -310,14 +292,10 @@ impl Default for Config {
             max_blobs_per_block_electra: 9,
             max_request_blocks: 1024,
             max_request_blocks_deneb: 128,
-            max_request_blob_sidecars: 768,
-            max_request_data_column_sidecars: 0x4000,
             min_epochs_for_blob_sidecars_requests: 4096,
-            min_epochs_for_block_requests: 33024,
             blob_sidecar_subnet_count: nonzero!(6_u64),
             min_epochs_for_data_column_sidecars_requests: 4096,
             data_column_sidecar_subnet_count: 128,
-            max_request_blob_sidecars_electra: 1152,
             blob_sidecar_subnet_count_electra: nonzero!(9_u64),
             max_request_blob_sidecars_fulu: 1536,
             max_request_payloads: 128,
@@ -405,10 +383,6 @@ impl Config {
     /// [Minimal configuration](https://github.com/ethereum/consensus-specs/blob/aac851f860fa384916f62027b2dbe3318a354c5b/configs/minimal.yaml).
     #[must_use]
     pub fn minimal() -> Self {
-        #[expect(
-            deprecated,
-            reason = "seconds_per_slot is still present in the consensus specs as of v1.6.0-alpha.5"
-        )]
         Self {
             // Meta
             config_name: Cow::Borrowed("minimal"),
@@ -432,7 +406,6 @@ impl Config {
             // Time parameters
             eth1_follow_distance: 16,
             min_builder_withdrawability_delay: 2,
-            seconds_per_slot: nonzero!(6_u64),
             shard_committee_period: 64,
             slot_duration_ms: Duration::from_millis(6000),
 
@@ -447,9 +420,6 @@ impl Config {
             deposit_chain_id: 5,
             deposit_contract_address: H160(hex!("1234567890123456789012345678901234567890")),
             deposit_network_id: 5,
-
-            // Networking
-            min_epochs_for_block_requests: 272,
 
             ..Self::default()
         }
@@ -918,6 +888,13 @@ impl Config {
         self.phase_at_epoch(GENESIS_EPOCH)
     }
 
+    #[must_use]
+    pub fn attestation_subnet_prefix_bits(&self) -> u8 {
+        AttestationSubnetCount::USIZE
+            .ilog2_ceil()
+            .saturating_add(self.attestation_subnet_extra_bits)
+    }
+
     #[inline]
     #[must_use]
     pub const fn version(&self, phase: Phase) -> Version {
@@ -1009,6 +986,12 @@ impl Config {
     }
 
     #[must_use]
+    pub const fn max_request_data_column_sidecars<P: Preset>(&self) -> u64 {
+        self.max_request_blocks_deneb
+            .saturating_mul(P::NumberOfColumns::U64)
+    }
+
+    #[must_use]
     pub const fn blob_sidecar_subnet_count(&self, phase: Phase) -> NonZeroU64 {
         match phase {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
@@ -1019,13 +1002,18 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn max_request_blob_sidecars(&self, phase: Phase) -> u64 {
-        match phase {
+    pub fn max_request_blob_sidecars(&self, phase: Phase) -> u64 {
+        let max_blobs_per_block_for_phase = match phase {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
-                self.max_request_blob_sidecars
+                self.max_blobs_per_block
             }
-            Phase::Electra | Phase::Fulu | Phase::Gloas => self.max_request_blob_sidecars_electra,
-        }
+            Phase::Electra | Phase::Fulu | Phase::Gloas => self.max_blobs_per_block_electra,
+        };
+
+        self.max_request_blocks(phase).saturating_mul(
+            u64::try_from(max_blobs_per_block_for_phase)
+                .expect("max_blobs_per_block parameter should always fit in u64"),
+        )
     }
 
     #[must_use]
@@ -1054,6 +1042,12 @@ impl Config {
         self.blob_sidecar_subnet_count
             .get()
             .max(self.blob_sidecar_subnet_count_electra.get())
+    }
+
+    #[must_use]
+    pub const fn min_epochs_for_block_requests(&self) -> u64 {
+        self.min_validator_withdrawability_delay
+            .saturating_add(self.churn_limit_quotient.get() / 2)
     }
 
     #[must_use]

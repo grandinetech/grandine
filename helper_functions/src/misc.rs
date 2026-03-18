@@ -397,7 +397,7 @@ pub fn compute_subscribed_subnets<P: Preset>(
     epoch: Epoch,
 ) -> Result<impl Iterator<Item = SubnetId>> {
     let node_id_prefix = node_id
-        .shr(NodeId::BITS - u16::from(config.attestation_subnet_prefix_bits))
+        .shr(NodeId::BITS - u16::from(config.attestation_subnet_prefix_bits()))
         .try_into()?;
 
     let node_offset = node_id % config.epochs_per_subnet_subscription;
@@ -408,7 +408,7 @@ pub fn compute_subscribed_subnets<P: Preset>(
         .map(hashing::hash_64)?;
 
     let permutated_prefix_maximum = 1_u64
-        .checked_shl(config.attestation_subnet_prefix_bits.into())
+        .checked_shl(config.attestation_subnet_prefix_bits().into())
         .ok_or(Error::PermutatedPrefixMaximumOverflow)?
         .try_into()?;
 
@@ -709,7 +709,7 @@ pub fn blob_serve_range_slot<P: Preset>(
 #[must_use]
 pub fn block_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
     let epoch = compute_epoch_at_slot::<P>(current_slot)
-        .checked_sub(config.min_epochs_for_block_requests)
+        .checked_sub(config.min_epochs_for_block_requests())
         .unwrap_or(GENESIS_EPOCH);
 
     compute_start_slot_at_epoch::<P>(epoch)

@@ -99,7 +99,7 @@ pub struct Critical<P: Preset, E, W> {
     high_priority_tasks: VecDeque<HighPriorityTask<P, E, W>>,
     mid_priority_tasks: VecDeque<MidPriorityTask<P, W>>,
     low_priority_tasks: VecDeque<LowPriorityTask<P, W>>,
-    persistance_task_running: bool,
+    persistence_task_running: bool,
 }
 
 #[derive(From)]
@@ -305,29 +305,29 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
             }
 
             if let Some(task) = critical.low_priority_tasks.pop_front() {
-                let is_persistance_task = matches!(
+                let is_persistence_task = matches!(
                     &task,
                     LowPriorityTask::PersistDataColumnSidecarsTask(_)
                         | LowPriorityTask::PersistBlobSidecarsTask(_)
                 );
 
-                if is_persistance_task && critical.persistance_task_running {
+                if is_persistence_task && critical.persistence_task_running {
                     // A PersistDataColumnSidecarsTask is already executing. Drop this one;
                     // its data remains in the store and will be picked up by the next task.
                     drop(critical);
                     continue 'outer;
                 }
 
-                if is_persistance_task {
-                    critical.persistance_task_running = true;
+                if is_persistence_task {
+                    critical.persistence_task_running = true;
                 }
 
                 drop(critical);
                 trace_with_peers!("thread {} received low priority task", thread_name());
                 task.run_and_handle_panics();
 
-                if is_persistance_task {
-                    shared.critical.lock().persistance_task_running = false;
+                if is_persistence_task {
+                    shared.critical.lock().persistence_task_running = false;
                 }
 
                 continue 'outer;

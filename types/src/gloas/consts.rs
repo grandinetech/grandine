@@ -14,9 +14,9 @@ pub const DOMAIN_BEACON_BUILDER: DomainType = H32(hex!("0B000000"));
 pub const DOMAIN_PTC_ATTESTER: DomainType = H32(hex!("0C000000"));
 
 // Payload status
-pub const PAYLOAD_STATUS_PENDING: PayloadStatus = 0u8;
-pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 1u8;
-pub const PAYLOAD_STATUS_FULL: PayloadStatus = 2u8;
+pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 0u8;
+pub const PAYLOAD_STATUS_FULL: PayloadStatus = 1u8;
+pub const PAYLOAD_STATUS_PENDING: PayloadStatus = 2u8;
 
 // Misc
 pub const BUILDER_INDEX_SELF_BUILD: BuilderIndex = BuilderIndex::MAX;

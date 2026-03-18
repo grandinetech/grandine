@@ -1540,7 +1540,7 @@ impl<P: Preset> Network<P> {
         let max_request_data_column_sidecars: usize = self
             .controller
             .chain_config()
-            .max_request_data_column_sidecars
+            .max_request_data_column_sidecars::<P>()
             .try_into()?;
 
         // > The following data column sidecars, where they exist, MUST be sent in (slot, column_index) order.
@@ -1750,7 +1750,7 @@ impl<P: Preset> Network<P> {
         let max_request_data_column_sidecars = self
             .controller
             .chain_config()
-            .max_request_data_column_sidecars;
+            .max_request_data_column_sidecars::<P>();
 
         self.dedicated_executor
             .spawn(async move {
