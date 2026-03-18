@@ -82,6 +82,7 @@ use types::{
         containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{
         BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WEI_IN_GWEI,
         WithBlobsAndMev, WithStatus,
@@ -113,7 +114,8 @@ use crate::{
     misc::{
         APIBlock, BroadcastValidation, SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
         SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
-        SingleApiAttestation, SingleApiAttestationListPhaseDeserializer, SyncedStatus,
+        SignedExecutionPayloadBidPhaseDeserializer, SingleApiAttestation,
+        SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
     response::{EthResponse, JsonOrSsz},
     state_id,
@@ -1758,6 +1760,35 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
             api_to_p2p_tx,
         )
         .await
+    }
+}
+
+/// `POST /eth/v1/beacon/execution_payload/bid`
+pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthJsonOrSsz(signed_payload_bid, _): EthJsonOrSsz<
+        Arc<SignedExecutionPayloadBid<P>>,
+        SignedExecutionPayloadBidPhaseDeserializer<P>,
+    >,
+) -> Result<StatusCode, Error> {
+    let (sender, receiver) = futures::channel::oneshot::channel();
+
+    controller.on_api_execution_payload_bid(signed_payload_bid.clone_arc(), sender);
+
+    let result = receiver.await?;
+
+    match result {
+        Ok(ValidationOutcome::Accept | ValidationOutcome::Ignore(true)) => {
+            ApiToP2p::PublishPayloadBid(signed_payload_bid).send(&api_to_p2p_tx);
+
+            Ok(StatusCode::OK)
+        }
+        Ok(ValidationOutcome::Ignore(false)) => {
+            // Ignore the bid, do not forward
+            Ok(StatusCode::NO_CONTENT)
+        }
+        Err(error) => Err(Error::InvalidPayloadBid(error)),
     }
 }
 
