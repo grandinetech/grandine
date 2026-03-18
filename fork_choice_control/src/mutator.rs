@@ -948,6 +948,13 @@ where
 
                     debug_with_peers!("block delayed until parent envelope: {block_root:?}");
 
+                    let peer_id = pending_block.origin.peer_id();
+
+                    self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(
+                        parent_root,
+                        peer_id,
+                    ));
+
                     self.delay_block_until_envelope(pending_block, parent_root);
                 }
             }

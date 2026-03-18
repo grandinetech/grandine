@@ -52,6 +52,7 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
+    ExecutionPayloadEnvelopeNeeded(H256, Option<PeerId>),
     DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, AppRequestId, RPCRequestType),
     RequestedBlock(

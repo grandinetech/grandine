@@ -490,6 +490,10 @@ impl<P: Preset> Network<P> {
                             P2pToSync::BlockNeeded(root, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
+                        P2pMessage::ExecutionPayloadEnvelopeNeeded(root, peer_id) => {
+                            P2pToSync::ExecutionPayloadEnvelopeNeeded(root, peer_id)
+                                .send(&self.channels.p2p_to_sync_tx);
+                        }
                         P2pMessage::FinalizedCheckpoint(finalized_checkpoint) => {
                             P2pToSync::FinalizedCheckpoint(finalized_checkpoint)
                                 .send(&self.channels.p2p_to_sync_tx);
