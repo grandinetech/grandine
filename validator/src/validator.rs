@@ -1455,10 +1455,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     selection_proof,
                 })?;
 
-                // Pool stores data.index = committee_index for all Electra+.
-                let pool_data = AttestationData {
-                    index: committee_index,
-                    ..own_attestation.attestation.data()
+                // Pool stores data.index = encode_pool_index(committee_index, payload_index)
+                // only for Gloas attestations. Pre-Gloas: data.index = committee_index as-is.
+                let att_data = own_attestation.attestation.data();
+                let is_post_gloas = att_data.target.epoch >= self.chain_config.gloas_fork_epoch;
+                let pool_data = if is_post_gloas {
+                    AttestationData {
+                        index: operation_pools::encode_pool_index(committee_index, att_data.index),
+                        ..att_data
+                    }
+                } else {
+                    AttestationData {
+                        index: committee_index,
+                        ..att_data
+                    }
                 };
                 Some((pool_data, aggregator))
             })

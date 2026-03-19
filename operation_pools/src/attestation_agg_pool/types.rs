@@ -29,6 +29,22 @@ pub struct AttestationPrePool {
     pub original_payload_index: u64,
 }
 
+// Packs committee_index (lower 32 bits) and payload_index (upper 32 bits) into a single u64.
+// This encodes data.index for pool storage so that same-committee attestations with different
+// payload votes (Gloas) get separate aggregate buckets. decode_committee_index extracts the
+// lower half via bitmask, decode_payload_index extracts the upper half via right-shift.
+pub fn encode_pool_index(committee_index: u64, payload_index: u64) -> u64 {
+    committee_index | (payload_index << 32)
+}
+
+pub fn decode_committee_index(encoded: u64) -> u64 {
+    encoded & 0xFFFF_FFFF
+}
+
+pub fn decode_payload_index(encoded: u64) -> u64 {
+    encoded >> 32
+}
+
 #[derive(Default, Clone)]
 pub struct Aggregate<P: Preset> {
     pub aggregation_bits: BitList<P::MaxValidatorsPerCommittee>,

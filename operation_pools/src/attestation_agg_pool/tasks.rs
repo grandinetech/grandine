@@ -18,7 +18,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     electra::error::AttestationConversionError,
-    phase0::containers::Attestation,
+    phase0::containers::{Attestation, AttestationData},
     phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
@@ -30,7 +30,7 @@ use crate::{
         attestation_packer::{AttestationPacker, PackOutcome},
         conversion::convert_attestation_for_pool,
         pool::Pool,
-        types::{Aggregate, AttestationPrePool},
+        types::{Aggregate, AttestationPrePool, encode_pool_index},
     },
     misc::PoolTask,
 };
@@ -244,6 +244,17 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             signature,
         } = attestation;
 
+        let committee_index = data.index;
+        let is_post_gloas = data.target.epoch >= controller.chain_config().gloas_fork_epoch;
+        let data = if is_post_gloas {
+            AttestationData {
+                index: encode_pool_index(data.index, attestation_pre_pool.original_payload_index),
+                ..data
+            }
+        } else {
+            data
+        };
+
         let is_singular = aggregation_bits.count_ones() == 1;
 
         if is_singular {
@@ -259,7 +270,7 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
                 }
             }
 
-            if !pool.aggregate_in_committee(data.index, data.slot).await {
+            if !pool.aggregate_in_committee(committee_index, data.slot).await {
                 return Ok(());
             }
         }

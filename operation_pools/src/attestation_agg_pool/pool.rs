@@ -253,7 +253,11 @@ impl<P: Preset> Pool<P> {
             .into_iter()
             .filter(|attestation| {
                 let mut data = attestation.data;
-                let data_committee_index = data.index;
+                let data_committee_index = if epoch >= self.chain_config.gloas_fork_epoch {
+                    super::types::decode_committee_index(data.index)
+                } else {
+                    data.index
+                };
 
                 if epoch >= self.chain_config.electra_fork_epoch {
                     data.index = 0;

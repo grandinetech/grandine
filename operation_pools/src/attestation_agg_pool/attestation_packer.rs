@@ -13,7 +13,7 @@ use good_lp::{
 };
 use helper_functions::{
     accessors::{self, get_base_reward, get_base_reward_per_increment},
-    misc, phase0, predicates,
+    misc, phase0,
 };
 use itertools::Itertools as _;
 use rayon::iter::{
@@ -31,10 +31,10 @@ use types::{
     nonstandard::AttestationEpoch,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
-        containers::{Attestation, PendingAttestation},
+        containers::{Attestation, AttestationData, PendingAttestation},
         primitives::{ValidatorIndex, H256},
     },
-    preset::{Preset, SlotsPerHistoricalRoot},
+    preset::Preset,
     traits::BeaconState as _,
 };
 
@@ -710,24 +710,9 @@ impl<P: Preset> AttestationPacker<P> {
     }
 
     fn participation_flags(&self, attestation: &Attestation<P>) -> Result<ParticipationFlags> {
-        // Pool-format attestation data uses data.index = committee_index.
-        // Restore consensus-format data.index before computing participation flags.
         let mut data = attestation.data;
         if self.state.is_post_gloas() {
-            if predicates::is_attestation_same_slot::<P>(&*self.state, &data)? {
-                data.index = 0;
-            } else {
-                let bit = self
-                    .state
-                    .post_gloas()
-                    .and_then(|s| {
-                        let slot = usize::try_from(data.slot).ok()?;
-                        s.execution_payload_availability()
-                            .get(slot % SlotsPerHistoricalRoot::<P>::USIZE)
-                    })
-                    .unwrap_or(false);
-                data.index = u64::from(bit);
-            }
+            data.index = super::types::decode_payload_index(data.index);
         }
         accessors::get_attestation_participation_flags(
             &self.state,
@@ -740,8 +725,12 @@ impl<P: Preset> AttestationPacker<P> {
         &'a self,
         attestation: &'a Attestation<P>,
     ) -> Result<impl Iterator<Item = ValidatorIndex> + 'a> {
+        let mut data = attestation.data;
+        if self.state.is_post_gloas() {
+            data.index = super::types::decode_committee_index(data.index);
+        }
         // TODO(feature/electra): use electra::get_attesting_indices for electra attestations
-        phase0::get_attesting_indices(&self.state, attestation.data, &attestation.aggregation_bits)
+        phase0::get_attesting_indices(&self.state, data, &attestation.aggregation_bits)
     }
 }
 
