@@ -658,12 +658,12 @@ mod tests {
         .expect("genesis_time_in_ms should fit in u64");
         let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
 
-        assert_eq!(next_tick(&mut ticks).await?, None);
+        assert_eq!(next_tick(&mut ticks)?, None);
 
         // Advance to genesis slot
         tokio::time::advance(one_second_duration).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             Some(Tick::new(0, TickKind::Propose))
         );
 
@@ -676,55 +676,55 @@ mod tests {
         // Last tick in slot 31 (pre-Gloas)
         tokio::time::advance(one_second_duration).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             Some(Tick::new(31, TickKind::AggregateFourth))
         );
-        assert_eq!(next_tick(&mut ticks).await?, None);
+        assert_eq!(next_tick(&mut ticks)?, None);
 
         // Fork transition to Gloas at slot 32
         // tokio::time::advance(one_second_duration).await;
         tokio::time::advance(post_gloas_tick_duration).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             None,
             "Propose tick at slot 32 should not appear yet"
         );
 
         tokio::time::advance(Duration::from_millis(250)).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             Some(Tick::new(32, TickKind::Propose))
         );
-        assert_eq!(next_tick(&mut ticks).await?, None);
+        assert_eq!(next_tick(&mut ticks)?, None);
 
         // Advance to next tick by 750ms (post-Gloas)
         tokio::time::advance(post_gloas_tick_duration).await;
-        assert_eq!(next_tick(&mut ticks).await?, None); // ProposeSecond
+        assert_eq!(next_tick(&mut ticks)?, None); // ProposeSecond
 
         tokio::time::advance(post_gloas_tick_duration).await;
-        assert_eq!(next_tick(&mut ticks).await?, None); // ProposeThird
+        assert_eq!(next_tick(&mut ticks)?, None); // ProposeThird
 
         // End of propose interval (post-Gloas)
         tokio::time::advance(post_gloas_tick_duration).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             Some(Tick::new(32, TickKind::ProposeFourth))
         );
-        assert_eq!(next_tick(&mut ticks).await?, None);
+        assert_eq!(next_tick(&mut ticks)?, None);
 
         // Then, Start of attest interval
         tokio::time::advance(post_gloas_tick_duration).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             Some(Tick::new(32, TickKind::Attest))
         );
-        assert_eq!(next_tick(&mut ticks).await?, None);
+        assert_eq!(next_tick(&mut ticks)?, None);
 
         // ── Regression guard: advancing only 250 ms more must NOT emit anything ───
         // Under the old bug the interval would have fired at the 1000 ms mark (250 ms after Attest), producing a spurious tick.
         tokio::time::advance(Duration::from_millis(250)).await;
         assert_eq!(
-            next_tick(&mut ticks).await?,
+            next_tick(&mut ticks)?,
             None,
             "spurious tick at old 1000 ms boundary must not appear post-fork"
         );
@@ -1209,15 +1209,11 @@ mod tests {
         }
     }
 
-    async fn next_tick<S>(stream: &mut S) -> Result<Option<Tick>>
+    fn next_tick<S>(stream: &mut S) -> Result<Option<Tick>>
     where
         S: Stream<Item = Result<Tick>> + Unpin,
     {
-        tokio::time::timeout(Duration::ZERO, stream.next())
-            .await
-            .ok()
-            .flatten()
-            .transpose()
+        stream.next().now_or_never().flatten().transpose()
     }
 
     async fn drain<S>(stream: &mut S) -> Result<()>
