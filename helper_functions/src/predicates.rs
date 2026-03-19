@@ -429,6 +429,11 @@ pub fn can_builder_cover_bid<P: Preset>(
         accessors::get_pending_balance_to_withdraw_for_builder(state, builder_index);
     let min_balance = P::MIN_DEPOSIT_AMOUNT + pending_withdrawals_amount;
 
+    // Prevent edge case when `bid_amount` = 0
+    if balance < min_balance {
+        return Ok(false);
+    }
+
     Ok(balance.saturating_sub(min_balance).ge(&bid_amount))
 }
 
