@@ -1227,6 +1227,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 ValidatorToP2p::PublishBeaconBlock(block.clone_arc()).send(&self.p2p_tx);
 
+                // Delay envelope gossip to give peers time to process the block first
+                tokio::time::sleep(Duration::from_millis(100)).await;
+
                 // Handle Gloas execution payload envelope (only for self-build)
                 // Pass the proposed block's header with real state_root so that
                 // process_execution_payload's beacon_block_root check passes:
