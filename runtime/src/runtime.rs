@@ -298,7 +298,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     let slashing_protector = Arc::new(Mutex::new(slashing_protector));
 
-    let current_tick = Tick::current(&chain_config, anchor_state.genesis_time())?;
+    let current_tick = Tick::current::<P>(&chain_config, anchor_state.genesis_time())?;
 
     let event_channels = Arc::new(EventChannels::new(max_events));
 
@@ -851,7 +851,8 @@ async fn run_clock<P: Preset>(
     controller: RealController<P>,
     mut stop_clock_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
-    let mut ticks = clock::ticks(controller.chain_config(), controller.genesis_time())?.fuse();
+    let mut ticks =
+        clock::ticks::<P>(controller.chain_config(), controller.genesis_time_in_ms())?.fuse();
 
     loop {
         select! {
