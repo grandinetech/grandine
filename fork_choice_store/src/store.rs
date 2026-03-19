@@ -422,6 +422,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn get_payload_bid_from(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+    ) -> Option<&Arc<SignedExecutionPayloadBid<P>>> {
+        self.accepted_payload_bids.get(&slot)?.get(&builder_index)
+    }
+
+    #[must_use]
     pub const fn justified_checkpoint(&self) -> Checkpoint {
         self.justified_checkpoint
     }

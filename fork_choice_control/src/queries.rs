@@ -22,7 +22,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadBid,
+    gloas::{containers::SignedExecutionPayloadBid, primitives::BuilderIndex},
     nonstandard::{PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
@@ -645,6 +645,22 @@ where
         .await?
     }
 
+    pub async fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
+        let store = self.store_snapshot();
+        let pubkey_cache = self.pubkey_cache().clone_arc();
+        let state_cache = self.state_cache().clone_arc();
+
+        tokio::task::spawn_blocking(move || {
+            state_cache.state_at_slot(
+                &pubkey_cache,
+                &store,
+                store.head().block_root,
+                store.slot() + 1,
+            )
+        })
+        .await?
+    }
+
     pub fn preprocessed_state_at_current_slot_blocking(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();
@@ -830,6 +846,17 @@ where
     ) -> Option<Arc<SignedExecutionPayloadBid<P>>> {
         self.store_snapshot()
             .accepted_payload_bid_at_slot(slot)
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn get_payload_bid_from(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+    ) -> Option<Arc<SignedExecutionPayloadBid<P>>> {
+        self.store_snapshot()
+            .get_payload_bid_from(slot, builder_index)
             .cloned()
     }
 

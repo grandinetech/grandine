@@ -50,8 +50,8 @@ use crate::{
         validator_aggregate_attestation, validator_aggregate_attestation_v2,
         validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
-        validator_block_v3, validator_liveness, validator_prepare_beacon_proposer,
-        validator_proposer_duties, validator_proposer_duties_v2,
+        validator_block_v3, validator_execution_payload_bid, validator_liveness,
+        validator_prepare_beacon_proposer, validator_proposer_duties, validator_proposer_duties_v2,
         validator_publish_aggregate_and_proofs_v1, validator_publish_aggregate_and_proofs_v2,
         validator_publish_contributions_and_proofs, validator_register_validator,
         validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
@@ -598,6 +598,10 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
         .route(
             "/eth/v1/validator/sync_committee_selections",
             post(validator_sync_committee_selections),
+        )
+        .route(
+            "/eth/v1/validator/execution_payload_bid/{slot}/{builder_index}",
+            get(validator_execution_payload_bid),
         )
         .layer(axum::middleware::map_request_with_state(
             state,
