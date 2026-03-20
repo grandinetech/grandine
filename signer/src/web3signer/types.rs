@@ -51,6 +51,10 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
     }
 }
 
+// TODO(gloas): Currently, Web3signer only plans to support payload attestation message signing,
+// See this PR for details: https://github.com/Consensys/web3signer/pull/1159, but we expect them
+// to add support for builder message signing in the future. When that happens, we can remove this.
+// TODO
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[cfg_attr(test, derive(Clone, Copy, Deserialize))]
