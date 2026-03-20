@@ -25,5 +25,5 @@ pub struct ValidatorConfig {
     pub backfill_custody_groups: bool,
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
-    pub enable_payload_build: bool,
+    pub enable_local_payload_building: bool,
 }

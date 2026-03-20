@@ -647,7 +647,7 @@ pub struct BlockBuildOptions {
     pub disable_blockprint_graffiti: bool,
     pub skip_randao_verification: bool,
     pub builder_boost_factor: Uint256,
-    pub enable_payload_build: bool,
+    pub enable_local_payload_building: bool,
 }
 
 #[derive(Clone)]
@@ -1169,7 +1169,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // unless they choose to self-build, as favor or no active builders
         let mut payload_with_data = None;
         if self.beacon_state.post_gloas().is_none_or(|state| {
-            self.options.enable_payload_build
+            self.options.enable_local_payload_building
                 || accessors::get_active_builder_indices(state).count() == 0
         }) && let Some(handle) = local_execution_payload_handle
         {
@@ -1193,7 +1193,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             Some(payload_with_mev_and_versions) => payload_with_mev_and_versions,
             None => {
                 let has_no_payload = if self.beacon_state.is_post_gloas() {
-                    self.options.enable_payload_build
+                    self.options.enable_local_payload_building
                 } else {
                     self.beacon_state.post_capella().is_some()
                         || post_merge_state(&self.beacon_state).is_some()
@@ -1209,7 +1209,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut without_state_root_with_payload =
             if let Some(state) = self.beacon_state.post_gloas() {
-                let signed_payload_bid = if self.options.enable_payload_build {
+                let signed_payload_bid = if self.options.enable_local_payload_building {
                     // Cache payload root for payload envelope construction (only when self-building)
                     // External builders publish their own envelope
                     if let Some(ref payload) = execution_payload {

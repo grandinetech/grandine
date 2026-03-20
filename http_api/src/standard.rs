@@ -3193,7 +3193,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
-            enable_payload_build: false,
+            enable_local_payload_building: false,
         },
     );
 
