@@ -22,6 +22,7 @@ use types::{
     bellatrix::primitives::Gas,
     capella::consts::DOMAIN_BLS_TO_EXECUTION_CHANGE,
     config::Config,
+    nonstandard::Phase,
     phase0::{
         consts::{
             ATTESTATION_PROPAGATION_SLOT_RANGE, AttestationSubnetCount, BASE_REWARDS_PER_EPOCH,
@@ -160,6 +161,32 @@ pub struct FullConfig {
     epochs_per_validator_registration_submission: u64,
     #[serde(with = "serde_utils::string_or_native")]
     preferred_execution_gas_limit: Gas,
+
+    // Kept for backwards-compatibility with clients that may read these fields
+    // Removed from consensus specs at v1.7.0-alpha.3
+    #[deprecated = "removed from specs at v1.7.0-alpha.3, kept for backwards-compatibility"]
+    #[serde(with = "serde_utils::string_or_native")]
+    attestation_subnet_prefix_bits: u8,
+
+    #[deprecated = "removed from specs at v1.7.0-alpha.3, kept for backwards-compatibility"]
+    #[serde(with = "serde_utils::string_or_native")]
+    max_request_blob_sidecars: u64,
+
+    #[deprecated = "removed from specs at v1.7.0-alpha.3, kept for backwards-compatibility"]
+    #[serde(with = "serde_utils::string_or_native")]
+    max_request_blob_sidecars_electra: u64,
+
+    #[deprecated = "removed from specs at v1.7.0-alpha.3, kept for backwards-compatibility"]
+    #[serde(with = "serde_utils::string_or_native")]
+    max_request_data_column_sidecars: u64,
+
+    #[deprecated = "removed from specs at v1.7.0-alpha.3, kept for backwards-compatibility"]
+    #[serde(with = "serde_utils::string_or_native")]
+    min_epochs_for_block_requests: u64,
+
+    #[deprecated = "removed from specs at v1.7.0-alpha.3, kept for backwards-compatibility"]
+    #[serde(with = "serde_utils::string_or_native")]
+    seconds_per_slot: u64,
 }
 
 impl FullConfig {
@@ -177,7 +204,6 @@ impl FullConfig {
             deneb_preset: DenebPreset::new::<P>(),
             electra_preset: ElectraPreset::new::<P>(),
             fulu_preset: FuluPreset::new::<P>(),
-            config,
 
             // Phase 0 miscellaneous beacon chain constants
             base_rewards_per_epoch: BASE_REWARDS_PER_EPOCH,
@@ -243,6 +269,45 @@ impl FullConfig {
             epochs_per_validator_registration_submission:
                 EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
             preferred_execution_gas_limit: PREFERRED_EXECUTION_GAS_LIMIT,
+
+            // Removed from upstream, kept here for backwards-compatibility
+            #[expect(
+                deprecated,
+                reason = "attestation_subnet_prefix_bits was removed from consensus specs v1.7.0-alpha.3"
+            )]
+            attestation_subnet_prefix_bits: config.attestation_subnet_prefix_bits(),
+
+            #[expect(
+                deprecated,
+                reason = "max_request_blob_sidecars was removed from consensus specs v1.7.0-alpha.3"
+            )]
+            max_request_blob_sidecars: config.max_request_blob_sidecars(Phase::Deneb),
+
+            #[expect(
+                deprecated,
+                reason = "max_request_blob_sidecars_electra was removed from consensus specs v1.7.0-alpha.3"
+            )]
+            max_request_blob_sidecars_electra: config.max_request_blob_sidecars(Phase::Electra),
+
+            #[expect(
+                deprecated,
+                reason = "max_request_data_column_sidecars was removed from consensus specs v1.7.0-alpha.3"
+            )]
+            max_request_data_column_sidecars: config.max_request_data_column_sidecars::<P>(),
+
+            #[expect(
+                deprecated,
+                reason = "min_epochs_for_block_requests was removed from consensus specs v1.7.0-alpha.3"
+            )]
+            min_epochs_for_block_requests: config.min_epochs_for_block_requests(),
+
+            #[expect(
+                deprecated,
+                reason = "seconds_per_slot was removed from consensus specs v1.7.0-alpha.3"
+            )]
+            seconds_per_slot: config.slot_duration_ms.as_secs(),
+
+            config,
         }
     }
 }
