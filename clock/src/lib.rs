@@ -96,6 +96,12 @@ impl InstantLike for Instant {
     }
 }
 
+impl InstantLike for tokio::time::Instant {
+    fn checked_add(self, duration: Duration) -> Option<Self> {
+        Self::checked_add(&self, duration)
+    }
+}
+
 impl SystemTimeLike for SystemTime {
     type Error = SystemTimeError;
 
@@ -325,7 +331,7 @@ pub fn ticks<P: Preset>(
     // We assume the `Instant` and `SystemTime` obtained here correspond to the same point in time.
     // This is slightly inaccurate but the error will probably be negligible compared to clock
     // differences between different nodes in the network.
-    let now_instant = Instant::now();
+    let now_instant = tokio::time::Instant::now();
     let now_system_time = SystemTime::now();
 
     let (next_tick, next_instant) = next_tick_with_instant::<P, _, _>(
@@ -337,7 +343,7 @@ pub fn ticks<P: Preset>(
     )?;
 
     Ok(Box::pin(futures::stream::try_unfold(
-        (next_tick, next_instant.into()),
+        (next_tick, next_instant),
         move |(mut next_tick, mut deadline)| {
             async move {
                 loop {
@@ -649,6 +655,7 @@ mod tests {
                 .add(1000),
         )
         .expect("genesis_time_in_ms should fit in u64");
+
         let mut ticks = ticks::<Mainnet>(&config, genesis_time_in_ms)?;
 
         assert_eq!(next_tick(&mut ticks)?, None);
