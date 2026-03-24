@@ -4772,7 +4772,7 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     eip_7594::construct_data_column_sidecars_from_blobs(
         signed_beacon_block.into(),
-        blobs.unwrap_or_default().to_vec(),
+        blobs.unwrap_or_default().into_iter(),
         proofs
             .unwrap_or_else(KzgProofs::empty_fulu)
             .into_iter()

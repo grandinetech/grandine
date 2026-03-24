@@ -333,7 +333,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             let reconstruction_result =
                                 eip_7594::construct_data_column_sidecars_from_blobs(
                                     block_or_sidecar,
-                                    received_blobs,
+                                    received_blobs.into_iter(),
                                     cells_proofs,
                                     self.controller.store_config().kzg_backend,
                                     self.metrics.clone(),

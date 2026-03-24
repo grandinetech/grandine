@@ -49,12 +49,9 @@ use types::{
             SyncAggregate,
         },
     },
-    bellatrix::{
-        containers::{
-            BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
-            ExecutionPayload as BellatrixExecutionPayload,
-        },
-        primitives::Wei,
+    bellatrix::containers::{
+        BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
+        ExecutionPayload as BellatrixExecutionPayload,
     },
     capella::containers::{
         BeaconBlock as CapellaBeaconBlock, BeaconBlockBody as CapellaBeaconBlockBody,
@@ -1233,7 +1230,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     // `boosted_builder_mev` in case we still want to support the off-protocol builders
                     block_mev = selected_bid
                         .as_ref()
-                        .map(|bid| Wei::from_u64(bid.message.value) * WEI_IN_GWEI);
+                        .map(|bid| Uint256::from_u64(bid.message.value) * WEI_IN_GWEI);
 
                     selected_bid
                 };

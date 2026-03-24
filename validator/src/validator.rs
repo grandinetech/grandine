@@ -1183,7 +1183,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if slot_head.phase().is_peerdas_activated() {
             let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
                 block.clone_arc().into(),
-                blobs.to_vec(),
+                blobs.into_iter(),
                 block_proofs
                     .unwrap_or_else(KzgProofs::empty_fulu)
                     .into_iter()

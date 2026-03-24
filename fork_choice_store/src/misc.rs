@@ -864,7 +864,7 @@ impl ExecutionPayloadEnvelopeOrigin {
 
     #[must_use]
     pub const fn should_generate_event(&self) -> bool {
-        matches!(self, Self::Gossip(_))
+        matches!(self, Self::Gossip(_) | Self::Api(_))
     }
 
     // TODO: (gloas): confirm whether can we trust own execution payload envelope

@@ -326,6 +326,7 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
                     &task,
                     LowPriorityTask::PersistDataColumnSidecarsTask(_)
                         | LowPriorityTask::PersistBlobSidecarsTask(_)
+                        | LowPriorityTask::PersistExecutionPayloadEnvelopesTask(_)
                 );
 
                 if is_persistence_task && critical.persistence_task_running {

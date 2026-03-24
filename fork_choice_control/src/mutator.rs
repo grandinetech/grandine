@@ -4327,6 +4327,16 @@ where
             metrics.set_collection_length(
                 module_path!(),
                 &type_name,
+                "delayed_until_block_execution_payload_envelopes",
+                self.delayed_until_block
+                    .values()
+                    .map(|delayed| delayed.execution_payload_envelopes.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
                 "delayed_until_payload",
                 self.delayed_until_payload.len(),
             );

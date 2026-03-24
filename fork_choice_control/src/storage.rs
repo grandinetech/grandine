@@ -661,35 +661,24 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_execution_payload_envelopes(&self, up_to_slot: Slot) -> Result<()> {
-        let mut envelopes_to_remove: Vec<H256> = vec![];
-        let mut keys_to_remove = vec![];
-
         let results = self
             .database
             .iterator_descending(..=EnvelopeRootBySlot(up_to_slot, H256::zero()).to_string())?;
 
-        for result in results {
-            let (key_bytes, value_bytes) = result?;
+        let (mut keys_to_remove, envelopes_to_remove): (Vec<_>, Vec<_>) =
+            itertools::process_results(results, |iter| {
+                iter.take_while(|(key_bytes, _)| EnvelopeRootBySlot::has_prefix(key_bytes))
+                    .map(|(k, v)| (k.into_owned(), v))
+                    .unzip()
+            })?;
 
-            if !EnvelopeRootBySlot::has_prefix(&key_bytes) {
-                break;
-            }
-
+        for value_bytes in envelopes_to_remove {
             let block_root = H256::from_ssz_default(value_bytes)?;
-            envelopes_to_remove.push(block_root);
-            keys_to_remove.push(key_bytes.into_owned());
+
+            keys_to_remove.push(EnvelopeByBlockRoot(block_root).to_string().into());
         }
 
-        for block_root in envelopes_to_remove {
-            let key = EnvelopeByBlockRoot(block_root).to_string();
-            self.database.delete(key)?;
-        }
-
-        for key in keys_to_remove {
-            self.database.delete(key)?;
-        }
-
-        Ok(())
+        self.database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn genesis_block_root(&self, store: &Store<P, Self>) -> Result<H256> {
