@@ -3,6 +3,7 @@ image = 'ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main'
 pre-build = [
   'dpkg --add-architecture $CROSS_DEB_ARCH',
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get --assume-yes install clang cmake unzip protobuf-compiler libprotobuf-dev libz-dev',
+  'ln -sf /usr/bin/clang /usr/bin/cc',
 ]
 
 [target.aarch64-unknown-linux-gnu]
@@ -10,4 +11,5 @@ image = 'ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main'
 pre-build = [
   'dpkg --add-architecture $CROSS_DEB_ARCH',
   'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get --assume-yes install clang cmake unzip protobuf-compiler libprotobuf-dev:$CROSS_DEB_ARCH libz-dev:$CROSS_DEB_ARCH',
+  'ln -sf /usr/bin/clang /usr/bin/cc',
 ]
