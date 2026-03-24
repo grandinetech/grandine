@@ -2051,7 +2051,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         // Build envelope with placeholder state_root (will be set after processing)
-        let mut envelope = ExecutionPayloadEnvelope {
+        let message = ExecutionPayloadEnvelope {
             payload,
             execution_requests,
             builder_index: BUILDER_INDEX_SELF_BUILD,
@@ -2061,7 +2061,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         let signed_envelope = SignedExecutionPayloadEnvelope {
-            message: envelope.clone(),
+            message,
             signature: SignatureBytes::default(),
         };
 
@@ -2072,11 +2072,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             | BeaconState::Capella(_)
             | BeaconState::Deneb(_)
             | BeaconState::Electra(_)
-            | BeaconState::Fulu(_) => {
-                return Err(AnyhowError::msg(
-                    "compute_execution_payload_envelope requires post-Gloas state",
-                ));
-            }
+            | BeaconState::Fulu(_) => Err(AnyhowError::msg(
+                "compute_execution_payload_envelope requires post-Gloas state",
+            )),
             BeaconState::Gloas(gloas_state) => {
                 let mut post_execution_state = gloas_state.clone();
 
@@ -2089,11 +2087,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     NullVerifier,
                 )?;
 
-                envelope.state_root = post_execution_state.hash_tree_root();
+                let SignedExecutionPayloadEnvelope { mut message, .. } = signed_envelope;
+
+                message.state_root = post_execution_state.hash_tree_root();
+
+                Ok(Some(message))
             }
         }
-
-        Ok(Some(envelope))
     }
 
     /// Get cached Gloas envelope data from `payload_cache` (called by validator after signing block)
