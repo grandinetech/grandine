@@ -8,7 +8,7 @@ use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use itertools::{Either, Itertools as _};
+use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
 use pubkey_cache::PubkeyCache;
@@ -995,28 +995,33 @@ impl<P: Preset> Storage<P> {
         state: &mut BeaconState<P>,
         finalized_validators: Option<&Validators<P>>,
     ) -> Result<()> {
-        let finalized_validators = finalized_validators.map(|v| Ok(Either::Left(v))).unwrap_or_else(|| {
-            info_with_peers!("loading validators from disk");
-
-            let Some(validators) = self.get::<PersistentList<PublicKeyBytes, P::ValidatorRegistryLimit>>(FinalizedValidators)? else {
-                bail!(
-                    "Unable to restore validators into state - no saved validators on disk found."
-                );
-            };
-
-            Ok(Either::Right(validators))
-        })?;
+        let mut disk_validators = None;
 
         for (index, validator) in state.validators_mut().into_iter().enumerate() {
             if validator.pubkey.is_zero() {
                 // restore validator pubkey, by taking pubkey from the finalized validators list
-                let finalized_validator_pubkey = finalized_validators
-                    .as_ref()
-                    .either(
-                        |v| v.get(index as u64).map(|v| v.pubkey),
-                        |v| v.get(index as u64).copied(),
-                    )
-                    .context("Invalid finalized validators list")?;
+                let finalized_validator_pubkey = match finalized_validators {
+                    Some(v) => v.get(index as u64).map(|v| v.pubkey),
+                    None => {
+                        if disk_validators.is_none() {
+                            info_with_peers!("loading validators from disk");
+
+                            let Some(validators) = self.get::<PersistentList<PublicKeyBytes, P::ValidatorRegistryLimit>>(FinalizedValidators)?
+                            else {
+                                bail!("unable to restore validators into state - no saved validators on disk found.");
+                            };
+
+                            disk_validators = Some(validators);
+                        }
+
+                        disk_validators
+                            .as_ref()
+                            .expect("disk_validators are loaded before access above")
+                            .get(index as u64)
+                            .copied()
+                    }
+                }.context("invalid finalized validators list")?;
+
                 validator.pubkey = finalized_validator_pubkey;
             }
         }
