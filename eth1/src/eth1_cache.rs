@@ -95,7 +95,7 @@ impl Eth1Cache {
             Ok((key_string, value_bytes))
         });
 
-        itertools::process_results(results, |pairs| self.database.put_batch(pairs))
+        itertools::process_results(results, |pairs| self.database.put_batch(pairs.collect()))
             .and_then(core::convert::identity)
     }
 
