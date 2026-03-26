@@ -225,7 +225,7 @@ jobs:
           path: artifacts
 
       - name: Download csharp bindings
-        if: needs.version.outputs.label == 'unstable'
+        if: needs.version.outputs.label == 'unstable' && needs.build_csharp_bindings.result == 'success'
         uses: actions/download-artifact@v5
         with:
           name: plugin
@@ -244,7 +244,7 @@ jobs:
           mv ./artifacts/lib-linux-arm64/libgrandine.so ./target/aarch64-unknown-linux-gnu/compact/libgrandine.so
       
       - name: Move C# artifacts
-        if: needs.version.outputs.label == 'unstable'
+        if: needs.version.outputs.label == 'unstable' && needs.build_csharp_bindings.result == 'success'
         run: |
           mkdir -p ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/
           mv ./artifacts/Grandine.NethermindPlugin.dll ./bindings/csharp/Grandine.NethermindPlugin/bin/Release/net10.0/
@@ -262,7 +262,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build & push docker images (with nethermind integration)
-        if: needs.version.outputs.label == 'unstable'
+        if: needs.version.outputs.label == 'unstable' && needs.build_csharp_bindings.result == 'success'
         env:
           DOCKER_SUFFIX: ${{ github.event_name == 'workflow_dispatch' && env.GRANDINE_COMMIT || '' }}
         run: |
@@ -273,7 +273,7 @@ jobs:
             NETHERMIND_VERSION=${{ env.NETHERMIND_VERSION }}
 
       - name: Build & push docker images
-        if: needs.version.outputs.label == 'stable'
+        if: needs.version.outputs.label == 'stable' || needs.build_csharp_bindings.result != 'success'
         env: 
           DOCKER_SUFFIX: ${{ github.event_name == 'workflow_dispatch' && env.GRANDINE_COMMIT || '' }}
         run: |
