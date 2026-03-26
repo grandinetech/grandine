@@ -2,6 +2,7 @@ use anyhow::Result;
 use database::Database;
 use derive_more::Constructor;
 use ssz::SszHash as _;
+use types::nonstandard::DebugInfo;
 use types::phase0::{
     containers::AttestationData,
     primitives::{Epoch, H256, ValidatorIndex},
@@ -49,7 +50,11 @@ impl AttestationVotes {
         attestation_data: AttestationData,
     ) -> Result<()> {
         let key = Self::key(target_epoch, validator_index);
-        self.db.put(key, attestation_data.hash_tree_root())?;
+        self.db.put(
+            key,
+            attestation_data.hash_tree_root(),
+            &DebugInfo::new("insert attestation vote".into()),
+        )?;
         Ok(())
     }
 
@@ -60,7 +65,10 @@ impl AttestationVotes {
         let first_key = Self::key(from_epoch, 1);
         let last_key = Self::key(to_epoch, ValidatorIndex::MAX);
 
-        self.db.delete_range(&first_key..&last_key)?;
+        self.db.delete_range(
+            &first_key..&last_key,
+            &DebugInfo::new("cleanup attestation votes".into()),
+        )?;
 
         Ok(())
     }

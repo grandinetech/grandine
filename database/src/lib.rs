@@ -23,6 +23,7 @@ use std_ext::ArcExt as _;
 use tap::Pipe as _;
 #[cfg(not(target_os = "zkvm"))]
 use thiserror::Error;
+use types::nonstandard::DebugInfo;
 use unwrap_none::UnwrapNone as _;
 
 #[cfg(not(target_os = "zkvm"))]
@@ -156,7 +157,7 @@ impl Database {
         })
     }
 
-    pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
+    pub fn delete(&self, key: impl AsRef<[u8]>, debug_info: &DebugInfo) -> Result<()> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -164,6 +165,12 @@ impl Database {
                 environment,
                 restart_tx: _,
             } => {
+                let mut debug_info = debug_info.clone();
+
+                log::info!("START delete for {}", debug_info.message());
+
+                debug_info.start();
+
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
@@ -173,6 +180,12 @@ impl Database {
                     cursor.del(WriteFlags::default())?;
                     transaction.commit()?;
                 }
+
+                log::info!(
+                    "FINISHED delete for {} in {}",
+                    debug_info.message(),
+                    debug_info.elapsed_ms()
+                );
             }
             DatabaseKind::InMemory { map } => {
                 map.lock()
@@ -184,7 +197,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn delete_batch(&self, keys: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Result<()> {
+    pub fn delete_batch(
+        &self,
+        keys: impl IntoIterator<Item = impl AsRef<[u8]>>,
+        debug_info: &DebugInfo,
+    ) -> Result<()> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -192,6 +209,12 @@ impl Database {
                 environment,
                 restart_tx: _,
             } => {
+                let mut debug_info = debug_info.clone();
+
+                log::info!("START delete_batch for {}", debug_info.message());
+
+                debug_info.start();
+
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
@@ -204,6 +227,12 @@ impl Database {
                 }
 
                 transaction.commit()?;
+
+                log::info!(
+                    "FINISHED delete_batch for {} in {}",
+                    debug_info.message(),
+                    debug_info.elapsed_ms()
+                );
             }
             DatabaseKind::InMemory { map } => {
                 let mut map = map.lock().expect("in-memory database mutex is poisoned");
@@ -217,7 +246,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn delete_range(&self, range: Range<impl AsRef<[u8]>>) -> Result<()> {
+    pub fn delete_range(
+        &self,
+        range: Range<impl AsRef<[u8]>>,
+        debug_info: &DebugInfo,
+    ) -> Result<()> {
         let start = range.start.as_ref();
         let end = range.end.as_ref();
 
@@ -228,12 +261,23 @@ impl Database {
                 environment,
                 restart_tx: _,
             } => {
+                let mut debug_info = debug_info.clone();
+
+                log::info!("START delete_range for {}", debug_info.message());
+
+                debug_info.start();
+
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
                 let mut cursor = transaction.cursor(database.dbi())?;
 
                 let Some((mut key, ())) = cursor.set_range::<Cow<_>, _>(start)? else {
+                    log::info!(
+                        "ABORTED delete_range for {} in {}",
+                        debug_info.message(),
+                        debug_info.elapsed_ms()
+                    );
                     return Ok(());
                 };
 
@@ -246,6 +290,12 @@ impl Database {
                 }
 
                 transaction.commit()?;
+
+                log::info!(
+                    "FINISHED delete_range for {} in {}",
+                    debug_info.message(),
+                    debug_info.elapsed_ms()
+                );
             }
             DatabaseKind::InMemory { map } => {
                 // Update the map atomically for consistency with `Database::put_batch`.
@@ -517,11 +567,20 @@ impl Database {
         .pipe(Ok)
     }
 
-    pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
-        self.put_batch(vec![(key, value)])
+    pub fn put(
+        &self,
+        key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+        debug_info: &DebugInfo,
+    ) -> Result<()> {
+        self.put_batch(vec![(key, value)], debug_info)
     }
 
-    pub fn put_batch(&self, pairs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<()> {
+    pub fn put_batch(
+        &self,
+        pairs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>,
+        debug_info: &DebugInfo,
+    ) -> Result<()> {
         if pairs.is_empty() {
             return Ok(());
         }
@@ -538,10 +597,20 @@ impl Database {
                     .map(|(key, value)| Ok((key, compress(value.as_ref())?)))
                     .collect::<Result<Vec<_>>>()?;
 
+                let mut debug_info = debug_info.clone();
+
+                log::info!("START put_batch for {}", debug_info.message());
+
+                debug_info.start();
+
+                let mut total_bytes = 0;
+
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
                 for (key, compressed) in &compressed_pairs {
+                    total_bytes += compressed.len();
+
                     transaction
                         .put(
                             database.dbi(),
@@ -557,6 +626,12 @@ impl Database {
                 transaction.commit().map_err(|error| {
                     handle_write_error(database_name, error, restart_tx.as_ref())
                 })?;
+
+                log::info!(
+                    "FINISHED put_batch for {} in {} (total value bytes: {total_bytes})",
+                    debug_info.message(),
+                    debug_info.elapsed_ms()
+                );
             }
             DatabaseKind::InMemory { map } => {
                 let mut map = map.lock().expect("in-memory database mutex is poisoned");
@@ -755,7 +830,7 @@ mod tests {
     fn test_delete_batch(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
 
-        database.delete_batch(["A", "C", "D"])?;
+        database.delete_batch(["A", "C", "D"], &DebugInfo::new("test delete batch".into()))?;
 
         assert_pairs_eq(
             database.iterator_ascending("A"..)?,
@@ -932,7 +1007,10 @@ mod tests {
     fn test_multiple_of_the_same_key(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
 
-        database.put_batch(vec![("A", "1"), ("A", "2"), ("A", "3")])?;
+        database.put_batch(
+            vec![("A", "1"), ("A", "2"), ("A", "3")],
+            DebugInfo::default(),
+        )?;
 
         assert_eq!(database.get("A")?, Some(to_bytes("3")));
 
@@ -1019,8 +1097,11 @@ mod tests {
 
     fn populate_database(database: &Database) -> Result<()> {
         // This indirectly tests `Database::put` and `Database::put_batch`.
-        database.put_batch(vec![("A", "1"), ("B", "2"), ("C", "3")])?;
-        database.put("E", "5")?;
+        database.put_batch(
+            vec![("A", "1"), ("B", "2"), ("C", "3")],
+            DebugInfo::default(),
+        )?;
+        database.put("E", "5", DebugInfo::default())?;
         Ok(())
     }
 

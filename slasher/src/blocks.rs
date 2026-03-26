@@ -6,6 +6,7 @@ use helper_functions::misc;
 use ssz::{Ssz, SszReadDefault, SszWrite};
 use types::{
     combined::SignedBeaconBlock,
+    nonstandard::DebugInfo,
     phase0::{
         containers::{BeaconBlockHeader, ProposerSlashing},
         primitives::{Epoch, H256, Slot, ValidatorIndex},
@@ -105,7 +106,11 @@ impl Blocks {
             body_root: block.message().body().hash_tree_root(),
         };
 
-        self.blocks_db.put(key, block_record.to_ssz()?)?;
+        self.blocks_db.put(
+            key,
+            block_record.to_ssz()?,
+            &DebugInfo::new("update block record".into()),
+        )?;
 
         Ok(())
     }
@@ -126,7 +131,10 @@ impl Blocks {
         let first_key = build_block_record_key(1, from_slot);
         let last_key = build_block_record_key(ValidatorIndex::MAX, to_slot);
 
-        self.blocks_db.delete_range(&first_key..&last_key)?;
+        self.blocks_db.delete_range(
+            &first_key..&last_key,
+            &DebugInfo::new("cleanup block records".into()),
+        )?;
 
         Ok(())
     }

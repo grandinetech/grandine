@@ -11,7 +11,9 @@ use scc::{HashMap as SccHashMap, HashSet as SccHashSet};
 use ssz::{ContiguousList, Size, Ssz, SszRead, SszSize, SszWrite};
 use std_ext::ArcExt;
 use typenum::U65536;
-use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
+use types::{
+    combined::BeaconState, nonstandard::DebugInfo, preset::Preset, traits::BeaconState as _,
+};
 
 type CachedKeys = SccHashMap<PublicKeyBytes, Arc<PublicKey>>;
 
@@ -118,7 +120,7 @@ impl PubkeyCache {
 
         if let Some(database) = self.database.as_ref() {
             let entries = batch.len();
-            database.put_batch(batch)?;
+            database.put_batch(batch, &DebugInfo::new("load and persist state keys".into()))?;
             debug_with_peers!("persisted {entries} validator pubkeys to pubkey cache db");
         }
 
@@ -148,7 +150,10 @@ impl PubkeyCache {
         }
 
         let entries = batch.len();
-        database.put_batch(batch)?;
+        database.put_batch(
+            batch,
+            &DebugInfo::new("persist state validator keys".into()),
+        )?;
 
         self.unpersisted.iter_sync(|pubkey| {
             debug_with_peers!("pubkey {:?} unpersisted: removing from cache", *pubkey);

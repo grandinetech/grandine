@@ -3,6 +3,7 @@ use core::marker::PhantomData;
 use anyhow::Result;
 use database::Database;
 use types::{
+    nonstandard::DebugInfo,
     phase0::{
         containers::{AttestationData, IndexedAttestation},
         primitives::{Epoch, ValidatorIndex},
@@ -126,8 +127,11 @@ impl<P: Preset> Targets<P> {
             }
         }
 
-        self.min_targets_db
-            .put(key, wincode::serialize(&min_targets)?)?;
+        self.min_targets_db.put(
+            key,
+            wincode::serialize(&min_targets)?,
+            &DebugInfo::new("update min targets".into()),
+        )?;
 
         Ok(())
     }
@@ -153,8 +157,11 @@ impl<P: Preset> Targets<P> {
             }
         }
 
-        self.max_targets_db
-            .put(key, wincode::serialize(&max_targets)?)?;
+        self.max_targets_db.put(
+            key,
+            wincode::serialize(&max_targets)?,
+            &DebugInfo::new("update max targets".into()),
+        )?;
 
         Ok(())
     }

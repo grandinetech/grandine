@@ -709,6 +709,57 @@ impl<T: Clone> WithOrigin<T> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct DebugInfo {
+    pub name: String,
+    pub id: u128,
+    pub started_at: Option<std::time::Instant>,
+}
+
+impl Default for DebugInfo {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            id: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+            started_at: None,
+        }
+    }
+}
+
+impl DebugInfo {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            id: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+            started_at: None,
+        }
+    }
+
+    pub fn elapsed_ms(&self) -> String {
+        format!(
+            "{} ms",
+            self.started_at.map_or_else(
+                || "N/A".to_string(),
+                |started_at| started_at.elapsed().as_millis().to_string()
+            )
+        )
+    }
+
+    pub fn message(&self) -> String {
+        format!("{} (id: {})", self.name, self.id)
+    }
+
+    pub fn start(&mut self) {
+        self.started_at = Some(std::time::Instant::now());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools as _;

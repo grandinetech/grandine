@@ -6,6 +6,7 @@ use deposit_tree::DepositTree;
 use eth1_api::{DepositEvent, Eth1Block};
 use itertools::Itertools as _;
 use ssz::{SszReadDefault, SszWrite as _};
+use types::nonstandard::DebugInfo;
 use types::phase0::primitives::ExecutionBlockNumber;
 
 const BLOCK_KEY_PREFIX: &str = "bk";
@@ -95,8 +96,11 @@ impl Eth1Cache {
             Ok((key_string, value_bytes))
         });
 
-        itertools::process_results(results, |pairs| self.database.put_batch(pairs.collect()))
-            .and_then(core::convert::identity)
+        itertools::process_results(results, |pairs| {
+            self.database
+                .put_batch(pairs.collect(), &DebugInfo::new("put eth1 blocks".into()))
+        })
+        .and_then(core::convert::identity)
     }
 
     pub fn put_deposit_tree(&self, deposit_tree: &DepositTree) -> Result<()> {
@@ -118,7 +122,11 @@ fn get<V: SszReadDefault>(database: &Database, key: impl AsRef<[u8]>) -> Result<
 }
 
 fn put_deposit_tree(database: &Database, deposit_tree: &DepositTree) -> Result<()> {
-    database.put(DEPOSIT_TREE_KEY, deposit_tree.to_ssz()?)
+    database.put(
+        DEPOSIT_TREE_KEY,
+        deposit_tree.to_ssz()?,
+        &DebugInfo::new("put deposit tree".into()),
+    )
 }
 
 fn valid_block_key_bytes(key_bytes: &[u8]) -> bool {

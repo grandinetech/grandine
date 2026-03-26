@@ -9,6 +9,7 @@ use helper_functions::misc;
 use serde::{Serialize, de::DeserializeOwned};
 use types::{
     bellatrix::primitives::Gas,
+    nonstandard::DebugInfo,
     phase0::primitives::{ExecutionAddress, H256},
 };
 
@@ -126,12 +127,18 @@ impl ProposerConfigs {
     }
 
     fn db_put(&self, key: impl core::fmt::Display, value: &impl Serialize) -> Result<()> {
-        self.database
-            .put(key.to_string(), serde_json::to_string(value)?)
+        self.database.put(
+            key.to_string(),
+            serde_json::to_string(value)?,
+            &DebugInfo::new("put proposer config".into()),
+        )
     }
 
     fn db_remove(&self, key: impl core::fmt::Display) -> Result<()> {
-        self.database.delete(key.to_string())
+        self.database.delete(
+            key.to_string(),
+            &DebugInfo::new("delete proposer config".into()),
+        )
     }
 }
 

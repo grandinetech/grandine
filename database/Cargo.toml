@@ -9,10 +9,12 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 im = { workspace = true }
+log = { workspace = true }
 snap = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
 unwrap_none = { workspace = true }
+types = { workspace = true }
 
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
 bytesize = { workspace = true }

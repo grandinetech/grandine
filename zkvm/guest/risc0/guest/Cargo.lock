@@ -925,6 +925,7 @@ dependencies = [
  "futures",
  "im",
  "itertools 0.14.0",
+ "log",
  "logging",
  "reth-libmdbx",
  "snap",
@@ -932,6 +933,7 @@ dependencies = [
  "tap",
  "thiserror 2.0.16",
  "tracing",
+ "types",
  "unwrap_none",
 ]
 

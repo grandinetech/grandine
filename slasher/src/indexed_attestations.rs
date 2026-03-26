@@ -4,6 +4,7 @@ use anyhow::Result;
 use database::Database;
 use ssz::{SszHash as _, SszReadDefault as _, SszWrite as _};
 use types::{
+    nonstandard::DebugInfo,
     phase0::{
         containers::IndexedAttestation,
         primitives::{Epoch, H256},
@@ -60,7 +61,11 @@ impl<P: Preset> IndexedAttestations<P> {
     ) -> Result<()> {
         let attestation_data_root = indexed_attestation.data.hash_tree_root();
         let key = Self::key(target_epoch, attestation_data_root);
-        self.db.put(key, indexed_attestation.to_ssz()?)?;
+        self.db.put(
+            key,
+            indexed_attestation.to_ssz()?,
+            &DebugInfo::new("insert indexed attestation".into()),
+        )?;
         Ok(())
     }
 
@@ -71,7 +76,10 @@ impl<P: Preset> IndexedAttestations<P> {
         let first_key = Self::key(from_epoch, H256::zero());
         let last_key = Self::key(to_epoch, H256::repeat_byte(255_u8));
 
-        self.db.delete_range(&first_key..&last_key)?;
+        self.db.delete_range(
+            &first_key..&last_key,
+            &DebugInfo::new("cleanup indexed attestations".into()),
+        )?;
 
         Ok(())
     }

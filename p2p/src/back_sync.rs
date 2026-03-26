@@ -27,7 +27,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    nonstandard::{PayloadStatus, StorageMode, WithStatus},
+    nonstandard::{DebugInfo, PayloadStatus, StorageMode, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{H256, Slot},
@@ -661,11 +661,18 @@ impl Data {
     }
 
     fn save(&self, database: &Database) -> Result<()> {
-        database.put(self.db_key(), self.to_ssz()?)
+        database.put(
+            self.db_key(),
+            self.to_ssz()?,
+            &DebugInfo::new("save back-sync data".into()),
+        )
     }
 
     fn remove(&self, database: &Database) -> Result<()> {
-        database.delete(self.db_key())
+        database.delete(
+            self.db_key(),
+            &DebugInfo::new("remove back-sync data".into()),
+        )
     }
 
     fn find(database: &Database) -> Result<Option<Self>> {
@@ -711,7 +718,11 @@ impl SyncMode {
             return Ok(());
         }
 
-        database.put(Self::db_key(low_slot), wincode::serialize(&self)?)
+        database.put(
+            Self::db_key(low_slot),
+            wincode::serialize(&self)?,
+            &DebugInfo::new("save sync mode".into()),
+        )
     }
 
     fn remove(&self, database: &Database, low_slot: Slot) -> Result<()> {
@@ -719,7 +730,10 @@ impl SyncMode {
             return Ok(());
         }
 
-        database.delete(Self::db_key(low_slot))
+        database.delete(
+            Self::db_key(low_slot),
+            &DebugInfo::new("remove sync mode".into()),
+        )
     }
 
     fn load(database: &Database, low_slot: Slot) -> Result<Self> {

@@ -56,7 +56,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
+    nonstandard::{DebugInfo, PayloadStatus, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -2126,6 +2126,7 @@ where
                 self.store.unfinalized_canonical_chain(),
                 self.store.finalized().iter(),
                 &self.store,
+                &DebugInfo::new("final save before shutdown".into()),
             )?;
 
             info_with_peers!(
@@ -3498,7 +3499,7 @@ where
                 .spawn(move || {
                     debug_with_peers!("saving finalized blocks and anchor state…");
 
-                    match storage.append(core::iter::empty(), archived.iter(), &store) {
+                    match storage.append(core::iter::empty(), archived.iter(), &store, &DebugInfo::new("archive finalized blocks and states".into())) {
                         Ok(slots) => {
                             if let Some(chain_link) = archived.back() {
                                 let finalized_block = chain_link.block.clone_arc();

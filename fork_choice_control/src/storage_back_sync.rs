@@ -13,7 +13,7 @@ use types::{
     Validators,
     combined::{DataColumnSidecar, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    nonstandard::{FinalizedCheckpoint, WithOrigin},
+    nonstandard::{DebugInfo, FinalizedCheckpoint, WithOrigin},
     phase0::primitives::Slot,
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -125,7 +125,8 @@ impl<P: Preset> Storage<P> {
                 if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
                     info_with_peers!("archiving back-sync data up to {slot} slot");
 
-                    self.database.put_batch(batch)?;
+                    self.database
+                        .put_batch(batch, &DebugInfo::new("archive back-sync states 1".into()))?;
 
                     batch = vec![];
                     states_in_batch = 0;
@@ -133,7 +134,8 @@ impl<P: Preset> Storage<P> {
             }
         }
 
-        self.database.put_batch(batch)?;
+        self.database
+            .put_batch(batch, &DebugInfo::new("archive back-sync states 2".into()))?;
 
         info_with_peers!(
             "back-synced state archival completed (start_slot: {start_slot}, end_slot: {end_slot})",
@@ -172,7 +174,8 @@ impl<P: Preset> Storage<P> {
             batch.push(serialize(FinalizedBlockByRoot(block_root), block)?);
         }
 
-        self.database.put_batch(batch)
+        self.database
+            .put_batch(batch, &DebugInfo::new("store back-sync blocks".into()))
     }
 }
 

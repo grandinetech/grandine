@@ -28,7 +28,9 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    nonstandard::{BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint, StorageMode},
+    nonstandard::{
+        BlobSidecarWithId, DataColumnSidecarWithId, DebugInfo, FinalizedCheckpoint, StorageMode,
+    },
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Epoch, H256, Slot},
@@ -235,7 +237,8 @@ impl<P: Preset> Storage<P> {
 
         self.append_finalized_validator_pubkeys_to_batch(&mut batch, anchor_validators)?;
 
-        self.database.put_batch(batch)?;
+        self.database
+            .put_batch(batch, &DebugInfo::new("load anchor state".into()))?;
 
         let state_storage = (anchor_state, anchor_block, unfinalized_blocks);
 
@@ -265,6 +268,7 @@ impl<P: Preset> Storage<P> {
         unfinalized: impl Iterator<Item = &'cl ChainLink<P>>,
         finalized: impl DoubleEndedIterator<Item = &'cl ChainLink<P>>,
         store: &Store<P, Self>,
+        debug_info: &DebugInfo,
     ) -> Result<AppendedBlockSlots> {
         let mut slots = AppendedBlockSlots::default();
         let mut store_head_slot = 0;
@@ -379,7 +383,7 @@ impl<P: Preset> Storage<P> {
             self.append_finalized_validator_pubkeys_to_batch(&mut batch, &finalized_validators)?;
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch(batch, debug_info)?;
 
         Ok(slots)
     }
@@ -411,7 +415,8 @@ impl<P: Preset> Storage<P> {
             persisted_blob_ids.push(blob_id);
         }
 
-        self.database.put_batch(batch)?;
+        self.database
+            .put_batch(batch, &DebugInfo::new("append blob sidecars".into()))?;
 
         Ok(persisted_blob_ids)
     }
@@ -443,7 +448,8 @@ impl<P: Preset> Storage<P> {
             self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
         }
 
-        self.database.put_batch(batch)?;
+        self.database
+            .put_batch(batch, &DebugInfo::new("append states".into()))?;
 
         Ok(slots)
     }
@@ -476,7 +482,10 @@ impl<P: Preset> Storage<P> {
             keys_to_remove.push(BlobSidecarByBlobId(block_root, index).to_string().into());
         }
 
-        self.database.delete_batch(keys_to_remove)
+        self.database.delete_batch(
+            keys_to_remove,
+            &DebugInfo::new("prune old blob sidecars".into()),
+        )
     }
 
     pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
@@ -498,7 +507,10 @@ impl<P: Preset> Storage<P> {
             keys_to_remove.push(StateByBlockRoot(block_root).to_string().into());
         }
 
-        self.database.delete_batch(keys_to_remove)
+        self.database.delete_batch(
+            keys_to_remove,
+            &DebugInfo::new("prune old blocks and states".into()),
+        )
     }
 
     pub(crate) fn prune_old_state_roots(&self, up_to_slot: Slot) -> Result<()> {
@@ -522,7 +534,10 @@ impl<P: Preset> Storage<P> {
             }
         }
 
-        self.database.delete_batch(keys_to_remove)
+        self.database.delete_batch(
+            keys_to_remove,
+            &DebugInfo::new("prune old state roots".into()),
+        )
     }
 
     pub(crate) fn prune_unfinalized_blocks(&self, last_finalized_slot: Slot) -> Result<Vec<Slot>> {
@@ -559,7 +574,10 @@ impl<P: Preset> Storage<P> {
             }
         }
 
-        self.database.delete_batch(keys_to_remove)?;
+        self.database.delete_batch(
+            keys_to_remove,
+            &DebugInfo::new("prune unfinalized blocks".into()),
+        )?;
 
         Ok(slots)
     }
@@ -594,7 +612,8 @@ impl<P: Preset> Storage<P> {
             persisted_data_column_ids.push(data_column_id);
         }
 
-        self.database.put_batch(batch)?;
+        self.database
+            .put_batch(batch, &DebugInfo::new("append data column sidecars".into()))?;
 
         Ok(persisted_data_column_ids)
     }
@@ -631,7 +650,10 @@ impl<P: Preset> Storage<P> {
             )
         }
 
-        self.database.delete_batch(keys_to_remove)
+        self.database.delete_batch(
+            keys_to_remove,
+            &DebugInfo::new("prune old data column sidecars".into()),
+        )
     }
 
     pub(crate) fn checkpoint_state_slot(
@@ -1388,7 +1410,11 @@ pub enum Error {
 }
 
 pub fn save(database: &Database, key: impl core::fmt::Display, value: impl SszWrite) -> Result<()> {
-    database.put(serialize_key(key), serialize_value(value)?)
+    database.put(
+        serialize_key(key),
+        serialize_value(value)?,
+        &DebugInfo::new("Storage::save".into()),
+    )
 }
 
 pub fn get<V: SszReadDefault>(
@@ -1493,30 +1519,33 @@ mod tests {
         let block_6 = block_with_slot(6);
         let block_10 = block_with_slot(10);
 
-        database.put_batch(vec![
-            // Slot 1
-            serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
-            serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block_1)?,
-            serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
-            serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
-            // Slot 3
-            serialize(BlockRootBySlot(3), H256::repeat_byte(3))?,
-            serialize(FinalizedBlockByRoot(H256::repeat_byte(3)), &block_3)?,
-            // Slot 5
-            serialize(BlockRootBySlot(5), H256::repeat_byte(5))?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(5)), &block_5)?,
-            //Slot 6
-            serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
-            serialize(FinalizedBlockByRoot(H256::repeat_byte(6)), &block_6)?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(6)), &block_6)?,
-            serialize(SlotByStateRoot(H256::repeat_byte(6)), 6_u64)?,
-            serialize(StateByBlockRoot(H256::repeat_byte(6)), 6_u64)?,
-            // Slot 10, test case that "10" < "3" is not true
-            serialize(BlockRootBySlot(10), H256::repeat_byte(10))?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(10)), &block_10)?,
-            serialize(SlotByStateRoot(H256::repeat_byte(10)), 10_u64)?,
-            serialize(StateByBlockRoot(H256::repeat_byte(10)), 10_u64)?,
-        ])?;
+        database.put_batch(
+            vec![
+                // Slot 1
+                serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
+                serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block_1)?,
+                serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
+                serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
+                // Slot 3
+                serialize(BlockRootBySlot(3), H256::repeat_byte(3))?,
+                serialize(FinalizedBlockByRoot(H256::repeat_byte(3)), &block_3)?,
+                // Slot 5
+                serialize(BlockRootBySlot(5), H256::repeat_byte(5))?,
+                serialize(UnfinalizedBlockByRoot(H256::repeat_byte(5)), &block_5)?,
+                //Slot 6
+                serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
+                serialize(FinalizedBlockByRoot(H256::repeat_byte(6)), &block_6)?,
+                serialize(UnfinalizedBlockByRoot(H256::repeat_byte(6)), &block_6)?,
+                serialize(SlotByStateRoot(H256::repeat_byte(6)), 6_u64)?,
+                serialize(StateByBlockRoot(H256::repeat_byte(6)), 6_u64)?,
+                // Slot 10, test case that "10" < "3" is not true
+                serialize(BlockRootBySlot(10), H256::repeat_byte(10))?,
+                serialize(UnfinalizedBlockByRoot(H256::repeat_byte(10)), &block_10)?,
+                serialize(SlotByStateRoot(H256::repeat_byte(10)), 10_u64)?,
+                serialize(StateByBlockRoot(H256::repeat_byte(10)), 10_u64)?,
+            ],
+            &DebugInfo::default(),
+        )?;
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
@@ -1559,29 +1588,32 @@ mod tests {
 
         let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
 
-        database.put_batch(vec![
-            // Slot 1
-            serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
-            serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
-            serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
-            serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
-            // Slot 3
-            serialize(BlockRootBySlot(3), H256::repeat_byte(3))?,
-            serialize(FinalizedBlockByRoot(H256::repeat_byte(3)), &block)?,
-            // Slot 5
-            serialize(BlockRootBySlot(5), H256::repeat_byte(5))?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(5)), &block)?,
-            //Slot 6
-            serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(6)), &block)?,
-            serialize(SlotByStateRoot(H256::repeat_byte(6)), 6_u64)?,
-            serialize(StateByBlockRoot(H256::repeat_byte(6)), 6_u64)?,
-            // Slot 10, test case that "10" < "3" is not true
-            serialize(BlockRootBySlot(10), H256::repeat_byte(10))?,
-            serialize(UnfinalizedBlockByRoot(H256::repeat_byte(10)), &block)?,
-            serialize(SlotByStateRoot(H256::repeat_byte(10)), 10_u64)?,
-            serialize(StateByBlockRoot(H256::repeat_byte(10)), 10_u64)?,
-        ])?;
+        database.put_batch(
+            vec![
+                // Slot 1
+                serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
+                serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
+                serialize(SlotByStateRoot(H256::repeat_byte(1)), 1_u64)?,
+                serialize(StateByBlockRoot(H256::repeat_byte(1)), 1_u64)?,
+                // Slot 3
+                serialize(BlockRootBySlot(3), H256::repeat_byte(3))?,
+                serialize(FinalizedBlockByRoot(H256::repeat_byte(3)), &block)?,
+                // Slot 5
+                serialize(BlockRootBySlot(5), H256::repeat_byte(5))?,
+                serialize(UnfinalizedBlockByRoot(H256::repeat_byte(5)), &block)?,
+                //Slot 6
+                serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
+                serialize(UnfinalizedBlockByRoot(H256::repeat_byte(6)), &block)?,
+                serialize(SlotByStateRoot(H256::repeat_byte(6)), 6_u64)?,
+                serialize(StateByBlockRoot(H256::repeat_byte(6)), 6_u64)?,
+                // Slot 10, test case that "10" < "3" is not true
+                serialize(BlockRootBySlot(10), H256::repeat_byte(10))?,
+                serialize(UnfinalizedBlockByRoot(H256::repeat_byte(10)), &block)?,
+                serialize(SlotByStateRoot(H256::repeat_byte(10)), 10_u64)?,
+                serialize(StateByBlockRoot(H256::repeat_byte(10)), 10_u64)?,
+            ],
+            &DebugInfo::default(),
+        )?;
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
@@ -1687,10 +1719,13 @@ mod tests {
     fn test_block_root_before_or_at_slot() -> Result<()> {
         let database = Database::in_memory();
 
-        database.put_batch(vec![
-            serialize(BlockRootBySlot(2), H256::repeat_byte(2))?,
-            serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
-        ])?;
+        database.put_batch(
+            vec![
+                serialize(BlockRootBySlot(2), H256::repeat_byte(2))?,
+                serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
+            ],
+            &DebugInfo::default(),
+        )?;
 
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
