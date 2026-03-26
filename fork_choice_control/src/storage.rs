@@ -221,17 +221,19 @@ impl<P: Preset> Storage<P> {
 
         info_with_peers!("loaded state at slot {anchor_slot}");
 
+        let anchor_validators = anchor_state.validators();
+
         let mut batch = vec![
             serialize(FinalizedBlockByRoot(anchor_block_root), &anchor_block)?,
             serialize(BlockRootBySlot(anchor_slot), anchor_block_root)?,
             serialize(SlotByStateRoot(anchor_state_root), anchor_slot)?,
             serialize(
                 StateByBlockRoot(anchor_block_root),
-                prepare_state(anchor_state.clone_arc()),
+                prepare_state(anchor_state.clone_arc(), anchor_validators.len_usize()),
             )?,
         ];
 
-        self.append_finalized_validator_pubkeys_to_batch(&mut batch, anchor_state.validators())?;
+        self.append_finalized_validator_pubkeys_to_batch(&mut batch, anchor_validators)?;
 
         self.database.put_batch(batch)?;
 
@@ -270,10 +272,8 @@ impl<P: Preset> Storage<P> {
         let mut archival_state_appended = false;
         let mut batch = vec![];
 
-        self.append_finalized_validator_pubkeys_to_batch(
-            &mut batch,
-            &store.finalized_validators(),
-        )?;
+        let finalized_validators = store.finalized_validators();
+        self.append_finalized_validator_pubkeys_to_batch(&mut batch, &finalized_validators)?;
 
         let unfinalized = unfinalized.zip(core::iter::repeat(false));
         let finalized = finalized.rev().zip(core::iter::repeat(true));
@@ -345,6 +345,7 @@ impl<P: Preset> Storage<P> {
                             head_slot: store_head_slot,
                             state: prepare_state(
                                 state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                                finalized_validators.len_usize(),
                             ),
                         },
                     )?);
@@ -360,7 +361,10 @@ impl<P: Preset> Storage<P> {
 
                     batch.push(serialize(
                         StateByBlockRoot(block_root),
-                        prepare_state(state.get_or_init(|| chain_link.state(store)).clone_arc()),
+                        prepare_state(
+                            state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                            finalized_validators.len_usize(),
+                        ),
                     )?);
 
                     archival_state_appended = true;
@@ -421,7 +425,7 @@ impl<P: Preset> Storage<P> {
                 slots.push(state.slot());
                 batch.push(serialize(
                     StateByBlockRoot(block_root),
-                    prepare_state(archival_state),
+                    prepare_state(archival_state, finalized_validators.len_usize()),
                 )?);
             }
         }
@@ -1418,8 +1422,16 @@ pub fn print_beacon_database_info(database: &Database) -> Result<()> {
     Ok(())
 }
 
-fn prepare_state<P: Preset>(mut state: Arc<BeaconState<P>>) -> Arc<BeaconState<P>> {
-    for validator in &mut *state.make_mut().validators_mut() {
+fn prepare_state<P: Preset>(
+    mut state: Arc<BeaconState<P>>,
+    finalized_validator_list_len: usize,
+) -> Arc<BeaconState<P>> {
+    for validator in state
+        .make_mut()
+        .validators_mut()
+        .into_iter()
+        .take(finalized_validator_list_len)
+    {
         // pubkey never changes, so we can restore it later from finalized validator list
         validator.pubkey = PublicKeyBytes::zero();
     }
