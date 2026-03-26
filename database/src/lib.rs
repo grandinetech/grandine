@@ -518,13 +518,14 @@ impl Database {
     }
 
     pub fn put(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
-        self.put_batch(core::iter::once((key, value)))
+        self.put_batch(vec![(key, value)])
     }
 
-    pub fn put_batch(
-        &self,
-        pairs: impl IntoIterator<Item = (impl AsRef<[u8]>, impl AsRef<[u8]>)>,
-    ) -> Result<()> {
+    pub fn put_batch(&self, pairs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<()> {
+        if pairs.is_empty() {
+            return Ok(());
+        }
+
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -931,7 +932,7 @@ mod tests {
     fn test_multiple_of_the_same_key(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
 
-        database.put_batch([("A", "1"), ("A", "2"), ("A", "3")])?;
+        database.put_batch(vec![("A", "1"), ("A", "2"), ("A", "3")])?;
 
         assert_eq!(database.get("A")?, Some(to_bytes("3")));
 
@@ -1018,7 +1019,7 @@ mod tests {
 
     fn populate_database(database: &Database) -> Result<()> {
         // This indirectly tests `Database::put` and `Database::put_batch`.
-        database.put_batch([("A", "1"), ("B", "2"), ("C", "3")])?;
+        database.put_batch(vec![("A", "1"), ("B", "2"), ("C", "3")])?;
         database.put("E", "5")?;
         Ok(())
     }
