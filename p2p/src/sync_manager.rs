@@ -34,7 +34,7 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    nonstandard::{Phase, StorageMode},
+    nonstandard::StorageMode,
     phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
 };
