@@ -270,11 +270,6 @@ impl<P: Preset> Storage<P> {
         let mut archival_state_appended = false;
         let mut batch = vec![];
 
-        self.append_finalized_validator_pubkeys_to_batch(
-            &mut batch,
-            &store.finalized_validators(),
-        )?;
-
         let unfinalized = unfinalized.zip(core::iter::repeat(false));
         let finalized = finalized.rev().zip(core::iter::repeat(true));
 
@@ -294,6 +289,8 @@ impl<P: Preset> Storage<P> {
         }
 
         debug_with_peers!("saving store head slot: {store_head_slot}");
+
+        let mut update_finalized_validators = false;
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
@@ -350,6 +347,7 @@ impl<P: Preset> Storage<P> {
                     )?);
 
                     checkpoint_state_appended = true;
+                    update_finalized_validators = true;
                 }
 
                 if !archival_state_appended
@@ -364,8 +362,16 @@ impl<P: Preset> Storage<P> {
                     )?);
 
                     archival_state_appended = true;
+                    update_finalized_validators = true;
                 }
             }
+        }
+
+        if update_finalized_validators {
+            self.append_finalized_validator_pubkeys_to_batch(
+                &mut batch,
+                &store.finalized_validators(),
+            )?;
         }
 
         self.database.put_batch(batch)?;
@@ -412,7 +418,7 @@ impl<P: Preset> Storage<P> {
     ) -> Result<Vec<Slot>> {
         let mut slots = vec![];
         let mut batch = vec![];
-        self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
+        let mut update_finalized_validators = false;
 
         for (state, block_root) in states_with_block_roots {
             if !self.contains_key(StateByBlockRoot(block_root))? {
@@ -423,7 +429,13 @@ impl<P: Preset> Storage<P> {
                     StateByBlockRoot(block_root),
                     prepare_state(archival_state),
                 )?);
+
+                update_finalized_validators = true;
             }
+        }
+
+        if update_finalized_validators {
+            self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
         }
 
         self.database.put_batch(batch)?;
