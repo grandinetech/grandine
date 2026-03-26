@@ -608,13 +608,11 @@ lto = false
 # We had to fork `jsonrpc` because it does not allow nonstandard members.
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '87c4ccb9bb2af494de375f5f6c62850badd26304' }
-quinn = { git = 'https://github.com/sigp/quinn', rev = '59af87979c8411864c1cb68613222f54ed2930a7' }
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
-yamux = { git = 'https://github.com/sigp/rust-yamux', rev = '29efa6aebd4bdfcb16bfb21969ec0c785e570b74' }
 
 [patch.'https://github.com/libp2p/rust-libp2p.git']
-libp2p = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'f88e43de9eba00b416d0374b1a1fb2de47b65864' }
-libp2p-mplex = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'f88e43de9eba00b416d0374b1a1fb2de47b65864' }
+libp2p = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
+libp2p-mplex = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }
