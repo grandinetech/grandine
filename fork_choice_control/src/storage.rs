@@ -19,6 +19,7 @@ use thiserror::Error;
 use tracing::info;
 use transition_functions::combined;
 use try_from_iterator::TryFromIterator;
+use typenum::Unsigned as _;
 use types::{
     Validators,
     combined::{BeaconState, DataColumnSidecar, SignedBeaconBlock},
@@ -41,6 +42,7 @@ use types::{
 use crate::checkpoint_sync;
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
+pub const MAX_DATA_COLUMN_EPOCHS_TO_PRUNE: usize = 100;
 
 pub enum StateLoadStrategy<P: Preset> {
     Auto {
@@ -616,6 +618,12 @@ impl<P: Preset> Storage<P> {
         let (mut keys_to_remove, columns_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
                 iter.take_while(|(key_bytes, _)| SlotColumnId::has_prefix(key_bytes))
+                    .take(
+                        // Limit number of entries to prune per single transaction
+                        MAX_DATA_COLUMN_EPOCHS_TO_PRUNE
+                            * P::SlotsPerEpoch::USIZE
+                            * P::NumberOfColumns::USIZE,
+                    )
                     .map(|(k, v)| (k.into_owned(), v))
                     .unzip()
             })?;
