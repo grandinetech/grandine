@@ -346,14 +346,14 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.71.1"
+version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
+checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
 dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "regex",
@@ -2860,8 +2860,8 @@ checksum = "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884"
 
 [[package]]
 name = "reth-libmdbx"
-version = "1.10.2"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=8e3b5e6a99439561b73c5dd31bd3eced2e994d60#8e3b5e6a99439561b73c5dd31bd3eced2e994d60"
+version = "1.11.3"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=d6324d63e27ef6b7c49cdc9b1977c1b808234c7b#d6324d63e27ef6b7c49cdc9b1977c1b808234c7b"
 dependencies = [
  "bitflags 2.9.4",
  "byteorder",
@@ -2875,8 +2875,8 @@ dependencies = [
 
 [[package]]
 name = "reth-mdbx-sys"
-version = "1.10.2"
-source = "git+https://github.com/paradigmxyz/reth.git?rev=8e3b5e6a99439561b73c5dd31bd3eced2e994d60#8e3b5e6a99439561b73c5dd31bd3eced2e994d60"
+version = "1.11.3"
+source = "git+https://github.com/paradigmxyz/reth.git?rev=d6324d63e27ef6b7c49cdc9b1977c1b808234c7b#d6324d63e27ef6b7c49cdc9b1977c1b808234c7b"
 dependencies = [
  "bindgen",
  "cc",
