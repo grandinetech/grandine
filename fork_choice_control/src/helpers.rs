@@ -672,11 +672,13 @@ impl<P: Preset> Context<P> {
         )
         .expect("attestation should be constructed successfully");
 
-        self.controller()
-            .on_singular_attestation(AttestationItem::unverified(
+        self.controller().on_singular_attestation(
+            self.controller().owned_wait_group(),
+            AttestationItem::unverified(
                 Arc::new(attestation),
                 AttestationOrigin::Gossip(subnet_id, GossipId::default()),
-            ));
+            ),
+        );
 
         self.controller().wait_for_tasks();
 

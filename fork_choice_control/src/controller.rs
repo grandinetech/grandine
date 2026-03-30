@@ -45,7 +45,10 @@ use types::{
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::ValidationOutcome,
-    phase0::primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
+    phase0::{
+        containers::Checkpoint,
+        primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
+    },
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -490,48 +493,57 @@ where
 
     pub fn on_aggregate_and_proof(
         &self,
+        wait_group: W,
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
         origin: AggregateAndProofOrigin<GossipId>,
     ) {
         self.spawn(AggregateAndProofTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
+            wait_group,
             aggregate_and_proof,
             origin,
             metrics: self.metrics.clone(),
         })
     }
 
-    pub fn on_singular_attestation(&self, attestation: AttestationItem<P, GossipId>) {
+    pub fn on_singular_attestation(
+        &self,
+        wait_group: W,
+        attestation: AttestationItem<P, GossipId>,
+    ) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
-            wait_group: self.owned_wait_group(),
+            wait_group,
             attestation,
             metrics: self.metrics.clone(),
         })
     }
 
-    pub fn on_aggregate_and_proof_batch(&self, results: Vec<VerifyAggregateAndProofResult<P>>) {
+    pub fn on_aggregate_and_proof_batch(
+        &self,
+        wait_group: W,
+        results: Vec<VerifyAggregateAndProofResult<P>>,
+    ) {
         if results.is_empty() {
             return;
         }
 
         MutatorMessage::AggregateAndProofBatch {
-            wait_group: self.owned_wait_group(),
+            wait_group,
             results,
         }
         .send(&self.mutator_tx)
     }
 
-    pub fn on_attestation_batch(&self, results: Vec<VerifyAttestationResult<P>>) {
+    pub fn on_attestation_batch(&self, wait_group: W, results: Vec<VerifyAttestationResult<P>>) {
         if results.is_empty() {
             return;
         }
 
         MutatorMessage::AttestationBatch {
-            wait_group: self.owned_wait_group(),
+            wait_group,
             results,
         }
         .send(&self.mutator_tx)
@@ -827,6 +839,14 @@ where
     pub fn stop(&self) {
         let save_to_storage = !std::thread::panicking();
         MutatorMessage::Stop { save_to_storage }.send(&self.mutator_tx);
+    }
+
+    pub fn override_finalized_checkpoint(&self, checkpoint: Checkpoint) {
+        MutatorMessage::OverrideFinalizedCheckpoint {
+            wait_group: self.owned_wait_group(),
+            checkpoint,
+        }
+        .send(&self.mutator_tx);
     }
 
     pub const fn block_processor(&self) -> &Arc<BlockProcessor<P>> {

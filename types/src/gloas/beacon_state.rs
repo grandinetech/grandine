@@ -127,6 +127,9 @@ pub struct BeaconState<P: Preset> {
     pub latest_block_hash: ExecutionBlockHash,
     pub payload_expected_withdrawals: PayloadExpectedWithdrawals<P>,
 
+    // > Payload timeliness
+    // pub ptc_window: PtcWindow<P>,
+
     // Cache
     #[derivative(PartialEq = "ignore")]
     #[serde(skip)]

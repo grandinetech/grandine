@@ -14,3 +14,6 @@ mod slot_head;
 mod tasks;
 mod validator;
 mod validator_config;
+
+#[cfg(test)]
+mod gossip_spec_tests;

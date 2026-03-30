@@ -28,7 +28,7 @@ use eth2_libp2p::{
     types::{EnrForkId, ForkContext, GossipEncoding, core_topics_to_subscribe},
 };
 use features::Feature;
-use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage};
+use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage, Wait};
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
@@ -107,13 +107,13 @@ const NEW_PHASE_TOPICS_ADVANCE_SLOTS: u64 = 5;
 /// <https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/specs/altair/p2p-interface.md#transitioning-the-gossip>
 const OLD_PHASE_TOPICS_REMAIN_EPOCHS: u64 = 2;
 
-pub struct Channels<P: Preset> {
+pub struct Channels<P: Preset, W: Wait = ()> {
     pub api_to_p2p_rx: UnboundedReceiver<ApiToP2p<P>>,
     pub blob_fetcher_to_p2p_rx: UnboundedReceiver<BlobFetcherToP2p<P>>,
     pub fork_choice_to_p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     pub pool_to_p2p_rx: UnboundedReceiver<PoolToP2pMessage>,
     pub p2p_to_sync_tx: UnboundedSender<P2pToSync<P>>,
-    pub p2p_to_validator_tx: UnboundedSender<P2pToValidator<P>>,
+    pub p2p_to_validator_tx: UnboundedSender<P2pToValidator<P, W>>,
     pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p<P>>,
     pub validator_to_p2p_rx: UnboundedReceiver<ValidatorToP2p<P>>,
     pub network_to_slasher_tx: Option<UnboundedSender<P2pToSlasher<P>>>,
@@ -121,12 +121,12 @@ pub struct Channels<P: Preset> {
 }
 
 #[expect(clippy::struct_field_names)]
-pub struct Network<P: Preset> {
+pub struct Network<P: Preset, W: Wait> {
     network_globals: Arc<NetworkGlobals>,
     controller: RealController<P>,
-    channels: Channels<P>,
+    channels: Channels<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
-    sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P>>,
+    sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
     // TODO(Grandine Team): Is there a good reason to keep the `ForkContext` around?
     //                      The current fork can be determined from `Network.controller`
@@ -146,7 +146,7 @@ pub struct Network<P: Preset> {
     storage_mode: StorageMode,
 }
 
-impl<P: Preset> Network<P> {
+impl<P: Preset, W: Wait> Network<P, W> {
     #[must_use]
     pub const fn network_globals(&self) -> &Arc<NetworkGlobals> {
         &self.network_globals
@@ -157,9 +157,9 @@ impl<P: Preset> Network<P> {
         network_config: Arc<NetworkConfig>,
         controller: RealController<P>,
         slot: Slot,
-        channels: Channels<P>,
+        channels: Channels<P, W>,
         dedicated_executor: Arc<DedicatedExecutor>,
-        sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P>>,
+        sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
         metrics: Option<Arc<Metrics>>,
         libp2p_registry: Option<&mut Registry>,
@@ -2158,6 +2158,7 @@ impl<P: Preset> Network<P> {
                 P2pToValidator::VoluntaryExit(
                     signed_voluntary_exit,
                     GossipId { source, message_id },
+                    W::default(),
                 )
                 .send(&self.channels.p2p_to_validator_tx);
             }
@@ -2172,7 +2173,7 @@ impl<P: Preset> Network<P> {
 
                 let gossip_id = GossipId { source, message_id };
 
-                P2pToValidator::ProposerSlashing(proposer_slashing, gossip_id)
+                P2pToValidator::ProposerSlashing(proposer_slashing, gossip_id, W::default())
                     .send(&self.channels.p2p_to_validator_tx);
             }
             PubsubMessage::AttesterSlashing(attester_slashing) => {
@@ -2189,7 +2190,7 @@ impl<P: Preset> Network<P> {
                 self.controller
                     .on_gossip_attester_slashing(attester_slashing.clone());
 
-                P2pToValidator::AttesterSlashing(attester_slashing, gossip_id)
+                P2pToValidator::AttesterSlashing(attester_slashing, gossip_id, W::default())
                     .send(&self.channels.p2p_to_validator_tx);
             }
             PubsubMessage::SignedContributionAndProof(proof) => {

@@ -36,9 +36,9 @@ pub use crate::{
 };
 
 pub mod checkpoint_sync;
+pub mod controller;
 
 mod block_processor;
-mod controller;
 mod events;
 mod messages;
 mod misc;

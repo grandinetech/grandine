@@ -183,6 +183,11 @@ where
         self.snapshot().checkpoint_state_blocking(checkpoint)
     }
 
+    #[must_use]
+    pub fn finalized_checkpoint(&self) -> Checkpoint {
+        self.store_snapshot().finalized_checkpoint()
+    }
+
     // The [Eth Beacon Node API specification] does not say if `GET /eth/v2/debug/beacon/heads`
     // should return non-viable forks. We return all of them.
     //
@@ -941,11 +946,6 @@ where
     #[must_use]
     pub fn justified_epoch(&self) -> Epoch {
         self.store_snapshot().justified_epoch()
-    }
-
-    #[must_use]
-    pub fn finalized_checkpoint(&self) -> Checkpoint {
-        self.store_snapshot().finalized_checkpoint()
     }
 
     #[must_use]
