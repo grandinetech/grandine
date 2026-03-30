@@ -23,9 +23,10 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{
-        containers::{DataColumnIdentifier, PartialDataColumn, PartialDataColumnHeader},
+        containers::{DataColumnIdentifier, PartialDataColumnHeader},
         primitives::ColumnIndex,
     },
+    nonstandard::PartialDataColumn,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };

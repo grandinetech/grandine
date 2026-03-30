@@ -26,15 +26,15 @@ use types::{
     deneb::primitives::{Blob, KzgCommitment, KzgProof},
     fulu::{
         containers::{
-            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry, PartialDataColumn,
-            PartialDataColumnHeader, PartialDataColumnSidecar,
+            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry, PartialDataColumnHeader,
+            PartialDataColumnSidecar,
         },
         primitives::{
             BlobCommitmentsInclusionProof, CellBitmap, CellsAndKzgProofs, ColumnIndex, CustodyIndex,
         },
     },
     gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
-    nonstandard::BlockOrDataColumnSidecar,
+    nonstandard::{BlockOrDataColumnSidecar, PartialDataColumn},
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, NodeId, Slot, SubnetId, ValidatorIndex},

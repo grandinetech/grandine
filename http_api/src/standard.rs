@@ -4016,6 +4016,7 @@ async fn publish_beacon_block_with_data_column_sidecars_and_gossip_checks<P: Pre
                 block,
                 data_column_sidecars,
                 api_to_p2p_tx,
+                controller.store_config().enable_partial_columns,
             );
         }
         Ok(Some(ValidationOutcome::Ignore(publishable))) => {
@@ -4024,6 +4025,7 @@ async fn publish_beacon_block_with_data_column_sidecars_and_gossip_checks<P: Pre
                     block,
                     data_column_sidecars,
                     api_to_p2p_tx,
+                    controller.store_config().enable_partial_columns,
                 );
             }
 
@@ -4061,16 +4063,24 @@ fn publish_block_with_data_column_sidecars_to_network<P: Preset>(
     block: Arc<SignedBeaconBlock<P>>,
     data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+    publish_partials: bool,
 ) {
+    if publish_partials
+        && let Some(header) = data_column_sidecars
+            .first()
+            .and_then(|s| s.partial_data_column_header())
+    {
+        let partial_data_columns = data_column_sidecars
+            .iter()
+            .map(|sidecar| Arc::new(sidecar.as_ref().into()))
+            .collect::<Vec<_>>();
+        ApiToP2p::PublishPartialDataColumns(partial_data_columns, Arc::new(header))
+            .send(api_to_p2p_tx);
+    }
+
     for data_column_sidecar in data_column_sidecars {
         ApiToP2p::PublishDataColumnSidecar(data_column_sidecar.clone_arc()).send(api_to_p2p_tx);
     }
-
-    let partial_data_columns = data_column_sidecars
-        .iter()
-        .map(|sidecar| Arc::new(sidecar.as_ref().into()))
-        .collect::<Vec<_>>();
-    ApiToP2p::PublishPartialDataColumns(partial_data_columns).send(api_to_p2p_tx);
 
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
@@ -4267,6 +4277,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
+                            controller.store_config().enable_partial_columns,
                         );
                         StatusCode::OK
                     }
@@ -4281,6 +4292,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
+                            controller.store_config().enable_partial_columns,
                         );
                         StatusCode::OK
                     }
@@ -4300,6 +4312,7 @@ async fn publish_signed_block_v2_with_data_column_sidecar<P: Preset, W: Wait>(
                             block,
                             &data_column_sidecars,
                             &api_to_p2p_tx,
+                            controller.store_config().enable_partial_columns,
                         );
                     }
 

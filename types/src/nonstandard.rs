@@ -26,7 +26,10 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
-    fulu::containers::{DataColumnIdentifier, PartialDataColumnHeader},
+    fulu::{
+        containers::{DataColumnIdentifier, PartialDataColumnHeader, PartialDataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -721,6 +724,22 @@ impl<T: Clone> WithOrigin<T> {
         match self.origin {
             Origin::CheckpointSync => None,
             Origin::Genesis => Some(self.value.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialDataColumn<P: Preset> {
+    pub block_root: H256,
+    pub index: ColumnIndex,
+    pub sidecar: PartialDataColumnSidecar<P>,
+}
+
+impl<P: Preset> From<&PartialDataColumn<P>> for DataColumnIdentifier {
+    fn from(column: &PartialDataColumn<P>) -> Self {
+        Self {
+            block_root: column.block_root,
+            index: column.index,
         }
     }
 }

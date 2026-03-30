@@ -24,9 +24,9 @@ use types::{
         SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    fulu::containers::{PartialDataColumn, PartialDataColumnHeader},
+    fulu::containers::PartialDataColumnHeader,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
+    nonstandard::{PartialDataColumn, PayloadStatus, Publishable, StorageMode, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},

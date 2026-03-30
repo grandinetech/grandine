@@ -25,11 +25,11 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumn},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumnHeader},
         primitives::ColumnIndex,
     },
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::Phase,
+    nonstandard::{PartialDataColumn, Phase},
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, H256, Slot, SubnetId, ValidatorIndex},
@@ -105,7 +105,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
-    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>),
+    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>, Arc<PartialDataColumnHeader<P>>),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),
@@ -215,7 +215,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
-    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>),
+    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>, Arc<PartialDataColumnHeader<P>>),
     UpdateDataColumnSubnets(u64),
 }
 
@@ -259,7 +259,10 @@ pub enum ServiceInboundMessage<P: Preset> {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
     Publish(PubsubMessage<P>),
-    PublishPartialMessages(Vec<Arc<PartialDataColumn<P>>>),
+    PublishPartialMessages(
+        Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
     ReportPartialMessageValidationFailure(PeerId, GossipTopic),

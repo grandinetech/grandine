@@ -1345,6 +1345,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         unfinalized_states_in_memory,
         kzg_backend,
         sync_without_reconstruction,
+        enable_partial_columns: network_config.enable_partial_columns,
     };
 
     let eth1_auth = Arc::new(Auth::new(auth_options)?);

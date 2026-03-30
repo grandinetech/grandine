@@ -58,11 +58,11 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumn},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumnHeader},
         primitives::ColumnIndex,
     },
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
+    nonstandard::{CustodyMode, PartialDataColumn, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
@@ -352,8 +352,8 @@ impl<P: Preset> Network<P> {
                             P2pToSync::DataColumnsNeeded(data_columns_by_root, slot)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
-                        BlobFetcherToP2p::PublishPartialDataColumns(partial_columns) => {
-                            self.publish_partial_data_column_sidecars(partial_columns);
+                        BlobFetcherToP2p::PublishPartialDataColumns(partial_columns, header) => {
+                            self.publish_partial_data_column_sidecars(partial_columns, header);
                         }
                     }
 
@@ -404,8 +404,8 @@ impl<P: Preset> Network<P> {
                             self.publish_voluntary_exit(voluntary_exit);
                             true
                         }
-                        ApiToP2p::PublishPartialDataColumns(partial_columns) => {
-                            self.publish_partial_data_column_sidecars(partial_columns);
+                        ApiToP2p::PublishPartialDataColumns(partial_columns, header) => {
+                            self.publish_partial_data_column_sidecars(partial_columns, header);
                             true
                         }
                         ApiToP2p::RequestIdentity(receiver) => {
@@ -475,8 +475,8 @@ impl<P: Preset> Network<P> {
                         P2pMessage::PublishDataColumnSidecar(data_column_sidecar) => {
                             self.publish_data_column_sidecar(data_column_sidecar);
                         }
-                        P2pMessage::PublishPartialDataColumn(partial_column) => {
-                            self.publish_partial_data_column_sidecars(vec![partial_column]);
+                        P2pMessage::PublishPartialDataColumn(partial_column, header) => {
+                            self.publish_partial_data_column_sidecars(vec![partial_column], header);
                         },
                         P2pMessage::PenalizePeer(peer_id, mutator_rejection_reason) => {
                             self.report_peer(
@@ -586,8 +586,8 @@ impl<P: Preset> Network<P> {
                         ValidatorToP2p::PublishContributionAndProof(contribution_and_proof) => {
                             self.publish_contribution_and_proof(contribution_and_proof);
                         }
-                        ValidatorToP2p::PublishPartialDataColumns(partial_columns) => {
-                            self.publish_partial_data_column_sidecars(partial_columns);
+                        ValidatorToP2p::PublishPartialDataColumns(partial_columns, header) => {
+                            self.publish_partial_data_column_sidecars(partial_columns, header);
                         }
                         ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count) => {
                             self.update_data_column_subnets(custody_group_count);
@@ -833,16 +833,10 @@ impl<P: Preset> Network<P> {
     fn publish_partial_data_column_sidecars(
         &self,
         partial_columns: Vec<Arc<PartialDataColumn<P>>>,
+        header: Arc<PartialDataColumnHeader<P>>,
     ) {
-        if self.network_globals.network_config.enable_partial_columns {
-            debug_with_peers!(
-                "publishing {} partial data column sidecars",
-                partial_columns.len()
-            );
-
-            ServiceInboundMessage::PublishPartialMessages(partial_columns)
-                .send(&self.network_to_service_tx);
-        }
+        ServiceInboundMessage::PublishPartialMessages(partial_columns, header)
+            .send(&self.network_to_service_tx);
     }
 
     fn publish_singular_attestation(&self, attestation: Arc<Attestation<P>>, subnet_id: SubnetId) {
@@ -2772,8 +2766,8 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::Publish(message) => {
                             service.publish(message);
                         }
-                        ServiceInboundMessage::PublishPartialMessages(columns) => {
-                            service.publish_partial(columns);
+                        ServiceInboundMessage::PublishPartialMessages(columns, header) => {
+                            service.publish_partial(columns, header);
                         }
                         ServiceInboundMessage::ReportPeer(peer_id, action, source, msg) => {
                             service.report_peer(&peer_id, action, source, msg);

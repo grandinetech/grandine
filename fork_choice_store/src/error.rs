@@ -7,8 +7,9 @@ use types::{
     bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    fulu::containers::{PartialDataColumn, PartialDataColumnHeader},
+    fulu::containers::PartialDataColumnHeader,
     gloas::containers::SignedExecutionPayloadBid,
+    nonstandard::PartialDataColumn,
     phase0::primitives::{Epoch, ExecutionAddress, Gwei, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };

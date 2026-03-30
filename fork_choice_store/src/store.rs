@@ -60,7 +60,7 @@ use types::{
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     fulu::{
         containers::{
-            DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumn,
+            DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar,
             PartialDataColumnHeader,
         },
         primitives::ColumnIndex,
@@ -74,7 +74,8 @@ use types::{
         primitives::BuilderIndex,
     },
     nonstandard::{
-        BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, StorageMode, WithStatus,
+        BlobSidecarWithId, DataColumnSidecarWithId, PartialDataColumn, PayloadStatus, Phase,
+        StorageMode, WithStatus,
     },
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},

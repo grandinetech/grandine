@@ -10,7 +10,7 @@ use crate::{
     electra::containers::ExecutionRequests,
     fulu::containers::{
         BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
-        DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier, PartialDataColumn,
+        DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier,
         PartialDataColumnHeader, PartialDataColumnSidecar,
     },
     phase0::primitives::{H256, Slot},
@@ -195,15 +195,6 @@ impl<P: Preset> From<DataColumnsByRootIdentifier<P>> for Vec<DataColumnIdentifie
     }
 }
 
-impl<P: Preset> From<&PartialDataColumn<P>> for DataColumnIdentifier {
-    fn from(column: &PartialDataColumn<P>) -> Self {
-        Self {
-            block_root: column.block_root,
-            index: column.index,
-        }
-    }
-}
-
 impl<P: Preset> PartialDataColumnHeader<P> {
     pub const fn slot(&self) -> Slot {
         self.signed_block_header.message.slot
@@ -268,7 +259,10 @@ impl<P: Preset> PartialDataColumnSidecar<P> {
         }
     }
 
-    pub fn clone_filter<F: Fn(usize) -> bool>(&self, filter: F) -> Option<Self> {
+    pub fn filter<F>(&self, filter: F) -> Option<Self>
+    where
+        F: Fn(usize) -> bool,
+    {
         // create new partial sidecar that only include cells being filter
         let mut cells_present_bitmap = self.cells_present_bitmap.clone();
         let mut cells = Vec::new();

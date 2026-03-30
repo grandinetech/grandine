@@ -89,7 +89,7 @@ use crate::{
             LightClientBootstrap as FuluLightClientBootstrap,
             LightClientFinalityUpdate as FuluLightClientFinalityUpdate,
             LightClientOptimisticUpdate as FuluLightClientOptimisticUpdate,
-            LightClientUpdate as FuluLightClientUpdate, PartialDataColumn, PartialDataColumnHeader,
+            LightClientUpdate as FuluLightClientUpdate, PartialDataColumnHeader,
             PartialDataColumnSidecar, SignedBeaconBlock as FuluSignedBeaconBlock,
             SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
         },
@@ -106,7 +106,7 @@ use crate::{
             SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         },
     },
-    nonstandard::Phase,
+    nonstandard::{PartialDataColumn, Phase},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         containers::{

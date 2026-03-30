@@ -5,9 +5,10 @@ use std_ext::ArcExt;
 use types::{
     combined::DataColumnSidecar,
     fulu::containers::{
-        DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumn,
-        PartialDataColumnHeader, PartialDataColumnSidecar,
+        DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumnHeader,
+        PartialDataColumnSidecar,
     },
+    nonstandard::PartialDataColumn,
     phase0::primitives::Slot,
     preset::Preset,
 };

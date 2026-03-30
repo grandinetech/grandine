@@ -30,9 +30,9 @@ use types::{
     },
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::containers::{DataColumnIdentifier, PartialDataColumn},
+    fulu::containers::DataColumnIdentifier,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{RelativeEpoch, ValidationOutcome},
+    nonstandard::{PartialDataColumn, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{H256, Slot},

@@ -1632,10 +1632,14 @@ where
                     ));
                 }
 
-                if matches!(origin, DataColumnSidecarOrigin::Gossip(..)) {
-                    self.send_to_p2p(P2pMessage::PublishPartialDataColumn(Arc::new(
-                        data_column_sidecar.as_ref().into(),
-                    )));
+                if matches!(origin, DataColumnSidecarOrigin::Gossip(..))
+                    && self.store.store_config().enable_partial_columns
+                    && let Some(header) = data_column_sidecar.partial_data_column_header()
+                {
+                    self.send_to_p2p(P2pMessage::PublishPartialDataColumn(
+                        Arc::new(data_column_sidecar.as_ref().into()),
+                        Arc::new(header),
+                    ));
                 }
 
                 if self

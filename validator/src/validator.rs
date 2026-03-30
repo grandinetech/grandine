@@ -1185,13 +1185,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             prometheus_metrics::stop_and_record(timer);
 
-            ValidatorToP2p::PublishPartialDataColumns(
-                data_column_sidecars
-                    .iter()
-                    .map(|sidecar| Arc::new(sidecar.as_ref().into()))
-                    .collect(),
-            )
-            .send(&self.p2p_tx);
+            if self.controller.store_config().enable_partial_columns
+                && let Some(header) = data_column_sidecars
+                    .first()
+                    .and_then(|s| s.partial_data_column_header())
+            {
+                ValidatorToP2p::PublishPartialDataColumns(
+                    data_column_sidecars
+                        .iter()
+                        .map(|sidecar| Arc::new(sidecar.as_ref().into()))
+                        .collect(),
+                    Arc::new(header),
+                )
+                .send(&self.p2p_tx);
+            }
 
             for data_column_sidecar in data_column_sidecars {
                 if self

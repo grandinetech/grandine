@@ -399,14 +399,20 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                         })
                                         .collect::<Vec<_>>();
 
-                                    // Publish partial data column sidecars
-                                    BlobFetcherToP2p::PublishPartialDataColumns(
-                                        data_column_sidecars
-                                            .iter()
-                                            .map(|sidecar| Arc::new(sidecar.as_ref().into()))
-                                            .collect(),
-                                    )
-                                    .send(&self.p2p_tx);
+                                    if self.controller.store_config().enable_partial_columns
+                                        && let Some(header) = data_column_sidecars
+                                            .first()
+                                            .and_then(|s| s.partial_data_column_header())
+                                    {
+                                        BlobFetcherToP2p::PublishPartialDataColumns(
+                                            data_column_sidecars
+                                                .iter()
+                                                .map(|sidecar| Arc::new(sidecar.as_ref().into()))
+                                                .collect(),
+                                            Arc::new(header),
+                                        )
+                                        .send(&self.p2p_tx);
+                                    }
 
                                     for data_column_sidecar in data_column_sidecars {
                                         let identifier = DataColumnIdentifier {
@@ -433,7 +439,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                                     )
                                 }
                             }
-                        } else {
+                        } else if self.controller.store_config().enable_partial_columns {
                             match block_or_sidecar_to_header(&block_or_sidecar) {
                                 Some(header) => {
                                     let partial_columns_result =
@@ -465,6 +471,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                                             BlobFetcherToP2p::PublishPartialDataColumns(
                                                 partial_columns,
+                                                Arc::new(header.clone()),
                                             )
                                             .send(&self.p2p_tx);
                                         }
