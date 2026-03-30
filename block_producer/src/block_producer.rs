@@ -320,17 +320,17 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     ) -> Result<PoolAdditionOutcome> {
         let mut attester_slashings = self.producer_context.attester_slashings.lock().await;
 
-        let mut seen_indices =
-            attester_slashings
-                .iter()
-                .flat_map(|attester_slashing| match attester_slashing {
-                    AttesterSlashing::Phase0(attester_slashing) => {
-                        accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
-                    }
-                    AttesterSlashing::Electra(attester_slashing) => {
-                        accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
-                    }
-                });
+        let seen_indices = attester_slashings
+            .iter()
+            .flat_map(|attester_slashing| match attester_slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                }
+            })
+            .collect::<HashSet<_>>();
 
         let all_seen = match slashing {
             AttesterSlashing::Phase0(ref attester_slashing) => {

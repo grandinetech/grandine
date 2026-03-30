@@ -188,6 +188,10 @@ pub enum MutatorMessage<P: Preset, W> {
         block: Arc<SignedBeaconBlock<P>>,
         data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     },
+    OverrideFinalizedCheckpoint {
+        wait_group: W,
+        checkpoint: Checkpoint,
+    },
 }
 
 impl<P: Preset, W> MutatorMessage<P, W> {

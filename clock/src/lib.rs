@@ -139,6 +139,15 @@ impl Tick {
         Self::from_duration::<P>(config, duration_since_unix_epoch, genesis_time)
     }
 
+    pub fn at_time_in_ms<P: Preset>(
+        config: &Config,
+        time: u64,
+        genesis_time: UnixSeconds,
+    ) -> Result<Self> {
+        let duration_since_unix_epoch = Duration::from_millis(time);
+        Self::from_duration::<P>(config, duration_since_unix_epoch, genesis_time)
+    }
+
     pub fn current<P: Preset>(config: &Config, genesis_time: UnixSeconds) -> Result<Self> {
         let duration_since_unix_epoch = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
         Self::from_duration::<P>(config, duration_since_unix_epoch, genesis_time)

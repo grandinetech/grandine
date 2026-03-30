@@ -5,11 +5,13 @@ use core::{
 use std::{
     backtrace::Backtrace,
     collections::{
-        HashSet as StdHashSet,
+        BTreeMap, HashSet as StdHashSet,
         binary_heap::{BinaryHeap, PeekMut},
     },
     sync::{Arc, OnceLock},
 };
+
+use bitvec::vec::BitVec;
 
 use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
@@ -153,6 +155,15 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // The fork choice store only deals with active validator indices, which cannot diverge.
     // Validators can only become eligible for activation after they are finalized.
     latest_messages: Vector<Option<Arc<LatestMessage>>>,
+    // Tracks which validators have had a valid gossip singular attestation accepted per target
+    // epoch, implementing the spec rule:
+    // [IGNORE] No other valid attestation seen for this validator and target epoch.
+    // Indexed by target epoch -> BitVec where bit i = validator i has been observed.
+    seen_gossip_attesters: BTreeMap<Epoch, BitVec>,
+    // Tracks which validators have produced a valid gossip aggregate and proof per target epoch,
+    // implementing the spec rule:
+    // [IGNORE] This is the first valid aggregate for this aggregator in this epoch.
+    seen_gossip_aggregators: BTreeMap<Epoch, StdHashSet<ValidatorIndex>>,
     // `consensus-specs` doesn't explicitly state it, but `Store.checkpoint_states` is effectively a
     // cache, as its contents can be recomputed at any time using data from other fields.
     //
@@ -327,6 +338,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             justified_active_balances: Self::active_balances(&anchor_state),
             timely_proposer_score: OnceLock::new(),
             latest_messages,
+            seen_gossip_attesters: BTreeMap::new(),
+            seen_gossip_aggregators: BTreeMap::new(),
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             current_slot_attestations: vector![],
             execution_payload_locations: hashmap! {},
@@ -439,6 +452,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub const fn finalized_checkpoint(&self) -> Checkpoint {
         self.finalized_checkpoint
+    }
+
+    pub const fn override_finalized_checkpoint(&mut self, checkpoint: Checkpoint) {
+        self.finalized_checkpoint = checkpoint;
+        self.unrealized_finalized_checkpoint = checkpoint;
     }
 
     #[must_use]
@@ -1125,41 +1143,51 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
         block_root: H256,
-    ) -> Option<BlockAction<P>> {
+    ) -> Result<Option<BlockAction<P>>> {
         // Skip blocks that are already known.
         //
         // This is a slight deviation from `consensus-specs`, but it appears to be compatible with
         // both the fork choice rule and the Networking specification.
         if self.contains_block(block_root) {
-            return Some(BlockAction::Ignore(true));
+            return Ok(Some(BlockAction::Ignore(true)));
         }
 
         // > Blocks cannot be in the future.
         // > If they are, their consideration must be delayed until the are in the past.
         if self.slot() < block.message().slot() {
-            return Some(BlockAction::DelayUntilSlot(block.clone_arc()));
+            return Ok(Some(BlockAction::DelayUntilSlot(block.clone_arc())));
         }
 
         // > Check that block is later than the finalized epoch slot
         //
         // This is redundant but may be faster than loading the parent block.
         if block.message().slot() <= self.finalized_slot() {
-            return Some(BlockAction::Ignore(false));
+            return Ok(Some(BlockAction::Ignore(false)));
         }
 
         // > Parent block must be known
-        let Some(parent) = self.chain_link(block.message().parent_root()) else {
-            return Some(BlockAction::DelayUntilParent(block.clone_arc()));
+        let parent_root = block.message().parent_root();
+
+        let Some(parent) = self.chain_link(parent_root) else {
+            // # [REJECT] The block's parent passes validation
+            ensure!(
+                !self.rejected_block_roots.contains(&parent_root),
+                Error::<P>::BlockParentRejectedBlock {
+                    block: block.clone_arc()
+                },
+            );
+
+            return Ok(Some(BlockAction::DelayUntilParent(block.clone_arc())));
         };
 
         // > Check block is a descendant of the finalized block at the checkpoint finalized slot
         //
         // Checking the slot is sufficient because orphans are pruned as soon as possible.
         if parent.slot() < self.finalized_slot() {
-            return Some(BlockAction::Ignore(false));
+            return Ok(Some(BlockAction::Ignore(false)));
         }
 
-        None
+        Ok(None)
     }
 
     pub fn validate_block_for_gossip(
@@ -1173,7 +1201,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             bail!("blacklisted beacon block: (block root: {block_root:?})");
         }
 
-        let block_action = self.validate_gossip_rules(block, block_root);
+        let block_action = self.validate_gossip_rules(block, block_root)?;
 
         if let Some(action) = block_action {
             return Ok(Some(action));
@@ -1204,7 +1232,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             bail!("blacklisted beacon block: (block root: {block_root:?})");
         }
 
-        let block_action = self.validate_gossip_rules(block, block_root);
+        let block_action = self.validate_gossip_rules(block, block_root)?;
 
         if let Some(action) = block_action {
             return Ok(action);
@@ -1640,6 +1668,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             !signature_validated && origin.verify_signatures(),
         )?;
 
+        // > This is the first valid aggregate for this aggregator in this epoch
+        if self.is_gossip_aggregator_known(aggregator_index, target.epoch) {
+            return Ok(AggregateAndProofAction::Ignore);
+        }
+
         // https://github.com/ethereum/consensus-specs/pull/2847
         let is_subset_aggregate = !self.aggregate_and_proof_supersets.check(&aggregate);
 
@@ -1708,6 +1741,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         attestation: Box::new(attestation),
                     },
                 );
+            }
+
+            // > [IGNORE] No other valid attestation seen for this validator and target epoch
+            //
+            // For `SingleAttestation` (Electra+) the attester index is available directly,
+            // so the check can be done early before the expensive target state resolution.
+            // For Phase0 the index requires committee resolution; the check is deferred and
+            // done after `attesting_indices` is resolved below.
+            if let Attestation::Single(single) = attestation.item.as_ref()
+                && self.is_gossip_attester_known(single.attester_index, target.epoch)
+            {
+                return Ok(AttestationAction::Ignore(attestation));
             }
         }
 
@@ -1796,6 +1841,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         };
 
+        // > [IGNORE] No other valid attestation seen for this validator and target epoch
+        //
+        // Deferred check for Phase0 attestations where the attester index was not yet
+        // available at the earlier check above.
+
+        if attestation.origin.must_be_singular()
+            && let Attestation::Phase0(_) = attestation.item.as_ref()
+            && let Some(&validator_index) = attesting_indices.into_iter().next()
+            && self.is_gossip_attester_known(validator_index, target.epoch)
+        {
+            return Ok(AttestationAction::Ignore(attestation));
+        }
+
         Ok(AttestationAction::Accept {
             attestation,
             attesting_indices,
@@ -1807,6 +1865,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// Roughly corresponds to [`validate_on_attestation`] from the Fork Choice specification.
     ///
     /// [`validate_on_attestation`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#validate_on_attestation
+    #[expect(clippy::too_many_lines)]
     fn validate_attestation_internal(
         &self,
         attestation: &Arc<Attestation<P>>,
@@ -1908,19 +1967,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        // > Attestation target must be for a known block.
-        // > If target block is unknown, delay consideration until block is found
-        if !self.contains_block(target.root) {
-            if Feature::IgnoreAttestationsForUnknownBlocks.is_enabled() {
-                return Ok(PartialAttestationAction::Ignore);
-            }
-
-            return Ok(PartialAttestationAction::DelayUntilBlock(target.root));
-        }
-
         // > Attestations must be for a known block.
         // > If block is unknown, delay consideration until the block is found
         let Some(ghost_vote_block) = self.block(beacon_block_root).map(WithStatus::value) else {
+            // [REJECT] The block being voted for passes validation
+            ensure!(
+                !self.rejected_block_roots.contains(&beacon_block_root),
+                Error::AttestationForRejectedBlock {
+                    attestation: attestation.clone_arc()
+                },
+            );
+
             if Feature::IgnoreAttestationsForUnknownBlocks.is_enabled() {
                 return Ok(PartialAttestationAction::Ignore);
             }
@@ -1948,12 +2005,28 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
 
         // > LMD vote must be consistent with FFG vote target
+        //
+        // This [REJECT] check is performed before the [IGNORE] check for unknown target block
+        // below because it does not require target.root to be in the store — the ancestor is
+        // computed by traversing backwards from beacon_block_root. Ordering it first ensures
+        // that an attestation with an inconsistent target is rejected rather than ignored even
+        // when the target root happens to be unknown.
         ensure!(
             target.root == ancestor_at_target_epoch_start,
             Error::LmdGhostInconsistentWithFfgTarget {
                 attestation: attestation.clone_arc(),
             },
         );
+
+        // > Attestation target must be for a known block.
+        // > If target block is unknown, delay consideration until block is found
+        if !self.contains_block(target.root) {
+            if Feature::IgnoreAttestationsForUnknownBlocks.is_enabled() {
+                return Ok(PartialAttestationAction::Ignore);
+            }
+
+            return Ok(PartialAttestationAction::DelayUntilBlock(target.root));
+        }
 
         Ok(PartialAttestationAction::Accept)
     }
@@ -2706,6 +2779,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let epoch_updated = new_tick.epoch::<P>() > old_tick.epoch::<P>();
 
         if epoch_updated {
+            let previous_epoch = self.previous_epoch();
             let old_justified_checkpoint = self.justified_checkpoint;
             let old_finalized_checkpoint = self.finalized_checkpoint;
 
@@ -2726,6 +2800,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if finalized_checkpoint_updated {
                 self.extend_latest_messages_after_finalization();
             }
+
+            self.seen_gossip_attesters
+                .retain(|&epoch, _| epoch >= previous_epoch);
+
+            self.seen_gossip_aggregators
+                .retain(|&epoch, _| epoch >= previous_epoch);
         }
 
         let current_slot_attestations = core::mem::take(&mut self.current_slot_attestations);
@@ -3445,6 +3525,48 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         self.apply_balance_differences(differences)
+    }
+
+    pub fn observe_gossip_attester(&mut self, validator_index: ValidatorIndex, epoch: Epoch) {
+        if let Ok(index) = usize::try_from(validator_index) {
+            let bitfield = self
+                .seen_gossip_attesters
+                .entry(epoch)
+                .or_insert_with(|| BitVec::repeat(false, self.justified_active_balances.len()));
+
+            if bitfield.len() <= index {
+                bitfield.resize(index + 1, false);
+            }
+
+            bitfield.set(index, true);
+        }
+    }
+
+    pub fn is_gossip_attester_known(&self, validator_index: ValidatorIndex, epoch: Epoch) -> bool {
+        let Ok(index) = usize::try_from(validator_index) else {
+            return false;
+        };
+
+        self.seen_gossip_attesters
+            .get(&epoch)
+            .is_some_and(|bitfield| bitfield.get(index).is_some_and(|bit| *bit))
+    }
+
+    pub fn observe_gossip_aggregator(&mut self, aggregator_index: ValidatorIndex, epoch: Epoch) {
+        self.seen_gossip_aggregators
+            .entry(epoch)
+            .or_default()
+            .insert(aggregator_index);
+    }
+
+    pub fn is_gossip_aggregator_known(
+        &self,
+        aggregator_index: ValidatorIndex,
+        epoch: Epoch,
+    ) -> bool {
+        self.seen_gossip_aggregators
+            .get(&epoch)
+            .is_some_and(|set| set.contains(&aggregator_index))
     }
 
     // `Vector` has no `resize` method as of `im` version 15.1.0.
@@ -4498,6 +4620,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             &type_name,
             "current_slot_attestations",
             self.current_slot_attestations.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "seen_gossip_attesters",
+            self.seen_gossip_attesters
+                .values()
+                .map(|bitfield| bitfield.count_ones())
+                .sum(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "seen_gossip_aggregators",
+            self.seen_gossip_aggregators
+                .values()
+                .map(StdHashSet::len)
+                .sum(),
         );
     }
 }

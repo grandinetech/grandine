@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result, bail};
-use eth1_api::{ApiController, RealController};
+use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
 use logging::debug_with_peers;
@@ -67,8 +67,8 @@ pub fn convert_to_electra_attestation<P: Preset>(
 }
 
 // TODO(feature/electra): properly refactor attestations
-pub fn try_convert_to_single_attestation<P: Preset>(
-    controller: &RealController<P>,
+pub fn try_convert_to_single_attestation<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
     attestation: ElectraAttestation<P>,
 ) -> Result<SingleAttestation> {
     let ElectraAttestation {

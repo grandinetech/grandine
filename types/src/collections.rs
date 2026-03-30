@@ -7,7 +7,7 @@
 //!
 //! All bundle sizes are currently set to minimize rehashing at the cost of higher memory usage.
 
-use ssz::{PersistentList, PersistentVector, UnhashedBundleSize};
+use ssz::{ContiguousVector, PersistentList, PersistentVector, UnhashedBundleSize};
 
 use crate::{
     altair::primitives::ParticipationFlags,
@@ -20,7 +20,7 @@ use crate::{
     },
     preset::{
         BuilderPendingPaymentsLength, MaxAttestationsPerEpoch, Preset, ProposerLookaheadLength,
-        SlotsPerEth1VotingPeriod, SlotsPerHistoricalRoot,
+        PtcWindowLength, SlotsPerEth1VotingPeriod, SlotsPerHistoricalRoot,
     },
 };
 
@@ -84,3 +84,6 @@ pub type BuilderPendingWithdrawals<P> =
 
 pub type PayloadExpectedWithdrawals<P> =
     PersistentList<Withdrawal, <P as Preset>::MaxWithdrawalsPerPayload>;
+
+pub type Ptc<P> = ContiguousVector<ValidatorIndex, <P as Preset>::PtcSize>;
+// pub type PtcWindow<P> = PersistentVector<Ptc<P>, PtcWindowLength<P>, UnhashedBundleSize<Ptc<P>>>;

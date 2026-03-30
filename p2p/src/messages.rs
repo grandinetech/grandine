@@ -223,13 +223,13 @@ impl<P: Preset> ValidatorToP2p<P> {
     }
 }
 
-pub enum P2pToValidator<P: Preset> {
-    AttesterSlashing(Box<AttesterSlashing<P>>, GossipId),
-    ProposerSlashing(Box<ProposerSlashing>, GossipId),
-    VoluntaryExit(Box<SignedVoluntaryExit>, GossipId),
+pub enum P2pToValidator<P: Preset, W = ()> {
+    AttesterSlashing(Box<AttesterSlashing<P>>, GossipId, W),
+    ProposerSlashing(Box<ProposerSlashing>, GossipId, W),
+    VoluntaryExit(Box<SignedVoluntaryExit>, GossipId, W),
 }
 
-impl<P: Preset> P2pToValidator<P> {
+impl<P: Preset, W> P2pToValidator<P, W> {
     pub fn send(self, tx: &UnboundedSender<Self>) {
         if tx.unbounded_send(self).is_err() {
             debug_with_peers!("send to validator failed because the receiver was dropped");
