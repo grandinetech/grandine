@@ -32,6 +32,8 @@ public interface IGrandineEngineApi
 
     CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2(CVec_CH256 versionedHashes);
 
+    CResult_CVec_COption_CBlobAndProofV2 EngineGetBlobsV3(CVec_CH256 versionedHashes);
+
     CResult_CVec_CGrandineString EngineExchangeCapabilities(CVec_CGrandineString capabilities);
 
     CResult_CVec_CClientVersionV1 EngineGetClientVersionV1(CClientVersionV1 version);

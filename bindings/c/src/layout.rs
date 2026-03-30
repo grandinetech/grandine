@@ -76,6 +76,11 @@ pub extern "C" fn grandine_layout_blob_and_proof_v2() -> CLayout {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn grandine_layout_option_blob_and_proof_v2() -> CLayout {
+    CLayout::new(Layout::new::<COption<CBlobAndProofV2>>())
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn grandine_layout_string() -> CLayout {
     CLayout::new(Layout::new::<CGrandineString>())
 }
