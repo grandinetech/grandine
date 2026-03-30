@@ -2,6 +2,7 @@ use eth2_libp2p::{
     ConnectionDirection, Enr, EnrExt as _, EnrSyncCommitteeBitfield, Multiaddr,
     PeerConnectionStatus, PeerId, PeerInfo, types::EnrAttestationBitfield,
 };
+use fork_choice_control::Wait;
 use serde::{Deserialize, Serialize};
 use types::preset::Preset;
 
@@ -111,7 +112,7 @@ impl From<&ConnectionDirection> for PeerDirection {
     }
 }
 
-impl<P: Preset> Network<P> {
+impl<P: Preset, W: Wait> Network<P, W> {
     #[must_use]
     pub fn node_identity(&self) -> NodeIdentity {
         let metadata = self.network_globals().local_metadata.read();

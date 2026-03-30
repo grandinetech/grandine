@@ -281,7 +281,11 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
     ) {
         dedicated_executor
             .spawn(async move {
-                Self { controller }.process_aggregate_batch(aggregates, metrics.as_ref());
+                Self { controller }.process_aggregate_batch(
+                    wait_group.clone(),
+                    aggregates,
+                    metrics.as_ref(),
+                );
 
                 TaskMessage::Finished(wait_group).send(&task_to_verifier_tx);
             })
@@ -311,6 +315,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
 
     fn process_aggregate_batch(
         &self,
+        wait_group: W,
         aggregates_with_origins: Vec<AggregateWithOrigin<P>>,
         metrics: Option<&Arc<Metrics>>,
     ) {
@@ -335,7 +340,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                 _ => Either::Right(result),
             });
 
-        self.send_results_to_fork_choice(other);
+        self.send_results_to_fork_choice(wait_group.clone(), other);
 
         match self.verify_aggregate_batch_signatures(
             &accepted,
@@ -343,7 +348,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
             metrics,
         ) {
             Ok(()) => {
-                self.send_results_to_fork_choice(accepted);
+                self.send_results_to_fork_choice(wait_group, accepted);
             }
             Err(error) => {
                 exception!(
@@ -358,22 +363,30 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
                         ..
                     }) = result
                     {
-                        self.process_singular_aggregate(AggregateWithOrigin {
-                            aggregate: aggregate_and_proof,
-                            origin,
-                        });
+                        self.process_singular_aggregate(
+                            wait_group.clone(),
+                            AggregateWithOrigin {
+                                aggregate: aggregate_and_proof,
+                                origin,
+                            },
+                        );
                     }
                 }
             }
         }
     }
 
-    fn send_results_to_fork_choice(&self, results: Vec<VerifyAggregateAndProofResult<P>>) {
+    fn send_results_to_fork_choice(
+        &self,
+        wait_group: W,
+        results: Vec<VerifyAggregateAndProofResult<P>>,
+    ) {
         if results.is_empty() {
             return;
         }
 
-        self.controller.on_aggregate_and_proof_batch(results);
+        self.controller
+            .on_aggregate_and_proof_batch(wait_group, results);
     }
 
     fn verify_aggregate_batch_signatures(
@@ -445,10 +458,15 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
         verifier.finish()
     }
 
-    fn process_singular_aggregate(&self, aggregate_with_origin: AggregateWithOrigin<P>) {
+    fn process_singular_aggregate(
+        &self,
+        wait_group: W,
+        aggregate_with_origin: AggregateWithOrigin<P>,
+    ) {
         let AggregateWithOrigin { aggregate, origin } = aggregate_with_origin;
 
-        self.controller.on_aggregate_and_proof(aggregate, origin);
+        self.controller
+            .on_aggregate_and_proof(wait_group, aggregate, origin);
     }
 }
 
@@ -473,7 +491,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
                         .start_timer()
                 });
 
-                Self { controller }.process_attestation_batch(attestations);
+                Self { controller }.process_attestation_batch(wait_group.clone(), attestations);
 
                 TaskMessage::Finished(wait_group).send(&task_to_verifier_tx);
             })
@@ -501,7 +519,11 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
         }
     }
 
-    fn process_attestation_batch(&self, attestations: Vec<AttestationItem<P, GossipId>>) {
+    fn process_attestation_batch(
+        &self,
+        wait_group: W,
+        attestations: Vec<AttestationItem<P, GossipId>>,
+    ) {
         let snapshot = self.controller.snapshot();
 
         // if let Some(metrics) = metrics.as_ref() {
@@ -516,7 +538,7 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
                 _ => Either::Right(result),
             });
 
-        self.send_results_to_fork_choice(other);
+        self.send_results_to_fork_choice(wait_group.clone(), other);
 
         // if let Some(metrics) = metrics.as_ref() {
         //     metrics.set_attestation_verifier_attestation_batch_signature_len(accepted_attestations_wo.len());
@@ -529,26 +551,27 @@ impl<P: Preset, W: Wait> VerifyAttestationBatchTask<P, W> {
                     .map(|action| action.map(AttestationAction::into_verified))
                     .collect();
 
-                self.send_results_to_fork_choice(accepted);
+                self.send_results_to_fork_choice(wait_group, accepted);
             }
             Err(error) => {
                 exception!("signature verification for gossip attestation batch failed: {error}");
 
                 for accepted_attestation in accepted.into_iter().flatten() {
                     if let AttestationAction::Accept { attestation, .. } = accepted_attestation {
-                        self.controller.on_singular_attestation(attestation);
+                        self.controller
+                            .on_singular_attestation(wait_group.clone(), attestation);
                     }
                 }
             }
         }
     }
 
-    fn send_results_to_fork_choice(&self, results: Vec<VerifyAttestationResult<P>>) {
+    fn send_results_to_fork_choice(&self, wait_group: W, results: Vec<VerifyAttestationResult<P>>) {
         if results.is_empty() {
             return;
         }
 
-        self.controller.on_attestation_batch(results);
+        self.controller.on_attestation_batch(wait_group, results);
     }
 
     fn verify_attestation_batch_signatures(

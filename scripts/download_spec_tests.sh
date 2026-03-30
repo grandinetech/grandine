@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SPEC_VERSION="${SPEC_VERSION:-v1.7.0-alpha.3}"
+SPEC_VERSION="${SPEC_VERSION:-v1.7.0-alpha.4}"
 TESTS_DIR="consensus-spec-tests"
 VERSION_FILE="${TESTS_DIR}/.version"
 BASE_URL="https://github.com/ethereum/consensus-specs/releases/download/${SPEC_VERSION}"
@@ -98,12 +98,12 @@ download_tarball() {
 
         # Clean up any partial extraction
         rm -rf "${TESTS_DIR}/tests/${tarball_name}"
-        
+
         if [[ $attempt -lt $MAX_RETRIES ]]; then
             echo "  Retrying in 2 seconds..."
             sleep 2
         fi
-        
+
         attempt=$((attempt + 1))
     done
 

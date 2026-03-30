@@ -34,10 +34,7 @@ use types::{
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
     fulu::beacon_state::BeaconState as FuluBeaconState,
-    gloas::{
-        beacon_state::BeaconState as GloasBeaconState,
-        containers::{BuilderPendingPayment, ExecutionPayloadBid},
-    },
+    gloas::{beacon_state::BeaconState as GloasBeaconState, containers::ExecutionPayloadBid},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
@@ -906,10 +903,11 @@ pub fn upgrade_to_gloas<P: Preset>(
         builders: PersistentList::default(),
         next_withdrawal_builder_index: 0,
         execution_payload_availability: BitVector::new(true),
-        builder_pending_payments: PersistentVector::repeat_element(BuilderPendingPayment::default()),
+        builder_pending_payments: PersistentVector::default(),
         builder_pending_withdrawals: PersistentList::default(),
         latest_block_hash: latest_execution_payload_header.block_hash,
         payload_expected_withdrawals: PersistentList::default(),
+        // ptc_window: PersistentVector::default(),
         // Cache
         cache,
     };

@@ -128,7 +128,7 @@ pub struct Channels<P: Preset, W> {
     pub api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
     pub fork_choice_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
     pub p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
-    pub p2p_to_validator_rx: UnboundedReceiver<P2pToValidator<P>>,
+    pub p2p_to_validator_rx: UnboundedReceiver<P2pToValidator<P, W>>,
     pub slasher_to_validator_rx: Option<UnboundedReceiver<SlasherToValidator<P>>>,
     pub subnet_service_tx: UnboundedSender<ToSubnetService>,
     pub validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
@@ -144,7 +144,7 @@ pub struct Validator<P: Preset, W: Wait> {
     api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
     fork_choice_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
     p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
-    p2p_to_validator_rx: UnboundedReceiver<P2pToValidator<P>>,
+    p2p_to_validator_rx: UnboundedReceiver<P2pToValidator<P, W>>,
     last_tick: Option<Tick>,
     next_graffiti_index: usize,
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
@@ -327,14 +327,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 },
 
                 gossip_message = self.p2p_to_validator_rx.select_next_some() => match gossip_message {
-                    P2pToValidator::AttesterSlashing(slashing, gossip_id) => {
-                        self.handle_attester_slashing(slashing, gossip_id).await
+                    P2pToValidator::AttesterSlashing(slashing, gossip_id, wait_group) => {
+                        self.handle_attester_slashing(slashing, gossip_id, wait_group).await
                     }
-                    P2pToValidator::ProposerSlashing(slashing, gossip_id) => {
-                        self.handle_propser_slashing(*slashing, gossip_id).await
+                    P2pToValidator::ProposerSlashing(slashing, gossip_id, wait_group) => {
+                        self.handle_propser_slashing(*slashing, gossip_id, wait_group).await
                     }
-                    P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id) => {
-                        self.handle_voluntary_exit(*voluntary_exit, gossip_id).await
+                    P2pToValidator::VoluntaryExit(voluntary_exit, gossip_id, wait_group) => {
+                        self.handle_voluntary_exit(*voluntary_exit, gossip_id, wait_group).await
                     }
                 },
 
@@ -414,7 +414,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
-    async fn handle_propser_slashing(&self, slashing: ProposerSlashing, gossip_id: GossipId) {
+    async fn handle_propser_slashing(
+        &self,
+        slashing: ProposerSlashing,
+        gossip_id: GossipId,
+        _wait_group: W,
+    ) {
         let outcome = match self
             .block_producer
             .handle_external_proposer_slashing(slashing)
@@ -439,6 +444,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &self,
         slashing: Box<AttesterSlashing<P>>,
         gossip_id: GossipId,
+        _wait_group: W,
     ) {
         let outcome = match self
             .block_producer
@@ -464,6 +470,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &self,
         voluntary_exit: SignedVoluntaryExit,
         gossip_id: GossipId,
+        _wait_group: W,
     ) {
         let outcome = match self
             .block_producer
@@ -1320,11 +1327,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let attestation = Arc::new(attestation.clone());
             let subnet_id = slot_head.subnet_id(attestation.data().slot, committee_index)?;
 
-            self.controller
-                .on_singular_attestation(AttestationItem::unverified(
+            self.controller.on_singular_attestation(
+                wait_group.clone(),
+                AttestationItem::unverified(
                     attestation.clone_arc(),
                     AttestationOrigin::Own(subnet_id),
-                ));
+                ),
+            );
 
             ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
                 .send(&self.p2p_tx);

@@ -42,6 +42,8 @@ pub enum Error<P: Preset> {
         attestation: Arc<Attestation<P>>,
         block: Arc<SignedBeaconBlock<P>>,
     },
+    #[error("block being voted for failed validation (attestation: {attestation:?})")]
+    AttestationForRejectedBlock { attestation: Arc<Attestation<P>> },
     #[error("attestation votes for a checkpoint in the wrong epoch: {attestation:?}")]
     AttestationTargetsWrongEpoch { attestation: Arc<Attestation<P>> },
     #[error(
@@ -83,6 +85,8 @@ pub enum Error<P: Preset> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("block parent rejected (block: {block:?}")]
+    BlockParentRejectedBlock { block: Arc<SignedBeaconBlock<P>> },
     #[error(
         "the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}"
     )]

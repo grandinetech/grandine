@@ -334,6 +334,14 @@ where
                     execution_block_hash,
                     payload_status,
                 ),
+                MutatorMessage::OverrideFinalizedCheckpoint {
+                    wait_group,
+                    checkpoint,
+                } => {
+                    self.store_mut().override_finalized_checkpoint(checkpoint);
+                    self.update_store_snapshot();
+                    drop(wait_group);
+                }
                 MutatorMessage::Stop { save_to_storage } => {
                     break self.handle_stop(save_to_storage);
                 }
@@ -543,8 +551,6 @@ where
             self.send_to_pool(PoolMessage::Slot(slot));
             self.send_to_p2p(P2pMessage::Slot(slot));
             self.send_to_subnet_service(SubnetMessage::Slot(wait_group.clone(), slot));
-
-            self.track_collection_metrics();
         }
 
         if changes.is_finalized_checkpoint_updated() {
@@ -581,6 +587,8 @@ where
             ) {
                 self.prepare_execution_payload_for_next_slot(&state);
             }
+
+            self.track_collection_metrics();
         }
 
         Ok(())
@@ -1042,6 +1050,13 @@ where
                     ));
                 }
 
+                let message = aggregate_and_proof.message();
+
+                self.store_mut().observe_gossip_aggregator(
+                    message.aggregator_index(),
+                    message.aggregate().data().target.epoch,
+                );
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
@@ -1225,6 +1240,7 @@ where
                 }
 
                 let is_from_block = attestation.origin.is_from_block();
+                let is_singular = attestation.origin.must_be_singular();
 
                 let AttestationItem {
                     item: attestation,
@@ -1245,6 +1261,15 @@ where
                     attesting_indices,
                     is_from_block,
                 };
+
+                if is_singular {
+                    let target_epoch = valid_attestation.data.target.epoch;
+
+                    for &validator_index in &valid_attestation.attesting_indices {
+                        self.store_mut()
+                            .observe_gossip_attester(validator_index, target_epoch);
+                    }
+                }
 
                 let old_head = self.store_mut().apply_attestation(valid_attestation)?;
 
