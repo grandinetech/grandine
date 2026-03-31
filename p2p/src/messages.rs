@@ -20,12 +20,12 @@ use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{
-        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, AttesterSlashing, DataColumnSidecar, PartialDataColumnHeader,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumnHeader},
+        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
     gloas::containers::SignedExecutionPayloadBid,
@@ -105,7 +105,10 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
-    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>, Arc<PartialDataColumnHeader<P>>),
+    PublishPartialDataColumns(
+        #[serde(skip)] Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),
@@ -215,7 +218,10 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
-    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>, Arc<PartialDataColumnHeader<P>>),
+    PublishPartialDataColumns(
+        #[serde(skip)] Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     UpdateDataColumnSubnets(u64),
 }
 

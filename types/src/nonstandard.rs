@@ -9,7 +9,7 @@ use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::{ContiguousList, Size, SszHash, SszSize, SszWrite, WriteError};
+use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -19,7 +19,9 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, DataColumnSidecar, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, PartialDataColumnHeader, SignedBeaconBlock,
+    },
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
@@ -27,7 +29,7 @@ use crate::{
     },
     electra::containers::ExecutionRequests,
     fulu::{
-        containers::{DataColumnIdentifier, PartialDataColumnHeader, PartialDataColumnSidecar},
+        containers::{DataColumnIdentifier, PartialDataColumnSidecar},
         primitives::ColumnIndex,
     },
     phase0::{
@@ -451,7 +453,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
             Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
-            Self::PartialHeader(header) => header.signed_block_header.message.hash_tree_root(),
+            Self::PartialHeader(header) => header.beacon_block_root(),
         }
     }
 
@@ -462,7 +464,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Sidecar(sidecar) => sidecar
                 .pre_gloas()
                 .map(|sidecar| sidecar.signed_block_header),
-            Self::PartialHeader(header) => Some(header.signed_block_header),
+            Self::PartialHeader(header) => header.signed_block_header(),
         }
     }
 
@@ -476,7 +478,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
             Self::Sidecar(sidecar) => sidecar.kzg_commitments(),
-            Self::PartialHeader(header) => Some(&header.kzg_commitments),
+            Self::PartialHeader(header) => Some(header.kzg_commitments()),
         }
     }
 }

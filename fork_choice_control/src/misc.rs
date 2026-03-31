@@ -17,15 +17,14 @@ use strum::IntoStaticStr;
 use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
-    combined::{DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        DataColumnSidecar, PartialDataColumnHeader, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
-    fulu::{
-        containers::{DataColumnIdentifier, PartialDataColumnHeader},
-        primitives::ColumnIndex,
-    },
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::PartialDataColumn,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,

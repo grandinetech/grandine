@@ -19,12 +19,16 @@ use scc::HashMap as SccHashMap;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use types::{
-    combined::SignedBeaconBlock,
+    combined::{PartialDataColumnHeader, SignedBeaconBlock},
     deneb::{containers::BlobIdentifier, primitives::BlobIndex},
     fulu::{
-        containers::{DataColumnIdentifier, DataColumnsByRootIdentifier, PartialDataColumnHeader},
+        containers::{
+            DataColumnIdentifier, DataColumnsByRootIdentifier,
+            PartialDataColumnHeader as FuluPartialDataColumnHeader,
+        },
         primitives::ColumnIndex,
     },
+    gloas::containers::PartialDataColumnHeader as GloasPartialDataColumnHeader,
     nonstandard::BlockOrDataColumnSidecar,
     phase0::primitives::Slot,
     preset::Preset,
@@ -550,10 +554,10 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 fn block_or_sidecar_to_header<P: Preset>(
     block_or_sidecar: &BlockOrDataColumnSidecar<P>,
 ) -> Option<PartialDataColumnHeader<P>> {
-    let kzg_commitments_inclusion_proof = match block_or_sidecar {
+    let kzg_commitments_inclusion_proof_opt = match block_or_sidecar {
         BlockOrDataColumnSidecar::Block(block) => match block.as_ref() {
             SignedBeaconBlock::Fulu(block) => {
-                misc::kzg_commitments_inclusion_proof(&block.message.body)
+                Some(misc::kzg_commitments_inclusion_proof(&block.message.body))
             }
             SignedBeaconBlock::Phase0(_)
             | SignedBeaconBlock::Altair(_)
@@ -561,15 +565,28 @@ fn block_or_sidecar_to_header<P: Preset>(
             | SignedBeaconBlock::Capella(_)
             | SignedBeaconBlock::Deneb(_)
             | SignedBeaconBlock::Electra(_)
-            | SignedBeaconBlock::Gloas(_) => return None,
+            | SignedBeaconBlock::Gloas(_) => None,
         },
-        BlockOrDataColumnSidecar::Sidecar(sidecar) => sidecar.kzg_commitments_inclusion_proof()?,
-        BlockOrDataColumnSidecar::PartialHeader(header) => header.kzg_commitments_inclusion_proof,
+        BlockOrDataColumnSidecar::Sidecar(sidecar) => sidecar.kzg_commitments_inclusion_proof(),
+        BlockOrDataColumnSidecar::PartialHeader(header) => header.kzg_commitments_inclusion_proof(),
     };
 
-    Some(PartialDataColumnHeader {
-        signed_block_header: block_or_sidecar.signed_block_header()?,
-        kzg_commitments: block_or_sidecar.kzg_commitments().cloned()?,
-        kzg_commitments_inclusion_proof,
-    })
+    let header = if let Some(kzg_commitments_inclusion_proof) = kzg_commitments_inclusion_proof_opt
+    {
+        FuluPartialDataColumnHeader {
+            signed_block_header: block_or_sidecar.signed_block_header()?,
+            kzg_commitments: block_or_sidecar.kzg_commitments().cloned()?,
+            kzg_commitments_inclusion_proof,
+        }
+        .into()
+    } else {
+        GloasPartialDataColumnHeader {
+            kzg_commitments: block_or_sidecar.kzg_commitments().cloned()?,
+            slot: block_or_sidecar.slot(),
+            beacon_block_root: block_or_sidecar.block_root(),
+        }
+        .into()
+    };
+
+    Some(header)
 }

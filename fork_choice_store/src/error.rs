@@ -5,9 +5,11 @@ use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
     bellatrix::{containers::PowBlock, primitives::Gas},
-    combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        Attestation, DataColumnSidecar, PartialDataColumnHeader, SignedAggregateAndProof,
+        SignedBeaconBlock,
+    },
     deneb::containers::BlobSidecar,
-    fulu::containers::PartialDataColumnHeader,
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::PartialDataColumn,
     phase0::primitives::{Epoch, ExecutionAddress, Gwei, Slot, SubnetId, ValidatorIndex},
@@ -231,6 +233,13 @@ pub enum Error<P: Preset> {
     PartialHeaderProposerIndexMismatch {
         header: Arc<PartialDataColumnHeader<P>>,
         computed: ValidatorIndex,
+    },
+    #[error(
+        "partial data column header's slot mismatch the slot in beacon block: {header:?}, block_slot: {block_slot}"
+    )]
+    PartialHeaderSlotMismatch {
+        header: Arc<PartialDataColumnHeader<P>>,
+        block_slot: Slot,
     },
     #[error(
         "The cells present bitmap length is not equal to the number of KZG commitments \

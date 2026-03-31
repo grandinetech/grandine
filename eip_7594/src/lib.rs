@@ -21,13 +21,13 @@ use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    combined::{DataColumnSidecar, SignedBeaconBlock},
+    combined::{DataColumnSidecar, PartialDataColumnHeader, SignedBeaconBlock},
     config::Config,
     deneb::primitives::{Blob, KzgCommitment, KzgProof},
     fulu::{
         containers::{
-            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry, PartialDataColumnHeader,
-            PartialDataColumnSidecar,
+            DataColumnSidecar as FuluDataColumnSidecar, MatrixEntry,
+            PartialDataColumnHeader as FuluPartialDataColumnHeader, PartialDataColumnSidecar,
         },
         primitives::{
             BlobCommitmentsInclusionProof, CellBitmap, CellsAndKzgProofs, ColumnIndex, CustodyIndex,
@@ -250,7 +250,7 @@ pub fn verify_sidecar_inclusion_proof<P: Preset>(
 }
 
 pub fn verify_partial_data_column_header_inclusion_proof<P: Preset>(
-    header: &PartialDataColumnHeader<P>,
+    header: &FuluPartialDataColumnHeader<P>,
     metrics: Option<&Arc<Metrics>>,
 ) -> bool {
     let _timer = metrics.as_ref().map(|metrics| {
@@ -259,7 +259,7 @@ pub fn verify_partial_data_column_header_inclusion_proof<P: Preset>(
             .start_timer()
     });
 
-    let PartialDataColumnHeader {
+    let FuluPartialDataColumnHeader {
         kzg_commitments,
         signed_block_header,
         kzg_commitments_inclusion_proof,
@@ -488,18 +488,27 @@ pub fn construct_data_column_sidecars_from_partial_header<P: Preset>(
     header: &PartialDataColumnHeader<P>,
     cells_and_kzg_proofs: &[CellsAndKzgProofs<P>],
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
-    let PartialDataColumnHeader {
-        kzg_commitments,
-        signed_block_header,
-        kzg_commitments_inclusion_proof,
-    } = header;
+    match header {
+        PartialDataColumnHeader::Fulu(header) => {
+            let FuluPartialDataColumnHeader {
+                kzg_commitments,
+                signed_block_header,
+                kzg_commitments_inclusion_proof,
+            } = header;
 
-    get_fulu_data_column_sidecars(
-        *signed_block_header,
-        kzg_commitments,
-        *kzg_commitments_inclusion_proof,
-        cells_and_kzg_proofs,
-    )
+            get_fulu_data_column_sidecars(
+                *signed_block_header,
+                kzg_commitments,
+                *kzg_commitments_inclusion_proof,
+                cells_and_kzg_proofs,
+            )
+        }
+        PartialDataColumnHeader::Gloas(header) => get_data_column_sidecars_post_gloas(
+            header.beacon_block_root,
+            header.slot,
+            cells_and_kzg_proofs,
+        ),
+    }
 }
 
 pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
@@ -703,7 +712,7 @@ fn construct_partial_data_columns<P: Preset>(
     header: &PartialDataColumnHeader<P>,
     cells_and_kzg_proofs_opt: Vec<Option<CellsAndKzgProofs<P>>>,
 ) -> Result<Vec<Arc<PartialDataColumn<P>>>> {
-    let block_root = header.signed_block_header.message.hash_tree_root();
+    let block_root = header.beacon_block_root();
     let mut cells_present_bitmap = CellBitmap::<P>::with_length(cells_and_kzg_proofs_opt.len());
     let cells_and_kzg_proofs = cells_and_kzg_proofs_opt
         .into_iter()

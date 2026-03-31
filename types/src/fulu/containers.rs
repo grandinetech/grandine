@@ -6,6 +6,7 @@ use typenum::{Log2, U1};
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
     capella::{consts::ExecutionPayloadIndex, containers::SignedBlsToExecutionChange},
+    combined::PartialDataColumnHeader as CombinedPartialDataColumnHeader,
     deneb::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
         primitives::{Blob, KzgCommitment, KzgProof},
@@ -212,7 +213,7 @@ pub struct PartialDataColumnSidecar<P: Preset> {
     pub cells_present_bitmap: CellBitmap<P>,
     pub partial_column: ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
     pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
-    pub header: ContiguousList<PartialDataColumnHeader<P>, U1>,
+    pub header: ContiguousList<CombinedPartialDataColumnHeader<P>, U1>,
 }
 
 #[derive(Clone, Default, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]

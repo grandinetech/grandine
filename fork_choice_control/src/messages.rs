@@ -19,10 +19,11 @@ use serde::Serialize;
 use tracing::Span;
 use types::{
     combined::{
-        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, BeaconState, DataColumnSidecar, PartialDataColumnHeader,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
-    fulu::{containers::{DataColumnIdentifier, PartialDataColumnHeader}, primitives::ColumnIndex},
+    fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::PartialDataColumn,
     phase0::{
         containers::Checkpoint,

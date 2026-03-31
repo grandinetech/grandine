@@ -1915,7 +1915,7 @@ where
                 );
             }
             Ok(PartialDataColumnSidecarAction::DelayUntilState(column, header, block_root)) => {
-                let slot = header.signed_block_header.message.slot;
+                let slot = header.slot();
 
                 let pending_partial = PendingPartialDataColumn {
                     column,
@@ -1951,7 +1951,14 @@ where
                 }
             }
             Ok(PartialDataColumnSidecarAction::DelayUntilParent(column, header)) => {
-                let parent_root = header.signed_block_header.message.parent_root;
+                let Some(parent_root) = header
+                    .signed_block_header()
+                    .map(|header| header.message.parent_root)
+                else {
+                    // This happends when the header is from a pre-gloas column and the
+                    // corresponding block got orphaned.
+                    return;
+                };
 
                 let pending_partial = PendingPartialDataColumn {
                     column,
@@ -1976,7 +1983,7 @@ where
                 }
             }
             Ok(PartialDataColumnSidecarAction::DelayUntilSlot(column, header)) => {
-                let slot = header.signed_block_header.message.slot;
+                let slot = header.slot();
 
                 let pending_partial = PendingPartialDataColumn {
                     column,
@@ -3208,11 +3215,7 @@ where
         pending_partial_data_column: PendingPartialDataColumn<P>,
         block_root: H256,
     ) {
-        let slot = pending_partial_data_column
-            .header
-            .signed_block_header
-            .message
-            .slot;
+        let slot = pending_partial_data_column.header.slot();
 
         self.delayed_until_state
             .entry((block_root, slot))
@@ -3225,28 +3228,24 @@ where
         &mut self,
         pending_partial_data_column: PendingPartialDataColumn<P>,
     ) {
-        let parent_root = pending_partial_data_column
+        if let Some(parent_root) = pending_partial_data_column
             .header
-            .signed_block_header
-            .message
-            .parent_root;
-
-        self.delayed_until_block
-            .entry(parent_root)
-            .or_default()
-            .partial_data_columns
-            .push(pending_partial_data_column);
+            .signed_block_header()
+            .map(|header| header.message.parent_root)
+        {
+            self.delayed_until_block
+                .entry(parent_root)
+                .or_default()
+                .partial_data_columns
+                .push(pending_partial_data_column);
+        }
     }
 
     fn delay_partial_data_column_sidecar_until_slot(
         &mut self,
         pending_partial_data_column: PendingPartialDataColumn<P>,
     ) {
-        let slot = pending_partial_data_column
-            .header
-            .signed_block_header
-            .message
-            .slot;
+        let slot = pending_partial_data_column.header.slot();
 
         self.delayed_until_slot
             .entry(slot)

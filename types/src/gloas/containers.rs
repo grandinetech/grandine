@@ -276,3 +276,12 @@ pub enum CombinedPayloadAttestation<P: Preset> {
     Attestation(PayloadAttestation<P>),
     Message(Arc<PayloadAttestationMessage>),
 }
+
+#[derive(Clone, Default, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct PartialDataColumnHeader<P: Preset> {
+    pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    pub beacon_block_root: H256,
+}

@@ -3,11 +3,11 @@ use std::{collections::HashMap, sync::Arc};
 use ssz::H256;
 use std_ext::ArcExt;
 use types::{
-    combined::DataColumnSidecar,
+    combined::{DataColumnSidecar, PartialDataColumnHeader},
     fulu::containers::{
-        DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumnHeader,
-        PartialDataColumnSidecar,
+        DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar, PartialDataColumnSidecar,
     },
+    gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
     nonstandard::PartialDataColumn,
     phase0::primitives::Slot,
     preset::Preset,
@@ -101,7 +101,7 @@ impl<P: Preset> PartialDataColumnCache<P> {
             .0;
 
         column.is_full().then(|| {
-            Arc::new(
+            let sidecar = if let Some(header) = header.pre_gloas() {
                 FuluDataColumnSidecar {
                     index: id.index,
                     column: column.partial_column.clone(),
@@ -110,8 +110,19 @@ impl<P: Preset> PartialDataColumnCache<P> {
                     signed_block_header: header.signed_block_header,
                     kzg_commitments_inclusion_proof: header.kzg_commitments_inclusion_proof,
                 }
-                .into(),
-            )
+                .into()
+            } else {
+                GloasDataColumnSidecar {
+                    index: id.index,
+                    column: column.partial_column.clone(),
+                    kzg_proofs: column.kzg_proofs.clone(),
+                    slot: header.slot(),
+                    beacon_block_root: header.beacon_block_root(),
+                }
+                .into()
+            };
+
+            Arc::new(sidecar)
         })
     }
 

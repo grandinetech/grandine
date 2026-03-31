@@ -6,9 +6,9 @@ use futures::channel::mpsc::UnboundedSender;
 use logging::debug_with_peers;
 use serde::Serialize;
 use types::{
-    deneb::containers::BlobIdentifier,
-    fulu::containers::{DataColumnsByRootIdentifier, PartialDataColumnHeader},
-    nonstandard::PartialDataColumn, phase0::primitives::Slot, preset::Preset,
+    combined::PartialDataColumnHeader, deneb::containers::BlobIdentifier,
+    fulu::containers::DataColumnsByRootIdentifier, nonstandard::PartialDataColumn,
+    phase0::primitives::Slot, preset::Preset,
 };
 
 pub struct Eth1Metrics {
@@ -51,7 +51,10 @@ impl<P: Preset> Eth1ApiToBlobFetcher<P> {
 pub enum BlobFetcherToP2p<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
-    PublishPartialDataColumns(#[serde(skip)] Vec<Arc<PartialDataColumn<P>>>, Arc<PartialDataColumnHeader<P>>),
+    PublishPartialDataColumns(
+        #[serde(skip)] Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
 }
 
 impl<P: Preset> BlobFetcherToP2p<P> {

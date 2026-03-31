@@ -50,7 +50,7 @@ use types::{
     Validators,
     combined::{
         Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
-        SignedAggregateAndProof, SignedBeaconBlock,
+        PartialDataColumnHeader, SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -59,10 +59,7 @@ use types::{
     },
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     fulu::{
-        containers::{
-            DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar,
-            PartialDataColumnHeader,
-        },
+        containers::{DataColumnIdentifier, DataColumnSidecar as FuluDataColumnSidecar},
         primitives::ColumnIndex,
     },
     gloas::{
@@ -2702,11 +2699,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // validate header if in the message, otherwise get from cache by `block_root`
         let header = if let Some(header) = column.sidecar.header.first() {
             let header = Arc::new(header.clone());
-            let block_header = header.signed_block_header.message;
+            let block_header_opt = header.signed_block_header().map(|header| header.message);
 
             let parent_info = || {
-                self.chain_link(block_header.parent_root)
-                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+                block_header_opt.and_then(|block_header| {
+                    self.chain_link(block_header.parent_root)
+                        .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+                })
             };
 
             let header_result = self.validate_partial_data_column_header(
@@ -2717,11 +2716,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 parent_info,
                 || {
                     state.or_else(|| {
-                        self.state_cache.existing_state_at_slot(
-                            self,
-                            block_header.parent_root,
-                            block_header.slot,
-                        )
+                        block_header_opt.and_then(|block_header| {
+                            self.state_cache.existing_state_at_slot(
+                                self,
+                                block_header.parent_root,
+                                block_header.slot,
+                            )
+                        })
                     })
                 },
                 metrics,
@@ -2759,7 +2760,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > [REJECT] The cells present bitmap length is equal to the number of KZG commitments in the `PartialDataColumnHeader`.
         let cells_bitmap_length = column.sidecar.cells_present_bitmap.len();
-        let commitment_length = header.kzg_commitments.len();
+        let commitment_length = header.kzg_commitments().len();
         ensure!(
             cells_bitmap_length == commitment_length,
             Error::<P>::PartialColumnCellsBitmapLengthMismatch {
@@ -2813,7 +2814,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if !origin.is_from_el() && cells_length > 0 {
             let verify_result = verify_partial_data_column_sidecar_kzg_proofs(
                 &column.sidecar,
-                &header.kzg_commitments,
+                header.kzg_commitments(),
                 column.index,
                 self.store_config.kzg_backend,
                 metrics,
@@ -2836,6 +2837,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_lines)]
     fn validate_partial_data_column_header(
         &self,
         block_root: H256,
@@ -2847,9 +2849,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<PartialDataColumnSidecarAction<P>> {
         // > [REJECT] The hash of the block header in `signed_block_header` MUST be the same as the partial message's group id.
-        let block_header = header.signed_block_header.message;
         ensure!(
-            block_root == block_header.hash_tree_root(),
+            block_root == header.beacon_block_root(),
             Error::PartialGroupIdMismatch { header }
         );
 
@@ -2867,9 +2868,36 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > [REJECT] The header's `kzg_commitments` list is non-empty.
         ensure!(
-            !header.kzg_commitments.is_empty(),
+            !header.kzg_commitments().is_empty(),
             Error::<P>::PartialHeaderNoBlob { header }
         );
+
+        let Some(signed_header) = header.signed_block_header() else {
+            // [IGNORE] The header's `beacon_block_root` has been seen via a valid signed
+            // execution payload bid. A client MAY queue the sidecar for processing once the
+            // block is retrieved
+            let Some(block) = self.block(block_root).map(WithStatus::value) else {
+                return Ok(PartialDataColumnSidecarAction::DelayUntilState(
+                    column.clone_arc(),
+                    header,
+                    block_root,
+                ));
+            };
+
+            // [REJECT] The header's `slot` matches the slot of the block with root `beacon_block_root`.
+            ensure!(
+                header.slot() == block.message().slot(),
+                Error::PartialHeaderSlotMismatch {
+                    header,
+                    block_slot: block.message().slot(),
+                }
+            );
+
+            // Return Ignore with `publishable` to `true` to signal the header is verified
+            return Ok(PartialDataColumnSidecarAction::Ignore(true));
+        };
+
+        let block_header = signed_header.message;
 
         // > [IGNORE] The header is not from a future slot (with a `MAXIMUM_GOSSIP_CLOCK_DISPARITY` allowance) -- i.e. validate that
         // > `block_header.slot <= current_slot` (a client MAY queue future headers for processing at the appropriate slot).
@@ -2900,7 +2928,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > [REJECT] The proposer signature of `signed_block_header` is valid with respect to the `block_header.proposer_index` pubkey.
         SingleVerifier.verify_singular(
             block_header.signing_root(&self.chain_config, &state),
-            header.signed_block_header.signature,
+            signed_header.signature,
             self.pubkey_cache
                 .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
             SignatureKind::BlockInBlobSidecar,
@@ -2955,9 +2983,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The header's kzg_commitments field inclusion proof is valid as verified by verify_partial_data_column_header_inclusion_proof.
-        if !origin.is_from_el() {
+        if !origin.is_from_el()
+            && let Some(fulu_header) = header.pre_gloas()
+        {
             ensure!(
-                verify_partial_data_column_header_inclusion_proof(&header, metrics),
+                verify_partial_data_column_header_inclusion_proof(fulu_header, metrics),
                 Error::PartialHeaderInvalidInclusionProof { header }
             );
         }

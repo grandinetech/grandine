@@ -20,11 +20,10 @@ use transition_functions::unphased::StateRootPolicy;
 use types::{
     Validators,
     combined::{
-        Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, AttestingIndices, BeaconState, DataColumnSidecar, PartialDataColumnHeader,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
-    fulu::containers::PartialDataColumnHeader,
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{PartialDataColumn, PayloadStatus, Publishable, StorageMode, ValidationOutcome},
     phase0::{
