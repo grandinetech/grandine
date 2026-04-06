@@ -700,7 +700,10 @@ impl<P: Preset> Context<P> {
             let option = self.next_p2p_message_verbose();
 
             if let Some(
-                P2pMessage::FinalizedCheckpoint(_) | P2pMessage::HeadChanged(_) | P2pMessage::Stop,
+                P2pMessage::FinalizedCheckpoint(_)
+                | P2pMessage::HeadChanged(_)
+                | P2pMessage::ExecutionPayloadEnvelopeNeeded(_, _)
+                | P2pMessage::Stop,
             ) = option
             {
                 continue;

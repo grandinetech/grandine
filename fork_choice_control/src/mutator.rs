@@ -1139,6 +1139,22 @@ where
 
                 self.delay_aggregate_and_proof_until_slot(wait_group, pending_aggregate_and_proof);
             }
+            Ok(AggregateAndProofAction::DelayUntilEnvelope(aggregate_and_proof, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_aggregate_and_proof(&["delayed_until_envelope"]);
+                }
+
+                let pending_aggregate_and_proof = PendingAggregateAndProof {
+                    aggregate_and_proof,
+                    origin,
+                };
+
+                self.delay_aggregate_and_proof_until_envelope(
+                    wait_group,
+                    pending_aggregate_and_proof,
+                    block_root,
+                );
+            }
             Ok(AggregateAndProofAction::WaitForTargetState(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["delayed_until_state"]);
@@ -1311,6 +1327,13 @@ where
 
                 self.delay_attestation_until_slot(wait_group, attestation);
             }
+            Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_attestation(&["delayed_until_envelope"]);
+                }
+
+                self.delay_attestation_until_envelope(wait_group, attestation, block_root);
+            }
             Ok(AttestationAction::WaitForTargetState(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_state"]);
@@ -1397,6 +1420,10 @@ where
                 }
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                     self.delay_attestation_until_slot(wait_group, attestation);
+                    None
+                }
+                Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root)) => {
+                    self.delay_attestation_until_envelope(wait_group, attestation, block_root);
                     None
                 }
                 Ok(AttestationAction::WaitForTargetState(pending_attestation)) => {
@@ -3236,6 +3263,35 @@ where
         }
     }
 
+    fn delay_aggregate_and_proof_until_envelope(
+        &mut self,
+        wait_group: &W,
+        pending_aggregate_and_proof: PendingAggregateAndProof<P>,
+        block_root: H256,
+    ) {
+        if self.store.has_envelope(block_root) {
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+        } else {
+            trace_with_peers!(
+                "aggregate and proof delayed until envelope \
+                 (block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_aggregate_and_proof
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(block_root, peer_id));
+
+            self.delayed_until_envelope
+                .entry(block_root)
+                .or_default()
+                .aggregates
+                .push(pending_aggregate_and_proof);
+        }
+    }
+
     fn delay_attestation_until_block(
         &mut self,
         wait_group: &W,
@@ -3264,6 +3320,35 @@ where
             ));
 
             self.delayed_until_block
+                .entry(block_root)
+                .or_default()
+                .attestations
+                .push(pending_attestation);
+        }
+    }
+
+    fn delay_attestation_until_envelope(
+        &mut self,
+        wait_group: &W,
+        pending_attestation: PendingAttestation<P>,
+        block_root: H256,
+    ) {
+        if self.store.has_envelope(block_root) {
+            self.retry_attestation(wait_group.clone(), pending_attestation);
+        } else {
+            trace_with_peers!(
+                "attestation delayed until envelope \
+                 (pending_attestation: {pending_attestation:?}, block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_attestation
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(block_root, peer_id));
+
+            self.delayed_until_envelope
                 .entry(block_root)
                 .or_default()
                 .attestations

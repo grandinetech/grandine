@@ -1973,6 +1973,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             PartialAttestationAction::DelayUntilSlot => {
                 return Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof));
             }
+            PartialAttestationAction::DelayUntilEnvelope(block_root) => {
+                return Ok(AggregateAndProofAction::DelayUntilEnvelope(
+                    aggregate_and_proof,
+                    block_root,
+                ));
+            }
         }
 
         let AttestationData { slot, target, .. } = aggregate.data();
@@ -2126,6 +2132,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
             Ok(PartialAttestationAction::DelayUntilSlot) => {
                 return Ok(AttestationAction::DelayUntilSlot(attestation));
+            }
+            Ok(PartialAttestationAction::DelayUntilEnvelope(block_root)) => {
+                return Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root));
             }
             Err(source) => {
                 return Err(AttestationValidationError::Other {
@@ -2403,6 +2412,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Note: index < 2 is guaranteed here — enforced by !is_from_block check
         // for gossip attestations, and by state transition for block attestations.
         // (raise in review if incorrect)
+
+        // [New in EIP7732]
+        // If attesting for a full node, the payload must be known.
+        //
+        // Delay gossip attestation with payload_present=1 until envelope arrives.
+        // Spec(gloas): https://github.com/ethereum/consensus-specs/commit/6b3aedc5367981721a4620feaf4a2fd3438b1f54
+        // Block-packed attestations are currently allowed to affect forkchoice.
+        // TODO(gloas): revisit !is_from_block after 1.7.0-alpha.4 spec test changes. now if removed gives a failrue at 
+        // spec_tests::gloas_minimal_get_head_consensus_spec_tests_tests_minimal_gloas_fork_choice_get_head_pyspec_tests_voting_source_within_two_epoch
+        // also at that point recheck finalized block getting attestaion can be handled via has_envelope without calling unfinalized_locations_full or not
+
+        if !is_from_block && index == 1 {
+            if let Some(location) = self.unfinalized_locations_full.get(&beacon_block_root) {
+                let chain_link = &self.unfinalized[&location.segment_id][location.position].chain_link;
+                if chain_link.block.message().body().with_payload_bid().is_some()
+                    && chain_link.execution_payload_state.is_none()
+                {
+                    return Ok(PartialAttestationAction::DelayUntilEnvelope(beacon_block_root));
+                }
+            }
+        }
 
         let ancestor_at_target_epoch_start = self
             .ancestor(beacon_block_root, Self::start_of_epoch(target.epoch))

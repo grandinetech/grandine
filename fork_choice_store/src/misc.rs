@@ -888,6 +888,7 @@ pub enum AggregateAndProofAction<P: Preset> {
     Ignore,
     DelayUntilBlock(Arc<SignedAggregateAndProof<P>>, H256),
     DelayUntilSlot(Arc<SignedAggregateAndProof<P>>),
+    DelayUntilEnvelope(Arc<SignedAggregateAndProof<P>>, H256),
     WaitForTargetState(Arc<SignedAggregateAndProof<P>>),
 }
 
@@ -899,6 +900,7 @@ pub enum AttestationAction<P: Preset, I> {
     Ignore(AttestationItem<P, I>),
     DelayUntilBlock(AttestationItem<P, I>, H256),
     DelayUntilSlot(AttestationItem<P, I>),
+    DelayUntilEnvelope(AttestationItem<P, I>, H256),
     WaitForTargetState(AttestationItem<P, I>),
 }
 
@@ -918,6 +920,9 @@ impl<P: Preset, I> AttestationAction<P, I> {
                 Self::DelayUntilBlock(attestation.into_verified(), block_root)
             }
             Self::DelayUntilSlot(attestation) => Self::DelayUntilSlot(attestation.into_verified()),
+            Self::DelayUntilEnvelope(attestation, root) => {
+                Self::DelayUntilEnvelope(attestation.into_verified(), root)
+            }
             Self::WaitForTargetState(attestation) => {
                 Self::WaitForTargetState(attestation.into_verified())
             }
@@ -1009,6 +1014,7 @@ pub enum PartialAttestationAction {
     Ignore,
     DelayUntilBlock(H256),
     DelayUntilSlot,
+    DelayUntilEnvelope(H256),
 }
 
 #[derive(Debug)]
