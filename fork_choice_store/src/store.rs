@@ -305,13 +305,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             root: block_root,
         };
 
-        // For Gloas, genesis/anchor is conceptually a "full" block with execution state
-        // spec(gloas): https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L175
-        let execution_payload_state = if anchor_state.phase() >= Phase::Gloas {
-            Some(anchor_state.clone_arc())
-        } else {
-            None
-        };
+        // Anchor state is always pre-execution (block_state). Post-execution states
+        // are rejected at checkpoint sync ingestion. No execution_payload_state for anchors.
+        let execution_payload_state = None;
 
         let anchor = ChainLink {
             block_root,
