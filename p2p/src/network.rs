@@ -1426,6 +1426,26 @@ impl<P: Preset> Network<P> {
         );
 
         let ExecutionPayloadEnvelopesByRangeRequest { start_slot, count } = request;
+        let start_epoch = misc::compute_epoch_at_slot::<P>(start_slot);
+
+        // Spec(gloas): https://github.com/ethereum/consensus-specs/blame/2e55491d98828b0741a535064860942c9045ab24/specs/gloas/p2p-interface.md#L664
+        if start_epoch < self.controller.min_checked_block_availability_epoch() {
+            debug_with_peers!(
+                "received invalid request requesting execution payload envelopes before block \
+                availability period: (peer_id: {peer_id}, inbound_request_id: \
+                {inbound_request_id:?}, request: {request:?})",
+            );
+
+            ServiceInboundMessage::SendErrorResponse(
+                peer_id,
+                inbound_request_id,
+                RpcErrorResponse::InvalidRequest,
+                "requested execution payload envelopes before block availability period",
+            )
+            .send(&self.network_to_service_tx);
+
+            return Ok(());
+        }
 
         let max_request_blocks = self.controller.chain_config().max_request_blocks_deneb;
         let difference = count.min(max_request_blocks).min(MAX_FOR_DOS_PREVENTION);
