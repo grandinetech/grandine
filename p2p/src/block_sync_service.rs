@@ -1287,6 +1287,9 @@ impl<P: Preset> BlockSyncService<P> {
         block_root: H256,
         peer_id: Option<PeerId>,
     ) -> Result<()> {
+        // Note: This check should be revisted on any complexity caused by different slot start of range requests for envelope and block batches.
+        // Usually on a block of slot S is requested along with envelope of slot S-1 in pure gloas cases but it can both be slot S with a function call
+        // to this through DelayUntilParentEnvelope route if this check is removed.
         if !self.is_forward_synced {
             return Ok(());
         }
