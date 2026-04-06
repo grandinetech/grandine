@@ -539,8 +539,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// vs payload-not-arrived explicitly (for example via `is_some()`).
     #[must_use]
     pub fn chain_link_full(&self, block_root: H256) -> Option<&ChainLink<P>> {
-        if let Some(loc) = self.unfinalized_locations_full.get(&block_root) {
-            return Some(&self.unfinalized[&loc.segment_id][loc.position].chain_link);
+        if let Some(location) = self.unfinalized_locations_full.get(&block_root) {
+            return Some(&self.unfinalized[&location.segment_id][location.position].chain_link);
         }
         // Finalized blocks included (variant not tracked after finalization)
         let index = self.finalized_indices.get(&block_root)?;
@@ -713,11 +713,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `unfinalized_locations_full` is pruned on finalization/orphaning. This is safe
         // because the only caller (`should_extend_payload`) is used during head selection,
         // which only considers unfinalized blocks.
-        let Some(loc) = self.unfinalized_locations_full.get(&block_root) else {
+        let Some(location) = self.unfinalized_locations_full.get(&block_root) else {
             return false;
         };
         // Check payload actually arrived (not just FULL placeholder)
-        if self.unfinalized[&loc.segment_id][loc.position]
+        if self.unfinalized[&location.segment_id][location.position]
             .chain_link
             .execution_payload_state
             .is_none()
@@ -1074,10 +1074,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return true;
         }
         // Check FULL location exists AND has execution_payload_state (envelope arrived)
-        let Some(loc) = self.unfinalized_locations_full.get(&block_root) else {
+        let Some(location) = self.unfinalized_locations_full.get(&block_root) else {
             return false;
         };
-        self.unfinalized[&loc.segment_id][loc.position]
+        self.unfinalized[&location.segment_id][location.position]
             .chain_link
             .execution_payload_state
             .is_some()
@@ -1348,7 +1348,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut head_weight = self
             .unfinalized_locations_full
             .get(&head_root)
-            .map(|loc| self.unfinalized[&loc.segment_id][loc.position].attesting_balance)
+            .map(|location| self.unfinalized[&location.segment_id][location.position].attesting_balance)
             .unwrap_or(0);
 
         // Get chain_link for equivocating weight calculation
@@ -3620,8 +3620,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // Both variants must exist in the tree for head selection to compare them.
                 if self.phase() >= Phase::Gloas {
                     let parent_root = chain_link.block.message().parent_root();
-                    if let Some(loc) = self.unfinalized_locations_full.get(&parent_root).copied() {
-                        let parent_has_payload = self.unfinalized[&loc.segment_id][loc.position]
+                    if let Some(location) = self.unfinalized_locations_full.get(&parent_root).copied() {
+                        let parent_has_payload = self.unfinalized[&location.segment_id][location.position]
                             .chain_link
                             .execution_payload_state
                             .is_some();
@@ -4342,7 +4342,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 self.unfinalized
                     .get(seg_id)
                     .and_then(|seg| seg.parent_location())
-                    .map(|loc| loc.segment_id)
+                    .map(|location| location.segment_id)
             })
             .collect();
 
@@ -4355,7 +4355,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ]
         .into_iter()
         .flatten()
-        .find(|loc| canonical_segments.contains(&loc.segment_id))
+        .find(|location| canonical_segments.contains(&location.segment_id))
         .or_else(|| self.unfinalized_locations_full.get(&finalized_root))
         .copied();
 
