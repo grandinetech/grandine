@@ -1734,13 +1734,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let parent_full = self.is_parent_node_full_for_block(block);
             let has_parent_exec = parent.execution_payload_state.is_some();
 
-            // Skip delay for pre-Gloas or finalized parents: their execution payload
-            // has already been processed, so no envelope will arrive separately.
+            // Skip delay for pre-Gloas parents: their execution payload
+            // is intrinsic to the block, so no envelope will arrive separately.
             let parent_root = block.message().parent_root();
             let parent_is_pre_gloas = parent.block.phase() < Phase::Gloas;
-            let parent_is_finalized = self.finalized_indices.contains_key(&parent_root);
 
-            if parent_full && !has_parent_exec && !parent_is_pre_gloas && !parent_is_finalized {
+            if parent_full && !has_parent_exec && !parent_is_pre_gloas {
                 return Ok(BlockAction::DelayUntilParentEnvelope(
                     block.clone_arc(),
                     block.message().parent_root(),
@@ -4107,26 +4106,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         execution_payload_state: Arc<BeaconState<P>>,
         execution_block_hash: ExecutionBlockHash,
     ) -> Result<()> {
-        // Find existing FULL placeholder
-        let Some(&location) = self.unfinalized_locations_full.get(&beacon_block_root) else {
+        if let Some(&location) = self.unfinalized_locations_full.get(&beacon_block_root) {
+            // Unfinalized FULL placeholder path.
+            let segment = self
+                .unfinalized
+                .get_mut(&location.segment_id)
+                .expect("segment should exist for location in unfinalized_locations_full");
+            let unfinalized_block = &mut segment[location.position];
+
+            unfinalized_block.chain_link.execution_payload_state = Some(execution_payload_state);
+
+            self.execution_payload_locations
+                .insert(execution_block_hash, location);
+        } else if let Some(&index) = self.finalized_indices.get(&beacon_block_root) {
+            // Checkpoint-sync anchors and already-finalized Gloas blocks live in `finalized`,
+            // not in `unfinalized_locations_full`, but may still receive an envelope later.
+            self.finalized[index].execution_payload_state = Some(execution_payload_state);
+        } else {
             bail!(
                 "insert_payload: FULL placeholder not found for beacon_block_root: {beacon_block_root:?}"
             );
-        };
-
-        // Get the UnfinalizedBlock and fill execution_payload_state
-        let segment = self
-            .unfinalized
-            .get_mut(&location.segment_id)
-            .expect("segment should exist for location in unfinalized_locations_full");
-        let unfinalized_block = &mut segment[location.position];
-
-        // Fill the placeholder with execution state
-        unfinalized_block.chain_link.execution_payload_state = Some(execution_payload_state);
-
-        // Update execution_payload_locations map
-        self.execution_payload_locations
-            .insert(execution_block_hash, location);
+        }
 
         Ok(())
     }
@@ -4291,14 +4291,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Pre-Gloas blocks always use unfinalized_locations_full (where all blocks are stored).
         let parent = if let Some(gloas_body) = block.message().body().with_payload_bid() {
             let builds_on_full = self.is_parent_node_full_for_block(block);
-
-            if !builds_on_full {
-                // EMPTY: Create EMPTY segment for parent if needed
+            let parent_is_finalized = self.finalized_indices.contains_key(&parent_root);
+            //note: even in case of empty gloas parent block finalized, the segment
+            // will be created through the else path and get None as parent rooted at finalized checkpoint.
+            if !builds_on_full && !parent_is_finalized {
+                // EMPTY: Create EMPTY segment for parent if needed, the new segment
                 if !self.unfinalized_locations_empty.contains_key(&parent_root) {
                     self.extend_empty_segment(parent_root)?;
                 }
                 self.unfinalized_locations_empty.get(&parent_root).copied()
             } else {
+                // FULL path, also used for finalized parents (new segment created at line 4349)
                 self.unfinalized_locations_full.get(&parent_root).copied()
             }
         } else {
