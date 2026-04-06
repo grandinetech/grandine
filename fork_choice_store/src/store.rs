@@ -1076,18 +1076,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn has_envelope(&self, block_root: H256) -> bool {
-        // Pre-Gloas blocks have no envelope concept — treat as always available
-        if self.phase() < Phase::Gloas {
-            return true;
+        // Check unfinalized FULL location first
+        if let Some(location) = self.unfinalized_locations_full.get(&block_root) {
+            let chain_link = &self.unfinalized[&location.segment_id][location.position].chain_link;
+            if self.chain_config.phase_at_slot::<P>(chain_link.slot()) < Phase::Gloas {
+                return true;
+            }
+            return chain_link.execution_payload_state.is_some();
         }
-        // Check FULL location exists AND has execution_payload_state (envelope arrived)
-        let Some(location) = self.unfinalized_locations_full.get(&block_root) else {
-            return false;
-        };
-        self.unfinalized[&location.segment_id][location.position]
-            .chain_link
-            .execution_payload_state
-            .is_some()
+        // Finalized: pre-Gloas blocks have payload intrinsic to the block.
+        // Gloas finalized blocks must check execution_payload_state
+        // (e.g. checkpoint sync anchor has no envelope).
+        if let Some(index) = self.finalized_indices.get(&block_root) {
+            let chain_link = &self.finalized[*index];
+            if self.chain_config.phase_at_slot::<P>(chain_link.slot()) < Phase::Gloas {
+                return true;
+            }
+            return chain_link.execution_payload_state.is_some();
+        }
+        false
     }
 
     /// Get the slot of a block by its root.
