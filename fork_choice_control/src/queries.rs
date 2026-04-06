@@ -993,28 +993,16 @@ where
         parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<DataColumnSidecarAction<P>> {
-        match Arc::unwrap_or_clone(data_column_sidecar) {
-            DataColumnSidecar::Fulu(data_column_sidecar) => self
-                .store_snapshot()
-                .validate_fulu_data_column_sidecar_with_state(
-                    data_column_sidecar,
-                    block_seen,
-                    origin,
-                    validate_block_presence,
-                    parent_fn,
-                    state_fn,
-                    None,
-                ),
-            DataColumnSidecar::Gloas(data_column_sidecar) => {
-                self.store_snapshot().validate_gloas_data_column_sidecar(
-                    data_column_sidecar,
-                    block_seen,
-                    origin,
-                    validate_block_presence,
-                    None,
-                )
-            }
-        }
+        self.store_snapshot()
+            .validate_data_column_sidecar_with_state(
+                data_column_sidecar,
+                block_seen,
+                origin,
+                validate_block_presence,
+                parent_fn,
+                state_fn,
+                None,
+            )
     }
 
     pub fn validate_execution_payload_envelope_with_state(
