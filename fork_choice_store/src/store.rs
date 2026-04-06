@@ -4814,19 +4814,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
-            // Route vote semantics by voted block phase, not store phase.
+            // Route vote semantics by the voted block phase, not the store phase.
             // At the Fulu->Gloas boundary, attestations can still reference pre-Gloas roots.
-            let voted_block_phase_and_slot = self
+            let block_uses_empty_full_variant = self
                 .chain_link_full(beacon_block_root)
-                .map(|link| (link.block.phase(), link.block.message().slot()));
-            let supports_empty_variant = voted_block_phase_and_slot
-                .map(|(phase, _)| phase >= Phase::Gloas)
-                .unwrap_or(false);
-            let payload_present = if supports_empty_variant {
-                data.index == 1
-            } else {
-                true
-            };
+                .is_some_and(|link| link.block.phase() >= Phase::Gloas);
+            let payload_present = !block_uses_empty_full_variant || data.index == 1;
 
             let latest_message = Arc::new(LatestMessage {
                 slot,
@@ -4849,8 +4842,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // [Gloas] Same-slot votes are pending and stay neutral until a later settled vote.
                 let mut same_slot_pending = false;
-                if supports_empty_variant {
-                    if let Some((_, voted_block_slot)) = voted_block_phase_and_slot {
+                if block_uses_empty_full_variant {
+                    let voted_block_slot = self
+                        .chain_link_full(beacon_block_root)
+                        .map(|link| link.block.message().slot());
+                    if let Some(voted_block_slot) = voted_block_slot {
                         if slot <= voted_block_slot {
                             same_slot_pending = true;
                         }
@@ -4890,44 +4886,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     let old_root = old_message.beacon_block_root;
                     let old_payload_present = old_message.payload_present;
                     let old_slot = old_message.slot;
-                    let old_supports_empty_variant = self
+                    let old_block_uses_empty_full_variant = self
                         .chain_link_full(old_root)
-                        .map(|link| link.block.phase() >= Phase::Gloas)
-                        .unwrap_or(false);
+                        .is_some_and(|link| link.block.phase() >= Phase::Gloas);
 
                     // Re-derive same-slot status: was the old vote for the same slot as the block?
-                    let old_same_slot = if old_supports_empty_variant {
+                    let old_same_slot = if old_block_uses_empty_full_variant {
                         self.chain_link_full(old_root)
-                            .map(|link| old_slot <= link.block.message().slot())
-                            .unwrap_or(false)
+                            .is_some_and(|link| old_slot <= link.block.message().slot())
                     } else {
                         false
                     };
 
-                    // Pre-Gloas intuition was simple: latest-message update = subtract old + add new on one path.
-                    // With FULL placeholders, that is no longer always true.
-                    //
-                    // A validator can submit a valid latest-message attestation (valid by beacon root), but the
-                    // direct FULL vote target may still lack execution payload state locally. In that case:
-                    // - the attestation is still accepted,
-                    // - but FULL weight must not be credited yet.
-                    //
-                    // Therefore this block enforces:
-                    // 1) Old vote removal:
+                    // Old vote removal:
                     //    - old same-slot vote: subtract BOTH FULL and EMPTY (both were credited earlier).
-                    //    - old FULL vote: subtract FULL only if FULL had actually been applied (`old_can_apply`).
+                    //    - old FULL vote: subtract FULL (envelope guaranteed present via delay-until-envelope).
                     //    - old EMPTY vote: subtract EMPTY.
-                    // 2) New vote addition:
+                    // New vote addition:
                     //    - same-slot pending: add BOTH FULL and EMPTY.
-                    //    - new FULL vote: add FULL only when `can_apply_full` is true.
-                    //    - new EMPTY vote: add EMPTY.
-                    //
-                    // Net effect is intentionally possible:
-                    // "subtract old, skip add new FULL" when FULL payload state is not available yet.
-                    //
-                    // Important(for the TBS portion):
-                    // if later add EMPTY fallback for `payload_present = true`, we should track the actual
-                    // applied side (FULL/EMPTY/BOTH) and use that for all future subtractions. `payload_present` alone is intent, not guaranteed applied location.
+                    //    - FULL vote: add FULL (envelope guaranteed present via delay-until-envelope).
+                    //    - EMPTY vote: add EMPTY.
                     if old_same_slot {
                         // [Gloas] Same-slot was added to both Full and Empty; subtract from both.
                         // note that the additon logic is not here. because that is controlled by can_apply_full
@@ -4935,27 +4913,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             .entry(old_root)
                             .or_default()
                             .sub_assign(balance);
-                        if old_supports_empty_variant {
+                        if old_block_uses_empty_full_variant {
                             differences_empty
                                 .entry(old_root)
                                 .or_default()
                                 .sub_assign(balance);
                         }
-                    } else if old_payload_present || !old_supports_empty_variant {
-                        // Only subtract from full if weight was actually applied
-                        let old_can_apply = if old_supports_empty_variant {
-                            self.chain_link_full(old_root)
-                                .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
-                                .unwrap_or(false)
-                        } else {
-                            true
-                        };
-                        if old_can_apply {
-                            differences_full
-                                .entry(old_root)
-                                .or_default()
-                                .sub_assign(balance);
-                        }
+                    } else if old_payload_present || !old_block_uses_empty_full_variant {
+                        differences_full
+                            .entry(old_root)
+                            .or_default()
+                            .sub_assign(balance);
                     } else {
                         differences_empty
                             .entry(old_root)
@@ -4967,7 +4935,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // The approach below inlines the behaviour of `is_supporting_vote``
                 if same_slot_pending {
                     // [Gloas] Same-slot: apply to both Full and Empty only for post-Gloas blocks.
-                    if supports_empty_variant {
+                    if block_uses_empty_full_variant {
                         let had_empty = self
                             .unfinalized_locations_empty
                             .contains_key(&beacon_block_root);
@@ -4983,17 +4951,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         .entry(beacon_block_root)
                         .or_default()
                         .add_assign(balance);
-                    if supports_empty_variant {
+                    if block_uses_empty_full_variant {
                         differences_empty
                             .entry(beacon_block_root)
                             .or_default()
                             .add_assign(balance);
                     }
-                } else if payload_present || !supports_empty_variant {
-                    let can_apply_full = if supports_empty_variant {
+                } else if payload_present || !block_uses_empty_full_variant {
+                    // TODO(gloas): The vote additon part will be simplified just like the substraction part after v1.7.0-alpha.4
+                    let can_apply_full = if block_uses_empty_full_variant {
                         self.chain_link_full(beacon_block_root)
-                            .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
-                            .unwrap_or(false)
+                            .is_some_and(|chain_link: &ChainLink<P>| {
+                                chain_link.execution_payload_state.is_some()
+                            })
                     } else {
                         true
                     };
@@ -5004,18 +4974,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             .or_default()
                             .add_assign(balance);
                     }
-                    // TBD: the replay non added(sub already done) votes for  payload_present = true and can_apply_full = false needs to be triggered at insert_payload step when payload finallyy arrives.
-                    // need some way to remember what was not applied. ideally, DelayUntilEnvelope for attestation is not correct, as we are sure about the substraction part(as beacon block is present). But without
-                    // that `EnvelopeNeeded` request would be somewhat of a new pattern. if no intention to request in this case, then storing it in store iteself is quite possible.
-
-                    // empty entry should be safe as in this spec "is_suporting_vote"(payload_present vote to pending will return true) will return true.
-                    // but currently fails:
-                    //spec_tests::gloas_mainnet_get_head_consensus_spec_tests_tests_mainnet_gloas_fork_choice_get_head_pyspec_tests_discard_equivocations_on_attester_slashing
-                    //spec_tests::gloas_minimal_get_head_consensus_spec_tests_tests_minimal_gloas_fork_choice_get_head_pyspec_tests_discard_equivocations_on_attester_slashing
-                    //  differences_empty
-                    //     .entry(beacon_block_root)
-                    //     .or_default()
-                    //     .add_assign(balance);
                 } else {
                     differences_empty
                         .entry(beacon_block_root)
