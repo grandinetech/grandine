@@ -666,9 +666,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn is_parent_node_full_for_block(&self, block: &SignedBeaconBlock<P>) -> bool {
         let parent_root = block.message().parent_root();
 
-        // Finalized parents are treated as FULL — no EMPTY segment exists for them.
-        if self.finalized_indices.contains_key(&parent_root) {
-            return true;
+        // Finalized pre-Gloas parents are always FULL (payload intrinsic to block).
+        // Gloas finalized parents fall through to bid comparison below.
+        if let Some(index) = self.finalized_indices.get(&parent_root) {
+            if self.finalized[*index].block.phase() < Phase::Gloas {
+                return true;
+            }
         }
 
         let Some(parent) = self.chain_link_full(parent_root) else {
@@ -683,14 +686,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
+        // Genesis/default block_hash is zero — no envelope concept, not FULL.
+        // See: https://github.com/ethereum/consensus-specs/issues/5043
+        let parent_block_hash = parent_gloas_body
+            .signed_execution_payload_bid()
+            .message
+            .block_hash;
+
+        if parent_block_hash == H256::zero() {
+            return false;
+        }
+
         current_gloas_body
             .signed_execution_payload_bid()
             .message
             .parent_block_hash
-            == parent_gloas_body
-                .signed_execution_payload_bid()
-                .message
-                .block_hash
+            == parent_block_hash
     }
 
     /// Check if payload was timely.
