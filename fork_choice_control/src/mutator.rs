@@ -2094,6 +2094,16 @@ where
             self.retry_delayed(objects, wait_group);
         }
 
+        if !self.storage.prune_storage_enabled() {
+            self.spawn(PersistExecutionPayloadEnvelopesTask {
+                store_snapshot: self.owned_store(),
+                storage: self.storage.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group: wait_group.clone(),
+                metrics: self.metrics.clone(),
+            });
+        }
+
         Ok(())
     }
 
@@ -2894,11 +2904,13 @@ where
             .is_finalized_checkpoint_updated()
             .then(|| {
                 let delayed = self.prune_delayed_until_block();
+                let delayed_until_envelope = self.prune_delayed_until_envelope();
                 let delayed_until_blobs = self.prune_delayed_until_blobs();
                 let delayed_until_data = self.prune_delayed_until_data();
                 let waiting = self.prune_waiting_for_checkpoint_states();
                 delayed
                     .into_iter()
+                    .chain(delayed_until_envelope)
                     .chain(delayed_until_blobs)
                     .chain(delayed_until_data)
                     .chain(waiting)
@@ -3979,6 +3991,65 @@ where
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.data_column_sidecar.slot() - 1 <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            !delayed.is_empty()
+        });
+
+        gossip_ids
+    }
+
+    fn prune_delayed_until_envelope(&mut self) -> Vec<GossipId> {
+        let finalized_slot = self.store.finalized_slot();
+        let previous_epoch = self.store.previous_epoch();
+
+        let mut gossip_ids = vec![];
+
+        self.delayed_until_envelope.retain(|_, delayed| {
+            let Delayed {
+                blocks,
+                payload_status: _,
+                aggregates,
+                attestations,
+                payload_attestations: _,
+                execution_payload_envelopes: _,
+                blob_sidecars: _,
+                data_column_sidecars: _,
+            } = delayed;
+
+            gossip_ids.extend(
+                blocks
+                    .extract_if(.., |pending| {
+                        // The parent of a delayed block cannot be in a finalized slot.
+                        pending.block.message().slot() - 1 <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                aggregates
+                    .extract_if(.., |pending| {
+                        let epoch = pending
+                            .aggregate_and_proof
+                            .message()
+                            .aggregate()
+                            .data()
+                            .target
+                            .epoch;
+
+                        epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                attestations
+                    .extract_if(.., |pending| {
+                        let epoch = pending.data().target.epoch;
+
+                        epoch < previous_epoch
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
