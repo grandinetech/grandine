@@ -2302,6 +2302,13 @@ impl<P: Preset> DataColumnSidecar<P> {
         }
     }
 
+    pub const fn signed_block_header(&self) -> Option<&SignedBeaconBlockHeader> {
+        match self {
+            Self::Fulu(sidecar) => Some(&sidecar.signed_block_header),
+            Self::Gloas(_) => None,
+        }
+    }
+
     pub const fn pre_gloas(&self) -> Option<&FuluDataColumnSidecar<P>> {
         match self {
             Self::Fulu(sidecar) => Some(sidecar),
