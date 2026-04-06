@@ -600,7 +600,7 @@ pub fn epoch_report(
         BeaconState::Deneb(state) => deneb::epoch_report(config, pubkey_cache, state)?.into(),
         BeaconState::Electra(state) => electra::epoch_report(config, pubkey_cache, state)?.into(),
         BeaconState::Fulu(state) => electra::epoch_report(config, pubkey_cache, state)?.into(),
-        BeaconState::Gloas(state) => gloas::epoch_report(config, pubkey_cache, state)?.into(),
+        BeaconState::Gloas(state) => electra::epoch_report(config, pubkey_cache, state)?.into(),
     };
 
     post_process_slots_for_epoch_report(config, pubkey_cache, state)?;
