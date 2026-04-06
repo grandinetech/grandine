@@ -220,6 +220,7 @@ pub fn get_expected_withdrawals<P: Preset>(
         state,
         &mut withdrawal_index,
         &mut withdrawals,
+        P::MaxWithdrawalsPerPayload::USIZE,
         current_epoch,
     )?;
 
@@ -373,6 +374,7 @@ fn process_validators_sweep_withdrawals<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
     withdrawal_index: &mut WithdrawalIndex,
     withdrawals: &mut Vec<Withdrawal>,
+    withdrawal_limit: usize,
     current_epoch: Epoch,
 ) -> Result<()> {
     let total_validators = state.validators().len_u64();
@@ -380,7 +382,7 @@ fn process_validators_sweep_withdrawals<P: Preset>(
     let mut validator_index = state.next_withdrawal_validator_index();
 
     for _ in 0..bound {
-        if withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
+        if withdrawals.len() >= withdrawal_limit {
             break;
         }
 
@@ -490,16 +492,23 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     )?;
 
     // > Update next withdrawal builder index to start the next withdrawal sweep
-    let total_builders = state.builders().len_u64();
-    if total_builders > 0 {
-        let next_index = state.next_withdrawal_builder_index() + processed_builders_sweep_count;
-        *state.next_withdrawal_builder_index_mut() = next_index % total_builders;
-    }
+    update_next_withdrawal_builder_index(state, processed_builders_sweep_count);
 
     // > Update the next validator index to start the next withdrawal sweep
     capella::update_next_withdrawal_validator_index(state, &withdrawals);
 
     Ok(())
+}
+
+pub fn update_next_withdrawal_builder_index<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+    processed_builders_sweep_count: u64,
+) {
+    let total_builders = state.builders().len_u64();
+    if total_builders > 0 {
+        let next_index = state.next_withdrawal_builder_index() + processed_builders_sweep_count;
+        *state.next_withdrawal_builder_index_mut() = next_index % total_builders;
+    }
 }
 
 fn apply_withdrawals<P: Preset>(
@@ -554,7 +563,6 @@ fn validate_execution_payload_bid<P: Preset>(
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
     let signed_bid = &block.body.signed_execution_payload_bid;
-    let payload_bid = signed_bid.message.clone();
     let ExecutionPayloadBid {
         builder_index,
         value: amount,
@@ -563,7 +571,7 @@ fn validate_execution_payload_bid<P: Preset>(
         parent_block_root,
         prev_randao,
         ..
-    } = payload_bid;
+    } = signed_bid.message;
 
     // > For self-builds, `amount` must be zero and `signature` must be empty,
     // Otherwise verify builder is active, has valid signature, and can pay bid.
@@ -836,7 +844,6 @@ pub fn apply_attestation<P: Preset>(
         get_attestation_participation_flags(state, attestation.data, inclusion_delay)?;
 
     // > Update epoch participation flags
-    let is_attestation_same_slot = is_attestation_same_slot(state, &attestation.data)?;
     let base_reward_per_increment = get_base_reward_per_increment(state);
 
     let attesting_indices_with_base_rewards = get_attesting_indices(state, attestation)?
@@ -849,24 +856,21 @@ pub fn apply_attestation<P: Preset>(
         .collect::<Result<Vec<_>>>()?;
 
     // > [New in Gloas:EIP7732]
+    let is_attestation_same_slot = is_attestation_same_slot(state, &attestation.data)?;
     let attestation_epoch = attestation_epoch(state, attestation.data.target.epoch)?;
-    let mut payment = match attestation_epoch {
+    let payment_slot = match attestation_epoch {
         AttestationEpoch::Previous => {
-            state
-                .builder_pending_payments()
-                .get(builder_payment_index_for_previous_epoch::<P>(
-                    attestation.data.slot,
-                ))
+            builder_payment_index_for_previous_epoch::<P>(attestation.data.slot)
         }
         AttestationEpoch::Current => {
-            state
-                .builder_pending_payments()
-                .get(builder_payment_index_for_current_epoch::<P>(
-                    attestation.data.slot,
-                ))
+            builder_payment_index_for_current_epoch::<P>(attestation.data.slot)
         }
-    }?
-    .to_owned();
+    };
+
+    let mut payment = state
+        .builder_pending_payments()
+        .get(payment_slot)?
+        .to_owned();
 
     let epoch_participation = match attestation_epoch {
         AttestationEpoch::Previous => state.previous_epoch_participation_mut(),
@@ -907,18 +911,9 @@ pub fn apply_attestation<P: Preset>(
     increase_balance(balance(state, proposer_index)?, proposer_reward);
 
     // > Update builder payment weight
-    match attestation_epoch {
-        AttestationEpoch::Current => {
-            *state.builder_pending_payments_mut().mod_index_mut(
-                builder_payment_index_for_current_epoch::<P>(attestation.data.slot),
-            ) = payment
-        }
-        AttestationEpoch::Previous => {
-            *state.builder_pending_payments_mut().mod_index_mut(
-                builder_payment_index_for_previous_epoch::<P>(attestation.data.slot),
-            ) = payment
-        }
-    }
+    *state
+        .builder_pending_payments_mut()
+        .mod_index_mut(payment_slot) = payment;
 
     slot_report.add_attestation_reward(proposer_reward);
     slot_report.update_performance(
