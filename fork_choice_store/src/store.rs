@@ -5618,7 +5618,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
-        self.head().slot() + self.store_config.max_empty_slots >= self.slot()
+        self.head().slot() + P::SlotsPerEpoch::U64 >= self.slot()
     }
 
     #[must_use]
