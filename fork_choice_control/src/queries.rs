@@ -90,7 +90,7 @@ where
     }
 
     #[must_use]
-    pub fn genesis_time_in_ms(&self) -> UnixSeconds {
+    pub fn genesis_time_in_ms(&self) -> u64 {
         self.genesis_time().saturating_mul(1000)
     }
 

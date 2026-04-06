@@ -1034,24 +1034,11 @@ pub fn ptc_for_slot<P: Preset>(
     state: &impl BeaconState<P>,
     slot: Slot,
 ) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
-    let epoch = misc::compute_epoch_at_slot::<P>(slot);
-    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
-    let seed = hashing::hash_256_64(seed, slot);
-
-    // > Concatenate all committees for this slot in order
-    let indices = beacon_committees(state, slot)?.flatten();
-
-    misc::compute_balance_weighted_selection::<P>(
-        state,
-        &PackedIndices::U64(indices.into_iter().collect()),
-        seed,
-        P::PtcSize::USIZE,
-        false,
-    )?
-    .into_iter()
-    .take(P::PtcSize::USIZE)
-    .pipe(ContiguousVector::try_from_iter)
-    .map_err(Into::into)
+    compute_ptc_for_slot_internal(state, slot)?
+        .into_iter()
+        .take(P::PtcSize::USIZE)
+        .pipe(ContiguousVector::try_from_iter)
+        .map_err(Into::into)
 }
 
 // Internal helper to compute PTC for one slot
@@ -1063,7 +1050,7 @@ fn compute_ptc_for_slot_internal<P: Preset>(
     let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
     let seed = hashing::hash_256_64(seed, slot);
 
-    let indices = beacon_committees(state, slot)?.flatten().collect_vec();
+    let indices = beacon_committees(state, slot)?.flatten();
 
     misc::compute_balance_weighted_selection::<P>(
         state,

@@ -493,19 +493,7 @@ impl Eth1Api {
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
             }
-            PayloadId::Fulu(payload_id) => {
-                let params = vec![serde_json::to_value(payload_id)?];
-
-                self.execute::<EngineGetPayloadV5Response<P>>(
-                    ENGINE_GET_PAYLOAD_V5,
-                    params,
-                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
-                    None,
-                )
-                .await
-                .map(|with_client_info| with_client_info.map(Into::into))
-            }
-            PayloadId::Gloas(payload_id) => {
+            PayloadId::Fulu(payload_id) | PayloadId::Gloas(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV5Response<P>>(

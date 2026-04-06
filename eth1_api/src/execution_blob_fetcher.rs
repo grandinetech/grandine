@@ -237,7 +237,6 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
             return;
         }
 
-        // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
         let Some(kzg_commitments) = block_or_sidecar.kzg_commitments() else {
             return;
         };
