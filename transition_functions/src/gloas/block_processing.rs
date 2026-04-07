@@ -697,6 +697,7 @@ pub fn process_execution_payload_bid<P: Preset>(
     Ok(())
 }
 
+#[expect(clippy::too_many_lines)]
 pub fn process_operations<P: Preset, V: Verifier, B>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -710,17 +711,32 @@ where
         + BlockBodyWithBlsToExecutionChanges<P>
         + BlockBodyWithPayloadAttestations<P>,
 {
-    // > Verify that outstanding deposits are processed up to the maximum number of deposits
-    let in_block = body.deposits().len().try_into()?;
-    let computed = state
+    // > [Modified in Electra:EIP6110]
+    // > Disable former deposit mechanism once all prior deposits are processed
+    let eth1_deposit_index_limit = state
         .eth1_data()
         .deposit_count
-        .saturating_sub(state.eth1_deposit_index())
-        .min(P::MaxDeposits::U64);
-    ensure!(
-        in_block == computed,
-        Error::<P>::DepositCountMismatch { computed, in_block }
-    );
+        .min(state.deposit_requests_start_index());
+
+    let in_block = body.deposits().len().try_into()?;
+
+    if state.eth1_deposit_index() < eth1_deposit_index_limit {
+        let computed =
+            P::MaxDeposits::U64.min(eth1_deposit_index_limit - state.eth1_deposit_index());
+
+        ensure!(
+            computed == in_block,
+            Error::<P>::DepositCountMismatch { computed, in_block },
+        );
+    } else {
+        ensure!(
+            in_block == 0,
+            Error::<P>::DepositCountMismatch {
+                computed: 0,
+                in_block
+            },
+        );
+    }
 
     for proposer_slashing in body.proposer_slashings().iter().copied() {
         process_proposer_slashing(
