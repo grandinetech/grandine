@@ -26,8 +26,9 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockTask, BlockVerifyForGossipTask, CheckpointStateTask,
-        DataColumnSidecarTask, ExecutionPayloadBidTask, PersistBlobSidecarsTask,
-        PersistDataColumnSidecarsTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        DataColumnSidecarTask, ExecutionPayloadBidTask, ExecutionPayloadEnvelopeTask,
+        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
         PruneStateCacheTask, RetryDataColumnSidecarTask, Run, StateAtSlotCacheFlushTask,
     },
     wait::Wait,
@@ -111,6 +112,7 @@ enum HighPriorityTask<P: Preset, E, W> {
     // processing of blocks that are waiting for checkpoint states. However, this may result in a
     // `CheckpointStateTask` being prioritized when it's only needed to verify attestations.
     CheckpointState(CheckpointStateTask<P, W>),
+    ExecutionPayloadEnvelope(ExecutionPayloadEnvelopeTask<P, W>),
     PreprocessState(PreprocessStateTask<P, W>),
     RetryDataColumnSidecar(RetryDataColumnSidecarTask<P, W>),
 }
@@ -127,6 +129,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for HighPriorityTask<P, E, 
             Self::Block(task) => task.run(),
             Self::BlockForGossip(task) => task.run(),
             Self::CheckpointState(task) => task.run(),
+            Self::ExecutionPayloadEnvelope(task) => task.run(),
             Self::PreprocessState(task) => task.run(),
             Self::RetryDataColumnSidecar(task) => task.run(),
         }
@@ -154,6 +157,7 @@ enum LowPriorityTask<P: Preset, W> {
     PruneStateCacheTask(PruneStateCacheTask<P, W>),
     StateAtSlotCacheFlush(StateAtSlotCacheFlushTask<P>),
     PersistDataColumnSidecarsTask(PersistDataColumnSidecarsTask<P, W>),
+    PersistExecutionPayloadEnvelopesTask(PersistExecutionPayloadEnvelopesTask<P, W>),
 }
 
 impl<P: Preset, W> Run for LowPriorityTask<P, W> {
@@ -169,6 +173,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::PruneStateCacheTask(task) => task.run(),
             Self::StateAtSlotCacheFlush(task) => task.run(),
             Self::PersistDataColumnSidecarsTask(task) => task.run(),
+            Self::PersistExecutionPayloadEnvelopesTask(task) => task.run(),
         }
     }
 }
@@ -279,6 +284,18 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PersistDataColumnSidecarsTask<P, W> {
     }
 }
 
+impl<P: Preset, E, W> Spawn<P, E, W> for ExecutionPayloadEnvelopeTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.high_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for PersistExecutionPayloadEnvelopesTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
 fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, W>) {
     trace_with_peers!("thread {} starting", thread_name());
 
@@ -309,6 +326,7 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
                     &task,
                     LowPriorityTask::PersistDataColumnSidecarsTask(_)
                         | LowPriorityTask::PersistBlobSidecarsTask(_)
+                        | LowPriorityTask::PersistExecutionPayloadEnvelopesTask(_)
                 );
 
                 if is_persistence_task && critical.persistence_task_running {
