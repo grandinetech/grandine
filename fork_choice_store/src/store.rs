@@ -305,13 +305,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             root: block_root,
         };
 
-        // For Gloas, genesis/anchor is conceptually a "full" block with execution state
-        // spec(gloas): https://github.com/ethereum/consensus-specs/blob/915907a6ed6d753bbbee4919a41a1e5b8a6a2d96/specs/gloas/fork-choice.md?plain=1#L175
-        let execution_payload_state = if anchor_state.phase() >= Phase::Gloas {
-            Some(anchor_state.clone_arc())
-        } else {
-            None
-        };
+        // Anchor state is always pre-execution (block_state). Post-execution states
+        // are rejected at checkpoint sync ingestion. No execution_payload_state for anchors.
+        let execution_payload_state = None;
 
         let anchor = ChainLink {
             block_root,
@@ -539,8 +535,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// vs payload-not-arrived explicitly (for example via `is_some()`).
     #[must_use]
     pub fn chain_link_full(&self, block_root: H256) -> Option<&ChainLink<P>> {
-        if let Some(loc) = self.unfinalized_locations_full.get(&block_root) {
-            return Some(&self.unfinalized[&loc.segment_id][loc.position].chain_link);
+        if let Some(location) = self.unfinalized_locations_full.get(&block_root) {
+            return Some(&self.unfinalized[&location.segment_id][location.position].chain_link);
         }
         // Finalized blocks included (variant not tracked after finalization)
         let index = self.finalized_indices.get(&block_root)?;
@@ -670,9 +666,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn is_parent_node_full_for_block(&self, block: &SignedBeaconBlock<P>) -> bool {
         let parent_root = block.message().parent_root();
 
-        // Finalized parents are treated as FULL — no EMPTY segment exists for them.
-        if self.finalized_indices.contains_key(&parent_root) {
-            return true;
+        // Finalized pre-Gloas parents are always FULL (payload intrinsic to block).
+        // Gloas finalized parents fall through to bid comparison below.
+        if let Some(index) = self.finalized_indices.get(&parent_root) {
+            if self.finalized[*index].block.phase() < Phase::Gloas {
+                return true;
+            }
         }
 
         let Some(parent) = self.chain_link_full(parent_root) else {
@@ -687,14 +686,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
+        // Genesis/default block_hash is zero — no envelope concept, not FULL.
+        // See: https://github.com/ethereum/consensus-specs/issues/5043
+        let parent_block_hash = parent_gloas_body
+            .signed_execution_payload_bid()
+            .message
+            .block_hash;
+
+        if parent_block_hash == H256::zero() {
+            return false;
+        }
+
         current_gloas_body
             .signed_execution_payload_bid()
             .message
             .parent_block_hash
-            == parent_gloas_body
-                .signed_execution_payload_bid()
-                .message
-                .block_hash
+            == parent_block_hash
     }
 
     /// Check if payload was timely.
@@ -713,11 +720,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `unfinalized_locations_full` is pruned on finalization/orphaning. This is safe
         // because the only caller (`should_extend_payload`) is used during head selection,
         // which only considers unfinalized blocks.
-        let Some(loc) = self.unfinalized_locations_full.get(&block_root) else {
+        let Some(location) = self.unfinalized_locations_full.get(&block_root) else {
             return false;
         };
         // Check payload actually arrived (not just FULL placeholder)
-        if self.unfinalized[&loc.segment_id][loc.position]
+        if self.unfinalized[&location.segment_id][location.position]
             .chain_link
             .execution_payload_state
             .is_none()
@@ -1069,18 +1076,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn has_envelope(&self, block_root: H256) -> bool {
-        // Pre-Gloas blocks have no envelope concept — treat as always available
-        if self.phase() < Phase::Gloas {
-            return true;
+        // Check unfinalized FULL location first
+        if let Some(location) = self.unfinalized_locations_full.get(&block_root) {
+            let chain_link = &self.unfinalized[&location.segment_id][location.position].chain_link;
+            if self.chain_config.phase_at_slot::<P>(chain_link.slot()) < Phase::Gloas {
+                return true;
+            }
+            return chain_link.execution_payload_state.is_some();
         }
-        // Check FULL location exists AND has execution_payload_state (envelope arrived)
-        let Some(loc) = self.unfinalized_locations_full.get(&block_root) else {
-            return false;
-        };
-        self.unfinalized[&loc.segment_id][loc.position]
-            .chain_link
-            .execution_payload_state
-            .is_some()
+        // Finalized: pre-Gloas blocks have payload intrinsic to the block.
+        // Gloas finalized blocks must check execution_payload_state
+        // (e.g. checkpoint sync anchor has no envelope).
+        if let Some(index) = self.finalized_indices.get(&block_root) {
+            let chain_link = &self.finalized[*index];
+            if self.chain_config.phase_at_slot::<P>(chain_link.slot()) < Phase::Gloas {
+                return true;
+            }
+            return chain_link.execution_payload_state.is_some();
+        }
+        false
     }
 
     /// Get the slot of a block by its root.
@@ -1348,7 +1362,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut head_weight = self
             .unfinalized_locations_full
             .get(&head_root)
-            .map(|loc| self.unfinalized[&loc.segment_id][loc.position].attesting_balance)
+            .map(|location| self.unfinalized[&location.segment_id][location.position].attesting_balance)
             .unwrap_or(0);
 
         // Get chain_link for equivocating weight calculation
@@ -1727,13 +1741,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let parent_full = self.is_parent_node_full_for_block(block);
             let has_parent_exec = parent.execution_payload_state.is_some();
 
-            // Skip delay for pre-Gloas or finalized parents: their execution payload
-            // has already been processed, so no envelope will arrive separately.
+            // Skip delay for pre-Gloas parents: their execution payload
+            // is intrinsic to the block, so no envelope will arrive separately.
             let parent_root = block.message().parent_root();
             let parent_is_pre_gloas = parent.block.phase() < Phase::Gloas;
-            let parent_is_finalized = self.finalized_indices.contains_key(&parent_root);
 
-            if parent_full && !has_parent_exec && !parent_is_pre_gloas && !parent_is_finalized {
+            if parent_full && !has_parent_exec && !parent_is_pre_gloas {
                 return Ok(BlockAction::DelayUntilParentEnvelope(
                     block.clone_arc(),
                     block.message().parent_root(),
@@ -1973,6 +1986,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             PartialAttestationAction::DelayUntilSlot => {
                 return Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof));
             }
+            PartialAttestationAction::DelayUntilEnvelope(block_root) => {
+                return Ok(AggregateAndProofAction::DelayUntilEnvelope(
+                    aggregate_and_proof,
+                    block_root,
+                ));
+            }
         }
 
         let AttestationData { slot, target, .. } = aggregate.data();
@@ -2126,6 +2145,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
             Ok(PartialAttestationAction::DelayUntilSlot) => {
                 return Ok(AttestationAction::DelayUntilSlot(attestation));
+            }
+            Ok(PartialAttestationAction::DelayUntilEnvelope(block_root)) => {
+                return Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root));
             }
             Err(source) => {
                 return Err(AttestationValidationError::Other {
@@ -2403,6 +2425,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Note: index < 2 is guaranteed here — enforced by !is_from_block check
         // for gossip attestations, and by state transition for block attestations.
         // (raise in review if incorrect)
+
+        // [New in EIP7732]
+        // If attesting for a full node, the payload must be known.
+        //
+        // Delay gossip attestation with payload_present=1 until envelope arrives.
+        // Spec(gloas): https://github.com/ethereum/consensus-specs/commit/6b3aedc5367981721a4620feaf4a2fd3438b1f54
+        // Block-packed attestations are currently allowed to affect forkchoice.
+        // TODO(gloas): revisit !is_from_block after 1.7.0-alpha.4 spec test changes. now if removed gives a failrue at 
+        // spec_tests::gloas_minimal_get_head_consensus_spec_tests_tests_minimal_gloas_fork_choice_get_head_pyspec_tests_voting_source_within_two_epoch
+        // also at that point recheck finalized block getting attestaion can be handled via has_envelope without calling unfinalized_locations_full or not
+
+        if !is_from_block && index == 1 {
+            if let Some(location) = self.unfinalized_locations_full.get(&beacon_block_root) {
+                let chain_link = &self.unfinalized[&location.segment_id][location.position].chain_link;
+                if chain_link.block.message().body().with_payload_bid().is_some()
+                    && chain_link.execution_payload_state.is_none()
+                {
+                    return Ok(PartialAttestationAction::DelayUntilEnvelope(beacon_block_root));
+                }
+            }
+        }
 
         let ancestor_at_target_epoch_start = self
             .ancestor(beacon_block_root, Self::start_of_epoch(target.epoch))
@@ -3620,8 +3663,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // Both variants must exist in the tree for head selection to compare them.
                 if self.phase() >= Phase::Gloas {
                     let parent_root = chain_link.block.message().parent_root();
-                    if let Some(loc) = self.unfinalized_locations_full.get(&parent_root).copied() {
-                        let parent_has_payload = self.unfinalized[&loc.segment_id][loc.position]
+                    if let Some(location) = self.unfinalized_locations_full.get(&parent_root).copied() {
+                        let parent_has_payload = self.unfinalized[&location.segment_id][location.position]
                             .chain_link
                             .execution_payload_state
                             .is_some();
@@ -4070,26 +4113,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         execution_payload_state: Arc<BeaconState<P>>,
         execution_block_hash: ExecutionBlockHash,
     ) -> Result<()> {
-        // Find existing FULL placeholder
-        let Some(&location) = self.unfinalized_locations_full.get(&beacon_block_root) else {
+        if let Some(&location) = self.unfinalized_locations_full.get(&beacon_block_root) {
+            // Unfinalized FULL placeholder path.
+            let segment = self
+                .unfinalized
+                .get_mut(&location.segment_id)
+                .expect("segment should exist for location in unfinalized_locations_full");
+            let unfinalized_block = &mut segment[location.position];
+
+            unfinalized_block.chain_link.execution_payload_state = Some(execution_payload_state);
+
+            self.execution_payload_locations
+                .insert(execution_block_hash, location);
+        } else if let Some(&index) = self.finalized_indices.get(&beacon_block_root) {
+            // Checkpoint-sync anchors and already-finalized Gloas blocks live in `finalized`,
+            // not in `unfinalized_locations_full`, but may still receive an envelope later.
+            self.finalized[index].execution_payload_state = Some(execution_payload_state);
+        } else {
             bail!(
                 "insert_payload: FULL placeholder not found for beacon_block_root: {beacon_block_root:?}"
             );
-        };
-
-        // Get the UnfinalizedBlock and fill execution_payload_state
-        let segment = self
-            .unfinalized
-            .get_mut(&location.segment_id)
-            .expect("segment should exist for location in unfinalized_locations_full");
-        let unfinalized_block = &mut segment[location.position];
-
-        // Fill the placeholder with execution state
-        unfinalized_block.chain_link.execution_payload_state = Some(execution_payload_state);
-
-        // Update execution_payload_locations map
-        self.execution_payload_locations
-            .insert(execution_block_hash, location);
+        }
 
         Ok(())
     }
@@ -4254,14 +4298,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Pre-Gloas blocks always use unfinalized_locations_full (where all blocks are stored).
         let parent = if let Some(gloas_body) = block.message().body().with_payload_bid() {
             let builds_on_full = self.is_parent_node_full_for_block(block);
-
-            if !builds_on_full {
-                // EMPTY: Create EMPTY segment for parent if needed
+            let parent_is_finalized = self.finalized_indices.contains_key(&parent_root);
+            //note: even in case of empty gloas parent block finalized, the segment
+            // will be created through the else path and get None as parent rooted at finalized checkpoint.
+            if !builds_on_full && !parent_is_finalized {
+                // EMPTY: Create EMPTY segment for parent if needed, the new segment
                 if !self.unfinalized_locations_empty.contains_key(&parent_root) {
                     self.extend_empty_segment(parent_root)?;
                 }
                 self.unfinalized_locations_empty.get(&parent_root).copied()
             } else {
+                // FULL path, also used for finalized parents (new segment created at line 4349)
                 self.unfinalized_locations_full.get(&parent_root).copied()
             }
         } else {
@@ -4342,7 +4389,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 self.unfinalized
                     .get(seg_id)
                     .and_then(|seg| seg.parent_location())
-                    .map(|loc| loc.segment_id)
+                    .map(|location| location.segment_id)
             })
             .collect();
 
@@ -4355,7 +4402,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ]
         .into_iter()
         .flatten()
-        .find(|loc| canonical_segments.contains(&loc.segment_id))
+        .find(|location| canonical_segments.contains(&location.segment_id))
         .or_else(|| self.unfinalized_locations_full.get(&finalized_root))
         .copied();
 
@@ -4814,19 +4861,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 continue;
             }
 
-            // Route vote semantics by voted block phase, not store phase.
+            // Route vote semantics by the voted block phase, not the store phase.
             // At the Fulu->Gloas boundary, attestations can still reference pre-Gloas roots.
-            let voted_block_phase_and_slot = self
+            let block_uses_empty_full_variant = self
                 .chain_link_full(beacon_block_root)
-                .map(|link| (link.block.phase(), link.block.message().slot()));
-            let supports_empty_variant = voted_block_phase_and_slot
-                .map(|(phase, _)| phase >= Phase::Gloas)
-                .unwrap_or(false);
-            let payload_present = if supports_empty_variant {
-                data.index == 1
-            } else {
-                true
-            };
+                .is_some_and(|link| link.block.phase() >= Phase::Gloas);
+            let payload_present = !block_uses_empty_full_variant || data.index == 1;
 
             let latest_message = Arc::new(LatestMessage {
                 slot,
@@ -4849,8 +4889,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // [Gloas] Same-slot votes are pending and stay neutral until a later settled vote.
                 let mut same_slot_pending = false;
-                if supports_empty_variant {
-                    if let Some((_, voted_block_slot)) = voted_block_phase_and_slot {
+                if block_uses_empty_full_variant {
+                    let voted_block_slot = self
+                        .chain_link_full(beacon_block_root)
+                        .map(|link| link.block.message().slot());
+                    if let Some(voted_block_slot) = voted_block_slot {
                         if slot <= voted_block_slot {
                             same_slot_pending = true;
                         }
@@ -4890,44 +4933,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     let old_root = old_message.beacon_block_root;
                     let old_payload_present = old_message.payload_present;
                     let old_slot = old_message.slot;
-                    let old_supports_empty_variant = self
+                    let old_block_uses_empty_full_variant = self
                         .chain_link_full(old_root)
-                        .map(|link| link.block.phase() >= Phase::Gloas)
-                        .unwrap_or(false);
+                        .is_some_and(|link| link.block.phase() >= Phase::Gloas);
 
                     // Re-derive same-slot status: was the old vote for the same slot as the block?
-                    let old_same_slot = if old_supports_empty_variant {
+                    let old_same_slot = if old_block_uses_empty_full_variant {
                         self.chain_link_full(old_root)
-                            .map(|link| old_slot <= link.block.message().slot())
-                            .unwrap_or(false)
+                            .is_some_and(|link| old_slot <= link.block.message().slot())
                     } else {
                         false
                     };
 
-                    // Pre-Gloas intuition was simple: latest-message update = subtract old + add new on one path.
-                    // With FULL placeholders, that is no longer always true.
-                    //
-                    // A validator can submit a valid latest-message attestation (valid by beacon root), but the
-                    // direct FULL vote target may still lack execution payload state locally. In that case:
-                    // - the attestation is still accepted,
-                    // - but FULL weight must not be credited yet.
-                    //
-                    // Therefore this block enforces:
-                    // 1) Old vote removal:
+                    // Old vote removal:
                     //    - old same-slot vote: subtract BOTH FULL and EMPTY (both were credited earlier).
-                    //    - old FULL vote: subtract FULL only if FULL had actually been applied (`old_can_apply`).
+                    //    - old FULL vote: subtract FULL (envelope guaranteed present via delay-until-envelope).
                     //    - old EMPTY vote: subtract EMPTY.
-                    // 2) New vote addition:
+                    // New vote addition:
                     //    - same-slot pending: add BOTH FULL and EMPTY.
-                    //    - new FULL vote: add FULL only when `can_apply_full` is true.
-                    //    - new EMPTY vote: add EMPTY.
-                    //
-                    // Net effect is intentionally possible:
-                    // "subtract old, skip add new FULL" when FULL payload state is not available yet.
-                    //
-                    // Important(for the TBS portion):
-                    // if later add EMPTY fallback for `payload_present = true`, we should track the actual
-                    // applied side (FULL/EMPTY/BOTH) and use that for all future subtractions. `payload_present` alone is intent, not guaranteed applied location.
+                    //    - FULL vote: add FULL (envelope guaranteed present via delay-until-envelope).
+                    //    - EMPTY vote: add EMPTY.
                     if old_same_slot {
                         // [Gloas] Same-slot was added to both Full and Empty; subtract from both.
                         // note that the additon logic is not here. because that is controlled by can_apply_full
@@ -4935,27 +4960,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             .entry(old_root)
                             .or_default()
                             .sub_assign(balance);
-                        if old_supports_empty_variant {
+                        if old_block_uses_empty_full_variant {
                             differences_empty
                                 .entry(old_root)
                                 .or_default()
                                 .sub_assign(balance);
                         }
-                    } else if old_payload_present || !old_supports_empty_variant {
-                        // Only subtract from full if weight was actually applied
-                        let old_can_apply = if old_supports_empty_variant {
-                            self.chain_link_full(old_root)
-                                .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
-                                .unwrap_or(false)
-                        } else {
-                            true
-                        };
-                        if old_can_apply {
-                            differences_full
-                                .entry(old_root)
-                                .or_default()
-                                .sub_assign(balance);
-                        }
+                    } else if old_payload_present || !old_block_uses_empty_full_variant {
+                        differences_full
+                            .entry(old_root)
+                            .or_default()
+                            .sub_assign(balance);
                     } else {
                         differences_empty
                             .entry(old_root)
@@ -4967,7 +4982,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 // The approach below inlines the behaviour of `is_supporting_vote``
                 if same_slot_pending {
                     // [Gloas] Same-slot: apply to both Full and Empty only for post-Gloas blocks.
-                    if supports_empty_variant {
+                    if block_uses_empty_full_variant {
                         let had_empty = self
                             .unfinalized_locations_empty
                             .contains_key(&beacon_block_root);
@@ -4983,17 +4998,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         .entry(beacon_block_root)
                         .or_default()
                         .add_assign(balance);
-                    if supports_empty_variant {
+                    if block_uses_empty_full_variant {
                         differences_empty
                             .entry(beacon_block_root)
                             .or_default()
                             .add_assign(balance);
                     }
-                } else if payload_present || !supports_empty_variant {
-                    let can_apply_full = if supports_empty_variant {
+                } else if payload_present || !block_uses_empty_full_variant {
+                    // TODO(gloas): The vote additon part will be simplified just like the substraction part after v1.7.0-alpha.4
+                    let can_apply_full = if block_uses_empty_full_variant {
                         self.chain_link_full(beacon_block_root)
-                            .map(|link: &ChainLink<P>| link.execution_payload_state.is_some())
-                            .unwrap_or(false)
+                            .is_some_and(|chain_link: &ChainLink<P>| {
+                                chain_link.execution_payload_state.is_some()
+                            })
                     } else {
                         true
                     };
@@ -5004,18 +5021,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             .or_default()
                             .add_assign(balance);
                     }
-                    // TBD: the replay non added(sub already done) votes for  payload_present = true and can_apply_full = false needs to be triggered at insert_payload step when payload finallyy arrives.
-                    // need some way to remember what was not applied. ideally, DelayUntilEnvelope for attestation is not correct, as we are sure about the substraction part(as beacon block is present). But without
-                    // that `EnvelopeNeeded` request would be somewhat of a new pattern. if no intention to request in this case, then storing it in store iteself is quite possible.
-
-                    // empty entry should be safe as in this spec "is_suporting_vote"(payload_present vote to pending will return true) will return true.
-                    // but currently fails:
-                    //spec_tests::gloas_mainnet_get_head_consensus_spec_tests_tests_mainnet_gloas_fork_choice_get_head_pyspec_tests_discard_equivocations_on_attester_slashing
-                    //spec_tests::gloas_minimal_get_head_consensus_spec_tests_tests_minimal_gloas_fork_choice_get_head_pyspec_tests_discard_equivocations_on_attester_slashing
-                    //  differences_empty
-                    //     .entry(beacon_block_root)
-                    //     .or_default()
-                    //     .add_assign(balance);
                 } else {
                     differences_empty
                         .entry(beacon_block_root)
@@ -5613,7 +5618,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
-        self.head().slot() + self.store_config.max_empty_slots >= self.slot()
+        self.head().slot() + P::SlotsPerEpoch::U64 >= self.slot()
     }
 
     #[must_use]

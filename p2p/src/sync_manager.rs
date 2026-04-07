@@ -492,8 +492,14 @@ impl<P: Preset> SyncManager<P> {
             // Request execution payload envelopes for Gloas-activated slots
             // Note: Unlike blobs/columns which use serve_range checks, envelopes are needed
             // for all Gloas slots (similar to blocks) for state transition
-            //TODO: confirm this from hangleang
-            if sync_mode.is_default() && config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
+            let gloas_start_slot = misc::compute_start_slot_at_epoch::<P>(config.gloas_fork_epoch);
+            if sync_mode.is_default() && start_slot + count >= gloas_start_slot {
+                // Adjust range iff `start_slot < gloas_start_slot`,
+                // otherwise stay the same because `offset` gonna be 0.
+                let offset = gloas_start_slot.saturating_sub(start_slot);
+                let count = count.checked_sub(offset).unwrap_or(1);
+                let start_slot = start_slot.max(gloas_start_slot);
+
                 let batch = SyncBatch {
                     target: SyncTarget::ExecutionPayloadEnvelope,
                     direction: SyncDirection::Back,
@@ -711,7 +717,13 @@ impl<P: Preset> SyncManager<P> {
                 // Request execution payload envelopes for Gloas-activated slots
                 // Note: Similar to blocks, envelopes are needed for all Gloas slots (not just serve range)
                 // This must be checked before serve range checks to ensure envelopes are always requested
-                if config.phase_at_slot::<P>(start_slot) >= Phase::Gloas {
+                let gloas_start_slot =
+                    misc::compute_start_slot_at_epoch::<P>(config.gloas_fork_epoch);
+                if start_slot + count >= gloas_start_slot {
+                    let offset = gloas_start_slot.saturating_sub(start_slot);
+                    let count = count.checked_sub(offset).unwrap_or(1);
+                    let start_slot = start_slot.max(gloas_start_slot).saturating_sub(1);
+
                     sync_batches.push(SyncBatch {
                         target: SyncTarget::ExecutionPayloadEnvelope,
                         direction: SyncDirection::Forward,

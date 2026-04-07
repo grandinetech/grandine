@@ -1139,6 +1139,22 @@ where
 
                 self.delay_aggregate_and_proof_until_slot(wait_group, pending_aggregate_and_proof);
             }
+            Ok(AggregateAndProofAction::DelayUntilEnvelope(aggregate_and_proof, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_aggregate_and_proof(&["delayed_until_envelope"]);
+                }
+
+                let pending_aggregate_and_proof = PendingAggregateAndProof {
+                    aggregate_and_proof,
+                    origin,
+                };
+
+                self.delay_aggregate_and_proof_until_envelope(
+                    wait_group,
+                    pending_aggregate_and_proof,
+                    block_root,
+                );
+            }
             Ok(AggregateAndProofAction::WaitForTargetState(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["delayed_until_state"]);
@@ -1311,6 +1327,13 @@ where
 
                 self.delay_attestation_until_slot(wait_group, attestation);
             }
+            Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_attestation(&["delayed_until_envelope"]);
+                }
+
+                self.delay_attestation_until_envelope(wait_group, attestation, block_root);
+            }
             Ok(AttestationAction::WaitForTargetState(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_state"]);
@@ -1397,6 +1420,10 @@ where
                 }
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                     self.delay_attestation_until_slot(wait_group, attestation);
+                    None
+                }
+                Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root)) => {
+                    self.delay_attestation_until_envelope(wait_group, attestation, block_root);
                     None
                 }
                 Ok(AttestationAction::WaitForTargetState(pending_attestation)) => {
@@ -2065,6 +2092,16 @@ where
                 objects.blocks.len()
             );
             self.retry_delayed(objects, wait_group);
+        }
+
+        if !self.storage.prune_storage_enabled() {
+            self.spawn(PersistExecutionPayloadEnvelopesTask {
+                store_snapshot: self.owned_store(),
+                storage: self.storage.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group: wait_group.clone(),
+                metrics: self.metrics.clone(),
+            });
         }
 
         Ok(())
@@ -2867,11 +2904,13 @@ where
             .is_finalized_checkpoint_updated()
             .then(|| {
                 let delayed = self.prune_delayed_until_block();
+                let delayed_until_envelope = self.prune_delayed_until_envelope();
                 let delayed_until_blobs = self.prune_delayed_until_blobs();
                 let delayed_until_data = self.prune_delayed_until_data();
                 let waiting = self.prune_waiting_for_checkpoint_states();
                 delayed
                     .into_iter()
+                    .chain(delayed_until_envelope)
                     .chain(delayed_until_blobs)
                     .chain(delayed_until_data)
                     .chain(waiting)
@@ -3236,6 +3275,35 @@ where
         }
     }
 
+    fn delay_aggregate_and_proof_until_envelope(
+        &mut self,
+        wait_group: &W,
+        pending_aggregate_and_proof: PendingAggregateAndProof<P>,
+        block_root: H256,
+    ) {
+        if self.store.has_envelope(block_root) {
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+        } else {
+            trace_with_peers!(
+                "aggregate and proof delayed until envelope \
+                 (block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_aggregate_and_proof
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(block_root, peer_id));
+
+            self.delayed_until_envelope
+                .entry(block_root)
+                .or_default()
+                .aggregates
+                .push(pending_aggregate_and_proof);
+        }
+    }
+
     fn delay_attestation_until_block(
         &mut self,
         wait_group: &W,
@@ -3264,6 +3332,35 @@ where
             ));
 
             self.delayed_until_block
+                .entry(block_root)
+                .or_default()
+                .attestations
+                .push(pending_attestation);
+        }
+    }
+
+    fn delay_attestation_until_envelope(
+        &mut self,
+        wait_group: &W,
+        pending_attestation: PendingAttestation<P>,
+        block_root: H256,
+    ) {
+        if self.store.has_envelope(block_root) {
+            self.retry_attestation(wait_group.clone(), pending_attestation);
+        } else {
+            trace_with_peers!(
+                "attestation delayed until envelope \
+                 (pending_attestation: {pending_attestation:?}, block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_attestation
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(block_root, peer_id));
+
+            self.delayed_until_envelope
                 .entry(block_root)
                 .or_default()
                 .attestations
@@ -3894,6 +3991,65 @@ where
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.data_column_sidecar.slot() - 1 <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            !delayed.is_empty()
+        });
+
+        gossip_ids
+    }
+
+    fn prune_delayed_until_envelope(&mut self) -> Vec<GossipId> {
+        let finalized_slot = self.store.finalized_slot();
+        let previous_epoch = self.store.previous_epoch();
+
+        let mut gossip_ids = vec![];
+
+        self.delayed_until_envelope.retain(|_, delayed| {
+            let Delayed {
+                blocks,
+                payload_status: _,
+                aggregates,
+                attestations,
+                payload_attestations: _,
+                execution_payload_envelopes: _,
+                blob_sidecars: _,
+                data_column_sidecars: _,
+            } = delayed;
+
+            gossip_ids.extend(
+                blocks
+                    .extract_if(.., |pending| {
+                        // The parent of a delayed block cannot be in a finalized slot.
+                        pending.block.message().slot() - 1 <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                aggregates
+                    .extract_if(.., |pending| {
+                        let epoch = pending
+                            .aggregate_and_proof
+                            .message()
+                            .aggregate()
+                            .data()
+                            .target
+                            .epoch;
+
+                        epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                attestations
+                    .extract_if(.., |pending| {
+                        let epoch = pending.data().target.epoch;
+
+                        epoch < previous_epoch
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
