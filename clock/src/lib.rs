@@ -302,7 +302,7 @@ impl TickKind {
     /// Returns the number of tick variants in use for a given slot.
     /// Pre-Gloas: 12 ticks (3 intervals * 4 ticks each)
     /// Post-Gloas: 16 ticks (4 intervals * 4 ticks each)
-    fn ticks_per_slot<P: Preset>(config: &Config, slot: Slot) -> usize {
+    pub fn ticks_per_slot<P: Preset>(config: &Config, slot: Slot) -> usize {
         if config.phase_at_slot::<P>(slot) >= Phase::Gloas {
             Self::CARDINALITY // 4 intervals of 4 ticks each
         } else {

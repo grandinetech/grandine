@@ -83,6 +83,8 @@ pub enum Error<P: Preset> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("block with root {block_root} not found in fork choice")]
+    BlockNotFound { block_root: H256 },
     #[error("builder index mismatch: expected {expected}, actual {actual}")]
     BuilderIndexMismatch {
         expected: ValidatorIndex,
@@ -244,4 +246,4 @@ pub enum Error<P: Preset> {
     },
 }
 
-assert_eq_size!(Error<Mainnet>, [usize; 4]);
+assert_eq_size!(Error<Mainnet>, [usize; 5]);

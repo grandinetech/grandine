@@ -687,7 +687,7 @@ where
         match *result {
             Ok(BlockAction::Accept(mut chain_link, attester_slashing_results)) => {
                 let block_root = chain_link.block_root;
-                let parent_root = chain_link.block.message().parent_root();
+                let parent_root = chain_link.parent_root();
 
                 if origin.should_send_gossip_event() {
                     self.event_channels
@@ -2735,6 +2735,14 @@ where
                     sender,
                     Ok(ValidationOutcome::Ignore(false)),
                 );
+            } else {
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                }
+
+                reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Accept));
             }
         } else if self
             .store
