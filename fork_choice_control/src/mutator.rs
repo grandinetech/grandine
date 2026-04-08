@@ -336,12 +336,14 @@ where
                     wait_group,
                     result,
                     origin,
-                    submission_time,
+                    processing_timings,
+                    tracing_span,
                 } => self.handle_execution_payload_envelope(
                     wait_group,
                     result,
                     origin,
-                    submission_time,
+                    processing_timings,
+                    tracing_span,
                 ),
                 MutatorMessage::PayloadBid { result, origin } => {
                     self.handle_payload_bid(result, origin)
@@ -1897,25 +1899,25 @@ where
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
-        submission_time: Instant,
+        processing_timings: ProcessingTimings,
+        tracing_span: Span,
     ) {
         match result {
-            Ok(ExecutionPayloadEnvelopeAction::Accept(execution_payload_envelope)) => {
+            Ok(ExecutionPayloadEnvelopeAction::Accept(envelope, state)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_execution_payload_envelope(&["accepted"]);
                 }
 
-                trace_with_peers!(
-                    "execution payload envelope accepted (beacon_block_root: {:?}, slot: {})",
-                    execution_payload_envelope.message.beacon_block_root,
-                    execution_payload_envelope.message.slot
+                let beacon_block_root = envelope.block_root();
+                let slot = envelope.slot();
+
+                debug_with_peers!(
+                    "execution payload envelope accepted (beacon_block_root: {beacon_block_root:?}, slot: {slot})"
                 );
 
                 if origin.should_generate_event() {
-                    self.event_channels.send_execution_payload_available_event(
-                        execution_payload_envelope.message.slot,
-                        execution_payload_envelope.message.beacon_block_root,
-                    );
+                    self.event_channels
+                        .send_execution_payload_available_event(slot, beacon_block_root);
                 }
 
                 let (gossip_id, sender) = origin.split();
@@ -1929,8 +1931,7 @@ where
                     Ok(ValidationOutcome::Accept),
                 );
 
-                // TODO(gloas): implement `on_execution_payload`
-                // self.accept_execution_payload_envelope(wait_group, execution_payload_envelope);
+                self.accept_execution_payload_envelope(&wait_group, envelope, state);
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1956,12 +1957,14 @@ where
                     metrics.register_mutator_execution_payload_envelope(&["delayed_until_block"]);
                 }
 
+                let processing_timings = processing_timings.delayed();
                 self.delay_execution_payload_envelope_until_block(
                     wait_group,
                     PendingExecutionPayloadEnvelope {
                         execution_payload_envelope,
                         origin,
-                        submission_time,
+                        processing_timings,
+                        tracing_span,
                     },
                     beacon_block_root,
                 );
@@ -1969,27 +1972,25 @@ where
             Ok(ExecutionPayloadEnvelopeAction::DelayUntilState(
                 execution_payload_envelope,
                 beacon_block_root,
-                slot,
             )) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_execution_payload_envelope(&["delayed_until_state"]);
                 }
 
+                let slot = execution_payload_envelope.slot();
+                let processing_timings = processing_timings.delayed();
                 let pending_envelope = PendingExecutionPayloadEnvelope {
                     execution_payload_envelope,
                     origin,
-                    submission_time,
+                    processing_timings,
+                    tracing_span,
                 };
 
-                if let Some(state) =
+                if let Some(_state) =
                     self.state_cache
                         .existing_state_at_slot(&self.store, beacon_block_root, slot)
                 {
-                    self.retry_execution_payload_envelope(
-                        wait_group,
-                        pending_envelope,
-                        Some(state),
-                    );
+                    self.retry_execution_payload_envelope(wait_group, pending_envelope);
                 } else {
                     debug_with_peers!(
                         "execution payload envelope delayed until state at same slot is ready \
@@ -2013,10 +2014,12 @@ where
 
                 let slot = execution_payload_envelope.slot();
                 let block_root = execution_payload_envelope.block_root();
+                let processing_timings = processing_timings.delayed();
                 let pending_payload_envelope = PendingExecutionPayloadEnvelope {
                     execution_payload_envelope,
                     origin,
-                    submission_time,
+                    processing_timings,
+                    tracing_span,
                 };
 
                 let envelope_data_column_availability = self.block_data_column_availability(
@@ -2037,11 +2040,7 @@ where
 
                 match envelope_data_column_availability {
                     BlockDataColumnAvailability::Complete => {
-                        self.retry_execution_payload_envelope(
-                            wait_group,
-                            pending_payload_envelope,
-                            None,
-                        );
+                        self.retry_execution_payload_envelope(wait_group, pending_payload_envelope);
                     }
                     BlockDataColumnAvailability::AnyPending => {
                         self.delay_execution_payload_envelope_until_data(
@@ -2074,7 +2073,6 @@ where
                             self.retry_execution_payload_envelope(
                                 wait_group,
                                 pending_payload_envelope,
-                                None,
                             );
                         } else {
                             if !matches!(
@@ -2109,7 +2107,6 @@ where
                                 self.retry_execution_payload_envelope(
                                     wait_group,
                                     pending_payload_envelope,
-                                    None,
                                 );
                             } else {
                                 self.delay_execution_payload_envelope_until_data(
@@ -2953,6 +2950,28 @@ where
         reply_block_validation_result_to_http_api(sender, Err(error));
     }
 
+    fn accept_execution_payload_envelope(
+        &mut self,
+        wait_group: &W,
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        state: Arc<BeaconState<P>>,
+    ) {
+        self.store_mut()
+            .apply_execution_payload_envelope(envelope, state);
+
+        self.update_store_snapshot();
+
+        if !self.storage.prune_storage_enabled() {
+            self.spawn(PersistExecutionPayloadEnvelopesTask {
+                store_snapshot: self.owned_store(),
+                storage: self.storage.clone_arc(),
+                mutator_tx: self.owned_mutator_tx(),
+                wait_group: wait_group.clone(),
+                metrics: self.metrics.clone(),
+            });
+        }
+    }
+
     fn accept_blob_sidecar(&mut self, wait_group: &W, blob_sidecar: &Arc<BlobSidecar<P>>) {
         let block_root = blob_sidecar.signed_block_header.message.hash_tree_root();
 
@@ -3039,11 +3058,7 @@ where
         if accepted_data_columns == self.store.sampling_columns_count()
             && let Some(pending_payload_envelope) = self.take_delayed_until_data(block_root)
         {
-            self.retry_execution_payload_envelope(
-                wait_group.clone(),
-                pending_payload_envelope,
-                None,
-            );
+            self.retry_execution_payload_envelope(wait_group.clone(), pending_payload_envelope);
         }
 
         self.event_channels
@@ -3265,11 +3280,7 @@ where
         beacon_block_root: H256,
     ) {
         if self.store.contains_block(beacon_block_root) {
-            self.retry_execution_payload_envelope(
-                wait_group,
-                pending_execution_payload_envelope,
-                None,
-            );
+            self.retry_execution_payload_envelope(wait_group, pending_execution_payload_envelope);
         } else {
             trace_with_peers!(
                 "execution payload envelope delayed until block \
@@ -3538,7 +3549,6 @@ where
             self.retry_execution_payload_envelope(
                 wait_group.clone(),
                 pending_execution_payload_envelope,
-                None,
             );
         }
 
@@ -3604,25 +3614,26 @@ where
         &self,
         wait_group: W,
         pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
-        state: Option<Arc<BeaconState<P>>>,
     ) {
         trace_with_peers!("retrying delayed execution payload envelope");
 
         let PendingExecutionPayloadEnvelope {
             execution_payload_envelope,
             origin,
-            submission_time,
+            processing_timings,
+            tracing_span,
         } = pending_execution_payload_envelope;
 
         self.spawn(ExecutionPayloadEnvelopeTask {
             store_snapshot: self.owned_store(),
             mutator_tx: self.owned_mutator_tx(),
+            execution_engine: self.execution_engine.clone(),
             wait_group,
             execution_payload_envelope,
-            state,
             origin,
-            submission_time,
+            processing_timings,
             metrics: self.metrics.clone(),
+            tracing_span,
         });
     }
 
@@ -4661,7 +4672,8 @@ fn reply_delayed_payload_envelope_validation_result<P: Preset>(
     let PendingExecutionPayloadEnvelope {
         execution_payload_envelope,
         origin,
-        submission_time,
+        processing_timings,
+        tracing_span,
     } = pending_envelope;
 
     if let ExecutionPayloadEnvelopeOrigin::Api(Some(sender)) = origin {
@@ -4670,13 +4682,15 @@ fn reply_delayed_payload_envelope_validation_result<P: Preset>(
         PendingExecutionPayloadEnvelope {
             execution_payload_envelope,
             origin: ExecutionPayloadEnvelopeOrigin::Api(None),
-            submission_time,
+            processing_timings,
+            tracing_span,
         }
     } else {
         PendingExecutionPayloadEnvelope {
             execution_payload_envelope,
             origin,
-            submission_time,
+            processing_timings,
+            tracing_span,
         }
     }
 }
