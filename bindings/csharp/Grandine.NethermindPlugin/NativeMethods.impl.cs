@@ -689,6 +689,52 @@ public unsafe partial struct CVec_COption_CBlobAndProofV1
     }
 }
 
+public unsafe partial struct CVec_COption_CBlobAndProofV2
+{
+    public CVec_COption_CBlobAndProofV2(nuint length)
+    {
+        if (length == 0)
+        {
+            this.data = null;
+            this.data_len = 0;
+            return;
+        }
+
+        IntPtr pointer;
+        unsafe
+        {
+            pointer = (IntPtr)NativeMethods.grandine_vec_alloc(NativeMethods.grandine_layout_option_blob_and_proof_v2(), length);
+        }
+
+        this.data = (COption_CBlobAndProofV2*)pointer.ToPointer();
+        this.data_len = length;
+    }
+
+    public CVec_COption_CBlobAndProofV2(COption_CBlobAndProofV2[] array)
+        : this((nuint)array.Length)
+    {
+        if (array.Length == 0)
+        {
+            return;
+        }
+
+        unsafe
+        {
+            var ptr = (IntPtr)this.data;
+
+            for (var i = 0; i < array.Length; ++i)
+            {
+                Marshal.StructureToPtr(array[i], IntPtr.Add(ptr, i * Marshal.SizeOf<COption_CBlobAndProofV2>()), false);
+            }
+        }
+    }
+
+    public CVec_COption_CBlobAndProofV2(IEnumerable<COption_CBlobAndProofV2> enumerator)
+        : this(enumerator?.ToArray() ?? Array.Empty<COption_CBlobAndProofV2>())
+    {
+    }
+}
+
 public unsafe partial struct CVec_CTransaction
 {
     public CVec_CTransaction(nuint length)
@@ -978,6 +1024,15 @@ public unsafe partial struct CResult_CVec_COption_CBlobAndProofV1
     public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
+public unsafe partial struct CResult_CVec_COption_CBlobAndProofV2
+{
+    public static CResult_CVec_COption_CBlobAndProofV2 Success(CVec_COption_CBlobAndProofV2 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
+
+    public static CResult_CVec_COption_CBlobAndProofV2 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
+
+    public static CResult_CVec_COption_CBlobAndProofV2 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
+}
+
 public unsafe partial struct CResult_CEngineGetPayloadV5Response
 {
     public static CResult_CEngineGetPayloadV5Response Success(CEngineGetPayloadV5Response value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
@@ -1071,6 +1126,13 @@ public unsafe partial struct COption_CBlobAndProofV1
     public static COption_CBlobAndProofV1 None => new () { is_something = false };
 
     public static COption_CBlobAndProofV1 Some(CBlobAndProofV1 value) => new () { is_something = true, value = value };
+}
+
+public unsafe partial struct COption_CBlobAndProofV2
+{
+    public static COption_CBlobAndProofV2 None => new () { is_something = false };
+
+    public static COption_CBlobAndProofV2 Some(CBlobAndProofV2 value) => new () { is_something = true, value = value };
 }
 
 public unsafe partial struct CGrandineString

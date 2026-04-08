@@ -44,9 +44,10 @@ use crate::{
     endpoints::{ClientVersions, Endpoint, Endpoints},
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
-        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
-        ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4, ENGINE_GET_PAYLOAD_V5,
-        ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_EL_BLOBS_V3,
+        ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
+        ENGINE_GET_PAYLOAD_V5, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
+        ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
 };
@@ -85,6 +86,11 @@ impl Eth1Api {
             eth1_api_to_metrics_tx,
             metrics,
         }
+    }
+
+    #[must_use]
+    pub fn has_capability(&self, capability: &str) -> bool {
+        self.endpoints.has_capability(capability)
     }
 
     pub fn client_versions(&self) -> impl Iterator<Item = Arc<ClientVersions>> {
@@ -175,6 +181,22 @@ impl Eth1Api {
             params,
             Some(ENGINE_GET_BLOBS_TIMEOUT),
             Some(ENGINE_GET_EL_BLOBS_V2),
+        )
+        .await
+        .map(WithClientVersions::result)
+    }
+
+    pub(crate) async fn get_blobs_v3<P: Preset>(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Vec<Option<BlobAndProofV2<P>>>> {
+        let params = vec![serde_json::to_value(versioned_hashes)?];
+
+        self.execute(
+            ENGINE_GET_EL_BLOBS_V3,
+            params,
+            Some(ENGINE_GET_BLOBS_TIMEOUT),
+            Some(ENGINE_GET_EL_BLOBS_V3),
         )
         .await
         .map(WithClientVersions::result)

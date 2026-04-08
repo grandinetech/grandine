@@ -4583,7 +4583,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4857,6 +4857,7 @@ dependencies = [
  "anyhow",
  "dedicated_executor",
  "duplicate",
+ "execution_engine",
  "futures",
  "helper_functions",
  "itertools 0.14.0",
@@ -5137,7 +5138,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5270,6 +5271,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "libp2p",
+ "libp2p-gossipsub",
  "libp2p-mplex",
  "local-ip-address",
  "logging",
@@ -6050,12 +6052,12 @@ dependencies = [
 
 [[package]]
 name = "futures-bounded"
-version = "0.2.4"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91f328e7fb845fc832912fb6a34f40cf6d1888c92f974d1893a54e97b5ff542e"
+checksum = "b604752cefc5aa3ab98992a107a8bd99465d2825c1584e0b60cb6957b21e19d7"
 dependencies = [
- "futures-timer",
  "futures-util",
+ "tokio",
 ]
 
 [[package]]
@@ -8090,7 +8092,7 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 [[package]]
 name = "libp2p"
 version = "0.56.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "bytes",
  "either",
@@ -8123,7 +8125,7 @@ dependencies = [
 [[package]]
 name = "libp2p-allow-block-list"
 version = "0.6.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "libp2p-core",
  "libp2p-identity",
@@ -8133,7 +8135,7 @@ dependencies = [
 [[package]]
 name = "libp2p-connection-limits"
 version = "0.6.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "libp2p-core",
  "libp2p-identity",
@@ -8143,7 +8145,7 @@ dependencies = [
 [[package]]
 name = "libp2p-core"
 version = "0.43.2"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "either",
  "fnv",
@@ -8167,7 +8169,7 @@ dependencies = [
 [[package]]
 name = "libp2p-dns"
 version = "0.45.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "hickory-resolver 0.25.2",
@@ -8181,7 +8183,7 @@ dependencies = [
 [[package]]
 name = "libp2p-gossipsub"
 version = "0.50.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "async-channel",
  "asynchronous-codec",
@@ -8212,7 +8214,7 @@ dependencies = [
 [[package]]
 name = "libp2p-identify"
 version = "0.47.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "asynchronous-codec",
  "either",
@@ -8253,7 +8255,7 @@ dependencies = [
 [[package]]
 name = "libp2p-kad"
 version = "0.49.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -8280,7 +8282,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mdns"
 version = "0.48.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "hickory-proto 0.25.2",
@@ -8298,7 +8300,7 @@ dependencies = [
 [[package]]
 name = "libp2p-metrics"
 version = "0.17.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "libp2p-core",
@@ -8314,7 +8316,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mplex"
 version = "0.43.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -8332,7 +8334,7 @@ dependencies = [
 [[package]]
 name = "libp2p-noise"
 version = "0.46.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -8354,7 +8356,7 @@ dependencies = [
 [[package]]
 name = "libp2p-plaintext"
 version = "0.43.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -8369,7 +8371,7 @@ dependencies = [
 [[package]]
 name = "libp2p-quic"
 version = "0.13.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "futures-timer",
@@ -8390,7 +8392,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm"
 version = "0.47.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "either",
  "fnv",
@@ -8411,7 +8413,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm-derive"
 version = "0.35.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "heck 0.5.0",
  "quote 1.0.45",
@@ -8421,7 +8423,7 @@ dependencies = [
 [[package]]
 name = "libp2p-tcp"
 version = "0.44.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "futures-timer",
@@ -8435,8 +8437,8 @@ dependencies = [
 
 [[package]]
 name = "libp2p-tls"
-version = "0.6.2"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+version = "0.6.3"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "futures-rustls",
@@ -8454,7 +8456,7 @@ dependencies = [
 [[package]]
 name = "libp2p-upnp"
 version = "0.6.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "futures-timer",
@@ -8468,7 +8470,7 @@ dependencies = [
 [[package]]
 name = "libp2p-yamux"
 version = "0.47.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "either",
  "futures",
@@ -8993,7 +8995,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 [[package]]
 name = "multistream-select"
 version = "0.13.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "bytes",
  "futures",
@@ -9190,7 +9192,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11926,7 +11928,7 @@ dependencies = [
 [[package]]
 name = "quick-protobuf-codec"
 version = "0.3.1"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "asynchronous-codec",
  "bytes",
@@ -11949,7 +11951,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.37",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -11987,9 +11989,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.3",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13279,7 +13281,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13392,7 +13394,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13444,7 +13446,7 @@ dependencies = [
 [[package]]
 name = "rw-stream-sink"
 version = "0.4.0"
-source = "git+https://github.com/sigp/rust-libp2p.git?rev=defcaf1a78cf5b70a723b3fee0e0be051c1dbd88#defcaf1a78cf5b70a723b3fee0e0be051c1dbd88"
+source = "git+https://github.com/jxs/rust-libp2p.git?branch=gossipsub-partial-messages#5cee9b3cac951a4553672db62f593a4abe71fa3f"
 dependencies = [
  "futures",
  "pin-project",
@@ -15885,7 +15887,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -17656,7 +17658,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

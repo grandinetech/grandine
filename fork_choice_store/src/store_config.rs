@@ -21,6 +21,8 @@ pub struct StoreConfig {
     pub kzg_backend: KzgBackend,
     #[derivative(Default(value = "false"))]
     pub sync_without_reconstruction: bool,
+    #[derivative(Default(value = "false"))]
+    pub enable_partial_columns: bool,
 }
 
 impl StoreConfig {

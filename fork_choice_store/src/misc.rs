@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Error as AnyhowError, Result};
 use derivative::Derivative;
 use derive_more::Debug;
-use eth2_libp2p::{GossipId, PeerId};
+use eth2_libp2p::{GossipId, GossipTopic, PeerId};
 use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
@@ -20,12 +20,12 @@ use transition_functions::unphased::StateRootPolicy;
 use types::{
     Validators,
     combined::{
-        Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, AttestingIndices, BeaconState, DataColumnSidecar, PartialDataColumnHeader,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
+    nonstandard::{PartialDataColumn, PayloadStatus, Publishable, StorageMode, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
@@ -639,6 +639,7 @@ pub enum DataColumnSidecarOrigin {
     Gossip(SubnetId, GossipId),
     Requested(PeerId),
     Own,
+    Merged,
 }
 
 impl DataColumnSidecarOrigin {
@@ -652,7 +653,11 @@ impl DataColumnSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
-            Self::BackSync | Self::ExecutionLayer | Self::Own | Self::Requested(_) => (None, None),
+            Self::BackSync
+            | Self::ExecutionLayer
+            | Self::Own
+            | Self::Requested(_)
+            | Self::Merged => (None, None),
         }
     }
 
@@ -664,7 +669,8 @@ impl DataColumnSidecarOrigin {
             | Self::BackSync
             | Self::ExecutionLayer
             | Self::Own
-            | Self::Requested(_) => None,
+            | Self::Requested(_)
+            | Self::Merged => None,
         }
     }
 
@@ -673,7 +679,7 @@ impl DataColumnSidecarOrigin {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => Some(*peer_id),
-            Self::Api(_) | Self::BackSync | Self::ExecutionLayer | Self::Own => None,
+            Self::Api(_) | Self::BackSync | Self::ExecutionLayer | Self::Own | Self::Merged => None,
         }
     }
 
@@ -685,7 +691,8 @@ impl DataColumnSidecarOrigin {
             | Self::BackSync
             | Self::ExecutionLayer
             | Self::Own
-            | Self::Requested(_) => None,
+            | Self::Requested(_)
+            | Self::Merged => None,
         }
     }
 
@@ -697,6 +704,37 @@ impl DataColumnSidecarOrigin {
     #[must_use]
     pub const fn is_from_back_sync(&self) -> bool {
         matches!(self, Self::BackSync)
+    }
+
+    #[must_use]
+    pub const fn is_from_el(&self) -> bool {
+        matches!(self, Self::ExecutionLayer)
+    }
+
+    #[must_use]
+    pub const fn is_from_merged(&self) -> bool {
+        matches!(self, Self::Merged)
+    }
+
+    #[must_use]
+    pub const fn is_from_el_or_merged(&self) -> bool {
+        matches!(self, Self::ExecutionLayer | Self::Merged)
+    }
+}
+
+#[derive(Debug)]
+pub enum PartialDataColumnOrigin {
+    Gossip(PeerId, GossipTopic),
+    ExecutionLayer,
+}
+
+impl PartialDataColumnOrigin {
+    #[must_use]
+    pub const fn peer_id(&self) -> Option<PeerId> {
+        match self {
+            Self::Gossip(peer_id, _) => Some(*peer_id),
+            Self::ExecutionLayer => None,
+        }
     }
 
     #[must_use]
@@ -807,6 +845,37 @@ impl<P: Preset> DataColumnSidecarAction<P> {
     #[must_use]
     pub const fn ignored(&self) -> bool {
         matches!(self, Self::Ignore(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum PartialDataColumnSidecarAction<P: Preset> {
+    Accept(Arc<PartialDataColumn<P>>),
+    Ignore(Publishable),
+    DelayUntilState(
+        Arc<PartialDataColumn<P>>,
+        Arc<PartialDataColumnHeader<P>>,
+        H256,
+    ),
+    DelayUntilParent(Arc<PartialDataColumn<P>>, Arc<PartialDataColumnHeader<P>>),
+    DelayUntilSlot(Arc<PartialDataColumn<P>>, Arc<PartialDataColumnHeader<P>>),
+}
+
+impl<P: Preset> PartialDataColumnSidecarAction<P> {
+    #[must_use]
+    pub const fn accepted(&self) -> bool {
+        matches!(self, Self::Accept(_))
+    }
+
+    #[must_use]
+    pub const fn ignored(&self) -> bool {
+        matches!(self, Self::Ignore(_))
+    }
+
+    #[must_use]
+    /// Use in check header validation result
+    pub const fn valid_header(&self) -> bool {
+        matches!(self, Self::Ignore(true))
     }
 }
 

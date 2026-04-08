@@ -83,6 +83,9 @@ pub struct CEmbedAdapter {
     engine_get_blobs_v2: unsafe extern "C" fn(
         versioned_hashes: CVec<CH256>,
     ) -> CResult<COption<CVec<CBlobAndProofV2>>>,
+    engine_get_blobs_v3: unsafe extern "C" fn(
+        versioned_hashes: CVec<CH256>,
+    ) -> CResult<CVec<COption<CBlobAndProofV2>>>,
     engine_exchange_capabilities:
         unsafe extern "C" fn(capabilities: CVec<CGrandineString>) -> CResult<CVec<CGrandineString>>,
     engine_get_client_version_v1:
@@ -307,6 +310,33 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
                     .map(TryInto::try_into)
                     .collect::<Result<_, _>>()?,
             ))
+        })
+    }
+
+    fn engine_get_blobs_v3(
+        &self,
+        versioned_hashes: Vec<types::deneb::primitives::VersionedHash>,
+    ) -> Result<Vec<Option<execution_engine::BlobAndProofV2<Mainnet>>>> {
+        let versioned_hashes = versioned_hashes
+            .into_iter()
+            .map(|hash| hash.into())
+            .collect::<CVec<_>>();
+
+        let result = unsafe { (self.engine_get_blobs_v3)(versioned_hashes) };
+
+        let result: Result<_> = result.into();
+
+        result.and_then(|v| {
+            v.into_iter()
+                .map(|blob| {
+                    let blob: Option<CBlobAndProofV2> = blob.into();
+                    let Some(blob) = blob else {
+                        return Ok(None);
+                    };
+
+                    blob.try_into().map(Some).map_err(Into::into)
+                })
+                .collect::<Result<Vec<_>, _>>()
         })
     }
 

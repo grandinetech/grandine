@@ -11,7 +11,7 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    ExecutionPayloadBidOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, PartialDataColumnOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -32,7 +32,7 @@ use types::{
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{RelativeEpoch, ValidationOutcome},
+    nonstandard::{PartialDataColumn, RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
         primitives::{H256, Slot},
@@ -790,5 +790,62 @@ impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
         if let Err(error) = state_at_slot_cache.flush() {
             warn_with_peers!("failed to flush state at slot cache: {error:?}");
         }
+    }
+}
+
+pub struct PartialDataColumnTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
+    pub partial_column: Arc<PartialDataColumn<P>>,
+    pub state: Option<Arc<CombinedBeaconState<P>>>,
+    pub origin: PartialDataColumnOrigin,
+    pub submission_time: Instant,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for PartialDataColumnTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "PartialDataColumnTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            wait_group,
+            partial_column,
+            state,
+            origin,
+            submission_time,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .partial_data_column_sidecar_verification_times
+                .start_timer()
+        });
+
+        if let Some(metrics) = metrics.as_ref() {
+            metrics.register_partial_message_cells_received(&[partial_column
+                .index
+                .to_string()
+                .as_str()]);
+        }
+
+        let data_column_identifier = partial_column.as_ref().into();
+        let result = store_snapshot.validate_partial_data_column(
+            partial_column,
+            state,
+            &origin,
+            metrics.as_ref(),
+        );
+
+        MutatorMessage::PartialDataColumnSidecar {
+            wait_group,
+            result,
+            origin,
+            data_column_identifier,
+            submission_time,
+        }
+        .send(&mutator_tx);
     }
 }

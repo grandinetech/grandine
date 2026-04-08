@@ -37,7 +37,8 @@ use fork_choice_store::{
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin, PayloadAction, StateCacheProcessor, Store, ValidAttestation,
+    ExecutionPayloadBidOrigin, PartialDataColumnOrigin, PartialDataColumnSidecarAction,
+    PayloadAction, StateCacheProcessor, Store, ValidAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -76,16 +77,17 @@ use crate::{
     misc::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
-        PendingChainLink, PendingDataColumnSidecar, ProcessingTimings, ReorgSource,
-        VerifyAggregateAndProofResult, VerifyAttestationResult, WaitingForCheckpointState,
+        PendingChainLink, PendingDataColumnSidecar, PendingPartialDataColumn, ProcessingTimings,
+        ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
+        WaitingForCheckpointState,
     },
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockTask, CheckpointStateTask,
-        DataColumnSidecarTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, PruneStateCacheTask,
-        RetryDataColumnSidecarTask,
+        DataColumnSidecarTask, PartialDataColumnTask, PersistBlobSidecarsTask,
+        PersistDataColumnSidecarsTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        PruneStateCacheTask, RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -313,6 +315,19 @@ where
                         slot,
                     );
                 }
+                MutatorMessage::PartialDataColumnSidecar {
+                    wait_group,
+                    result,
+                    origin,
+                    data_column_identifier,
+                    submission_time,
+                } => self.handle_partial_data_column_sidecar(
+                    wait_group,
+                    result,
+                    origin,
+                    data_column_identifier,
+                    submission_time,
+                ),
                 MutatorMessage::PayloadBid { result, origin } => {
                     self.handle_payload_bid(result, origin)
                 }
@@ -1611,9 +1626,19 @@ where
     ) {
         match result {
             Ok(DataColumnSidecarAction::Accept(data_column_sidecar)) => {
-                if origin.is_from_el() {
+                if origin.is_from_el_or_merged() {
                     self.send_to_p2p(P2pMessage::PublishDataColumnSidecar(
                         data_column_sidecar.clone_arc(),
+                    ));
+                }
+
+                if matches!(origin, DataColumnSidecarOrigin::Gossip(..))
+                    && self.store.store_config().enable_partial_columns
+                    && let Some(header) = data_column_sidecar.partial_data_column_header()
+                {
+                    self.send_to_p2p(P2pMessage::PublishPartialDataColumn(
+                        Arc::new(data_column_sidecar.as_ref().into()),
+                        Arc::new(header),
                     ));
                 }
 
@@ -1808,6 +1833,187 @@ where
                 ));
 
                 reply_to_http_api(sender, Err(error));
+            }
+        }
+    }
+
+    #[expect(clippy::too_many_lines)]
+    fn handle_partial_data_column_sidecar(
+        &mut self,
+        wait_group: W,
+        result: Result<PartialDataColumnSidecarAction<P>>,
+        origin: PartialDataColumnOrigin,
+        data_column_identifier: DataColumnIdentifier,
+        submission_time: Instant,
+    ) {
+        match result {
+            Ok(PartialDataColumnSidecarAction::Accept(partial_column)) => {
+                debug_with_peers!(
+                    "accepted partial data column sidecar (identifier: {data_column_identifier:?}, cells_present: {:?})",
+                    partial_column.sidecar.cells_present_bitmap
+                );
+
+                let column_index_str = data_column_identifier.index.to_string();
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_partial_message_useful_cells(&[column_index_str.as_str()]);
+                }
+
+                if let Some(data_column_sidecar) = self
+                    .store_mut()
+                    .apply_partial_data_column_sidecar(&partial_column)
+                {
+                    debug_with_peers!(
+                        "merged into full data column sidecar (identifier: {data_column_identifier:?})"
+                    );
+
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        metrics.register_partial_message_column_complementation(&[
+                            column_index_str.as_str(),
+                        ]);
+                    }
+
+                    self.send_to_p2p(P2pMessage::DataColumnSidecarMerged(data_column_sidecar));
+                }
+
+                let block_root = data_column_identifier.block_root;
+
+                if let Some(header) = self
+                    .store
+                    .partial_header(block_root)
+                    .or_else(|| partial_column.sidecar.header.first().cloned().map(Arc::new))
+                    && self.store.is_forward_synced()
+                    && !origin.is_from_el()
+                    && !self.store.has_requested_blobs_from_el(&block_root)
+                    && !self.store.is_sidecars_construction_started(&block_root)
+                {
+                    self.store_mut()
+                        .mark_requested_blobs_from_el(block_root, header.slot());
+                    self.update_store_snapshot();
+
+                    let data_column_identifiers = self
+                        .store
+                        .sampling_columns()
+                        .iter()
+                        .map(|index| DataColumnIdentifier {
+                            block_root,
+                            index: *index,
+                        })
+                        .collect::<Vec<_>>();
+
+                    self.request_blobs_from_execution_engine(
+                        EngineGetBlobsV2Params {
+                            block_or_sidecar: header.into(),
+                            data_column_identifiers,
+                        }
+                        .into(),
+                    )
+                }
+            }
+            Ok(PartialDataColumnSidecarAction::Ignore(_)) => {
+                debug_with_peers!(
+                    "partial data column sidecar ignored (identifier: {data_column_identifier:?})"
+                );
+            }
+            Ok(PartialDataColumnSidecarAction::DelayUntilState(column, header, block_root)) => {
+                let slot = header.slot();
+
+                let pending_partial = PendingPartialDataColumn {
+                    column,
+                    header,
+                    origin,
+                    submission_time,
+                };
+
+                if let Some(state) =
+                    self.state_cache
+                        .existing_state_at_slot(&self.store, block_root, slot)
+                {
+                    self.retry_partial_data_column(wait_group, pending_partial, Some(state));
+                } else {
+                    debug_with_peers!(
+                        "partial data column sidecar delayed until state at same slot is ready \
+                            (identifier: {data_column_identifier:?}, slot: {slot})",
+                    );
+
+                    let peer_id = pending_partial.origin.peer_id();
+
+                    self.delay_partial_data_column_sidecar_until_state(pending_partial, block_root);
+
+                    // During block validation the necessary beacon state should have been built
+                    // and stored in state cache despite block being delayed due to incomplete data availability.
+                    // If there is a delayed until blobs block and no corresponding state in state cache,
+                    // it means cache got pruned and it needs to rebuild necessary beacon state.
+                    if let Some(delayed_block) = self.take_delayed_until_blobs(block_root) {
+                        self.retry_block(wait_group, delayed_block);
+                    } else {
+                        self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+                    }
+                }
+            }
+            Ok(PartialDataColumnSidecarAction::DelayUntilParent(column, header)) => {
+                let Some(parent_root) = header
+                    .signed_block_header()
+                    .map(|header| header.message.parent_root)
+                else {
+                    // This happends when the header is from a pre-gloas column and the
+                    // corresponding block got orphaned.
+                    return;
+                };
+
+                let pending_partial = PendingPartialDataColumn {
+                    column,
+                    header,
+                    origin,
+                    submission_time,
+                };
+
+                if self.store.contains_block(parent_root) {
+                    self.retry_partial_data_column(wait_group, pending_partial, None);
+                } else {
+                    debug_with_peers!(
+                        "partial data column header delayed until block parent: \
+                        {parent_root:?}, identifier: {data_column_identifier:?}",
+                    );
+
+                    let peer_id = pending_partial.origin.peer_id();
+
+                    self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
+
+                    self.delay_partial_data_column_sidecar_until_parent(pending_partial);
+                }
+            }
+            Ok(PartialDataColumnSidecarAction::DelayUntilSlot(column, header)) => {
+                let slot = header.slot();
+
+                let pending_partial = PendingPartialDataColumn {
+                    column,
+                    header,
+                    origin,
+                    submission_time,
+                };
+
+                if slot <= self.store.slot() {
+                    self.retry_partial_data_column(wait_group, pending_partial, None);
+                } else {
+                    debug_with_peers!(
+                        "partial data column header delayed until slot: {slot}, \
+                        identifier: {data_column_identifier:?}",
+                    );
+
+                    self.delay_partial_data_column_sidecar_until_slot(pending_partial);
+                }
+            }
+            Err(error) => {
+                warn_with_peers!(
+                    "partial data column sidecar rejected (identifier: {data_column_identifier:?}, origin: {origin:?}, error: {error})"
+                );
+
+                if let PartialDataColumnOrigin::Gossip(peer_id, topic) = origin {
+                    self.send_to_p2p(P2pMessage::RejectPartial(
+                        peer_id,
+                        MutatorRejectionReason::InvalidPartialMessage { topic },
+                    ));
+                }
             }
         }
     }
@@ -3004,6 +3210,50 @@ where
             .push(pending_data_column_sidecar);
     }
 
+    fn delay_partial_data_column_sidecar_until_state(
+        &mut self,
+        pending_partial_data_column: PendingPartialDataColumn<P>,
+        block_root: H256,
+    ) {
+        let slot = pending_partial_data_column.header.slot();
+
+        self.delayed_until_state
+            .entry((block_root, slot))
+            .or_default()
+            .partial_data_columns
+            .push(pending_partial_data_column);
+    }
+
+    fn delay_partial_data_column_sidecar_until_parent(
+        &mut self,
+        pending_partial_data_column: PendingPartialDataColumn<P>,
+    ) {
+        if let Some(parent_root) = pending_partial_data_column
+            .header
+            .signed_block_header()
+            .map(|header| header.message.parent_root)
+        {
+            self.delayed_until_block
+                .entry(parent_root)
+                .or_default()
+                .partial_data_columns
+                .push(pending_partial_data_column);
+        }
+    }
+
+    fn delay_partial_data_column_sidecar_until_slot(
+        &mut self,
+        pending_partial_data_column: PendingPartialDataColumn<P>,
+    ) {
+        let slot = pending_partial_data_column.header.slot();
+
+        self.delayed_until_slot
+            .entry(slot)
+            .or_default()
+            .partial_data_columns
+            .push(pending_partial_data_column);
+    }
+
     fn take_delayed_until_blobs(&mut self, block_root: H256) -> Option<PendingBlock<P>> {
         self.delayed_until_blobs.remove(&block_root)
     }
@@ -3042,6 +3292,7 @@ where
             attestations,
             blob_sidecars,
             data_column_sidecars,
+            partial_data_columns,
         } = delayed;
 
         for pending_block in blocks {
@@ -3062,6 +3313,10 @@ where
 
         for pending_data_column_sidecar in data_column_sidecars {
             self.retry_data_column_sidecar(wait_group.clone(), pending_data_column_sidecar, None);
+        }
+
+        for pending_partial_data_column in partial_data_columns {
+            self.retry_partial_data_column(wait_group.clone(), pending_partial_data_column, None);
         }
     }
 
@@ -3203,6 +3458,35 @@ where
         });
     }
 
+    fn retry_partial_data_column(
+        &self,
+        wait_group: W,
+        pending_partial_data_column: PendingPartialDataColumn<P>,
+        state: Option<Arc<BeaconState<P>>>,
+    ) {
+        trace_with_peers!(
+            "retrying delayed partial data column sidecar: {pending_partial_data_column:?}"
+        );
+
+        let PendingPartialDataColumn {
+            column,
+            header: _,
+            origin,
+            submission_time,
+        } = pending_partial_data_column;
+
+        self.spawn(PartialDataColumnTask {
+            store_snapshot: self.owned_store(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            partial_column: column,
+            state,
+            origin,
+            submission_time,
+            metrics: self.metrics.clone(),
+        });
+    }
+
     fn prune_delayed_until_blobs(&mut self) -> Vec<GossipId> {
         let finalized_slot = self.store.finalized_slot();
 
@@ -3257,6 +3541,7 @@ where
                 attestations,
                 blob_sidecars,
                 data_column_sidecars,
+                partial_data_columns: _,
             } = delayed;
 
             gossip_ids.extend(

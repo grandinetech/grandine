@@ -20,8 +20,8 @@ use ssz::ContiguousList;
 use types::{
     altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
     combined::{
-        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, AttesterSlashing, DataColumnSidecar, PartialDataColumnHeader,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{
@@ -29,7 +29,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::Phase,
+    nonstandard::{PartialDataColumn, Phase},
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ForkDigest, H256, Slot, SubnetId, ValidatorIndex},
@@ -75,10 +75,12 @@ pub enum P2pToSync<P: Preset> {
     GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
+    GossipPartialDataColumn(Arc<PartialDataColumn<P>>, PeerId, GossipTopic),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
+    DataColumnSidecarMerged(Arc<DataColumnSidecar<P>>),
     Stop,
 }
 
@@ -103,6 +105,10 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),
+    PublishPartialDataColumns(
+        #[serde(skip)] Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     RequestIdentity(#[serde(skip)] Sender<NodeIdentity>),
     RequestPeer(PeerId, #[serde(skip)] Sender<Option<NodePeer>>),
     RequestPeerCount(#[serde(skip)] Sender<NodePeerCount>),
@@ -212,6 +218,10 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
+    PublishPartialDataColumns(
+        #[serde(skip)] Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     UpdateDataColumnSubnets(u64),
 }
 
@@ -255,8 +265,13 @@ pub enum ServiceInboundMessage<P: Preset> {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
     Publish(PubsubMessage<P>),
+    PublishPartialMessages(
+        Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
+    ReportPartialMessageValidationFailure(PeerId, GossipTopic),
     SendErrorResponse(PeerId, InboundRequestId, RpcErrorResponse, &'static str),
     SendRequest(PeerId, AppRequestId, RequestType<P>),
     SendResponse(PeerId, InboundRequestId, Box<Response<P>>),

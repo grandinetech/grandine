@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::fmt::{self, Debug};
 use std::sync::Arc;
 
 use bit_field::BitField as _;
@@ -19,14 +19,19 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, DataColumnSidecar, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, PartialDataColumnHeader, SignedBeaconBlock,
+    },
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::ExecutionRequests,
-    fulu::containers::DataColumnIdentifier,
+    fulu::{
+        containers::{DataColumnIdentifier, PartialDataColumnSidecar},
+        primitives::ColumnIndex,
+    },
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -430,6 +435,7 @@ impl<P: Preset> KzgProofs<P> {
 pub enum BlockOrDataColumnSidecar<P: Preset> {
     Block(Arc<SignedBeaconBlock<P>>),
     Sidecar(Arc<DataColumnSidecar<P>>),
+    PartialHeader(Arc<PartialDataColumnHeader<P>>),
 }
 
 impl<P: Preset> BlockOrDataColumnSidecar<P> {
@@ -438,6 +444,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().slot(),
             Self::Sidecar(sidecar) => sidecar.slot(),
+            Self::PartialHeader(header) => header.slot(),
         }
     }
 
@@ -446,6 +453,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
             Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
+            Self::PartialHeader(header) => header.beacon_block_root(),
         }
     }
 
@@ -456,6 +464,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Sidecar(sidecar) => sidecar
                 .pre_gloas()
                 .map(|sidecar| sidecar.signed_block_header),
+            Self::PartialHeader(header) => header.signed_block_header(),
         }
     }
 
@@ -469,7 +478,19 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
             Self::Sidecar(sidecar) => sidecar.kzg_commitments(),
+            Self::PartialHeader(header) => Some(header.kzg_commitments()),
         }
+    }
+}
+
+impl<P: Preset> fmt::Display for BlockOrDataColumnSidecar<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let variant = match self {
+            Self::Block(_) => "Block",
+            Self::Sidecar(_) => "Sidecar",
+            Self::PartialHeader(_) => "PartialHeader",
+        };
+        write!(f, "{variant}")
     }
 }
 
@@ -705,6 +726,22 @@ impl<T: Clone> WithOrigin<T> {
         match self.origin {
             Origin::CheckpointSync => None,
             Origin::Genesis => Some(self.value.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialDataColumn<P: Preset> {
+    pub block_root: H256,
+    pub index: ColumnIndex,
+    pub sidecar: PartialDataColumnSidecar<P>,
+}
+
+impl<P: Preset> From<&PartialDataColumn<P>> for DataColumnIdentifier {
+    fn from(column: &PartialDataColumn<P>) -> Self {
+        Self {
+            block_root: column.block_root,
+            index: column.index,
         }
     }
 }

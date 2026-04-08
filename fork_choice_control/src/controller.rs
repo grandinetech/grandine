@@ -19,12 +19,12 @@ use std::{
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
 use clock::Tick;
-use eth2_libp2p::{GossipId, PeerId};
+use eth2_libp2p::{GossipId, GossipTopic, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    StateCacheProcessor, Store, StoreConfig,
+    PartialDataColumnOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -44,7 +44,7 @@ use types::{
     deneb::containers::BlobSidecar,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::ValidationOutcome,
+    nonstandard::{PartialDataColumn, ValidationOutcome},
     phase0::primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -67,7 +67,7 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
-        StateAtSlotCacheFlushTask,
+        PartialDataColumnTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -601,6 +601,38 @@ where
         .await
     }
 
+    pub async fn on_merged_data_column_sidecar(
+        &self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        block_seen: bool,
+    ) {
+        self.spawn_data_column_sidecar_task(
+            data_column_sidecar,
+            block_seen,
+            DataColumnSidecarOrigin::Merged,
+        )
+        .await
+    }
+
+    pub fn on_gossip_partial_data_column(
+        &self,
+        partial_column: Arc<PartialDataColumn<P>>,
+        peer_id: PeerId,
+        topic: GossipTopic,
+    ) {
+        self.spawn_partial_data_column_task(
+            partial_column,
+            PartialDataColumnOrigin::Gossip(peer_id, topic),
+        );
+    }
+
+    pub fn on_el_partial_data_column(&self, partial_column: Arc<PartialDataColumn<P>>) {
+        self.spawn_partial_data_column_task(
+            partial_column,
+            PartialDataColumnOrigin::ExecutionLayer,
+        );
+    }
+
     pub fn on_requested_blob_sidecar(
         &self,
         blob_sidecar: Arc<BlobSidecar<P>>,
@@ -779,6 +811,23 @@ where
             origin,
             submission_time: Instant::now(),
             validate_block_presence,
+            metrics: self.metrics.clone(),
+        })
+    }
+
+    fn spawn_partial_data_column_task(
+        &self,
+        partial_column: Arc<PartialDataColumn<P>>,
+        origin: PartialDataColumnOrigin,
+    ) {
+        self.spawn(PartialDataColumnTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            partial_column,
+            state: None,
+            origin,
+            submission_time: Instant::now(),
             metrics: self.metrics.clone(),
         })
     }

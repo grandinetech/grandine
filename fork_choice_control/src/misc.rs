@@ -4,11 +4,12 @@ use std::{sync::Arc, time::Instant};
 use anyhow::Result;
 use clock::Tick;
 use derivative::Derivative;
-use eth2_libp2p::GossipId;
+use eth2_libp2p::{GossipId, GossipTopic};
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
+    PartialDataColumnOrigin,
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
@@ -16,12 +17,15 @@ use strum::IntoStaticStr;
 use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
-    combined::{DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        DataColumnSidecar, PartialDataColumnHeader, SignedAggregateAndProof, SignedBeaconBlock,
+    },
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    nonstandard::PartialDataColumn,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -39,6 +43,7 @@ pub struct Delayed<P: Preset> {
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
+    pub partial_data_columns: Vec<PendingPartialDataColumn<P>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +100,7 @@ impl<P: Preset> Delayed<P> {
             attestations,
             blob_sidecars,
             data_column_sidecars,
+            partial_data_columns,
         } = self;
 
         blocks.is_empty()
@@ -103,6 +109,7 @@ impl<P: Preset> Delayed<P> {
             && attestations.is_empty()
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
+            && partial_data_columns.is_empty()
     }
 }
 
@@ -171,6 +178,14 @@ pub struct PendingDataColumnSidecar<P: Preset> {
     pub submission_time: Instant,
 }
 
+#[derive(Debug)]
+pub struct PendingPartialDataColumn<P: Preset> {
+    pub column: Arc<PartialDataColumn<P>>,
+    pub header: Arc<PartialDataColumnHeader<P>>,
+    pub origin: PartialDataColumnOrigin,
+    pub submission_time: Instant,
+}
+
 pub struct VerifyAggregateAndProofResult<P: Preset> {
     pub result: Result<AggregateAndProofAction<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
@@ -195,6 +210,10 @@ pub enum MutatorRejectionReason {
         data_column_identifier: DataColumnIdentifier,
     },
     InvalidPayloadBid,
+    #[strum(serialize = "invalid_partial_message")]
+    InvalidPartialMessage {
+        topic: GossipTopic,
+    },
 }
 
 pub enum BlockBlobAvailability {

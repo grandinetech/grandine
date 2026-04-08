@@ -454,6 +454,38 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
+    public CResult_CVec_COption_CBlobAndProofV2 EngineGetBlobsV3(CVec_CH256 versionedHashes)
+    {
+        this.logger.Debug("Received engine_getBlobsV3 request from grandine");
+
+        try
+        {
+            var blobs = this.engineRpc.engine_getBlobsV3(GrandineUtils.ConvertVersionedHashes(versionedHashes)).Result;
+
+            if (blobs.Result != Result.Success)
+            {
+                return CResult_CVec_COption_CBlobAndProofV2.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, blobs.Result.Error);
+            }
+
+            var blobArray = new CVec_COption_CBlobAndProofV2(blobs.Data.Select(blob =>
+            {
+                if (blob == null)
+                {
+                    return COption_CBlobAndProofV2.None;
+                }
+
+                return COption_CBlobAndProofV2.Some(new CBlobAndProofV2(blob));
+            }));
+
+            return CResult_CVec_COption_CBlobAndProofV2.Success(blobArray);
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_getBlobsV3 function invocation", e);
+            return CResult_CVec_COption_CBlobAndProofV2.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
     public CResult_CVec_CGrandineString EngineExchangeCapabilities(CVec_CGrandineString capabilities)
     {
         this.logger.Debug("Received engine_exchangeCapabilities request from grandine");

@@ -89,10 +89,12 @@ use crate::{
             LightClientBootstrap as FuluLightClientBootstrap,
             LightClientFinalityUpdate as FuluLightClientFinalityUpdate,
             LightClientOptimisticUpdate as FuluLightClientOptimisticUpdate,
-            LightClientUpdate as FuluLightClientUpdate, SignedBeaconBlock as FuluSignedBeaconBlock,
+            LightClientUpdate as FuluLightClientUpdate,
+            PartialDataColumnHeader as FuluPartialDataColumnHeader, PartialDataColumnSidecar,
+            SignedBeaconBlock as FuluSignedBeaconBlock,
             SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
         },
-        primitives::{Cell, ColumnIndex},
+        primitives::{BlobCommitmentsInclusionProof, Cell, CellBitmap, ColumnIndex},
     },
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
@@ -102,10 +104,11 @@ use crate::{
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate,
+            PartialDataColumnHeader as GloasPartialDataColumnHeader,
             SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         },
     },
-    nonstandard::Phase,
+    nonstandard::{PartialDataColumn, Phase},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         containers::{
@@ -2268,10 +2271,33 @@ impl<P: Preset> DataColumnSidecar<P> {
         }
     }
 
+    pub const fn kzg_commitments_inclusion_proof(
+        &self,
+    ) -> Option<BlobCommitmentsInclusionProof<P>> {
+        match self {
+            Self::Fulu(sidecar) => Some(sidecar.kzg_commitments_inclusion_proof),
+            Self::Gloas(_) => None,
+        }
+    }
+
     pub fn beacon_block_root(&self) -> H256 {
         match self {
             Self::Fulu(sidecar) => sidecar.signed_block_header.message.hash_tree_root(),
             Self::Gloas(sidecar) => sidecar.beacon_block_root,
+        }
+    }
+
+    pub fn partial_data_column_header(&self) -> Option<PartialDataColumnHeader<P>> {
+        match self {
+            Self::Fulu(sidecar) => Some(
+                FuluPartialDataColumnHeader {
+                    kzg_commitments: sidecar.kzg_commitments.clone(),
+                    signed_block_header: sidecar.signed_block_header,
+                    kzg_commitments_inclusion_proof: sidecar.kzg_commitments_inclusion_proof,
+                }
+                .into(),
+            ),
+            Self::Gloas(_) => None,
         }
     }
 
@@ -2310,6 +2336,130 @@ impl<P: Preset> From<&DataColumnSidecar<P>> for DataColumnIdentifier {
         let block_root = sidecar.beacon_block_root();
 
         Self { block_root, index }
+    }
+}
+
+impl<P: Preset> From<&DataColumnSidecar<P>> for PartialDataColumn<P> {
+    fn from(sidecar: &DataColumnSidecar<P>) -> Self {
+        let blob_count = sidecar.column().len();
+        let cells_present_bitmap = CellBitmap::<P>::new(true, blob_count);
+        let header = if let Some(header) = sidecar.partial_data_column_header() {
+            ContiguousList::full(header)
+        } else {
+            ContiguousList::default()
+        };
+        let partial_sidecar = PartialDataColumnSidecar {
+            cells_present_bitmap,
+            partial_column: sidecar.column().clone(),
+            kzg_proofs: sidecar.kzg_proofs().clone(),
+            header,
+        };
+
+        Self {
+            block_root: sidecar.beacon_block_root(),
+            index: sidecar.index(),
+            sidecar: partial_sidecar,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, From, Deserialize, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum PartialDataColumnHeader<P: Preset> {
+    Fulu(FuluPartialDataColumnHeader<P>),
+    Gloas(GloasPartialDataColumnHeader<P>),
+}
+
+impl<P: Preset> SszSize for PartialDataColumnHeader<P> {
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+        FuluPartialDataColumnHeader::<P>::SIZE,
+        GloasPartialDataColumnHeader::<P>::SIZE,
+    ]);
+}
+
+impl<C, P: Preset> SszRead<C> for PartialDataColumnHeader<P> {
+    fn from_ssz_unchecked(_context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        let header = match GloasPartialDataColumnHeader::from_ssz_default(bytes) {
+            Ok(gloas_header) => Self::Gloas(gloas_header),
+            Err(_) => match FuluPartialDataColumnHeader::from_ssz_default(bytes) {
+                Ok(fulu_header) => Self::Fulu(fulu_header),
+                Err(_) => {
+                    return Err(ReadError::Custom {
+                        message: "failed to parse partial data column header from ssz bytes",
+                    });
+                }
+            },
+        };
+
+        Ok(header)
+    }
+}
+
+impl<P: Preset> SszWrite for PartialDataColumnHeader<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Fulu(header) => header.write_variable(bytes),
+            Self::Gloas(header) => header.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> SszHash for PartialDataColumnHeader<P> {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> H256 {
+        match self {
+            Self::Fulu(header) => header.hash_tree_root(),
+            Self::Gloas(header) => header.hash_tree_root(),
+        }
+    }
+}
+
+impl<P: Preset> PartialDataColumnHeader<P> {
+    pub const fn slot(&self) -> Slot {
+        match self {
+            Self::Fulu(header) => header.signed_block_header.message.slot,
+            Self::Gloas(header) => header.slot,
+        }
+    }
+
+    pub fn beacon_block_root(&self) -> H256 {
+        match self {
+            Self::Fulu(header) => header.signed_block_header.message.hash_tree_root(),
+            Self::Gloas(header) => header.beacon_block_root,
+        }
+    }
+
+    pub const fn kzg_commitments(
+        &self,
+    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+        match self {
+            Self::Fulu(header) => &header.kzg_commitments,
+            Self::Gloas(header) => &header.kzg_commitments,
+        }
+    }
+
+    pub const fn kzg_commitments_inclusion_proof(
+        &self,
+    ) -> Option<BlobCommitmentsInclusionProof<P>> {
+        match self {
+            Self::Fulu(header) => Some(header.kzg_commitments_inclusion_proof),
+            Self::Gloas(_) => None,
+        }
+    }
+
+    pub const fn signed_block_header(&self) -> Option<SignedBeaconBlockHeader> {
+        match self {
+            Self::Fulu(header) => Some(header.signed_block_header),
+            Self::Gloas(_) => None,
+        }
+    }
+
+    pub const fn pre_gloas(&self) -> Option<&FuluPartialDataColumnHeader<P>> {
+        match self {
+            Self::Fulu(header) => Some(header),
+            Self::Gloas(_) => None,
+        }
     }
 }
 

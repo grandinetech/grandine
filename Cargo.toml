@@ -1,75 +1,75 @@
 [workspace]
 members = [
-    'ad_hoc_bench',
-    'allocator',
-    'arithmetic',
-    'attestation_verifier',
-    'benches',
-    'binary_utils',
-    'bindings/c',
-    'bindings/csharp',
-    'block_producer',
-    'bls',
-    'bls/bls-blst',
-    'bls/bls-core',
-    'bls/bls-zkcrypto',
-    'builder_api',
-    'clock',
-    'data_dumper',
-    'database',
-    'debug_info',
-    'deposit_tree',
-    'directories',
-    'doppelganger_protection',
-    'eip_2335',
-    'eip_7594',
-    'eth1',
-    'eth1_api',
-    'eth2_cache_utils',
-    'execution_engine',
-    'factory',
-    'features',
-    'fork_choice_control',
-    'fork_choice_store',
-    'genesis',
-    'grandine',
-    'grandine_version',
-    'hashing',
-    'helper_functions',
-    'http_api',
-    'http_api_utils',
-    'interop',
-    'keymanager',
-    'kzg_utils',
-    'liveness_tracker',
-    'logging',
-    'metrics',
-    'operation_pools',
-    'p2p',
-    'panics',
-    'predefined_chains',
-    'prometheus_metrics',
-    'pubkey_cache',
-    'runtime',
-    'serde_utils',
-    'shuffling',
-    'signer',
-    'slasher',
-    'slashing_protection',
-    'snapshot_test_utils',
-    'spec_test_utils',
-    'ssz',
-    'ssz_derive',
-    'state_cache',
-    'std_ext',
-    'transition_functions',
-    'try_from_iterator',
-    'types',
-    'validator',
-    'validator_key_cache',
-    'validator_statistics',
-    'zkvm/guest/risc0',
-    'zkvm/host',
+  'ad_hoc_bench',
+  'allocator',
+  'arithmetic',
+  'attestation_verifier',
+  'benches',
+  'binary_utils',
+  'bindings/c',
+  'bindings/csharp',
+  'block_producer',
+  'bls',
+  'bls/bls-blst',
+  'bls/bls-core',
+  'bls/bls-zkcrypto',
+  'builder_api',
+  'clock',
+  'data_dumper',
+  'database',
+  'debug_info',
+  'deposit_tree',
+  'directories',
+  'doppelganger_protection',
+  'eip_2335',
+  'eip_7594',
+  'eth1',
+  'eth1_api',
+  'eth2_cache_utils',
+  'execution_engine',
+  'factory',
+  'features',
+  'fork_choice_control',
+  'fork_choice_store',
+  'genesis',
+  'grandine',
+  'grandine_version',
+  'hashing',
+  'helper_functions',
+  'http_api',
+  'http_api_utils',
+  'interop',
+  'keymanager',
+  'kzg_utils',
+  'liveness_tracker',
+  'logging',
+  'metrics',
+  'operation_pools',
+  'p2p',
+  'panics',
+  'predefined_chains',
+  'prometheus_metrics',
+  'pubkey_cache',
+  'runtime',
+  'serde_utils',
+  'shuffling',
+  'signer',
+  'slasher',
+  'slashing_protection',
+  'snapshot_test_utils',
+  'spec_test_utils',
+  'ssz',
+  'ssz_derive',
+  'state_cache',
+  'std_ext',
+  'transition_functions',
+  'try_from_iterator',
+  'types',
+  'validator',
+  'validator_key_cache',
+  'validator_statistics',
+  'zkvm/guest/risc0',
+  'zkvm/host',
 ]
 
 # Feature resolver version 3 is the default starting with Rust 2024, but that does not apply in
@@ -98,38 +98,38 @@ unsafe_code = 'forbid'
 # See the output of `rustc --warn help` for a full list of lints available in the current version.
 # They are documented at <https://doc.rust-lang.org/rustc/lints/listing/allowed-by-default.html>.
 absolute_paths_not_starting_with_crate = 'warn'
-anonymous_parameters                   = 'warn'
-deprecated_in_future                   = 'warn'
-deprecated_safe                        = 'warn'
-let_underscore_drop                    = 'warn'
-macro_use_extern_crate                 = 'warn'
-meta_variable_misuse                   = 'warn'
-missing_unsafe_on_extern               = 'warn'
-non_ascii_idents                       = 'warn'
-non_local_definitions                  = 'warn'
-redundant_lifetimes                    = 'warn'
-trivial_casts                          = 'warn'
-trivial_numeric_casts                  = 'warn'
-unit_bindings                          = 'warn'
-unused_crate_dependencies              = 'warn'
-unused_extern_crates                   = 'warn'
-unused_import_braces                   = 'warn'
-unused_lifetimes                       = 'warn'
-unused_macro_rules                     = 'warn'
-unused_qualifications                  = 'warn'
+anonymous_parameters = 'warn'
+deprecated_in_future = 'warn'
+deprecated_safe = 'warn'
+let_underscore_drop = 'warn'
+macro_use_extern_crate = 'warn'
+meta_variable_misuse = 'warn'
+missing_unsafe_on_extern = 'warn'
+non_ascii_idents = 'warn'
+non_local_definitions = 'warn'
+redundant_lifetimes = 'warn'
+trivial_casts = 'warn'
+trivial_numeric_casts = 'warn'
+unit_bindings = 'warn'
+unused_crate_dependencies = 'warn'
+unused_extern_crates = 'warn'
+unused_import_braces = 'warn'
+unused_lifetimes = 'warn'
+unused_macro_rules = 'warn'
+unused_qualifications = 'warn'
 
 # These are almost never helpful and require boilerplate.
-unstable_name_collisions               = 'allow'
+unstable_name_collisions = 'allow'
 
 [workspace.lints.clippy]
 # Additional Clippy lint groups.
-nursery  = 'warn'
+nursery = 'warn'
 pedantic = 'warn'
 
 # A subset of the `clippy::cargo` group.
-negative_feature_names  = 'warn'
+negative_feature_names = 'warn'
 redundant_feature_names = 'warn'
-wildcard_dependencies   = 'warn'
+wildcard_dependencies = 'warn'
 
 # A subset of the `clippy::restriction` group.
 # Some notable lints from it that we do not enable:
@@ -179,61 +179,61 @@ wildcard_dependencies   = 'warn'
 #
 # - `clippy::unimplemented`
 #   It's useful to leave some trait methods unimplemented.
-alloc_instead_of_core             = 'warn'
-allow_attributes                  = 'warn'
-assertions_on_result_states       = 'warn'
-cfg_not_test                      = 'warn'
-clone_on_ref_ptr                  = 'warn'
-dbg_macro                         = 'warn'
-decimal_literal_representation    = 'warn'
-empty_drop                        = 'warn'
+alloc_instead_of_core = 'warn'
+allow_attributes = 'warn'
+assertions_on_result_states = 'warn'
+cfg_not_test = 'warn'
+clone_on_ref_ptr = 'warn'
+dbg_macro = 'warn'
+decimal_literal_representation = 'warn'
+empty_drop = 'warn'
 empty_enum_variants_with_brackets = 'warn'
-empty_structs_with_brackets       = 'warn'
-filetype_is_file                  = 'warn'
-float_arithmetic                  = 'warn'
-float_cmp_const                   = 'warn'
-format_push_string                = 'warn'
-get_unwrap                        = 'warn'
-host_endian_bytes                 = 'warn'
-if_then_some_else_none            = 'warn'
-lossy_float_literal               = 'warn'
-missing_asserts_for_indexing      = 'warn'
-mixed_read_write_in_expression    = 'warn'
-multiple_inherent_impl            = 'warn'
-mutex_atomic                      = 'warn'
-needless_raw_strings              = 'warn'
-partial_pub_fields                = 'warn'
-print_stderr                      = 'warn'
-print_stdout                      = 'warn'
-pub_without_shorthand             = 'warn'
-rc_buffer                         = 'warn'
-rc_mutex                          = 'warn'
-redundant_type_annotations        = 'warn'
-rest_pat_in_fully_bound_structs   = 'warn'
-same_name_method                  = 'warn'
-semicolon_inside_block            = 'warn'
-std_instead_of_core               = 'warn'
-str_to_string                     = 'warn'
-string_add                        = 'warn'
-string_lit_chars_any              = 'warn'
-string_slice                      = 'warn'
-todo                              = 'warn'
+empty_structs_with_brackets = 'warn'
+filetype_is_file = 'warn'
+float_arithmetic = 'warn'
+float_cmp_const = 'warn'
+format_push_string = 'warn'
+get_unwrap = 'warn'
+host_endian_bytes = 'warn'
+if_then_some_else_none = 'warn'
+lossy_float_literal = 'warn'
+missing_asserts_for_indexing = 'warn'
+mixed_read_write_in_expression = 'warn'
+multiple_inherent_impl = 'warn'
+mutex_atomic = 'warn'
+needless_raw_strings = 'warn'
+partial_pub_fields = 'warn'
+print_stderr = 'warn'
+print_stdout = 'warn'
+pub_without_shorthand = 'warn'
+rc_buffer = 'warn'
+rc_mutex = 'warn'
+redundant_type_annotations = 'warn'
+rest_pat_in_fully_bound_structs = 'warn'
+same_name_method = 'warn'
+semicolon_inside_block = 'warn'
+std_instead_of_core = 'warn'
+str_to_string = 'warn'
+string_add = 'warn'
+string_lit_chars_any = 'warn'
+string_slice = 'warn'
+todo = 'warn'
 # Enable `clippy::undocumented_unsafe_blocks` in case we ever change our stance on unsafe code.
-undocumented_unsafe_blocks        = 'warn'
-unnecessary_self_imports          = 'warn'
-unwrap_used                       = 'warn'
-verbose_file_reads                = 'warn'
+undocumented_unsafe_blocks = 'warn'
+unnecessary_self_imports = 'warn'
+unwrap_used = 'warn'
+verbose_file_reads = 'warn'
 
 # These are almost never helpful.
 assertions_on_constants = { level = 'allow', priority = 1 }
-map_unwrap_or           = { level = 'allow', priority = 1 }
-option_if_let_else      = { level = 'allow', priority = 1 }
-single_match_else       = { level = 'allow', priority = 1 }
-struct_field_names      = { level = 'allow', priority = 1 }
+map_unwrap_or = { level = 'allow', priority = 1 }
+option_if_let_else = { level = 'allow', priority = 1 }
+single_match_else = { level = 'allow', priority = 1 }
+struct_field_names = { level = 'allow', priority = 1 }
 
 # These are almost never helpful and require boilerplate.
 into_iter_without_iter = { level = 'allow', priority = 1 }
-len_without_is_empty   = { level = 'allow', priority = 1 }
+len_without_is_empty = { level = 'allow', priority = 1 }
 
 # `derivative::Derivative` and `fixed_hash::construct_fixed_hash!` generate code that triggers these.
 # It is not just a bug in the macros.
@@ -244,8 +244,8 @@ len_without_is_empty   = { level = 'allow', priority = 1 }
 # `derivative` has open issues for 2 of the lints:
 # - <https://github.com/mcarton/rust-derivative/issues/112>
 # - <https://github.com/mcarton/rust-derivative/issues/115>
-expl_impl_clone_on_copy        = { level = 'allow', priority = 1 }
-non_canonical_clone_impl       = { level = 'allow', priority = 1 }
+expl_impl_clone_on_copy = { level = 'allow', priority = 1 }
+non_canonical_clone_impl = { level = 'allow', priority = 1 }
 non_canonical_partial_ord_impl = { level = 'allow', priority = 1 }
 
 # `clippy::implicit_hasher` has next to no benefit and sometimes requires nonlocal changes to code.
@@ -342,6 +342,11 @@ gag = '1'
 generic-array = { version = '=0.14.7', features = ['serde'] }
 git-version = '0.3'
 glob = '0.3'
+# This is tracking the sigp-gossipsub branch on sigp/rust-libp2p commit: Aug 20 2025
+gossipsub = { package = "libp2p-gossipsub", git = "https://github.com/jxs/rust-libp2p.git", branch = "gossipsub-partial-messages", features = [
+  "partial_messages",
+  "metrics",
+] }
 good_lp = { version = '1', default-features = false, features = ['highs'] }
 hash_hasher = '2'
 hex = { version = '0.4', features = ['serde'] }
@@ -359,13 +364,30 @@ impl-serde = '0.5'
 integer-sqrt = '0.1'
 instant = '0.1'
 itertools = '0.14'
-jwt-simple = { version = '0.12', default-features = false, features = ['pure-rust'] }
+jwt-simple = { version = '0.12', default-features = false, features = [
+  'pure-rust',
+] }
 kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 lazy_static = '1'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'd6324d63e27ef6b7c49cdc9b1977c1b808234c7b' }
-libp2p = { git = 'https://github.com/libp2p/rust-libp2p.git', default-features = false, features = ['metrics', 'dns', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp', 'gossipsub'] }
+libp2p = { git = 'https://github.com/jxs/rust-libp2p.git', branch = "gossipsub-partial-messages", default-features = false, features = [
+  'metrics',
+  'dns',
+  'identify',
+  'macros',
+  'noise',
+  'plaintext',
+  'secp256k1',
+  'serde',
+  'tcp',
+  'tokio',
+  'yamux',
+  'quic',
+  'upnp',
+  'gossipsub',
+] }
 libp2p-identity = { version = '0.2.13', features = ['peerid'] }
-libp2p-mplex = { git = 'https://github.com/libp2p/rust-libp2p.git' }
+libp2p-mplex = { git = 'https://github.com/jxs/rust-libp2p.git', branch = "gossipsub-partial-messages" }
 local-ip-address = '0.6'
 log = '0.4'
 logroller = '0.1'
@@ -400,12 +422,15 @@ rand = '0.8'
 rand_chacha = '0.3'
 rayon = '1'
 rc-box = '1'
-refinery = { version = '0.9',  features = ['rusqlite'] }
+refinery = { version = '0.9', features = ['rusqlite'] }
 regex = '1'
 replace_with = '0.1'
 reqwest = { version = '0.13', features = ['json', 'native-tls-vendored'] }
 risc0-build = { version = '3.0.4', features = ['unstable'] }
-risc0-zkvm = { version = '3.0.4', features = ['unstable', 'heap-embedded-alloc'] }
+risc0-zkvm = { version = '3.0.4', features = [
+  'unstable',
+  'heap-embedded-alloc',
+] }
 rusqlite = { version = '0.37', features = ['bundled'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
@@ -427,7 +452,9 @@ serde_with = '3'
 serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2', features = ['compress'] }
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2', features = [
+  'compress',
+] }
 slog = { version = '2', features = ['max_level_trace'] }
 slog-async = '2'
 slog-stdlog = '4'
@@ -447,9 +474,19 @@ test-case = '3'
 test-generator = '0.3'
 thiserror = '2'
 tikv-jemalloc-ctl = { version = '0.6', features = ['stats'] }
-tikv-jemallocator = { version = '0.6', features = ['stats', 'background_threads_runtime_support'] }
+tikv-jemallocator = { version = '0.6', features = [
+  'stats',
+  'background_threads_runtime_support',
+] }
 tiny-keccak = { version = '2', features = ['keccak'] }
-tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
+tokio = { version = '1', features = [
+  'fs',
+  'macros',
+  'rt-multi-thread',
+  'signal',
+  'sync',
+  'time',
+] }
 tokio-io-timeout = '1'
 tokio-stream = { version = '0.1', features = ['sync'] }
 tokio-util = { version = '0.7', features = ['codec', 'compat', 'time'] }
@@ -459,7 +496,12 @@ tower-http = { version = '0.6', features = ['cors', 'trace'] }
 tracing = '0.1'
 tracing-appender = '0.2'
 tracing-opentelemetry = '0.32'
-tracing-subscriber = { version = '0.3', features = ['env-filter', 'fmt', 'registry', 'chrono'] }
+tracing-subscriber = { version = '0.3', features = [
+  'env-filter',
+  'fmt',
+  'registry',
+  'chrono',
+] }
 tracing-test = '0.2'
 triomphe = '0.1'
 tynm = '0.2'
@@ -470,7 +512,9 @@ unwrap_none = '0.1'
 url = '2'
 uuid = { version = '1', features = ['serde', 'v4'] }
 variant_count = '1'
-web3 = { git = 'https://github.com/grandinetech/rust-web3.git', default-features = false, features = ['http-native-tls-vendored'] }
+web3 = { git = 'https://github.com/grandinetech/rust-web3.git', default-features = false, features = [
+  'http-native-tls-vendored',
+] }
 wincode = { version = '0', features = ['derive'] }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 xz2 = { version = '0.1' }
@@ -610,9 +654,10 @@ jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '87c4ccb9bb2af494de375f5f6c62850badd26304' }
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
 
-[patch.'https://github.com/libp2p/rust-libp2p.git']
-libp2p = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
-libp2p-mplex = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
+# This is intentionally unset as we use jxs fork in this PR. TODO: restore/remove
+# [patch.'https://github.com/libp2p/rust-libp2p.git']
+# libp2p = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
+# libp2p-mplex = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }

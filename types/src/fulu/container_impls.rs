@@ -11,8 +11,9 @@ use crate::{
     fulu::containers::{
         BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
         DataColumnIdentifier, DataColumnSidecar, DataColumnsByRootIdentifier,
+        PartialDataColumnHeader, PartialDataColumnSidecar,
     },
-    phase0::primitives::H256,
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 
@@ -191,5 +192,108 @@ impl<P: Preset> From<DataColumnsByRootIdentifier<P>> for Vec<DataColumnIdentifie
             .into_iter()
             .map(|index| DataColumnIdentifier { block_root, index })
             .collect()
+    }
+}
+
+impl<P: Preset> PartialDataColumnHeader<P> {
+    pub const fn slot(&self) -> Slot {
+        self.signed_block_header.message.slot
+    }
+}
+
+impl<P: Preset> PartialDataColumnSidecar<P> {
+    #[must_use]
+    pub fn is_full(&self) -> bool {
+        self.cells_present_bitmap.iter().all(|bit| *bit)
+    }
+
+    pub fn merge(&mut self, other: &Self) {
+        let mut cells = Vec::new();
+        let mut proofs = Vec::new();
+
+        // iterate over `partial_column` and `kzg_proofs` which has different size from the bitmap
+        let mut self_cell_index = 0;
+        let mut other_cell_index = 0;
+
+        for (self_present, other_present) in self
+            .cells_present_bitmap
+            .iter()
+            .zip(other.cells_present_bitmap.iter())
+        {
+            match (*self_present, *other_present) {
+                (true, _) => {
+                    cells.push(self.partial_column.get(self_cell_index).cloned().expect(
+                        "self partial column contains cells less than attached present bitmap",
+                    ));
+                    proofs.push(*self.kzg_proofs.get(self_cell_index).expect(
+                        "self partial kzg proofs contains proofs less than attached present bitmap",
+                    ));
+                }
+                (false, true) => {
+                    cells.push(other.partial_column.get(other_cell_index).cloned().expect(
+                        "other partial column contains cells less than attached present bitmap",
+                    ));
+                    proofs.push(*other.kzg_proofs.get(other_cell_index).expect(
+                        "other partial kzg proofs contains proofs less than attached present bitmap",
+                    ));
+                }
+                _ => {}
+            }
+
+            if *self_present {
+                self_cell_index += 1;
+            }
+
+            if *other_present {
+                other_cell_index += 1;
+            }
+        }
+
+        // merge cells present bitmap after compare with other
+        self.cells_present_bitmap |= &other.cells_present_bitmap;
+        self.partial_column = ContiguousList::try_from(cells).expect("should be within bound");
+        self.kzg_proofs = ContiguousList::try_from(proofs).expect("should be within bound");
+
+        if self.header.is_empty() && !other.header.is_empty() {
+            self.header = other.header.clone();
+        }
+    }
+
+    pub fn filter<F>(&self, filter: F) -> Option<Self>
+    where
+        F: Fn(usize) -> bool,
+    {
+        // create new partial sidecar that only include cells being filter
+        let mut cells_present_bitmap = self.cells_present_bitmap.clone();
+        let mut cells = Vec::new();
+        let mut proofs = Vec::new();
+
+        // iterate over `partial_column` and `kzg_proofs` which has different size from the bitmap
+        let mut cell_index = 0;
+
+        for (blob_index, present) in self.cells_present_bitmap.iter().enumerate() {
+            if *present {
+                let is_included = filter(blob_index);
+                cells_present_bitmap.set(blob_index, is_included);
+
+                if is_included {
+                    cells.push(self.partial_column.get(cell_index).cloned()?);
+                    proofs.push(*self.kzg_proofs.get(cell_index)?);
+                }
+
+                cell_index += 1;
+            }
+        }
+
+        if cells.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            cells_present_bitmap,
+            partial_column: ContiguousList::try_from(cells).expect("should be within bound"),
+            kzg_proofs: ContiguousList::try_from(proofs).expect("should be within bound"),
+            header: self.header.clone(),
+        })
     }
 }

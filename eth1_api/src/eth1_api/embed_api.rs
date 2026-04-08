@@ -41,9 +41,10 @@ use crate::{
     deposit_event::DepositEvent,
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
-        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_PAYLOAD_V1,
-        ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4, ENGINE_GET_PAYLOAD_V5,
-        ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2, ENGINE_GET_EL_BLOBS_V3,
+        ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
+        ENGINE_GET_PAYLOAD_V5, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
+        ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
 };
@@ -118,6 +119,10 @@ pub trait EmbedAdapter: Send + Sync {
         &self,
         versioned_hashes: Vec<VersionedHash>,
     ) -> Result<Option<Vec<BlobAndProofV2<Mainnet>>>>;
+    fn engine_get_blobs_v3(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Vec<Option<BlobAndProofV2<Mainnet>>>>;
 
     fn engine_exchange_capabilities(&self, capabilities: &[&str]) -> Result<Vec<String>>;
     fn engine_get_client_version_v1(
@@ -177,6 +182,10 @@ impl Eth1Api {
 
     pub(crate) fn set_capabilities(&self, capabilities: HashSet<String>) {
         self.capabilities.store(Arc::new(capabilities));
+    }
+
+    pub(crate) fn has_capability(&self, capability: &str) -> bool {
+        self.capabilities.load().contains(capability)
     }
 
     pub(crate) fn set_client_versions(&self, versions: ClientVersions) {
@@ -775,6 +784,38 @@ impl Eth1Api {
                     .collect::<Result<Vec<BlobAndProofV2<P>>>>()
             })
             .transpose()?;
+        Ok(results)
+    }
+
+    pub(crate) async fn get_blobs_v3<P: Preset>(
+        &self,
+        versioned_hashes: Vec<VersionedHash>,
+    ) -> Result<Vec<Option<BlobAndProofV2<P>>>> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            prometheus_metrics::start_timer_vec(
+                &metrics.eth1_api_request_times,
+                ENGINE_GET_EL_BLOBS_V3,
+            )
+        });
+
+        let results = self
+            .exec(move |adapter| adapter.engine_get_blobs_v3(versioned_hashes))
+            .await?;
+        let results = results
+            .into_iter()
+            .map(|value| {
+                value
+                    .map(|blob| {
+                        let blob: &dyn std::any::Any = &blob;
+                        let blob: &BlobAndProofV2<P> =
+                            blob.downcast_ref().ok_or(Error::InvalidPreset)?;
+                        let blob = blob.clone();
+                        Ok(blob)
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<Option<BlobAndProofV2<P>>>>>()?;
+
         Ok(results)
     }
 

@@ -12,17 +12,19 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin,
+    ExecutionPayloadBidOrigin, PartialDataColumnOrigin, PartialDataColumnSidecarAction,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
 use tracing::Span;
 use types::{
     combined::{
-        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, BeaconState, DataColumnSidecar, PartialDataColumnHeader,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    nonstandard::PartialDataColumn,
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -149,6 +151,13 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
         slot: Slot,
     },
+    PartialDataColumnSidecar {
+        wait_group: W,
+        result: Result<PartialDataColumnSidecarAction<P>>,
+        origin: PartialDataColumnOrigin,
+        data_column_identifier: DataColumnIdentifier,
+        submission_time: Instant,
+    },
     PayloadBid {
         result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
@@ -210,11 +219,17 @@ pub enum P2pMessage<P: Preset> {
     Ignore(GossipId),
     PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
+    PublishPartialDataColumn(
+        #[serde(skip)] Arc<PartialDataColumn<P>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
+    RejectPartial(PeerId, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadChanged(H256),
+    DataColumnSidecarMerged(Arc<DataColumnSidecar<P>>),
     Stop,
 }
 

@@ -1,4 +1,4 @@
-use ssz::{ByteVector, ContiguousVector};
+use ssz::{BitList, ByteVector, ContiguousVector};
 
 use crate::{
     deneb::primitives::KzgProof,
@@ -18,3 +18,4 @@ pub type CellsAndKzgProofs<P> = (
     ExtCells<P>,
     ContiguousVector<KzgProof, <P as Preset>::CellsPerExtBlob>,
 );
+pub type CellBitmap<P> = BitList<<P as Preset>::MaxBlobCommitmentsPerBlock>;

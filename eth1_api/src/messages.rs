@@ -1,10 +1,13 @@
+use std::sync::Arc;
+
 use eth2_libp2p::PeerId;
 use execution_engine::EngineGetBlobsParams;
 use futures::channel::mpsc::UnboundedSender;
 use logging::debug_with_peers;
 use serde::Serialize;
 use types::{
-    deneb::containers::BlobIdentifier, fulu::containers::DataColumnsByRootIdentifier,
+    combined::PartialDataColumnHeader, deneb::containers::BlobIdentifier,
+    fulu::containers::DataColumnsByRootIdentifier, nonstandard::PartialDataColumn,
     phase0::primitives::Slot, preset::Preset,
 };
 
@@ -48,6 +51,10 @@ impl<P: Preset> Eth1ApiToBlobFetcher<P> {
 pub enum BlobFetcherToP2p<P: Preset> {
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
+    PublishPartialDataColumns(
+        #[serde(skip)] Vec<Arc<PartialDataColumn<P>>>,
+        Arc<PartialDataColumnHeader<P>>,
+    ),
 }
 
 impl<P: Preset> BlobFetcherToP2p<P> {

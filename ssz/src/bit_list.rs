@@ -252,6 +252,53 @@ impl<N> BitList<N> {
             .sum()
     }
 
+    #[must_use]
+    pub fn is_subset(&self, other: &Self) -> bool {
+        assert_eq!(self.len(), other.len());
+
+        core::iter::zip(self.as_raw_slice(), other.as_raw_slice())
+            .all(|(byte, other_byte)| byte & !other_byte == 0)
+    }
+
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        assert_eq!(self.len(), other.len());
+
+        let bits = core::iter::zip(self.as_raw_slice(), other.as_raw_slice())
+            .map(|(byte, other_byte)| byte | other_byte)
+            .collect::<BitVec<u8>>();
+
+        Self {
+            bits: bits.into_boxed_bitslice(),
+            phantom: PhantomData,
+        }
+    }
+
+    #[must_use]
+    /// Return bits not in `other`, not logical difference `XOR`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let a = bitbox![1, 0, 1, 1];
+    /// let b = bitbox![1, 1, 0, 1];
+    /// let result = a.difference(&b);
+    ///
+    /// assert_eq!(result, bitbox![0, 0, 1, 0]);
+    /// ```
+    pub fn difference(&self, other: &Self) -> Self {
+        assert_eq!(self.len(), other.len());
+
+        let bits = core::iter::zip(self.as_raw_slice(), other.as_raw_slice())
+            .map(|(byte, other_byte)| byte & !other_byte)
+            .collect::<BitVec<u8>>();
+
+        Self {
+            bits: bits.into_boxed_bitslice(),
+            phantom: PhantomData,
+        }
+    }
+
     fn measure_length(bytes: &[u8]) -> Result<usize, ReadError>
     where
         N: Unsigned,
