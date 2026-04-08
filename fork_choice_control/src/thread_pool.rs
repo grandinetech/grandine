@@ -112,7 +112,7 @@ enum HighPriorityTask<P: Preset, E, W> {
     // processing of blocks that are waiting for checkpoint states. However, this may result in a
     // `CheckpointStateTask` being prioritized when it's only needed to verify attestations.
     CheckpointState(CheckpointStateTask<P, W>),
-    ExecutionPayloadEnvelope(ExecutionPayloadEnvelopeTask<P, W>),
+    ExecutionPayloadEnvelope(ExecutionPayloadEnvelopeTask<P, E, W>),
     PreprocessState(PreprocessStateTask<P, W>),
     RetryDataColumnSidecar(RetryDataColumnSidecarTask<P, W>),
 }
@@ -284,7 +284,7 @@ impl<P: Preset, E, W> Spawn<P, E, W> for PersistDataColumnSidecarsTask<P, W> {
     }
 }
 
-impl<P: Preset, E, W> Spawn<P, E, W> for ExecutionPayloadEnvelopeTask<P, W> {
+impl<P: Preset, E, W> Spawn<P, E, W> for ExecutionPayloadEnvelopeTask<P, E, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.high_priority_tasks.push_back(self.into())
     }
