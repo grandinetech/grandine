@@ -180,7 +180,8 @@ pub struct PendingDataColumnSidecar<P: Preset> {
 pub struct PendingExecutionPayloadEnvelope<P: Preset> {
     pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     pub origin: ExecutionPayloadEnvelopeOrigin,
-    pub submission_time: Instant,
+    pub processing_timings: ProcessingTimings,
+    pub tracing_span: Span,
 }
 
 pub struct VerifyAggregateAndProofResult<P: Preset> {
