@@ -16,6 +16,7 @@ use thiserror::Error;
 use types::{
     combined::{BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock},
     config::Config,
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{Phase, Toption},
     phase0::{
         consts::DOMAIN_BEACON_PROPOSER,
@@ -109,6 +110,40 @@ pub fn state_transition_for_report<P: Preset>(
     )?;
 
     Ok(slot_report)
+}
+
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
+pub fn custom_process_execution_payload<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_envelope: &SignedExecutionPayloadEnvelope<P>,
+    execution_engine: impl ExecutionEngine<P> + Send,
+    verifier: impl Verifier + Send,
+) -> Result<()> {
+    match state {
+        BeaconState::Gloas(state) => gloas::process_execution_payload(
+            config,
+            pubkey_cache,
+            state,
+            signed_envelope,
+            execution_engine,
+            verifier,
+        ),
+        state => {
+            // This match arm will silently match any new phases.
+            // Cause a compilation error if a new phase is added.
+            const_assert_eq!(Phase::CARDINALITY, 8);
+
+            bail!(PayloadEnvelopePhaseError {
+                block_root: signed_envelope.block_root(),
+                envelope_phase: Phase::Gloas,
+                envelope_slot: signed_envelope.slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
+            });
+        }
+    }
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -1018,6 +1053,19 @@ pub struct PhaseError {
     block_phase: Phase,
     block_root: H256,
     block_slot: Slot,
+    state_phase: Phase,
+    state_slot: Slot,
+}
+
+#[derive(Debug, Error)]
+#[error(
+    "state and payload envelope phases do not match (state: {state_phase} at slot: {state_slot}, \
+    payload envelope for block: {block_root:?}, {envelope_phase} at slot: {envelope_slot})"
+)]
+pub struct PayloadEnvelopePhaseError {
+    block_root: H256,
+    envelope_phase: Phase,
+    envelope_slot: Slot,
     state_phase: Phase,
     state_slot: Slot,
 }

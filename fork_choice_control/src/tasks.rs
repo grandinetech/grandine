@@ -501,28 +501,39 @@ impl<P: Preset, W> Run for RetryDataColumnSidecarTask<P, W> {
     }
 }
 
-pub struct ExecutionPayloadEnvelopeTask<P: Preset, W> {
+pub struct ExecutionPayloadEnvelopeTask<P: Preset, E, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub execution_engine: E,
     pub wait_group: W,
     pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-    pub state: Option<Arc<CombinedBeaconState<P>>>,
     pub origin: ExecutionPayloadEnvelopeOrigin,
-    pub submission_time: Instant,
+    pub processing_timings: ProcessingTimings,
     pub metrics: Option<Arc<Metrics>>,
+    pub tracing_span: Span,
 }
 
-impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
+impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelopeTask<P, E, W> {
+    #[instrument(
+        skip_all,
+        name = "ExecutionPayloadEnvelopeTask::run",
+        parent = &self.tracing_span,
+        fields(
+            origin = ?&self.origin,
+            slot = self.execution_payload_envelope.slot()
+        ),
+    )]
     fn run(self) {
         let Self {
             store_snapshot,
             mutator_tx,
+            execution_engine,
             wait_group,
             execution_payload_envelope,
-            state,
             origin,
-            submission_time,
+            processing_timings,
             metrics,
+            tracing_span,
         } = self;
 
         let _timer = metrics.as_ref().map(|metrics| {
@@ -532,16 +543,18 @@ impl<P: Preset, W> Run for ExecutionPayloadEnvelopeTask<P, W> {
         });
 
         let result = store_snapshot.validate_execution_payload_envelope(
-            execution_payload_envelope,
-            state,
+            &execution_payload_envelope,
             &origin,
+            execution_engine,
+            MultiVerifier::default(),
         );
 
         MutatorMessage::ExecutionPayloadEnvelope {
             wait_group,
             result,
             origin,
-            submission_time,
+            processing_timings,
+            tracing_span,
         }
         .send(&mutator_tx);
     }
