@@ -868,12 +868,13 @@ where
         self.spawn(ExecutionPayloadEnvelopeTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
+            execution_engine: self.execution_engine.clone(),
             wait_group: self.owned_wait_group(),
             execution_payload_envelope,
-            state: None,
             origin,
-            submission_time: Instant::now(),
+            processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),
+            tracing_span: Span::current(),
         })
     }
 

@@ -153,7 +153,8 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
-        submission_time: Instant,
+        processing_timings: ProcessingTimings,
+        tracing_span: Span,
     },
     FinishedPersistingExecutionPayloadEnvelopes {
         wait_group: W,
