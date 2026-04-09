@@ -73,7 +73,7 @@ use types::{
         BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, StorageMode, WithStatus,
     },
     phase0::{
-        consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, GENESIS_EPOCH, GENESIS_SLOT},
+        consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, BASIS_POINTS, GENESIS_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
@@ -537,6 +537,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             || self.finalized_indices.contains_key(&block_root)
     }
 
+    #[must_use]
+    pub fn contains_payload_state(&self, block_root: H256) -> bool {
+        self.payload_states.contains_key(&block_root)
+    }
+
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
         self.unfinalized_locations.contains_key(&block_root)
     }
@@ -774,13 +779,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn head_with_payload_status(&self) -> (&ChainLink<P>, ExecutionPayloadStatus) {
-        if let Some(unfinalized_block) = self.unfinalized_head() {
-            let attesting_balances = unfinalized_block.attesting_balances;
-            let has_payload = self
-                .payload_states
-                .contains_key(&unfinalized_block.block_root());
+        if let Some(head) = self.unfinalized_head() {
+            let attesting_balances = head.attesting_balances;
+            let has_payload = self.payload_states.contains_key(&head.block_root());
 
-            let payload_status = if unfinalized_block.slot() + 1 == self.slot() {
+            let payload_status = if head.slot() + 1 == self.slot() {
                 // TODO: add `should_extend_payload` check
                 if has_payload {
                     PAYLOAD_STATUS_FULL
@@ -793,7 +796,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 PAYLOAD_STATUS_EMPTY
             };
 
-            (&unfinalized_block.chain_link, payload_status)
+            (&head.chain_link, payload_status)
         } else {
             // TODO: review this
             let chain_link = if let Some(justified_chain_link) = self.justified_chain_link() {
@@ -938,7 +941,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if self.phase() >= Phase::Gloas && parent_root == self.last_finalized().block_root {
             let parent_balances = self.last_finalized_attesting_balances();
-            let parent_has_payload_state = self.payload_states.contains_key(&parent_root);
+            let parent_has_payload_state = self.contains_payload_state(parent_root);
 
             match first_block.parent_payload_presence() {
                 PayloadPresence::Empty
@@ -1096,8 +1099,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return true;
         }
 
-        // TODO: check for equivocations
-        true
+        !self.exhibits_equivocation_on_blocks(
+            chain_link.slot().saturating_sub(1),
+            parent.block.message().proposer_index(),
+            parent_root,
+        )
     }
 
     fn should_wait_for_justified_state(&self, checkpoint: Checkpoint) -> bool {
@@ -1123,7 +1129,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         unfinalized_block: &UnfinalizedBlock<P>,
         parent: Option<&UnfinalizedBlock<P>>,
-        apply_proposer_boost: Option<bool>,
+        apply_proposer_boost: bool,
     ) -> Score {
         // Since Gloas, when comparing two competing blocks,
         // first Score parameter is their parents' empty/full node score.
@@ -1135,7 +1141,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let parent_attestation_score = if let Some(parent) = parent
             && parent.slot() + 1 != self.slot()
         {
-            let parent_has_payload_state = self.payload_states.contains_key(&parent.block_root());
+            let parent_has_payload_state = self.contains_payload_state(parent.block_root());
 
             match unfinalized_block.parent_payload_presence() {
                 PayloadPresence::Empty => parent.attesting_balances.empty,
@@ -1168,7 +1174,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             false
         };
 
-        let proposer_score = if ancestor_of_boosted_block && apply_proposer_boost.unwrap_or(true) {
+        let proposer_score = if ancestor_of_boosted_block && apply_proposer_boost {
             // > Calculate proposer score if ``proposer_boost_root`` is set
             self.timely_proposer_score()
         } else {
@@ -1468,6 +1474,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
     ) -> Result<BlockAction<P>> {
         let block_root = block.message().hash_tree_root();
+        let parent_root = block.message().parent_root();
 
         if self.blacklisted_blocks.contains(&block_root) {
             bail!("blacklisted beacon block: (block root: {block_root:?})");
@@ -1480,7 +1487,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // > Parent block must be known
-        let Some(parent) = self.chain_link(block.message().parent_root()) else {
+        let Some(parent) = self.chain_link(parent_root) else {
             return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
         };
 
@@ -3059,7 +3066,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ))?;
             let tick_index: u64 = self.tick.kind as u64;
 
-            (tick_index + 1) * 10000 <= self.chain_config.attestation_due_bps * ticks_per_slot
+            (tick_index + 1) * BASIS_POINTS
+                <= self.chain_config.attestation_due_bps * ticks_per_slot
         } else {
             self.tick.is_before_attesting_interval()
         };
@@ -4134,8 +4142,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut branch_points = BinaryHeap::<BranchPoint>::new();
         let mut best = None;
 
-        let apply_proposer_boost =
-            (self.phase() >= Phase::Gloas).then(|| self.should_apply_proposer_boost());
+        let apply_proposer_boost = if self.phase() >= Phase::Gloas {
+            self.should_apply_proposer_boost()
+        } else {
+            true
+        };
 
         for (segment_id, segment) in self.unfinalized.iter().rev() {
             let viable = self.is_segment_viable(segment);
