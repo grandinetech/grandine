@@ -16,6 +16,7 @@ pub use crate::{
     dynamic_list::DynamicList,
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
+    incomplete_persistent_vector::IncompletePersistentVector,
     merkle_tree::{MerkleTree, ProofWithLength, mix_in_length},
     persistent_list::PersistentList,
     persistent_vector::PersistentVector,
@@ -24,8 +25,8 @@ pub use crate::{
     size::Size,
     type_level::{
         BitVectorBits, ByteVectorBytes, BytesToDepth, ContiguousVectorElements, FitsInU64,
-        MerkleBits, MerkleElements, MinimumBundleSize, PersistentVectorElements, ProofSize,
-        UnhashedBundleSize,
+        IncompletePersistentVectorElements, MerkleBits, MerkleElements, MinimumBundleSize,
+        PersistentVectorElements, ProofSize, UnhashedBundleSize,
     },
     uint256::Uint256,
     zero_default::ZeroDefault,
@@ -44,6 +45,7 @@ mod contiguous_vector;
 mod dynamic_list;
 mod error;
 mod hc;
+mod incomplete_persistent_vector;
 mod iter;
 mod merkle_tree;
 mod negative;

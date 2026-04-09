@@ -1,6 +1,6 @@
 // This is the best we can do until feature `generic_const_exprs` is stabilized.
 
-use core::ops::{Add, Shr, Sub};
+use core::ops::{Add, Rem, Shr, Sub};
 
 use ethereum_types::H256;
 use generic_array::ArrayLength;
@@ -23,6 +23,16 @@ pub trait PersistentVectorElements<T, B>: Unsigned + NonZero {}
 
 impl<T, N, B> PersistentVectorElements<T, B> for N where
     N: Unsigned + NonZero + PowerOfTwo + IsGreaterOrEqual<B, Output = True>
+{
+}
+
+pub trait IncompletePersistentVectorElements<T, B>:
+    Unsigned + NonZero + Rem<B, Output: ArrayLength<T>>
+{
+}
+
+impl<T, N, B> IncompletePersistentVectorElements<T, B> for N where
+    N: Unsigned + NonZero + Rem<B, Output: ArrayLength<T>> + IsGreaterOrEqual<B, Output = True>
 {
 }
 
@@ -105,6 +115,8 @@ type BitsToChunks<N> = BytesToChunks<BitsToBytes<N>>;
 type BitsToDepth<N> = ChunksToDepth<BitsToChunks<N>>;
 
 pub type BytesToDepth<N> = ChunksToDepth<BytesToChunks<N>>;
+
+pub type TailElements<N, B> = op!(N % B);
 
 /// Number of elements needed to fill a single chunk without padding.
 pub type MinimumBundleSize<T> = <T as SszHash>::PackingFactor;
