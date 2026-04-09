@@ -85,11 +85,6 @@ pub enum Error<P: Preset> {
     },
     #[error("block with root {block_root} not found in fork choice")]
     BlockNotFound { block_root: H256 },
-    #[error("builder index mismatch: expected {expected}, actual {actual}")]
-    BuilderIndexMismatch {
-        expected: ValidatorIndex,
-        actual: ValidatorIndex,
-    },
     #[error(
         "the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}"
     )]
@@ -181,15 +176,6 @@ pub enum Error<P: Preset> {
     ExecutionPayloadBidSignatureNotEmpty,
     #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
     ExecutionPayloadBidValueNonZero { value: Gwei },
-    #[error(
-        "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
-    )]
-    ExecutionPayloadBlockHashMismatch {
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Box<H256>,
-    },
-    #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
-    ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
@@ -211,13 +197,6 @@ pub enum Error<P: Preset> {
     #[error("payload envelope's block is invalid: {payload_envelope:?}")]
     PayloadEnvelopeInvalidBlock {
         payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-    },
-    #[error(
-        "payload envelope validation with pre-Gloas state: (envelope_slot: {envelope_slot}, state_slot: {state_slot})"
-    )]
-    PayloadEnvelopeWithPreGloasState {
-        envelope_slot: Slot,
-        state_slot: Slot,
     },
     #[error("terminal PoW block has incorrect hash: {block:?}")]
     TerminalBlockHashMismatch { block: Arc<SignedBeaconBlock<P>> },

@@ -987,15 +987,23 @@ where
         }
     }
 
-    pub fn validate_execution_payload_envelope_with_state(
+    pub fn validate_execution_payload_envelope_with_custom_state_transition(
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
-        state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+        state_transition: impl FnOnce(
+            &ChainLink<P>,
+        ) -> Result<(
+            Arc<BeaconState<P>>,
+            Option<ExecutionPayloadEnvelopeAction<P>>,
+        )>,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         self.store_snapshot()
-            .validate_execution_payload_envelope_with_state(envelope, origin, block_info, state_fn)
+            .validate_execution_payload_envelope_with_custom_state_transition(
+                envelope,
+                origin,
+                state_transition,
+            )
     }
 }
 

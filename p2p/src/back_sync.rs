@@ -492,11 +492,10 @@ impl<P: Preset> Batch<P> {
         let head_state = controller.head_state().value;
 
         let action = tokio::task::block_in_place(|| {
-            controller.validate_execution_payload_envelope_with_state(
+            controller.validate_execution_payload_envelope_with_custom_state_transition(
                 envelope.clone_arc(),
                 &ExecutionPayloadEnvelopeOrigin::BackSync,
-                || Some((block.clone_arc(), PayloadStatus::Optimistic)),
-                || Some(head_state.clone_arc()),
+                |_| Ok((head_state.clone_arc(), None)),
             )
         })?;
 
