@@ -33,7 +33,7 @@ use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_pee
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
-use ssz::{ContiguousList, SszHash as _};
+use ssz::{BitVector, ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tracing::{debug_span, instrument};
@@ -60,8 +60,8 @@ use types::{
     },
     gloas::{
         consts::{
-            BUILDER_INDEX_SELF_BUILD, PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL,
-            PAYLOAD_STATUS_PENDING,
+            BUILDER_INDEX_SELF_BUILD, DATA_AVAILABILITY_TIMELY_THRESHOLD, PAYLOAD_STATUS_EMPTY,
+            PAYLOAD_STATUS_FULL, PAYLOAD_STATUS_PENDING, PAYLOAD_TIMELY_THRESHOLD,
         },
         containers::{
             DataColumnSidecar as GloasDataColumnSidecar, ProposerPreferences,
@@ -181,6 +181,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // - Obtaining active balances from the justified state requires it to be in the right epoch.
     checkpoint_states: HashMap<Checkpoint, Arc<BeaconState<P>>>,
     payload_states: HashMap<H256, Arc<BeaconState<P>>>,
+    payload_timeliness_vote: HashMap<H256, BitVector<P::PtcSize>>,
+    payload_data_availability_vote: HashMap<H256, BitVector<P::PtcSize>>,
     // TODO(Grandine Team): Process current slot attestations incrementally to speed up
     //                      `Store::apply_tick`. Update the comment to match the new design.
     //
@@ -321,6 +323,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         blacklisted_blocks.extend(chain_config.blacklisted_blocks.iter());
 
+        let payload_timeliness_vote = hashmap! { anchor.block_root => BitVector::new(true) };
+        let payload_data_availability_vote = hashmap! { anchor.block_root => BitVector::new(true) };
+
         Self {
             chain_config,
             pubkey_cache,
@@ -343,6 +348,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             latest_messages,
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             payload_states: hashmap! {},
+            payload_timeliness_vote,
+            payload_data_availability_vote,
             current_slot_attestations: vector![],
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
@@ -814,11 +821,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn head_with_payload_status(&self) -> (&ChainLink<P>, ExecutionPayloadStatus) {
         if let Some(head) = self.unfinalized_head() {
             let attesting_balances = head.attesting_balances;
-            let has_payload = self.payload_states.contains_key(&head.block_root());
+            let has_payload = self.contains_payload_state(head.block_root());
 
             let payload_status = if head.slot() + 1 == self.slot() {
-                // TODO: add `should_extend_payload` check
-                if has_payload {
+                if has_payload && self.should_extend_payload(head.block_root()) {
                     PAYLOAD_STATUS_FULL
                 } else {
                     PAYLOAD_STATUS_EMPTY
@@ -840,6 +846,70 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             (chain_link, PAYLOAD_STATUS_PENDING)
         }
+    }
+
+    fn should_extend_payload(&self, block_root: H256) -> bool {
+        let proposer_root = self.proposer_boost_root;
+
+        if proposer_root.is_zero()
+            || (self.is_payload_timely(block_root) && self.is_payload_data_available(block_root))
+        {
+            return true;
+        }
+
+        if let Some(boosted_block) = self.chain_link(proposer_root) {
+            if boosted_block.parent_root() != block_root {
+                return true;
+            }
+
+            if let Some(parent) = self.chain_link(boosted_block.parent_root())
+                && Self::parent_payload_presence(&boosted_block.block, &parent.block).is_full()
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    // > Return whether the execution payload for the beacon block with root ``root``
+    // > was voted as present by the PTC, and was locally determined to be available.
+    fn is_payload_timely(&self, block_root: H256) -> bool {
+        let Some(payload_timeliness_vote) = self.payload_timeliness_vote.get(&block_root) else {
+            return false;
+        };
+
+        if !self.contains_payload_state(block_root) {
+            return false;
+        }
+
+        let vote_count: u64 = payload_timeliness_vote
+            .count_ones()
+            .try_into()
+            .expect("payload timeliness vote count should fit into u64");
+
+        vote_count > PAYLOAD_TIMELY_THRESHOLD
+    }
+
+    // > Return whether the blob data for the beacon block with root ``root``
+    // > was voted as present by the PTC, and was locally determined to be available.
+    fn is_payload_data_available(&self, block_root: H256) -> bool {
+        let Some(payload_data_availability_vote) =
+            self.payload_data_availability_vote.get(&block_root)
+        else {
+            return false;
+        };
+
+        if !self.contains_payload_state(block_root) {
+            return false;
+        }
+
+        let vote_count: u64 = payload_data_availability_vote
+            .count_ones()
+            .try_into()
+            .expect("payload data availability vote count should fit into u64");
+
+        vote_count > DATA_AVAILABILITY_TIMELY_THRESHOLD
     }
 
     #[must_use]

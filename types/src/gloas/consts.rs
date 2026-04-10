@@ -18,6 +18,10 @@ pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 0u8;
 pub const PAYLOAD_STATUS_FULL: PayloadStatus = 1u8;
 pub const PAYLOAD_STATUS_PENDING: PayloadStatus = 2u8;
 
+// Payload & data availability timeliness
+pub const PAYLOAD_TIMELY_THRESHOLD: u64 = 256;
+pub const DATA_AVAILABILITY_TIMELY_THRESHOLD: u64 = 256;
+
 // Misc
 pub const BUILDER_INDEX_SELF_BUILD: BuilderIndex = BuilderIndex::MAX;
 pub const BUILDER_PAYMENT_THRESHOLD_NUMERATOR: u64 = 6;
