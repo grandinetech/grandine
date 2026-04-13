@@ -530,8 +530,8 @@ impl<P: Preset> Context<P> {
     ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_proposer_slashing/*/*"]             [fulu_minimal_gossip_proposer_slashing]             [Minimal] [Fulu];
     ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_proposer_slashing/*/*"]          [electra_mainnet_gossip_proposer_slashing]          [Mainnet] [Electra];
     ["consensus-spec-tests/tests/minimal/electra/networking/gossip_proposer_slashing/*/*"]          [electra_minimal_gossip_proposer_slashing]          [Minimal] [Electra];
-    // ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_proposer_slashing/*/*"]            [gloas_mainnet_gossip_proposer_slashing]            [Mainnet] [Gloas];
-    // ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_proposer_slashing/*/*"]            [gloas_minimal_gossip_proposer_slashing]            [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_proposer_slashing/*/*"]            [gloas_mainnet_gossip_proposer_slashing]            [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_proposer_slashing/*/*"]            [gloas_minimal_gossip_proposer_slashing]            [Minimal] [Gloas];
     ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_attester_slashing/*/*"]           [phase0_mainnet_gossip_attester_slashing]           [Mainnet] [Phase0];
     ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_attester_slashing/*/*"]           [phase0_minimal_gossip_attester_slashing]           [Minimal] [Phase0];
     ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_attester_slashing/*/*"]           [altair_mainnet_gossip_attester_slashing]           [Mainnet] [Altair];
@@ -546,8 +546,8 @@ impl<P: Preset> Context<P> {
     ["consensus-spec-tests/tests/minimal/electra/networking/gossip_attester_slashing/*/*"]          [electra_minimal_gossip_attester_slashing]          [Minimal] [Electra];
     ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_attester_slashing/*/*"]             [fulu_mainnet_gossip_attester_slashing]             [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_attester_slashing/*/*"]             [fulu_minimal_gossip_attester_slashing]             [Minimal] [Fulu];
-    // ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_attester_slashing/*/*"]            [gloas_mainnet_gossip_attester_slashing]            [Mainnet] [Gloas];
-    // ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_attester_slashing/*/*"]            [gloas_minimal_gossip_attester_slashing]            [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_attester_slashing/*/*"]            [gloas_mainnet_gossip_attester_slashing]            [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_attester_slashing/*/*"]            [gloas_minimal_gossip_attester_slashing]            [Minimal] [Gloas];
     ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_voluntary_exit/*/*"]              [phase0_mainnet_gossip_voluntary_exit]              [Mainnet] [Phase0];
     ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_voluntary_exit/*/*"]              [phase0_minimal_gossip_voluntary_exit]              [Minimal] [Phase0];
 )]

@@ -14,8 +14,9 @@ use nonzero_ext::nonzero;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use ssz::{
-    BitVectorBits, ByteVectorBytes, ContiguousVectorElements, FitsInU64, MerkleBits,
-    MerkleElements, PersistentVectorElements, UnhashedBundleSize,
+    BitVectorBits, ByteVectorBytes, ContiguousVectorElements, FitsInU64,
+    IncompletePersistentVectorElements, MerkleBits, MerkleElements, PersistentVectorElements,
+    UnhashedBundleSize,
 };
 use strum::{Display, EnumString};
 use typenum::{
@@ -111,17 +112,18 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
                             + Send
                             + Sync,
             >,
+        > + Add<
+            U2,
+            Output: Mul<
+                Self::SlotsPerEpoch,
+                Output: IncompletePersistentVectorElements<
+                    Ptc<Self>,
+                    UnhashedBundleSize<Ptc<Self>>,
+                > + Debug
+                            + Send
+                            + Sync,
+            >,
         >;
-    // > + Add<
-    //     U2,
-    //     Output: Mul<
-    //         Self::SlotsPerEpoch,
-    //         Output: PersistentVectorElements<Ptc<Self>, UnhashedBundleSize<Ptc<Self>>>
-    //                     + Debug
-    //                     + Send
-    //                     + Sync,
-    //     >,
-    // >;
     type SlotsPerEpoch: Unsigned
         + NonZero
         + Sub<B1>
