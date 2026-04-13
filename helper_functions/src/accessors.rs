@@ -23,6 +23,7 @@ use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::{IsGreaterOrEqual, Sub1, True, Unsigned as _};
 use types::{
+    Ptc,
     altair::{
         consts::{
             DOMAIN_SYNC_COMMITTEE, TIMELY_HEAD_FLAG_INDEX, TIMELY_SOURCE_FLAG_INDEX,
@@ -1030,35 +1031,66 @@ pub fn get_beacon_proposer_indices<P: Preset>(
     )
 }
 
-pub fn ptc_for_slot<P: Preset>(
-    state: &impl BeaconState<P>,
-    slot: Slot,
-) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
-    compute_ptc_for_slot_internal(state, slot)?
-        .into_iter()
-        .take(P::PtcSize::USIZE)
-        .pipe(ContiguousVector::try_from_iter)
-        .map_err(Into::into)
+pub fn ptc_for_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<Ptc<P>> {
+    let members = beacon_committees(state, slot)?.flatten();
+    ptc_from_committee_members(state, slot, members)
 }
 
-// Internal helper to compute PTC for one slot
-fn compute_ptc_for_slot_internal<P: Preset>(
+// Compute PTC for any epoch, bypassing the `relative_epoch` cache.
+// Used in epoch processing where the target epoch (current + `MinSeedLookahead` + 1) exceeds
+// the range covered by the shuffling cache (prev/current/next only).
+pub fn ptc_for_slot_for_epoch_processing<P: Preset>(
     state: &impl BeaconState<P>,
     slot: Slot,
-) -> Result<Vec<ValidatorIndex>> {
+) -> Result<Ptc<P>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let ordered: Vec<ValidatorIndex> =
+        get_active_validator_indices_by_epoch(state, epoch).collect();
+
+    let active_validator_count = u64::try_from(ordered.len())?;
+    let attester_seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_ATTESTER);
+    let mut shuffled = ordered;
+
+    shuffling::shuffle_slice::<P, _>(&mut shuffled, attester_seed)?;
+
+    let validator_count = ValidatorIndex::try_from(shuffled.len())?;
+    let committees_per_slot =
+        misc::committee_count_from_active_validator_count::<P>(active_validator_count);
+
+    let committees_in_epoch = committees_per_slot * P::SlotsPerEpoch::U64;
+    let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
+
+    let members = (0..committees_per_slot).flat_map(|committee_index| {
+        let index_in_epoch = slots_since_epoch_start * committees_per_slot + committee_index;
+        let start = usize::try_from(validator_count * index_in_epoch / committees_in_epoch)
+            .expect("committee start fits in usize");
+        let end = usize::try_from(validator_count * (index_in_epoch + 1) / committees_in_epoch)
+            .expect("committee end fits in usize");
+
+        shuffled[start..end].iter().copied()
+    });
+
+    ptc_from_committee_members(state, slot, members)
+}
+
+fn ptc_from_committee_members<P: Preset>(
+    state: &impl BeaconState<P>,
+    slot: Slot,
+    members: impl Iterator<Item = ValidatorIndex>,
+) -> Result<Ptc<P>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
     let seed = hashing::hash_256_64(seed, slot);
 
-    let indices = beacon_committees(state, slot)?.flatten();
-
-    misc::compute_balance_weighted_selection::<P>(
+    let selection = misc::compute_balance_weighted_selection::<P>(
         state,
-        &PackedIndices::U64(indices.into_iter().collect()),
+        &PackedIndices::U64(members.collect()),
         seed,
         P::PtcSize::USIZE,
         false,
-    )
+    )?;
+
+    Ptc::<P>::try_from_iter(selection).map_err(Into::into)
 }
 
 pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<RelativeSlot> {
@@ -1098,7 +1130,7 @@ pub fn get_or_try_init_ptc<P: Preset>(
 
         let slot = absolute_slot(state, relative_slot);
 
-        compute_ptc_for_slot_internal(state, slot)
+        ptc_for_slot(state, slot).map(|ptc| ptc.into_iter().collect())
     })
 }
 
@@ -1106,10 +1138,7 @@ pub fn get_or_try_init_ptc<P: Preset>(
 ///
 /// Caches PTC using `RelativeSlot`. Cache is shifted in `advance_slot()`: Previous <- Current <- Next.
 /// Callers must ensure state is post-Gloas (PTC is not relevant for pre-Gloas).
-pub fn get_ptc<P: Preset>(
-    state: &impl PostGloasBeaconState<P>,
-    slot: Slot,
-) -> Result<ContiguousVector<ValidatorIndex, P::PtcSize>> {
+pub fn get_ptc<P: Preset>(state: &impl PostGloasBeaconState<P>, slot: Slot) -> Result<Ptc<P>> {
     let Ok(rel_slot) = relative_slot(state, slot) else {
         return ptc_for_slot(state, slot);
     };
@@ -1117,7 +1146,7 @@ pub fn get_ptc<P: Preset>(
     get_or_try_init_ptc(state, rel_slot, true)?
         .iter()
         .copied()
-        .pipe(ContiguousVector::try_from_iter)
+        .pipe(Ptc::<P>::try_from_iter)
         .map_err(Into::into)
 }
 

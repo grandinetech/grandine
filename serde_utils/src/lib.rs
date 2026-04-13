@@ -14,6 +14,7 @@ pub mod prefixed_hex_quantity;
 pub mod shared;
 pub mod sorted_list_desc_by_key;
 pub mod string_or_native;
+pub mod string_or_native_nested_sequence;
 pub mod string_or_native_sequence;
 
 mod assertions;

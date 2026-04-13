@@ -14,7 +14,7 @@ use std_ext::ArcExt as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    ProposerLookahead,
+    ProposerLookahead, Ptc, PtcWindow,
     altair::beacon_state::BeaconState as AltairBeaconState,
     bellatrix::{
         beacon_state::BeaconState as BellatrixBeaconState,
@@ -793,6 +793,7 @@ pub fn upgrade_to_gloas<P: Preset>(
     pre: FuluBeaconState<P>,
 ) -> Result<GloasBeaconState<P>> {
     let epoch = accessors::get_current_epoch(&pre);
+    let ptc_window = initialize_ptc_window(&pre)?;
 
     let FuluBeaconState {
         genesis_time,
@@ -907,7 +908,7 @@ pub fn upgrade_to_gloas<P: Preset>(
         builder_pending_withdrawals: PersistentList::default(),
         latest_block_hash: latest_execution_payload_header.block_hash,
         payload_expected_withdrawals: PersistentList::default(),
-        // ptc_window: PersistentVector::default(),
+        ptc_window,
         // Cache
         cache,
     };
@@ -932,6 +933,22 @@ fn initialize_proposer_lookahead<P: Preset>(
     }
 
     PersistentVector::try_from_iter(lookahead).map_err(Into::into)
+}
+
+fn initialize_ptc_window<P: Preset>(state: &FuluBeaconState<P>) -> Result<PtcWindow<P>> {
+    let current_epoch = accessors::get_current_epoch(state);
+    let start_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
+    let previous_epoch = (0..P::SlotsPerEpoch::U64).map(|_| Ok(Ptc::<P>::default()));
+
+    let current_and_lookahead_epochs = (start_slot
+        ..start_slot + (1 + P::MinSeedLookahead::U64) * P::SlotsPerEpoch::U64)
+        .map(|slot| accessors::ptc_for_slot(state, slot));
+
+    let window = previous_epoch
+        .chain(current_and_lookahead_epochs)
+        .collect::<Result<Vec<_>>>()?;
+
+    PtcWindow::<P>::try_from_iter(window).map_err(Into::into)
 }
 
 fn onboard_builders<P: Preset>(

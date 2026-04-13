@@ -53,7 +53,7 @@ use crate::{
         Balances, BuilderPendingPayments, BuilderPendingWithdrawals, Builders, EpochParticipation,
         Eth1DataVotes, HistoricalRoots, InactivityScores, PayloadExpectedWithdrawals,
         PendingConsolidations, PendingDeposits, PendingPartialWithdrawals, ProposerLookahead,
-        RandaoMixes, RecentRoots, Slashings, Validators,
+        PtcWindow, RandaoMixes, RecentRoots, Slashings, Validators,
     },
     combined::{
         Attestation as CombinedAtteststation, AttesterSlashing as CombinedAttesterSlashing,
@@ -936,6 +936,7 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn payload_expected_withdrawals(&self) -> &PayloadExpectedWithdrawals<P>;
     fn builders(&self) -> &Builders<P>;
     fn next_withdrawal_builder_index(&self) -> BuilderIndex;
+    fn ptc_window(&self) -> &PtcWindow<P>;
 
     fn latest_execution_payload_bid_mut(&mut self) -> &mut ExecutionPayloadBid<P>;
     fn execution_payload_availability_mut(&mut self) -> &mut BitVector<SlotsPerHistoricalRoot<P>>;
@@ -945,6 +946,7 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn payload_expected_withdrawals_mut(&mut self) -> &mut PayloadExpectedWithdrawals<P>;
     fn builders_mut(&mut self) -> &mut Builders<P>;
     fn next_withdrawal_builder_index_mut(&mut self) -> &mut BuilderIndex;
+    fn ptc_window_mut(&mut self) -> &mut PtcWindow<P>;
 }
 
 #[duplicate_item(
@@ -984,6 +986,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         [builder_pending_withdrawals]       [BuilderPendingWithdrawals<P>];
         [payload_expected_withdrawals]      [PayloadExpectedWithdrawals<P>];
         [builders]                          [Builders<P>];
+        [ptc_window]                        [PtcWindow<P>];
     )]
     fn field(&self) -> &return_type {
         get_ref([field])
@@ -999,6 +1002,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         [payload_expected_withdrawals]     [payload_expected_withdrawals_mut]     [PayloadExpectedWithdrawals<P>];
         [builders]                         [builders_mut]                         [Builders<P>];
         [next_withdrawal_builder_index]    [next_withdrawal_builder_index_mut]    [BuilderIndex];
+        [ptc_window]                       [ptc_window_mut]                       [PtcWindow<P>];
     )]
     fn method(&mut self) -> &mut return_type {
         get_ref_mut([field], [method])
