@@ -1,12 +1,19 @@
 use anyhow::Result;
 use arithmetic::NonZeroExt as _;
-use helper_functions::accessors::{get_builder_payment_quorum_threshold, get_next_epoch};
+use helper_functions::{
+    accessors::{
+        get_builder_payment_quorum_threshold, get_current_epoch, get_next_epoch,
+        ptc_for_slot_for_epoch_processing,
+    },
+    misc,
+};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use ssz::{PersistentVector, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
+    PtcWindow,
     capella::containers::HistoricalSummary,
     config::Config,
     gloas::{beacon_state::BeaconState, containers::BuilderPendingPayment},
@@ -79,7 +86,31 @@ pub fn process_epoch(
 
     fulu::process_proposer_lookahead(config, state)?;
 
+    // > [New in Gloas:EIP7732]
+    process_ptc_window(state)?;
+
     state.cache.advance_epoch();
+
+    Ok(())
+}
+
+fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
+    let mut ptc_window = state.ptc_window().into_iter().collect::<Vec<_>>();
+    let last_epoch_start = ptc_window.len().saturating_sub(P::SlotsPerEpoch::USIZE);
+
+    ptc_window.copy_within(P::SlotsPerEpoch::USIZE.., 0);
+
+    let target_epoch = get_current_epoch(state).saturating_add(P::MinSeedLookahead::U64 + 1);
+    let start_slot = misc::compute_start_slot_at_epoch::<P>(target_epoch);
+
+    let ptcs = (start_slot..start_slot + P::SlotsPerEpoch::U64)
+        .map(|slot| ptc_for_slot_for_epoch_processing(state, slot))
+        .collect::<Result<Vec<_>>>()?;
+
+    let refs = ptcs.iter().collect::<Vec<_>>();
+    ptc_window[last_epoch_start..].copy_from_slice(&refs);
+
+    *state.ptc_window_mut() = PtcWindow::<P>::try_from_iter(ptc_window.into_iter().cloned())?;
 
     Ok(())
 }
@@ -357,6 +388,16 @@ mod spec_tests {
     )]
     fn minimal_process_builder_pending_payments(case: Case) {
         run_process_builder_pending_payments_case::<Minimal>(case);
+    }
+
+    #[test_resources("consensus-spec-tests/tests/mainnet/gloas/epoch_processing/ptc_window/*/*")]
+    fn mainnet_process_ptc_window(case: Case) {
+        run_case::<Mainnet>(case, |_, state| process_ptc_window(state))
+    }
+
+    #[test_resources("consensus-spec-tests/tests/minimal/gloas/epoch_processing/ptc_window/*/*")]
+    fn minimal_process_ptc_window(case: Case) {
+        run_case::<Minimal>(case, |_, state| process_ptc_window(state))
     }
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
