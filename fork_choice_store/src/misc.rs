@@ -23,9 +23,10 @@ use types::{
         Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
         SignedBeaconBlock,
     },
+    config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
+    nonstandard::{PayloadStatus, Phase, Publishable, StorageMode, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
@@ -1032,18 +1033,38 @@ pub struct Differences {
 }
 
 impl Differences {
-    pub fn checked_add_balance_mut(&mut self, value: Gwei) -> Option<()> {
-        self.empty = self.empty.checked_add_unsigned(value)?;
-        self.full = self.full.checked_add_unsigned(value)?;
+    pub fn checked_add_balance_mut(
+        &mut self,
+        value: Gwei,
+        payload_present: Option<bool>,
+    ) -> Option<()> {
         self.pending = self.pending.checked_add_unsigned(value)?;
+
+        if let Some(payload_present) = payload_present {
+            if payload_present {
+                self.full = self.full.checked_add_unsigned(value)?;
+            } else {
+                self.empty = self.empty.checked_add_unsigned(value)?;
+            }
+        }
 
         Some(())
     }
 
-    pub fn checked_sub_balance_mut(&mut self, value: Gwei) -> Option<()> {
-        self.empty = self.empty.checked_sub_unsigned(value)?;
-        self.full = self.full.checked_sub_unsigned(value)?;
+    pub fn checked_sub_balance_mut(
+        &mut self,
+        value: Gwei,
+        payload_present: Option<bool>,
+    ) -> Option<()> {
         self.pending = self.pending.checked_sub_unsigned(value)?;
+
+        if let Some(payload_present) = payload_present {
+            if payload_present {
+                self.full = self.full.checked_sub_unsigned(value)?;
+            } else {
+                self.empty = self.empty.checked_sub_unsigned(value)?;
+            }
+        }
 
         Some(())
     }
@@ -1121,6 +1142,12 @@ pub struct LatestMessage {
     // This is the LMD GHOST vote root and it corresponds to `AttestationData.beacon_block_root`.
     pub root: H256,
     pub payload_present: bool,
+}
+
+impl LatestMessage {
+    pub fn post_gloas<P: Preset>(&self, chain_config: &ChainConfig) -> bool {
+        chain_config.phase_at_slot::<P>(self.slot) >= Phase::Gloas
+    }
 }
 
 #[derive(Error, Debug)]

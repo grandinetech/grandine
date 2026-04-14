@@ -3356,10 +3356,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             differences_entry.pending.sub_assign(balance);
 
-            if latest_message.payload_present {
-                differences_entry.full.sub_assign(balance);
-            } else {
-                differences_entry.empty.sub_assign(balance);
+            if latest_message.post_gloas::<P>(&self.chain_config) {
+                if latest_message.payload_present {
+                    differences_entry.full.sub_assign(balance);
+                } else {
+                    differences_entry.empty.sub_assign(balance);
+                }
             }
         }
 
@@ -3793,12 +3795,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             let differences_entry = differences.entry(latest_message.root).or_default();
+            let payload_present = latest_message
+                .post_gloas::<P>(&self.chain_config)
+                .then(|| latest_message.payload_present);
 
             differences_entry
-                .checked_sub_balance_mut(old_balance)
+                .checked_sub_balance_mut(old_balance, payload_present)
                 .expect("the combined balances of the planned validators fit in i64");
             differences_entry
-                .checked_add_balance_mut(new_balance)
+                .checked_add_balance_mut(new_balance, payload_present)
                 .expect("the combined balances of the planned validators fit in i64");
         }
 
@@ -3973,21 +3978,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     }
 
                     if old_root == root && payload_present == old_payload_present {
+                        // If nothing changed, it should still update latest message's slot
+                        if index < self.latest_messages.len() {
+                            self.latest_messages[index] = Some(latest_message.clone_arc());
+                        }
+
                         continue;
                     }
 
                     let differences_entry = differences.entry(old_root).or_default();
 
                     // Subtract balance from node for previous vote
-                    if old_root != root {
-                        differences_entry.pending.sub_assign(balance);
-                    }
+                    differences_entry.pending.sub_assign(balance);
 
                     // Subtract balance from node for previous vote for its payload status
-                    if old_payload_present {
-                        differences_entry.full.sub_assign(balance);
-                    } else {
-                        differences_entry.empty.sub_assign(balance);
+                    if old_message.post_gloas::<P>(&self.chain_config)
+                        && let Some(chain_link) = self.chain_link(old_root)
+                        && chain_link.slot() < old_slot
+                    {
+                        if old_payload_present {
+                            differences_entry.full.sub_assign(balance);
+                        } else {
+                            differences_entry.empty.sub_assign(balance);
+                        }
                     }
                 }
 
@@ -3997,10 +4010,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 differences_entry.pending.add_assign(balance);
 
                 // Add balance to node for the new vote for its payload status
-                if payload_present {
-                    differences_entry.full.add_assign(balance);
-                } else {
-                    differences_entry.empty.add_assign(balance);
+                if latest_message.post_gloas::<P>(&self.chain_config)
+                    && let Some(chain_link) = self.chain_link(root)
+                    && chain_link.slot() < slot
+                {
+                    if payload_present {
+                        differences_entry.full.add_assign(balance);
+                    } else {
+                        differences_entry.empty.add_assign(balance);
+                    }
                 }
 
                 // Note that we mutate `Store.latest_messages` as we go along.
@@ -4059,7 +4077,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     ..
                 } = dissolved_difference;
 
-                assert_ne!(differences.pending, 0);
+                assert!(differences.non_zero());
 
                 let start = start.unwrap_or_else(|| segment.first_position());
 
