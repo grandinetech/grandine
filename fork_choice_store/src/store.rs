@@ -821,30 +821,48 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn head_with_payload_status(&self) -> (&ChainLink<P>, ExecutionPayloadStatus) {
         if let Some(head) = self.unfinalized_head() {
             let attesting_balances = head.attesting_balances;
-            let has_payload = self.contains_payload_state(head.block_root());
-
-            let payload_status = if head.slot() + 1 == self.slot() {
-                if has_payload && self.should_extend_payload(head.block_root()) {
-                    PAYLOAD_STATUS_FULL
-                } else {
-                    PAYLOAD_STATUS_EMPTY
-                }
-            } else if attesting_balances.full >= attesting_balances.empty && has_payload {
-                PAYLOAD_STATUS_FULL
-            } else {
-                PAYLOAD_STATUS_EMPTY
-            };
+            let payload_status =
+                self.chain_link_payload_status(&head.chain_link, attesting_balances);
 
             (&head.chain_link, payload_status)
         } else {
-            // TODO: review this
             let chain_link = if let Some(justified_chain_link) = self.justified_chain_link() {
                 justified_chain_link
             } else {
                 self.anchor()
             };
 
-            (chain_link, PAYLOAD_STATUS_PENDING)
+            let finalized_payload_status =
+                if chain_link.block_root == self.last_finalized().block_root {
+                    let attesting_balances = self.last_finalized_attesting_balances();
+
+                    self.chain_link_payload_status(chain_link, attesting_balances)
+                } else {
+                    PAYLOAD_STATUS_PENDING
+                };
+
+            (chain_link, finalized_payload_status)
+        }
+    }
+
+    fn chain_link_payload_status(
+        &self,
+        chain_link: &ChainLink<P>,
+        attesting_balances: AttestingBalances,
+    ) -> u8 {
+        let block_root = chain_link.block_root;
+        let has_payload = self.contains_payload_state(block_root);
+
+        if chain_link.slot() + 1 == self.slot() {
+            if has_payload && self.should_extend_payload(block_root) {
+                PAYLOAD_STATUS_FULL
+            } else {
+                PAYLOAD_STATUS_EMPTY
+            }
+        } else if has_payload && attesting_balances.full >= attesting_balances.empty {
+            PAYLOAD_STATUS_FULL
+        } else {
+            PAYLOAD_STATUS_EMPTY
         }
     }
 
