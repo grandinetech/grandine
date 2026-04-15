@@ -129,9 +129,9 @@ jobs:
               curl -L https://sp1up.succinct.xyz | bash
               echo "/home/runner/.sp1/bin" >> $GITHUB_PATH
               export PATH="/home/runner/.sp1/bin:$PATH"
-              sp1up -v 6.0.2
+              sp1up -v 6.1.0
               cargo prove --version
-            execute: RUST_LOG=info SP1_PROVER=light cargo run -p zkvm_host --features sp1 --release -- --test "$TEST" execute
+            execute: RUST_LOG=info SP1_PROVER=light cargo run -p zkvm_host --features sp1 --features sp1-sdk/profiling --release -- --test "$TEST" execute
 
           # zkVM test - Brevis Pico implementation
           - backend: pico

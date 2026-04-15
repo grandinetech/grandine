@@ -2984,7 +2984,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         for validator_index in slashable_indices {
             // Votes of slashed validators should not be used to compute the head.
-            self.equivocating_indices.insert(validator_index);
+            if self.equivocating_indices.insert(validator_index).is_some() {
+                continue;
+            }
 
             let index = usize::try_from(validator_index)?;
 

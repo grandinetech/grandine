@@ -57,7 +57,7 @@ impl VmBackend for Vm {
         stdin.write_slice(&cache_ssz);
         stdin.write_slice(&phase_bytes);
 
-        let (output, report) = client.execute(STATE_TRANSITION_ELF, stdin).run()?;
+        let (output, report) = client.execute(STATE_TRANSITION_ELF, &stdin).run()?;
 
         Ok((output.as_slice().to_vec(), Report(report)))
     }
