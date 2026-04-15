@@ -225,8 +225,9 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
         let slot = block_or_sidecar.slot();
         let block_root = block_or_sidecar.block_root();
 
-        // TODO: (gloas): block can be imported before data available
-        if self.controller.contains_block(block_root)
+        if self
+            .controller
+            .contains_block_and_data_available(block_root)
             || self
                 .controller
                 .is_sidecars_construction_started(&block_root)
@@ -332,7 +333,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                             let reconstruction_result =
                                 eip_7594::construct_data_column_sidecars_from_blobs(
                                     block_or_sidecar,
-                                    received_blobs,
+                                    received_blobs.into_iter(),
                                     cells_proofs,
                                     self.controller.store_config().kzg_backend,
                                     self.metrics.clone(),

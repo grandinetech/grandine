@@ -2503,12 +2503,13 @@ pub async fn beacon_events<P: Preset>(
                 Event::ChainReorg(data) => ssevent.json_data(data),
                 Event::ContributionAndProof(data) => ssevent.json_data(data),
                 Event::DataColumnSidecar(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadAvailable(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
                 Event::FinalizedCheckpoint(data) => ssevent.json_data(data),
                 Event::Head(data) => ssevent.json_data(data),
                 Event::PayloadAttributes(data) => ssevent.json_data(data),
                 Event::ProposerSlashing(data) => ssevent.json_data(data),
                 Event::VoluntaryExit(data) => ssevent.json_data(data),
-                Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
             }
             .map_err(Into::into)
         })
@@ -3192,6 +3193,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
+            enable_local_payload_building: false,
         },
     );
 
@@ -3531,7 +3533,7 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
         .get_payload_bid_from(slot, builder_index)
         .ok_or(Error::ExecutionPayloadBidNotFound)?;
 
-    Ok(EthResponse::json_or_ssz(signed_bid.message.clone(), &headers)?.version(version))
+    Ok(EthResponse::json_or_ssz(signed_bid.message, &headers)?.version(version))
 }
 
 /// `POST /eth/v1/validator/aggregate_and_proofs`
@@ -4770,7 +4772,7 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     eip_7594::construct_data_column_sidecars_from_blobs(
         signed_beacon_block.into(),
-        blobs.unwrap_or_default().to_vec(),
+        blobs.unwrap_or_default().into_iter(),
         proofs
             .unwrap_or_else(KzgProofs::empty_fulu)
             .into_iter()

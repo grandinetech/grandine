@@ -12,7 +12,7 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationAction, AttestationItem, AttestationValidationError,
     AttesterSlashingOrigin, BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin,
     ChainLink, DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadBidAction,
-    ExecutionPayloadBidOrigin,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
 };
 use logging::debug_with_peers;
 use serde::Serialize;
@@ -149,6 +149,17 @@ pub enum MutatorMessage<P: Preset, W> {
         persisted_data_column_ids: Vec<DataColumnIdentifier>,
         slot: Slot,
     },
+    ExecutionPayloadEnvelope {
+        wait_group: W,
+        result: Result<ExecutionPayloadEnvelopeAction<P>>,
+        origin: ExecutionPayloadEnvelopeOrigin,
+        processing_timings: ProcessingTimings,
+        tracing_span: Span,
+    },
+    FinishedPersistingExecutionPayloadEnvelopes {
+        wait_group: W,
+        persisted_block_roots: Vec<H256>,
+    },
     PayloadBid {
         result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,
@@ -239,8 +250,8 @@ pub enum PoolMessage<P: Preset, W> {
         wait_group: W,
         block_root: H256,
         block: Arc<SignedBeaconBlock<P>>,
-        origin: BlockOrigin,
         slot: Slot,
+        is_from_requested: bool,
     },
 }
 

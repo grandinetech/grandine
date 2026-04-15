@@ -23,12 +23,13 @@ use types::{
         Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
         SignedBeaconBlock,
     },
+    config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
+    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    nonstandard::{PayloadStatus, Phase, Publishable, StorageMode, ValidationOutcome},
     phase0::{
         containers::{AttestationData, Checkpoint},
-        primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
+        primitives::{ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
@@ -49,6 +50,7 @@ pub struct ChainLink<P: Preset> {
     pub unrealized_justified_checkpoint: Checkpoint,
     pub unrealized_finalized_checkpoint: Checkpoint,
     pub payload_status: PayloadStatus,
+    pub parent_payload_presence: PayloadPresence,
 }
 
 impl<P: Preset> ChainLink<P> {
@@ -83,6 +85,11 @@ impl<P: Preset> ChainLink<P> {
     }
 
     #[must_use]
+    pub fn parent_root(&self) -> H256 {
+        self.block.message().parent_root()
+    }
+
+    #[must_use]
     pub fn state<S: Storage<P>>(&self, store: &Store<P, S>) -> Arc<BeaconState<P>> {
         store.load_beacon_state(self.block_root, self.slot(), self.state.as_ref())
     }
@@ -100,10 +107,60 @@ pub enum PayloadAction {
     DelayUntilBlock(ExecutionBlockHash),
 }
 
+// It's too cumbersome to rename `PayloadStatus` and all the related fields and methods to something else.
+// So what is called `PayloadStatus` in the Gloas consensus specs, is called `PayloadPresence` in Grandine.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum PayloadPresence {
+    Empty,
+    Full,
+    #[default]
+    Pending,
+}
+
+impl PayloadPresence {
+    #[must_use]
+    pub const fn is_full(self) -> bool {
+        matches!(self, Self::Full)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AttestingBalances {
+    pub empty: Gwei,
+    pub full: Gwei,
+    pub pending: Gwei,
+}
+
+impl AttestingBalances {
+    pub fn add_differences(
+        mut self,
+        differences: Differences,
+        payload_presence: Option<PayloadPresence>,
+    ) -> Option<Self> {
+        self.pending = self.pending.checked_add_signed(differences.pending)?;
+
+        match payload_presence {
+            Some(PayloadPresence::Empty) => {
+                self.empty = self.empty.checked_add_signed(differences.pending)?;
+            }
+            Some(PayloadPresence::Full) => {
+                self.full = self.full.checked_add_signed(differences.pending)?;
+            }
+            Some(PayloadPresence::Pending) => {}
+            None => {
+                self.empty = self.empty.checked_add_signed(differences.empty)?;
+                self.full = self.full.checked_add_signed(differences.full)?;
+            }
+        }
+
+        Some(self)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct UnfinalizedBlock<P: Preset> {
     pub chain_link: ChainLink<P>,
-    pub attesting_balance: Gwei,
+    pub attesting_balances: AttestingBalances,
 }
 
 impl<P: Preset> UnfinalizedBlock<P> {
@@ -111,8 +168,17 @@ impl<P: Preset> UnfinalizedBlock<P> {
     pub const fn new(chain_link: ChainLink<P>) -> Self {
         Self {
             chain_link,
-            attesting_balance: 0,
+            attesting_balances: AttestingBalances {
+                empty: 0,
+                full: 0,
+                pending: 0,
+            },
         }
+    }
+
+    #[must_use]
+    pub const fn block_root(&self) -> H256 {
+        self.chain_link.block_root
     }
 
     #[must_use]
@@ -138,6 +204,11 @@ impl<P: Preset> UnfinalizedBlock<P> {
     #[must_use]
     pub const fn is_optimistic(&self) -> bool {
         self.chain_link.is_optimistic()
+    }
+
+    #[must_use]
+    pub const fn parent_payload_presence(&self) -> PayloadPresence {
+        self.chain_link.parent_payload_presence
     }
 }
 
@@ -827,6 +898,85 @@ pub enum PartialAttestationAction {
     DelayUntilSlot,
 }
 
+#[derive(Debug, Clone, AsRefStr)]
+pub enum ExecutionPayloadEnvelopeOrigin {
+    BackSync,
+    Gossip(GossipId),
+    Requested(PeerId),
+    Own,
+    Api(Option<Sender<Result<ValidationOutcome>>>),
+}
+
+impl ExecutionPayloadEnvelopeOrigin {
+    #[must_use]
+    pub fn split(self) -> (Option<GossipId>, Option<Sender<Result<ValidationOutcome>>>) {
+        match self {
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, sender),
+            Self::BackSync | Self::Requested(_) | Self::Own => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(&self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id.clone()),
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn should_generate_event(&self) -> bool {
+        matches!(self, Self::Gossip(_) | Self::Api(_) | Self::Own)
+    }
+
+    // TODO: (gloas): confirm whether can we trust own execution payload envelope
+    #[must_use]
+    pub const fn verify_signatures(&self) -> bool {
+        match self {
+            Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
+            Self::Own => false,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_from_back_sync(&self) -> bool {
+        matches!(self, Self::BackSync)
+    }
+
+    #[must_use]
+    pub const fn is_requested(&self) -> bool {
+        matches!(self, Self::Requested(_))
+    }
+}
+
+#[derive(Debug)]
+pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
+    Accept(Arc<SignedExecutionPayloadEnvelope<P>>, Arc<BeaconState<P>>),
+    Ignore(Publishable),
+    DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
+    DelayUntilState(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
+    DelayUntilData(
+        Arc<SignedExecutionPayloadEnvelope<P>>,
+        Arc<SignedBeaconBlock<P>>,
+    ),
+}
+
+impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
+    #[must_use]
+    pub const fn accepted(&self) -> bool {
+        matches!(self, Self::Accept(_, _))
+    }
+}
+
 #[derive(Clone)]
 pub struct ValidAttestation<P: Preset> {
     pub data: AttestationData,
@@ -952,6 +1102,58 @@ assert_eq_size!(Option<Location>, [usize; 2]);
 // silently.
 pub type Difference = i64;
 
+// Balance differences for fork choice nodes depending on payload presence status
+#[derive(Clone, Copy, Debug, Default, Derivative)]
+#[derivative(PartialEq, Eq, PartialOrd, Ord)]
+pub struct Differences {
+    pub empty: Difference,
+    pub full: Difference,
+    pub pending: Difference,
+}
+
+impl Differences {
+    pub fn checked_add_balance_mut(
+        &mut self,
+        value: Gwei,
+        payload_present: Option<bool>,
+    ) -> Option<()> {
+        self.pending = self.pending.checked_add_unsigned(value)?;
+
+        if let Some(payload_present) = payload_present {
+            if payload_present {
+                self.full = self.full.checked_add_unsigned(value)?;
+            } else {
+                self.empty = self.empty.checked_add_unsigned(value)?;
+            }
+        }
+
+        Some(())
+    }
+
+    pub fn checked_sub_balance_mut(
+        &mut self,
+        value: Gwei,
+        payload_present: Option<bool>,
+    ) -> Option<()> {
+        self.pending = self.pending.checked_sub_unsigned(value)?;
+
+        if let Some(payload_present) = payload_present {
+            if payload_present {
+                self.full = self.full.checked_sub_unsigned(value)?;
+            } else {
+                self.empty = self.empty.checked_sub_unsigned(value)?;
+            }
+        }
+
+        Some(())
+    }
+
+    #[must_use]
+    pub const fn non_zero(&self) -> bool {
+        self.empty != 0 || self.full != 0 || self.pending != 0
+    }
+}
+
 /// The [weight] of a block combined with its root as a [tiebreaker].
 ///
 /// See [`consensus-specs` pull request #3250] for more information.
@@ -959,14 +1161,16 @@ pub type Difference = i64;
 /// [weight]:                               https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_weight
 /// [tiebreaker]:                           https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_head
 /// [`consensus-specs` pull request #3250]: https://github.com/ethereum/consensus-specs/pull/3250
-pub type Score = (Gwei, H256);
+pub type Score = (Gwei, Gwei, H256);
 
 #[derive(Clone, Copy, Derivative)]
 #[derivative(PartialEq, Eq, PartialOrd, Ord)]
 pub struct DifferenceAtLocation {
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-    pub difference: Difference,
+    pub differences: Differences,
     pub location: Location,
+    #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
+    pub last_block_payload_presence: Option<PayloadPresence>,
 }
 
 impl DifferenceAtLocation {
@@ -975,7 +1179,8 @@ impl DifferenceAtLocation {
             segment_id: self.location.segment_id,
             start: None,
             end: self.location.position,
-            difference: self.difference,
+            differences: self.differences,
+            last_block_payload_presence: self.last_block_payload_presence,
         }
     }
 
@@ -984,16 +1189,19 @@ impl DifferenceAtLocation {
             segment_id: self.location.segment_id,
             start: Some(position.next()?),
             end: self.location.position,
-            difference: self.difference,
+            differences: self.differences,
+            last_block_payload_presence: self.last_block_payload_presence,
         })
     }
 }
 
+#[derive(Debug)]
 pub struct DissolvedDifference {
     pub segment_id: SegmentId,
     pub start: Option<Position>,
     pub end: Position,
-    pub difference: Difference,
+    pub differences: Differences,
+    pub last_block_payload_presence: Option<PayloadPresence>,
 }
 
 #[derive(Derivative)]
@@ -1001,17 +1209,24 @@ pub struct DissolvedDifference {
 pub struct BranchPoint {
     pub parent: Location,
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-    pub best_descendant: SegmentId,
+    pub segment_id: SegmentId,
     #[derivative(PartialEq = "ignore", PartialOrd = "ignore", Ord = "ignore")]
-    pub score: Score,
+    pub best_descendant: SegmentId,
 }
 
 /// [`LatestMessage`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#latestmessage)
 pub struct LatestMessage {
-    pub epoch: Epoch,
+    pub slot: Slot,
     // This is named differently than in `consensus-specs` to avoid confusion with FFG vote roots.
     // This is the LMD GHOST vote root and it corresponds to `AttestationData.beacon_block_root`.
-    pub beacon_block_root: H256,
+    pub root: H256,
+    pub payload_present: bool,
+}
+
+impl LatestMessage {
+    pub fn post_gloas<P: Preset>(&self, chain_config: &ChainConfig) -> bool {
+        chain_config.phase_at_slot::<P>(self.slot) >= Phase::Gloas
+    }
 }
 
 #[derive(Error, Debug)]

@@ -9,6 +9,7 @@ use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
+    ExecutionPayloadEnvelopeOrigin,
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
@@ -22,6 +23,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -39,6 +41,7 @@ pub struct Delayed<P: Preset> {
     pub attestations: Vec<PendingAttestation<P>>,
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
+    pub execution_payload_envelopes: Vec<PendingExecutionPayloadEnvelope<P>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +98,7 @@ impl<P: Preset> Delayed<P> {
             attestations,
             blob_sidecars,
             data_column_sidecars,
+            execution_payload_envelopes,
         } = self;
 
         blocks.is_empty()
@@ -103,6 +107,7 @@ impl<P: Preset> Delayed<P> {
             && attestations.is_empty()
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
+            && execution_payload_envelopes.is_empty()
     }
 }
 
@@ -171,6 +176,14 @@ pub struct PendingDataColumnSidecar<P: Preset> {
     pub submission_time: Instant,
 }
 
+#[derive(Debug)]
+pub struct PendingExecutionPayloadEnvelope<P: Preset> {
+    pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub processing_timings: ProcessingTimings,
+    pub tracing_span: Span,
+}
+
 pub struct VerifyAggregateAndProofResult<P: Preset> {
     pub result: Result<AggregateAndProofAction<P>>,
     pub origin: AggregateAndProofOrigin<GossipId>,
@@ -194,6 +207,7 @@ pub enum MutatorRejectionReason {
     InvalidDataColumnSidecar {
         data_column_identifier: DataColumnIdentifier,
     },
+    InvalidExecutionPayloadEnvelope,
     InvalidPayloadBid,
 }
 
