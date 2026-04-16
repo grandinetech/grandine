@@ -44,7 +44,7 @@ use types::{
     deneb::containers::BlobSidecar,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::ValidationOutcome,
+    nonstandard::{ValidationOutcome, ValidationOutcomeWithReason},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, SubnetId},
@@ -394,7 +394,7 @@ where
     pub fn on_api_execution_payload_bid(
         &self,
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
-        sender: OneshotSender<Result<ValidationOutcome>>,
+        sender: OneshotSender<Result<ValidationOutcomeWithReason>>,
     ) {
         self.spawn_execution_payload_bid_task(payload_bid, ExecutionPayloadBidOrigin::Api(sender))
     }

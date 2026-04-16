@@ -56,7 +56,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome},
+    nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -1855,20 +1855,25 @@ where
                     self.send_to_p2p(P2pMessage::Accept(gossip_id));
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+                reply_execution_payload_bid_validation_result_to_http_api(
+                    sender,
+                    Ok(ValidationOutcomeWithReason::Accept),
+                );
 
                 self.store_mut().apply_execution_payload_bid(payload_bid);
-
                 self.update_store_snapshot();
             }
-            Ok(ExecutionPayloadBidAction::Ignore(publishable)) => {
+            Ok(ExecutionPayloadBidAction::Ignore(message)) => {
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {
                     self.send_to_p2p(P2pMessage::Ignore(gossip_id));
                 }
 
-                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+                reply_execution_payload_bid_validation_result_to_http_api(
+                    sender,
+                    Ok(ValidationOutcomeWithReason::Ignore(message)),
+                );
             }
             Err(error) => {
                 let source = error.to_string();
@@ -1883,7 +1888,10 @@ where
                     ));
                 }
 
-                reply_to_http_api(sender, Err(anyhow!(source)));
+                reply_execution_payload_bid_validation_result_to_http_api(
+                    sender,
+                    Err(anyhow!(source)),
+                );
             }
         }
     }
@@ -4022,6 +4030,17 @@ fn reply_block_validation_result_to_http_api(
 ) {
     if let Some(mut sender) = sender
         && let Err(reply) = sender.try_send(reply)
+    {
+        debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
+    }
+}
+
+fn reply_execution_payload_bid_validation_result_to_http_api(
+    sender: Option<OneshotSender<Result<ValidationOutcomeWithReason>>>,
+    reply: Result<ValidationOutcomeWithReason>,
+) {
+    if let Some(sender) = sender
+        && let Err(reply) = sender.send(reply)
     {
         debug_with_peers!("reply to HTTP API failed because the receiver was dropped: {reply:?}");
     }

@@ -637,6 +637,12 @@ pub enum ValidationOutcome {
     Ignore(Publishable),
 }
 
+#[derive(PartialEq, Eq, Debug)]
+pub enum ValidationOutcomeWithReason {
+    Accept,
+    Ignore(&'static str),
+}
+
 #[derive(Clone)]
 pub struct OwnAttestation<P: Preset> {
     pub validator_index: ValidatorIndex,

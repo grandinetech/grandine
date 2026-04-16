@@ -406,7 +406,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route("/eth/v1/beacon/blocks", post(publish_block));
 
     let execution_payload_routes = Router::new().route(
-        "/eth/v1/beacon/execution_payload/bid",
+        "/eth/v1/beacon/execution_payload_bid",
         post(publish_execution_payload_bid),
     );
 
