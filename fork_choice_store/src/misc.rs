@@ -25,7 +25,9 @@ use types::{
     },
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::{PayloadStatus, Publishable, StorageMode, ValidationOutcome},
+    nonstandard::{
+        PayloadStatus, Publishable, StorageMode, ValidationOutcome, ValidationOutcomeWithReason,
+    },
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
@@ -295,7 +297,7 @@ impl<I> AggregateAndProofOrigin<I> {
 #[derive(Debug, AsRefStr)]
 pub enum ExecutionPayloadBidOrigin {
     Gossip(GossipId),
-    Api(OneshotSender<Result<ValidationOutcome>>),
+    Api(OneshotSender<Result<ValidationOutcomeWithReason>>),
 }
 
 impl Serialize for ExecutionPayloadBidOrigin {
@@ -313,7 +315,7 @@ impl ExecutionPayloadBidOrigin {
         self,
     ) -> (
         Option<GossipId>,
-        Option<OneshotSender<Result<ValidationOutcome>>>,
+        Option<OneshotSender<Result<ValidationOutcomeWithReason>>>,
     ) {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
@@ -812,7 +814,7 @@ impl<P: Preset> DataColumnSidecarAction<P> {
 
 pub enum ExecutionPayloadBidAction<P: Preset> {
     Accept(Arc<SignedExecutionPayloadBid<P>>),
-    Ignore(Publishable),
+    Ignore(&'static str),
 }
 
 pub enum PartialBlockAction {

@@ -87,8 +87,8 @@ use types::{
         primitives::BuilderIndex,
     },
     nonstandard::{
-        BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome, WEI_IN_GWEI,
-        WithBlobsAndMev, WithStatus,
+        BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome,
+        ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
         consts::{GENESIS_SLOT, TargetAggregatorsPerCommittee},
@@ -1766,7 +1766,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     }
 }
 
-/// `POST /eth/v1/beacon/execution_payload/bid`
+/// `POST /eth/v1/beacon/execution_payload_bid`
 pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
@@ -1782,14 +1782,12 @@ pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
     let result = receiver.await?;
 
     match result {
-        Ok(ValidationOutcome::Accept | ValidationOutcome::Ignore(true)) => {
+        Ok(ValidationOutcomeWithReason::Accept) => {
             ApiToP2p::PublishPayloadBid(signed_payload_bid).send(&api_to_p2p_tx);
-
             Ok(StatusCode::OK)
         }
-        Ok(ValidationOutcome::Ignore(false)) => {
-            // Ignore the bid, do not forward
-            Ok(StatusCode::NO_CONTENT)
+        Ok(ValidationOutcomeWithReason::Ignore(message)) => {
+            Err(Error::InvalidPayloadBid(AnyhowError::msg(message)))
         }
         Err(error) => Err(Error::InvalidPayloadBid(error)),
     }

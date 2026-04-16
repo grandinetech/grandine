@@ -1384,7 +1384,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > the `bid.slot` is the current slot or the next slot
         if bid.slot < self.slot() || bid.slot > self.slot() + 1 {
-            return Ok(ExecutionPayloadBidAction::Ignore(false));
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.slot` is the current slot or the next slot",
+            ));
         }
 
         // > Verify commitments are under limit
@@ -1404,17 +1406,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .execution_payload_locations
             .contains_key(&bid.parent_block_hash)
         {
-            return Ok(ExecutionPayloadBidAction::Ignore(true));
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
+            ));
         }
 
         // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
         if !self.contains_block(bid.parent_block_root) {
-            return Ok(ExecutionPayloadBidAction::Ignore(true));
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice",
+            ));
         }
 
         // > the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen.
         let Some(proposer_preference) = self.proposer_preferences.get(&bid.slot) else {
-            return Ok(ExecutionPayloadBidAction::Ignore(true));
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen",
+            ));
         };
 
         // > `bid.fee_recipient` matches the `fee_recipient` from the proposer's `SignedProposerPreferences` associated with `bid.slot`.
@@ -1439,7 +1447,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.state_cache
                 .existing_state_at_slot(self, bid.parent_block_root, bid.slot)
         else {
-            return Ok(ExecutionPayloadBidAction::Ignore(true));
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "state unavailable for bid validation",
+            ));
         };
 
         if builder_index == BUILDER_INDEX_SELF_BUILD {
@@ -1454,8 +1464,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         } else {
             let Some(post_gloas_state) = state.post_gloas() else {
-                return Ok(ExecutionPayloadBidAction::Ignore(true));
+                return Ok(ExecutionPayloadBidAction::Ignore("state pre-gloas"));
             };
+
             let builder = post_gloas_state.builders().get(builder_index)?;
 
             // > the `bid.builder_index` is a valid/active builder index
@@ -1470,7 +1481,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             // > the `bid.value` is less or equal than the builder's excess balance
             if !predicates::can_builder_cover_bid(post_gloas_state, builder_index, bid.value)? {
-                return Ok(ExecutionPayloadBidAction::Ignore(false));
+                return Ok(ExecutionPayloadBidAction::Ignore(
+                    "the `bid.value` is less or equal than the builder's excess balance",
+                ));
             }
 
             if origin.verify_signatures() {
@@ -1492,7 +1505,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if let Some(payload_bids) = self.accepted_payload_bids.get(&bid.slot) {
             // > this is the first signed bid seen from the given builder for this slot
             if payload_bids.contains_key(&builder_index) {
-                return Ok(ExecutionPayloadBidAction::Ignore(true));
+                return Ok(ExecutionPayloadBidAction::Ignore(
+                    "this is the first signed bid seen from the given builder for this slot",
+                ));
             }
 
             // > this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
@@ -1509,7 +1524,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         + (highest_bid.message.value * MIN_BID_INCREASE_PERCENTAGE)
                             .saturating_div(100)
             {
-                return Ok(ExecutionPayloadBidAction::Ignore(false));
+                return Ok(ExecutionPayloadBidAction::Ignore(
+                    "this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)",
+                ));
             }
         }
 
