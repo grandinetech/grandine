@@ -8,6 +8,7 @@ use crate::phase0::primitives::{DomainType, Epoch, H32, Slot};
 
 pub const ATTESTATION_PROPAGATION_SLOT_RANGE: u64 = 32;
 pub const BASE_REWARDS_PER_EPOCH: NonZeroU64 = nonzero!(4_u64);
+pub const BASIS_POINTS: u64 = 10_000;
 pub const BLS_WITHDRAWAL_PREFIX: &[u8] = &hex!("00");
 pub const DOMAIN_AGGREGATE_AND_PROOF: DomainType = H32(hex!("06000000"));
 pub const DOMAIN_BEACON_ATTESTER: DomainType = H32(hex!("01000000"));

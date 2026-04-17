@@ -23,6 +23,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -191,6 +192,11 @@ pub enum MutatorMessage<P: Preset, W> {
     OverrideFinalizedCheckpoint {
         wait_group: W,
         checkpoint: Checkpoint,
+    },
+    MockValidExecutionPayloadEnvelope {
+        wait_group: W,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        gossip_id: GossipId,
     },
 }
 

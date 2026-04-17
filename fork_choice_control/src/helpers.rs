@@ -19,6 +19,10 @@ use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    gloas::{
+        containers::SignedExecutionPayloadEnvelope,
+        primitives::PayloadStatus as ExecutionPayloadStatus,
+    },
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -428,6 +432,26 @@ impl<P: Preset> Context<P> {
         }
     }
 
+    pub fn on_valid_execution_payload(
+        &mut self,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
+        assert!(matches!(
+            self.on_execution_payload(envelope),
+            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+        ));
+    }
+
+    pub fn on_invalid_execution_payload(
+        &mut self,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
+        assert!(matches!(
+            self.on_execution_payload(envelope),
+            Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)),
+        ));
+    }
+
     pub fn on_acceptable_singular_attestation(
         &mut self,
         state: &Arc<BeaconState<P>>,
@@ -554,6 +578,12 @@ impl<P: Preset> Context<P> {
         assert_eq!(head.slot(), expected_head_slot);
     }
 
+    pub fn assert_head_payload_status(&self, expected_payload_status: ExecutionPayloadStatus) {
+        let (_, payload_status) = self.controller().head_with_payload_status();
+
+        assert_eq!(payload_status, expected_payload_status);
+    }
+
     pub fn assert_status(&self, expected_status: Status<P>) {
         // In normal operation making multiple calls to `Controller` could result in computations
         // being done based on different snapshots of `Store`, leading to inconsistent results.
@@ -653,6 +683,16 @@ impl<P: Preset> Context<P> {
     fn on_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) -> Option<P2pMessage<P>> {
         self.controller()
             .on_gossip_block(block.clone_arc(), GossipId::default());
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
+    fn on_execution_payload(
+        &mut self,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) -> Option<P2pMessage<P>> {
+        self.controller()
+            .on_gossip_execution_payload(envelope.clone_arc(), GossipId::default());
         self.controller().wait_for_tasks();
         self.next_p2p_message()
     }

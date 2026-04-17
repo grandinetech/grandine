@@ -19,6 +19,7 @@ use types::{
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
+    gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -47,6 +48,11 @@ enum Step {
         #[serde(default = "serde_aux::field_attributes::bool_true")]
         valid: bool,
     },
+    ExecutionPayload {
+        execution_payload: PathBuf,
+        #[serde(default = "serde_aux::field_attributes::bool_true")]
+        valid: bool,
+    },
     MergeBlock {
         pow_block: PathBuf,
     },
@@ -63,6 +69,7 @@ enum Step {
 #[serde(deny_unknown_fields)]
 struct Checks {
     head: Option<HeadCheck>,
+    head_payload_status: Option<u8>,
     time: Option<UnixSeconds>,
     genesis_time: Option<UnixSeconds>,
     justified_checkpoint: Option<Checkpoint>,
@@ -151,6 +158,16 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice/withholding/*/*"]           [fulu_minimal_withholding]           [Minimal] [Fulu];
     ["consensus-spec-tests/tests/mainnet/fulu/sync/*/*/*"]                            [fulu_sync_mainnet]                  [Mainnet] [Fulu];
     ["consensus-spec-tests/tests/minimal/fulu/sync/*/*/*"]                            [fulu_sync_minimal]                  [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/ex_ante/*/*"]              [gloas_mainnet_ex_ante]              [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_head/*/*"]             [gloas_mainnet_get_head]             [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_block/*/*"]             [gloas_mainnet_on_block]             [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload/*/*"] [gloas_mainnet_on_execution_payload] [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]              [gloas_minimal_ex_ante]              [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]             [gloas_minimal_get_head]             [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_block/*/*"]             [gloas_minimal_on_block]             [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload/*/*"] [gloas_minimal_on_execution_payload] [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/reorg/*/*"]                [gloas_minimal_reorg]                [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/withholding/*/*"]          [gloas_minimal_withholding]          [Minimal] [Gloas];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case<'_>) {
@@ -280,6 +297,21 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     context.on_invalid_block(&block);
                 }
             }
+            Step::ExecutionPayload {
+                execution_payload,
+                valid,
+            } => {
+                let envelope = case.ssz::<_, Arc<SignedExecutionPayloadEnvelope<P>>>(
+                    config.as_ref(),
+                    execution_payload,
+                );
+
+                if valid {
+                    context.on_valid_execution_payload(&envelope);
+                } else {
+                    context.on_invalid_execution_payload(&envelope);
+                }
+            }
             Step::MergeBlock { pow_block } => {
                 let block_hash = pow_block
                     .to_str()
@@ -320,6 +352,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
             Step::Checks { checks } => {
                 let Checks {
                     head,
+                    head_payload_status,
                     time,
                     genesis_time,
                     justified_checkpoint,
@@ -329,6 +362,10 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
                 if let Some(HeadCheck { slot, root }) = head {
                     context.assert_head(slot, root);
+                }
+
+                if let Some(payload_status) = head_payload_status {
+                    context.assert_head_payload_status(payload_status);
                 }
 
                 if let Some(time) = time {
