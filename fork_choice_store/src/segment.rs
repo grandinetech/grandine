@@ -2,20 +2,26 @@ use core::{
     num::NonZeroUsize,
     ops::{Index, IndexMut, RangeInclusive, RangeToInclusive},
 };
+use std::sync::Arc;
 
 use anyhow::Result;
 use derive_more::Debug;
 #[cfg(not(target_os = "zkvm"))]
 use im::{
     Vector,
+    hashmap::HashMap,
     vector::{Iter, IterMut},
 };
 #[cfg(target_os = "zkvm")]
 use std::vec::Vec as Vector;
 use thiserror::Error;
-use types::{phase0::primitives::Slot, preset::Preset};
+use types::{
+    combined::BeaconState,
+    phase0::primitives::{Gwei, H256, Slot},
+    preset::Preset,
+};
 
-use crate::misc::{ChainLink, UnfinalizedBlock};
+use crate::misc::{ChainLink, PayloadPresence, UnfinalizedBlock};
 
 #[derive(Clone, Debug)]
 pub struct Segment<P: Preset> {
@@ -116,6 +122,54 @@ impl<P: Preset> Segment<P> {
         self.blocks.iter().rev().find(|block| block.non_invalid())
     }
 
+    // Select the latest block with most votes in segment
+    #[must_use]
+    pub fn best_block(
+        &self,
+        proposer_boost: Gwei,
+        store_payload_states: &HashMap<H256, Arc<BeaconState<P>>>,
+    ) -> Option<&UnfinalizedBlock<P>> {
+        let mut index_of_best = 0;
+        let mut parent = self.first_block();
+
+        if parent.is_invalid() {
+            return None;
+        }
+
+        for (index, block) in self.blocks.iter().enumerate().skip(1) {
+            if block.is_invalid() {
+                break;
+            }
+
+            let parent_empty = parent.attesting_balances.empty;
+            let parent_full = parent.attesting_balances.full;
+            let parent_has_payload_state = store_payload_states.contains_key(&parent.block_root());
+
+            // Only proceed selecting the child block if:
+            // - it's indicating that it is the child of parent with no payload
+            //   and the parent has more votes that for its empty payload state,
+            //   or parent does not actually have a payload state in store;
+            // - it's indicating that is the child of parent with payload,
+            //   and parent does not have more votes for its empty payload state;
+            // - it's a child of parent with "pending" payload
+            //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
+            index_of_best = match block.parent_payload_presence() {
+                PayloadPresence::Empty
+                    if parent_empty + proposer_boost > parent_full || !parent_has_payload_state =>
+                {
+                    index
+                }
+                PayloadPresence::Full if parent_empty <= parent_full + proposer_boost => index,
+                PayloadPresence::Pending => index,
+                _ => break,
+            };
+
+            parent = block;
+        }
+
+        Some(&self.blocks[index_of_best])
+    }
+
     #[must_use]
     pub const fn first_position(&self) -> Position {
         self.first_position
@@ -180,14 +234,14 @@ impl<P: Preset> Segment<P> {
         self.blocks.iter().take(length)
     }
 
-    pub fn iter_mut_range(
+    pub fn iter_mut_range_rev(
         &mut self,
         positions: RangeInclusive<Position>,
     ) -> impl Iterator<Item = &mut UnfinalizedBlock<P>> {
         let (first_included, last_included) = positions.into_inner();
         let start = self.resolve_position(first_included);
         let length = self.resolve_position(last_included) - start + 1;
-        self.blocks.iter_mut().skip(start).take(length)
+        self.blocks.iter_mut().skip(start).take(length).rev()
     }
 
     pub fn push(&mut self, block: UnfinalizedBlock<P>) {

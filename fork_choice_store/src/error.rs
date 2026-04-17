@@ -8,7 +8,7 @@ use types::{
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadBid,
-    phase0::primitives::{Epoch, ExecutionAddress, Gwei, Slot, SubnetId, ValidatorIndex},
+    phase0::primitives::{Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -85,6 +85,8 @@ pub enum Error<P: Preset> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("block with root {block_root} not found in fork choice")]
+    BlockNotFound { block_root: H256 },
     #[error("block parent rejected (block: {block:?}")]
     BlockParentRejectedBlock { block: Arc<SignedBeaconBlock<P>> },
     #[error(
@@ -223,4 +225,4 @@ pub enum Error<P: Preset> {
     },
 }
 
-assert_eq_size!(Error<Mainnet>, [usize; 4]);
+assert_eq_size!(Error<Mainnet>, [usize; 5]);
