@@ -17,9 +17,7 @@ mod tested_types {
         capella::containers::{
             BlsToExecutionChange, HistoricalSummary, SignedBlsToExecutionChange, Withdrawal,
         },
-        deneb::containers::{
-            BlobIdentifier, BlobSidecar, ExecutionPayload, ExecutionPayloadHeader,
-        },
+        deneb::containers::{BlobIdentifier, BlobSidecar, ExecutionPayloadHeader},
         electra::containers::{
             AggregateAndProof, Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest,
             ExecutionRequests, IndexedAttestation, PendingConsolidation, PendingDeposit,

@@ -1003,6 +1003,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 bls_to_execution_changes,
                                 signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
                                 payload_attestations,
+                                // TODO
+                                parent_execution_requests: ExecutionRequests::default(),
                             },
                         }))
                     }
@@ -1704,6 +1706,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         //
         // See <https://github.com/ethereum/consensus-specs/pull/3350>.
         let parent_hash = if let Some(state) = state.post_gloas() {
+            // TODO(gloas)
             state.latest_block_hash()
         } else if let Some(state) = state.post_capella() {
             state.latest_execution_payload_header().block_hash()

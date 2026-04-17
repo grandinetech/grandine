@@ -480,6 +480,6 @@ impl<P: Preset> SignForSingleFork<P> for ExecutionPayloadEnvelope<P> {
     const SIGNATURE_KIND: SignatureKind = SignatureKind::ExecutionPayloadEnvelope;
 
     fn epoch(&self) -> Epoch {
-        misc::compute_epoch_at_slot::<P>(self.slot)
+        misc::compute_epoch_at_slot::<P>(self.payload.slot_number)
     }
 }
