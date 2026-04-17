@@ -57,6 +57,7 @@ pub struct BeaconBlockBody<P: Preset> {
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub signed_execution_payload_bid: SignedExecutionPayloadBid<P>,
     pub payload_attestations: ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
+    pub parent_execution_requests: ExecutionRequests<P>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -123,6 +124,7 @@ pub struct ExecutionPayloadBid<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub execution_payment: Gwei,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub execution_requests_root: H256,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -135,7 +137,6 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     pub beacon_block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
-    pub state_root: H256,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]

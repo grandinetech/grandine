@@ -65,6 +65,8 @@ pub enum Error<P: Preset> {
         index: BuilderIndex,
         current_epoch: Epoch,
     },
+    #[error("builder payment index ({index}) out of bounds (length: {length})")]
+    BuilderPaymentIndexOutOfBounds { index: u64, length: u64 },
     #[error("cannot exit builder because it has pending withdrawals in the queue")]
     BuilderVoluntaryExitWithPendingWithdrawals,
     #[error("deposit count is incorrect (computed: {computed}, in_block: {in_block})")]
@@ -87,6 +89,10 @@ pub enum Error<P: Preset> {
     EnvelopeSlotMismatch { in_envelope: Slot, in_state: Slot },
     #[error("execution payload bid's signature is invalid")]
     ExecutionPayloadBidSignatureInvalid,
+    #[error("execution requests not empty")]
+    ExecutionRequestsNotEmpty,
+    #[error("execution requests root ({computed:?}) does not match expected ({expected:?})")]
+    ExecutionRequestsRootMismatch { computed: H256, expected: H256 },
     #[error(
         "parent hash in execution payload ({in_block:?}) \
          does not match latest execution payload header ({in_state:?})"

@@ -21,7 +21,8 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            BuilderPendingPayment, ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope,
+            BuilderPendingPayment, ExecutionPayloadBid, ExecutionPayloadEnvelope,
+            SignedExecutionPayloadEnvelope,
         },
     },
     phase0::containers::DepositMessage,
@@ -160,6 +161,15 @@ pub fn validate_execution_payload_envelope<P: Preset>(
         }
     );
 
+    // > Verify execution requests against committed bid
+    let computed = envelope.execution_requests.hash_tree_root();
+    let expected = state.latest_execution_payload_bid().execution_requests_root;
+
+    ensure!(
+        computed == expected,
+        Error::<P>::ExecutionRequestsRootMismatch { computed, expected },
+    );
+
     // > Verify consistency of the parent hash with respect to the previous execution payload header
     let in_state = state.latest_block_hash();
     let in_block = payload.parent_hash;
@@ -171,93 +181,7 @@ pub fn validate_execution_payload_envelope<P: Preset>(
     Ok(())
 }
 
-pub fn process_execution_payload<P: Preset, V: Verifier>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &mut impl PostGloasBeaconState<P>,
-    signed_envelope: &SignedExecutionPayloadEnvelope<P>,
-    execution_engine: impl ExecutionEngine<P>,
-    verifier: V,
-) -> Result<()> {
-    if !V::IS_NULL {
-        verify_execution_payload_envelope_signature(
-            config,
-            pubkey_cache,
-            state,
-            signed_envelope,
-            verifier,
-        )?;
-    }
-
-    let envelope = &signed_envelope.message;
-    let payload = &envelope.payload;
-
-    // > Cache latest block header state root
-    let previous_state_root = state.hash_tree_root();
-    if state.latest_block_header().state_root.is_zero() {
-        state.latest_block_header_mut().state_root = previous_state_root;
-    }
-
-    validate_execution_payload_envelope(config, state, signed_envelope)?;
-
-    // > Verify the execution payload is valid
-    let committed_bid = state.latest_execution_payload_bid();
-    let versioned_hashes = committed_bid
-        .blob_kzg_commitments
-        .iter()
-        .copied()
-        .map(kzg_commitment_to_versioned_hash)
-        .collect();
-
-    execution_engine.notify_new_payload(
-        envelope.beacon_block_root,
-        payload.clone().into(),
-        Some(ExecutionPayloadParams::Electra {
-            versioned_hashes,
-            parent_beacon_block_root: state.latest_block_header().parent_root,
-            execution_requests: envelope.execution_requests.clone(),
-        }),
-        None,
-    )?;
-
-    process_execution_requests(config, pubkey_cache, state, &envelope.execution_requests)?;
-
-    // > Queue the builder payment
-    let payment_slot = misc::builder_payment_index_for_current_epoch::<P>(state.slot());
-    let payment = *state.builder_pending_payments().get(payment_slot)?;
-    let amount = payment.withdrawal.amount;
-    if amount > 0 {
-        state
-            .builder_pending_withdrawals_mut()
-            .push(payment.withdrawal)?;
-    }
-    *state
-        .builder_pending_payments_mut()
-        .mod_index_mut(payment_slot) = BuilderPendingPayment::default();
-
-    // > Cache execution payload header
-    let slot: usize = state.slot().try_into()?;
-    state
-        .execution_payload_availability_mut()
-        .set(slot % SlotsPerHistoricalRoot::<P>::USIZE, true);
-    *state.latest_block_hash_mut() = payload.block_hash;
-
-    if !V::IS_NULL {
-        let computed = state.hash_tree_root();
-        let in_envelope = envelope.state_root;
-        ensure!(
-            in_envelope == computed,
-            Error::<P>::StateRootMismatch {
-                computed,
-                in_block: in_envelope
-            }
-        );
-    }
-
-    Ok(())
-}
-
-fn process_execution_requests<P: Preset>(
+pub fn process_execution_requests<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
@@ -392,11 +316,6 @@ mod spec_tests {
 
     use super::*;
 
-    #[derive(Deserialize)]
-    struct Execution {
-        execution_valid: bool,
-    }
-
     macro_rules! processing_tests {
         (
             $module_name: ident,
@@ -447,42 +366,6 @@ mod spec_tests {
         "consolidation_request",
         "consensus-spec-tests/tests/mainnet/gloas/operations/consolidation_request/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/consolidation_request/*/*",
-    }
-
-    #[test_resources("consensus-spec-tests/tests/mainnet/gloas/operations/execution_payload/*/*")]
-    fn mainnet_execution_payload(case: Case) {
-        run_execution_payload_case::<Mainnet>(case);
-    }
-
-    #[test_resources("consensus-spec-tests/tests/minimal/gloas/operations/execution_payload/*/*")]
-    fn minimal_execution_payload(case: Case) {
-        run_execution_payload_case::<Minimal>(case);
-    }
-
-    fn run_execution_payload_case<P: Preset>(case: Case) {
-        let mut state = case.ssz_default::<BeaconState<P>>("pre");
-        let signed_envelope = case.ssz_default("signed_envelope");
-        let post_option = case.try_ssz_default("post");
-        let Execution { execution_valid } = case.yaml("execution");
-        let execution_engine = MockExecutionEngine::new(execution_valid, false, None);
-        let pubkey_cache = PubkeyCache::default();
-
-        let result = process_execution_payload(
-            &P::default_config(),
-            &pubkey_cache,
-            &mut state,
-            &signed_envelope,
-            &execution_engine,
-            SingleVerifier,
-        )
-        .map(|()| state);
-
-        if let Some(expected_post) = post_option {
-            let actual_post = result.expect("execution payload processing should succeed");
-            assert_eq!(actual_post, expected_post);
-        } else {
-            result.expect_err("execution payload processing should fail");
-        }
     }
 
     fn run_processing_case<P: Preset, O: SszReadDefault>(
