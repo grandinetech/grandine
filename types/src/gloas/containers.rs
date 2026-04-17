@@ -3,15 +3,18 @@ use std::sync::Arc;
 use bls::{PublicKeyBytes, SignatureBytes};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use ssz::{BitVector, ContiguousList, ContiguousVector, Hc, Ssz};
+use ssz::{BitVector, ByteList, ByteVector, ContiguousList, ContiguousVector, Hc, Ssz};
 use typenum::Log2;
 
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
-    bellatrix::primitives::Gas,
-    capella::{consts::ExecutionPayloadIndex, containers::SignedBlsToExecutionChange},
+    bellatrix::primitives::{Gas, Transaction},
+    capella::{
+        consts::ExecutionPayloadIndex,
+        containers::{SignedBlsToExecutionChange, Withdrawal},
+    },
     deneb::{
-        containers::{ExecutionPayload, ExecutionPayloadHeader},
+        containers::ExecutionPayloadHeader,
         primitives::{KzgCommitment, KzgProof},
     },
     electra::{
@@ -19,11 +22,12 @@ use crate::{
         containers::{Attestation, AttesterSlashing, ExecutionRequests},
     },
     fulu::primitives::{Cell, ColumnIndex},
-    gloas::primitives::{BuilderIndex, PayloadStatus},
+    gloas::primitives::{BlockAccessList, BuilderIndex, PayloadStatus},
     phase0::{
         containers::{BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing, SignedVoluntaryExit},
         primitives::{
-            Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex,
+            Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
+            Uint256, UnixSeconds, ValidatorIndex,
         },
     },
     preset::Preset,
@@ -57,6 +61,7 @@ pub struct BeaconBlockBody<P: Preset> {
         ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub signed_execution_payload_bid: SignedExecutionPayloadBid<P>,
     pub payload_attestations: ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
+    pub parent_execution_requests: ExecutionRequests<P>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -104,6 +109,41 @@ pub struct DataColumnSidecar<P: Preset> {
     pub beacon_block_root: H256,
 }
 
+#[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct ExecutionPayload<P: Preset> {
+    pub parent_hash: ExecutionBlockHash,
+    pub fee_recipient: ExecutionAddress,
+    pub state_root: H256,
+    pub receipts_root: H256,
+    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
+    pub prev_randao: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub block_number: ExecutionBlockNumber,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub gas_limit: Gas,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub gas_used: Gas,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub timestamp: UnixSeconds,
+    // TODO(Grandine Team): Try removing the `Arc` when we have data for benchmarking Bellatrix.
+    //                      The cost of cloning `ByteList<MaxExtraDataBytes>` may be negligible.
+    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
+    pub base_fee_per_gas: Uint256,
+    pub block_hash: ExecutionBlockHash,
+    // TODO(Grandine Team): Consider removing the `Arc`. It can be removed with no loss of performance
+    //                      at the cost of making `ExecutionPayloadV1` more complicated.
+    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    pub withdrawals: ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub blob_gas_used: Gas,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub excess_blob_gas: Gas,
+    pub block_access_list: Arc<BlockAccessList<P>>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot_number: Slot,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct ExecutionPayloadBid<P: Preset> {
@@ -123,6 +163,7 @@ pub struct ExecutionPayloadBid<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub execution_payment: Gwei,
     pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub execution_requests_root: H256,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -133,9 +174,6 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub builder_index: BuilderIndex,
     pub beacon_block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub state_root: H256,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]

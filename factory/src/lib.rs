@@ -43,7 +43,7 @@ use types::{
     },
     electra::containers::{
         Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock,
-        BeaconBlockBody as ElectraBeaconBlockBody,
+        BeaconBlockBody as ElectraBeaconBlockBody, ExecutionRequests,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     gloas::{
@@ -386,6 +386,7 @@ fn signed_execution_payload_bid<P: Preset>(
             value: 0,
             execution_payment: 0,
             blob_kzg_commitments: ContiguousList::default(),
+            execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
             ..Default::default()
         },
         signature: SignatureBytes::empty(),

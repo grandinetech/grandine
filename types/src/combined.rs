@@ -98,7 +98,8 @@ use crate::{
         beacon_state::BeaconState as GloasBeaconState,
         containers::{
             BeaconBlock as GloasBeaconBlock, DataColumnSidecar as GloasDataColumnSidecar,
-            ExecutionPayloadBid, LightClientBootstrap as GloasLightClientBootstrap,
+            ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
+            LightClientBootstrap as GloasLightClientBootstrap,
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate,
@@ -1443,6 +1444,7 @@ pub enum ExecutionPayload<P: Preset> {
     Bellatrix(BellatrixExecutionPayload<P>),
     Capella(CapellaExecutionPayload<P>),
     Deneb(DenebExecutionPayload<P>),
+    Gloas(GloasExecutionPayload<P>),
 }
 
 impl<P: Preset> SszHash for ExecutionPayload<P> {
@@ -1453,6 +1455,7 @@ impl<P: Preset> SszHash for ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.hash_tree_root(),
             Self::Capella(payload) => payload.hash_tree_root(),
             Self::Deneb(payload) => payload.hash_tree_root(),
+            Self::Gloas(payload) => payload.hash_tree_root(),
         }
     }
 }
@@ -1460,10 +1463,11 @@ impl<P: Preset> SszHash for ExecutionPayload<P> {
 impl<P: Preset> SszSize for ExecutionPayload<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 4 }>([
         BellatrixExecutionPayload::<P>::SIZE,
         CapellaExecutionPayload::<P>::SIZE,
         DenebExecutionPayload::<P>::SIZE,
+        GloasExecutionPayload::<P>::SIZE,
     ]);
 }
 
@@ -1482,9 +1486,10 @@ impl<P: Preset> SszRead<Phase> for ExecutionPayload<P> {
             }
             Phase::Bellatrix => Self::Bellatrix(SszReadDefault::from_ssz_default(bytes)?),
             Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
-            Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas => {
+            Phase::Deneb | Phase::Electra | Phase::Fulu => {
                 Self::Deneb(SszReadDefault::from_ssz_default(bytes)?)
             }
+            Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(block)
@@ -1497,10 +1502,8 @@ impl<P: Preset> ExecutionPayload<P> {
             (self, phase),
             (Self::Bellatrix(_), Phase::Bellatrix)
                 | (Self::Capella(_), Phase::Capella)
-                | (
-                    Self::Deneb(_),
-                    Phase::Deneb | Phase::Electra | Phase::Fulu | Phase::Gloas
-                )
+                | (Self::Deneb(_), Phase::Deneb | Phase::Electra | Phase::Fulu)
+                | (Self::Gloas(_), Phase::Gloas)
         )
     }
 
@@ -1509,6 +1512,7 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(_) => Phase::Bellatrix,
             Self::Capella(_) => Phase::Capella,
             Self::Deneb(_) => Phase::Deneb,
+            Self::Gloas(_) => Phase::Gloas,
         }
     }
 
@@ -1517,6 +1521,7 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.block_number,
             Self::Capella(payload) => payload.block_number,
             Self::Deneb(payload) => payload.block_number,
+            Self::Gloas(payload) => payload.block_number,
         }
     }
 
@@ -1525,6 +1530,7 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.block_hash,
             Self::Capella(payload) => payload.block_hash,
             Self::Deneb(payload) => payload.block_hash,
+            Self::Gloas(payload) => payload.block_hash,
         }
     }
 
@@ -1533,6 +1539,7 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.gas_limit,
             Self::Capella(payload) => payload.gas_limit,
             Self::Deneb(payload) => payload.gas_limit,
+            Self::Gloas(payload) => payload.gas_limit,
         }
     }
 
@@ -1541,6 +1548,7 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.prev_randao,
             Self::Capella(payload) => payload.prev_randao,
             Self::Deneb(payload) => payload.prev_randao,
+            Self::Gloas(payload) => payload.prev_randao,
         }
     }
 }
