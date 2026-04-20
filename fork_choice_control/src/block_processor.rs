@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use data_dumper::DataDumper;
 use derive_more::Constructor;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
@@ -37,6 +38,7 @@ pub struct BlockProcessor<P: Preset> {
     chain_config: Arc<ChainConfig>,
     pubkey_cache: Arc<PubkeyCache>,
     state_cache: Arc<StateCacheProcessor<P>>,
+    data_dumper: Option<Arc<DataDumper>>,
 }
 
 // NOTE: These functions are all potentially blocking due to state cache access.
@@ -254,8 +256,8 @@ impl<P: Preset> BlockProcessor<P> {
                     }
                 }
 
-                let state = self.perform_state_transition(
-                    state,
+                let state_transition_result = self.perform_state_transition(
+                    state.clone_arc(),
                     block,
                     block_root,
                     ProcessSlots::IfNeeded,
@@ -263,7 +265,16 @@ impl<P: Preset> BlockProcessor<P> {
                     execution_engine,
                     verifier,
                     NullSlotReport,
-                )?;
+                );
+
+                if state_transition_result.is_err()
+                    && let Some(data_dumper) = &self.data_dumper
+                {
+                    data_dumper.dump_signed_beacon_block(block.clone_arc());
+                    data_dumper.dump_beacon_state(state, block_root);
+                }
+
+                let state = state_transition_result?;
 
                 Ok((state, None))
             },

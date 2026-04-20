@@ -43,6 +43,7 @@ pub enum Feature {
     DumpBeaconBlocks,
     DumpBeaconStates,
     DumpBlobSidecars,
+    DumpRejectedBlocksAndStates,
     IgnoreAttestationsForUnknownBlocks,
     IgnoreFutureAttestations,
     InhibitApplicationRestart,

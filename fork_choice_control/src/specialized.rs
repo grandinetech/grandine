@@ -126,6 +126,7 @@ where
             event_channels,
             execution_engine,
             metrics,
+            None,
             futures::sink::drain(),
             p2p_tx,
             futures::sink::drain(),

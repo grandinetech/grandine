@@ -179,6 +179,7 @@ impl<P: Preset> Context<P> {
             event_channels.clone_arc(),
             execution_engine.clone_arc(),
             None,
+            None,
             fc_to_attestation_verifier_tx,
             fc_to_p2p_tx,
             fc_to_pool_tx,

@@ -5911,6 +5911,7 @@ dependencies = [
  "cached",
  "clock",
  "crossbeam-utils",
+ "data_dumper",
  "database",
  "derivative",
  "derive_more 2.1.1",

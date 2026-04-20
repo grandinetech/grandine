@@ -19,6 +19,7 @@ use std::{
 use anyhow::{Context as _, Result};
 use arc_swap::{ArcSwap, Guard};
 use clock::Tick;
+use data_dumper::DataDumper;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
@@ -119,6 +120,7 @@ where
         event_channels: Arc<EventChannels<P>>,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
+        data_dumper: Option<Arc<DataDumper>>,
         attestation_verifier_tx: A, // impl UnboundedSink<AttestationVerifierMessage<P, W>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
         pool_tx: impl UnboundedSink<PoolMessage<P, W>>,
@@ -157,6 +159,7 @@ where
             chain_config,
             pubkey_cache.clone_arc(),
             state_cache.clone_arc(),
+            data_dumper,
         ));
 
         let sidecars_pending_reconstruction = Arc::new(SccHashMap::new());

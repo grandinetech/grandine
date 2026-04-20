@@ -79,7 +79,9 @@ impl Inner {
     }
 
     fn dump_beacon_state<P: Preset>(&self, state: Arc<BeaconState<P>>, block_root: H256) {
-        if !Feature::DumpBeaconStates.is_enabled() {
+        if !Feature::DumpBeaconStates.is_enabled()
+            && !Feature::DumpRejectedBlocksAndStates.is_enabled()
+        {
             return;
         }
 
@@ -132,7 +134,9 @@ impl Inner {
     }
 
     fn dump_signed_beacon_block<P: Preset>(&self, signed_block: Arc<SignedBeaconBlock<P>>) {
-        if !Feature::DumpBeaconBlocks.is_enabled() {
+        if !Feature::DumpBeaconBlocks.is_enabled()
+            && !Feature::DumpRejectedBlocksAndStates.is_enabled()
+        {
             return;
         }
 
@@ -153,6 +157,7 @@ fn dump_enabled() -> bool {
         || Feature::DumpBeaconBlocks.is_enabled()
         || Feature::DumpBeaconStates.is_enabled()
         || Feature::DumpBlobSidecars.is_enabled()
+        || Feature::DumpRejectedBlocksAndStates.is_enabled()
 }
 
 fn try_dump_aggregate_attestation<P: Preset>(

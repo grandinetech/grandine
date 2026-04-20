@@ -304,6 +304,8 @@ pub async fn run_after_genesis<P: Preset>(
 
     let sidecars_construction_started = Arc::new(SccHashMap::new());
 
+    let data_dumper = Arc::new(DataDumper::new(&chain_config.config_name)?);
+
     let (controller, mutator_handle) = Controller::new(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
@@ -314,6 +316,7 @@ pub async fn run_after_genesis<P: Preset>(
         event_channels.clone_arc(),
         execution_engine.clone_arc(),
         metrics.clone(),
+        Some(data_dumper.clone_arc()),
         fork_choice_to_attestation_verifier_tx,
         fork_choice_to_p2p_tx,
         fork_choice_to_pool_tx,
@@ -424,8 +427,6 @@ pub async fn run_after_genesis<P: Preset>(
             controller.slot(),
         );
     }
-
-    let data_dumper = Arc::new(DataDumper::new(&controller.chain_config().config_name)?);
 
     let validator_statistics =
         report_validator_performance.then(|| Arc::new(ValidatorStatistics::new(metrics.clone())));
