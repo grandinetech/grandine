@@ -568,8 +568,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.event_channels.send_payload_attributes_event(
                     slot_head.beacon_state.phase(),
-                    proposer_index,
                     slot,
+                    proposer_index,
                     slot_head.beacon_block_root,
                     &payload_attributes,
                     payload.block_number(),
