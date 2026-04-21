@@ -4293,6 +4293,7 @@ dependencies = [
  "itertools 0.14.0",
  "logging",
  "reth-libmdbx",
+ "rocksdb",
  "snap",
  "std_ext",
  "tap",
@@ -8497,6 +8498,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1744e39d1d6a9948f4f388969627434e31128196de472883b39f148769bfe30a"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "librocksdb-sys"
+version = "0.17.3+10.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cef2a00ee60fe526157c9023edab23943fae1ce2ab6f4abb2a807c1746835de9"
+dependencies = [
+ "bindgen 0.72.1",
+ "bzip2-sys",
+ "cc",
+ "libc",
+ "libz-sys",
 ]
 
 [[package]]
@@ -12931,6 +12945,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocksdb"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddb7af00d2b17dbd07d82c0063e25411959748ff03e8d4f96134c2ff41fce34f"
+dependencies = [
+ "libc",
+ "librocksdb-sys",
+]
+
+[[package]]
 name = "rrs-lib"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13086,6 +13110,7 @@ dependencies = [
  "operation_pools",
  "p2p",
  "panics",
+ "parse-display",
  "predefined_chains",
  "prometheus-client",
  "prometheus_metrics",

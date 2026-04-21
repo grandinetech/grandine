@@ -406,6 +406,7 @@ replace_with = '0.1'
 reqwest = { version = '0.13', features = ['json', 'native-tls-vendored'] }
 risc0-build = { version = '3.0.4', features = ['unstable'] }
 risc0-zkvm = { version = '3.0.4', features = ['unstable', 'heap-embedded-alloc'] }
+rocksdb = { version = '0.24', default-features = false, features = ["snappy", "bindgen-runtime"] }
 rusqlite = { version = '0.37', features = ['bundled'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }

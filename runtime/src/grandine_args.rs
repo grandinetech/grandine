@@ -78,6 +78,7 @@ use crate::{
     default_network_config,
     defaults::DEFAULT_RECONSTRUCTION_DELAY_MS,
     grandine_config::GrandineConfig,
+    misc::DatabaseKind,
     predefined_network::PredefinedNetwork,
     validators::Validators,
 };
@@ -469,6 +470,10 @@ struct BeaconNodeOptions {
     /// [default: disabled]
     #[clap(long)]
     in_memory: bool,
+
+    /// Choose database kind to use.
+    #[clap(long)]
+    database_kind: Option<DatabaseKind>,
 
     /// KZG backend
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
@@ -1079,6 +1084,7 @@ impl GrandineArgs {
             track_liveness,
             detect_doppelgangers,
             in_memory,
+            database_kind,
             kzg_backend,
             blacklisted_blocks,
             sync_without_reconstruction,
@@ -1451,6 +1457,7 @@ impl GrandineArgs {
             archival_epoch_interval,
             reset_databases: force_reset_beacon_db,
             storage_mode,
+            db_kind: database_kind,
         };
 
         network_config_options.print_upnp_warning();

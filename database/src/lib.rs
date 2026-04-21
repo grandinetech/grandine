@@ -18,6 +18,8 @@ use itertools::Either;
 use libmdbx::{DatabaseFlags, Environment, Geometry, Info, ObjectLength, Stat, WriteFlags};
 #[cfg(not(target_os = "zkvm"))]
 use logging::{debug_with_peers, error_with_peers};
+#[cfg(not(target_os = "zkvm"))]
+use rocksdb::DB;
 use snap::raw::{Decoder, Encoder};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -30,6 +32,9 @@ const GROWTH_STEP: ByteSize = ByteSize::mib(256);
 
 #[cfg(not(target_os = "zkvm"))]
 const MAX_NAMED_DATABASES: usize = 10;
+
+#[cfg(not(target_os = "zkvm"))]
+const ROCKS_COLUMN_FAMILY: &str = "cf1";
 
 pub trait PrefixableKey {
     const PREFIX: &'static str;
@@ -103,6 +108,46 @@ impl Database {
         mode: DatabaseMode,
         restart_tx: Option<UnboundedSender<RestartMessage>>,
     ) -> Result<Self> {
+        let path = directory.as_ref();
+        let legacy_name = path.to_str().ok_or(Error)?;
+
+        // Try to open the directory as an existing MDBX environment without creating
+        // any new files (permissions = 0 means "open existing, do not create").
+        let mdbx_environment = Environment::builder()
+            .set_max_dbs(MAX_NAMED_DATABASES)
+            .set_geometry(Geometry {
+                size: Some(..usize::try_from(max_size.as_u64())?),
+                growth_step: Some(isize::try_from(GROWTH_STEP.as_u64())?),
+                shrink_threshold: None,
+                page_size: None,
+            })
+            .open_with_permissions(path, DatabaseMode::ReadOnly.permissions())
+            .ok();
+
+        let has_mdbx_database = match mdbx_environment {
+            Some(environment) => {
+                let transaction = environment.begin_ro_txn()?;
+                transaction.open_db(Some(name)).is_ok()
+                    || transaction.open_db(Some(legacy_name)).is_ok()
+            }
+            None => false,
+        };
+
+        if has_mdbx_database {
+            Self::persistent_libmdbx(name, directory, max_size, mode, restart_tx)
+        } else {
+            Self::persistent_rocks(name, directory, max_size, mode, restart_tx)
+        }
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    pub fn persistent_libmdbx(
+        name: &str,
+        directory: impl AsRef<Path>,
+        max_size: ByteSize,
+        mode: DatabaseMode,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
+    ) -> Result<Self> {
         // If a database with the legacy name exists, keep using it.
         // Otherwise, create a new database with the specified name.
         // This check will not force existing users to resync.
@@ -142,9 +187,45 @@ impl Database {
 
         transaction.commit()?;
 
-        Ok(Self(DatabaseKind::Persistent {
+        Ok(Self(DatabaseKind::LegacyPersistent {
             database_name,
             environment,
+            restart_tx,
+        }))
+    }
+
+    #[cfg(not(target_os = "zkvm"))]
+    pub fn persistent_rocks(
+        name: &str,
+        directory: impl AsRef<Path>,
+        _max_size: ByteSize,
+        mode: DatabaseMode,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
+    ) -> Result<Self> {
+        use rocksdb::{ColumnFamilyDescriptor, Options};
+
+        let mut cf_options = Options::default();
+        cf_options.set_compression_type(rocksdb::DBCompressionType::Snappy);
+        let cf = ColumnFamilyDescriptor::new(ROCKS_COLUMN_FAMILY, cf_options);
+
+        let mut db_options = Options::default();
+        db_options.set_compression_type(rocksdb::DBCompressionType::Snappy);
+        if !mode.is_read_only() {
+            db_options.create_if_missing(true);
+            db_options.create_missing_column_families(true);
+        }
+
+        let path = directory.as_ref().join(name);
+
+        let database = match mode {
+            DatabaseMode::ReadOnly => {
+                DB::open_cf_descriptors_read_only(&db_options, path, vec![cf], false)?
+            }
+            DatabaseMode::ReadWrite => DB::open_cf_descriptors(&db_options, path, vec![cf])?,
+        };
+
+        Ok(Self(DatabaseKind::Persistent {
+            database,
             restart_tx,
         }))
     }
@@ -159,7 +240,7 @@ impl Database {
     pub fn delete(&self, key: impl AsRef<[u8]>) -> Result<()> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -174,6 +255,18 @@ impl Database {
                     transaction.commit()?;
                 }
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => {
+                database.delete_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    key,
+                )?;
+            }
             DatabaseKind::InMemory { map } => {
                 map.lock()
                     .expect("in-memory database mutex is poisoned")
@@ -187,7 +280,7 @@ impl Database {
     pub fn delete_batch(&self, keys: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Result<()> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -204,6 +297,19 @@ impl Database {
                 }
 
                 transaction.commit()?;
+            }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => {
+                let cf = database
+                    .cf_handle(ROCKS_COLUMN_FAMILY)
+                    .expect("persistent backend should always have RocksDB column family 'cf1'");
+
+                for k in keys.into_iter() {
+                    database.delete_cf(cf, k)?;
+                }
             }
             DatabaseKind::InMemory { map } => {
                 let mut map = map.lock().expect("in-memory database mutex is poisoned");
@@ -223,7 +329,7 @@ impl Database {
 
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -246,6 +352,19 @@ impl Database {
                 }
 
                 transaction.commit()?;
+            }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => {
+                database.delete_range_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    range.start,
+                    range.end,
+                )?;
             }
             DatabaseKind::InMemory { map } => {
                 // Update the map atomically for consistency with `Database::put_batch`.
@@ -276,7 +395,7 @@ impl Database {
     pub fn contains_key(&self, key: impl AsRef<[u8]>) -> Result<bool> {
         let contains_key = match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -287,6 +406,18 @@ impl Database {
                     .get::<()>(database.dbi(), key.as_ref())?
                     .is_some()
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .get_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    key,
+                )?
+                .is_some(),
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
@@ -299,7 +430,7 @@ impl Database {
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -310,21 +441,33 @@ impl Database {
                 transaction
                     .get::<Cow<_>>(database.dbi(), key.as_ref())?
                     .map(|compressed| decompress(&compressed))
+                    .transpose()
             }
-            DatabaseKind::InMemory { map } => map
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .get_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    key,
+                )
+                .map_err(anyhow::Error::from),
+            DatabaseKind::InMemory { map } => Ok(map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
                 .get(key.as_ref())
-                .map(|compressed| decompress(compressed)),
+                .map(|value| value.to_vec())),
         }
-        .transpose()
     }
 
     #[cfg(not(target_os = "zkvm"))]
     pub fn db_stats(&self) -> Result<Option<Stat>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -334,6 +477,8 @@ impl Database {
 
                 Some(transaction.db_stat(database.dbi())?)
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent { .. } => None,
             DatabaseKind::InMemory { map: _ } => None,
         }
         .pipe(Ok)
@@ -343,11 +488,13 @@ impl Database {
     pub fn env_info(&self) -> Result<Option<Info>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name: _,
                 environment,
                 restart_tx: _,
             } => Some(environment.info()?),
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent { .. } => None,
             DatabaseKind::InMemory { map: _ } => None,
         }
         .pipe(Ok)
@@ -358,7 +505,7 @@ impl Database {
     ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, usize)>>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -374,7 +521,25 @@ impl Database {
                         Ok((key, length))
                     })
                     .pipe(Either::Left)
+                    .pipe(Either::Left)
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .iterator_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    rocksdb::IteratorMode::Start,
+                )
+                .map(|v| {
+                    v.map(|(key, value)| (Cow::Owned(key.into_vec()), value.len()))
+                        .map_err(anyhow::Error::from)
+                })
+                .pipe(Either::Right)
+                .pipe(Either::Left),
             DatabaseKind::InMemory { map } => {
                 let map = map.lock().expect("in-memory database mutex is poisoned");
 
@@ -406,7 +571,7 @@ impl Database {
 
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -422,8 +587,26 @@ impl Database {
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.next().transpose()))
                     .map(|result| decompress_pair(result?))
+                    .pipe(Either::Right)
                     .pipe(Either::Left)
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .iterator_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    rocksdb::IteratorMode::From(start, rocksdb::Direction::Forward),
+                )
+                .map(|v| {
+                    v.map(|(k, v)| (Cow::Owned(k.into_vec()), v.into_vec()))
+                        .map_err(anyhow::Error::from)
+                })
+                .pipe(Either::Left)
+                .pipe(Either::Left),
             DatabaseKind::InMemory { map } => {
                 let map = map.lock().expect("in-memory database mutex is poisoned");
                 let start_pair = map.get_key_value(start);
@@ -462,7 +645,7 @@ impl Database {
 
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -486,8 +669,26 @@ impl Database {
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.prev().transpose()))
                     .map(|result| decompress_pair(result?))
+                    .pipe(Either::Right)
                     .pipe(Either::Left)
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .iterator_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    rocksdb::IteratorMode::From(end, rocksdb::Direction::Reverse),
+                )
+                .map(|v| {
+                    v.map(|(k, v)| (Cow::Owned(k.into_vec()), v.into_vec()))
+                        .map_err(anyhow::Error::from)
+                })
+                .pipe(Either::Left)
+                .pipe(Either::Left),
             DatabaseKind::InMemory { map } => {
                 let map = map.lock().expect("in-memory database mutex is poisoned");
                 let end_pair = map.get_key_value(end);
@@ -528,7 +729,7 @@ impl Database {
 
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx,
@@ -558,14 +759,33 @@ impl Database {
                     handle_write_error(database_name, error, restart_tx.as_ref())
                 })?;
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => {
+                use rocksdb::WriteBatchWithTransaction;
+
+                let mut batch = WriteBatchWithTransaction::<false>::default();
+                let cf = database
+                    .cf_handle(ROCKS_COLUMN_FAMILY)
+                    .expect("persistent backend should always have RocksDB column family 'cf1'");
+
+                for (k, v) in pairs {
+                    batch.put_cf(cf, k, v);
+                }
+
+                database.write(batch)?;
+            }
             DatabaseKind::InMemory { map } => {
                 let mut map = map.lock().expect("in-memory database mutex is poisoned");
                 let mut new_map = map.clone();
 
                 for (key, value) in pairs {
                     let key = key.as_ref().into();
-                    let compressed = compress(value.as_ref())?.into();
-                    new_map.insert(key, compressed);
+                    // Store raw bytes without compression - in-memory doesn't need it
+                    let value: Arc<[u8]> = value.as_ref().into();
+                    new_map.insert(key, value);
                 }
 
                 *map = new_map;
@@ -583,7 +803,7 @@ impl Database {
     pub fn prev(&self, key: impl AsRef<[u8]>) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -605,11 +825,27 @@ impl Database {
                     cursor.last()?.map(decompress_pair)
                 }
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .iterator_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    rocksdb::IteratorMode::From(key.as_ref(), rocksdb::Direction::Reverse),
+                )
+                .next()
+                .map(|v| {
+                    v.map(|(k, v)| (k.into_vec(), v.into_vec()))
+                        .map_err(anyhow::Error::from)
+                }),
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
                 .get_prev(key.as_ref())
-                .map(|(key, value)| Ok((key.to_vec(), decompress(value)?))),
+                .map(|(key, value)| Ok((key.to_vec(), value.to_vec()))),
         }
         .transpose()
     }
@@ -622,7 +858,7 @@ impl Database {
     pub fn next(&self, key: impl AsRef<[u8]>) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
-            DatabaseKind::Persistent {
+            DatabaseKind::LegacyPersistent {
                 database_name,
                 environment,
                 restart_tx: _,
@@ -634,11 +870,27 @@ impl Database {
 
                 cursor.set_range(key.as_ref())?.map(decompress_pair)
             }
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database,
+                restart_tx: _,
+            } => database
+                .iterator_cf(
+                    database.cf_handle(ROCKS_COLUMN_FAMILY).expect(
+                        "persistent backend should always have RocksDB column family 'cf1'",
+                    ),
+                    rocksdb::IteratorMode::From(key.as_ref(), rocksdb::Direction::Forward),
+                )
+                .next()
+                .map(|v| {
+                    v.map(|(k, v)| (k.into_vec(), v.into_vec()))
+                        .map_err(anyhow::Error::from)
+                }),
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
                 .get_next(key.as_ref())
-                .map(|(key, value)| Ok((key.to_vec(), decompress(value)?))),
+                .map(|(key, value)| Ok((key.to_vec(), value.to_vec()))),
         }
         .transpose()
     }
@@ -658,11 +910,16 @@ impl From<InMemoryMap> for Database {
 
 enum DatabaseKind {
     #[cfg(not(target_os = "zkvm"))]
-    Persistent {
+    LegacyPersistent {
         // TODO(Grandine Team): It should be possible to remove `database_name` by using the default
         //                      database (`None`), but that would probably force users to resync.
         database_name: String,
         environment: Environment,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
+    },
+    #[cfg(not(target_os = "zkvm"))]
+    Persistent {
+        database: DB,
         restart_tx: Option<UnboundedSender<RestartMessage>>,
     },
     InMemory {
@@ -751,6 +1008,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_delete_batch(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -766,6 +1024,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_delete_range_inclusive_exclusive(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -781,6 +1040,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_delete_range_between(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -796,6 +1056,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_contains_key(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -811,6 +1072,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_iterator_ascending(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -843,6 +1105,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_iterator_descending(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -879,6 +1142,11 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    // TODO(rocksdb): rocksdb uses different compression tactic, meaning that
+    //     this test doesn't report value lengths correctly (rocksdb provides
+    //     uncompressed value lengths, and mdbx/in-memory backend provid
+    //     compressed value length).
+    // #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_all_keys_iterator_with_lengths(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -908,6 +1176,7 @@ mod tests {
 
     // This covers a bug we introduced and fixed while implementing in-memory mode.
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_iterators_do_not_modify_the_database(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -928,6 +1197,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_multiple_of_the_same_key(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -945,6 +1215,7 @@ mod tests {
     //   A B C   E
     // ```
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_prev(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -968,6 +1239,7 @@ mod tests {
     //   A B C   E
     // ```
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_next(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -986,6 +1258,7 @@ mod tests {
     }
 
     #[test_case(build_persistent_database)]
+    #[test_case(build_persistent_rocks_database)]
     #[test_case(build_in_memory_database)]
     fn test_isolation(constructor: Constructor) -> Result<()> {
         let database = constructor()?;
@@ -999,6 +1272,19 @@ mod tests {
     }
 
     fn build_persistent_database() -> Result<Database> {
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(1),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
+        populate_database(&database)?;
+        Ok(database)
+    }
+
+    fn build_persistent_rocks_database() -> Result<Database> {
         let database = Database::persistent(
             "test_db",
             TempDir::new()?,

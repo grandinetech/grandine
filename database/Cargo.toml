@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 im = { workspace = true }
+rocksdb = { workspace = true }
 snap = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }

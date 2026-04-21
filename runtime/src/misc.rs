@@ -9,6 +9,7 @@ use fs_err::PathExt as _;
 use futures::channel::mpsc::UnboundedSender;
 use logging::info_with_peers;
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
+use parse_display::{Display, FromStr};
 use prometheus_metrics::Metrics;
 use types::nonstandard::StorageMode;
 
@@ -28,17 +29,40 @@ pub struct StorageConfig {
     pub archival_epoch_interval: NonZeroU64,
     pub reset_databases: bool,
     pub storage_mode: StorageMode,
+    pub db_kind: Option<DatabaseKind>,
+}
+
+#[derive(Debug, Clone, Display, FromStr)]
+pub enum DatabaseKind {
+    Libmdbx,
+    Rocksdb,
 }
 
 impl StorageConfig {
     pub fn eth1_database(&self, restart_tx: UnboundedSender<RestartMessage>) -> Result<Database> {
-        Database::persistent(
-            "eth1",
-            self.eth1_database_path(),
-            self.eth1_db_size,
-            DatabaseMode::ReadWrite,
-            Some(restart_tx),
-        )
+        match self.db_kind {
+            Some(DatabaseKind::Libmdbx) => Database::persistent_libmdbx(
+                "eth1",
+                self.eth1_database_path(),
+                self.eth1_db_size,
+                DatabaseMode::ReadWrite,
+                Some(restart_tx.clone()),
+            ),
+            Some(DatabaseKind::Rocksdb) => Database::persistent_rocks(
+                "eth1",
+                self.eth1_database_path(),
+                self.eth1_db_size,
+                DatabaseMode::ReadWrite,
+                Some(restart_tx.clone()),
+            ),
+            None => Database::persistent(
+                "eth1",
+                self.eth1_database_path(),
+                self.eth1_db_size,
+                DatabaseMode::ReadWrite,
+                Some(restart_tx),
+            ),
+        }
     }
 
     #[must_use]
@@ -66,7 +90,25 @@ impl StorageConfig {
             );
         }
 
-        Database::persistent("beacon_fork_choice", path, self.db_size, mode, restart_tx)
+        match self.db_kind {
+            Some(DatabaseKind::Libmdbx) => Database::persistent_libmdbx(
+                "beacon_fork_choice",
+                path,
+                self.db_size,
+                mode,
+                restart_tx,
+            ),
+            Some(DatabaseKind::Rocksdb) => Database::persistent_rocks(
+                "beacon_fork_choice",
+                path,
+                self.db_size,
+                mode,
+                restart_tx,
+            ),
+            None => {
+                Database::persistent("beacon_fork_choice", path, self.db_size, mode, restart_tx)
+            }
+        }
     }
 
     #[must_use]
@@ -94,7 +136,15 @@ impl StorageConfig {
             );
         }
 
-        Database::persistent("pubkey_cache", path, self.db_size, mode, restart_tx)
+        match self.db_kind {
+            Some(DatabaseKind::Libmdbx) => {
+                Database::persistent_libmdbx("pubkey_cache", path, self.db_size, mode, restart_tx)
+            }
+            Some(DatabaseKind::Rocksdb) => {
+                Database::persistent_rocks("pubkey_cache", path, self.db_size, mode, restart_tx)
+            }
+            None => Database::persistent("pubkey_cache", path, self.db_size, mode, restart_tx),
+        }
     }
 
     #[must_use]
@@ -121,7 +171,15 @@ impl StorageConfig {
             );
         }
 
-        Database::persistent("sync", path, self.db_size, mode, None)
+        match self.db_kind {
+            Some(DatabaseKind::Libmdbx) => {
+                Database::persistent_libmdbx("sync", path, self.db_size, mode, None)
+            }
+            Some(DatabaseKind::Rocksdb) => {
+                Database::persistent_rocks("sync", path, self.db_size, mode, None)
+            }
+            None => Database::persistent("sync", path, self.db_size, mode, None),
+        }
     }
 
     #[must_use]
@@ -143,6 +201,7 @@ impl StorageConfig {
             archival_epoch_interval,
             reset_databases,
             storage_mode,
+            db_kind,
         } = self;
 
         let new_db_size = ByteSize::b(
@@ -167,6 +226,7 @@ impl StorageConfig {
             archival_epoch_interval,
             reset_databases,
             storage_mode,
+            db_kind,
         }
     }
 
@@ -195,6 +255,7 @@ mod tests {
             archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
             storage_mode: StorageMode::default(),
+            db_kind: Default::default(),
         };
 
         let StorageConfig {
@@ -217,6 +278,7 @@ mod tests {
             archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
             storage_mode: StorageMode::default(),
+            db_kind: Default::default(),
         };
 
         assert_eq!(storage_config.db_size, ByteSize::b(u64::MAX));

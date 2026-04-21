@@ -41,10 +41,10 @@ grandine_version = { workspace = true }
 helper_functions = { workspace = true }
 hex-literal = { workspace = true }
 http_api = { workspace = true }
-libmdbx = { workspace = true }
 itertools = { workspace = true }
 keymanager = { workspace = true }
 kzg_utils = { workspace = true }
+libmdbx = { workspace = true }
 liveness_tracker = { workspace = true }
 logging = { workspace = true }
 metrics = { workspace = true }
@@ -52,6 +52,7 @@ nonzero_ext = { workspace = true }
 num_cpus = { workspace = true }
 operation_pools = { workspace = true }
 panics = { workspace = true }
+parse-display = { workspace = true }
 p2p = { workspace = true }
 predefined_chains = { workspace = true }
 prometheus_metrics = { workspace = true }
