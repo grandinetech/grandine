@@ -2,31 +2,22 @@ use std::collections::HashMap;
 
 use anyhow::{Result, ensure};
 use bls::{PublicKeyBytes, SignatureBytes};
-use execution_engine::ExecutionEngine;
 use helper_functions::{
-    error::SignatureKind,
-    gloas::apply_deposit_for_builder,
-    misc::{self, compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
-    predicates::is_builder_withdrawal_credential,
-    signing::SignForSingleFork as _,
+    error::SignatureKind, gloas::apply_deposit_for_builder, misc::compute_timestamp_at_slot,
+    predicates::is_builder_withdrawal_credential, signing::SignForSingleFork as _,
     verifier::Verifier,
 };
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
-use typenum::Unsigned as _;
 use types::{
-    combined::ExecutionPayloadParams,
     config::Config,
     electra::containers::{DepositRequest, ExecutionRequests, PendingDeposit},
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
-        containers::{
-            BuilderPendingPayment, ExecutionPayloadBid, ExecutionPayloadEnvelope,
-            SignedExecutionPayloadEnvelope,
-        },
+        containers::{ExecutionPayloadEnvelope, SignedExecutionPayloadEnvelope},
     },
     phase0::containers::DepositMessage,
-    preset::{Preset, SlotsPerHistoricalRoot},
+    preset::Preset,
     traits::PostGloasBeaconState,
 };
 
@@ -303,9 +294,6 @@ fn is_pending_validator<P: Preset>(
 
 #[cfg(test)]
 mod spec_tests {
-    use execution_engine::MockExecutionEngine;
-    use helper_functions::verifier::SingleVerifier;
-    use serde::Deserialize;
     use spec_test_utils::{BlsSetting, Case};
     use ssz::SszReadDefault;
     use test_generator::test_resources;
