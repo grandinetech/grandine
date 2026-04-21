@@ -70,7 +70,7 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
-    ExecutionPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
+    ExecutionPayloadBid(ExecutionPayloadBidEvent<P>),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttributes(PayloadAttributesEvent),
@@ -258,8 +258,12 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
-    pub fn send_execution_payload_bid_event(&self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
-        if let Err(error) = self.send_execution_payload_bid_event_internal(payload_bid) {
+    pub fn send_execution_payload_bid_event(
+        &self,
+        phase: Phase,
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
+    ) {
+        if let Err(error) = self.send_execution_payload_bid_event_internal(phase, payload_bid) {
             warn_with_peers!("unable to send execution payload bid event: {error}");
         }
     }
@@ -473,10 +477,14 @@ impl<P: Preset> EventChannels<P> {
 
     fn send_execution_payload_bid_event_internal(
         &self,
+        phase: Phase,
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     ) -> Result<()> {
         if self.execution_payload_bids.receiver_count() > 0 {
-            let event = Event::ExecutionPayloadBid(payload_bid);
+            let event = Event::ExecutionPayloadBid(ExecutionPayloadBidEvent {
+                version: phase,
+                data: payload_bid,
+            });
             self.execution_payload_bids.send(event)?;
         }
 
@@ -629,7 +637,8 @@ pub struct DataColumnSidecarEvent<P: Preset> {
     pub index: ColumnIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
-    pub kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
 }
 
 impl<P: Preset> DataColumnSidecarEvent<P> {
@@ -638,10 +647,7 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
             block_root,
             index: data_column_sidecar.index(),
             slot: data_column_sidecar.slot(),
-            kzg_commitments: data_column_sidecar
-                .kzg_commitments()
-                .cloned()
-                .unwrap_or_default(),
+            kzg_commitments: data_column_sidecar.kzg_commitments().cloned(),
         }
     }
 }
@@ -740,6 +746,13 @@ impl HeadEvent {
             execution_optimistic: head.is_optimistic(),
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(bound = "")]
+pub struct ExecutionPayloadBidEvent<P: Preset> {
+    pub version: Phase,
+    pub data: Arc<SignedExecutionPayloadBid<P>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
