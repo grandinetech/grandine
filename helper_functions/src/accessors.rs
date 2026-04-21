@@ -1097,12 +1097,18 @@ fn ptc_from_committee_members<P: Preset>(
 }
 
 pub fn get_ptc<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<Ptc<P>> {
-    let previous_epoch = get_previous_epoch(state);
-    let window_start = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let state_epoch = get_current_epoch(state);
 
-    let index = slot
-        .checked_sub(window_start)
-        .ok_or(Error::SlotOutOfRange)?;
+    ensure!(
+        (state_epoch.saturating_sub(1)..=state_epoch + P::MinSeedLookahead::U64).contains(&epoch),
+        Error::SlotOutOfRange,
+    );
+
+    // Yields 0 for the previous epoch and (1 + lookahead) * SLOTS_PER_EPOCH at most for future epochs.
+    // saturating_sub is used to avoid underflow, but cannot saturate given the range check above.
+    let offset = (epoch + 1).saturating_sub(state_epoch) * P::SlotsPerEpoch::U64;
+    let index = offset + slot % P::SlotsPerEpoch::U64;
 
     let state = state.post_gloas().ok_or(Error::InvalidPhase {
         error: anyhow!("get_ptc with pre-Gloas beacon state"),
