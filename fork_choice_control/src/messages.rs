@@ -24,7 +24,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::PayloadAttestationMessage,
+    gloas::{containers::PayloadAttestationMessage, primitives::BuilderIndex},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -159,6 +159,9 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
+        // equivalent to identifier of the envelope
+        beacon_block_root: H256,
+        builder_index: BuilderIndex,
         processing_timings: ProcessingTimings,
         tracing_span: Span,
     },
@@ -246,6 +249,7 @@ pub enum P2pMessage<P: Preset> {
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
+    ExecutionPayloadEnvelopeNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadChanged(H256),
     Stop,

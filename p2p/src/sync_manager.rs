@@ -881,6 +881,15 @@ impl<P: Preset> SyncManager<P> {
             .ready_to_request_by_root(&block_root, peer_id)
     }
 
+    pub fn ready_to_request_execution_payload_envelope_by_root(
+        &mut self,
+        block_root: H256,
+        peer_id: Option<PeerId>,
+    ) -> bool {
+        self.execution_payload_envelope_requests
+            .ready_to_request_by_root(&block_root, peer_id)
+    }
+
     pub fn ready_to_request_data_column_by_root(
         &mut self,
         data_column_identifier: &DataColumnIdentifier,
@@ -952,6 +961,23 @@ impl<P: Preset> SyncManager<P> {
         );
 
         self.block_requests.add_request_by_root(block_root, peer_id)
+    }
+
+    pub fn add_execution_payload_envelope_request_by_root(
+        &mut self,
+        block_root: H256,
+        peer_id: PeerId,
+    ) -> bool {
+        self.log(
+            Level::Debug,
+            format_args!(
+                "add execution payload envelope request by root (block_root: {block_root:?}, \
+                 peer_id: {peer_id})",
+            ),
+        );
+
+        self.execution_payload_envelope_requests
+            .add_request_by_root(block_root, peer_id)
     }
 
     pub fn add_execution_payload_envelope_request_by_range(

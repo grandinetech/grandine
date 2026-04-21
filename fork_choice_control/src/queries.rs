@@ -451,6 +451,10 @@ where
         self.store_snapshot().contains_block(block_root)
     }
 
+    pub fn has_envelope(&self, block_root: H256) -> bool {
+        self.store_snapshot().has_envelope(block_root)
+    }
+
     pub fn contains_block_and_data_available(&self, block_root: H256) -> bool {
         self.store_snapshot()
             .contains_block_and_data_available(block_root)

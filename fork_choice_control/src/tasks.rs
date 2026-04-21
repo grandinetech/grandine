@@ -599,6 +599,9 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
                 .start_timer()
         });
 
+        let beacon_block_root = execution_payload_envelope.message.beacon_block_root;
+        let builder_index = execution_payload_envelope.message.builder_index;
+
         let result = store_snapshot.validate_execution_payload_envelope(
             &execution_payload_envelope,
             &origin,
@@ -610,6 +613,8 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
             wait_group,
             result,
             origin,
+            beacon_block_root,
+            builder_index,
             processing_timings,
             tracing_span,
         }
