@@ -2,21 +2,19 @@ use core::{
     num::NonZeroUsize,
     ops::{Index, IndexMut, RangeInclusive, RangeToInclusive},
 };
-use std::sync::Arc;
 
 use anyhow::Result;
 use derive_more::Debug;
 #[cfg(not(target_os = "zkvm"))]
 use im::{
     Vector,
-    hashmap::HashMap,
+    hashset::HashSet,
     vector::{Iter, IterMut},
 };
 #[cfg(target_os = "zkvm")]
 use std::vec::Vec as Vector;
 use thiserror::Error;
 use types::{
-    combined::BeaconState,
     phase0::primitives::{Gwei, H256, Slot},
     preset::Preset,
 };
@@ -127,7 +125,7 @@ impl<P: Preset> Segment<P> {
     pub fn best_block(
         &self,
         proposer_boost: Gwei,
-        store_payload_states: &HashMap<H256, Arc<BeaconState<P>>>,
+        verified_payloads: &HashSet<H256>,
     ) -> Option<&UnfinalizedBlock<P>> {
         let mut index_of_best = 0;
         let mut parent = self.first_block();
@@ -143,7 +141,7 @@ impl<P: Preset> Segment<P> {
 
             let parent_empty = parent.attesting_balances.empty;
             let parent_full = parent.attesting_balances.full;
-            let parent_has_payload_state = store_payload_states.contains_key(&parent.block_root());
+            let parent_payload_verified = verified_payloads.contains(&parent.block_root());
 
             // Only proceed selecting the child block if:
             // - it's indicating that it is the child of parent with no payload
@@ -155,7 +153,7 @@ impl<P: Preset> Segment<P> {
             //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
             index_of_best = match block.parent_payload_presence() {
                 PayloadPresence::Empty
-                    if parent_empty + proposer_boost > parent_full || !parent_has_payload_state =>
+                    if parent_empty + proposer_boost > parent_full || !parent_payload_verified =>
                 {
                     index
                 }
