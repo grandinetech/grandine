@@ -2411,16 +2411,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         attestation: attestation.clone_arc()
                     }
                 );
-
-                // This validation is present in the fork choice rule but not the Networking specification.
-                if self.slot() == slot {
-                    ensure!(
-                        index == 0,
-                        Error::AttestationDataPayloadPresenceForCurrentSlot {
-                            attestation: attestation.clone_arc()
-                        }
-                    );
-                }
             } else if self.phase() >= Phase::Electra {
                 ensure!(
                     index == 0,
@@ -2500,6 +2490,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 block: ghost_vote_block.clone_arc(),
             },
         );
+
+        // Spec(gloas):
+        //   - https://github.com/ethereum/consensus-specs/blob/a6687a2de15a0cbd92b052ce3a7727f83ef49b53/specs/gloas/fork-choice.md?plain=1#L637
+        //   - https://github.com/ethereum/consensus-specs/blob/a6687a2de15a0cbd92b052ce3a7727f83ef49b53/specs/gloas/p2p-interface.md?plain=1#L525
+        // Placed outside the `if not is_from_block` gate in the spec, so it applies to
+        // both gossip and block-embedded attestations.
+        // Compares the attested block's slot, not the store's local clock.
+        if self.phase() >= Phase::Gloas && ghost_vote_block.message().slot() == slot {
+            ensure!(
+                index == 0,
+                Error::AttestationDataPayloadPresenceForCurrentSlot {
+                    attestation: attestation.clone_arc()
+                }
+            );
+        }
 
         let ancestor_at_target_epoch_start = self
             .ancestor(beacon_block_root, Self::start_of_epoch(target.epoch))

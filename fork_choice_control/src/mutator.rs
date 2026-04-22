@@ -1981,7 +1981,7 @@ where
         }
     }
 
-    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments, clippy::too_many_lines)]
     fn handle_execution_payload_envelope(
         &mut self,
         wait_group: W,
