@@ -3177,47 +3177,43 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-        execution_engine: impl ExecutionEngine<P> + Send,
-        verifier: impl Verifier + Send,
+        _execution_engine: impl ExecutionEngine<P> + Send,
+        _verifier: impl Verifier + Send,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        self.validate_execution_payload_envelope_with_custom_state_transition(
+        let block_root = envelope.message.beacon_block_root;
+        let chain_link = self.chain_link(block_root);
+
+        let block_info = || {
+            chain_link.map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+        };
+
+        let state_fn = || {
+            // > Make a copy of the state to avoid mutability issues
+            self
+                .state_cache
+                .before_or_at_slot(self, block_root, envelope.message.payload.slot_number)
+                .or_else(|| {
+                    if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
+                    {
+                        // `Backtrace::force_capture` can be costly and a warning may be excessive,
+                        // but this is controlled by a `Feature` that should be disabled by default.
+                        warn_with_peers!(
+                            "processing slots for beacon state not found in state cache before state transition \
+                            (block root: {block_root:?} at slot {})\n{}",
+                            envelope.message.payload.slot_number,
+                            Backtrace::force_capture(),
+                        );
+                    }
+
+                    chain_link.map(|chain_link| chain_link.state(self))
+                })
+        };
+
+        self.validate_execution_payload_envelope_with_state(
             envelope.clone_arc(),
             origin,
-            |chain_link| {
-                let block_root = chain_link.block_root;
-
-                // > Make a copy of the state to avoid mutability issues
-                let mut state = self
-                    .state_cache
-                    .before_or_at_slot(self, block_root, chain_link.slot())
-                    .unwrap_or_else(|| {
-                        if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
-                        {
-                            // `Backtrace::force_capture` can be costly and a warning may be excessive,
-                            // but this is controlled by a `Feature` that should be disabled by default.
-                            warn_with_peers!(
-                                "processing slots for beacon state not found in state cache before state transition \
-                                (block root: {block_root:?} at slot {})\n{}",
-                                chain_link.slot(),
-                                Backtrace::force_capture(),
-                            );
-                        }
-
-                        chain_link.state(self)
-                    });
-
-                // > Process the execution payload
-                combined::custom_process_execution_payload(
-                    &self.chain_config,
-                    &self.pubkey_cache,
-                    state.make_mut(),
-                    envelope,
-                    execution_engine,
-                    verifier,
-                )?;
-
-                Ok((state, None))
-            },
+            block_info,
+            state_fn,
         )
     }
 
@@ -3226,7 +3222,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
     ) -> Option<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.message.slot;
+        let slot = envelope.message.payload.slot_number;
         let beacon_block_root = envelope.message.beacon_block_root;
         let builder_index = envelope.message.builder_index;
 
@@ -3249,78 +3245,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         None
     }
 
-    pub fn validate_execution_payload_envelope_with_custom_state_transition(
-        &self,
-        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        origin: &ExecutionPayloadEnvelopeOrigin,
-        state_transition: impl FnOnce(
-            &ChainLink<P>,
-        ) -> Result<(
-            Arc<BeaconState<P>>,
-            Option<ExecutionPayloadEnvelopeAction<P>>,
-        )>,
-    ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.message.slot;
-        let beacon_block_root = envelope.message.beacon_block_root;
-
-        if let Some(payload_action) =
-            self.validate_execution_payload_envelope_for_gossip_rules(&envelope, origin)
-        {
-            return Ok(payload_action);
-        }
-
-        // [REJECT] block passes validation.
-        // Part 1/2:
-        ensure!(
-            !self.rejected_block_roots.contains(&beacon_block_root),
-            Error::<P>::PayloadEnvelopeInvalidBlock {
-                payload_envelope: envelope
-            },
-        );
-
-        // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
-        // (a client MAY queue envelope for processing once the block is retrieved)
-        let Some(chain_link) = self.chain_link(beacon_block_root) else {
-            // Block not available yet, delay until it arrives
-            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
-                envelope,
-                beacon_block_root,
-            ));
-        };
-
-        let block = chain_link.block.clone_arc();
-
-        // [REJECT] block passes validation.
-        // Part 2/2:
-        ensure!(
-            !chain_link.payload_status.is_invalid(),
-            Error::<P>::PayloadEnvelopeInvalidBlock {
-                payload_envelope: envelope
-            },
-        );
-
-        // > Process the execution payload
-        let (state, payload_action) = state_transition(chain_link)?;
-
-        if let Some(action) = payload_action {
-            return Ok(action);
-        }
-
-        // > Check if blob data is available
-        // > If not, this payload MAY be queued and subsequently considered when blob data becomes available
-        if self.should_check_data_availability_at_slot(slot)
-            && !self.indices_of_missing_data_columns(&block).is_empty()
-        {
-            return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(
-                envelope,
-                block.clone_arc(),
-            ));
-        }
-
-        // > Add new state for this payload to the store
-        Ok(ExecutionPayloadEnvelopeAction::Accept(envelope, state))
-    }
-
     pub fn validate_execution_payload_envelope_with_state(
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
@@ -3328,7 +3252,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.message.slot;
+        let slot = envelope.message.payload.slot_number;
         let beacon_block_root = envelope.message.beacon_block_root;
         let builder_index = envelope.message.builder_index;
 
@@ -3422,6 +3346,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 beacon_block_root,
             ));
         };
+
+        // [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
+        ensure!(
+            envelope.message.execution_requests.hash_tree_root() == bid.execution_requests_root,
+            Error::<P>::ExecutionPayloadRequestsHashMismatch {
+                envelope,
+                expected: Box::new(bid.execution_requests_root),
+            },
+        );
 
         if origin.verify_signatures() {
             let Some(post_gloas_state) = state.post_gloas() else {
