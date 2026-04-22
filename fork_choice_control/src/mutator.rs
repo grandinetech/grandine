@@ -1950,7 +1950,7 @@ where
         tracing_span: Span,
     ) {
         match result {
-            Ok(ExecutionPayloadEnvelopeAction::Accept(envelope, state)) => {
+            Ok(ExecutionPayloadEnvelopeAction::Accept(envelope)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_execution_payload_envelope(&["accepted"]);
                 }
@@ -1978,7 +1978,7 @@ where
                     Ok(ValidationOutcome::Accept),
                 );
 
-                self.accept_execution_payload_envelope(&wait_group, envelope, state);
+                self.accept_execution_payload_envelope(&wait_group, envelope);
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -3124,10 +3124,8 @@ where
         &mut self,
         wait_group: &W,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        state: Arc<BeaconState<P>>,
     ) {
-        self.store_mut()
-            .apply_execution_payload_envelope(envelope, state);
+        self.store_mut().apply_execution_payload_envelope(envelope);
 
         self.update_store_snapshot();
 

@@ -63,7 +63,7 @@ use types::{
     gloas::{
         consts::{
             BUILDER_INDEX_SELF_BUILD, DATA_AVAILABILITY_TIMELY_THRESHOLD, PAYLOAD_STATUS_EMPTY,
-            PAYLOAD_STATUS_FULL, PAYLOAD_STATUS_PENDING, PAYLOAD_TIMELY_THRESHOLD,
+            PAYLOAD_STATUS_FULL, PAYLOAD_TIMELY_THRESHOLD,
         },
         containers::{
             CombinedPayloadAttestation, DataColumnSidecar as GloasDataColumnSidecar,
@@ -192,7 +192,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // - The optimization only applies if the first slot in the epoch as attested to was empty.
     // - Obtaining active balances from the justified state requires it to be in the right epoch.
     checkpoint_states: HashMap<Checkpoint, Arc<BeaconState<P>>>,
-    payload_states: HashMap<H256, Arc<BeaconState<P>>>,
+    payloads: HashSet<H256>,
     payload_timeliness_vote: HashMap<H256, BitVector<P::PtcSize>>,
     payload_data_availability_vote: HashMap<H256, BitVector<P::PtcSize>>,
     // TODO(Grandine Team): Process current slot attestations incrementally to speed up
@@ -335,12 +335,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         blacklisted_blocks.extend(chain_config.blacklisted_blocks.iter());
 
-        let payload_states = if anchor_state.post_gloas().is_some() {
-            HashMap::unit(block_root, anchor_state.clone_arc())
-        } else {
-            hashmap! {}
-        };
-
         let payload_timeliness_vote = hashmap! { anchor.block_root => BitVector::new(true) };
         let payload_data_availability_vote = hashmap! { anchor.block_root => BitVector::new(true) };
 
@@ -367,7 +361,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             seen_gossip_attesters: BTreeMap::new(),
             seen_gossip_aggregators: BTreeMap::new(),
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
-            payload_states,
+            payloads: HashSet::new(),
             payload_timeliness_vote,
             payload_data_availability_vote,
             current_slot_attestations: vector![],
@@ -600,11 +594,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 || self
                     .cached_execution_payload_envelope_by_root(block_root)
                     .is_some())
-    }
-
-    #[must_use]
-    pub fn contains_payload_state(&self, block_root: H256) -> bool {
-        self.payload_states.contains_key(&block_root)
     }
 
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
@@ -863,7 +852,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                     self.chain_link_payload_status(chain_link, attesting_balances)
                 } else {
-                    PAYLOAD_STATUS_PENDING
+                    PAYLOAD_STATUS_EMPTY
                 };
 
             (chain_link, finalized_payload_status)
@@ -876,15 +865,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         attesting_balances: AttestingBalances,
     ) -> u8 {
         let block_root = chain_link.block_root;
-        let has_payload = self.contains_payload_state(block_root);
 
         if chain_link.slot() + 1 == self.slot() {
-            if has_payload && self.should_extend_payload(block_root) {
+            if self.should_extend_payload(block_root) {
                 PAYLOAD_STATUS_FULL
             } else {
                 PAYLOAD_STATUS_EMPTY
             }
-        } else if has_payload && attesting_balances.full >= attesting_balances.empty {
+        } else if self.is_payload_verified(block_root)
+            && attesting_balances.full >= attesting_balances.empty
+        {
             PAYLOAD_STATUS_FULL
         } else {
             PAYLOAD_STATUS_EMPTY
@@ -892,6 +882,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     fn should_extend_payload(&self, block_root: H256) -> bool {
+        if !self.is_payload_verified(block_root) {
+            return false;
+        }
+
         let proposer_root = self.proposer_boost_root;
 
         if proposer_root.is_zero()
@@ -915,6 +909,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         false
     }
 
+    // > Return whether the execution payload envelope for the beacon block with
+    // > root ``root`` has been locally delivered and verified via
+    // > ``on_execution_payload_envelope``.
+    fn is_payload_verified(&self, block_root: H256) -> bool {
+        self.payloads.contains(&block_root)
+    }
+
     // > Return whether the execution payload for the beacon block with root ``root``
     // > was voted as present by the PTC, and was locally determined to be available.
     fn is_payload_timely(&self, block_root: H256) -> bool {
@@ -922,7 +923,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
-        if !self.contains_payload_state(block_root) {
+        if !self.is_payload_verified(block_root) {
             return false;
         }
 
@@ -943,7 +944,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
-        if !self.contains_payload_state(block_root) {
+        if !self.is_payload_verified(block_root) {
             return false;
         }
 
@@ -972,7 +973,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         self.head_segment()?
-            .best_block(applied_proposer_score, &self.payload_states)
+            .best_block(applied_proposer_score, &self.payloads)
     }
 
     fn head_segment(&self) -> Option<&Segment<P>> {
@@ -1087,11 +1088,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if self.phase() >= Phase::Gloas && parent_root == self.last_finalized().block_root {
             let parent_balances = self.last_finalized_attesting_balances();
-            let parent_has_payload_state = self.contains_payload_state(parent_root);
+            let parent_payload_verified = self.is_payload_verified(parent_root);
 
             match first_block.parent_payload_presence() {
                 PayloadPresence::Empty
-                    if parent_balances.empty < parent_balances.full && parent_has_payload_state =>
+                    if parent_balances.empty < parent_balances.full && parent_payload_verified =>
                 {
                     return false;
                 }
@@ -1287,11 +1288,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let parent_attestation_score = if let Some(parent) = parent
             && parent.slot() + 1 != self.slot()
         {
-            let parent_has_payload_state = self.contains_payload_state(parent.block_root());
+            let parent_payload_verified = self.is_payload_verified(parent.block_root());
 
             match unfinalized_block.parent_payload_presence() {
                 PayloadPresence::Empty => parent.attesting_balances.empty,
-                PayloadPresence::Full if parent_has_payload_state => parent.attesting_balances.full,
+                PayloadPresence::Full if parent_payload_verified => parent.attesting_balances.full,
                 PayloadPresence::Full | PayloadPresence::Pending => 0,
             }
         } else {
@@ -1378,31 +1379,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block: &SignedBeaconBlock<P>,
         parent: &SignedBeaconBlock<P>,
     ) -> PayloadPresence {
-        // TODO: use traits
-        let SignedBeaconBlock::Gloas(signed_block) = block else {
+        let Some(block_payload_bid) = block.payload_bid() else {
             return PayloadPresence::Pending;
         };
 
-        let block = &signed_block.message;
-
-        let SignedBeaconBlock::Gloas(parent) = parent else {
+        let Some(parent_payload_bid) = parent.payload_bid() else {
             return PayloadPresence::Pending;
         };
 
-        let parent_block_hash = block
-            .body
-            .signed_execution_payload_bid
-            .message
-            .parent_block_hash;
+        let parent_block_hash = block_payload_bid.parent_block_hash;
+        let message_block_hash = parent_payload_bid.block_hash;
 
-        let message_block_hash = parent
-            .message
-            .body
-            .signed_execution_payload_bid
-            .message
-            .block_hash;
-
-        if parent_block_hash == message_block_hash {
+        if parent_block_hash == message_block_hash && !message_block_hash.is_zero() {
             PayloadPresence::Full
         } else {
             PayloadPresence::Empty
@@ -3381,7 +3369,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             )?;
         }
 
-        Ok(ExecutionPayloadEnvelopeAction::Accept(envelope, state))
+        Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
     }
 
     pub fn validate_payload_attestation(
@@ -3673,7 +3661,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let tick_index: u64 = self.tick.kind as u64;
 
             (tick_index + 1) * BASIS_POINTS
-                <= self.chain_config.attestation_due_bps * ticks_per_slot
+                <= self.chain_config.attestation_due_bps_gloas * ticks_per_slot
         } else {
             self.tick.is_before_attesting_interval()
         };
@@ -3942,13 +3930,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn apply_execution_payload_envelope(
         &mut self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        state: Arc<BeaconState<P>>,
     ) {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
         let builder_index = envelope.message.builder_index;
 
-        self.payload_states.insert(beacon_block_root, state);
+        self.payloads.insert(beacon_block_root);
 
         self.accepted_execution_payload_envelopes
             .insert((slot, beacon_block_root, builder_index));
@@ -4453,10 +4440,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.finalized_attesting_balances =
             self.finalized_attesting_balances.split_off(&finalized_slot);
-        self.payload_states
-            .retain(|block_root, _| self.unfinalized_locations.contains_key(block_root));
         self.execution_payload_envelope_cache
             .prune_finalized(finalized_slot);
+        self.payloads
+            .retain(|block_root| self.unfinalized_locations.contains_key(block_root));
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
