@@ -11,7 +11,6 @@ anyhow = { workspace = true }
 bls = { workspace = true }
 database = { workspace = true }
 logging = { workspace = true }
-scc = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 tracing = { workspace = true }
@@ -20,6 +19,7 @@ types = { workspace = true }
 
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
 prometheus_metrics = { workspace = true }
+scc = { workspace = true }
 tynm = { workspace = true }
 
 [dev-dependencies]

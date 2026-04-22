@@ -916,7 +916,7 @@ impl<P: Preset> BlockSyncService<P> {
                         );
 
                         for (peer_id, columns) in peer_custody_columns_mapping {
-                            let columns = ContiguousList::try_from_iter(columns.into_iter())
+                            let columns = ContiguousList::try_from_iter(columns)
                                 .map(Arc::new)
                                 .expect("column indices must not be more than NUMBER_OF_COLUMNS");
 
@@ -1378,7 +1378,7 @@ impl<P: Preset> BlockSyncService<P> {
 
             let data_columns_by_root = DataColumnsByRootIdentifier {
                 block_root,
-                columns: ContiguousList::try_from_iter(column_indices.into_iter())
+                columns: ContiguousList::try_from_iter(column_indices)
                     .expect("column indices must not be more than NUMBER_OF_COLUMNS"),
             };
 
@@ -1452,12 +1452,12 @@ impl<P: Preset> BlockSyncService<P> {
             let mut column_indices_by_root = HashMap::new();
             for index in column_indices {
                 if let Some(block_roots) = missing_column_by_indices.get(&index) {
-                    block_roots.iter().for_each(|block_root| {
+                    for block_root in block_roots {
                         column_indices_by_root
                             .entry(*block_root)
                             .or_insert_with(Vec::new)
                             .push(index);
-                    })
+                    }
                 }
             }
 

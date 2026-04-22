@@ -1,5 +1,4 @@
 use super::{ConfigKind, ProofTrait, ReportTrait, VmBackend};
-use alloy::signers::local::PrivateKeySigner;
 use anyhow::{Context, Result, anyhow};
 use boundless_market::{Client, storage::StorageUploaderConfig};
 use clap::{Args as _, FromArgMatches as _};
@@ -97,10 +96,6 @@ impl VmBackend for Vm {
             let private_key =
                 std::env::var("PRIVATE_KEY").context("invalid PRIVATE_KEY environment variable")?;
 
-            let private_key: PrivateKeySigner = private_key
-                .parse()
-                .context("invalid PRIVATE_KEY environment variable")?;
-
             let storage_config = {
                 let cmd = StorageUploaderConfig::augment_args(clap::Command::new(""));
 
@@ -114,7 +109,8 @@ impl VmBackend for Vm {
 
             let client = Client::builder()
                 .with_rpc_url(rpc_url.parse().context("invalid RPC_URL")?)
-                .with_private_key(private_key)
+                .with_private_key_str(&private_key)
+                .context("invalid PRIVATE_KEY environment variable")?
                 .with_uploader_config(&storage_config)
                 .await?
                 .build()

@@ -145,7 +145,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
 
                         for (blob_and_proof, kzg_commitment, index) in blobs_and_proofs
                             .into_iter()
-                            .zip(kzg_commitments.into_iter())
+                            .zip(kzg_commitments)
                             .filter_map(|(blob_and_proof, (kzg_commitment, index))| {
                                 blob_and_proof
                                     .map(|blob_and_proof| (blob_and_proof, kzg_commitment, index))

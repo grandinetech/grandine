@@ -19,7 +19,7 @@ use tap::Pipe as _;
 use thiserror::Error;
 use types::{combined::BeaconState, phase0::primitives::Slot, preset::Preset};
 
-const CACHE_EXPIRATION: Duration = Duration::from_secs(3600);
+const CACHE_EXPIRATION: Duration = Duration::from_hours(1);
 const CACHE_LOCK_TIMEOUT: Duration = Duration::from_secs(1000);
 const CACHE_SIZE: usize = 5;
 

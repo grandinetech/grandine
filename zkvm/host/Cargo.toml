@@ -8,7 +8,6 @@ authors = ["Grandine <info@grandine.io>"]
 workspace = true
 
 [dependencies]
-alloy = { workspace = true, optional = true }
 anyhow = { workspace = true }
 bls = { workspace = true, features = ['zkcrypto'] }
 bls-zkcrypto = { workspace = true, optional = true }
@@ -43,7 +42,6 @@ zkm-build = { workspace = true, optional = true }
 
 [features]
 risc0 = [
-    "dep:alloy",
     "dep:boundless-market",
     "dep:bytemuck",
     "dep:risc0-zkvm",

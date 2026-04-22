@@ -89,7 +89,8 @@ impl<T> Crypto<T> {
         // Borrow the `Cipher` to avoid copying `iv` out of it.
         match &crypto.cipher.function {
             Cipher::Aes128Ctr { iv } => {
-                let mut cipher = Ctr32BE::<Aes128>::new(first_half.into(), iv.as_ref().into());
+                let mut cipher = Ctr32BE::<Aes128>::new_from_slices(first_half, iv.as_ref())
+                    .expect("AES-128-CTR key and IV lengths are fixed");
                 cipher.apply_keystream(crypto.cipher.message.as_mut());
             }
         }
@@ -129,7 +130,8 @@ impl<T> Crypto<T> {
         // Borrow the `Cipher` to avoid copying `iv` out of it.
         match &self.cipher.function {
             Cipher::Aes128Ctr { iv } => {
-                let mut cipher = Ctr32BE::<Aes128>::new(first_half.into(), iv.into());
+                let mut cipher = Ctr32BE::<Aes128>::new_from_slices(first_half, iv.as_ref())
+                    .expect("AES-128-CTR key and IV lengths are fixed");
                 cipher.apply_keystream(self.cipher.message.as_mut());
             }
         }

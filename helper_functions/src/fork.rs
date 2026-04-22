@@ -1011,7 +1011,7 @@ fn onboard_builders<P: Preset>(
         }
     }
 
-    *state.pending_deposits_mut() = PersistentList::try_from_iter(pending_deposits.into_iter())?;
+    *state.pending_deposits_mut() = PersistentList::try_from_iter(pending_deposits)?;
 
     Ok(())
 }

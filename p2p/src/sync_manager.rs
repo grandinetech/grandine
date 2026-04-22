@@ -427,7 +427,7 @@ impl<P: Preset> SyncManager<P> {
                                         response_received: false,
                                         retry_count: 0,
                                         data_columns: ContiguousList::try_from_iter(
-                                            columns.into_iter(),
+                                            columns,
                                         )
                                         .map(Arc::new)
                                         .inspect_err(|e| self.log(
@@ -627,11 +627,7 @@ impl<P: Preset> SyncManager<P> {
         let mut batch_index: u64 = 0;
         let mut block_peers = peers_to_sync.clone();
 
-        'outer: loop {
-            let Some(block_peer_id) = block_peers.pop() else {
-                break;
-            };
-
+        'outer: while let Some(block_peer_id) = block_peers.pop() {
             for _ in 0..BATCHES_PER_PEER {
                 if batch_index >= batches_in_front {
                     break 'outer;
@@ -712,7 +708,7 @@ impl<P: Preset> SyncManager<P> {
                     };
 
                     for (peer_id, columns) in peer_custody_columns_mapping {
-                        match ContiguousList::try_from_iter(columns.into_iter()) {
+                        match ContiguousList::try_from_iter(columns) {
                             Ok(columns) => {
                                 sync_batches.push(SyncBatch {
                                     target: SyncTarget::DataColumnSidecar,
@@ -1059,8 +1055,8 @@ impl<P: Preset> SyncManager<P> {
         let busy_peers = self.busy_peers();
 
         self.peers_custodial
-            .iter()
-            .filter_map(|(peer_id, _)| (!busy_peers.contains(peer_id)).then_some(*peer_id))
+            .keys()
+            .filter_map(|peer_id| (!busy_peers.contains(peer_id)).then_some(*peer_id))
             .collect()
     }
 

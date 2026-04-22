@@ -4530,7 +4530,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn dec_current_slot_blocks_in_processing(&self) {
-        let _ = self.current_slot_blocks_in_processing.fetch_update(
+        let _ = self.current_slot_blocks_in_processing.try_update(
             Ordering::SeqCst,
             Ordering::SeqCst,
             |count| count.checked_sub(1),

@@ -506,8 +506,8 @@ pub fn construct_cells_and_kzg_proofs<P: Preset>(
         let (cells, proofs): (Vec<_>, Vec<_>) =
             entries.into_iter().map(|e| (e.cell, e.kzg_proof)).unzip();
 
-        let cells = ContiguousVector::try_from_iter(cells.into_iter())?;
-        let proofs = ContiguousVector::try_from_iter(proofs.into_iter())?;
+        let cells = ContiguousVector::try_from_iter(cells)?;
+        let proofs = ContiguousVector::try_from_iter(proofs)?;
         result.push((cells, proofs));
     }
 

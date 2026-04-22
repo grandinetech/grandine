@@ -83,7 +83,7 @@ use crate::{
     upnp::PortMappings,
 };
 
-const GOSSIPSUB_PARAMETER_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
+const GOSSIPSUB_PARAMETER_UPDATE_INTERVAL: Duration = Duration::from_mins(1);
 const NETWORK_METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 const PEER_COUNT_UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 

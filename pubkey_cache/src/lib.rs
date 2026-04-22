@@ -1,4 +1,9 @@
 use std::sync::Arc;
+#[cfg(target_os = "zkvm")]
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::RwLock,
+};
 
 use anyhow::Result;
 use bls::{COMPRESSED_SIZE, DECOMPRESSED_SIZE, PublicKey, PublicKeyBytes, traits::PublicKey as _};
@@ -7,6 +12,7 @@ use database::{Database, InMemoryMap, PrefixableKey};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 #[cfg(not(target_os = "zkvm"))]
 use prometheus_metrics::Metrics;
+#[cfg(not(target_os = "zkvm"))]
 use scc::{HashMap as SccHashMap, HashSet as SccHashSet};
 use ssz::{ContiguousList, Size, Ssz, SszRead, SszSize, SszWrite};
 use std_ext::ArcExt;
@@ -14,6 +20,69 @@ use typenum::U65536;
 use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
 
 type CachedKeys = SccHashMap<PublicKeyBytes, Arc<PublicKey>>;
+
+/// Reimplement the subset of `scc::HashMap` used in this module because `scc`
+/// uses `Instant` internally, which is unsupported in zkVM guests.
+#[cfg(target_os = "zkvm")]
+#[derive(Default)]
+struct SccHashMap<K, V>(RwLock<BTreeMap<K, V>>);
+
+#[cfg(target_os = "zkvm")]
+impl<K: Ord, V: Clone> SccHashMap<K, V> {
+    fn new() -> Self {
+        Self(RwLock::new(BTreeMap::new()))
+    }
+
+    fn get_sync(&self, key: &K) -> Option<V> {
+        self.0.read().expect("read lock poisoned").get(key).cloned()
+    }
+
+    fn upsert_sync(&self, key: K, value: V) {
+        self.0
+            .write()
+            .expect("write lock poisoned")
+            .insert(key, value);
+    }
+
+    fn remove_sync(&self, key: &K) {
+        self.0.write().expect("write lock poisoned").remove(key);
+    }
+
+    fn len(&self) -> usize {
+        self.0.read().expect("read lock poisoned").len()
+    }
+}
+
+/// Reimplement the subset of `scc::HashSet` used in this module because `scc`
+/// uses `Instant` internally, which is unsupported in zkVM guests.
+#[cfg(target_os = "zkvm")]
+#[derive(Default)]
+struct SccHashSet<K>(RwLock<BTreeSet<K>>);
+
+#[cfg(target_os = "zkvm")]
+impl<K: Ord + Copy> SccHashSet<K> {
+    fn insert_sync(&self, key: K) -> Result<(), ()> {
+        self.0.write().expect("write lock poisoned").insert(key);
+
+        Ok(())
+    }
+
+    fn remove_sync(&self, key: &K) -> Option<K> {
+        self.0.write().expect("write lock poisoned").take(key)
+    }
+
+    fn iter_sync(&self, mut f: impl FnMut(&K) -> bool) {
+        for key in self.0.read().expect("read lock poisoned").iter() {
+            if !f(key) {
+                break;
+            }
+        }
+    }
+
+    fn clear_sync(&self) {
+        self.0.write().expect("write lock poisoned").clear();
+    }
+}
 
 #[derive(Default)]
 pub struct PubkeyCache {
