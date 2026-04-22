@@ -1131,7 +1131,7 @@ impl ExecutionPayloadEnvelopeOrigin {
 
 #[derive(Debug)]
 pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
-    Accept(Arc<SignedExecutionPayloadEnvelope<P>>, Arc<BeaconState<P>>),
+    Accept(Arc<SignedExecutionPayloadEnvelope<P>>),
     Ignore(Publishable),
     DelayUntilBeaconBlock(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
     DelayUntilState(Arc<SignedExecutionPayloadEnvelope<P>>, H256),
@@ -1144,7 +1144,7 @@ pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
 impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
     #[must_use]
     pub const fn accepted(&self) -> bool {
-        matches!(self, Self::Accept(_, _))
+        matches!(self, Self::Accept(_))
     }
 }
 
