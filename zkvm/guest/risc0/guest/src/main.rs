@@ -1,3 +1,10 @@
+// These two lines are necessary for the program to properly compile.
+//
+// Under the hood, we wrap your main function with some extra code so that it behaves properly
+// inside the zkVM.
+#![no_main]
+risc0_zkvm::guest::entry!(main);
+
 use anyhow::Result;
 use pubkey_cache::PubkeyCache;
 use risc0_zkvm::guest::env;
@@ -9,8 +16,6 @@ use types::{
     nonstandard::Phase,
     preset::{Mainnet, Preset},
 };
-
-risc0_zkvm::guest::entry!(main);
 
 fn read_block_and_state<P: Preset>()
 -> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
