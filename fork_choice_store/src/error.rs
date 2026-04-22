@@ -192,6 +192,13 @@ pub enum Error<P: Preset> {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
     },
+    #[error(
+        "execution payload requests hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadRequestsHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
     #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
     ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]

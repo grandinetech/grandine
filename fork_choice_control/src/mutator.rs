@@ -4066,7 +4066,13 @@ where
             gossip_ids.extend(
                 execution_payload_envelopes
                     .extract_if(.., |pending| {
-                        pending.execution_payload_envelope.message.slot - 1 <= finalized_slot
+                        pending
+                            .execution_payload_envelope
+                            .message
+                            .payload
+                            .slot_number
+                            .saturating_sub(1)
+                            <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
