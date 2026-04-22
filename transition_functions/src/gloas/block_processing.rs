@@ -34,7 +34,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::{Hc, PersistentList};
+use ssz::{Hc, PersistentList, SszHash as _};
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -42,7 +42,7 @@ use types::{
     altair::consts::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR},
     capella::{containers::Withdrawal, primitives::WithdrawalIndex},
     config::Config,
-    electra::containers::Attestation,
+    electra::containers::{Attestation, ExecutionRequests},
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         consts::BUILDER_INDEX_SELF_BUILD,
@@ -58,7 +58,7 @@ use types::{
         containers::{AttestationData, ProposerSlashing, SignedVoluntaryExit},
         primitives::{DepositIndex, Epoch, ExecutionAddress, H256},
     },
-    preset::Preset,
+    preset::{BuilderPendingPaymentsLength, Preset, SlotsPerHistoricalRoot},
     traits::{
         BeaconState, BlockBodyWithBlsToExecutionChanges, BlockBodyWithElectraAttestations,
         BlockBodyWithPayloadAttestations, PostGloasBeaconState,
@@ -67,6 +67,7 @@ use types::{
 
 use crate::{
     altair, capella, electra,
+    gloas::execution_payload_processing::process_execution_requests,
     unphased::{self, Error},
 };
 
@@ -146,6 +147,9 @@ pub fn custom_process_block<P: Preset>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     debug_assert_eq!(state.slot, block.slot);
+
+    // > [New in Gloas:EIP7732]
+    process_parent_execution_payload(config, pubkey_cache, state, block)?;
 
     unphased::process_block_header(config, state, block)?;
 
@@ -447,7 +451,9 @@ fn process_validators_sweep_withdrawals<P: Preset>(
 
 pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
     // Return early if the parent block is empty.
-    if state.latest_execution_payload_bid().block_hash != state.latest_block_hash() {
+    if state.latest_block_hash().is_zero()
+        || state.latest_execution_payload_bid().block_hash != state.latest_block_hash()
+    {
         return Ok(());
     }
 
@@ -655,6 +661,104 @@ fn validate_execution_payload_bid<P: Preset>(
             in_state,
         },
     );
+
+    Ok(())
+}
+
+pub fn process_parent_execution_payload<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    block: &BeaconBlock<P>,
+) -> Result<()> {
+    let bid = &block.body.signed_execution_payload_bid.message;
+    let parent_bid = state.latest_execution_payload_bid().clone();
+    let requests = &block.body.parent_execution_requests;
+
+    if parent_bid.block_hash.is_zero() || bid.parent_block_hash != parent_bid.block_hash {
+        // Parent was EMPTY -- no execution requests expected
+        ensure!(
+            *requests == ExecutionRequests::<P>::default(),
+            Error::<P>::ExecutionRequestsNotEmpty
+        );
+        return Ok(());
+    }
+
+    let computed = requests.hash_tree_root();
+
+    ensure!(
+        computed == parent_bid.execution_requests_root,
+        Error::<P>::ExecutionRequestsRootMismatch {
+            computed,
+            expected: parent_bid.execution_requests_root,
+        }
+    );
+
+    apply_parent_execution_payload(config, pubkey_cache, state, &parent_bid, requests)
+}
+
+fn apply_parent_execution_payload<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    parent_bid: &ExecutionPayloadBid<P>,
+    execution_requests: &ExecutionRequests<P>,
+) -> Result<()> {
+    process_execution_requests(config, pubkey_cache, state, execution_requests)?;
+
+    let parent_slot = parent_bid.slot;
+    let parent_epoch = compute_epoch_at_slot::<P>(parent_slot);
+
+    if parent_epoch == get_current_epoch(state) {
+        let payment_index = builder_payment_index_for_current_epoch::<P>(parent_slot);
+        settle_builder_payment(state, payment_index)?;
+    } else if parent_epoch == get_previous_epoch(state) {
+        let payment_index = builder_payment_index_for_previous_epoch::<P>(parent_slot);
+        settle_builder_payment(state, payment_index)?;
+    } else if parent_bid.value > 0 {
+        state
+            .builder_pending_withdrawals_mut()
+            .push(BuilderPendingWithdrawal {
+                fee_recipient: parent_bid.fee_recipient,
+                amount: parent_bid.value,
+                builder_index: parent_bid.builder_index,
+            })?;
+    }
+
+    let slot: usize = parent_slot.try_into()?;
+
+    state
+        .execution_payload_availability_mut()
+        .set(slot % SlotsPerHistoricalRoot::<P>::USIZE, true);
+
+    *state.latest_block_hash_mut() = parent_bid.block_hash;
+
+    Ok(())
+}
+
+fn settle_builder_payment<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+    payment_index: u64,
+) -> Result<()> {
+    ensure!(
+        payment_index < BuilderPendingPaymentsLength::<P>::U64,
+        Error::<P>::BuilderPaymentIndexOutOfBounds {
+            index: payment_index,
+            length: BuilderPendingPaymentsLength::<P>::U64,
+        }
+    );
+
+    let payment = *state.builder_pending_payments().mod_index(payment_index);
+
+    if payment.withdrawal.amount > 0 {
+        state
+            .builder_pending_withdrawals_mut()
+            .push(payment.withdrawal)?;
+    }
+
+    *state
+        .builder_pending_payments_mut()
+        .mod_index_mut(payment_index) = BuilderPendingPayment::default();
 
     Ok(())
 }
@@ -1444,6 +1548,14 @@ mod spec_tests {
         "payload_attestation",
         "consensus-spec-tests/tests/mainnet/gloas/operations/payload_attestation/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/payload_attestation/*/*",
+    }
+
+    processing_tests! {
+        process_parent_execution_payload,
+        |config, pubkey_cache, state, block, _| process_parent_execution_payload(config, pubkey_cache, state, &block),
+        "block",
+        "consensus-spec-tests/tests/mainnet/gloas/operations/parent_execution_payload/*/*",
+        "consensus-spec-tests/tests/minimal/gloas/operations/parent_execution_payload/*/*",
     }
 
     validation_tests! {

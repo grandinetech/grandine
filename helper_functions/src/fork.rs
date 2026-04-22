@@ -9,7 +9,7 @@ use anyhow::Result;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::{BitVector, PersistentList, PersistentVector};
+use ssz::{BitVector, PersistentList, PersistentVector, SszHash};
 use std_ext::ArcExt as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -31,7 +31,8 @@ use types::{
     },
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
-        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
+        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
+        containers::{ExecutionRequests, PendingDeposit},
     },
     fulu::beacon_state::BeaconState as FuluBeaconState,
     gloas::{beacon_state::BeaconState as GloasBeaconState, containers::ExecutionPayloadBid},
@@ -845,6 +846,7 @@ pub fn upgrade_to_gloas<P: Preset>(
 
     let latest_execution_payload_bid = ExecutionPayloadBid {
         block_hash: latest_execution_payload_header.block_hash,
+        execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
         ..Default::default()
     };
 
@@ -884,7 +886,7 @@ pub fn upgrade_to_gloas<P: Preset>(
         current_sync_committee,
         next_sync_committee,
         // > Execution
-        latest_execution_payload_bid,
+        latest_block_hash: latest_execution_payload_header.block_hash,
         // > Withdrawals
         next_withdrawal_index,
         next_withdrawal_validator_index,
@@ -906,7 +908,7 @@ pub fn upgrade_to_gloas<P: Preset>(
         execution_payload_availability: BitVector::new(true),
         builder_pending_payments: PersistentVector::default(),
         builder_pending_withdrawals: PersistentList::default(),
-        latest_block_hash: latest_execution_payload_header.block_hash,
+        latest_execution_payload_bid,
         payload_expected_withdrawals: PersistentList::default(),
         ptc_window,
         // Cache

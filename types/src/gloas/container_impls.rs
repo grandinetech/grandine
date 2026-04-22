@@ -5,15 +5,12 @@ use ssz::{ByteList, ContiguousList, H256};
 
 use crate::{
     capella::containers::Withdrawal,
-    deneb::{
-        containers::ExecutionPayload,
-        primitives::{KzgCommitment, KzgProof},
-    },
+    deneb::primitives::{KzgCommitment, KzgProof},
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
     gloas::containers::{
-        CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayloadEnvelope,
+        CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope,
         PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadBid,
         SignedExecutionPayloadEnvelope,
     },
@@ -24,7 +21,7 @@ use crate::{
 impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
     #[must_use]
     pub const fn slot(&self) -> Slot {
-        self.message.slot
+        self.message.payload.slot_number
     }
 
     #[must_use]
@@ -42,6 +39,7 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
                         ContiguousList::full(u8::MAX),
                     ))),
                     withdrawals: ContiguousList::full(Withdrawal::default()),
+                    block_access_list: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
                     ..Default::default()
                 },
                 execution_requests: ExecutionRequests {
