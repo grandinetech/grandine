@@ -65,25 +65,25 @@ validator_statistics = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
-attestation_verifier = { workspace = true }
+#attestation_verifier = { workspace = true }
 clock = { workspace = true }
-crossbeam-utils = { workspace = true }
-database = { workspace = true }
-duplicate = { workspace = true }
-eth1 = { workspace = true }
+#crossbeam-utils = { workspace = true }
+#database = { workspace = true }
+#duplicate = { workspace = true }
+#eth1 = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
-genesis = { workspace = true }
+#genesis = { workspace = true }
 hex-literal = { workspace = true }
 interop = { workspace = true }
-num_cpus = { workspace = true }
+#num_cpus = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
-spec_test_utils = { workspace = true }
+#spec_test_utils = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }
-test-generator = { workspace = true }
+#test-generator = { workspace = true }
 
 [features]
 eth2-cache = []

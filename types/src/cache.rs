@@ -28,7 +28,6 @@ pub struct Cache {
     pub active_validator_indices_ordered: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub active_validator_indices_shuffled: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
-    pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
 }
 
 impl Cache {

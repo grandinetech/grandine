@@ -126,11 +126,6 @@ pub fn initiate_builder_exit<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
     builder_index: BuilderIndex,
 ) -> Result<()> {
-    // > Return if builder already initiated exit
-    if state.builders().get(builder_index)?.withdrawable_epoch != FAR_FUTURE_EPOCH {
-        return Ok(());
-    }
-
     // > Set builder withdrawable epoch
     let current_epoch = get_current_epoch(state);
     let builder = state.builders_mut().get_mut(builder_index)?;

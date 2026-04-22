@@ -1,6 +1,5 @@
 use thiserror::Error;
 use types::{
-    bellatrix::primitives::Gas,
     capella::containers::Withdrawal,
     combined::Attestation,
     gloas::primitives::BuilderIndex,
@@ -65,6 +64,8 @@ pub enum Error<P: Preset> {
         index: BuilderIndex,
         current_epoch: Epoch,
     },
+    #[error("builder payment index ({index}) out of bounds (length: {length})")]
+    BuilderPaymentIndexOutOfBounds { index: u64, length: u64 },
     #[error("cannot exit builder because it has pending withdrawals in the queue")]
     BuilderVoluntaryExitWithPendingWithdrawals,
     #[error("deposit count is incorrect (computed: {computed}, in_block: {in_block})")]
@@ -74,19 +75,12 @@ pub enum Error<P: Preset> {
         // Boxed to pass `clippy::large_enum_variant`.
         deposit: Box<Deposit>,
     },
-    #[error(
-        "builder index in envelope ({in_envelope}) does not match in committed bid ({in_state})"
-    )]
-    EnvelopeBuilderMismatch {
-        in_envelope: ValidatorIndex,
-        in_state: ValidatorIndex,
-    },
-    #[error("block root in envelope ({in_envelope:?}) does not match in state ({in_state:?})")]
-    EnvelopeBlockRootMismatch { in_envelope: H256, in_state: H256 },
-    #[error("slot in envelope ({in_envelope}) does not match in state ({in_state})")]
-    EnvelopeSlotMismatch { in_envelope: Slot, in_state: Slot },
     #[error("execution payload bid's signature is invalid")]
     ExecutionPayloadBidSignatureInvalid,
+    #[error("execution requests not empty")]
+    ExecutionRequestsNotEmpty,
+    #[error("execution requests root ({computed:?}) does not match expected ({expected:?})")]
+    ExecutionRequestsRootMismatch { computed: H256, expected: H256 },
     #[error(
         "parent hash in execution payload ({in_block:?}) \
          does not match latest execution payload header ({in_state:?})"
@@ -126,17 +120,6 @@ pub enum Error<P: Preset> {
         in_attestation: Slot,
         state_slot: Slot,
     },
-    #[error(
-        "block hash in payload ({in_payload:?}) does not match in committed bid ({in_state:?})"
-    )]
-    PayloadBlockHashMismatch {
-        in_payload: ExecutionBlockHash,
-        in_state: ExecutionBlockHash,
-    },
-    #[error("gas limit in payload ({in_payload}) does not match in committed bid ({in_state})")]
-    PayloadGasLimitMismatch { in_payload: Gas, in_state: Gas },
-    #[error("withdrawals root in payload ({in_payload:?}) does not match in state ({in_state:?})")]
-    PayloadWithdrawalsMismatch { in_payload: H256, in_state: H256 },
     #[error("proposer (validator {index}) is slashed")]
     ProposerSlashed { index: ValidatorIndex },
     #[error("proposer index is incorrect (in_block: {in_block}, computed: {computed})")]

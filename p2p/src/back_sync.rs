@@ -178,7 +178,7 @@ impl<P: Preset> BackSync<P> {
         controller: &RealController<P>,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
-        let slot = envelope.message.slot;
+        let slot = envelope.message.payload.slot_number;
 
         if slot <= self.high_slot() && !self.is_finished(controller) {
             self.batch.push_execution_payload_envelope(envelope);

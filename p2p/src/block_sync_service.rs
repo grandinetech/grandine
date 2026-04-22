@@ -592,7 +592,7 @@ impl<P: Preset> BlockSyncService<P> {
 
                             match request_direction {
                                 SyncDirection::Forward => {
-                                    let envelope_slot = envelope.message.slot;
+                                    let envelope_slot = envelope.message.payload.slot_number;
                                     let builder_index = envelope.message.builder_index;
 
                                     if self.register_new_received_envelope(block_root, builder_index, envelope_slot) {
@@ -675,7 +675,7 @@ impl<P: Preset> BlockSyncService<P> {
                             }
                         }
                         P2pToSync::GossipExecutionPayload(execution_payload_envelope, peer_id, gossip_id) => {
-                            let block_slot = execution_payload_envelope.message.slot;
+                            let block_slot = execution_payload_envelope.message.payload.slot_number;
                             let beacon_block_root = execution_payload_envelope.message.beacon_block_root;
                             let builder_index = execution_payload_envelope.message.builder_index;
 

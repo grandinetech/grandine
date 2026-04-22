@@ -610,7 +610,7 @@ impl<P: Preset> Storage<P> {
 
         for envelope in envelopes {
             let block_root = envelope.message.beacon_block_root;
-            let slot = envelope.message.slot;
+            let slot = envelope.message.payload.slot_number;
 
             batch.push(serialize(EnvelopeByBlockRoot(block_root), envelope)?);
             batch.push(serialize(EnvelopeRootBySlot(slot, block_root), block_root)?);
