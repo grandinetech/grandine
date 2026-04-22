@@ -33,6 +33,7 @@ use serde::Deserialize;
 use signer::{Signer, Web3SignerConfig};
 use slashing_protection::{DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT, SlashingProtector};
 use spec_test_utils::{BlsSetting, Case};
+use ssz::SszHash as _;
 use std_ext::ArcExt;
 use test_generator::test_resources;
 use types::{
@@ -40,6 +41,7 @@ use types::{
         Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config,
+    electra::containers::ExecutionRequests,
     nonstandard::{Phase, StorageMode},
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
