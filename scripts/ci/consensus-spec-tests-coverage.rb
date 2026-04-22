@@ -16,6 +16,7 @@ IGNORED_GLOBS = %w[
   tests/*/*/ssz_static/PartialDataColumnPartsMetadata/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnSidecar/*/*/*.{ssz_snappy,yaml}
   tests/*/heze/*/*/*/*/*.{ssz_snappy,yaml}
+  tests/*/*/fast_confirmation/*/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/{compatible_unions,progressive_bitlist,progressive_containers,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/containers/{valid,invalid}/{ProgressiveBitsStruct,ProgressiveTestStruct}_*/*.{ssz_snappy,yaml}
   tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
