@@ -293,7 +293,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
 
             let bytes = client
                 .get(download_url.into_url())
-                .timeout(Duration::from_secs(600))
+                .timeout(Duration::from_mins(10))
                 .send()
                 .await?
                 .bytes()

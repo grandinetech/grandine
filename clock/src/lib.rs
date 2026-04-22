@@ -679,7 +679,7 @@ mod tests {
         // Fast-forward through slots 0-31 (pre-Gloas)
         // Each slot has 12 ticks at 1000 ms each = 12 000 ms. We skip 31 slots
         // and 11 ticks in bulk and draining the stream.
-        tokio::time::advance(Duration::from_millis(32 * 12_000 - 2000)).await;
+        tokio::time::advance(Duration::from_secs(32 * 12 - 2)).await;
         drain(&mut ticks).await?;
 
         // Last tick in slot 31 (pre-Gloas)

@@ -253,7 +253,7 @@ impl Default for Config {
             min_validator_withdrawability_delay: 256,
             seconds_per_eth1_block: 14,
             shard_committee_period: 256,
-            slot_duration_ms: Duration::from_millis(12000),
+            slot_duration_ms: Duration::from_secs(12),
             attestation_due_bps: 3333,
             aggregate_due_bps: 6667,
             sync_message_due_bps: 3333,
@@ -407,7 +407,7 @@ impl Config {
             eth1_follow_distance: 16,
             min_builder_withdrawability_delay: 2,
             shard_committee_period: 64,
-            slot_duration_ms: Duration::from_millis(6000),
+            slot_duration_ms: Duration::from_secs(6),
 
             // Validator cycle
             churn_limit_quotient: nonzero!(32_u64),

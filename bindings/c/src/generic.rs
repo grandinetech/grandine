@@ -12,8 +12,6 @@ use anyhow::Result;
 use generic_array::ArrayLength;
 use ssz::ByteList;
 
-use crate::layout::repeat_layout;
-
 pub const GRANDINE_SUCCESS: u32 = 0;
 pub const GRANDINE_ERROR_GENERIC: u32 = 1;
 pub const GRANDINE_ERROR_ENGINE_API: u32 = 2;
@@ -227,7 +225,8 @@ impl<T> Drop for CVec<T> {
             return;
         }
 
-        let layout = repeat_layout(Layout::new::<T>(), self.data_len as usize)
+        let layout = Layout::new::<T>()
+            .repeat_packed(self.data_len as usize)
             .expect("layout must be checked before, while allocating vec.");
 
         unsafe { alloc::dealloc(self.data as *mut u8, layout) };
@@ -243,7 +242,8 @@ impl<T: Clone> Clone for CVec<T> {
             }
         } else {
             let data = unsafe { &*ptr::slice_from_raw_parts(self.data, self.data_len as usize) };
-            let layout = repeat_layout(Layout::new::<T>(), self.data_len as usize)
+            let layout = Layout::new::<T>()
+                .repeat_packed(self.data_len as usize)
                 .expect("layout must be checked before, while allocating vec.");
             let dest = unsafe { alloc::alloc(layout) };
             let dest = unsafe {

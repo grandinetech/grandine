@@ -11,5 +11,6 @@ ignore = [
     # zkm-sdk & sp1-sdk come with rustls-webpki 0.101.7
     # TODO: remove this when this no longer the case
     'RUSTSEC-2026-0098',
-    'RUSTSEC-2026-0099'
+    'RUSTSEC-2026-0099',
+    'RUSTSEC-2026-0104'
 ]

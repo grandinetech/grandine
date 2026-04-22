@@ -31,7 +31,7 @@ use crate::{
         CPayloadAttributesV3, CPayloadStatusV1,
     },
     generic::{CGrandineString, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
-    layout::{CLayout, repeat_layout},
+    layout::CLayout,
 };
 
 mod arrays;
@@ -370,7 +370,7 @@ pub extern "C" fn grandine_vec_alloc(item_layout: CLayout, size: usize) -> *mut 
         return core::ptr::null_mut();
     };
 
-    let Ok(layout) = repeat_layout(item_layout, size) else {
+    let Ok(layout) = item_layout.repeat_packed(size) else {
         return core::ptr::null_mut();
     };
 

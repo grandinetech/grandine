@@ -1212,10 +1212,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         } else {
             for blob_sidecar in misc::construct_blob_sidecars(
                 block,
-                blobs.into_iter(),
-                block_proofs
-                    .unwrap_or_else(KzgProofs::empty_deneb)
-                    .into_iter(),
+                blobs,
+                block_proofs.unwrap_or_else(KzgProofs::empty_deneb),
             )? {
                 let blob_sidecar = Arc::new(blob_sidecar);
 

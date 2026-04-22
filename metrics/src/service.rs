@@ -30,7 +30,7 @@ use crate::{
 };
 
 const MIN_TIME_BETWEEN_SYSTEM_STATS_REFRESH: Duration = Duration::from_millis(500);
-const REMOTE_METRICS_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
+const REMOTE_METRICS_UPDATE_INTERVAL: Duration = Duration::from_mins(1);
 const REMOTE_METRICS_UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct MetricsChannels {

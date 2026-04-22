@@ -118,8 +118,8 @@ jobs:
               export PATH="/home/runner/.risc0/bin:$PATH"
               rzup install rust 1.91.1
               rzup install cpp 2024.1.5
-              rzup install r0vm 3.0.4
-              rzup install cargo-risczero 3.0.4
+              rzup install r0vm 3.0.5
+              rzup install cargo-risczero 3.0.5
               cargo risczero --version
             execute: RUST_LOG=info RISC0_DEV_MODE=1 cargo run -p zkvm_host --features risc0 --release -- --test "$TEST" execute
 

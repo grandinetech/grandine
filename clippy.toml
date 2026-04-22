@@ -78,3 +78,4 @@ enforced-import-renames = [
     { path = 'core::fmt::Result', rename = 'FmtResult' },
     { path = 'std::io::Result', rename = 'IoResult' },
 ]
+inherent-impl-lint-scope = 'file'

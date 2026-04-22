@@ -1,11 +1,10 @@
 #![no_main]
 ziskos::entrypoint!(main);
 
-use anyhow::Result;
+use anyhow::{Result, anyhow, ensure};
 use byteorder::ByteOrder;
 use pubkey_cache::PubkeyCache;
 use ssz::{SszHash as _, SszRead as _};
-use std::io::Read;
 use transition_functions::combined::untrusted_state_transition as state_transition;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -13,13 +12,13 @@ use types::{
     nonstandard::Phase,
     preset::{Mainnet, Preset},
 };
-use ziskos::{read_input, set_output};
+use ziskos::{read_input_slice, set_output};
 
 fn main() {
     println!("loading block and state...");
 
-    let input = read_input();
-    let (config, block, mut state, cache) = read_block_and_state::<Mainnet>(&input)
+    let input = read_input_slice();
+    let (config, block, mut state, cache) = read_block_and_state::<Mainnet>(input)
         .expect("zkvm-guest-zisk: read_block_and_state should succeed");
 
     println!("loaded block and state");
@@ -45,36 +44,25 @@ fn read_block_and_state<P: Preset>(
     mut input: &[u8],
 ) -> Result<(Config, SignedBeaconBlock<P>, BeaconState<P>, PubkeyCache)> {
     // reading config
-    let mut config = [0u8; 1];
-    input.read_exact(&mut config)?;
-
-    let mut buf = [0u8; size_of::<usize>()];
+    let config = take_bytes(&mut input, 1)?[0];
 
     // reading state_ssz
-    input.read_exact(&mut buf)?;
-    let state_ssz_len = usize::from_be_bytes(buf);
-    let mut state_ssz = vec![0u8; state_ssz_len];
-    input.read_exact(&mut state_ssz)?;
+    let state_ssz_len = read_len(&mut input)?;
+    let state_ssz = take_bytes(&mut input, state_ssz_len)?;
 
     // reading block_ssz
-    input.read_exact(&mut buf)?;
-    let block_ssz_len = usize::from_be_bytes(buf);
-    let mut block_ssz = vec![0u8; block_ssz_len];
-    input.read_exact(&mut block_ssz)?;
+    let block_ssz_len = read_len(&mut input)?;
+    let block_ssz = take_bytes(&mut input, block_ssz_len)?;
 
     // reading cache_ssz
-    input.read_exact(&mut buf)?;
-    let cache_ssz_len = usize::from_be_bytes(buf);
-    let mut cache_ssz = vec![0u8; cache_ssz_len];
-    input.read_exact(&mut cache_ssz)?;
+    let cache_ssz_len = read_len(&mut input)?;
+    let cache_ssz = take_bytes(&mut input, cache_ssz_len)?;
 
     // reading phase_bytes
-    input.read_exact(&mut buf)?;
-    let phase_be_len = usize::from_be_bytes(buf);
-    let mut phase_bytes = vec![0u8; phase_be_len];
-    input.read_exact(&mut phase_bytes)?;
+    let phase_bytes_len = read_len(&mut input)?;
+    let phase_bytes = take_bytes(&mut input, phase_bytes_len)?;
 
-    let config = match config[0] {
+    let config = match config {
         0 => Config::mainnet(),
         1 => Config::pectra_devnet_6(),
         v => panic!("unknown config kind {v}"),
@@ -102,4 +90,22 @@ fn read_block_and_state<P: Preset>(
     let cache = PubkeyCache::from_ssz(&config, &cache_ssz)?;
 
     Ok((config, block, state, cache))
+}
+
+fn read_len(input: &mut &[u8]) -> Result<usize> {
+    let bytes = take_bytes(input, size_of::<usize>())?;
+    let bytes: [u8; size_of::<usize>()] = bytes
+        .try_into()
+        .map_err(|_| anyhow!("invalid length field"))?;
+
+    Ok(usize::from_be_bytes(bytes))
+}
+
+fn take_bytes<'a>(input: &mut &'a [u8], len: usize) -> Result<&'a [u8]> {
+    ensure!(input.len() >= len, "input ended early");
+
+    let (prefix, suffix) = input.split_at(len);
+    *input = suffix;
+
+    Ok(prefix)
 }

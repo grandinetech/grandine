@@ -166,6 +166,7 @@ impl<P: Preset> AdHocBenchController<P> {
     }
 }
 
+#[expect(clippy::multiple_inherent_impl)]
 impl<P: Preset> BenchController<P> {
     #[must_use]
     pub fn quiet(

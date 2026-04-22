@@ -84,16 +84,3 @@ pub extern "C" fn grandine_layout_string() -> CLayout {
 pub extern "C" fn grandine_layout_client_version() -> CLayout {
     CLayout::new(Layout::new::<CClientVersionV1>())
 }
-
-// this is just straight copy-paste from rust std library
-// TODO: once Layout.repeat(n) stabilizes, remove this function.
-pub fn repeat_layout(item_layout: Layout, n: usize) -> Result<Layout> {
-    let padded = item_layout.pad_to_align();
-
-    if let Some(size) = padded.size().checked_mul(n) {
-        // The safe constructor is called here to enforce the isize size limit.
-        Ok(Layout::from_size_align(size, padded.align())?)
-    } else {
-        anyhow::bail!("Invalid layout");
-    }
-}

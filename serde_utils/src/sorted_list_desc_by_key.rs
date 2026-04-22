@@ -47,7 +47,7 @@ where
                 |iter| {
                     let mut items: Vec<I> = iter.collect();
                     items.sort_by(|a, b| b.key().cmp(&a.key()));
-                    T::try_from_iter(items.into_iter()).map_err(S::Error::custom)
+                    T::try_from_iter(items).map_err(S::Error::custom)
                 },
             )?
         }

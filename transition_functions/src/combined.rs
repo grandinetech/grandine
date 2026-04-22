@@ -743,6 +743,10 @@ pub fn process_trusted_block<P: Preset>(
     )
 }
 
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "False positive: beacon state is used mutably"
+)]
 fn process_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -873,6 +877,10 @@ pub fn process_trusted_blinded_block<P: Preset>(
     )
 }
 
+#[expect(
+    clippy::needless_pass_by_ref_mut,
+    reason = "False positive: beacon state is used mutably"
+)]
 fn process_blinded_block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

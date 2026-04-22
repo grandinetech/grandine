@@ -304,7 +304,7 @@ pub fn process_pending_deposits<P: Preset>(
             .into_iter()
             .copied()
             .skip(next_deposit_index.try_into()?)
-            .chain(deposits_to_postpone.into_iter()),
+            .chain(deposits_to_postpone),
     )?;
 
     if is_churn_limit_reached {

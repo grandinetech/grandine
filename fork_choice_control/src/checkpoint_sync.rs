@@ -91,7 +91,7 @@ async fn fetch<T: SszRead<Config>>(
     let response = client
         .get(url.into_url())
         .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
-        .timeout(Duration::from_secs(600))
+        .timeout(Duration::from_mins(10))
         .send()
         .await?;
 
