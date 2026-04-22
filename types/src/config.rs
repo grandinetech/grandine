@@ -87,8 +87,6 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub eth1_follow_distance: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    pub min_builder_withdrawability_delay: u64,
-    #[serde(with = "serde_utils::string_or_native")]
     pub min_validator_withdrawability_delay: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub seconds_per_eth1_block: u64,
@@ -104,6 +102,20 @@ pub struct Config {
     pub sync_message_due_bps: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub contribution_due_bps: u64,
+
+    // Gloas
+    #[serde(with = "serde_utils::string_or_native")]
+    pub min_builder_withdrawability_delay: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub attestation_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregate_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub sync_message_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub contribution_due_bps_gloas: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub payload_attestation_due_bps: u64,
 
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
@@ -249,7 +261,6 @@ impl Default for Config {
 
             // Time parameters
             eth1_follow_distance: 2048,
-            min_builder_withdrawability_delay: 64,
             min_validator_withdrawability_delay: 256,
             seconds_per_eth1_block: 14,
             shard_committee_period: 256,
@@ -258,6 +269,14 @@ impl Default for Config {
             aggregate_due_bps: 6667,
             sync_message_due_bps: 3333,
             contribution_due_bps: 6667,
+
+            // Gloas
+            min_builder_withdrawability_delay: 64,
+            attestation_due_bps_gloas: 2500,
+            aggregate_due_bps_gloas: 5000,
+            sync_message_due_bps_gloas: 2500,
+            contribution_due_bps_gloas: 5000,
+            payload_attestation_due_bps: 7500,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
@@ -405,9 +424,11 @@ impl Config {
 
             // Time parameters
             eth1_follow_distance: 16,
-            min_builder_withdrawability_delay: 2,
             shard_committee_period: 64,
             slot_duration_ms: Duration::from_secs(6),
+
+            // Gloas
+            min_builder_withdrawability_delay: 2,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(32_u64),
