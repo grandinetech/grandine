@@ -2809,7 +2809,7 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
         .into_iter()
         .collect::<HashSet<ValidatorIndex>>();
 
-    let response = misc::slots_in_epoch::<P>(epoch)
+    let response = misc::slots_in_epoch::<P>(epoch)?
         .map(|slot| {
             accessors::get_ptc(&state, slot)?
                 .into_iter()

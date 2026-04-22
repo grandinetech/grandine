@@ -802,7 +802,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
         debug_with_peers!(
             "publishing execution payload envelope (block_root: {:?}, slot: {}, builder_index: {})",
             envelope.message.beacon_block_root,
-            envelope.message.slot,
+            envelope.message.payload.slot_number,
             envelope.message.builder_index,
         );
 
@@ -1484,7 +1484,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         "sending ExecutionPayloadEnvelopesByRange response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {})",
-                        envelope.message.slot,
+                        envelope.message.payload.slot_number,
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -2175,7 +2175,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 debug_with_peers!(
                     "received ExecutionPayloadEnvelopesByRange response \
                     (peer_id: {peer_id}, slot: {})",
-                    envelope.message.slot,
+                    envelope.message.payload.slot_number,
                 );
 
                 P2pToSync::RequestedExecutionPayloadEnvelope(

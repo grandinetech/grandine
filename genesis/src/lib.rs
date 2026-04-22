@@ -38,6 +38,7 @@ use types::{
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
         containers::{
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
+            ExecutionRequests,
         },
     },
     fulu::{
@@ -46,7 +47,10 @@ use types::{
     },
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
-        containers::{BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody},
+        containers::{
+            BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
+            ExecutionPayloadBid, SignedExecutionPayloadBid,
+        },
     },
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
     phase0::{
@@ -344,7 +348,19 @@ fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBea
         Phase::Deneb => BeaconBlock::from(Hc::new(DenebBeaconBlock::default())),
         Phase::Electra => BeaconBlock::from(Hc::new(ElectraBeaconBlock::default())),
         Phase::Fulu => BeaconBlock::from(Hc::new(FuluBeaconBlock::default())),
-        Phase::Gloas => BeaconBlock::from(Hc::new(GloasBeaconBlock::default())),
+        Phase::Gloas => BeaconBlock::from(Hc::new(GloasBeaconBlock {
+            body: GloasBeaconBlockBody {
+                signed_execution_payload_bid: SignedExecutionPayloadBid {
+                    message: ExecutionPayloadBid {
+                        execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        })),
     }
     .with_state_root(state_root)
     .with_zero_signature()
