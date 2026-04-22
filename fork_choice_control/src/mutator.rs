@@ -365,9 +365,8 @@ where
                     execution_payload_envelope,
                     gossip_id,
                 } => {
-                    self.store_mut().insert_fake_payload_state(
-                        execution_payload_envelope.message.beacon_block_root,
-                    );
+                    self.store_mut()
+                        .insert_fake_payload(execution_payload_envelope.message.beacon_block_root);
                     self.update_store_snapshot();
                     self.send_to_p2p(P2pMessage::Accept(gossip_id));
                     drop(wait_group);
