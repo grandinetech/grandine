@@ -720,6 +720,18 @@ impl<P: Preset> SignedBeaconBlock<P> {
 
         Ok(block)
     }
+
+    #[must_use]
+    pub fn payload_bid(&self) -> Option<&ExecutionPayloadBid<P>> {
+        Some(
+            &self
+                .message()
+                .body()
+                .with_payload_bid()?
+                .signed_execution_payload_bid()
+                .message,
+        )
+    }
 }
 
 #[derive(Clone, Debug, From, VariantCount, Serialize)]
