@@ -3230,6 +3230,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         None
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn validate_execution_payload_envelope_with_state(
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
@@ -3305,6 +3306,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
+        ensure!(
+            envelope.message.payload.prev_randao == bid.prev_randao,
+            Error::<P>::ExecutionPayloadPrevRandaoMismatch {
+                envelope,
+                expected: Box::new(bid.prev_randao),
+            },
+        );
+
+        ensure!(
+            envelope.message.payload.gas_limit == bid.gas_limit,
+            Error::<P>::ExecutionPayloadGasLimitMismatch {
+                envelope,
+                expected: bid.gas_limit,
+            },
+        );
+
         // [REJECT] payload.block_hash == bid.block_hash
         ensure!(
             envelope.message.payload.block_hash == bid.block_hash,
@@ -3332,6 +3349,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         };
 
+        let mut header = state.latest_block_header();
+
+        header.state_root = state.hash_tree_root();
+
+        let header_root = header.hash_tree_root();
+
+        ensure!(
+            envelope.message.beacon_block_root == header_root,
+            Error::<P>::ExecutionPayloadBeaconBlockRootMismatch {
+                envelope,
+                expected: Box::new(header_root),
+            },
+        );
+
         // [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
         ensure!(
             envelope.message.execution_requests.hash_tree_root() == bid.execution_requests_root,
@@ -3341,15 +3372,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        if origin.verify_signatures() {
-            let Some(post_gloas_state) = state.post_gloas() else {
-                return Err(Error::<P>::PayloadEnvelopeWithPreGloasState {
-                    envelope_slot: slot,
-                    state_slot: state.slot(),
-                }
-                .into());
-            };
+        let Some(post_gloas_state) = state.post_gloas() else {
+            return Err(Error::<P>::PayloadEnvelopeWithPreGloasState {
+                envelope_slot: slot,
+                state_slot: state.slot(),
+            }
+            .into());
+        };
 
+        ensure!(
+            envelope.message.payload.parent_hash == post_gloas_state.latest_block_hash(),
+            Error::<P>::ExecutionPayloadParentHashMismatch {
+                envelope,
+                expected: Box::new(post_gloas_state.latest_block_hash()),
+            },
+        );
+
+        let expected_timestamp =
+            misc::compute_timestamp_at_slot(&self.chain_config, &state, state.slot());
+
+        ensure!(
+            envelope.message.payload.timestamp == expected_timestamp,
+            Error::<P>::ExecutionPayloadTimestampMismatch {
+                envelope,
+                expected: expected_timestamp,
+            },
+        );
+
+        ensure!(
+            envelope.message.payload.withdrawals.hash_tree_root()
+                == post_gloas_state
+                    .payload_expected_withdrawals()
+                    .hash_tree_root(),
+            Error::<P>::ExecutionPayloadWithdrawalsHashMismatch {
+                envelope,
+                expected: Box::new(post_gloas_state.payload_expected_withdrawals().clone()),
+            },
+        );
+
+        if origin.verify_signatures() {
             // Verify signature with proposer key if proposer choose to self-build
             let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
                 *accessors::public_key(&state, block.message().proposer_index())?
