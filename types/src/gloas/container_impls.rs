@@ -9,11 +9,11 @@ use crate::{
     electra::containers::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
-    gloas::containers::{
+    gloas::{containers::{
         CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope,
         PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadBid,
         SignedExecutionPayloadEnvelope,
-    },
+    }, primitives::BuilderIndex},
     phase0::primitives::Slot,
     preset::Preset,
 };
@@ -27,6 +27,11 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
     #[must_use]
     pub const fn block_root(&self) -> H256 {
         self.message.beacon_block_root
+    }
+
+    #[must_use]
+    pub const fn builder_index(&self) -> BuilderIndex {
+        self.message.builder_index
     }
 
     #[must_use]

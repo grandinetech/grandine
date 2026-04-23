@@ -609,8 +609,8 @@ impl<P: Preset> Storage<P> {
         let mut persisted_block_roots = vec![];
 
         for envelope in envelopes {
-            let block_root = envelope.message.beacon_block_root;
-            let slot = envelope.message.payload.slot_number;
+            let block_root = envelope.block_root();
+            let slot = envelope.slot();
 
             batch.push(serialize(EnvelopeByBlockRoot(block_root), envelope)?);
             batch.push(serialize(EnvelopeRootBySlot(slot, block_root), block_root)?);

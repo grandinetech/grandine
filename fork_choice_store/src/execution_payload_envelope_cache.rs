@@ -17,8 +17,8 @@ impl<P: Preset> ExecutionPayloadEnvelopeCache<P> {
     }
 
     pub fn insert(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
-        let slot = envelope.message.payload.slot_number;
-        let block_root = envelope.message.beacon_block_root;
+        let slot = envelope.slot();
+        let block_root = envelope.block_root();
 
         self.envelopes.insert(block_root, (envelope, slot, false));
     }
