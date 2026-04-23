@@ -1101,7 +1101,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let block = Arc::new(*beacon_block);
 
-                // Handle Gloas execution payload envelope (only for self-build)
+                // Assuming after Gloas if proposer doesn't self build, `block_blobs` always None
+                if let Some(blobs) = block_blobs
+                    && !blobs.is_empty()
+                {
+                    self.publish_blob_data(&wait_group, slot_head, &block, blobs, block_proofs)
+                        .await?;
+                }
+
+                self.controller
+                    .on_own_block(wait_group.clone(), block.clone_arc());
+
+                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
+
+                // If self-building:
+                // Publish the execution payload envelope after the beacon block so PTC members
+                // have seen the block (and its SignedExecutionPayloadBid) before attesting
                 if slot_head.phase() >= Phase::Gloas
                     && let Some(envelope) = block_build_context
                         .compute_execution_payload_envelope(beacon_block_root)
@@ -1117,19 +1132,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     )
                     .await?;
                 }
-
-                // Assuming after Gloas if proposer doesn't self build, `block_blobs` always None
-                if let Some(blobs) = block_blobs
-                    && !blobs.is_empty()
-                {
-                    self.publish_blob_data(&wait_group, slot_head, &block, blobs, block_proofs)
-                        .await?;
-                }
-
-                self.controller
-                    .on_own_block(wait_group.clone(), block.clone_arc());
-
-                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
             }
         }
 
