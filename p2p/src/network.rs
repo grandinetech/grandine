@@ -832,9 +832,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
     fn publish_execution_payload_envelope(&self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
         debug_with_peers!(
             "publishing execution payload envelope (block_root: {:?}, slot: {}, builder_index: {})",
-            envelope.message.beacon_block_root,
-            envelope.message.payload.slot_number,
-            envelope.message.builder_index,
+            envelope.block_root(),
+            envelope.slot(),
+            envelope.builder_index(),
         );
 
         self.publish(PubsubMessage::ExecutionPayload(envelope));
@@ -1515,7 +1515,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         "sending ExecutionPayloadEnvelopesByRange response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         slot: {})",
-                        envelope.message.payload.slot_number,
+                        envelope.slot(),
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -1586,7 +1586,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         "sending ExecutionPayloadEnvelopesByRoot response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
                         block_root: {:?})",
-                        envelope.message.beacon_block_root,
+                        envelope.block_root(),
                     );
 
                     ServiceInboundMessage::SendResponse(
@@ -2206,7 +2206,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 debug_with_peers!(
                     "received ExecutionPayloadEnvelopesByRange response \
                     (peer_id: {peer_id}, slot: {})",
-                    envelope.message.payload.slot_number,
+                    envelope.slot(),
                 );
 
                 P2pToSync::RequestedExecutionPayloadEnvelope(
@@ -2230,7 +2230,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     "received ExecutionPayloadEnvelopesByRoot response chunk \
                     (app_request_id: {app_request_id:?}, peer_id: {peer_id}, \
                     block_root: {:?})",
-                    envelope.message.beacon_block_root,
+                    envelope.block_root(),
                 );
 
                 P2pToSync::RequestedExecutionPayloadEnvelope(
