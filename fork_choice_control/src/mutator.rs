@@ -268,7 +268,7 @@ where
                 MutatorMessage::BlockPayloadAttestations {
                     wait_group,
                     results,
-                } => self.handle_block_payload_attestations(&wait_group, results)?,
+                } => self.handle_block_payload_attestations(&wait_group, results),
                 MutatorMessage::AttesterSlashing {
                     wait_group,
                     result,
@@ -352,12 +352,12 @@ where
                     self.handle_payload_bid(result, origin)
                 }
                 MutatorMessage::PayloadAttestation { wait_group, result } => {
-                    self.handle_payload_attestation(&wait_group, result)?
+                    self.handle_payload_attestation(&wait_group, result)
                 }
                 MutatorMessage::PayloadAttestationBatch {
                     wait_group,
                     results,
-                } => self.handle_payload_attestation_batch(&wait_group, results)?,
+                } => self.handle_payload_attestation_batch(&wait_group, results),
                 MutatorMessage::PreprocessedBeaconState { state } => {
                     self.prepare_execution_payload_for_next_slot(&state);
                 }
@@ -1513,7 +1513,7 @@ where
         &mut self,
         wait_group: &W,
         results: Vec<VerifyPayloadAttestationResult<P>>,
-    ) -> Result<()> {
+    ) {
         let accepted = results
             .into_iter()
             .filter_map(|result| match result {
@@ -1541,11 +1541,9 @@ where
             })
             .collect_vec();
 
-        self.store_mut().apply_payload_attestation_batch(accepted)?;
+        self.store_mut().apply_payload_attestation_batch(accepted);
 
         self.update_store_snapshot();
-
-        Ok(())
     }
 
     fn handle_attester_slashing(
@@ -2300,7 +2298,7 @@ where
         &mut self,
         wait_group: &W,
         result: VerifyPayloadAttestationResult<P>,
-    ) -> Result<()> {
+    ) {
         match result {
             Ok(PayloadAttestationAction::Accept {
                 payload_attestation,
@@ -2353,7 +2351,7 @@ where
                 };
 
                 self.store_mut()
-                    .apply_payload_attestation(valid_payload_attestation)?;
+                    .apply_payload_attestation(valid_payload_attestation);
 
                 self.update_store_snapshot();
             }
@@ -2402,20 +2400,16 @@ where
                 reply_to_http_api(sender, Err(anyhow!(source)));
             }
         }
-
-        Ok(())
     }
 
     fn handle_payload_attestation_batch(
         &mut self,
         wait_group: &W,
         results: Vec<VerifyPayloadAttestationResult<P>>,
-    ) -> Result<()> {
+    ) {
         for result in results {
-            self.handle_payload_attestation(wait_group, result)?;
+            self.handle_payload_attestation(wait_group, result);
         }
-
-        Ok(())
     }
 
     fn handle_checkpoint_state(
