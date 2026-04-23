@@ -336,9 +336,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         blacklisted_blocks.extend(chain_config.blacklisted_blocks.iter());
 
-        let payload_timeliness_vote = hashmap! { anchor.block_root => BitVector::new(true) };
-        let payload_data_availability_vote = hashmap! { anchor.block_root => BitVector::new(true) };
-
         Self {
             chain_config,
             pubkey_cache,
@@ -363,8 +360,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             seen_gossip_aggregators: BTreeMap::new(),
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             payloads: HashSet::new(),
-            payload_timeliness_vote,
-            payload_data_availability_vote,
+            payload_timeliness_vote: HashMap::new(),
+            payload_data_availability_vote: HashMap::new(),
             current_slot_attestations: vector![],
             execution_payload_locations: hashmap! {},
             aggregate_and_proof_supersets: Arc::new(AggregateAndProofSupersets::new()),
@@ -3401,10 +3398,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        // [IGNORE] The payload_attestation_message is the first valid message received from the
-        // validator with index payload_attestation_message.validate_index
-        // TODO: (gloas): check if the first valid message
-
         // [REJECT] The message's block data.beacon_block_root passes validation.
         // Part 1/2:
         if self.rejected_block_roots.contains(&block_root) {
@@ -3482,6 +3475,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 });
             }
         };
+
+        // [IGNORE] The payload_attestation_message is the first valid message received from the
+        // validator with index payload_attestation_message.validate_index
+        if let Some(votes) = self.payload_timeliness_vote.get(&block_root)
+            && attesting_indices_positions
+                .iter()
+                .flat_map(|(_, positions)| positions)
+                .any(|&pos| votes[pos])
+        {
+            return Ok(PayloadAttestationAction::Ignore(payload_attestation));
+        }
 
         Ok(PayloadAttestationAction::Accept {
             payload_attestation,
@@ -3879,21 +3883,43 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn apply_payload_attestation(
         &mut self,
         valid_payload_attestation: ValidPayloadAttestation,
-    ) -> Result<()> {
+    ) {
         self.apply_payload_attestation_batch(core::iter::once(valid_payload_attestation))
     }
 
-    #[expect(clippy::unused_self)]
-    #[expect(clippy::unnecessary_wraps)]
-    #[expect(clippy::needless_pass_by_ref_mut)]
     pub fn apply_payload_attestation_batch(
         &mut self,
-        _valid_payload_attestations: impl IntoIterator<Item = ValidPayloadAttestation>,
-    ) -> Result<()> {
-        // TODO(gloas): update PTC votes into fork choice
-        // spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#new-on_payload_attestation_message
+        valid_payload_attestations: impl IntoIterator<Item = ValidPayloadAttestation>,
+    ) {
+        for ValidPayloadAttestation {
+            data,
+            attesting_indices_positions,
+            ..
+        } in valid_payload_attestations
+        {
+            let block_root = data.beacon_block_root;
 
-        Ok(())
+            let timeliness_votes = self.payload_timeliness_vote.entry(block_root).or_default();
+
+            for &pos in attesting_indices_positions
+                .iter()
+                .flat_map(|(_, positions)| positions)
+            {
+                timeliness_votes.set(pos, data.payload_present);
+            }
+
+            let availability_votes = self
+                .payload_data_availability_vote
+                .entry(block_root)
+                .or_default();
+
+            for &pos in attesting_indices_positions
+                .iter()
+                .flat_map(|(_, positions)| positions)
+            {
+                availability_votes.set(pos, data.blob_data_available);
+            }
+        }
     }
 
     /// [`on_attester_slashing`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_attester_slashing)
