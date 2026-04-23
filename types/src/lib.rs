@@ -101,7 +101,7 @@ pub mod gloas {
     mod spec_tests;
 }
 
-pub use collections::{ProposerLookahead, Ptc, PtcWindow, Validators};
+pub use collections::{PayloadExpectedWithdrawals, ProposerLookahead, Ptc, PtcWindow, Validators};
 
 mod collections;
 
