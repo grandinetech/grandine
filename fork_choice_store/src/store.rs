@@ -3179,7 +3179,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         _execution_engine: impl ExecutionEngine<P> + Send,
         _verifier: impl Verifier + Send,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        let block_root = envelope.message.beacon_block_root;
+        let block_root = envelope.block_root();
         let chain_link = self.chain_link(block_root);
 
         let block_info = || {
@@ -3190,7 +3190,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // > Make a copy of the state to avoid mutability issues
             self
                 .state_cache
-                .before_or_at_slot(self, block_root, envelope.message.payload.slot_number)
+                .before_or_at_slot(self, block_root, envelope.slot())
                 .or_else(|| {
                     if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
                     {
@@ -3199,7 +3199,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         warn_with_peers!(
                             "processing slots for beacon state not found in state cache before state transition \
                             (block root: {block_root:?} at slot {})\n{}",
-                            envelope.message.payload.slot_number,
+                            envelope.slot(),
                             Backtrace::force_capture(),
                         );
                     }
@@ -3221,9 +3221,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
     ) -> Option<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.message.payload.slot_number;
-        let beacon_block_root = envelope.message.beacon_block_root;
-        let builder_index = envelope.message.builder_index;
+        let slot = envelope.slot();
+        let beacon_block_root = envelope.block_root();
+        let builder_index = envelope.builder_index();
 
         // [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
         // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
@@ -3251,9 +3251,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
-        let slot = envelope.message.payload.slot_number;
-        let beacon_block_root = envelope.message.beacon_block_root;
-        let builder_index = envelope.message.builder_index;
+        let slot = envelope.slot();
+        let beacon_block_root = envelope.block_root();
+        let builder_index = envelope.builder_index();
 
         if let Some(payload_action) =
             self.validate_execution_payload_envelope_for_gossip_rules(&envelope, origin)
@@ -3973,7 +3973,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
-        let builder_index = envelope.message.builder_index;
+        let builder_index = envelope.builder_index();
 
         self.payloads.insert(beacon_block_root);
 

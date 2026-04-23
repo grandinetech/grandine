@@ -917,9 +917,18 @@ pub fn compute_balance_weighted_selection<P: Preset>(
         .pipe(NonZeroU64::new)
         .ok_or(Error::NoActiveValidators)?;
 
+    let max_random_value = u64::from(u16::MAX);
+    let mut random_bytes = [0u8; 32];
     let mut selected = vec![];
     let mut i = 0u64;
+
     while selected.len() < size {
+        let offset = usize::try_from((i % 16) * 2)?;
+
+        if offset == 0 {
+            random_bytes = *hashing::hash_256_64(seed, i / 16).as_fixed_bytes();
+        }
+
         let mut next_index = (i % total)
             .try_conv::<usize>()
             .expect("next_index fits in usize because it is less than indices.len()");
@@ -934,7 +943,17 @@ pub fn compute_balance_weighted_selection<P: Preset>(
             .get(next_index)
             .expect("compute_balance_weighted_selection returns a value less than indices.len()");
 
-        if compute_balance_weighted_acceptance(state, candidate_index, seed, i)? {
+        let random_value = u64::from(u16::from_le_bytes([
+            random_bytes[offset],
+            random_bytes[offset + 1],
+        ]));
+
+        let effective_balance = state
+            .validators()
+            .get(candidate_index)
+            .map(|validator| validator.effective_balance)?;
+
+        if effective_balance * max_random_value >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value {
             selected.push(candidate_index);
         }
 
@@ -942,27 +961,6 @@ pub fn compute_balance_weighted_selection<P: Preset>(
     }
 
     Ok(selected)
-}
-
-fn compute_balance_weighted_acceptance<P: Preset>(
-    state: &(impl BeaconState<P> + ?Sized),
-    index: ValidatorIndex,
-    seed: H256,
-    i: u64,
-) -> Result<bool> {
-    let max_random_value = u64::from(u16::MAX);
-    let seed = hashing::hash_256_64(seed, i / 16);
-    let random_bytes = seed.as_fixed_bytes();
-    let offset = usize::try_from((i % 16).try_mul(2)?)?;
-    let random_value = u64::from(u16::from_le_bytes([
-        random_bytes[offset],
-        random_bytes[offset.try_add(1)?],
-    ]));
-
-    let effective_balance = state.validators().effective_balance(index)?;
-
-    Ok(effective_balance.try_mul(max_random_value)?
-        >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?)
 }
 
 #[must_use]
