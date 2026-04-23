@@ -178,12 +178,12 @@ impl<P: Preset> BackSync<P> {
         controller: &RealController<P>,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
-        let slot = envelope.message.payload.slot_number;
+        let slot = envelope.slot();
 
         if slot <= self.high_slot() && !self.is_finished(controller) {
             self.batch.push_execution_payload_envelope(envelope);
         } else {
-            let block_root = envelope.message.beacon_block_root;
+            let block_root = envelope.block_root();
             debug_with_peers!(
                 "ignoring execution payload envelope: block_root {block_root:?}, slot: {slot}"
             );
@@ -331,7 +331,7 @@ impl<P: Preset> Batch<P> {
         &mut self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
-        let block_root = envelope.message.beacon_block_root;
+        let block_root = envelope.block_root();
         self.execution_payload_envelopes
             .insert(block_root, envelope);
     }
