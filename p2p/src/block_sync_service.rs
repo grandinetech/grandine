@@ -588,7 +588,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::RequestedExecutionPayloadEnvelope(envelope, peer_id, request_id, request_type) => {
-                            let block_root = envelope.message.beacon_block_root;
+                            let block_root = envelope.block_root();
 
                             self.sync_manager.record_received_execution_payload_envelope_response(
                                 block_root,
@@ -606,8 +606,8 @@ impl<P: Preset> BlockSyncService<P> {
 
                             match request_direction {
                                 SyncDirection::Forward => {
-                                    let envelope_slot = envelope.message.payload.slot_number;
-                                    let builder_index = envelope.message.builder_index;
+                                    let envelope_slot = envelope.slot();
+                                    let builder_index = envelope.builder_index();
 
                                     if self.register_new_received_envelope(block_root, builder_index, envelope_slot) {
                                         self.controller.on_requested_execution_payload_envelope(envelope, peer_id);
@@ -696,9 +696,9 @@ impl<P: Preset> BlockSyncService<P> {
                             }
                         }
                         P2pToSync::GossipExecutionPayload(execution_payload_envelope, peer_id, gossip_id) => {
-                            let block_slot = execution_payload_envelope.message.payload.slot_number;
-                            let beacon_block_root = execution_payload_envelope.message.beacon_block_root;
-                            let builder_index = execution_payload_envelope.message.builder_index;
+                            let block_slot = execution_payload_envelope.slot();
+                            let beacon_block_root = execution_payload_envelope.block_root();
+                            let builder_index = execution_payload_envelope.builder_index();
 
                             if self.register_new_received_envelope(beacon_block_root, builder_index, block_slot) {
                                 debug_with_peers!(
