@@ -879,7 +879,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
-    fn should_extend_payload(&self, block_root: H256) -> bool {
+    pub fn should_extend_payload(&self, block_root: H256) -> bool {
         if !self.is_payload_verified(block_root) {
             return false;
         }
