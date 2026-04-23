@@ -4,6 +4,7 @@ use anyhow::Error as AnyhowError;
 use static_assertions::assert_eq_size;
 use thiserror::Error;
 use types::{
+    PayloadExpectedWithdrawals,
     bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
@@ -193,6 +194,32 @@ pub enum Error<P: Preset> {
         expected: Box<H256>,
     },
     #[error(
+        "execution payload beacon block root mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadBeaconBlockRootMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
+    #[error("execution payload gas_limit mismatch (envelope: {envelope:?}, expected: {expected})")]
+    ExecutionPayloadGasLimitMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Gas,
+    },
+    #[error(
+        "execution payload parent hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadParentHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
+    #[error(
+        "execution payload prev randao mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadPrevRandaoMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
+    #[error(
         "execution payload requests hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
     )]
     ExecutionPayloadRequestsHashMismatch {
@@ -201,6 +228,20 @@ pub enum Error<P: Preset> {
     },
     #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
     ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
+    #[error(
+        "execution payload timestamp mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadTimestampMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: u64,
+    },
+    #[error(
+        "execution payload withdrawals mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadWithdrawalsHashMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<PayloadExpectedWithdrawals<P>>,
+    },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
