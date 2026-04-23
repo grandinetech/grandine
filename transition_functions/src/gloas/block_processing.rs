@@ -706,7 +706,7 @@ pub fn process_parent_execution_payload<P: Preset>(
     apply_parent_execution_payload(config, pubkey_cache, state, &parent_bid, requests)
 }
 
-fn apply_parent_execution_payload<P: Preset>(
+pub fn apply_parent_execution_payload<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
