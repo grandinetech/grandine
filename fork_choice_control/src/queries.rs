@@ -1192,6 +1192,21 @@ impl<P: Preset> Snapshot<'_, P> {
             .map(ChainLink::slot)
     }
 
+    #[must_use]
+    pub fn should_extend_payload(&self, block_root: H256) -> bool {
+        self.store_snapshot.should_extend_payload(block_root)
+    }
+
+    #[must_use]
+    pub fn cached_execution_payload_envelope_by_root(
+        &self,
+        block_root: H256,
+    ) -> Option<Arc<SignedExecutionPayloadEnvelope<P>>> {
+        self.store_snapshot
+            .cached_execution_payload_envelope_by_root(block_root)
+            .cloned()
+    }
+
     pub fn checkpoint_state_blocking(
         &self,
         checkpoint: Checkpoint,
