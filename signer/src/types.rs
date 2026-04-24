@@ -25,6 +25,7 @@ use types::{
     },
     gloas::containers::{
         BeaconBlock as GloasBeaconBlock, ExecutionPayloadEnvelope, PayloadAttestationData,
+        ProposerPreferences,
     },
     phase0::{
         containers::{
@@ -87,6 +88,7 @@ pub enum SigningMessage<'block, P: Preset> {
     ContributionAndProof(ContributionAndProof<P>),
     ValidatorRegistration(ValidatorRegistrationV1),
     VoluntaryExit(VoluntaryExit),
+    ProposerPreferences(ProposerPreferences),
 }
 
 impl<'block, P: Preset> From<&'block Hc<Phase0BeaconBlock<P>>> for SigningMessage<'block, P> {
