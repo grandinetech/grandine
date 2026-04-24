@@ -31,6 +31,7 @@ use types::{
         ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
     },
     fulu::containers::DataColumnIdentifier,
+    gloas::{containers::ExecutionPayload as GloasExecutionPayload, primitives::BlockAccessList},
     nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot, UnixSeconds,
@@ -427,6 +428,135 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
     }
 }
 
+/// [`ExecutionPayloadV4`](https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#executionpayloadv4)
+#[derive(Clone, Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct ExecutionPayloadV4<P: Preset> {
+    pub parent_hash: ExecutionBlockHash,
+    pub fee_recipient: ExecutionAddress,
+    pub state_root: H256,
+    pub receipts_root: H256,
+    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
+    pub prev_randao: H256,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub block_number: ExecutionBlockNumber,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub gas_limit: Gas,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub gas_used: Gas,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub timestamp: UnixSeconds,
+    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub base_fee_per_gas: Wei,
+    pub block_hash: ExecutionBlockHash,
+    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub blob_gas_used: Gas,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub excess_blob_gas: Gas,
+    pub block_access_list: Arc<BlockAccessList<P>>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub slot_number: Slot,
+}
+
+impl<P: Preset> From<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
+    fn from(payload: GloasExecutionPayload<P>) -> Self {
+        let GloasExecutionPayload {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+            block_access_list,
+            slot_number,
+        } = payload;
+
+        Self {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals: withdrawals.map(Into::into),
+            blob_gas_used,
+            excess_blob_gas,
+            block_access_list,
+            slot_number,
+        }
+    }
+}
+
+impl<P: Preset> From<ExecutionPayloadV4<P>> for GloasExecutionPayload<P> {
+    fn from(payload: ExecutionPayloadV4<P>) -> Self {
+        let ExecutionPayloadV4 {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+            block_access_list,
+            slot_number,
+        } = payload;
+
+        Self {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals: withdrawals.map(Into::into),
+            blob_gas_used,
+            excess_blob_gas,
+            block_access_list,
+            slot_number,
+        }
+    }
+}
+
 /// [`BlobsBundleV1`](https://github.com/ethereum/execution-apis/blob/v1.0.0-beta.3/src/engine/experimental/blob-extension.md#blobsbundlev1)
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
@@ -643,6 +773,47 @@ impl<P: Preset> From<EngineGetPayloadV5Response<P>> for WithBlobsAndMev<Executio
         } = response;
 
         let execution_payload = ExecutionPayload::Deneb(execution_payload.into());
+
+        let BlobsBundleV2 {
+            commitments,
+            proofs,
+            blobs,
+        } = blobs_bundle;
+
+        Self::new(
+            execution_payload,
+            Some(commitments),
+            Some(KzgProofs::Fulu(proofs)),
+            Some(blobs),
+            Some(block_value),
+            Some(execution_requests.into()),
+        )
+    }
+}
+
+/// [`engine_getPayloadV6` response](https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#response-2)
+#[derive(Clone, Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct EngineGetPayloadV6Response<P: Preset> {
+    pub execution_payload: ExecutionPayloadV4<P>,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub block_value: Wei,
+    pub blobs_bundle: BlobsBundleV2<P>,
+    pub should_override_builder: bool,
+    pub execution_requests: RawExecutionRequests<P>,
+}
+
+impl<P: Preset> From<EngineGetPayloadV6Response<P>> for WithBlobsAndMev<ExecutionPayload<P>, P> {
+    fn from(response: EngineGetPayloadV6Response<P>) -> Self {
+        let EngineGetPayloadV6Response {
+            execution_payload,
+            block_value,
+            blobs_bundle,
+            execution_requests,
+            ..
+        } = response;
+
+        let execution_payload = ExecutionPayload::Gloas(execution_payload.into());
 
         let BlobsBundleV2 {
             commitments,
