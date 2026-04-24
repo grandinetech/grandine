@@ -30,10 +30,10 @@ use types::{
     },
     fulu::containers::BeaconBlock as FuluBeaconBlock,
     gloas::{
-        consts::{DOMAIN_BEACON_BUILDER, DOMAIN_PTC_ATTESTER},
+        consts::{DOMAIN_BEACON_BUILDER, DOMAIN_PROPOSER_PREFERENCES, DOMAIN_PTC_ATTESTER},
         containers::{
             BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid, ExecutionPayloadEnvelope,
-            PayloadAttestationData,
+            PayloadAttestationData, ProposerPreferences,
         },
     },
     phase0::{
@@ -481,5 +481,27 @@ impl<P: Preset> SignForSingleFork<P> for ExecutionPayloadEnvelope<P> {
 
     fn epoch(&self) -> Epoch {
         misc::compute_epoch_at_slot::<P>(self.payload.slot_number)
+    }
+}
+
+impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
+    const DOMAIN_TYPE: DomainType = DOMAIN_PROPOSER_PREFERENCES;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::ProposerPreferences;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.proposal_slot)
+    }
+
+    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
+        let epoch = <Self as SignForSingleFork<P>>::epoch(self);
+        let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
+        let fork_version = config.version_at_epoch(epoch);
+        let domain = misc::compute_domain(
+            config,
+            domain_type,
+            Some(fork_version),
+            Some(beacon_state.genesis_validators_root()),
+        );
+        misc::compute_signing_root(self, domain)
     }
 }

@@ -27,7 +27,7 @@ use types::{
     deneb::containers::BlobSidecar,
     gloas::containers::{
         CombinedPayloadAttestation, PayloadAttestationData, SignedExecutionPayloadBid,
-        SignedExecutionPayloadEnvelope,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     nonstandard::{
         PayloadStatus, Phase, Publishable, StorageMode, ValidationOutcome,
@@ -1057,6 +1057,11 @@ impl<P: Preset> PayloadAttestationAction<P> {
     }
 }
 
+pub enum ProposerPreferencesAction {
+    Accept(Arc<SignedProposerPreferences>),
+    Ignore(Publishable),
+}
+
 pub enum PartialBlockAction {
     Accept,
     Ignore,
@@ -1126,6 +1131,36 @@ impl ExecutionPayloadEnvelopeOrigin {
     #[must_use]
     pub const fn is_requested(&self) -> bool {
         matches!(self, Self::Requested(_))
+    }
+}
+
+// TODO: add `Api(OneshotSender<Result<ValidationOutcome>>)` variant once
+// https://github.com/ethereum/beacon-APIs/pull/593 merges.
+pub enum ProposerPreferencesOrigin {
+    Gossip(GossipId),
+    Own,
+}
+
+impl ProposerPreferencesOrigin {
+    #[must_use]
+    pub fn split(
+        self,
+    ) -> (
+        Option<GossipId>,
+        Option<OneshotSender<Result<ValidationOutcome>>>,
+    ) {
+        match self {
+            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Own => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub const fn verify_signatures(&self) -> bool {
+        match self {
+            Self::Gossip(_) => true,
+            Self::Own => false,
+        }
     }
 }
 
