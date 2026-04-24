@@ -26,7 +26,7 @@ use eth2_libp2p::{
         },
     },
     service::{Network as Service, api_types::AppRequestId},
-    types::{EnrForkId, ForkContext, GossipEncoding, core_topics_to_subscribe},
+    types::{EnrForkId, ForkContext, GossipEncoding, GossipKind, core_topics_to_subscribe},
 };
 use features::Feature;
 use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage, Wait};
@@ -64,6 +64,7 @@ use types::{
     },
     gloas::containers::{
         PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     nonstandard::{CustodyMode, Phase, RelativeEpoch, StorageMode, WithStatus},
     phase0::{
@@ -563,6 +564,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         ValidatorToP2p::PublishPayloadAttestation(payload_attestation_message) => {
                             self.publish_payload_attestation_message(payload_attestation_message);
                         }
+                        ValidatorToP2p::PublishProposerPreferences(signed_preferences) => {
+                            self.publish_proposer_preferences(signed_preferences);
+                        }
                         ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count) => {
                             self.update_data_column_subnets(custody_group_count);
                         }
@@ -698,6 +702,20 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
                 ServiceInboundMessage::SubscribeNewForkTopics(next_phase, next_fork_digest)
                     .send(&self.network_to_service_tx);
+            }
+
+            // Subscribe to proposer_preferences topic one epoch before Gloas activation
+            if next_phase == Phase::Gloas && epoch + 1 == next_fork_epoch {
+                info_with_peers!(
+                    "subscribing to proposer_preferences topic ahead of Gloas activation"
+                );
+
+                let topic = GossipTopic::new(
+                    GossipKind::ProposerPreferences,
+                    GossipEncoding::default(),
+                    next_fork_digest,
+                );
+                ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
             }
         }
 
@@ -884,6 +902,27 @@ impl<P: Preset, W: Wait> Network<P, W> {
         self.publish(PubsubMessage::PayloadAttestationMessage(
             payload_attestation_message,
         ));
+    }
+
+    fn publish_proposer_preferences(
+        &self,
+        signed_proposer_preferences: Arc<SignedProposerPreferences>,
+    ) {
+        trace_with_peers!(
+            "publishing proposer preferences: (validator_index: {}, slot: {})",
+            signed_proposer_preferences.message.validator_index,
+            signed_proposer_preferences.message.proposal_slot
+        );
+
+        let message = PubsubMessage::ProposerPreferences(signed_proposer_preferences);
+
+        // Pre-fork: topic uses Gloas fork digest even during Fulu epoch
+        if let Some((Phase::Gloas, next_fork_digest, _)) = self.fork_context.next_fork() {
+            ServiceInboundMessage::PublishWithDigest(message, next_fork_digest)
+                .send(&self.network_to_service_tx);
+        } else {
+            self.publish(message);
+        }
     }
 
     fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
@@ -2481,6 +2520,21 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 self.controller
                     .on_gossip_payload_attestation(payload_attestation_message, gossip_id);
             }
+            PubsubMessage::ProposerPreferences(signed_preferences) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["proposer_preferences"]);
+                }
+
+                trace_with_peers!(
+                    "received signed proposer preferences as gossip: \
+                    {signed_preferences:?} from {source}"
+                );
+
+                self.controller.on_gossip_proposer_preferences(
+                    signed_preferences,
+                    GossipId { source, message_id },
+                );
+            }
             PubsubMessage::LightClientFinalityUpdate(_) => {
                 debug_with_peers!("received light client finality update as gossip");
             }
@@ -2988,6 +3042,9 @@ fn run_network_service<P: Preset>(
                         }
                         ServiceInboundMessage::Publish(message) => {
                             service.publish(message);
+                        }
+                        ServiceInboundMessage::PublishWithDigest(message, digest) => {
+                            service.publish_with_digest(message, digest);
                         }
                         ServiceInboundMessage::ReportPeer(peer_id, action, source, msg) => {
                             service.report_peer(&peer_id, action, source, msg);
