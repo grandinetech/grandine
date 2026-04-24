@@ -479,6 +479,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn has_envelope(&self, block_root: H256) -> bool {
+        self.cached_execution_payload_envelope_by_root(block_root)
+            .is_some()
+    }
+
+    #[must_use]
     pub const fn justified_checkpoint(&self) -> Checkpoint {
         self.justified_checkpoint
     }
@@ -2029,6 +2035,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             PartialAttestationAction::DelayUntilSlot => {
                 return Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof));
             }
+            PartialAttestationAction::DelayUntilEnvelope(block_root) => {
+                return Ok(AggregateAndProofAction::DelayUntilEnvelope(
+                    aggregate_and_proof,
+                    block_root,
+                ));
+            }
         }
 
         let AttestationData { slot, target, .. } = aggregate.data();
@@ -2187,6 +2199,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
             Ok(PartialAttestationAction::DelayUntilSlot) => {
                 return Ok(AttestationAction::DelayUntilSlot(attestation));
+            }
+            Ok(PartialAttestationAction::DelayUntilEnvelope(block_root)) => {
+                return Ok(AttestationAction::DelayUntilEnvelope(
+                    attestation,
+                    block_root,
+                ));
             }
             Err(source) => {
                 return Err(AttestationValidationError::Other {
@@ -2393,16 +2411,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         attestation: attestation.clone_arc()
                     }
                 );
-
-                // This validation is present in the fork choice rule but not the Networking specification.
-                if self.slot() == slot {
-                    ensure!(
-                        index == 0,
-                        Error::AttestationDataPayloadPresenceForCurrentSlot {
-                            attestation: attestation.clone_arc()
-                        }
-                    );
-                }
             } else if self.phase() >= Phase::Electra {
                 ensure!(
                     index == 0,
@@ -2483,6 +2491,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
+        // Spec(gloas):
+        //   - https://github.com/ethereum/consensus-specs/blob/a6687a2de15a0cbd92b052ce3a7727f83ef49b53/specs/gloas/fork-choice.md?plain=1#L637
+        //   - https://github.com/ethereum/consensus-specs/blob/a6687a2de15a0cbd92b052ce3a7727f83ef49b53/specs/gloas/p2p-interface.md?plain=1#L525
+        // Placed outside the `if not is_from_block` gate in the spec, so it applies to
+        // both gossip and block-embedded attestations.
+        // Compares the attested block's slot, not the store's local clock.
+        if self.phase() >= Phase::Gloas && ghost_vote_block.message().slot() == slot {
+            ensure!(
+                index == 0,
+                Error::AttestationDataPayloadPresenceForCurrentSlot {
+                    attestation: attestation.clone_arc()
+                }
+            );
+        }
+
         let ancestor_at_target_epoch_start = self
             .ancestor(beacon_block_root, Self::start_of_epoch(target.epoch))
             .expect(
@@ -2512,6 +2535,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             return Ok(PartialAttestationAction::DelayUntilBlock(target.root));
+        }
+
+        // Delay gossip attestation with payload_present=1 (index == 1) until
+        // its execution payload envelope is locally available.
+        // Spec: https://github.com/ethereum/consensus-specs/commit/6b3aedc5367981721a4620feaf4a2fd3438b1f54
+        //
+        // Placed after base-spec consistency checks so invalid attestations reject before envelope queuing.
+        //
+        // Block-packed attestations (`is_from_block`) bypass this delay.
+        if !is_from_block
+            && index == 1
+            && ghost_vote_block
+                .message()
+                .body()
+                .with_payload_bid()
+                .is_some()
+            && !self.has_envelope(beacon_block_root)
+        {
+            return Ok(PartialAttestationAction::DelayUntilEnvelope(
+                beacon_block_root,
+            ));
         }
 
         Ok(PartialAttestationAction::Accept)

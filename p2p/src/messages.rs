@@ -28,9 +28,12 @@ use types::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
     },
-    gloas::containers::{
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-        SignedProposerPreferences,
+    gloas::{
+        containers::{
+            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            SignedProposerPreferences,
+        },
+        primitives::BuilderIndex,
     },
     nonstandard::Phase,
     phase0::{
@@ -56,6 +59,7 @@ pub enum P2pToSync<P: Preset> {
     StatusPeer(PeerId),
     BlobsNeeded(Vec<BlobIdentifier>, Slot, Option<PeerId>),
     BlockNeeded(H256, Option<PeerId>),
+    ExecutionPayloadEnvelopeNeeded(H256, Option<PeerId>),
     DataColumnsNeeded(DataColumnsByRootIdentifier<P>, Slot),
     RequestedBlobSidecar(Arc<BlobSidecar<P>>, PeerId, AppRequestId, RPCRequestType),
     RequestedBlock(
@@ -87,6 +91,7 @@ pub enum P2pToSync<P: Preset> {
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
+    ExecutionPayloadEnvelopeRejected(H256, BuilderIndex),
     GossipExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>, PeerId, GossipId),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),

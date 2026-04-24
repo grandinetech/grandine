@@ -494,6 +494,16 @@ impl<P: Preset, W: Wait> Network<P, W> {
                                     P2pToSync::DataColumnSidecarRejected(data_column_identifier)
                                         .send(&self.channels.p2p_to_sync_tx)
                                 }
+                                MutatorRejectionReason::InvalidExecutionPayloadEnvelope {
+                                    beacon_block_root,
+                                    builder_index,
+                                } => {
+                                    P2pToSync::ExecutionPayloadEnvelopeRejected(
+                                        beacon_block_root,
+                                        builder_index,
+                                    )
+                                    .send(&self.channels.p2p_to_sync_tx)
+                                }
                                 _ => {}
                             }
 
@@ -509,6 +519,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         }
                         P2pMessage::BlockNeeded(root, peer_id) => {
                             P2pToSync::BlockNeeded(root, peer_id)
+                                .send(&self.channels.p2p_to_sync_tx);
+                        }
+                        P2pMessage::ExecutionPayloadEnvelopeNeeded(root, peer_id) => {
+                            P2pToSync::ExecutionPayloadEnvelopeNeeded(root, peer_id)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
                         P2pMessage::FinalizedCheckpoint(finalized_checkpoint) => {

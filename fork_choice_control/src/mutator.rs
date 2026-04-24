@@ -59,7 +59,7 @@ use types::{
     combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadEnvelope,
+    gloas::{containers::SignedExecutionPayloadEnvelope, primitives::BuilderIndex},
     nonstandard::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -113,6 +113,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     execution_engine: E,
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
+    delayed_until_envelope: HashMap<H256, Delayed<P>>,
     delayed_until_data: HashMap<H256, PendingExecutionPayloadEnvelope<P>>,
     // We previously ignored objects that would have to be delayed more than one slot. This was
     // based on the assumption that one slot is enough to account for clock differences between
@@ -197,6 +198,7 @@ where
             execution_engine,
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
+            delayed_until_envelope: HashMap::new(),
             delayed_until_data: HashMap::new(),
             delayed_until_slot: BTreeMap::new(),
             delayed_until_payload: HashMap::new(),
@@ -340,12 +342,16 @@ where
                     wait_group,
                     result,
                     origin,
+                    beacon_block_root,
+                    builder_index,
                     processing_timings,
                     tracing_span,
                 } => self.handle_execution_payload_envelope(
                     wait_group,
                     result,
                     origin,
+                    beacon_block_root,
+                    builder_index,
                     processing_timings,
                     tracing_span,
                 ),
@@ -1197,6 +1203,22 @@ where
 
                 self.delay_aggregate_and_proof_until_slot(wait_group, pending_aggregate_and_proof);
             }
+            Ok(AggregateAndProofAction::DelayUntilEnvelope(aggregate_and_proof, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_aggregate_and_proof(&["delayed_until_envelope"]);
+                }
+
+                let pending_aggregate_and_proof = PendingAggregateAndProof {
+                    aggregate_and_proof,
+                    origin,
+                };
+
+                self.delay_aggregate_and_proof_until_envelope(
+                    wait_group,
+                    pending_aggregate_and_proof,
+                    block_root,
+                );
+            }
             Ok(AggregateAndProofAction::WaitForTargetState(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["delayed_until_state"]);
@@ -1379,6 +1401,13 @@ where
 
                 self.delay_attestation_until_slot(wait_group, attestation);
             }
+            Ok(AttestationAction::DelayUntilEnvelope(attestation, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_attestation(&["delayed_until_envelope"]);
+                }
+
+                self.delay_attestation_until_envelope(wait_group, attestation, block_root);
+            }
             Ok(AttestationAction::WaitForTargetState(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_state"]);
@@ -1466,6 +1495,16 @@ where
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                     self.delay_attestation_until_slot(wait_group, attestation);
                     None
+                }
+                Ok(AttestationAction::DelayUntilEnvelope(_, _)) => {
+                    // (review this)
+                    // `!is_from_block` in validate_attestation_internal
+                    // makes this variant unreachable for block-based attestations.
+                    // Arm retained so the match covers every variant. not sure if (_=> None)default
+                    // handling should be introduced
+                    unreachable!(
+                        "AttestationAction::DelayUntilEnvelope for block-based attestation"
+                    )
                 }
                 Ok(AttestationAction::WaitForTargetState(pending_attestation)) => {
                     let checkpoint = pending_attestation.data().target;
@@ -1942,12 +1981,14 @@ where
         }
     }
 
-    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments, clippy::too_many_lines)]
     fn handle_execution_payload_envelope(
         &mut self,
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
+        beacon_block_root: H256,
+        builder_index: BuilderIndex,
         processing_timings: ProcessingTimings,
         tracing_span: Span,
     ) {
@@ -1981,6 +2022,12 @@ where
                 );
 
                 self.accept_execution_payload_envelope(&wait_group, envelope);
+
+                // Drain attestations/aggregates that were delayed waiting on the envelope.
+                // The retries will see `has_envelope(root) == true` during validation
+                if let Some(delayed) = self.delayed_until_envelope.remove(&beacon_block_root) {
+                    self.retry_delayed(delayed, &wait_group);
+                }
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -2225,12 +2272,13 @@ where
 
                 let (gossip_id, sender) = origin.split();
 
-                if gossip_id.is_some() {
-                    self.send_to_p2p(P2pMessage::Reject(
-                        gossip_id,
-                        MutatorRejectionReason::InvalidExecutionPayloadEnvelope,
-                    ));
-                }
+                self.send_to_p2p(P2pMessage::Reject(
+                    gossip_id,
+                    MutatorRejectionReason::InvalidExecutionPayloadEnvelope {
+                        beacon_block_root,
+                        builder_index,
+                    },
+                ));
 
                 reply_payload_envelope_validation_result_to_http_api(sender, Err(anyhow!(source)));
             }
@@ -3469,6 +3517,36 @@ where
         }
     }
 
+    fn delay_aggregate_and_proof_until_envelope(
+        &mut self,
+        wait_group: &W,
+        pending_aggregate_and_proof: PendingAggregateAndProof<P>,
+        block_root: H256,
+    ) {
+        if self.store.has_envelope(block_root) {
+            self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+        } else {
+            trace_with_peers!(
+                "aggregate and proof delayed until envelope (block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_aggregate_and_proof
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(
+                block_root, peer_id,
+            ));
+
+            self.delayed_until_envelope
+                .entry(block_root)
+                .or_default()
+                .aggregates
+                .push(pending_aggregate_and_proof);
+        }
+    }
+
     fn delay_attestation_until_block(
         &mut self,
         wait_group: &W,
@@ -3497,6 +3575,43 @@ where
             ));
 
             self.delayed_until_block
+                .entry(block_root)
+                .or_default()
+                .attestations
+                .push(pending_attestation);
+        }
+    }
+
+    fn delay_attestation_until_envelope(
+        &mut self,
+        wait_group: &W,
+        pending_attestation: PendingAttestation<P>,
+        block_root: H256,
+    ) {
+        if self.store.has_envelope(block_root) {
+            self.retry_attestation(wait_group.clone(), pending_attestation);
+        } else {
+            trace_with_peers!(
+                "attestation delayed until envelope \
+                 (pending_attestation: {pending_attestation:?}, block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_attestation
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::ExecutionPayloadEnvelopeNeeded(
+                block_root, peer_id,
+            ));
+
+            // Attestations produced by the application itself should never be delayed.
+            assert!(!matches!(
+                pending_attestation.origin,
+                AttestationOrigin::Own(_),
+            ));
+
+            self.delayed_until_envelope
                 .entry(block_root)
                 .or_default()
                 .attestations
@@ -4038,16 +4153,67 @@ where
         let delayed = self.prune_delayed_until_block();
         let delayed_until_blobs = self.prune_delayed_until_blobs();
         let delayed_until_data = self.prune_delayed_until_data();
+        let delayed_until_envelope = self.prune_delayed_until_envelope();
         let waiting = self.prune_waiting_for_checkpoint_states();
 
         for gossip_id in delayed
             .into_iter()
             .chain(delayed_until_blobs)
             .chain(delayed_until_data)
+            .chain(delayed_until_envelope)
             .chain(waiting)
         {
             self.send_to_p2p(P2pMessage::Ignore(gossip_id));
         }
+    }
+
+    fn prune_delayed_until_envelope(&mut self) -> Vec<GossipId> {
+        let previous_epoch = self.store.previous_epoch();
+
+        let mut gossip_ids = vec![];
+
+        self.delayed_until_envelope.retain(|_, delayed| {
+            let Delayed {
+                blocks: _,
+                payload_status: _,
+                aggregates,
+                attestations,
+                execution_payload_envelopes: _,
+                blob_sidecars: _,
+                data_column_sidecars: _,
+                payload_attestations: _,
+            } = delayed;
+
+            gossip_ids.extend(
+                aggregates
+                    .extract_if(.., |pending| {
+                        let epoch = pending
+                            .aggregate_and_proof
+                            .message()
+                            .aggregate()
+                            .data()
+                            .target
+                            .epoch;
+
+                        epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                attestations
+                    .extract_if(.., |pending| {
+                        let epoch = pending.data().target.epoch;
+
+                        epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            !delayed.is_empty()
+        });
+
+        gossip_ids
     }
 
     // Some objects may be delayed until a block that is itself delayed.
