@@ -12,7 +12,7 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem,
-    PayloadAttestationOrigin, StateCacheProcessor, Store,
+    PayloadAttestationOrigin, ProposerPreferencesOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -32,7 +32,9 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::containers::DataColumnIdentifier,
-    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    gloas::containers::{
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    },
     nonstandard::{RelativeEpoch, ValidationOutcome},
     phase0::{
         containers::Checkpoint,
@@ -715,6 +717,29 @@ impl<P: Preset, W> Run for PayloadAttestationBatchTask<P, W> {
             results,
         }
         .send(&mutator_tx);
+    }
+}
+
+pub struct ProposerPreferencesTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub signed_preferences: Arc<SignedProposerPreferences>,
+    pub origin: ProposerPreferencesOrigin,
+}
+
+impl<P: Preset, W> Run for ProposerPreferencesTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "ProposerPreferencesTask::run")]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            mutator_tx,
+            signed_preferences,
+            origin,
+        } = self;
+
+        let result = store_snapshot.validate_proposer_preferences(signed_preferences, &origin);
+
+        MutatorMessage::ProposerPreferences { result, origin }.send(&mutator_tx);
     }
 }
 

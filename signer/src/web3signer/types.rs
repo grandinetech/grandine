@@ -41,6 +41,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             }
             SigningMessage::ValidatorRegistration(_) => MessageType::ValidatorRegistration,
             SigningMessage::VoluntaryExit(_) => MessageType::VoluntaryExit,
+            SigningMessage::ProposerPreferences(_) => MessageType::ProposerPreferences,
         };
 
         Self {
@@ -72,6 +73,7 @@ enum MessageType {
     SyncCommitteeContributionAndProof,
     ValidatorRegistration,
     VoluntaryExit,
+    ProposerPreferences,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,6 +103,7 @@ mod tests {
                 "SYNC_COMMITTEE_CONTRIBUTION_AND_PROOF",
                 "VALIDATOR_REGISTRATION",
                 "VOLUNTARY_EXIT",
+                "PROPOSER_PREFERENCES",
             ],
         );
     }
