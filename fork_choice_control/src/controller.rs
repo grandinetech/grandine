@@ -25,7 +25,7 @@ use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
     ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
-    StateCacheProcessor, Store, StoreConfig,
+    ProposerPreferencesOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -46,6 +46,7 @@ use types::{
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::{
         PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     nonstandard::{ValidationOutcome, ValidationOutcomeWithReason},
     phase0::{
@@ -74,7 +75,7 @@ use crate::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
         ExecutionPayloadEnvelopeTask, PayloadAttestationBatchTask, PayloadAttestationTask,
-        StateAtSlotCacheFlushTask,
+        ProposerPreferencesTask, StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -411,6 +412,28 @@ where
         sender: OneshotSender<Result<ValidationOutcomeWithReason>>,
     ) {
         self.spawn_execution_payload_bid_task(payload_bid, ExecutionPayloadBidOrigin::Api(sender))
+    }
+
+    pub fn on_gossip_proposer_preferences(
+        &self,
+        signed_preferences: Arc<SignedProposerPreferences>,
+        gossip_id: GossipId,
+    ) {
+        self.spawn(ProposerPreferencesTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            signed_preferences,
+            origin: ProposerPreferencesOrigin::Gossip(gossip_id),
+        })
+    }
+
+    pub fn on_own_proposer_preferences(&self, signed_preferences: Arc<SignedProposerPreferences>) {
+        self.spawn(ProposerPreferencesTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            signed_preferences,
+            origin: ProposerPreferencesOrigin::Own,
+        })
     }
 
     pub fn on_notified_fork_choice_update(&self, payload_status: PayloadStatusV1) {

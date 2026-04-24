@@ -39,7 +39,7 @@ use types::{
             BUILDER_PAYMENT_THRESHOLD_DENOMINATOR, BUILDER_PAYMENT_THRESHOLD_NUMERATOR,
             DOMAIN_PTC_ATTESTER,
         },
-        containers::{IndexedPayloadAttestation, PayloadAttestation},
+        containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
@@ -1160,6 +1160,69 @@ pub fn get_active_builder_indices<P: Preset>(
             predicates::is_active_builder(builder, state.finalized_checkpoint().epoch)
         })
         .map(|(index, _)| index)
+}
+
+/// Check if validator is proposer for given slot in `proposer_lookahead`.
+///
+/// Uses `post_fulu()` not `post_gloas()`.
+/// This allows pre-fork validation of preferences broadcast one epoch before Gloas
+/// (as mentioned in the spec).
+#[must_use]
+pub fn is_valid_proposal_slot<P: Preset>(
+    state: &impl BeaconState<P>,
+    preferences: &ProposerPreferences,
+) -> bool {
+    let Some(post_fulu) = state.post_fulu() else {
+        return false;
+    };
+
+    let current_epoch = get_current_epoch(state);
+    let proposal_epoch = misc::compute_epoch_at_slot::<P>(preferences.proposal_slot);
+
+    if proposal_epoch < current_epoch || proposal_epoch > current_epoch + 1 {
+        return false;
+    }
+
+    let index = (proposal_epoch - current_epoch) * P::SlotsPerEpoch::U64
+        + (preferences.proposal_slot % P::SlotsPerEpoch::U64);
+
+    post_fulu
+        .proposer_lookahead()
+        .get(index)
+        .map(|&proposer| proposer == preferences.validator_index)
+        .unwrap_or(false)
+}
+
+/// Get the future slots in the current epoch and the slots in the next epoch
+/// for which `validator_index` is proposing.
+///
+/// Returns empty Vec if state is pre-Fulu (no `proposer_lookahead`).
+/// Uses `post_fulu()` not `post_gloas()` so pre-fork broadcast works one epoch before Gloas
+/// (<https://github.com/ethereum/consensus-specs/blob/2e55491d98828b0741a535064860942c9045ab24/specs/gloas/p2p-interface.md?plain=1#L431>).
+/// Currently we are using this to send per epoch relevant proposals per validator to follow spec.
+/// We can also use a slot driven (or partial epoch bucket / mid epoch) approach instead of broadcasting at once.
+#[must_use]
+pub fn get_upcoming_proposal_slots<P: Preset>(
+    state: &impl BeaconState<P>,
+    validator_index: ValidatorIndex,
+) -> Vec<Slot> {
+    let Some(post_fulu) = state.post_fulu() else {
+        return Vec::new();
+    };
+
+    let current_epoch_start = misc::compute_start_slot_at_epoch::<P>(get_current_epoch(state));
+    post_fulu
+        .proposer_lookahead()
+        .into_iter()
+        .enumerate()
+        .filter_map(|(offset, proposer)| {
+            let slot = current_epoch_start + offset as u64;
+            if slot <= state.slot() {
+                return None;
+            }
+            (*proposer == validator_index).then_some(slot)
+        })
+        .collect()
 }
 
 #[cfg(test)]
