@@ -5,11 +5,12 @@ pub use crate::{
         BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetBlobsParams,
         EngineGetBlobsV1Params, EngineGetBlobsV2Params, EngineGetPayloadV1Response,
         EngineGetPayloadV2Response, EngineGetPayloadV3Response, EngineGetPayloadV4Response,
-        EngineGetPayloadV5Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-        ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1,
-        PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatus,
-        PayloadStatusV1, PayloadStatusWithBlockHash, PayloadValidationStatus, RawExecutionRequests,
-        RequestType, WithdrawalV1,
+        EngineGetPayloadV5Response, EngineGetPayloadV6Response, ExecutionPayloadV1,
+        ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
+        ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
+        PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatus, PayloadStatusV1,
+        PayloadStatusWithBlockHash, PayloadValidationStatus, RawExecutionRequests, RequestType,
+        WithdrawalV1,
     },
 };
 

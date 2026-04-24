@@ -8,8 +8,9 @@ use ethereum_types::H64;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1, RawExecutionRequests,
+    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
+    RawExecutionRequests,
 };
 use futures::{Future, channel::mpsc::UnboundedSender};
 use logging::warn_with_peers;
@@ -46,8 +47,8 @@ use crate::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
         ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
-        ENGINE_GET_PAYLOAD_V5, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
-        ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_GET_PAYLOAD_V5, ENGINE_GET_PAYLOAD_V6, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2,
+        ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
 };
@@ -505,11 +506,23 @@ impl Eth1Api {
                 .await
                 .map(|with_client_info| with_client_info.map(Into::into))
             }
-            PayloadId::Fulu(payload_id) | PayloadId::Gloas(payload_id) => {
+            PayloadId::Fulu(payload_id) => {
                 let params = vec![serde_json::to_value(payload_id)?];
 
                 self.execute::<EngineGetPayloadV5Response<P>>(
                     ENGINE_GET_PAYLOAD_V5,
+                    params,
+                    Some(ENGINE_GET_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(|with_client_info| with_client_info.map(Into::into))
+            }
+            PayloadId::Gloas(payload_id) => {
+                let params = vec![serde_json::to_value(payload_id)?];
+
+                self.execute::<EngineGetPayloadV6Response<P>>(
+                    ENGINE_GET_PAYLOAD_V6,
                     params,
                     Some(ENGINE_GET_PAYLOAD_TIMEOUT),
                     None,
