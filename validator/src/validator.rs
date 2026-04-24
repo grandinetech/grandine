@@ -27,7 +27,7 @@ use features::Feature;
 use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
-    PayloadAttestationOrigin, StateCacheError,
+    PayloadAttestationOrigin, PayloadPresence, StateCacheError,
 };
 use futures::{
     channel::{
@@ -1934,6 +1934,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let phase = slot_head.phase();
 
+        // If the attested block is in the current slot, the payload can't have been
+        // revealed yet, so always use 0.
+        // See: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#attestation
+        let gloas_index = (phase >= Phase::Gloas).then(|| {
+            let beacon_block_slot = slot_head.beacon_state.latest_block_header().slot;
+            if beacon_block_slot == slot_head.slot() {
+                0_u64
+            } else {
+                match self
+                    .controller
+                    .payload_presence_by_block_root(slot_head.beacon_block_root)
+                {
+                    PayloadPresence::Full => 1,
+                    PayloadPresence::Empty | PayloadPresence::Pending => 0,
+                }
+            }
+        });
+
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {
                 epoch: slot_head.current_epoch(),
@@ -1974,9 +1992,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         target,
                     };
 
-                    // TODO: (gloas): update `index` field to signal payload status
-                    // see spec: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#attestation
-                    if phase >= Phase::Electra {
+                    if let Some(idx) = gloas_index {
+                        data.index = idx;
+                    } else if phase >= Phase::Electra {
                         data.index = 0;
                     }
 
@@ -2218,22 +2236,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         own_members: &[PTCMember],
     ) -> Result<&[PayloadAttestationMessage]> {
         // Skip attesting if validators has not seen any beacon block for the assigned slot
-        let Some(beacon_block_root) = self.controller.block_root_by_slot(slot_head.slot())? else {
+        let Some(block_with_root) = self
+            .controller
+            .block_by_slot(slot_head.slot())?
+            .map(WithStatus::value)
+        else {
             return Ok(&[]);
         };
+
+        let beacon_block_root = block_with_root.root;
 
         if let Some(own_payload_attestations) = self.own_payload_attestations.get() {
             return Ok(own_payload_attestations);
         }
 
+        let payload_present = self
+            .controller
+            .execution_payload_envelope_by_root(beacon_block_root)?
+            .is_some();
+
+        let blob_data_available = self
+            .controller
+            .indices_of_missing_data_columns(&block_with_root.block)
+            .is_empty();
+
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let data = PayloadAttestationData {
                 slot: slot_head.slot(),
                 beacon_block_root,
-                // TODO: (gloas): set to `true` if signed envelope reference by `block_root` has been seen in fork choice
-                payload_present: true,
-                // TODO: (gloas): set to `true` if blob data is available defined by fork choice
-                blob_data_available: true,
+                payload_present,
+                blob_data_available,
             };
 
             let doppelganger_protection = self
