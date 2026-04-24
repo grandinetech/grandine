@@ -39,7 +39,8 @@ use fork_choice_store::{
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
     PayloadAction, PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationOrigin,
-    StateCacheProcessor, Store, ValidAttestation, ValidPayloadAttestation,
+    ProposerPreferencesAction, ProposerPreferencesOrigin, StateCacheProcessor, Store,
+    ValidAttestation, ValidPayloadAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -358,6 +359,9 @@ where
                     wait_group,
                     results,
                 } => self.handle_payload_attestation_batch(&wait_group, results),
+                MutatorMessage::ProposerPreferences { result, origin } => {
+                    self.handle_proposer_preferences(result, origin)
+                }
                 MutatorMessage::PreprocessedBeaconState { state } => {
                     self.prepare_execution_payload_for_next_slot(&state);
                 }
@@ -2409,6 +2413,71 @@ where
     ) {
         for result in results {
             self.handle_payload_attestation(wait_group, result);
+        }
+    }
+
+    fn handle_proposer_preferences(
+        &mut self,
+        result: Result<ProposerPreferencesAction>,
+        origin: ProposerPreferencesOrigin,
+    ) {
+        match result {
+            Ok(ProposerPreferencesAction::Accept(signed_preferences)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_proposer_preferences(&["accepted"]);
+                }
+
+                trace_with_peers!(
+                    "proposer preferences accepted (validator_index: {}, proposal_slot: {})",
+                    signed_preferences.message.validator_index,
+                    signed_preferences.message.proposal_slot
+                );
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Accept(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
+
+                // TODO: send proposer preferences event once https://github.com/ethereum/beacon-APIs/pull/593 merges
+                self.store_mut()
+                    .apply_proposer_preferences(signed_preferences);
+
+                self.update_store_snapshot();
+            }
+            Ok(ProposerPreferencesAction::Ignore(publishable)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_proposer_preferences(&["ignored"]);
+                }
+
+                let (gossip_id, sender) = origin.split();
+
+                if let Some(gossip_id) = gossip_id {
+                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                }
+
+                reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+            }
+            Err(error) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_proposer_preferences(&["rejected"]);
+                }
+
+                warn_with_peers!("proposer preferences rejected (error: {error:?})");
+
+                let (gossip_id, sender) = origin.split();
+
+                if gossip_id.is_some() {
+                    self.send_to_p2p(P2pMessage::Reject(
+                        gossip_id,
+                        MutatorRejectionReason::InvalidProposerPreferences,
+                    ));
+                }
+
+                reply_to_http_api(sender, Err(anyhow!(error)));
+            }
         }
     }
 

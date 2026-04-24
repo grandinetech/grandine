@@ -8,7 +8,9 @@ use types::{
     bellatrix::{containers::PowBlock, primitives::Gas},
     combined::{Attestation, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
-    gloas::containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+    gloas::containers::{
+        SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    },
     phase0::primitives::{Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
@@ -241,6 +243,14 @@ pub enum Error<P: Preset> {
     ExecutionPayloadWithdrawalsHashMismatch {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<PayloadExpectedWithdrawals<P>>,
+    },
+    #[error("proposer preferences has invalid proposal slot: {signed_preferences:?}")]
+    InvalidProposerPreferencesProposalSlot {
+        signed_preferences: Arc<SignedProposerPreferences>,
+    },
+    #[error("proposer preferences has invalid signature: {signed_preferences:?}")]
+    InvalidProposerPreferencesSignature {
+        signed_preferences: Arc<SignedProposerPreferences>,
     },
     #[error("aggregate and proof has invalid signature: {aggregate_and_proof:?}")]
     InvalidAggregateAndProofSignature {
