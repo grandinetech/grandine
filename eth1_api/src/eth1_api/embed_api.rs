@@ -7,9 +7,9 @@ use ethereum_types::H64;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1,
+    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1,
+    PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1,
 };
 use futures::channel::mpsc::UnboundedSender;
 use prometheus_metrics::Metrics;
@@ -43,8 +43,8 @@ use crate::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
         ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
-        ENGINE_GET_PAYLOAD_V5, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2, ENGINE_NEW_PAYLOAD_V3,
-        ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_GET_PAYLOAD_V5, ENGINE_GET_PAYLOAD_V6, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2,
+        ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
     },
     eth1_block::Eth1Block,
 };
@@ -115,6 +115,8 @@ pub trait EmbedAdapter: Send + Sync {
     -> Result<EngineGetPayloadV4Response<Mainnet>>;
     fn engine_get_payload_v5(&self, payload_id: H64)
     -> Result<EngineGetPayloadV5Response<Mainnet>>;
+    fn engine_get_payload_v6(&self, payload_id: H64)
+    -> Result<EngineGetPayloadV6Response<Mainnet>>;
 
     fn engine_get_blobs_v1(
         &self,
@@ -715,7 +717,7 @@ impl Eth1Api {
 
                 value.into()
             }
-            PayloadId::Fulu(payload_id) | PayloadId::Gloas(payload_id) => {
+            PayloadId::Fulu(payload_id) => {
                 let _timer = self.metrics.as_ref().map(|metrics| {
                     prometheus_metrics::start_timer_vec(
                         &metrics.eth1_api_request_times,
@@ -729,6 +731,25 @@ impl Eth1Api {
 
                 let value: &dyn std::any::Any = &value;
                 let value: &EngineGetPayloadV5Response<P> =
+                    value.downcast_ref().ok_or(Error::InvalidPreset)?;
+                let value = value.clone();
+
+                value.into()
+            }
+            PayloadId::Gloas(payload_id) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_GET_PAYLOAD_V6,
+                    )
+                });
+
+                let value = self
+                    .exec(move |adapter| adapter.engine_get_payload_v6(payload_id))
+                    .await?;
+
+                let value: &dyn std::any::Any = &value;
+                let value: &EngineGetPayloadV6Response<P> =
                     value.downcast_ref().ok_or(Error::InvalidPreset)?;
                 let value = value.clone();
 
