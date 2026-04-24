@@ -30,6 +30,7 @@ use types::{
     },
     gloas::containers::{
         PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
     nonstandard::Phase,
     phase0::{
@@ -223,6 +224,7 @@ pub enum ValidatorToP2p<P: Preset> {
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishContributionAndProof(Box<SignedContributionAndProof<P>>),
     PublishPayloadAttestation(Arc<PayloadAttestationMessage>),
+    PublishProposerPreferences(Arc<SignedProposerPreferences>),
     UpdateDataColumnSubnets(u64),
 }
 
@@ -266,6 +268,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     DiscoverSubnetPeers(Vec<SubnetDiscovery>),
     GoodbyePeer(PeerId, GoodbyeReason, ReportSource),
     Publish(PubsubMessage<P>),
+    PublishWithDigest(PubsubMessage<P>, ForkDigest),
     ReportPeer(PeerId, PeerAction, ReportSource, &'static str),
     ReportMessageValidationResult(GossipId, MessageAcceptance),
     SendErrorResponse(PeerId, InboundRequestId, RpcErrorResponse, &'static str),

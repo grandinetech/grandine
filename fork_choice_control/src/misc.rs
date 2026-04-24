@@ -218,6 +218,7 @@ pub enum MutatorRejectionReason {
     InvalidExecutionPayloadEnvelope,
     InvalidPayloadBid,
     InvalidPayloadAttestation,
+    InvalidProposerPreferences,
 }
 
 pub enum BlockBlobAvailability {
