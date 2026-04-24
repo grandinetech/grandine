@@ -87,7 +87,7 @@ use types::{
     gloas::{
         containers::{
             ExecutionPayloadBid, PayloadAttestation, PayloadAttestationData,
-            PayloadAttestationMessage, SignedExecutionPayloadBid,
+            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
         primitives::BuilderIndex,
     },
@@ -1402,6 +1402,45 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
     .map_err(AnyhowError::new)?;
 
     Ok(EthResponse::json_or_ssz(blob_sidecars, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(version))
+}
+
+/// `GET /eth/v1/beacon/execution_payload_envelope/{block_id}`
+///
+/// Beacon API source:
+/// <https://github.com/ethereum/beacon-APIs/commit/e25942758161fe82009a20f2d3b1868e0ff611d8>
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::execution_payload_envelope"
+)]
+pub async fn execution_payload_envelope<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(block_id): EthPath<BlockId>,
+    headers: HeaderMap,
+) -> Result<EthResponse<Arc<SignedExecutionPayloadEnvelope<P>>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: block,
+        status,
+        finalized,
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = block.phase();
+
+    if version < Phase::Gloas {
+        return Err(Error::BlockPreGloas);
+    }
+
+    let root = block.message().hash_tree_root();
+
+    let envelope = controller
+        .execution_payload_envelope_by_root(root)?
+        .ok_or(Error::ExecutionPayloadEnvelopeNotFound)?;
+
+    Ok(EthResponse::json_or_ssz(envelope, &headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized)
         .version(version))
