@@ -20,6 +20,7 @@ pub const ENGINE_GET_PAYLOAD_V2: &str = "engine_getPayloadV2";
 pub const ENGINE_GET_PAYLOAD_V3: &str = "engine_getPayloadV3";
 pub const ENGINE_GET_PAYLOAD_V4: &str = "engine_getPayloadV4";
 pub const ENGINE_GET_PAYLOAD_V5: &str = "engine_getPayloadV5";
+pub const ENGINE_GET_PAYLOAD_V6: &str = "engine_getPayloadV6";
 pub const ENGINE_NEW_PAYLOAD_V1: &str = "engine_newPayloadV1";
 pub const ENGINE_NEW_PAYLOAD_V2: &str = "engine_newPayloadV2";
 pub const ENGINE_NEW_PAYLOAD_V3: &str = "engine_newPayloadV3";
@@ -38,6 +39,7 @@ pub const CAPABILITIES: &[&str] = &[
     ENGINE_GET_PAYLOAD_V3,
     ENGINE_GET_PAYLOAD_V4,
     ENGINE_GET_PAYLOAD_V5,
+    ENGINE_GET_PAYLOAD_V6,
     ENGINE_NEW_PAYLOAD_V1,
     ENGINE_NEW_PAYLOAD_V2,
     ENGINE_NEW_PAYLOAD_V3,
