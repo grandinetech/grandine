@@ -3702,6 +3702,7 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
 
     let block_root;
     let mut state;
+    let blob_data_available;
 
     let is_optimistic = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
@@ -3713,10 +3714,16 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         state = controller
             .state_before_or_at_slot(block_root, slot)
             .ok_or(Error::StateNotFound)?;
+        blob_data_available = controller
+            .indices_of_missing_data_columns(&block.value.block)
+            .is_empty();
         block.status.is_optimistic()
     } else {
         block_root = head.block_root;
         state = controller.state_by_chain_link(&head);
+        blob_data_available = controller
+            .indices_of_missing_data_columns(&head.block)
+            .is_empty();
         status.is_optimistic()
     };
 
@@ -3743,6 +3750,10 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         return Err(Error::HeadIsOptimistic);
     }
 
+    let payload_present = controller
+        .execution_payload_envelope_by_root(block_root)?
+        .is_some();
+
     if state.slot() < slot {
         state = tokio::task::spawn_blocking(move || {
             controller.preprocessed_state_post_block_blocking(block_root, slot)
@@ -3755,10 +3766,8 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
     let payload_attestation_data = PayloadAttestationData {
         slot,
         beacon_block_root: block_root,
-        // TODO: (gloas): set to `true` if signed envelope reference by `block_root` has been seen in fork choice
-        payload_present: true,
-        // TODO: (gloas): set to `true` if blob data is available defined by fork choice
-        blob_data_available: true,
+        payload_present,
+        blob_data_available,
     };
 
     Ok(EthResponse::json_or_ssz(payload_attestation_data, &headers)?.version(version))

@@ -8,7 +8,7 @@ use execution_engine::ExecutionEngine;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeAction,
-    ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadEnvelopeOrigin, PayloadPresence, StateCacheProcessor, Store,
 };
 use futures::Future;
 use helper_functions::{accessors, misc};
@@ -611,6 +611,27 @@ where
             Some(envelope) => Ok(Some(envelope.clone_arc())),
             None => storage.execution_payload_envelope_by_root(block_root),
         }
+    }
+
+    pub fn indices_of_missing_data_columns(
+        &self,
+        block: &SignedBeaconBlock<P>,
+    ) -> Vec<ColumnIndex> {
+        self.store_snapshot().indices_of_missing_data_columns(block)
+    }
+
+    pub fn payload_presence_by_block_root(&self, block_root: H256) -> PayloadPresence {
+        let store = self.store_snapshot();
+        let (head, _) = store.head_with_payload_status();
+        for chain_link in store.chain_ending_with(head.block_root) {
+            if chain_link.block.message().parent_root() == block_root {
+                return chain_link.parent_payload_presence;
+            }
+            if chain_link.block_root == block_root {
+                break;
+            }
+        }
+        PayloadPresence::Pending
     }
 
     pub fn blocks_by_root(
