@@ -193,6 +193,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // - Obtaining active balances from the justified state requires it to be in the right epoch.
     checkpoint_states: HashMap<Checkpoint, Arc<BeaconState<P>>>,
     payloads: HashSet<H256>,
+    // This field is used to track which PTC members have cast a valid vote for a given block root.
+    payload_vote: HashMap<H256, BitVector<P::PtcSize>>,
     payload_timeliness_vote: HashMap<H256, BitVector<P::PtcSize>>,
     payload_data_availability_vote: HashMap<H256, BitVector<P::PtcSize>>,
     // TODO(Grandine Team): Process current slot attestations incrementally to speed up
@@ -359,6 +361,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             seen_gossip_aggregators: BTreeMap::new(),
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             payloads: HashSet::new(),
+            payload_vote: HashMap::new(),
             payload_timeliness_vote: HashMap::new(),
             payload_data_availability_vote: HashMap::new(),
             current_slot_attestations: vector![],
@@ -3525,7 +3528,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The payload_attestation_message is the first valid message received from the
         // validator with index payload_attestation_message.validate_index
-        if let Some(votes) = self.payload_timeliness_vote.get(&block_root)
+        if let Some(votes) = self.payload_vote.get(&block_root)
             && attesting_indices_positions
                 .iter()
                 .flat_map(|(_, positions)| positions)
@@ -3945,6 +3948,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         } in valid_payload_attestations
         {
             let block_root = data.beacon_block_root;
+
+            let payload_votes = self.payload_vote.entry(block_root).or_default();
+
+            for &pos in attesting_indices_positions
+                .iter()
+                .flat_map(|(_, positions)| positions)
+            {
+                payload_votes.set(pos, true);
+            }
 
             let timeliness_votes = self.payload_timeliness_vote.entry(block_root).or_default();
 
