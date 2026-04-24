@@ -85,6 +85,7 @@ pub struct Metrics {
     mutator_aggregate_and_proofs: IntCounterVec,
     mutator_execution_payload_envelopes: IntCounterVec,
     mutator_payload_attestations: IntCounterVec,
+    mutator_proposer_preferences: IntCounterVec,
 
     pub block_insertion_times: Histogram,
     pub block_processing_times: Histogram,
@@ -465,6 +466,14 @@ impl Metrics {
                 opts!(
                     "MUTATOR_PAYLOAD_ATTESTATIONS",
                     "Counter for different payload attestations (delayed/ignored etc) for Mutator",
+                ),
+                &["type"],
+            )?,
+
+            mutator_proposer_preferences: IntCounterVec::new(
+                opts!(
+                    "MUTATOR_PROPOSER_PREFERENCES",
+                    "Counter for different proposer preferences (accepted/ignored/rejected etc) for Mutator",
                 ),
                 &["type"],
             )?,
@@ -1047,6 +1056,7 @@ impl Metrics {
         default_registry.register(Box::new(self.mutator_aggregate_and_proofs.clone()))?;
         default_registry.register(Box::new(self.mutator_execution_payload_envelopes.clone()))?;
         default_registry.register(Box::new(self.mutator_payload_attestations.clone()))?;
+        default_registry.register(Box::new(self.mutator_proposer_preferences.clone()))?;
         default_registry.register(Box::new(self.block_insertion_times.clone()))?;
         default_registry.register(Box::new(self.block_processing_times.clone()))?;
         default_registry.register(Box::new(self.block_post_processing_times.clone()))?;
@@ -1451,6 +1461,20 @@ impl Metrics {
             Err(error) => {
                 warn_with_peers!(
                     "unable to register mutator payload attestation for {labels:?}: {error:?}"
+                )
+            }
+        }
+    }
+
+    pub fn register_mutator_proposer_preferences(&self, labels: &[&str]) {
+        match self
+            .mutator_proposer_preferences
+            .get_metric_with_label_values(labels)
+        {
+            Ok(counter) => counter.inc(),
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to register mutator proposer preferences for {labels:?}: {error:?}"
                 )
             }
         }
