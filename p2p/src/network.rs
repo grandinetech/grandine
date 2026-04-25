@@ -146,6 +146,7 @@ pub struct Network<P: Preset, W: Wait> {
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
     last_nfd_update_epoch: Option<Epoch>,
+    proposer_preferences_subscribed: bool,
     backfill_custody_groups: bool,
     storage_mode: StorageMode,
 }
@@ -294,6 +295,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
             data_dumper,
             earliest_available_slot,
             last_nfd_update_epoch: None,
+            proposer_preferences_subscribed: false,
             backfill_custody_groups,
             storage_mode,
         };
@@ -705,7 +707,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
             }
 
             // Subscribe to proposer_preferences topic one epoch before Gloas activation
-            if next_phase == Phase::Gloas && epoch + 1 == next_fork_epoch {
+            if next_phase == Phase::Gloas
+                && epoch + 1 == next_fork_epoch
+                && !self.proposer_preferences_subscribed
+            {
                 info_with_peers!(
                     "subscribing to proposer_preferences topic ahead of Gloas activation"
                 );
@@ -716,6 +721,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     next_fork_digest,
                 );
                 ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
+                self.proposer_preferences_subscribed = true;
             }
         }
 

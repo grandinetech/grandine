@@ -91,6 +91,13 @@ impl<P: Preset> CombinedPayloadAttestation<P> {
             Self::Message(payload_attestation) => payload_attestation.data,
         }
     }
+
+    pub const fn message(&self) -> Option<&Arc<PayloadAttestationMessage>> {
+        match self {
+            Self::Attestation(_) => None,
+            Self::Message(message) => Some(message),
+        }
+    }
 }
 
 impl<P: Preset> SignedExecutionPayloadBid<P> {
@@ -99,14 +106,5 @@ impl<P: Preset> SignedExecutionPayloadBid<P> {
         &self,
     ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
         &self.message.blob_kzg_commitments
-    }
-}
-
-impl<P: Preset> CombinedPayloadAttestation<P> {
-    pub const fn message(&self) -> Option<&Arc<PayloadAttestationMessage>> {
-        match self {
-            Self::Attestation(_) => None,
-            Self::Message(message) => Some(message),
-        }
     }
 }
