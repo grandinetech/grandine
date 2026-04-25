@@ -25,6 +25,7 @@ pub const ENGINE_NEW_PAYLOAD_V1: &str = "engine_newPayloadV1";
 pub const ENGINE_NEW_PAYLOAD_V2: &str = "engine_newPayloadV2";
 pub const ENGINE_NEW_PAYLOAD_V3: &str = "engine_newPayloadV3";
 pub const ENGINE_NEW_PAYLOAD_V4: &str = "engine_newPayloadV4";
+pub const ENGINE_NEW_PAYLOAD_V5: &str = "engine_newPayloadV5";
 
 pub const CAPABILITIES: &[&str] = &[
     ENGINE_FORKCHOICE_UPDATED_V1,
@@ -44,4 +45,5 @@ pub const CAPABILITIES: &[&str] = &[
     ENGINE_NEW_PAYLOAD_V2,
     ENGINE_NEW_PAYLOAD_V3,
     ENGINE_NEW_PAYLOAD_V4,
+    ENGINE_NEW_PAYLOAD_V5,
 ];
