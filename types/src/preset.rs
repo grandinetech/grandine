@@ -1100,7 +1100,7 @@ pub struct GloasPreset {
     #[serde(with = "serde_utils::string_or_native")]
     ptc_size: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
-    max_payload_attestation: u64,
+    max_payload_attestations: u64,
     #[serde(with = "serde_utils::string_or_native")]
     builder_registry_limit: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
@@ -1114,7 +1114,7 @@ impl GloasPreset {
     pub fn new<P: Preset>() -> Self {
         Self {
             ptc_size: P::PtcSize::non_zero(),
-            max_payload_attestation: P::MaxPayloadAttestation::U64,
+            max_payload_attestations: P::MaxPayloadAttestation::U64,
             builder_registry_limit: P::BuilderRegistryLimit::non_zero(),
             builder_pending_withdrawals_limit: P::BuilderPendingWithdrawalsLimit::U64,
             max_builders_per_withdrawals_sweep: P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,
