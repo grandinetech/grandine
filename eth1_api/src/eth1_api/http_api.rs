@@ -9,8 +9,8 @@ use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1,
-    RawExecutionRequests,
+    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
+    PayloadStatusV1, RawExecutionRequests,
 };
 use futures::{Future, channel::mpsc::UnboundedSender};
 use logging::warn_with_peers;
@@ -48,7 +48,7 @@ use crate::{
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
         ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
         ENGINE_GET_PAYLOAD_V5, ENGINE_GET_PAYLOAD_V6, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2,
-        ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4, ENGINE_NEW_PAYLOAD_V5,
     },
     eth1_block::Eth1Block,
 };
@@ -243,7 +243,7 @@ impl Eth1Api {
         Ok(deposit_events)
     }
 
-    /// Calls [`engine_newPayloadV1`] or [`engine_newPayloadV2`] or [`engine_newPayloadV3`] or [`engine_newPayloadV4`] depending on `payload`.
+    /// Calls [`engine_newPayloadV1`] or [`engine_newPayloadV2`] or [`engine_newPayloadV3`] or [`engine_newPayloadV4`] or [`engine_newPayloadV5`] depending on `payload`.
     ///
     /// Later versions of `engine_newPayload` accept parameters of all prior versions,
     /// but using the earlier versions allows the application to work with old execution clients.
@@ -252,6 +252,8 @@ impl Eth1Api {
     /// [`engine_newPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_newpayloadv2
     /// [`engine_newPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_newpayloadv3
     /// [`engine_newPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_newpayloadv4
+    /// [`engine_newPayloadV5`]: https://github.com/ethereum/execution-apis/blob/4db2ff91a1811f40aa7c23547eef9d2bc789d27e/src/engine/amsterdam.md#engine_newpayloadv5
+    #[expect(clippy::too_many_lines)]
     pub async fn new_payload<P: Preset>(
         &self,
         payload: ExecutionPayload<P>,
@@ -324,6 +326,33 @@ impl Eth1Api {
 
                 self.execute(
                     ENGINE_NEW_PAYLOAD_V4,
+                    params,
+                    Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
+                    None,
+                )
+                .await
+                .map(WithClientVersions::result)
+            }
+            (
+                ExecutionPayload::Gloas(payload),
+                Some(ExecutionPayloadParams::Electra {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                    execution_requests,
+                }),
+            ) => {
+                let payload_v4 = ExecutionPayloadV4::from(payload);
+                let raw_execution_requests = RawExecutionRequests::from(execution_requests);
+
+                let params = vec![
+                    serde_json::to_value(payload_v4)?,
+                    serde_json::to_value(versioned_hashes)?,
+                    serde_json::to_value(parent_beacon_block_root)?,
+                    serde_json::to_value(raw_execution_requests)?,
+                ];
+
+                self.execute(
+                    ENGINE_NEW_PAYLOAD_V5,
                     params,
                     Some(ENGINE_NEW_PAYLOAD_TIMEOUT),
                     None,
@@ -443,7 +472,7 @@ impl Eth1Api {
         })
     }
 
-    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] or [`engine_getPayloadV5`] depending on `payload_id`.
+    /// Calls [`engine_getPayloadV1`] or [`engine_getPayloadV2`] or [`engine_getPayloadV3`] or [`engine_getPayloadV4`] or [`engine_getPayloadV5`] or [`engine_getPayloadV6`] depending on `payload_id`.
     ///
     /// Newer versions of the method may be used to request payloads from all prior versions,
     /// but using the old methods allows the application to work with old execution clients.
@@ -453,6 +482,7 @@ impl Eth1Api {
     /// [`engine_getPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_getpayloadv3
     /// [`engine_getPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_getpayloadv4
     /// [`engine_getPayloadV5`]: https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#engine_getpayloadv5
+    /// [`engine_getPayloadV6`]: https://github.com/ethereum/execution-apis/blob/4db2ff91a1811f40aa7c23547eef9d2bc789d27e/src/engine/amsterdam.md#engine_getpayloadv6
     pub async fn get_payload<P: Preset>(
         &self,
         payload_id: PayloadId,

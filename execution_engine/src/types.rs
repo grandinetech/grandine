@@ -429,7 +429,7 @@ impl<P: Preset> From<ExecutionPayloadV3<P>> for DenebExecutionPayload<P> {
 }
 
 /// [`ExecutionPayloadV4`](https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#executionpayloadv4)
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(bound = "", rename_all = "camelCase")]
 pub struct ExecutionPayloadV4<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
