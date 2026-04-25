@@ -2816,7 +2816,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         }
 
-        let Some(ref state) = chain_link.state else {
+        let Some(ref state) = self.head().state else {
             return Ok(PayloadAttestationAction::DelayUntilBlock(
                 payload_attestation,
                 block_root,
