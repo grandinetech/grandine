@@ -22,6 +22,7 @@ use types::{
     bellatrix::primitives::Gas,
     capella::consts::DOMAIN_BLS_TO_EXECUTION_CHANGE,
     config::Config,
+    gloas::consts::{DOMAIN_BEACON_BUILDER, DOMAIN_PROPOSER_PREFERENCES, DOMAIN_PTC_ATTESTER},
     nonstandard::Phase,
     phase0::{
         consts::{
@@ -36,7 +37,7 @@ use types::{
     },
     preset::{
         AltairPreset, BellatrixPreset, CapellaPreset, DenebPreset, ElectraPreset, FuluPreset,
-        Phase0Preset, Preset,
+        GloasPreset, Phase0Preset, Preset,
     },
 };
 
@@ -58,6 +59,8 @@ pub struct FullConfig {
     electra_preset: ElectraPreset,
     #[serde(flatten)]
     fulu_preset: FuluPreset,
+    #[serde(flatten)]
+    gloas_preset: GloasPreset,
     #[serde(flatten)]
     config: Arc<Config>,
 
@@ -151,6 +154,11 @@ pub struct FullConfig {
     // Capella domain types
     domain_bls_to_execution_change: DomainType,
 
+    // Gloas domain types
+    domain_beacon_builder: DomainType,
+    domain_ptc_attester: DomainType,
+    domain_proposer_preferences: DomainType,
+
     // TODO(feature/deneb): Add constants from the Polynomial Commitments specification if needed.
 
     // Builder constants
@@ -204,6 +212,7 @@ impl FullConfig {
             deneb_preset: DenebPreset::new::<P>(),
             electra_preset: ElectraPreset::new::<P>(),
             fulu_preset: FuluPreset::new::<P>(),
+            gloas_preset: GloasPreset::new::<P>(),
 
             // Phase 0 miscellaneous beacon chain constants
             base_rewards_per_epoch: BASE_REWARDS_PER_EPOCH,
@@ -262,6 +271,11 @@ impl FullConfig {
 
             // Capella domain types
             domain_bls_to_execution_change: DOMAIN_BLS_TO_EXECUTION_CHANGE,
+
+            // Gloas domain types
+            domain_beacon_builder: DOMAIN_BEACON_BUILDER,
+            domain_ptc_attester: DOMAIN_PTC_ATTESTER,
+            domain_proposer_preferences: DOMAIN_PROPOSER_PREFERENCES,
 
             // Builder constants
             builder_proposal_delay_tolerance: BUILDER_PROPOSAL_DELAY_TOLERANCE,
