@@ -1128,11 +1128,11 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/fulu/finality/*/*/*"]         [fulu_minimal_finality]      [Minimal] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/random/*/*/*"]           [fulu_minimal_random]        [Minimal] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/sanity/blocks/*/*"]      [fulu_minimal_sanity]        [Minimal] [Fulu];
-        ["consensus-spec-tests/tests/mainnet/gloas/finality/*/*/*"]        [gloas_mainnet_random]       [Mainnet] [Gloas];
-        // ["consensus-spec-tests/tests/mainnet/gloas/random/*/*/*"]          [gloas_mainnet_random]       [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/mainnet/gloas/finality/*/*/*"]        [gloas_mainnet_finality]     [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/mainnet/gloas/random/*/*/*"]          [gloas_mainnet_random]       [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/mainnet/gloas/sanity/blocks/*/*"]     [gloas_mainnet_sanity]       [Mainnet] [Gloas];
-        ["consensus-spec-tests/tests/minimal/gloas/finality/*/*/*"]        [gloas_minimal_random]       [Minimal] [Gloas];
-        // ["consensus-spec-tests/tests/minimal/gloas/random/*/*/*"]          [gloas_minimal_random]       [Minimal] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/finality/*/*/*"]        [gloas_minimal_finality]     [Minimal] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/random/*/*/*"]          [gloas_minimal_random]       [Minimal] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/sanity/blocks/*/*"]     [gloas_minimal_sanity]       [Minimal] [Gloas];
     )]
     #[test_resources(glob)]
