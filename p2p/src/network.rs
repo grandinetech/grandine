@@ -145,7 +145,7 @@ pub struct Network<P: Preset, W: Wait> {
     port_mappings: Option<PortMappings>,
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
-    last_nfd_update_epoch: Option<Epoch>,
+    last_visited_epoch: Option<Epoch>,
     backfill_custody_groups: bool,
     storage_mode: StorageMode,
 }
@@ -288,7 +288,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
             port_mappings,
             data_dumper,
             earliest_available_slot,
-            last_nfd_update_epoch: None,
+            last_visited_epoch: None,
             backfill_custody_groups,
             storage_mode,
         };
@@ -688,16 +688,13 @@ impl<P: Preset, W: Wait> Network<P, W> {
         }
 
         // Update `nfd` field in `eth2` in ENR.
-        if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
+        if chain_config.is_peerdas_scheduled() && self.last_visited_epoch != Some(epoch) {
             let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
 
-            if fork_digest_by_state != fork_digest_by_epoch || self.last_nfd_update_epoch.is_none()
-            {
+            if fork_digest_by_state != fork_digest_by_epoch || self.last_visited_epoch.is_none() {
                 ServiceInboundMessage::UpdateNextForkDigest(next_fork_digest)
                     .send(&self.network_to_service_tx);
             }
-
-            self.last_nfd_update_epoch = Some(epoch);
         }
 
         // Subscribe to the topics of the next phase.
@@ -714,8 +711,11 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     .send(&self.network_to_service_tx);
             }
 
-            // Subscribe to proposer_preferences topic one epoch before Gloas activation
-            if next_phase == Phase::Gloas && epoch + 1 == next_fork_epoch {
+            // Subscribe to proposer_preferences topic one epoch before Gloas activation once.
+            if next_phase == Phase::Gloas
+                && epoch + 1 == next_fork_epoch
+                && self.last_visited_epoch != Some(epoch)
+            {
                 info_with_peers!(
                     "subscribing to proposer_preferences topic ahead of Gloas activation"
                 );
@@ -738,6 +738,12 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
                     .send(&self.network_to_service_tx);
             }
+        }
+
+        // Mark this epoch as visited for once-per-epoch network bookkeeping (NFD update +
+        // pre-Gloas proposer_preferences subscribe), including mid-epoch boot.
+        if self.last_visited_epoch != Some(epoch) {
+            self.last_visited_epoch = Some(epoch);
         }
     }
 
