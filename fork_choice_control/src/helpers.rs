@@ -446,10 +446,20 @@ impl<P: Preset> Context<P> {
         &mut self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
-        assert!(matches!(
-            self.on_execution_payload(envelope),
-            Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)),
-        ));
+        let expected_block_root = envelope.message.beacon_block_root;
+        let next_message = self.on_execution_payload(envelope);
+
+        match next_message {
+            Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root)
+            }
+            message => {
+                assert!(matches!(
+                    message,
+                    Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)),
+                ));
+            }
+        }
     }
 
     pub fn on_acceptable_singular_attestation(
