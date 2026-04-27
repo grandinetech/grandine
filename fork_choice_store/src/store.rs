@@ -61,10 +61,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::{
-        consts::{
-            BUILDER_INDEX_SELF_BUILD, DATA_AVAILABILITY_TIMELY_THRESHOLD, PAYLOAD_STATUS_EMPTY,
-            PAYLOAD_STATUS_FULL, PAYLOAD_TIMELY_THRESHOLD,
-        },
+        consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
         containers::{
             CombinedPayloadAttestation, DataColumnSidecar as GloasDataColumnSidecar,
             SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
@@ -79,7 +76,7 @@ use types::{
         containers::{AttestationData, Checkpoint},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
-    preset::Preset,
+    preset::{DataAvailabilityTimelyThreshold, PayloadTimelyThreshold, Preset},
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use unwrap_none::UnwrapNone as _;
@@ -933,7 +930,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .try_into()
             .expect("payload timeliness vote count should fit into u64");
 
-        vote_count > PAYLOAD_TIMELY_THRESHOLD
+        vote_count > PayloadTimelyThreshold::<P>::U64
     }
 
     // > Return whether the blob data for the beacon block with root ``root``
@@ -954,7 +951,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .try_into()
             .expect("payload data availability vote count should fit into u64");
 
-        vote_count > DATA_AVAILABILITY_TIMELY_THRESHOLD
+        vote_count > DataAvailabilityTimelyThreshold::<P>::U64
     }
 
     #[must_use]
@@ -2462,7 +2459,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     attestation: attestation.clone_arc()
                 }
             );
-            
+
             // This validation is present in the fork choice rule but not the Networking specification.
             if ghost_vote_block.message().slot() == slot {
                 ensure!(
