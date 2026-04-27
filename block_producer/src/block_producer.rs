@@ -1640,12 +1640,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         // TODO(Gloas): this is a quick fix due to time constraits.
         //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
-        let execution_requests_root =
-            if let Some((_, execution_requests)) = self.get_gloas_envelope_data().await {
-                execution_requests.hash_tree_root()
-            } else {
-                H256::zero()
-            };
+        let snapshot = self.producer_context.controller.snapshot();
+        let execution_requests_root = snapshot
+            .cached_execution_payload_envelope_by_root(self.head_block_root)
+            .map(|v| v.message.execution_requests.hash_tree_root())
+            .unwrap_or_default();
 
         let payload_bid = ExecutionPayloadBid {
             parent_block_hash: state.latest_block_hash(),
