@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context as _, Error as AnyhowError, Result};
+use anyhow::{Context as _, Error as AnyhowError, Result, anyhow};
 use bls::{
     AggregateSignature, PublicKeyBytes, SignatureBytes,
     traits::{Signature as _, SignatureBytes as _},
@@ -1013,6 +1013,31 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     Phase::Gloas => {
                         let payload_attestations = self.prepare_payload_attestations().await?;
 
+                        let snapshot = self.producer_context.controller.snapshot();
+                        let parent_execution_requests =
+                            if snapshot.should_extend_payload(parent_root) {
+                                let payload_root = *self
+                                    .producer_context
+                                    .cached_payload_roots
+                                    .lock()
+                                    .await
+                                    .cache_get(&parent_root)
+                                    .ok_or_else(|| anyhow!("no cached payload root"))?;
+
+                                let local_payload = self
+                                    .producer_context
+                                    .payload_cache
+                                    .lock()
+                                    .await
+                                    .cache_get(&payload_root)
+                                    .cloned()
+                                    .ok_or_else(|| anyhow!("no cached payload"))?;
+
+                                local_payload.result.execution_requests.unwrap_or_default()
+                            } else {
+                                ExecutionRequests::default()
+                            };
+
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
                             slot,
                             proposer_index,
@@ -1031,8 +1056,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 bls_to_execution_changes,
                                 signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
                                 payload_attestations,
-                                // TODO
-                                parent_execution_requests: ExecutionRequests::default(),
+                                parent_execution_requests,
                             },
                         }))
                     }
