@@ -230,7 +230,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + MerkleElements<ValidatorIndex>
         + BitVectorBits
         + MerkleBits
-        + Div<U2, Output: NonZero + Ord + Send + Sync>
+        + Div<U2, Output: NonZero + Ord + Unsigned + Send + Sync>
         + NonZero
         + Eq
         + Ord
@@ -629,6 +629,8 @@ pub type PtcWindowLength<P> =
 pub type BuilderPendingPaymentsLength<P> = Prod<<P as Preset>::SlotsPerEpoch, U2>;
 
 pub type PayloadTimelyThreshold<P> = Quot<<P as Preset>::PtcSize, U2>;
+
+pub type DataAvailabilityTimelyThreshold<P> = Quot<<P as Preset>::PtcSize, U2>;
 
 // This variable has been renamed a number of times and no longer even exists in `consensus-specs`,
 // but it's still needed in our implementation.
