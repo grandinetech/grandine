@@ -3387,7 +3387,12 @@ where
         let safe_block_hash = self.store.safe_execution_payload_hash();
         let finalized_block_hash = self.store.finalized_execution_payload_hash();
 
-        let head_block_hash = state.latest_execution_payload_header().block_hash();
+        let head_block_hash =
+            if let Some(post_gloas_state) = new_head.state(&self.store).post_gloas() {
+                post_gloas_state.latest_block_hash()
+            } else {
+                state.latest_execution_payload_header().block_hash()
+            };
 
         self.execution_engine.notify_forkchoice_updated(
             head_block_hash,
