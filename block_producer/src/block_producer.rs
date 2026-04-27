@@ -1023,7 +1023,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 snapshot
                                     .cached_execution_payload_envelope_by_root(parent_root)
                                     .ok_or_else(|| anyhow!("no cached payload envelope"))
-                                    .map(|payload| payload.message.execution_requests)
+                                    .map(|payload| payload.message.execution_requests.clone())
                                     .unwrap_or_default()
                             } else {
                                 ExecutionRequests::default()
