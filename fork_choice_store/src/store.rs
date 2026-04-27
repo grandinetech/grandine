@@ -2387,22 +2387,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             if self.phase() >= Phase::Gloas {
-                ensure!(
-                    index < 2,
-                    Error::AttestationDataInvalidPayloadStatus {
-                        attestation: attestation.clone_arc()
-                    }
-                );
-
-                // This validation is present in the fork choice rule but not the Networking specification.
-                if self.slot() == slot {
-                    ensure!(
-                        index == 0,
-                        Error::AttestationDataPayloadPresenceForCurrentSlot {
-                            attestation: attestation.clone_arc()
-                        }
-                    );
-                }
             } else if self.phase() >= Phase::Electra {
                 ensure!(
                     index == 0,
@@ -2470,6 +2454,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             return Ok(PartialAttestationAction::DelayUntilBlock(beacon_block_root));
         };
+
+        if self.phase() >= Phase::Gloas {
+            ensure!(
+                index < 2,
+                Error::AttestationDataInvalidPayloadStatus {
+                    attestation: attestation.clone_arc()
+                }
+            );
+            
+            // This validation is present in the fork choice rule but not the Networking specification.
+            if ghost_vote_block.message().slot() == slot {
+                ensure!(
+                    index == 0,
+                    Error::AttestationDataPayloadPresenceForCurrentSlot {
+                        attestation: attestation.clone_arc()
+                    }
+                );
+            }
+
+            if index == 1 {
+                ensure!(
+                    self.is_payload_verified(beacon_block_root),
+                    Error::AttestationDataInvalidPayloadStatus {
+                        attestation: attestation.clone_arc()
+                    }
+                );
+            }
+        }
 
         // > Attestations must not be for blocks in the future.
         // > If not, the attestation should not be considered
