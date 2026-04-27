@@ -1638,6 +1638,15 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let fee_recipient = self.fee_recipient().await?;
 
+        // TODO(Gloas): this is a quick fix due to time constraits.
+        //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
+        let execution_requests_root =
+            if let Some((_, execution_requests)) = self.get_gloas_envelope_data().await {
+                execution_requests.hash_tree_root()
+            } else {
+                H256::zero()
+            };
+
         let payload_bid = ExecutionPayloadBid {
             parent_block_hash: state.latest_block_hash(),
             parent_block_root: state.latest_block_header().hash_tree_root(),
@@ -1650,8 +1659,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             value: 0,
             execution_payment: 0,
             blob_kzg_commitments: blob_kzg_commitments_opt.unwrap_or_default(),
-            // TODO
-            execution_requests_root: H256::zero(),
+            execution_requests_root,
         };
 
         Ok(Some(SignedExecutionPayloadBid {
