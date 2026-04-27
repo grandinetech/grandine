@@ -1016,24 +1016,15 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         let snapshot = self.producer_context.controller.snapshot();
                         let parent_execution_requests =
                             if snapshot.should_extend_payload(parent_root) {
-                                let payload_root = *self
-                                    .producer_context
-                                    .cached_payload_roots
-                                    .lock()
-                                    .await
-                                    .cache_get(&parent_root)
-                                    .ok_or_else(|| anyhow!("no cached payload root"))?;
-
-                                let local_payload = self
-                                    .producer_context
-                                    .payload_cache
-                                    .lock()
-                                    .await
-                                    .cache_get(&payload_root)
-                                    .cloned()
-                                    .ok_or_else(|| anyhow!("no cached payload"))?;
-
-                                local_payload.result.execution_requests.unwrap_or_default()
+                                // TODO(gloas): the block root needs to be checked if it is gloas or not.
+                                // the current behavior erronously returns empty execution requests when
+                                // payload envelope is not found, though block may be from gloas phase and
+                                // envelope is missing (so it should error out).
+                                snapshot
+                                    .cached_execution_payload_envelope_by_root(parent_root)
+                                    .ok_or_else(|| anyhow!("no cached payload envelope"))
+                                    .map(|payload| payload.message.execution_requests)
+                                    .unwrap_or_default()
                             } else {
                                 ExecutionRequests::default()
                             };
