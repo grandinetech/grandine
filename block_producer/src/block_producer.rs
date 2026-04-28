@@ -2173,18 +2173,33 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     async fn get_gloas_envelope_data(
         &self,
     ) -> Option<(GloasExecutionPayload<P>, ExecutionRequests<P>)> {
-        let snapshot = self.producer_context.controller.snapshot();
+        let payload_root = *self
+            .producer_context
+            .cached_payload_roots
+            .lock()
+            .await
+            .cache_get(&self.head_block_root)?;
 
-        let local_payload =
-            snapshot.cached_execution_payload_envelope_by_root(self.head_block_root)?;
+        let local_payload = self
+            .producer_context
+            .payload_cache
+            .lock()
+            .await
+            .cache_get(&payload_root)
+            .cloned()?;
 
-        let ExecutionPayloadEnvelope {
+        let WithBlobsAndMev {
+            value: execution_payload,
             execution_requests,
-            payload,
             ..
-        } = &local_payload.message;
+        } = local_payload.result;
 
-        Some((payload.clone(), execution_requests.clone()))
+        let ExecutionPayload::Gloas(payload) = execution_payload else {
+            warn_with_peers!("unexpected non-Gloas payload format in Gloas envelope data");
+            return None;
+        };
+
+        Some((payload, execution_requests.unwrap_or_default()))
     }
 
     async fn fee_recipient(&self) -> Result<ExecutionAddress> {
