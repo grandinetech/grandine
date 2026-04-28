@@ -9,6 +9,7 @@ use anyhow::{Result, bail, ensure};
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use eth1_api::RealController;
+use execution_engine::NullExecutionEngine;
 use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
     ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
@@ -497,6 +498,8 @@ impl<P: Preset> Batch<P> {
                 &ExecutionPayloadEnvelopeOrigin::BackSync,
                 || Some((block.clone_arc(), PayloadStatus::Optimistic)),
                 || Some(head_state.clone_arc()),
+                // TODO(Gloas): not sure if we should notify execution engine when we do back sync
+                NullExecutionEngine,
             )
         })?;
 
