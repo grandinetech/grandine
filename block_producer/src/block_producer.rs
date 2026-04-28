@@ -1661,9 +1661,15 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .map(|v| v.message.execution_requests.hash_tree_root())
             .unwrap_or_default();
 
+        let parent_root = state.latest_block_header().hash_tree_root();
+
         let payload_bid = ExecutionPayloadBid {
-            parent_block_hash: state.latest_block_hash(),
-            parent_block_root: state.latest_block_header().hash_tree_root(),
+            parent_block_hash: if snapshot.should_extend_payload(parent_root) {
+                state.latest_execution_payload_bid().block_hash
+            } else {
+                state.latest_execution_payload_bid().parent_block_hash
+            },
+            parent_block_root: parent_root,
             block_hash: payload.block_hash(),
             prev_randao: payload.prev_randao(),
             fee_recipient,
@@ -2172,33 +2178,18 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     async fn get_gloas_envelope_data(
         &self,
     ) -> Option<(GloasExecutionPayload<P>, ExecutionRequests<P>)> {
-        let payload_root = *self
-            .producer_context
-            .cached_payload_roots
-            .lock()
-            .await
-            .cache_get(&self.head_block_root)?;
+        let snapshot = self.producer_context.controller.snapshot();
 
-        let local_payload = self
-            .producer_context
-            .payload_cache
-            .lock()
-            .await
-            .cache_get(&payload_root)
-            .cloned()?;
+        let local_payload =
+            snapshot.cached_execution_payload_envelope_by_root(self.head_block_root)?;
 
-        let WithBlobsAndMev {
-            value: execution_payload,
+        let ExecutionPayloadEnvelope {
             execution_requests,
+            payload,
             ..
-        } = local_payload.result;
+        } = &local_payload.message;
 
-        let ExecutionPayload::Gloas(payload) = execution_payload else {
-            warn_with_peers!("unexpected non-Gloas payload format in Gloas envelope data");
-            return None;
-        };
-
-        Some((payload, execution_requests.unwrap_or_default()))
+        Some((payload.clone(), execution_requests.clone()))
     }
 
     async fn fee_recipient(&self) -> Result<ExecutionAddress> {
