@@ -2,14 +2,14 @@ use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use helper_functions::{
     accessors::{
-        get_builder_payment_quorum_threshold, get_current_epoch, get_next_epoch,
-        ptc_for_slot_for_epoch_processing,
+        get_activation_churn_limit, get_builder_payment_quorum_threshold, get_current_epoch,
+        get_next_epoch, index_of_public_key, ptc_for_slot_for_epoch_processing,
     },
     misc,
 };
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentVector, SszHash as _};
+use ssz::{PersistentList, PersistentVector, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -17,14 +17,16 @@ use types::{
     capella::containers::HistoricalSummary,
     config::Config,
     gloas::{beacon_state::BeaconState, containers::BuilderPendingPayment},
+    phase0::consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
     preset::{BuilderPendingPaymentsLength, Preset},
-    traits::{BeaconState as _, PostGloasBeaconState},
+    traits::{BeaconState as _, PostElectraBeaconState, PostGloasBeaconState},
 };
 
 use super::epoch_intermediates;
 use crate::{
     altair::{self, EpochDeltasForTransition},
-    electra, fulu, unphased,
+    electra::{self, apply_pending_deposit},
+    fulu, unphased,
 };
 
 #[cfg(feature = "metrics")]
@@ -70,7 +72,7 @@ pub fn process_epoch(
     electra::process_registry_updates(config, state, summaries.as_mut_slice())?;
     electra::process_slashings::<_, ()>(state, summaries);
     unphased::process_eth1_data_reset(state);
-    electra::process_pending_deposits(config, pubkey_cache, state)?;
+    process_pending_deposits(config, pubkey_cache, state)?;
     electra::process_pending_consolidations(state)?;
 
     process_builder_pending_payments(state)?;
@@ -90,6 +92,92 @@ pub fn process_epoch(
     process_ptc_window(state)?;
 
     state.cache.advance_epoch();
+
+    Ok(())
+}
+
+#[expect(
+    clippy::useless_let_if_seq,
+    reason = "assignments with multiple variables are more readable with conditional affectation"
+)]
+fn process_pending_deposits<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostElectraBeaconState<P>,
+) -> Result<()> {
+    let next_epoch = get_current_epoch(state) + 1;
+    let available_for_processing =
+        state.deposit_balance_to_consume() + get_activation_churn_limit(config, state);
+
+    let mut processed_amount = 0;
+    let mut next_deposit_index: u64 = 0;
+    let mut deposits_to_postpone = vec![];
+    let mut is_churn_limit_reached = false;
+    let finalized_slot = misc::compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
+
+    for deposit in &state.pending_deposits().clone() {
+        // > Do not process deposit requests if Eth1 bridge deposits are not yet applied.
+        if deposit.slot > GENESIS_SLOT
+            && state.eth1_deposit_index() < state.deposit_requests_start_index()
+        {
+            break;
+        }
+
+        // > Check if deposit has been finalized, otherwise, stop processing.
+        if deposit.slot > finalized_slot {
+            break;
+        }
+
+        // > Check if number of processed deposits has not reached the limit, otherwise, stop processing.
+        if next_deposit_index >= P::MAX_PENDING_DEPOSITS_PER_EPOCH {
+            break;
+        }
+
+        let mut is_validator_exited = false;
+        let mut is_validator_withdrawn = false;
+
+        if let Some(validator_index) = index_of_public_key(state, &deposit.pubkey) {
+            let validator = state.validators().get(validator_index)?;
+
+            is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH;
+            is_validator_withdrawn = validator.withdrawable_epoch < next_epoch;
+        }
+
+        if is_validator_withdrawn {
+            // > Deposited balance will never become active. Increase balance but do not consume churn
+            apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+        } else if is_validator_exited {
+            // > Validator is exiting, postpone the deposit until after withdrawable epoch
+            deposits_to_postpone.push(*deposit);
+        } else {
+            // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
+            is_churn_limit_reached = processed_amount + deposit.amount > available_for_processing;
+
+            if is_churn_limit_reached {
+                break;
+            }
+
+            processed_amount += deposit.amount;
+            apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+        }
+
+        next_deposit_index += 1;
+    }
+
+    *state.pending_deposits_mut() = PersistentList::try_from_iter(
+        state
+            .pending_deposits()
+            .into_iter()
+            .copied()
+            .skip(next_deposit_index.try_into()?)
+            .chain(deposits_to_postpone),
+    )?;
+
+    if is_churn_limit_reached {
+        *state.deposit_balance_to_consume_mut() = available_for_processing - processed_amount;
+    } else {
+        *state.deposit_balance_to_consume_mut() = 0;
+    }
 
     Ok(())
 }
