@@ -230,7 +230,9 @@ where
                     finalized_epoch: chain_link.finalized_checkpoint.epoch,
                     validity: chain_link.payload_status,
                     weight: unfinalized_block.attesting_balances.pending,
-                    execution_block_hash: chain_link.execution_block_hash().unwrap_or_default(),
+                    execution_block_hash: chain_link
+                        .execution_block_hash(store.chain_config())
+                        .unwrap_or_default(),
                 }
             })
             .collect();
