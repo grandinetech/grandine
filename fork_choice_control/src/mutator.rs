@@ -1877,8 +1877,7 @@ where
                     submission_time,
                 };
 
-                // TODO: (gloas): gloas block can be imported without sidecars
-                if self.store.contains_block(parent_root) {
+                if self.store.contains_block_and_data_available(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
                     debug_with_peers!(

@@ -576,22 +576,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     // Pre-Gloas: once block imported into fork choice, data is also available,
-    // Post-Gloas: block can be imported without data availability check
-    // For Pre-Gloas block, checking `Self::contains_block` is enough,
-    // but for Post-Gloas, an additional data availability check is required
+    // Post-Gloas: block can be imported without data, an additional data availability check is required
     #[must_use]
     pub fn contains_block_and_data_available(&self, block_root: H256) -> bool {
-        let is_block_imported = self.contains_block(block_root);
-        let is_pre_gloas = self
-            .block(block_root)
-            .map(|chain_link| chain_link.value.phase() < Phase::Gloas)
-            .unwrap_or(false);
+        let Some(chain_link) = self.chain_link(block_root) else {
+            return false;
+        };
 
-        is_block_imported
-            && (is_pre_gloas
-                || self
-                    .cached_execution_payload_envelope_by_root(block_root)
-                    .is_some())
+        if chain_link.block.phase() < Phase::Gloas {
+            return true;
+        }
+
+        self.indices_of_missing_data_columns(&chain_link.block)
+            .is_empty()
     }
 
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
