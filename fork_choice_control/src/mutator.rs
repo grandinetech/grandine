@@ -1203,13 +1203,21 @@ where
                     origin,
                 };
 
-                self.delayed_until_envelope
-                    .entry(block_root)
-                    .or_default()
-                    .aggregates
-                    .push(pending_aggregate_and_proof);
+                if self.store.is_payload_verified(block_root) {
+                    self.retry_aggregate_and_proof(wait_group.clone(), pending_aggregate_and_proof);
+                } else {
+                    let peer_id = pending_aggregate_and_proof
+                        .origin
+                        .gossip_id_ref()
+                        .map(|gossip_id| gossip_id.source);
+                    self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, peer_id));
 
-                self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, None));
+                    self.delayed_until_envelope
+                        .entry(block_root)
+                        .or_default()
+                        .aggregates
+                        .push(pending_aggregate_and_proof);
+                }
             }
             Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1408,13 +1416,7 @@ where
                     metrics.register_mutator_attestation(&["delayed_until_payload"]);
                 }
 
-                self.delayed_until_envelope
-                    .entry(block_root)
-                    .or_default()
-                    .attestations
-                    .push(attestation);
-
-                self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, None));
+                self.delay_attestation_until_payload(wait_group, attestation, block_root);
             }
             Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1508,11 +1510,8 @@ where
                     None
                 }
                 Ok(AttestationAction::DelayUntilPayload(attestation, block_root)) => {
-                    self.delayed_until_envelope
-                        .entry(block_root)
-                        .or_default()
-                        .attestations
-                        .push(attestation);
+                    self.delay_attestation_until_payload(wait_group, attestation, block_root);
+
                     None
                 }
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
@@ -3241,7 +3240,7 @@ where
 
         self.update_store_snapshot();
 
-        if let Some(delayed) = self.delayed_until_envelope.remove(&beacon_block_root) {
+        if let Some(delayed) = self.take_delayed_until_envelope(beacon_block_root) {
             self.retry_delayed(delayed, wait_group);
         }
 
@@ -3562,6 +3561,29 @@ where
         }
     }
 
+    fn delay_attestation_until_payload(
+        &mut self,
+        wait_group: &W,
+        attestation: PendingAttestation<P>,
+        block_root: H256,
+    ) {
+        if self.store.is_payload_verified(block_root) {
+            self.retry_attestation(wait_group.clone(), attestation);
+        } else {
+            let peer_id = attestation
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+            self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, peer_id));
+
+            self.delayed_until_envelope
+                .entry(block_root)
+                .or_default()
+                .attestations
+                .push(attestation);
+        }
+    }
+
     fn delay_execution_payload_envelope_until_block(
         &mut self,
         wait_group: W,
@@ -3843,6 +3865,10 @@ where
         self.delayed_until_data.remove(&block_root)
     }
 
+    fn take_delayed_until_envelope(&mut self, beacon_block_root: H256) -> Option<Delayed<P>> {
+        self.delayed_until_envelope.remove(&beacon_block_root)
+    }
+
     // `wait_group` is a reference not just to pass Clippy lints but for correctness as well.
     // The referenced value must not be dropped before the current message is handled.
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
@@ -4094,12 +4120,14 @@ where
 
     fn prune_delayed_after_finalization(&mut self) {
         let delayed = self.prune_delayed_until_block();
+        let delayed_until_envelope = self.prune_delayed_until_envelope();
         let delayed_until_blobs = self.prune_delayed_until_blobs();
         let delayed_until_data = self.prune_delayed_until_data();
         let waiting = self.prune_waiting_for_checkpoint_states();
 
         for gossip_id in delayed
             .into_iter()
+            .chain(delayed_until_envelope)
             .chain(delayed_until_blobs)
             .chain(delayed_until_data)
             .chain(waiting)
@@ -4214,6 +4242,50 @@ where
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.data_column_sidecar.slot().saturating_sub(1) <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            !delayed.is_empty()
+        });
+
+        gossip_ids
+    }
+
+    fn prune_delayed_until_envelope(&mut self) -> Vec<GossipId> {
+        let previous_epoch = self.store.previous_epoch();
+
+        let mut gossip_ids = vec![];
+
+        self.delayed_until_envelope.retain(|_, delayed| {
+            let Delayed {
+                aggregates,
+                attestations,
+                ..
+            } = delayed;
+
+            gossip_ids.extend(
+                aggregates
+                    .extract_if(.., |pending| {
+                        let epoch = pending
+                            .aggregate_and_proof
+                            .message()
+                            .aggregate()
+                            .data()
+                            .target
+                            .epoch;
+
+                        epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                attestations
+                    .extract_if(.., |pending| {
+                        let epoch = pending.data().target.epoch;
+
+                        epoch < previous_epoch
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
