@@ -18,7 +18,7 @@ use types::{
 use crate::{
     accessors::{
         get_activation_exit_churn_limit, get_consolidation_churn_limit, get_current_epoch,
-        get_validator_churn_limit,
+        get_exit_churn_limit, get_validator_churn_limit,
     },
     error::Error,
     misc::compute_activation_exit_epoch,
@@ -191,7 +191,11 @@ pub fn compute_exit_epoch_and_update_churn<P: Preset>(
             state,
         ))?);
 
-    let per_epoch_churn = get_activation_exit_churn_limit(config, state);
+    let per_epoch_churn = if state.is_post_gloas() {
+        get_exit_churn_limit(config, state)
+    } else {
+        get_activation_exit_churn_limit(config, state)
+    };
 
     // > New epoch for exits.
     let mut exit_balance_to_consume = if state.earliest_exit_epoch() < earliest_exit_epoch {
