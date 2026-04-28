@@ -121,6 +121,10 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub churn_limit_quotient: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
+    pub churn_limit_quotient_gloas: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub consolidation_churn_limit_quotient: NonZeroU64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub ejection_balance: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub inactivity_score_bias: NonZeroU64,
@@ -134,6 +138,8 @@ pub struct Config {
     pub min_per_epoch_churn_limit_electra: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_per_epoch_activation_exit_churn_limit: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_per_epoch_activation_churn_limit_gloas: Gwei,
 
     // Fork choice
     #[serde(with = "serde_utils::string_or_native")]
@@ -280,6 +286,8 @@ impl Default for Config {
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
+            churn_limit_quotient_gloas: nonzero!(0x8000_u64), // 32_768
+            consolidation_churn_limit_quotient: nonzero!(0x0001_0000_u64), // 65_536
             ejection_balance: 16_000_000_000,
             inactivity_score_bias: nonzero!(4_u64),
             inactivity_score_recovery_rate: 16,
@@ -287,6 +295,7 @@ impl Default for Config {
             min_per_epoch_churn_limit: 4,
             min_per_epoch_churn_limit_electra: 128_000_000_000,
             max_per_epoch_activation_exit_churn_limit: 256_000_000_000,
+            max_per_epoch_activation_churn_limit_gloas: 256_000_000_000,
 
             // Fork choice
             proposer_score_boost: 40,
@@ -432,10 +441,13 @@ impl Config {
 
             // Validator cycle
             churn_limit_quotient: nonzero!(32_u64),
+            churn_limit_quotient_gloas: nonzero!(16_u64),
+            consolidation_churn_limit_quotient: nonzero!(32_u64),
             max_per_epoch_activation_churn_limit: 4,
             min_per_epoch_churn_limit: 2,
             min_per_epoch_churn_limit_electra: 64_000_000_000,
             max_per_epoch_activation_exit_churn_limit: 128_000_000_000,
+            max_per_epoch_activation_churn_limit_gloas: 128_000_000_000,
 
             // Deposit contract
             deposit_chain_id: 5,
