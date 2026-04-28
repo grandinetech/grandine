@@ -9861,6 +9861,7 @@ dependencies = [
  "enum-iterator",
  "eth1_api",
  "eth2_libp2p",
+ "execution_engine",
  "features",
  "fork_choice_control",
  "fork_choice_store",

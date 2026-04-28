@@ -1562,15 +1562,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 // See: https://github.com/grandinetech/grandine/blob/4413b701c78064c9624e8914eb30592c6f2ac835/types/src/electra/container_impls.rs#L160
                                 // Restore from the local validator's signed attestation, which
                                 // holds the gloas_index all attestors in this slot agreed on.
-                                if phase >= Phase::Gloas {
-                                    if let Some(gloas_index) = self
+                                if phase >= Phase::Gloas
+                                    && let Some(gloas_index) = self
                                         .own_singular_attestations
                                         .get()
                                         .and_then(|a| a.first())
                                         .map(|a| a.attestation.data().index)
-                                    {
-                                        aggregate.data.index = gloas_index;
-                                    }
+                                {
+                                    aggregate.data.index = gloas_index;
                                 }
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
