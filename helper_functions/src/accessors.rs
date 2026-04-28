@@ -1016,9 +1016,34 @@ pub fn get_consolidation_churn_limit<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
 ) -> Result<Gwei> {
-    get_balance_churn_limit(config, state)
-        .try_sub(get_activation_exit_churn_limit(config, state))
-        .map_err(Into::into)
+    if state.is_post_gloas() {
+        total_active_balance(state)
+            .div(config.consolidation_churn_limit_quotient)
+            .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
+            .pipe(Ok)
+    } else {
+        get_balance_churn_limit(config, state)
+            .try_sub(get_activation_exit_churn_limit(config, state))
+            .map_err(Into::into)
+    }
+}
+
+#[must_use]
+pub fn get_activation_churn_limit<P: Preset>(config: &Config, state: &impl BeaconState<P>) -> Gwei {
+    let churn = total_active_balance(state)
+        .div(config.churn_limit_quotient_gloas)
+        .max(config.min_per_epoch_churn_limit_electra)
+        .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT);
+
+    churn.min(config.max_per_epoch_activation_churn_limit_gloas)
+}
+
+#[must_use]
+pub fn get_exit_churn_limit<P: Preset>(config: &Config, state: &impl BeaconState<P>) -> Gwei {
+    total_active_balance(state)
+        .div(config.churn_limit_quotient_gloas)
+        .max(config.min_per_epoch_churn_limit_electra)
+        .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
 }
 
 #[must_use]
