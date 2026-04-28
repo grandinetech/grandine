@@ -245,6 +245,7 @@ pub enum P2pMessage<P: Preset> {
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
     BlockNeeded(H256, Option<PeerId>),
+    PayloadEnvelopeNeeded(H256, Option<PeerId>),
     FinalizedCheckpoint(Checkpoint),
     HeadChanged(H256),
     Stop,
