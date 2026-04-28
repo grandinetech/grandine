@@ -515,6 +515,8 @@ where
                         .collect();
 
                     let execution_payload_opt = if head.block.phase() >= Phase::Gloas {
+                        // TODO(Gloas): review if this is still needed: notify new payload should only happen after validating payload envelope
+
                         self.execution_payload_envelope_by_root(head.block_root)?
                             .map(|envelope| {
                                 params = Some(ExecutionPayloadParams::Electra {
