@@ -795,7 +795,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_propose_tick_times.start_timer());
 
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                // TODO(Gloas): review and fix
+                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let slot_head = Some(slot_head);
 
                 self.discard_previous_slot_attestations();
                 self.discard_previous_slot_payload_attestations();
@@ -808,7 +810,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                // TODO(Gloas): review and fix
+                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let slot_head = Some(slot_head);
 
                 if let Err(error) = self
                     .attest_and_start_aggregating(&wait_group, slot_head.as_ref())
@@ -832,7 +836,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_aggregate_tick_times.start_timer());
 
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                // TODO(Gloas): review and fix
+                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let slot_head = Some(slot_head);
 
                 self.publish_aggregates_and_proofs(&wait_group, slot_head.as_ref())
                     .await;
@@ -845,7 +851,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .await;
             }
             TickKind::PayloadAttest => {
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                // TODO(Gloas): review and fix
+                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let slot_head = Some(slot_head);
 
                 if let Err(error) = self.attest_payload(&wait_group, slot_head.as_ref()).await {
                     error_with_peers!(
