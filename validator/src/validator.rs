@@ -27,7 +27,7 @@ use features::Feature;
 use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
-    PayloadAttestationOrigin, PayloadPresence, StateCacheError,
+    PayloadAttestationOrigin, StateCacheError,
 };
 use futures::{
     channel::{
@@ -1949,22 +1949,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let phase = slot_head.phase();
 
-        // If the attested block is in the current slot, the payload can't have been
-        // revealed yet, so always use 0.
-        // See: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/validator.md#attestation
+        // See: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.5/specs/gloas/validator.md#attestation
         let gloas_index = (phase >= Phase::Gloas).then(|| {
-            let beacon_block_slot = slot_head.beacon_state.latest_block_header().slot;
-            if beacon_block_slot == slot_head.slot() {
-                0_u64
-            } else {
-                match self
-                    .controller
-                    .payload_presence_by_block_root(slot_head.beacon_block_root)
-                {
-                    PayloadPresence::Full => 1,
-                    PayloadPresence::Empty | PayloadPresence::Pending => 0,
-                }
-            }
+            u64::from(
+                slot_head.beacon_state.latest_block_header().slot != slot_head.slot()
+                    && self
+                        .controller
+                        .is_payload_verified(slot_head.beacon_block_root),
+            )
         });
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {

@@ -114,6 +114,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     delayed_until_blobs: HashMap<H256, PendingBlock<P>>,
     delayed_until_block: HashMap<H256, Delayed<P>>,
     delayed_until_data: HashMap<H256, PendingExecutionPayloadEnvelope<P>>,
+    delayed_until_envelope: HashMap<H256, Delayed<P>>,
     // We previously ignored objects that would have to be delayed more than one slot. This was
     // based on the assumption that one slot is enough to account for clock differences between
     // nodes. However, this meant that if the application lagged enough to miss multiple slot
@@ -198,6 +199,7 @@ where
             delayed_until_blobs: HashMap::new(),
             delayed_until_block: HashMap::new(),
             delayed_until_data: HashMap::new(),
+            delayed_until_envelope: HashMap::new(),
             delayed_until_slot: BTreeMap::new(),
             delayed_until_payload: HashMap::new(),
             delayed_until_state: HashMap::new(),
@@ -1187,6 +1189,22 @@ where
                     block_root,
                 );
             }
+            Ok(AggregateAndProofAction::DelayUntilPayload(aggregate_and_proof, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_aggregate_and_proof(&["delayed_until_payload"]);
+                }
+
+                let pending_aggregate_and_proof = PendingAggregateAndProof {
+                    aggregate_and_proof,
+                    origin,
+                };
+
+                self.delayed_until_envelope
+                    .entry(block_root)
+                    .or_default()
+                    .aggregates
+                    .push(pending_aggregate_and_proof);
+            }
             Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_aggregate_and_proof(&["delayed_until_slot"]);
@@ -1374,6 +1392,17 @@ where
 
                 self.delay_attestation_until_block(wait_group, attestation, block_root);
             }
+            Ok(AttestationAction::DelayUntilPayload(attestation, block_root)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_attestation(&["delayed_until_payload"]);
+                }
+
+                self.delayed_until_envelope
+                    .entry(block_root)
+                    .or_default()
+                    .attestations
+                    .push(attestation);
+            }
             Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_slot"]);
@@ -1463,6 +1492,14 @@ where
                 Ok(AttestationAction::Ignore(_)) => None,
                 Ok(AttestationAction::DelayUntilBlock(attestation, block_root)) => {
                     self.delay_attestation_until_block(wait_group, attestation, block_root);
+                    None
+                }
+                Ok(AttestationAction::DelayUntilPayload(attestation, block_root)) => {
+                    self.delayed_until_envelope
+                        .entry(block_root)
+                        .or_default()
+                        .attestations
+                        .push(attestation);
                     None
                 }
                 Ok(AttestationAction::DelayUntilSlot(attestation)) => {
@@ -3189,9 +3226,15 @@ where
         wait_group: &W,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     ) {
+        let beacon_block_root = envelope.block_root();
+
         self.store_mut().apply_execution_payload_envelope(envelope);
 
         self.update_store_snapshot();
+
+        if let Some(delayed) = self.delayed_until_envelope.remove(&beacon_block_root) {
+            self.retry_delayed(delayed, wait_group);
+        }
 
         if !self.storage.prune_storage_enabled() {
             self.spawn(PersistExecutionPayloadEnvelopesTask {
