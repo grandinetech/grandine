@@ -3439,9 +3439,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .collect();
 
         // TODO(Gloas): this will change in consensus specs v1.7.0-alpha.6
-        let parent_beacon_block_root = post_gloas_state
-            .latest_execution_payload_header()
-            .parent_hash();
+        let parent_beacon_block_root = post_gloas_state.latest_block_header().parent_root;
 
         let params = Some(ExecutionPayloadParams::Electra {
             versioned_hashes,
