@@ -905,7 +905,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // > Return whether the execution payload envelope for the beacon block with
     // > root ``root`` has been locally delivered and verified via
     // > ``on_execution_payload_envelope``.
-    fn is_payload_verified(&self, block_root: H256) -> bool {
+    pub fn is_payload_verified(&self, block_root: H256) -> bool {
         self.payloads.contains(&block_root)
     }
 
@@ -2023,6 +2023,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     block_root,
                 ));
             }
+            PartialAttestationAction::DelayUntilPayload(block_root) => {
+                return Ok(AggregateAndProofAction::DelayUntilPayload(
+                    aggregate_and_proof,
+                    block_root,
+                ));
+            }
             PartialAttestationAction::DelayUntilSlot => {
                 return Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof));
             }
@@ -2181,6 +2187,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
             Ok(PartialAttestationAction::DelayUntilBlock(block_root)) => {
                 return Ok(AttestationAction::DelayUntilBlock(attestation, block_root));
+            }
+            Ok(PartialAttestationAction::DelayUntilPayload(block_root)) => {
+                return Ok(AttestationAction::DelayUntilPayload(
+                    attestation,
+                    block_root,
+                ));
             }
             Ok(PartialAttestationAction::DelayUntilSlot) => {
                 return Ok(AttestationAction::DelayUntilSlot(attestation));
@@ -2468,7 +2480,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             );
 
-            // This validation is present in the fork choice rule but not the Networking specification.
             if ghost_vote_block.message().slot() == slot {
                 ensure!(
                     index == 0,
@@ -2479,12 +2490,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             if index == 1 {
-                ensure!(
-                    self.is_payload_verified(beacon_block_root),
-                    Error::AttestationDataInvalidPayloadStatus {
-                        attestation: attestation.clone_arc()
+                if !self.is_payload_verified(beacon_block_root) {
+                    if is_from_block {
+                        bail!(Error::AttestationDataInvalidPayloadStatus {
+                            attestation: attestation.clone_arc()
+                        });
                     }
-                );
+
+                    return Ok(PartialAttestationAction::DelayUntilPayload(
+                        beacon_block_root,
+                    ));
+                }
             }
         }
 
