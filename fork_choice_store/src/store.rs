@@ -3280,15 +3280,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        // [REJECT] block.slot equals envelope.slot
-        ensure!(
-            block.message().slot() == slot,
-            Error::<P>::ExecutionPayloadEnvelopeSlotMismatch {
-                expected: block.message().slot(),
-                actual: slot,
-            },
-        );
-
         let Some(bid) = block
             .message()
             .body()
@@ -3352,6 +3343,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 beacon_block_root,
             ));
         };
+
+        // [REJECT] block.slot equals envelope.slot
+        ensure!(
+            state.slot() == slot,
+            Error::<P>::ExecutionPayloadEnvelopeSlotMismatch {
+                expected: state.slot(),
+                actual: slot,
+            },
+        );
 
         let mut header = state.latest_block_header();
 
