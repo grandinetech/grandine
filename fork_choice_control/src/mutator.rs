@@ -1204,6 +1204,8 @@ where
                     .or_default()
                     .aggregates
                     .push(pending_aggregate_and_proof);
+
+                self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, None));
             }
             Ok(AggregateAndProofAction::DelayUntilSlot(aggregate_and_proof)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1402,6 +1404,8 @@ where
                     .or_default()
                     .attestations
                     .push(attestation);
+
+                self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, None));
             }
             Ok(AttestationAction::DelayUntilSlot(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {

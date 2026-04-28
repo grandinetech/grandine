@@ -517,6 +517,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             P2pToSync::FinalizedCheckpoint(finalized_checkpoint)
                                 .send(&self.channels.p2p_to_sync_tx);
                         }
+                        P2pMessage::PayloadEnvelopeNeeded(root, peer_id) => {
+                            P2pToSync::PayloadEnvelopeNeeded(root, peer_id)
+                                .send(&self.channels.p2p_to_sync_tx);
+                        }
                         P2pMessage::HeadChanged(_root) => {
                             // This message is only used in tests
                         }
