@@ -1434,7 +1434,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn safe_execution_payload_hash(&self) -> ExecutionBlockHash {
         self.justified_chain_link()
-            .and_then(ChainLink::execution_block_hash)
+            .and_then(|chain_link| chain_link.execution_block_hash(self.chain_config()))
             .unwrap_or_default()
     }
 
@@ -1443,7 +1443,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > As per EIP-3675, before a post-transition block is finalized,
         // > `notify_forkchoice_updated` MUST be called with `finalized_block_hash = Hash32()`.
         self.last_finalized()
-            .execution_block_hash()
+            .execution_block_hash(self.chain_config())
             .unwrap_or_default()
     }
 
@@ -4221,7 +4221,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let block_root = chain_link.block_root;
         let block = &chain_link.block;
         let parent_root = block.message().parent_root();
-        let execution_block_hash = block.execution_block_hash();
+        let execution_block_hash = block.execution_block_hash(self.chain_config());
 
         let new_block_location;
 
@@ -4332,6 +4332,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let old_len = finalized.len();
 
+        let chain_config = self.chain_config.clone_arc();
+
         finalized.extend(unfinalized_blocks.into_iter().enumerate().map(
             |(offset, unfinalized_block)| {
                 let block_root = unfinalized_block.block_root();
@@ -4344,7 +4346,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     "roots of unfinalized blocks should be present in self.unfinalized_locations",
                 );
 
-                if let Some(block_hash) = unfinalized_block.chain_link.execution_block_hash() {
+                if let Some(block_hash) = unfinalized_block
+                    .chain_link
+                    .execution_block_hash(&chain_config)
+                {
                     execution_payload_locations.remove(&block_hash);
                 }
 
@@ -5331,7 +5336,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             self.unfinalized_chain_ending_with(segment, *position)
                 .skip(1)
-                .map_while(ChainLink::execution_block_hash)
+                .map_while(|chain_link| chain_link.execution_block_hash(self.chain_config()))
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .for_each(|hash| {
@@ -5374,7 +5379,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         for hash in self
             .unfinalized_chain_ending_with(ending_segment, last_included)
-            .map_while(ChainLink::execution_block_hash)
+            .map_while(|chain_link| chain_link.execution_block_hash(self.chain_config()))
         {
             if hash == ancestor {
                 return hashes;
