@@ -1011,9 +1011,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         },
                     })),
                     Phase::Gloas => {
-                        let payload_attestations = self.prepare_payload_attestations().await?;
-
                         let snapshot = self.producer_context.controller.snapshot();
+                        let parent_block = self.producer_context.controller.head_block();
+
+                        // TODO(gloas): payload attestations are valid only for one slot after block.
+                        // spec says: "The slot of the parent block is exactly one slot before the proposing slot."
+                        let payload_attestations = if parent_block.value().to_header().message.slot
+                            != misc::previous_slot(slot)
+                        {
+                            Default::default()
+                        } else {
+                            self.prepare_payload_attestations().await?
+                        };
+
                         let parent_execution_requests =
                             if snapshot.should_extend_payload(parent_root) {
                                 // TODO(gloas): the block root needs to be checked if it is gloas or not.
