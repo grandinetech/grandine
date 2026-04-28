@@ -316,7 +316,7 @@ pub fn process_pending_deposits<P: Preset>(
     Ok(())
 }
 
-fn apply_pending_deposit<P: Preset>(
+pub fn apply_pending_deposit<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
