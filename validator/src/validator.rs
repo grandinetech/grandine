@@ -1554,10 +1554,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     selection_proof,
                                 })
                             } else {
-                                let aggregate = operation_pools::convert_to_electra_attestation(
-                                    aggregate.clone(),
-                                )
-                                .ok()?;
+                                let mut aggregate =
+                                    operation_pools::convert_to_electra_attestation(
+                                        aggregate.clone(),
+                                    )
+                                    .ok()?;
+
+                                // TODO(gloas): this is a quick fix, we should refactor pool to preserve data.index through
+                                // aggregation so this patch is no longer needed.
+                                // In Gloas, data.index signals payload presence (0 or 1), convert_to_electra_attestation always set it to zeros.
+                                // See: https://github.com/grandinetech/grandine/blob/4413b701c78064c9624e8914eb30592c6f2ac835/types/src/electra/container_impls.rs#L160
+                                // Restore from the local validator's signed attestation, which
+                                // holds the gloas_index all attestors in this slot agreed on.
+                                if phase >= Phase::Gloas {
+                                    if let Some(gloas_index) = self
+                                        .own_singular_attestations
+                                        .get()
+                                        .and_then(|a| a.first())
+                                        .map(|a| a.attestation.data().index)
+                                    {
+                                        aggregate.data.index = gloas_index;
+                                    }
+                                }
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
                                     aggregator_index,
