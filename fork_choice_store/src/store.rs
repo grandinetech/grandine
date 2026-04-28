@@ -49,7 +49,7 @@ use types::{
     Validators,
     combined::{
         Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
-        SignedAggregateAndProof, SignedBeaconBlock,
+        ExecutionPayloadParams, SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -3164,7 +3164,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-        _execution_engine: impl ExecutionEngine<P> + Send,
+        execution_engine: impl ExecutionEngine<P> + Send,
         _verifier: impl Verifier + Send,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         let block_root = envelope.block_root();
@@ -3201,6 +3201,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             origin,
             block_info,
             state_fn,
+            execution_engine,
         )
     }
 
@@ -3239,6 +3240,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         origin: &ExecutionPayloadEnvelopeOrigin,
         block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+        execution_engine: impl ExecutionEngine<P> + Send,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
@@ -3428,6 +3430,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 SignatureKind::ExecutionPayloadEnvelope,
             )?;
         }
+
+        let versioned_hashes = bid
+            .blob_kzg_commitments
+            .iter()
+            .copied()
+            .map(misc::kzg_commitment_to_versioned_hash)
+            .collect();
+
+        // TODO(Gloas): this will change in consensus specs v1.7.0-alpha.6
+        let parent_beacon_block_root = post_gloas_state
+            .latest_execution_payload_header()
+            .parent_hash();
+
+        let params = Some(ExecutionPayloadParams::Electra {
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests: envelope.message.execution_requests.clone(),
+        });
+
+        let payload = envelope.message.payload.clone().into();
+
+        // TODO(Gloas): review envelope validation for HTTP API
+        execution_engine.notify_new_payload(beacon_block_root, payload, params, None)?;
 
         Ok(ExecutionPayloadEnvelopeAction::Accept(envelope))
     }
