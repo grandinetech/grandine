@@ -202,9 +202,9 @@ pub mod electra {
         process_operations, process_withdrawal_request, process_withdrawals,
     };
     pub(crate) use epoch_processing::{
-        epoch_report, is_valid_deposit_signature, process_effective_balance_updates, process_epoch,
-        process_pending_consolidations, process_pending_deposits, process_registry_updates,
-        process_slashings,
+        apply_pending_deposit, epoch_report, is_valid_deposit_signature,
+        process_effective_balance_updates, process_epoch, process_pending_consolidations,
+        process_pending_deposits, process_registry_updates, process_slashings,
     };
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
