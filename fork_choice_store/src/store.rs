@@ -3499,12 +3499,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         }
 
-        let Some(ref state) = self.head().state else {
+        let Some(link) = self.chain_link(block_root) else {
             return Ok(PayloadAttestationAction::DelayUntilBlock(
                 payload_attestation,
                 block_root,
             ));
         };
+
+        let state = link.state(self);
 
         if payload_attestation.origin.is_from_block() {
             let parent_root = state.latest_block_header().parent_root;
@@ -3535,7 +3537,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // [REJECT] The message's validator index is within the payload committee in get_ptc(state, data.slot).
         // The state is the head state corresponding to processing the block up to the current slot as determined by the fork choice.
         let attesting_indices_positions = match self.attesting_indices_positions(
-            state,
+            &state,
             &payload_attestation.item,
             !skip_signatures_verification && payload_attestation.origin.verify_signatures(),
         ) {
