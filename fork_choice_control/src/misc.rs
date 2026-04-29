@@ -10,7 +10,7 @@ use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
     AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
     ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction, PayloadAttestationItem,
-    PayloadAttestationValidationError,
+    PayloadAttestationValidationError, ProposerPreferencesOrigin,
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
@@ -24,7 +24,7 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadEnvelope,
+    gloas::containers::{SignedExecutionPayloadEnvelope, SignedProposerPreferences},
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -44,6 +44,7 @@ pub struct Delayed<P: Preset> {
     pub blob_sidecars: Vec<PendingBlobSidecar<P>>,
     pub data_column_sidecars: Vec<PendingDataColumnSidecar<P>>,
     pub execution_payload_envelopes: Vec<PendingExecutionPayloadEnvelope<P>>,
+    pub proposer_preferences: Vec<PendingProposerPreferences>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,6 +104,7 @@ impl<P: Preset> Delayed<P> {
             blob_sidecars,
             data_column_sidecars,
             execution_payload_envelopes,
+            proposer_preferences,
         } = self;
 
         blocks.is_empty()
@@ -113,6 +115,7 @@ impl<P: Preset> Delayed<P> {
             && blob_sidecars.is_empty()
             && data_column_sidecars.is_empty()
             && execution_payload_envelopes.is_empty()
+            && proposer_preferences.is_empty()
     }
 }
 
@@ -187,6 +190,12 @@ pub struct PendingExecutionPayloadEnvelope<P: Preset> {
     pub origin: ExecutionPayloadEnvelopeOrigin,
     pub processing_timings: ProcessingTimings,
     pub tracing_span: Span,
+}
+
+#[derive(Debug)]
+pub struct PendingProposerPreferences {
+    pub signed_preferences: Arc<SignedProposerPreferences>,
+    pub origin: ProposerPreferencesOrigin,
 }
 
 pub struct VerifyAggregateAndProofResult<P: Preset> {
