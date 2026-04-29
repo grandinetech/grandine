@@ -244,10 +244,6 @@ pub enum Error<P: Preset> {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<PayloadExpectedWithdrawals<P>>,
     },
-    #[error("proposer preferences has invalid proposal slot: {signed_preferences:?}")]
-    InvalidProposerPreferencesProposalSlot {
-        signed_preferences: Arc<SignedProposerPreferences>,
-    },
     #[error("proposer preferences has invalid signature: {signed_preferences:?}")]
     InvalidProposerPreferencesSignature {
         signed_preferences: Arc<SignedProposerPreferences>,

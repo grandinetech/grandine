@@ -18,9 +18,8 @@ mod tested_types {
         phase0::containers::{
             AggregateAndProof, Attestation, AttestationData, AttesterSlashing, BeaconBlockHeader,
             Checkpoint, Deposit, DepositData, DepositMessage, Eth1Data, Fork, ForkData,
-            HistoricalBatch, IndexedAttestation, PendingAttestation, ProposerSlashing,
-            SignedAggregateAndProof, SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData,
-            Validator, VoluntaryExit,
+            HistoricalBatch, IndexedAttestation, ProposerSlashing, SignedAggregateAndProof,
+            SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
 }
@@ -200,12 +199,6 @@ tests_for_type! {
     LightClientUpdate<_>,
     "consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/LightClientUpdate/*/*",
     "consensus-spec-tests/tests/minimal/bellatrix/ssz_static/LightClientUpdate/*/*",
-}
-
-tests_for_type! {
-    PendingAttestation<_>,
-    "consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/PendingAttestation/*/*",
-    "consensus-spec-tests/tests/minimal/bellatrix/ssz_static/PendingAttestation/*/*",
 }
 
 tests_for_type! {
