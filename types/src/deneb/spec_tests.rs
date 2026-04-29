@@ -21,9 +21,8 @@ mod tested_types {
         phase0::containers::{
             AggregateAndProof, Attestation, AttestationData, AttesterSlashing, BeaconBlockHeader,
             Checkpoint, Deposit, DepositData, DepositMessage, Eth1Data, Fork, ForkData,
-            HistoricalBatch, IndexedAttestation, PendingAttestation, ProposerSlashing,
-            SignedAggregateAndProof, SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData,
-            Validator, VoluntaryExit,
+            IndexedAttestation, ProposerSlashing, SignedAggregateAndProof, SignedBeaconBlockHeader,
+            SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
 }
@@ -182,12 +181,6 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    HistoricalBatch<_>,
-    "consensus-spec-tests/tests/mainnet/deneb/ssz_static/HistoricalBatch/*/*",
-    "consensus-spec-tests/tests/minimal/deneb/ssz_static/HistoricalBatch/*/*",
-}
-
-tests_for_type! {
     HistoricalSummary,
     "consensus-spec-tests/tests/mainnet/deneb/ssz_static/HistoricalSummary/*/*",
     "consensus-spec-tests/tests/minimal/deneb/ssz_static/HistoricalSummary/*/*",
@@ -227,12 +220,6 @@ tests_for_type! {
     LightClientUpdate<_>,
     "consensus-spec-tests/tests/mainnet/deneb/ssz_static/LightClientUpdate/*/*",
     "consensus-spec-tests/tests/minimal/deneb/ssz_static/LightClientUpdate/*/*",
-}
-
-tests_for_type! {
-    PendingAttestation<_>,
-    "consensus-spec-tests/tests/mainnet/deneb/ssz_static/PendingAttestation/*/*",
-    "consensus-spec-tests/tests/minimal/deneb/ssz_static/PendingAttestation/*/*",
 }
 
 tests_for_type! {

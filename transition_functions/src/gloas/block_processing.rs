@@ -461,9 +461,7 @@ fn process_validators_sweep_withdrawals<P: Preset>(
 
 pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
     // Return early if the parent block is empty.
-    if state.latest_block_hash().is_zero()
-        || state.latest_execution_payload_bid().block_hash != state.latest_block_hash()
-    {
+    if state.latest_execution_payload_bid().block_hash != state.latest_block_hash() {
         return Ok(());
     }
 
@@ -686,10 +684,10 @@ pub fn process_parent_execution_payload<P: Preset>(
     block: &BeaconBlock<P>,
 ) -> Result<()> {
     let bid = &block.body.signed_execution_payload_bid.message;
-    let parent_bid = state.latest_execution_payload_bid().clone();
+    let parent_bid = state.latest_execution_payload_bid();
     let requests = &block.body.parent_execution_requests;
 
-    if parent_bid.block_hash.is_zero() || bid.parent_block_hash != parent_bid.block_hash {
+    if bid.parent_block_hash != parent_bid.block_hash {
         // Parent was EMPTY -- no execution requests expected
         ensure!(
             *requests == ExecutionRequests::<P>::default(),
@@ -708,18 +706,18 @@ pub fn process_parent_execution_payload<P: Preset>(
         }
     );
 
-    apply_parent_execution_payload(config, pubkey_cache, state, &parent_bid, requests)
+    apply_parent_execution_payload(config, pubkey_cache, state, requests)
 }
 
 pub fn apply_parent_execution_payload<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
-    parent_bid: &ExecutionPayloadBid<P>,
     execution_requests: &ExecutionRequests<P>,
 ) -> Result<()> {
     process_execution_requests(config, pubkey_cache, state, execution_requests)?;
 
+    let parent_bid = state.latest_execution_payload_bid().clone();
     let parent_slot = parent_bid.slot;
     let parent_epoch = compute_epoch_at_slot::<P>(parent_slot);
 
@@ -1522,6 +1520,22 @@ mod spec_tests {
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit/*/*",
+    }
+
+    processing_tests! {
+        process_voluntary_exit_churn,
+        |config, pubkey_cache, state, voluntary_exit, _| {
+            process_voluntary_exit(
+                config,
+                pubkey_cache,
+                state,
+                voluntary_exit,
+                SingleVerifier,
+            )
+        },
+        "voluntary_exit",
+        "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit_churn/*/*",
+        "consensus-spec-tests/tests/minimal/gloas/operations/voluntary_exit_churn/*/*",
     }
 
     processing_tests! {
