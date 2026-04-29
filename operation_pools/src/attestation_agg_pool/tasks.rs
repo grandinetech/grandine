@@ -18,6 +18,7 @@ use std_ext::ArcExt as _;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     electra::error::AttestationConversionError,
+    nonstandard::Phase,
     phase0::containers::Attestation,
     phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex},
     preset::Preset,
@@ -217,6 +218,13 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
 
         if let CombinedAttestation::Single(single_attestation) = attestation.as_ref() {
             attester_index = Some(single_attestation.attester_index);
+        }
+
+        // TODO(Gloas): remove after testing
+        if controller.phase() >= Phase::Gloas {
+            if attestation.data().index != 1 {
+                return Ok(());
+            }
         }
 
         let attestation = match convert_attestation_for_pool(&controller, attestation) {
