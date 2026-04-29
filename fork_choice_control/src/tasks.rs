@@ -723,6 +723,7 @@ impl<P: Preset, W> Run for PayloadAttestationBatchTask<P, W> {
 pub struct ProposerPreferencesTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
+    pub wait_group: W,
     pub signed_preferences: Arc<SignedProposerPreferences>,
     pub origin: ProposerPreferencesOrigin,
 }
@@ -733,13 +734,19 @@ impl<P: Preset, W> Run for ProposerPreferencesTask<P, W> {
         let Self {
             store_snapshot,
             mutator_tx,
+            wait_group,
             signed_preferences,
             origin,
         } = self;
 
         let result = store_snapshot.validate_proposer_preferences(signed_preferences, &origin);
 
-        MutatorMessage::ProposerPreferences { result, origin }.send(&mutator_tx);
+        MutatorMessage::ProposerPreferences {
+            wait_group,
+            result,
+            origin,
+        }
+        .send(&mutator_tx);
     }
 }
 
