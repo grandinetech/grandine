@@ -85,8 +85,8 @@ use crate::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
         PendingAggregateAndProof, PendingAttestation, PendingBlobSidecar, PendingBlock,
         PendingChainLink, PendingDataColumnSidecar, PendingExecutionPayloadEnvelope,
-        ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult, VerifyAttestationResult,
-        VerifyPayloadAttestationResult, WaitingForCheckpointState,
+        PendingProposerPreferences, ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult,
+        VerifyAttestationResult, VerifyPayloadAttestationResult, WaitingForCheckpointState,
     },
     state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
@@ -95,7 +95,7 @@ use crate::{
         BlockTask, CheckpointStateTask, DataColumnSidecarTask, ExecutionPayloadEnvelopeTask,
         PayloadAttestationTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
         PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
-        PruneStateCacheTask, RetryDataColumnSidecarTask,
+        ProposerPreferencesTask, PruneStateCacheTask, RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -363,9 +363,11 @@ where
                     wait_group,
                     results,
                 } => self.handle_payload_attestation_batch(&wait_group, results),
-                MutatorMessage::ProposerPreferences { result, origin } => {
-                    self.handle_proposer_preferences(result, origin)
-                }
+                MutatorMessage::ProposerPreferences {
+                    wait_group,
+                    result,
+                    origin,
+                } => self.handle_proposer_preferences(&wait_group, result, origin),
                 MutatorMessage::PreprocessedBeaconState { state } => {
                     self.prepare_execution_payload_for_next_slot(&state);
                 }
@@ -2469,6 +2471,7 @@ where
 
     fn handle_proposer_preferences(
         &mut self,
+        wait_group: &W,
         result: Result<ProposerPreferencesAction>,
         origin: ProposerPreferencesOrigin,
     ) {
@@ -2510,6 +2513,22 @@ where
                 }
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
+            }
+            Ok(ProposerPreferencesAction::DelayUntilBlock(signed_preferences)) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_mutator_proposer_preferences(&["delayed_until_block"]);
+                }
+
+                let checkpoint_root = signed_preferences.message.checkpoint_root;
+
+                self.delay_proposer_preferences_until_block(
+                    wait_group.clone(),
+                    PendingProposerPreferences {
+                        signed_preferences,
+                        origin,
+                    },
+                    checkpoint_root,
+                );
             }
             Err(error) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -3627,6 +3646,46 @@ where
             .insert(beacon_block_root, pending_execution_payload_envelope);
     }
 
+    fn delay_proposer_preferences_until_block(
+        &mut self,
+        wait_group: W,
+        pending_proposer_preferences: PendingProposerPreferences,
+        block_root: H256,
+    ) {
+        if self.store.contains_block(block_root) {
+            self.retry_proposer_preferences(wait_group, pending_proposer_preferences);
+        } else {
+            trace_with_peers!(
+                "proposer preferences delayed until checkpoint block (block_root: {block_root:?})",
+            );
+
+            let peer_id = pending_proposer_preferences
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+
+            self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+
+            self.delayed_until_block
+                .entry(block_root)
+                .or_default()
+                .proposer_preferences
+                .push(pending_proposer_preferences);
+        }
+    }
+
+    fn retry_proposer_preferences(&self, wait_group: W, pending: PendingProposerPreferences) {
+        trace_with_peers!("retrying delayed proposer preferences");
+
+        self.spawn(ProposerPreferencesTask {
+            store_snapshot: self.owned_store(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group,
+            signed_preferences: pending.signed_preferences,
+            origin: pending.origin,
+        });
+    }
+
     fn delay_payload_attestation_until_block(
         &mut self,
         wait_group: &W,
@@ -3888,6 +3947,7 @@ where
             payload_attestations,
             blob_sidecars,
             data_column_sidecars,
+            proposer_preferences,
         } = delayed;
 
         for pending_block in blocks {
@@ -3919,6 +3979,10 @@ where
 
         for pending_data_column_sidecar in data_column_sidecars {
             self.retry_data_column_sidecar(wait_group.clone(), pending_data_column_sidecar, None);
+        }
+
+        for pending_proposer_preferences in proposer_preferences {
+            self.retry_proposer_preferences(wait_group.clone(), pending_proposer_preferences);
         }
     }
 
@@ -4163,6 +4227,7 @@ where
                 payload_attestations,
                 blob_sidecars,
                 data_column_sidecars,
+                proposer_preferences,
             } = delayed;
 
             gossip_ids.extend(
@@ -4247,6 +4312,14 @@ where
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
                         pending.data_column_sidecar.slot().saturating_sub(1) <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                proposer_preferences
+                    .extract_if(.., |pending| {
+                        pending.signed_preferences.message.proposal_slot <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -4877,6 +4950,16 @@ where
                 self.delayed_until_block
                     .values()
                     .map(|delayed| delayed.payload_attestations.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_block_proposer_preferences",
+                self.delayed_until_block
+                    .values()
+                    .map(|delayed| delayed.proposer_preferences.len())
                     .sum(),
             );
 

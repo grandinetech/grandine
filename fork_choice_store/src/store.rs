@@ -1963,6 +1963,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
 
+        // [IGNORE] The block with root preferences.checkpoint_root has been seen
+        if !self.contains_block(preferences.checkpoint_root) {
+            return Ok(ProposerPreferencesAction::DelayUntilBlock(
+                signed_preferences,
+            ));
+        }
+
         // [IGNORE] preferences.validator_index is present at the correct slot in the current or
         // next epoch's portion of state.proposer_lookahead
         if !accessors::is_valid_proposal_slot::<P>(&state, preferences) {
