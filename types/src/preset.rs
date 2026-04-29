@@ -491,7 +491,7 @@ impl Preset for Minimal {
     type PendingPartialWithdrawalsLimit = U64;
 
     // Gloas
-    type PtcSize = U2;
+    type PtcSize = U16;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;

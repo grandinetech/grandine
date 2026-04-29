@@ -17,7 +17,7 @@ mod tested_types {
         capella::containers::{
             BlsToExecutionChange, HistoricalSummary, SignedBlsToExecutionChange, Withdrawal,
         },
-        deneb::containers::{BlobIdentifier, BlobSidecar, ExecutionPayloadHeader},
+        deneb::containers::{BlobIdentifier, BlobSidecar},
         electra::containers::{
             AggregateAndProof, Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest,
             ExecutionRequests, IndexedAttestation, PendingConsolidation, PendingDeposit,
@@ -28,8 +28,8 @@ mod tested_types {
         gloas::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
-            Eth1Data, Fork, ForkData, HistoricalBatch, PendingAttestation, ProposerSlashing,
-            SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
+            Eth1Data, Fork, ForkData, ProposerSlashing, SignedBeaconBlockHeader,
+            SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
 }
@@ -224,12 +224,6 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    ExecutionPayloadHeader<_>,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ExecutionPayloadHeader/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/ExecutionPayloadHeader/*/*",
-}
-
-tests_for_type! {
     ExecutionRequests<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ExecutionRequests/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/ExecutionRequests/*/*",
@@ -251,12 +245,6 @@ tests_for_type! {
     ForkData,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ForkData/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/ForkData/*/*",
-}
-
-tests_for_type! {
-    HistoricalBatch<_>,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/HistoricalBatch/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/HistoricalBatch/*/*",
 }
 
 tests_for_type! {
@@ -290,7 +278,7 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    LightClientHeader<_>,
+    LightClientHeader,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/LightClientHeader/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/LightClientHeader/*/*",
 }
@@ -329,12 +317,6 @@ tests_for_type! {
     PayloadAttestationMessage,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PayloadAttestationMessage/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/PayloadAttestationMessage/*/*",
-}
-
-tests_for_type! {
-    PendingAttestation<_>,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/PendingAttestation/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/PendingAttestation/*/*",
 }
 
 tests_for_type! {

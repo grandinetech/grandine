@@ -9,14 +9,9 @@ use typenum::Log2;
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
     bellatrix::primitives::{Gas, Transaction},
-    capella::{
-        consts::ExecutionPayloadIndex,
-        containers::{SignedBlsToExecutionChange, Withdrawal},
-    },
-    deneb::{
-        containers::ExecutionPayloadHeader,
-        primitives::{KzgCommitment, KzgProof},
-    },
+    capella::containers::{SignedBlsToExecutionChange, Withdrawal},
+    gloas::consts::ExecutionBlockHashGindexGloas,
+    deneb::primitives::{KzgCommitment, KzgProof},
     electra::{
         consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
         containers::{Attestation, AttesterSlashing, ExecutionRequests},
@@ -174,6 +169,7 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub builder_index: BuilderIndex,
     pub beacon_block_root: H256,
+    pub parent_beacon_block_root: H256,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
@@ -214,6 +210,7 @@ pub struct PayloadAttestation<P: Preset> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct ProposerPreferences {
+    pub checkpoint_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub proposal_slot: Slot,
     #[serde(with = "serde_utils::string_or_native")]
@@ -235,7 +232,7 @@ pub struct PayloadAttestationMessage {
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct LightClientBootstrap<P: Preset> {
-    pub header: LightClientHeader<P>,
+    pub header: LightClientHeader,
     pub current_sync_committee: SyncCommittee<P>,
     pub current_sync_committee_branch: ContiguousVector<H256, Log2<CurrentSyncCommitteeIndex>>,
 }
@@ -243,8 +240,8 @@ pub struct LightClientBootstrap<P: Preset> {
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct LightClientFinalityUpdate<P: Preset> {
-    pub attested_header: LightClientHeader<P>,
-    pub finalized_header: LightClientHeader<P>,
+    pub attested_header: LightClientHeader,
+    pub finalized_header: LightClientHeader,
     pub finality_branch: ContiguousVector<H256, Log2<FinalizedRootIndex>>,
     pub sync_aggregate: SyncAggregate<P>,
     #[serde(with = "serde_utils::string_or_native")]
@@ -253,16 +250,16 @@ pub struct LightClientFinalityUpdate<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-pub struct LightClientHeader<P: Preset> {
+pub struct LightClientHeader {
     pub beacon: BeaconBlockHeader,
-    pub execution: ExecutionPayloadHeader<P>,
-    pub execution_branch: ContiguousVector<H256, Log2<ExecutionPayloadIndex>>,
+    pub execution_block_hash: ExecutionBlockHash,
+    pub execution_branch: ContiguousVector<H256, Log2<ExecutionBlockHashGindexGloas>>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct LightClientOptimisticUpdate<P: Preset> {
-    pub attested_header: LightClientHeader<P>,
+    pub attested_header: LightClientHeader,
     pub sync_aggregate: SyncAggregate<P>,
     #[serde(with = "serde_utils::string_or_native")]
     pub signature_slot: Slot,
@@ -271,10 +268,10 @@ pub struct LightClientOptimisticUpdate<P: Preset> {
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct LightClientUpdate<P: Preset> {
-    pub attested_header: LightClientHeader<P>,
+    pub attested_header: LightClientHeader,
     pub next_sync_committee: SyncCommittee<P>,
     pub next_sync_committee_branch: ContiguousVector<H256, Log2<NextSyncCommitteeIndex>>,
-    pub finalized_header: LightClientHeader<P>,
+    pub finalized_header: LightClientHeader,
     pub finality_branch: ContiguousVector<H256, Log2<FinalizedRootIndex>>,
     pub sync_aggregate: SyncAggregate<P>,
     #[serde(with = "serde_utils::string_or_native")]

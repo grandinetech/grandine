@@ -1957,12 +1957,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
 
-        // [REJECT] preferences.validator_index is present at the correct slot in the current or
+        // [IGNORE] preferences.validator_index is present at the correct slot in the current or
         // next epoch's portion of state.proposer_lookahead
-        ensure!(
-            accessors::is_valid_proposal_slot::<P>(&state, preferences),
-            Error::<P>::InvalidProposerPreferencesProposalSlot { signed_preferences }
-        );
+        if !accessors::is_valid_proposal_slot::<P>(&state, preferences) {
+            return Ok(ProposerPreferencesAction::Ignore(false));
+        }
 
         // [IGNORE] First message from this validator for this slot
         if self
