@@ -1065,6 +1065,7 @@ impl<P: Preset> PayloadAttestationAction<P> {
 pub enum ProposerPreferencesAction {
     Accept(Arc<SignedProposerPreferences>),
     Ignore(Publishable),
+    DelayUntilBlock(Arc<SignedProposerPreferences>),
 }
 
 pub enum PartialBlockAction {
@@ -1142,6 +1143,7 @@ impl ExecutionPayloadEnvelopeOrigin {
 
 // TODO: add `Api(OneshotSender<Result<ValidationOutcome>>)` variant once
 // https://github.com/ethereum/beacon-APIs/pull/593 merges.
+#[derive(Debug)]
 pub enum ProposerPreferencesOrigin {
     Gossip(GossipId),
     Own,
@@ -1166,6 +1168,22 @@ impl ProposerPreferencesOrigin {
         match self {
             Self::Gossip(_) => true,
             Self::Own => false,
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(self) -> Option<GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Own => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Own => None,
         }
     }
 }
