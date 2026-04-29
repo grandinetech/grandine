@@ -3424,7 +3424,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         let expected_timestamp =
-            misc::compute_timestamp_at_slot(&self.chain_config, &state, state.slot());
+            misc::compute_timestamp_at_slot(&self.chain_config, &state, state.slot())?;
 
         ensure!(
             envelope.message.payload.timestamp == expected_timestamp,
