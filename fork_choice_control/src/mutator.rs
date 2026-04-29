@@ -2421,6 +2421,9 @@ where
                     metrics.register_mutator_payload_attestation(&["delayed_until_block"]);
                 }
 
+                let peer_id = payload_attestation.origin.peer_id();
+                self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, peer_id));
+
                 self.delay_payload_attestation_until_block(
                     wait_group,
                     payload_attestation,
