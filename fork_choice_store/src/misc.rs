@@ -738,6 +738,14 @@ impl PayloadAttestationOrigin {
     }
 
     #[must_use]
+    pub const fn peer_id(&self) -> Option<PeerId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id.source),
+            Self::Api(_) | Self::Own | Self::Block(_) => None,
+        }
+    }
+
+    #[must_use]
     pub fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,
