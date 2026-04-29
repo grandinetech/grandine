@@ -422,6 +422,7 @@ where
         self.spawn(ProposerPreferencesTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
             signed_preferences,
             origin: ProposerPreferencesOrigin::Gossip(gossip_id),
         })
@@ -431,6 +432,7 @@ where
         self.spawn(ProposerPreferencesTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
             signed_preferences,
             origin: ProposerPreferencesOrigin::Own,
         })

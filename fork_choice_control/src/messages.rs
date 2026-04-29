@@ -179,6 +179,7 @@ pub enum MutatorMessage<P: Preset, W> {
         results: Vec<VerifyPayloadAttestationResult<P>>,
     },
     ProposerPreferences {
+        wait_group: W,
         result: Result<ProposerPreferencesAction>,
         origin: ProposerPreferencesOrigin,
     },
