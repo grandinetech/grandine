@@ -23,7 +23,7 @@ mod tested_types {
         electra::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
-            Eth1Data, Fork, ForkData, HistoricalBatch, PendingAttestation, ProposerSlashing,
+            Eth1Data, Fork, ForkData, ProposerSlashing,
             SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
@@ -201,12 +201,6 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    HistoricalBatch<_>,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/HistoricalBatch/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/HistoricalBatch/*/*",
-}
-
-tests_for_type! {
     HistoricalSummary,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/HistoricalSummary/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/HistoricalSummary/*/*",
@@ -246,12 +240,6 @@ tests_for_type! {
     LightClientUpdate<_>,
     "consensus-spec-tests/tests/mainnet/electra/ssz_static/LightClientUpdate/*/*",
     "consensus-spec-tests/tests/minimal/electra/ssz_static/LightClientUpdate/*/*",
-}
-
-tests_for_type! {
-    PendingAttestation<_>,
-    "consensus-spec-tests/tests/mainnet/electra/ssz_static/PendingAttestation/*/*",
-    "consensus-spec-tests/tests/minimal/electra/ssz_static/PendingAttestation/*/*",
 }
 
 tests_for_type! {
