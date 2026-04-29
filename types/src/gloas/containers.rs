@@ -10,13 +10,13 @@ use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
     bellatrix::primitives::{Gas, Transaction},
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
-    gloas::consts::ExecutionBlockHashGindexGloas,
     deneb::primitives::{KzgCommitment, KzgProof},
     electra::{
         consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
         containers::{Attestation, AttesterSlashing, ExecutionRequests},
     },
     fulu::primitives::{Cell, ColumnIndex},
+    gloas::consts::ExecutionBlockHashGindexGloas,
     gloas::primitives::{BlockAccessList, BuilderIndex, PayloadStatus},
     phase0::{
         containers::{BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing, SignedVoluntaryExit},

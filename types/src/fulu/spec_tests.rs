@@ -29,8 +29,8 @@ mod tested_types {
         fulu::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
-            Eth1Data, Fork, ForkData, ProposerSlashing,
-            SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
+            Eth1Data, Fork, ForkData, ProposerSlashing, SignedBeaconBlockHeader,
+            SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
 }
@@ -265,7 +265,6 @@ tests_for_type! {
     "consensus-spec-tests/tests/mainnet/fulu/ssz_static/MatrixEntry/*/*",
     "consensus-spec-tests/tests/minimal/fulu/ssz_static/MatrixEntry/*/*",
 }
-
 
 tests_for_type! {
     PendingDeposit,
