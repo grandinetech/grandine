@@ -23,8 +23,8 @@ mod tested_types {
         electra::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
-            Eth1Data, Fork, ForkData, ProposerSlashing,
-            SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
+            Eth1Data, Fork, ForkData, ProposerSlashing, SignedBeaconBlockHeader,
+            SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
 }
