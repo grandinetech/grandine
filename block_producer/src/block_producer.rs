@@ -1511,12 +1511,36 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut exits = self.producer_context.voluntary_exits.lock().await;
 
         let split_index = itertools::partition(exits.iter_mut(), |voluntary_exit| {
-            unphased::validate_voluntary_exit(
-                &self.producer_context.chain_config,
-                &self.producer_context.pubkey_cache,
-                &self.beacon_state,
-                *voluntary_exit,
-            )
+            match self.beacon_state.as_ref() {
+                BeaconState::Phase0(_)
+                | BeaconState::Altair(_)
+                | BeaconState::Bellatrix(_)
+                | BeaconState::Capella(_)
+                | BeaconState::Deneb(_) => unphased::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    &self.beacon_state,
+                    *voluntary_exit,
+                ),
+                BeaconState::Electra(state) => electra::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    state,
+                    *voluntary_exit,
+                ),
+                BeaconState::Fulu(state) => electra::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    state,
+                    *voluntary_exit,
+                ),
+                BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    state,
+                    *voluntary_exit,
+                ),
+            }
             .is_ok()
         });
 
@@ -1666,7 +1690,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // TODO(Gloas): this is a quick fix due to time constraits.
         //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
         let snapshot = self.producer_context.controller.snapshot();
-        let (_, requests) = self.get_gloas_envelope_data().await.ok_or(anyhow!("no gloas envelope data"))?;
+        let (_, requests) = self
+            .get_gloas_envelope_data()
+            .await
+            .ok_or(anyhow!("no gloas envelope data"))?;
         let execution_requests_root = requests.hash_tree_root();
 
         let parent_root = state.latest_block_header().hash_tree_root();
