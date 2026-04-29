@@ -1045,7 +1045,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 graffiti,
                                 proposer_slashings,
                                 attester_slashings: self.prepare_attester_slashings_electra().await,
-                                attestations,
+                                attestations: Default::default(),
                                 deposits,
                                 voluntary_exits,
                                 sync_aggregate,
