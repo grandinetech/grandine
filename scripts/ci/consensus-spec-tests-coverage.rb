@@ -12,6 +12,7 @@ IGNORED_GLOBS = %w[
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/data_collection/pyspec_tests/*/*.{ssz_snappy,yaml}
+  tests/*/*/ssz_static/PartialDataColumnGroupID/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnHeader/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnPartsMetadata/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnSidecar/*/*/*.{ssz_snappy,yaml}
@@ -22,6 +23,7 @@ IGNORED_GLOBS = %w[
   tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
   tests/general/fulu/kzg/compute_verify_cell_kzg_proof_batch_challenge/*/*/*.{ssz_snappy,yaml}
   tests/general/fulu/ssz_generic/progressive_containers/*/*/*.{ssz_snappy,yaml}
+  tests/*/*/networking/*/pyspec_tests/*/*.{ssz_snappy,yaml}
 ].map! { |glob| File.join(DIRECTORY, glob) }
 
 LS_FILES_COMMAND = ['find', DIRECTORY, '-type', 'f', '-print0']

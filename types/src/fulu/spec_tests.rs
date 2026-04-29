@@ -29,7 +29,7 @@ mod tested_types {
         fulu::{beacon_state::BeaconState, containers::*},
         phase0::containers::{
             AttestationData, BeaconBlockHeader, Checkpoint, Deposit, DepositData, DepositMessage,
-            Eth1Data, Fork, ForkData, HistoricalBatch, PendingAttestation, ProposerSlashing,
+            Eth1Data, Fork, ForkData, ProposerSlashing,
             SignedBeaconBlockHeader, SignedVoluntaryExit, SigningData, Validator, VoluntaryExit,
         },
     };
@@ -219,12 +219,6 @@ tests_for_type! {
 }
 
 tests_for_type! {
-    HistoricalBatch<_>,
-    "consensus-spec-tests/tests/mainnet/fulu/ssz_static/HistoricalBatch/*/*",
-    "consensus-spec-tests/tests/minimal/fulu/ssz_static/HistoricalBatch/*/*",
-}
-
-tests_for_type! {
     HistoricalSummary,
     "consensus-spec-tests/tests/mainnet/fulu/ssz_static/HistoricalSummary/*/*",
     "consensus-spec-tests/tests/minimal/fulu/ssz_static/HistoricalSummary/*/*",
@@ -272,11 +266,6 @@ tests_for_type! {
     "consensus-spec-tests/tests/minimal/fulu/ssz_static/MatrixEntry/*/*",
 }
 
-tests_for_type! {
-    PendingAttestation<_>,
-    "consensus-spec-tests/tests/mainnet/fulu/ssz_static/PendingAttestation/*/*",
-    "consensus-spec-tests/tests/minimal/fulu/ssz_static/PendingAttestation/*/*",
-}
 
 tests_for_type! {
     PendingDeposit,
