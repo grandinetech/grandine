@@ -134,7 +134,9 @@ pub fn process_block_for_gossip<P: Preset>(
 }
 
 pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
+    altair::count_required_signatures(block)
+        + block.body.bls_to_execution_changes.len()
+        + block.body.payload_attestations.len()
 }
 
 pub fn custom_process_block<P: Preset>(

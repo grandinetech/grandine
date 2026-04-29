@@ -187,6 +187,31 @@ pub fn verify_signatures<P: Preset>(
 
         verifier.extend(triples, SignatureKind::Attestation)?;
 
+        // Payload attestations
+
+        let payload_attestations = &block.message.body.payload_attestations;
+
+        let triples = helper_functions::par_iter!(payload_attestations)
+            .map(|payload_attestation| {
+                let indexed =
+                    accessors::get_indexed_payload_attestation(state, payload_attestation)?;
+
+                let mut triple = Triple::default();
+
+                predicates::validate_constructed_indexed_payload_attestation(
+                    config,
+                    pubkey_cache,
+                    state,
+                    &indexed,
+                    &mut triple,
+                )?;
+
+                Ok(triple)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        verifier.extend(triples, SignatureKind::PayloadAttestation)?;
+
         // Voluntary exits
 
         for voluntary_exit in &block.message.body.voluntary_exits {
