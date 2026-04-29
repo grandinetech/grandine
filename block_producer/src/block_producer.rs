@@ -912,7 +912,16 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         let committee_index = attestation.data.index;
 
                         match operation_pools::convert_to_electra_attestation(attestation) {
-                            Ok(electra_attestation) => Some((electra_attestation, committee_index)),
+                            Ok(mut electra_attestation) => {
+                                // TODO(gloas): this is a quick fix, need refactor!
+                                // In Gloas, data.index signals payload presence (0 or 1), convert_to_electra_attestation always set it to zeros.
+                                // See: https://github.com/grandinetech/grandine/blob/4413b701c78064c9624e8914eb30592c6f2ac835/types/src/electra/container_impls.rs#L160
+                                if phase >= Phase::Gloas {
+                                    electra_attestation.data.index = committee_index as u64;
+                                }
+
+                                Some((electra_attestation, committee_index))
+                            }
                             Err(error) => {
                                 warn_with_peers!(
                                     "unable to convert to electra attestation: {error:?}"
