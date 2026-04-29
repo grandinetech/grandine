@@ -430,9 +430,23 @@ mod spec_tests {
     }
 
     #[test_resources(
+        "consensus-spec-tests/tests/mainnet/gloas/epoch_processing/pending_deposits_churn/*/*"
+    )]
+    fn mainnet_pending_deposits_churn(case: Case) {
+        run_pending_deposits_case::<Mainnet>(case);
+    }
+
+    #[test_resources(
         "consensus-spec-tests/tests/minimal/gloas/epoch_processing/pending_deposits/*/*"
     )]
     fn minimal_pending_deposits(case: Case) {
+        run_pending_deposits_case::<Minimal>(case);
+    }
+
+    #[test_resources(
+        "consensus-spec-tests/tests/minimal/gloas/epoch_processing/pending_deposits_churn/*/*"
+    )]
+    fn minimal_pending_deposits_churn(case: Case) {
         run_pending_deposits_case::<Minimal>(case);
     }
 
@@ -607,7 +621,7 @@ mod spec_tests {
 
     fn run_pending_deposits_case<P: Preset>(case: Case) {
         run_case::<P>(case, |pubkey_cache, state| {
-            electra::process_pending_deposits(&P::default_config(), pubkey_cache, state)
+            process_pending_deposits(&P::default_config(), pubkey_cache, state)
         });
     }
 

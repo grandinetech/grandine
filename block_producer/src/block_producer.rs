@@ -1810,13 +1810,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         snapshot.cached_execution_payload_envelope_by_root(parent_root)
                     {
                         let mut state_copy = state.clone();
-                        let parent_bid = state_copy.latest_execution_payload_bid().clone();
 
                         gloas::apply_parent_execution_payload(
                             chain_config,
                             &self.producer_context.pubkey_cache,
                             &mut state_copy,
-                            &parent_bid,
                             &envelope.message.execution_requests,
                         )?;
 
@@ -2179,6 +2177,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     pub async fn compute_execution_payload_envelope(
         &self,
         beacon_block_root: H256,
+        parent_beacon_block_root: H256,
     ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
         let Some((payload, execution_requests)) = self.get_gloas_envelope_data().await else {
             return Ok(None);
@@ -2189,6 +2188,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             execution_requests,
             builder_index: BUILDER_INDEX_SELF_BUILD,
             beacon_block_root,
+            parent_beacon_block_root,
         }))
     }
 
