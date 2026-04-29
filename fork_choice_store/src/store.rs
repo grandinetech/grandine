@@ -2478,9 +2478,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             if index == 1 && !self.is_payload_verified(beacon_block_root) {
                 if is_from_block {
-                    bail!(Error::AttestationDataInvalidPayloadStatus {
-                        attestation: attestation.clone_arc()
-                    });
+                    // TODO(gloas): the block should be delayed in this place
+
+                    // bail!(Error::AttestationDataInvalidPayloadStatus {
+                    //     attestation: attestation.clone_arc()
+                    // });
                 }
 
                 return Ok(PartialAttestationAction::DelayUntilPayload(
