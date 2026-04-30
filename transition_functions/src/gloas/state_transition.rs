@@ -193,7 +193,8 @@ pub fn verify_signatures<P: Preset>(
 
         let triples = helper_functions::par_iter!(payload_attestations)
             .map(|payload_attestation| {
-                let indexed = accessors::get_indexed_payload_attestation(state, payload_attestation)?;
+                let indexed =
+                    accessors::get_indexed_payload_attestation(state, payload_attestation)?;
 
                 let mut triple = Triple::default();
 
