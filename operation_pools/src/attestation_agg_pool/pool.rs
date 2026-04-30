@@ -9,28 +9,27 @@ use features::Feature;
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use ssz::{ContiguousList, SszHash};
+use ssz::SszHash;
 use std_ext::ArcExt as _;
 use tokio::sync::{Mutex, RwLock};
 use types::{
     config::Config as ChainConfig,
-    phase0::{
-        containers::{Attestation, AttestationData},
-        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
-    },
+    phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
     traits::BeaconState,
 };
 
-use crate::attestation_agg_pool::types::{Aggregate, AggregateMap, AttestationMap, AttestationSet};
+use crate::attestation_agg_pool::types::{
+    Aggregate, AggregateMap, AttestationKey, AttestationMap, AttestationSet, PoolAttestation,
+};
 
 #[expect(type_alias_bounds)]
-type AttestationsWithSlot<P: Preset> = (ContiguousList<Attestation<P>, P::MaxAttestations>, Slot);
+type AttestationsWithSlot<P: Preset> = (Vec<PoolAttestation<P>>, Slot);
 
 pub struct Pool<P: Preset> {
     chain_config: Arc<ChainConfig>,
     aggregates: RwLock<BTreeMap<Epoch, AggregateMap<P>>>,
-    data_root_to_data_map: RwLock<BTreeMap<Epoch, HashMap<H256, AttestationData>>>,
+    data_root_to_key_map: RwLock<BTreeMap<Epoch, HashMap<H256, BTreeSet<AttestationKey>>>>,
     // The type of the inner map does not affect the result of attestation packing,
     // though that may change if the packers are redesigned again.
     singular_attestations: RwLock<BTreeMap<Epoch, AttestationMap<P>>>,
@@ -45,7 +44,7 @@ impl<P: Preset> Pool<P> {
         Self {
             chain_config,
             aggregates: RwLock::default(),
-            data_root_to_data_map: RwLock::default(),
+            data_root_to_key_map: RwLock::default(),
             singular_attestations: RwLock::default(),
             best_proposable_attestations: Mutex::default(),
             committees_with_aggregators: RwLock::default(),
@@ -62,8 +61,8 @@ impl<P: Preset> Pool<P> {
             let mut aggregates = self.aggregates.write().await;
             *aggregates = aggregates.split_off(&previous_epoch);
 
-            let mut data_root_to_data_map = self.data_root_to_data_map.write().await;
-            *data_root_to_data_map = data_root_to_data_map.split_off(&previous_epoch);
+            let mut data_root_to_key_map = self.data_root_to_key_map.write().await;
+            *data_root_to_key_map = data_root_to_key_map.split_off(&previous_epoch);
 
             let mut singular_attestations = self.singular_attestations.write().await;
             *singular_attestations = singular_attestations.split_off(&previous_epoch);
@@ -73,26 +72,28 @@ impl<P: Preset> Pool<P> {
         *proposer_indices = proposer_indices.split_off(&slot);
     }
 
-    pub async fn add_data_root_to_data_entry(&self, data: AttestationData) {
-        let root = data.hash_tree_root();
+    pub async fn add_data_root_to_key_entry(&self, key: AttestationKey) {
+        let root = key.data.hash_tree_root();
 
-        self.data_root_to_data_map
+        self.data_root_to_key_map
             .write()
             .await
-            .entry(data.target.epoch)
+            .entry(key.data.target.epoch)
             .or_default()
-            .insert(root, data);
+            .entry(root)
+            .or_default()
+            .insert(key);
     }
 
-    pub async fn aggregates(&self, data: AttestationData) -> Arc<Mutex<Vec<Aggregate<P>>>> {
-        let epoch = data.target.epoch;
+    pub async fn aggregates(&self, key: AttestationKey) -> Arc<Mutex<Vec<Aggregate<P>>>> {
+        let epoch = key.data.target.epoch;
 
         if let Some(aggregates) = self
             .aggregates
             .read()
             .await
             .get(&epoch)
-            .and_then(|epoch_aggregates| epoch_aggregates.get(&data))
+            .and_then(|epoch_aggregates| epoch_aggregates.get(&key))
         {
             return aggregates.clone_arc();
         }
@@ -102,33 +103,38 @@ impl<P: Preset> Pool<P> {
             .await
             .entry(epoch)
             .or_default()
-            .entry(data)
+            .entry(key)
             .or_default()
             .clone_arc()
     }
 
-    pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<Attestation<P>> {
+    pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<PoolAttestation<P>> {
         self.aggregates
             .read()
             .await
             .get(&epoch)
             .into_iter()
             .flatten()
-            .map(|(data, aggregates)| async {
+            .map(|(key, aggregates)| async {
                 aggregates
                     .lock()
                     .await
                     .iter()
                     .cloned()
                     .map(|aggregate| {
+                        let AttestationKey {
+                            data,
+                            committee_index,
+                        } = *key;
                         let Aggregate {
                             aggregation_bits,
                             signature,
                         } = aggregate;
 
-                        Attestation {
+                        PoolAttestation {
                             aggregation_bits,
-                            data: *data,
+                            data,
+                            committee_index,
                             signature: signature.into(),
                         }
                     })
@@ -169,16 +175,16 @@ impl<P: Preset> Pool<P> {
 
     pub async fn best_aggregate_attestation(
         &self,
-        data: AttestationData,
-    ) -> Option<Attestation<P>> {
-        let epoch = data.target.epoch;
+        key: AttestationKey,
+    ) -> Option<PoolAttestation<P>> {
+        let epoch = key.data.target.epoch;
 
         if let Some(aggregates) = self
             .aggregates
             .read()
             .await
             .get(&epoch)
-            .and_then(|epoch_aggregates| epoch_aggregates.get(&data))
+            .and_then(|epoch_aggregates| epoch_aggregates.get(&key))
         {
             return aggregates
                 .lock()
@@ -187,14 +193,19 @@ impl<P: Preset> Pool<P> {
                 .max_by_key(|aggregate| aggregate.aggregation_bits.count_ones())
                 .cloned()
                 .map(|aggregate| {
+                    let AttestationKey {
+                        data,
+                        committee_index,
+                    } = key;
                     let Aggregate {
                         aggregation_bits,
                         signature,
                     } = aggregate;
 
-                    Attestation {
+                    PoolAttestation {
                         aggregation_bits,
                         data,
+                        committee_index,
                         signature: signature.into(),
                     }
                 });
@@ -204,27 +215,20 @@ impl<P: Preset> Pool<P> {
     }
 
     // Handler for the `/eth/v2/validator/aggregate_attestation` API call.
-    // Expects `attestation_data_root` computed from the post-Electra `AttestationData`,
-    // with `committee_index` explicitly set to 0 and provided separately.
+    // Expects `attestation_data_root` computed from the signed `AttestationData`,
+    // with `committee_index` provided separately.
     pub async fn best_aggregate_attestation_by_data_root_and_committee_index(
         &self,
         attestation_data_root: H256,
         epoch: Epoch,
         committee_index: CommitteeIndex,
-    ) -> Option<Attestation<P>> {
+    ) -> Option<PoolAttestation<P>> {
         self.aggregate_attestations_by_epoch(epoch)
             .await
             .into_iter()
             .filter(|attestation| {
-                let mut data = attestation.data;
-                let data_committee_index = data.index;
-
-                if epoch >= self.chain_config.electra_fork_epoch {
-                    data.index = 0;
-                }
-
-                data_committee_index == committee_index
-                    && data.hash_tree_root() == attestation_data_root
+                attestation.committee_index == committee_index
+                    && attestation.data.hash_tree_root() == attestation_data_root
             })
             .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
     }
@@ -233,15 +237,33 @@ impl<P: Preset> Pool<P> {
         &self,
         attestation_data_root: H256,
         epoch: Epoch,
-    ) -> Option<Attestation<P>> {
-        if let Some(data) = self
-            .data_root_to_data_map
+    ) -> Option<PoolAttestation<P>> {
+        if let Some(keys) = self
+            .data_root_to_key_map
             .read()
             .await
             .get(&epoch)
-            .and_then(|data_map| data_map.get(&attestation_data_root))
+            .and_then(|key_map| key_map.get(&attestation_data_root))
+            .cloned()
         {
-            return self.best_aggregate_attestation(*data).await;
+            let mut best_attestation = None;
+
+            for key in keys {
+                if let Some(attestation) = self.best_aggregate_attestation(key).await
+                    && best_attestation
+                        .as_ref()
+                        .is_none_or(|best: &PoolAttestation<P>| {
+                            attestation.aggregation_bits.count_ones()
+                                > best.aggregation_bits.count_ones()
+                        })
+                {
+                    best_attestation = Some(attestation);
+                }
+            }
+
+            if best_attestation.is_some() {
+                return best_attestation;
+            }
         }
 
         self.aggregate_attestations_by_epoch(epoch)
@@ -251,17 +273,14 @@ impl<P: Preset> Pool<P> {
             .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
     }
 
-    pub async fn best_proposable_attestations(
-        &self,
-        slot: Slot,
-    ) -> ContiguousList<Attestation<P>, P::MaxAttestations> {
+    pub async fn best_proposable_attestations(&self, slot: Slot) -> Vec<PoolAttestation<P>> {
         let attestations_with_slot = self.best_proposable_attestations.lock().await;
         let (attestations, prepared_for_slot) = &*attestations_with_slot;
 
         if slot == *prepared_for_slot {
             attestations.clone()
         } else {
-            ContiguousList::default()
+            Vec::new()
         }
     }
 
@@ -328,7 +347,7 @@ impl<P: Preset> Pool<P> {
 
     pub async fn set_best_proposable_attestations(
         &self,
-        attestations: ContiguousList<Attestation<P>, P::MaxAttestations>,
+        attestations: Vec<PoolAttestation<P>>,
         prepared_for_slot: Slot,
     ) {
         *self.best_proposable_attestations.lock().await = (attestations, prepared_for_slot);
@@ -350,16 +369,16 @@ impl<P: Preset> Pool<P> {
 
     pub async fn singular_attestations(
         &self,
-        data: AttestationData,
+        key: AttestationKey,
     ) -> Arc<RwLock<AttestationSet<P>>> {
-        let epoch = data.target.epoch;
+        let epoch = key.data.target.epoch;
 
         if let Some(attestations) = self
             .singular_attestations
             .read()
             .await
             .get(&epoch)
-            .and_then(|epoch_attestations| epoch_attestations.get(&data))
+            .and_then(|epoch_attestations| epoch_attestations.get(&key))
         {
             return attestations.clone_arc();
         }
@@ -369,12 +388,15 @@ impl<P: Preset> Pool<P> {
             .await
             .entry(epoch)
             .or_default()
-            .entry(data)
+            .entry(key)
             .or_default()
             .clone_arc()
     }
 
-    pub async fn singular_attestations_by_epoch(&self, epoch: Epoch) -> Vec<Arc<Attestation<P>>> {
+    pub async fn singular_attestations_by_epoch(
+        &self,
+        epoch: Epoch,
+    ) -> Vec<Arc<PoolAttestation<P>>> {
         self.singular_attestations
             .read()
             .await

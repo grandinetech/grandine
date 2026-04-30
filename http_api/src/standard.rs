@@ -43,7 +43,7 @@ use liveness_tracker::ApiToLiveness;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, Origin, PayloadAttestationAggPool,
-    PoolAdditionOutcome, SyncCommitteeAggPool, convert_to_electra_attestation,
+    PoolAdditionOutcome, SyncCommitteeAggPool,
 };
 use p2p::{
     ApiToP2p, BeaconCommitteeSubscription, NetworkConfig, NodeIdentity, NodePeer, NodePeerCount,
@@ -3108,9 +3108,11 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
     }
 
     let attestation = if phase < Phase::Electra {
-        Attestation::Phase0(attestation)
+        Attestation::Phase0(attestation.into_phase0_attestation())
     } else {
-        convert_to_electra_attestation(attestation).map(Attestation::Electra)?
+        attestation
+            .try_into_electra_attestation()
+            .map(Attestation::Electra)?
     };
 
     Ok(EthResponse::json(attestation))
@@ -3157,9 +3159,11 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
     }
 
     let attestation = if phase < Phase::Electra {
-        Attestation::Phase0(attestation)
+        Attestation::Phase0(attestation.into_phase0_attestation())
     } else {
-        convert_to_electra_attestation(attestation).map(Attestation::Electra)?
+        attestation
+            .try_into_electra_attestation()
+            .map(Attestation::Electra)?
     };
 
     Ok(EthResponse::json_or_ssz(attestation, &headers)?.version(phase))
@@ -4622,14 +4626,15 @@ async fn get_pool_attestations<P: Preset, W: Wait>(
         .iter()
         .chain(singular_attestations.iter().map(Arc::as_ref))
         .filter(|attestation| {
-            attestation.data.index == committee_index && attestation.data.slot == slot
+            attestation.committee_index == committee_index && attestation.data.slot == slot
         })
         .cloned()
         .filter_map(|attestation| {
             if phase < Phase::Electra {
-                Some(Attestation::Phase0(attestation))
+                Some(Attestation::Phase0(attestation.into_phase0_attestation()))
             } else {
-                convert_to_electra_attestation(attestation)
+                attestation
+                    .try_into_electra_attestation()
                     .map(Attestation::Electra)
                     .ok()
             }
