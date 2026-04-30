@@ -1129,13 +1129,17 @@ impl ExecutionPayloadEnvelopeOrigin {
         matches!(self, Self::Gossip(_) | Self::Api(_) | Self::Own)
     }
 
-    // TODO: (gloas): confirm whether can we trust own execution payload envelope
     #[must_use]
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
             Self::Own => false,
         }
+    }
+
+    #[must_use]
+    pub const fn is_own(&self) -> bool {
+        matches!(self, Self::Own)
     }
 
     #[must_use]
