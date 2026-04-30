@@ -162,12 +162,12 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_head/*/*"]                       [gloas_mainnet_get_head]                       [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_mainnet_get_parent_payload_status]      [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_block/*/*"]                       [gloas_mainnet_on_block]                       [Mainnet] [Gloas];
-    // TODO(Gloas): ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_mainnet_on_execution_payload_envelope]  [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_mainnet_on_execution_payload_envelope]  [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]                       [gloas_minimal_get_head]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_minimal_get_parent_payload_status]      [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_block/*/*"]                       [gloas_minimal_on_block]                       [Minimal] [Gloas];
-    // TODO(Gloas): ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_minimal_on_execution_payload_envelope]  [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_minimal_on_execution_payload_envelope]  [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/reorg/*/*"]                          [gloas_minimal_reorg]                          [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/withholding/*/*"]                    [gloas_minimal_withholding]                    [Minimal] [Gloas];
 )]
