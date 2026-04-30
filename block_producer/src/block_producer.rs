@@ -1675,7 +1675,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         // TODO(Gloas): this is a quick fix due to time constraits.
         //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
-        let snapshot = self.producer_context.controller.snapshot();
         let (_, requests) = self
             .get_gloas_envelope_data()
             .await
@@ -1685,11 +1684,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let parent_root = state.latest_block_header().hash_tree_root();
 
         let payload_bid = ExecutionPayloadBid {
-            parent_block_hash: if snapshot.should_extend_payload(parent_root) {
-                state.latest_execution_payload_bid().block_hash
-            } else {
-                state.latest_execution_payload_bid().parent_block_hash
-            },
+            parent_block_hash: payload.parent_hash(),
             parent_block_root: parent_root,
             block_hash: payload.block_hash(),
             prev_randao: payload.prev_randao(),

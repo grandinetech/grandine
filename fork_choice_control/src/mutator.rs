@@ -2515,7 +2515,7 @@ where
                     metrics.register_mutator_proposer_preferences(&["delayed_until_block"]);
                 }
 
-                let checkpoint_root = signed_preferences.message.checkpoint_root;
+                let dependent_root = signed_preferences.message.dependent_root;
 
                 self.delay_proposer_preferences_until_block(
                     wait_group.clone(),
@@ -2523,7 +2523,7 @@ where
                         signed_preferences,
                         origin,
                     },
-                    checkpoint_root,
+                    dependent_root,
                 );
             }
             Err(error) => {

@@ -2738,7 +2738,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let signer = self.signer.clone_arc();
         let p2p_tx = self.p2p_tx.clone();
         let beacon_state = slot_head.beacon_state.clone_arc();
-        let head_root = slot_head.beacon_block_root;
         let controller = self.controller.clone_arc();
 
         tokio::spawn(async move {
@@ -2759,29 +2758,31 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     let fee_recipient = proposer_configs.fee_recipient(pubkey).ok()?;
                     let gas_limit = proposer_configs.gas_limit(pubkey).ok()?;
                     let beacon_state = beacon_state.clone_arc();
+                    let controller = controller.clone_arc();
 
-                    Some(upcoming_slots.into_iter().map(move |proposal_slot| {
+                    Some(upcoming_slots.into_iter().filter_map(move |proposal_slot| {
                         let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
-                        let target_epoch = proposal_epoch.saturating_sub(1);
-                        let target_slot = misc::compute_start_slot_at_epoch::<P>(target_epoch);
 
-                        let checkpoint_root = if target_slot < beacon_state.slot() {
-                            accessors::get_block_root_at_slot(&beacon_state, target_slot)
-                                .unwrap_or(head_root)
-                        } else {
-                            head_root
-                        };
+                        match controller.proposer_dependent_root(&beacon_state, proposal_epoch) {
+                            Ok(dependent_root) => Some((
+                                pubkey,
+                                ProposerPreferences {
+                                    dependent_root,
+                                    proposal_slot,
+                                    validator_index,
+                                    fee_recipient,
+                                    gas_limit,
+                                },
+                            )),
+                            Err(error) => {
+                                warn_with_peers!(
+                                    "failed to compute dependent root for proposer preferences \
+                                    (slot {proposal_slot}, epoch {proposal_epoch}): {error}"
+                                );
 
-                        (
-                            pubkey,
-                            ProposerPreferences {
-                                checkpoint_root,
-                                proposal_slot,
-                                validator_index,
-                                fee_recipient,
-                                gas_limit,
-                            },
-                        )
+                                None
+                            }
+                        }
                     }))
                 })
                 .flatten()
