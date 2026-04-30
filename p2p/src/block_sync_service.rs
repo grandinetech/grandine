@@ -1676,7 +1676,11 @@ impl<P: Preset> BlockSyncService<P> {
         peer_id
             .filter(|peer_id| self.network_globals.is_peer_connected(peer_id))
             .or_else(|| {
-                debug_with_peers!("Peer {peer_id:?} is no longer connected, will find a new peer");
+                if let Some(peer_id) = peer_id {
+                    debug_with_peers!(
+                        "Peer {peer_id:?} is no longer connected, will find a new peer"
+                    );
+                }
 
                 None
             })

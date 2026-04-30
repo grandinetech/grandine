@@ -3625,12 +3625,14 @@ where
                  (beacon_block_root: {beacon_block_root:?})",
             );
 
-            let peer_id = pending_execution_payload_envelope
-                .origin
-                .gossip_id_ref()
-                .map(|gossip_id| gossip_id.source);
+            if !pending_execution_payload_envelope.origin.is_own() {
+                let peer_id = pending_execution_payload_envelope
+                    .origin
+                    .gossip_id_ref()
+                    .map(|gossip_id| gossip_id.source);
 
-            self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
+                self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
+            }
 
             self.delayed_until_block
                 .entry(beacon_block_root)
