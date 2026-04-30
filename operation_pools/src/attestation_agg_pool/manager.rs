@@ -11,16 +11,12 @@ use eth1_api::ApiController;
 use features::Feature;
 use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
-use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use tracing::instrument;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     config::Config,
-    phase0::{
-        containers::{Attestation, AttestationData},
-        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
-    },
+    phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
 };
 use validator_statistics::ValidatorStatistics;
@@ -33,6 +29,7 @@ use crate::{
             PackProposableAttestationsTask, SetCommitteesWithAggregatorsTask,
             SetRegisteredValidatorsTask,
         },
+        types::{AttestationKey, PoolAttestation},
     },
     misc::PoolTask,
 };
@@ -95,22 +92,22 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         }
     }
 
-    pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<Attestation<P>> {
+    pub async fn aggregate_attestations_by_epoch(&self, epoch: Epoch) -> Vec<PoolAttestation<P>> {
         self.pool.aggregate_attestations_by_epoch(epoch).await
     }
 
     pub async fn best_aggregate_attestation(
         &self,
-        data: AttestationData,
-    ) -> Option<Attestation<P>> {
-        self.pool.best_aggregate_attestation(data).await
+        key: AttestationKey,
+    ) -> Option<PoolAttestation<P>> {
+        self.pool.best_aggregate_attestation(key).await
     }
 
     pub async fn best_aggregate_attestation_by_data_root(
         &self,
         attestation_data_root: H256,
         epoch: Epoch,
-    ) -> Option<Attestation<P>> {
+    ) -> Option<PoolAttestation<P>> {
         self.pool
             .best_aggregate_attestation_by_data_root(attestation_data_root, epoch)
             .await
@@ -121,7 +118,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         attestation_data_root: H256,
         epoch: Epoch,
         committee_index: CommitteeIndex,
-    ) -> Option<Attestation<P>> {
+    ) -> Option<PoolAttestation<P>> {
         self.pool
             .best_aggregate_attestation_by_data_root_and_committee_index(
                 attestation_data_root,
@@ -134,7 +131,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
     pub async fn best_proposable_attestations(
         &self,
         beacon_state: Arc<BeaconState<P>>,
-    ) -> Result<ContiguousList<Attestation<P>, P::MaxAttestations>> {
+    ) -> Result<Vec<PoolAttestation<P>>> {
         self.spawn_task(BestProposableAttestationsTask {
             controller: self.controller.clone_arc(),
             pool: self.pool.clone_arc(),
@@ -208,7 +205,10 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         });
     }
 
-    pub async fn singular_attestations_by_epoch(&self, epoch: Epoch) -> Vec<Arc<Attestation<P>>> {
+    pub async fn singular_attestations_by_epoch(
+        &self,
+        epoch: Epoch,
+    ) -> Vec<Arc<PoolAttestation<P>>> {
         self.pool.singular_attestations_by_epoch(epoch).await
     }
 

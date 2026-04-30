@@ -12,14 +12,16 @@ use types::{
         containers::{Attestation as ElectraAttestation, SingleAttestation},
         error::AttestationConversionError,
     },
-    phase0::containers::{Attestation as Phase0Attestation, AttestationData, Checkpoint},
+    phase0::containers::{Attestation as Phase0Attestation, Checkpoint},
     preset::Preset,
 };
+
+use crate::attestation_agg_pool::types::PoolAttestation;
 
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     attestation: Arc<Attestation<P>>,
-) -> Result<Phase0Attestation<P>> {
+) -> Result<PoolAttestation<P>> {
     if attestation
         .data()
         .slot
@@ -30,7 +32,20 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     }
 
     let attestation = match Arc::unwrap_or_clone(attestation) {
-        Attestation::Phase0(attestation) => attestation,
+        Attestation::Phase0(attestation) => {
+            let Phase0Attestation {
+                aggregation_bits,
+                data,
+                signature,
+            } = attestation;
+
+            PoolAttestation {
+                aggregation_bits,
+                data,
+                committee_index: data.index,
+                signature,
+            }
+        }
         Attestation::Electra(attestation) => {
             let ElectraAttestation {
                 aggregation_bits,
@@ -45,20 +60,35 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
                 .next()
                 .ok_or(AttestationConversionError::InvalidCommitteeIndex)?;
 
-            Phase0Attestation {
+            PoolAttestation {
                 aggregation_bits: aggregation_bits
                     .try_into()
                     .map_err(AttestationConversionError::InvalidAggregationBits)?,
-                data: AttestationData { index, ..data },
+                data,
+                committee_index: index,
                 signature,
             }
         }
         Attestation::Single(attestation) => {
+            let committee_index = attestation.committee_index;
+            let data = attestation.data;
             let slot = attestation.data.slot;
             let state = current_state(controller, attestation.data.target);
             let committee = accessors::beacon_committee(&state, slot, attestation.committee_index)?;
 
-            attestation.try_into_phase0_attestation(committee)?
+            let phase0_attestation = attestation.try_into_phase0_attestation::<P>(committee)?;
+            let Phase0Attestation {
+                aggregation_bits,
+                signature,
+                ..
+            } = phase0_attestation;
+
+            PoolAttestation {
+                aggregation_bits,
+                data,
+                committee_index,
+                signature,
+            }
         }
     };
 
