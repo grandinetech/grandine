@@ -5093,11 +5093,6 @@ where
             return BlockDataColumnAvailability::Irrelevant;
         };
 
-        // Only check DA with payload envelope for post-Gloas block
-        if block.phase() >= Phase::Gloas {
-            return BlockDataColumnAvailability::Irrelevant;
-        }
-
         let missing_indices = self.store.indices_of_missing_data_columns(block);
 
         if missing_indices.is_empty() {
