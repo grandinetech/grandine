@@ -13,6 +13,7 @@ use fork_choice_store::{AttestationAction, AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
+use spec_test_utils::BlsSetting;
 use ssz::BitVector;
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
@@ -21,7 +22,9 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     gloas::{
-        containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
+        containers::{
+            CombinedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
+        },
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
@@ -79,6 +82,7 @@ impl<P: Preset> Context<P> {
             genesis_block,
             genesis_state,
             true,
+            None,
         ))
     }
 
@@ -89,6 +93,7 @@ impl<P: Preset> Context<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         optimistic_merge_block_validation: bool,
+        thread_pool_size: Option<usize>,
     ) -> Self {
         let (service_tx, service_rx) = futures::channel::mpsc::unbounded();
 
@@ -109,6 +114,7 @@ impl<P: Preset> Context<P> {
             anchor_state,
             execution_engine.clone_arc(),
             p2p_tx,
+            thread_pool_size,
         );
 
         if phase.is_peerdas_activated() {
@@ -292,11 +298,16 @@ impl<P: Preset> Context<P> {
             .preprocessed_state_at_current_slot_blocking();
 
         if old_slot < new_slot {
+            let next_message = self.next_p2p_message();
+
             assert!(matches!(
-                self.next_p2p_message(),
+                next_message,
                 Some(P2pMessage::Slot(slot)) if slot == new_slot,
             ));
         }
+
+        // discard p2p messages for objects that become available after tick
+        self.drain_p2p_messages();
     }
 
     pub fn on_slot(&mut self, new_slot: Slot) {
@@ -371,6 +382,81 @@ impl<P: Preset> Context<P> {
         ));
     }
 
+    pub fn on_valid_test_block(
+        &mut self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        let result = self.on_test_block(block, bls_setting);
+
+        assert!(matches!(
+            result,
+            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+        ));
+
+        // discard p2p messages for objects that become available after block is imported
+        self.drain_p2p_messages();
+    }
+
+    pub fn on_invalid_test_block(
+        &mut self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        let result = self.on_test_block(block, bls_setting);
+
+        assert!(matches!(
+            result,
+            Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _) | P2pMessage::BlockNeeded(_, _))
+                | None,
+        ));
+    }
+
+    pub fn on_test_block_with_missing_blobs(
+        &mut self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        blob_count: usize,
+        bls_setting: BlsSetting,
+    ) {
+        // If an optimistic beacon block is not accepted by the fork choice,
+        // then it will not be propagated in gossipsub before it is fully validated (e.g. block arrives before blob).
+        self.on_valid_test_block(block, bls_setting);
+
+        let block_root = block.message().hash_tree_root();
+
+        match self.next_execution_service_message() {
+            Some(ExecutionServiceMessage::GetBlobs(params)) => match params {
+                EngineGetBlobsParams::V1(EngineGetBlobsV1Params {
+                    block: block_with_missing_blobs,
+                    blob_identifiers,
+                    peer_id: _,
+                }) => {
+                    let expected_identifiers = (0..blob_count)
+                        .map(|index| BlobIdentifier {
+                            block_root,
+                            index: index.try_into().expect("usize should fit to u64"),
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(blob_identifiers, expected_identifiers);
+                    assert_eq!(block_with_missing_blobs, *block);
+                }
+                EngineGetBlobsParams::V2(EngineGetBlobsV2Params {
+                    block_or_sidecar,
+                    data_column_identifiers,
+                }) => {
+                    assert!(
+                        data_column_identifiers
+                            .iter()
+                            .all(|id| id.block_root == block_root)
+                    );
+                    assert!(!data_column_identifiers.is_empty());
+                    assert_eq!(block_or_sidecar.block_root(), block_root);
+                }
+            },
+            _ => panic!("ExecutionServiceMessage::GetBlobs expected"),
+        }
+    }
+
     pub fn on_block_with_missing_blobs(
         &mut self,
         block: &Arc<SignedBeaconBlock<P>>,
@@ -415,6 +501,28 @@ impl<P: Preset> Context<P> {
         }
     }
 
+    pub fn on_test_block_with_reconstructing_data_columns(
+        &mut self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        // If an optimistic beacon block is not accepted by the fork choice,
+        // then it will not be propagated in gossipsub before it is fully validated (e.g. block arrives before blob).
+        self.on_valid_test_block(block, bls_setting);
+
+        let block_root = block.message().hash_tree_root();
+
+        loop {
+            match self.next_p2p_message() {
+                Some(P2pMessage::PublishDataColumnSidecar(data_column_sidecar)) => {
+                    assert_eq!(data_column_sidecar.beacon_block_root(), block_root);
+                }
+                Some(P2pMessage::Accept(_)) | None => break,
+                Some(other) => panic!("Unexpected P2P message: {other:?}"),
+            }
+        }
+    }
+
     pub fn on_block_with_reconstructing_data_columns(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
         // If an optimistic beacon block is not accepted by the fork choice,
         // then it will not be propagated in gossipsub before it is fully validated (e.g. block arrives before blob).
@@ -436,9 +544,10 @@ impl<P: Preset> Context<P> {
     pub fn on_valid_execution_payload(
         &mut self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        bls_setting: BlsSetting,
     ) {
         assert!(matches!(
-            self.on_execution_payload(envelope),
+            self.on_execution_payload(envelope, bls_setting),
             Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
         ));
     }
@@ -446,9 +555,10 @@ impl<P: Preset> Context<P> {
     pub fn on_invalid_execution_payload(
         &mut self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        bls_setting: BlsSetting,
     ) {
         let expected_block_root = envelope.message.beacon_block_root;
-        let next_message = self.on_execution_payload(envelope);
+        let next_message = self.on_execution_payload(envelope, bls_setting);
 
         match next_message {
             Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
@@ -546,10 +656,96 @@ impl<P: Preset> Context<P> {
         self.controller().wait_for_tasks();
     }
 
-    pub fn on_test_attestation(&mut self, attestation: Attestation<P>) {
-        self.controller().on_test_attestation(Arc::new(attestation));
+    pub fn on_valid_test_attestation(
+        &mut self,
+        attestation: Attestation<P>,
+        bls_setting: BlsSetting,
+    ) {
+        self.controller()
+            .on_test_attestation(Arc::new(attestation), bls_setting);
+
         self.controller().wait_for_tasks();
-        self.next_p2p_message().unwrap_none();
+
+        let next_message = self.next_p2p_message();
+
+        println!("next_message: {next_message:?}");
+
+        assert!(matches!(next_message, Some(P2pMessage::Accept(_))));
+    }
+
+    pub fn on_invalid_test_attestation(
+        &mut self,
+        attestation: Attestation<P>,
+        bls_setting: BlsSetting,
+    ) {
+        let attestation_slot = attestation.data().slot;
+        let expected_block_root = attestation.data().beacon_block_root;
+
+        self.controller()
+            .on_test_attestation(Arc::new(attestation), bls_setting);
+
+        self.controller().wait_for_tasks();
+
+        let next_message = self.next_p2p_message();
+
+        println!("next_message: {next_message:?}");
+
+        match next_message {
+            Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root)
+            }
+            // Current-slot attestations pass gossip validation and return Accept, but their
+            // fork-choice effect is deferred to the next slot. The compliance test marks them
+            // valid: false (no immediate fork-choice effect), but Accept is the correct gossip
+            // response per spec.
+            Some(P2pMessage::Accept(_)) => {
+                assert_eq!(
+                    attestation_slot,
+                    self.controller().slot(),
+                    "Accept is only expected for current-slot attestations",
+                );
+            }
+            message => {
+                assert!(matches!(
+                    message,
+                    // None covers: DelayUntilSlot
+                    Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)) | None,
+                ));
+            }
+        }
+    }
+
+    pub fn on_valid_payload_attestation(
+        &mut self,
+        payload_attestation: Arc<CombinedPayloadAttestation<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        assert!(matches!(
+            self.on_test_payload_attestation(payload_attestation, bls_setting),
+            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+        ));
+    }
+
+    pub fn on_invalid_payload_attestation(
+        &mut self,
+        payload_attestation: Arc<CombinedPayloadAttestation<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        assert!(matches!(
+            self.on_test_payload_attestation(payload_attestation, bls_setting),
+            Some(P2pMessage::Reject(_, _) | P2pMessage::Ignore(_)),
+        ));
+    }
+
+    pub fn on_test_payload_attestation(
+        &mut self,
+        payload_attestation: Arc<CombinedPayloadAttestation<P>>,
+        bls_setting: BlsSetting,
+    ) -> Option<P2pMessage<P>> {
+        self.controller()
+            .on_test_payload_attestation(payload_attestation, bls_setting);
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
     }
 
     pub fn on_invalid_test_attestation(&self, attestation: Attestation<P>) {
@@ -578,6 +774,17 @@ impl<P: Preset> Context<P> {
     pub fn on_attester_slashing(&mut self, attester_slashing: AttesterSlashing<P>) {
         self.controller()
             .on_gossip_attester_slashing(Box::new(attester_slashing));
+        self.controller().wait_for_tasks();
+        self.next_p2p_message().unwrap_none();
+    }
+
+    pub fn on_test_attester_slashing(
+        &mut self,
+        attester_slashing: AttesterSlashing<P>,
+        bls_setting: BlsSetting,
+    ) {
+        self.controller()
+            .on_test_attester_slashing(Box::new(attester_slashing), bls_setting);
         self.controller().wait_for_tasks();
         self.next_p2p_message().unwrap_none();
     }
@@ -788,12 +995,30 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message()
     }
 
+    fn on_test_block(
+        &mut self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        bls_setting: BlsSetting,
+    ) -> Option<P2pMessage<P>> {
+        self.controller()
+            .on_test_block(block.clone_arc(), bls_setting);
+
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
+    fn drain_p2p_messages(&mut self) {
+        while self.next_p2p_message().is_some() {}
+    }
+
     fn on_execution_payload(
         &mut self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        bls_setting: BlsSetting,
     ) -> Option<P2pMessage<P>> {
         self.controller()
-            .on_gossip_execution_payload(envelope.clone_arc(), GossipId::default());
+            .on_test_execution_payload(envelope.clone_arc(), bls_setting);
+
         self.controller().wait_for_tasks();
         self.next_p2p_message()
     }
@@ -832,7 +1057,6 @@ impl<P: Preset> Context<P> {
         );
 
         self.controller().wait_for_tasks();
-
         self.next_p2p_message()
     }
 

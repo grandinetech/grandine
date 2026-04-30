@@ -213,6 +213,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
         .pipe(Arc::new);
 
     let anchor_state = case.ssz::<_, Arc<BeaconState<P>>>(config.as_ref(), "anchor_state");
+    let meta = case.meta();
     let steps = case.yaml::<Vec<Step>>("steps");
     let genesis_time = anchor_state.genesis_time();
     let pubkey_cache = Arc::new(PubkeyCache::default());
@@ -228,6 +229,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
         anchor_block,
         anchor_state,
         false,
+        None,
     );
 
     let mut last_payload_status: Option<PayloadStatusWithBlockHash> = None;
@@ -241,7 +243,8 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
             Step::Attestation { attestation, valid } => {
                 let attestation = case.ssz::<_, Attestation<P>>(config, attestation);
                 if valid {
-                    context.on_test_attestation(attestation);
+                    // context.on_test_attestation(attestation);
+                    context.on_valid_test_attestation(attestation, meta.bls_setting);
                 } else {
                     context.on_invalid_test_attestation(attestation);
                 }
@@ -337,9 +340,9 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                 );
 
                 if valid {
-                    context.on_valid_execution_payload(&envelope);
+                    context.on_valid_execution_payload(&envelope, meta.bls_setting);
                 } else {
-                    context.on_invalid_execution_payload(&envelope);
+                    context.on_invalid_execution_payload(&envelope, meta.bls_setting);
                 }
             }
             Step::MergeBlock { pow_block } => {

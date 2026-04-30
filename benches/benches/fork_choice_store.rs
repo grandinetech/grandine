@@ -24,6 +24,7 @@ use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
+use spec_test_utils::BlsSetting;
 use std_ext::ArcExt as _;
 use transition_functions::{combined, unphased::StateRootPolicy};
 use types::{
@@ -220,7 +221,7 @@ fn process_attestation<P: Preset>(
     attestation: Arc<Attestation<P>>,
 ) -> Result<()> {
     let slot = attestation.data().slot;
-    let origin = AttestationOrigin::<Never>::Test;
+    let origin = AttestationOrigin::<Never>::Test(BlsSetting::Required);
     let attestation_action =
         store.validate_attestation(AttestationItem::unverified(attestation, origin), false)?;
 

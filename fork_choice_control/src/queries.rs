@@ -1121,7 +1121,7 @@ where
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ForkTip {
     root: H256,
     #[serde(with = "serde_utils::string_or_native")]
@@ -1129,14 +1129,14 @@ pub struct ForkTip {
     execution_optimistic: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ForkChoiceContext {
     justified_checkpoint: Checkpoint,
     finalized_checkpoint: Checkpoint,
     fork_choice_nodes: Vec<FCNode>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct FCNode {
     #[serde(with = "serde_utils::string_or_native")]
     slot: Slot,

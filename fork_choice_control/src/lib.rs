@@ -55,6 +55,8 @@ mod unbounded_sink;
 mod wait;
 
 #[cfg(test)]
+mod compliance_tests;
+#[cfg(test)]
 mod extra_tests;
 #[cfg(test)]
 mod helpers;

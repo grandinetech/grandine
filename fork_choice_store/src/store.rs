@@ -2486,9 +2486,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             state.clone_arc()
         } else {
+            // Exclude cached states that are too far behind the target epoch —
+            // relative_epoch would fail on them and using them is incorrect.
             let mut target_state = self
                 .state_cache
-                .before_or_at_slot_in_cache_only(target.root, slot);
+                .before_or_at_slot_in_cache_only(target.root, slot)
+                .filter(|state| accessors::relative_epoch(state, target.epoch).is_ok());
 
             if let AttestationOrigin::Block(block_root) = attestation.origin
                 && target_state.is_none()
@@ -2505,6 +2508,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     target.root,
                     misc::compute_start_slot_at_epoch::<P>(target.epoch),
                 )
+                // Exclude cached states that are too far behind the target epoch —
+                // relative_epoch would fail on them and using them is incorrect.
+                .filter(|state| accessors::relative_epoch(state, target.epoch).is_ok())
+                .or_else(|| {
+                    // Compute the epoch boundary state via state transition.
+                    // The block at target.root may predate the target epoch
+                    // (empty slots in between), so the stored state is too old.
+                    self.state_cache
+                        .try_state_at_slot(
+                            &self.pubkey_cache,
+                            self,
+                            target.root,
+                            misc::compute_start_slot_at_epoch::<P>(target.epoch),
+                            true,
+                        )
+                        .ok()
+                        .flatten()
+                })
             }) else {
                 return Ok(AttestationAction::DelayUntilBlock(attestation, target.root));
             };

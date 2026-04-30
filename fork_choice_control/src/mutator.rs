@@ -3295,6 +3295,14 @@ where
                 None
             }
             BlockOrigin::Own | BlockOrigin::Persisted => None,
+            BlockOrigin::Test(_) => {
+                self.send_to_p2p(P2pMessage::Reject(
+                    None,
+                    MutatorRejectionReason::InvalidBlock,
+                ));
+
+                None
+            }
         };
 
         self.store_mut().register_rejected_block(block_root);
