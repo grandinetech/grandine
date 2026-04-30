@@ -13,7 +13,6 @@ use fork_choice_store::StateCacheError;
 use helper_functions::accessors;
 use logging::{exception, warn_with_peers};
 use prometheus_metrics::Metrics;
-use ssz::ContiguousList;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use types::{
@@ -34,7 +33,7 @@ use crate::{
         attestation_packer::{AttestationPacker, PackOutcome},
         conversion::convert_attestation_for_pool,
         pool::Pool,
-        types::Aggregate,
+        types::{Aggregate, AttestationKey, PoolAttestation},
     },
     misc::PoolTask,
 };
@@ -46,7 +45,7 @@ pub struct BestProposableAttestationsTask<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
-    type Output = ContiguousList<Attestation<P>, P::MaxAttestations>;
+    type Output = Vec<PoolAttestation<P>>;
 
     async fn run(self) -> Result<Self::Output> {
         let Self {
@@ -228,13 +227,6 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             attester_index = Some(single_attestation.attester_index);
         }
 
-        // TODO(Gloas): remove after testing
-        if controller.phase() >= Phase::Gloas {
-            if attestation.data().index != 1 {
-                return Ok(());
-            }
-        }
-
         let attestation = match convert_attestation_for_pool(&controller, attestation) {
             Ok(attestation) => attestation,
             Err(error) => {
@@ -252,11 +244,16 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             }
         };
 
-        let Attestation {
+        let PoolAttestation {
             aggregation_bits,
             data,
+            committee_index,
             signature,
         } = attestation;
+        let key = AttestationKey {
+            data,
+            committee_index,
+        };
 
         let is_singular = aggregation_bits.count_ones() == 1;
 
@@ -273,13 +270,16 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
                 }
             }
 
-            if !pool.aggregate_in_committee(data.index, data.slot).await {
+            if !pool
+                .aggregate_in_committee(committee_index, data.slot)
+                .await
+            {
                 return Ok(());
             }
         }
 
-        let singular_attestations = pool.singular_attestations(data).await;
-        let aggregates = pool.aggregates(data).await;
+        let singular_attestations = pool.singular_attestations(key).await;
+        let aggregates = pool.aggregates(key).await;
         let mut aggregates = aggregates.lock().await;
 
         if !is_singular || aggregates.is_empty() {
@@ -294,9 +294,10 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
 
             aggregates.push(aggregate);
         } else {
-            let attestation = Attestation {
+            let attestation = PoolAttestation {
                 aggregation_bits,
                 data,
+                committee_index,
                 signature,
             };
 
@@ -312,7 +313,7 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             }
         }
 
-        pool.add_data_root_to_data_entry(data).await;
+        pool.add_data_root_to_key_entry(key).await;
 
         drop(wait_group);
 
@@ -396,7 +397,7 @@ impl<P: Preset, W: Wait> PoolTask for SetRegisteredValidatorsTask<P, W> {
 }
 
 fn aggregate_attestation<P: Preset>(
-    attestation: &Attestation<P>,
+    attestation: &PoolAttestation<P>,
     aggregate: &mut Aggregate<P>,
 ) -> Result<()> {
     if attestation
