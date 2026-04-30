@@ -210,7 +210,7 @@ pub struct PayloadAttestation<P: Preset> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct ProposerPreferences {
-    pub checkpoint_root: H256,
+    pub dependent_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub proposal_slot: Slot,
     #[serde(with = "serde_utils::string_or_native")]
