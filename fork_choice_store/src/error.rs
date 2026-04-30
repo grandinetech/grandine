@@ -202,6 +202,13 @@ pub enum Error<P: Preset> {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<H256>,
     },
+    #[error(
+        "execution payload parent beacon block root mismatch (envelope: {envelope:?}, expected: {expected:?})"
+    )]
+    ExecutionPayloadParentBeaconBlockRootMismatch {
+        envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        expected: Box<H256>,
+    },
     #[error("execution payload gas_limit mismatch (envelope: {envelope:?}, expected: {expected})")]
     ExecutionPayloadGasLimitMismatch {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,

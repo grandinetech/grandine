@@ -1383,7 +1383,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let parent_block_hash = block_payload_bid.parent_block_hash;
         let message_block_hash = parent_payload_bid.block_hash;
 
-        if parent_block_hash == message_block_hash && !message_block_hash.is_zero() {
+        if parent_block_hash == message_block_hash {
             PayloadPresence::Full
         } else {
             PayloadPresence::Empty
@@ -3376,6 +3376,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
+        let parent_beacon_block_root = state.latest_block_header().parent_root;
+
+        ensure!(
+            envelope.message.parent_beacon_block_root == state.latest_block_header().parent_root,
+            Error::<P>::ExecutionPayloadParentBeaconBlockRootMismatch {
+                envelope,
+                expected: Box::new(parent_beacon_block_root),
+            },
+        );
+
         // [REJECT] hash_tree_root(envelope.execution_requests) == bid.execution_requests_root
         ensure!(
             envelope.message.execution_requests.hash_tree_root() == bid.execution_requests_root,
@@ -3446,9 +3456,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .copied()
             .map(misc::kzg_commitment_to_versioned_hash)
             .collect();
-
-        // TODO(Gloas): this will change in consensus specs v1.7.0-alpha.6
-        let parent_beacon_block_root = post_gloas_state.latest_block_header().parent_root;
 
         let params = Some(ExecutionPayloadParams::Electra {
             versioned_hashes,
@@ -5592,9 +5599,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn should_check_data_availability_at_slot(&self, slot: Slot) -> bool {
-        self.phase() < Phase::Gloas
-            && misc::compute_epoch_at_slot::<P>(slot)
-                >= self.min_checked_data_availability_epoch(slot)
+        misc::compute_epoch_at_slot::<P>(slot) >= self.min_checked_data_availability_epoch(slot)
     }
 
     pub fn state_cache(&self) -> Arc<StateCacheProcessor<P>> {
