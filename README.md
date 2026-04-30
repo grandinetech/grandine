@@ -31,7 +31,7 @@ Then the build may take a few minutes:
 git clone https://github.com/grandinetech/grandine
 cd grandine
 git submodule update --init dedicated_executor eth2_libp2p
-cargo build --profile compact --features default-networks --workspace --exclude zkvm_host --exclude zkvm_guest_risc0
+make release
 ```
 
 The compiled binary is available at `./target/compact/grandine`.
@@ -53,27 +53,13 @@ docker build .
 Cross-compilation command for `amd64` architecture:
 
 ```shell
-cross build \
-    --bin grandine \
-    --target x86_64-unknown-linux-gnu \
-    --features default-networks \
-    --profile compact \
-    --workspace \
-    --exclude zkvm_host \
-    --exclude zkvm_guest_risc0
+make release TARGET=x86_64-unknown-linux-gnu
 ```
 
 Cross-compilation command for `arm64` architecture:
 
 ```shell
-cross build \
-    --bin grandine \
-    --target aarch64-unknown-linux-gnu \
-    --features default-networks \
-    --profile compact \
-    --workspace \
-    --exclude zkvm_host \
-    --exclude zkvm_guest_risc0
+make release TARGET=aarch64-unknown-linux-gnu
 ```
 
 ### Docker Cross builds
