@@ -266,7 +266,8 @@ pub struct Store<P: Preset, S: Storage<P>> {
     accepted_gloas_data_column_sidecars: HashMap<(H256, ColumnIndex), Slot>,
     accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, SignedExecutionPayloadBid<P>>>,
     accepted_execution_payload_envelopes: HashSet<(Slot, H256, BuilderIndex)>,
-    accepted_proposer_preferences: HashMap<(H256, Slot, ValidatorIndex), Arc<SignedProposerPreferences>>,
+    accepted_proposer_preferences:
+        HashMap<(H256, Slot, ValidatorIndex), Arc<SignedProposerPreferences>>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -1821,9 +1822,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let proposer_index =
             accessors::get_beacon_proposer_index_at_slot(&self.chain_config, &state, bid.slot)?;
 
-        let Some(proposer_preference) = self
-            .accepted_proposer_preferences
-            .get(&(dependent_root, bid.slot, proposer_index))
+        let Some(proposer_preference) =
+            self.accepted_proposer_preferences
+                .get(&(dependent_root, bid.slot, proposer_index))
         else {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen",
@@ -1979,10 +1980,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         //  _[IGNORE]_ The `signed_proposer_preferences` is the first valid message seen
         // for the tuple `(preferences.dependent_root, preferences.proposal_slot, preferences.validator_index)`
-        if self
-            .accepted_proposer_preferences
-            .contains_key(&(dependent_root, proposal_slot, validator_index))
-        {
+        if self.accepted_proposer_preferences.contains_key(&(
+            dependent_root,
+            proposal_slot,
+            validator_index,
+        )) {
             return Ok(ProposerPreferencesAction::Ignore(true));
         }
 
