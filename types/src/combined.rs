@@ -1562,6 +1562,15 @@ impl<P: Preset> ExecutionPayload<P> {
         }
     }
 
+    pub const fn parent_hash(&self) -> ExecutionBlockHash {
+        match self {
+            Self::Bellatrix(payload) => payload.parent_hash,
+            Self::Capella(payload) => payload.parent_hash,
+            Self::Deneb(payload) => payload.parent_hash,
+            Self::Gloas(payload) => payload.parent_hash,
+        }
+    }
+
     pub const fn prev_randao(&self) -> H256 {
         match self {
             Self::Bellatrix(payload) => payload.prev_randao,

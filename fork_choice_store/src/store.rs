@@ -266,7 +266,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     accepted_gloas_data_column_sidecars: HashMap<(H256, ColumnIndex), Slot>,
     accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, SignedExecutionPayloadBid<P>>>,
     accepted_execution_payload_envelopes: HashSet<(Slot, H256, BuilderIndex)>,
-    accepted_proposer_preferences: HashMap<Slot, Arc<SignedProposerPreferences>>,
+    accepted_proposer_preferences: HashMap<(H256, Slot, ValidatorIndex), Arc<SignedProposerPreferences>>,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -1760,6 +1760,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         origin: &ExecutionPayloadBidOrigin,
+        proposer_dependent_root: impl Fn(&BeaconState<P>, Epoch) -> Result<H256>,
     ) -> Result<ExecutionPayloadBidAction<P>> {
         let bid = &payload_bid.message;
         let builder_index = bid.builder_index;
@@ -1806,8 +1807,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         }
 
+        let Some(state) =
+            self.state_cache
+                .existing_state_at_slot(self, bid.parent_block_root, bid.slot)
+        else {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "state unavailable for bid validation",
+            ));
+        };
+
         // > the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen.
-        let Some(proposer_preference) = self.accepted_proposer_preferences.get(&bid.slot) else {
+        let dependent_root = proposer_dependent_root(&state, bid_epoch)?;
+        let proposer_index =
+            accessors::get_beacon_proposer_index_at_slot(&self.chain_config, &state, bid.slot)?;
+
+        let Some(proposer_preference) = self
+            .accepted_proposer_preferences
+            .get(&(dependent_root, bid.slot, proposer_index))
+        else {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen",
             ));
@@ -1830,15 +1847,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 in_bid: bid.gas_limit
             }
         );
-
-        let Some(state) =
-            self.state_cache
-                .existing_state_at_slot(self, bid.parent_block_root, bid.slot)
-        else {
-            return Ok(ExecutionPayloadBidAction::Ignore(
-                "state unavailable for bid validation",
-            ));
-        };
 
         if builder_index == BUILDER_INDEX_SELF_BUILD {
             ensure!(
@@ -1929,25 +1937,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let preferences = &signed_preferences.message;
         let validator_index = preferences.validator_index;
         let proposal_slot = preferences.proposal_slot;
-
-        // ProposerPreferences carries no block root, so resolve via head + current slot.
-        // state_at_slot slot-processes inline, avoiding the gossip-before-tick race.
-        let Some(state) = self
-            .state_cache
-            .state_at_slot(
-                &self.pubkey_cache,
-                self,
-                self.head().block_root,
-                self.slot(),
-            )
-            .ok()
-        else {
-            return Ok(ProposerPreferencesAction::Ignore(true));
-        };
+        let dependent_root = preferences.dependent_root;
 
         // [IGNORE] proposal_slot is in the current or next epoch
         let current_epoch = misc::compute_epoch_at_slot::<P>(self.slot());
         let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
+
         if proposal_epoch < current_epoch || proposal_epoch > current_epoch + 1 {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
@@ -1957,23 +1952,36 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
 
-        // [IGNORE] The block with root preferences.checkpoint_root has been seen
-        if !self.contains_block(preferences.checkpoint_root) {
+        // [IGNORE] The block with root preferences.dependent_root has been seen
+        if !self.contains_block(dependent_root) {
             return Ok(ProposerPreferencesAction::DelayUntilBlock(
                 signed_preferences,
             ));
         }
 
-        // [IGNORE] preferences.validator_index is present at the correct slot in the current or
-        // next epoch's portion of state.proposer_lookahead
-        if !accessors::is_valid_proposal_slot::<P>(&state, preferences) {
+        // _[REJECT]_ `is_valid_proposal_slot(state, preferences)` returns `True`, where
+        // `state` is the checkpoint state at the epoch
+        // `compute_epoch_at_slot(preferences.proposal_slot) - 1` and the root
+        // `preferences.dependent_root`.
+        let Ok(state) = self.state_cache.state_at_slot(
+            &self.pubkey_cache,
+            self,
+            dependent_root,
+            misc::compute_start_slot_at_epoch::<P>(proposal_epoch.saturating_sub(1)),
+        ) else {
             return Ok(ProposerPreferencesAction::Ignore(false));
-        }
+        };
 
-        // [IGNORE] First message from this validator for this slot
+        ensure!(
+            accessors::is_valid_proposal_slot::<P>(&state, preferences),
+            Error::<P>::InvalidProposerPreferencesProposalSlot { signed_preferences }
+        );
+
+        //  _[IGNORE]_ The `signed_proposer_preferences` is the first valid message seen
+        // for the tuple `(preferences.dependent_root, preferences.proposal_slot, preferences.validator_index)`
         if self
             .accepted_proposer_preferences
-            .contains_key(&proposal_slot)
+            .contains_key(&(dependent_root, proposal_slot, validator_index))
         {
             return Ok(ProposerPreferencesAction::Ignore(true));
         }
@@ -4115,8 +4123,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         signed_preferences: Arc<SignedProposerPreferences>,
     ) {
         let slot = signed_preferences.message.proposal_slot;
+        let dependent_root = signed_preferences.message.dependent_root;
+        let validator_index = signed_preferences.message.validator_index;
+
         self.accepted_proposer_preferences
-            .insert(slot, signed_preferences);
+            .insert((dependent_root, slot, validator_index), signed_preferences);
     }
 
     pub fn apply_data_column_sidecar(&mut self, data_sidecar: Arc<DataColumnSidecar<P>>) {
@@ -4607,7 +4618,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.accepted_execution_payload_envelopes
             .retain(|(slot, _, _)| finalized_slot <= *slot);
         self.accepted_proposer_preferences
-            .retain(|slot, _| finalized_slot <= *slot);
+            .retain(|(_, slot, _), _| finalized_slot <= *slot);
         self.sidecars_construction_started
             .retain_sync(|_, slot| finalized_slot <= *slot);
         self.delayed_block_at_slot
