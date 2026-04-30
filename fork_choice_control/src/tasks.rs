@@ -622,6 +622,7 @@ pub struct ExecutionPayloadBidTask<P: Preset, W> {
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     pub origin: ExecutionPayloadBidOrigin,
+    pub storage: Arc<Storage<P>>,
 }
 
 impl<P: Preset, W> Run for ExecutionPayloadBidTask<P, W> {
@@ -632,9 +633,13 @@ impl<P: Preset, W> Run for ExecutionPayloadBidTask<P, W> {
             mutator_tx,
             payload_bid,
             origin,
+            storage,
         } = self;
 
-        let result = store_snapshot.validate_execution_payload_bid(payload_bid, &origin);
+        let result =
+            store_snapshot.validate_execution_payload_bid(payload_bid, &origin, |state, epoch| {
+                storage.dependent_root(&store_snapshot, state, epoch.saturating_sub(1))
+            });
 
         MutatorMessage::PayloadBid { result, origin }.send(&mutator_tx);
     }
