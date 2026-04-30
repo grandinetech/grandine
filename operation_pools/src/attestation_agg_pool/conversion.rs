@@ -12,26 +12,16 @@ use types::{
         containers::{Attestation as ElectraAttestation, SingleAttestation},
         error::AttestationConversionError,
     },
-    phase0::{
-        containers::{Attestation as Phase0Attestation, Checkpoint},
-        primitives::CommitteeIndex,
-    },
+    phase0::containers::{Attestation as Phase0Attestation, Checkpoint},
     preset::Preset,
 };
 
-/// Convert an incoming attestation into the pool's per-committee representation.
-///
-/// Returns the attestation with **pristine** `data` (byte-for-byte as signed) together with the
-/// committee index tracked separately. The committee index is deliberately NOT folded back into
-/// `data.index`: under Gloas that field is the payload-presence vote, so overwriting it would
-/// corrupt the signed root. The caller stores both in a [`PoolKey`]. See
-/// TODO(grandinetech/grandine#780).
-///
-/// [`PoolKey`]: crate::attestation_agg_pool::types::PoolKey
+use crate::attestation_agg_pool::types::PoolAttestation;
+
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     attestation: Arc<Attestation<P>>,
-) -> Result<(Phase0Attestation<P>, CommitteeIndex)> {
+) -> Result<PoolAttestation<P>> {
     if attestation
         .data()
         .slot
@@ -41,11 +31,20 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
         bail!(AttestationConversionError::Irrelevant);
     }
 
-    let attestation_with_committee = match Arc::unwrap_or_clone(attestation) {
-        // Pre-Electra: `data.index` is genuinely the committee index (as signed); already pristine.
+    let attestation = match Arc::unwrap_or_clone(attestation) {
         Attestation::Phase0(attestation) => {
-            let committee_index = attestation.data.index;
-            (attestation, committee_index)
+            let Phase0Attestation {
+                aggregation_bits,
+                data,
+                signature,
+            } = attestation;
+
+            PoolAttestation {
+                aggregation_bits,
+                data,
+                committee_index: data.index,
+                signature,
+            }
         }
         Attestation::Electra(attestation) => {
             let ElectraAttestation {
@@ -62,31 +61,40 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
                 .ok_or(AttestationConversionError::InvalidCommitteeIndex)?;
 
             // Keep `data` pristine (the signed Electra `data.index` is 0). The committee index is
-            // returned separately, never written into `data.index`. See TODO(#780).
-            let attestation = Phase0Attestation {
+            // in its own field, never written into `data.index`.
+            PoolAttestation {
                 aggregation_bits: aggregation_bits
                     .try_into()
                     .map_err(AttestationConversionError::InvalidAggregationBits)?,
                 data,
+                committee_index,
                 signature,
-            };
-
-            (attestation, committee_index)
+            }
         }
         Attestation::Single(attestation) => {
-            let slot = attestation.data.slot;
             let committee_index = attestation.committee_index;
+            let data = attestation.data;
+            let slot = attestation.data.slot;
             let state = current_state(controller, attestation.data.target);
             let committee = accessors::beacon_committee(&state, slot, committee_index)?;
 
-            (
-                attestation.try_into_phase0_attestation(committee)?,
+            let phase0_attestation = attestation.try_into_phase0_attestation::<P>(committee)?;
+            let Phase0Attestation {
+                aggregation_bits,
+                signature,
+                ..
+            } = phase0_attestation;
+
+            PoolAttestation {
+                aggregation_bits,
+                data,
                 committee_index,
-            )
+                signature,
+            }
         }
     };
 
-    Ok(attestation_with_committee)
+    Ok(attestation)
 }
 
 pub fn convert_to_electra_attestation<P: Preset>(
