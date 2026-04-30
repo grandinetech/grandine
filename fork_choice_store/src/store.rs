@@ -3387,7 +3387,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let parent_beacon_block_root = state.latest_block_header().parent_root;
 
         ensure!(
-            envelope.message.parent_beacon_block_root == state.latest_block_header().parent_root,
+            envelope.message.parent_beacon_block_root == parent_beacon_block_root,
             Error::<P>::ExecutionPayloadParentBeaconBlockRootMismatch {
                 envelope,
                 expected: Box::new(parent_beacon_block_root),
