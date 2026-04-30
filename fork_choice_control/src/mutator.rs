@@ -3188,7 +3188,11 @@ where
                     ));
                 }
 
-                self.notify_forkchoice_updated(&new_head);
+                // After Gloas, notify FCU should only be called when payload is processed or block produced
+                if self.store.phase() < Phase::Gloas {
+                    self.notify_forkchoice_updated(&new_head);
+                }
+
                 self.maybe_spawn_preprocess_head_state_for_current_slot_task(block_slot);
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
@@ -3262,6 +3266,8 @@ where
         self.store_mut().apply_execution_payload_envelope(envelope);
 
         self.update_store_snapshot();
+
+        self.notify_forkchoice_updated(self.store.head());
 
         if let Some(delayed) = self.take_delayed_until_envelope(beacon_block_root) {
             self.retry_delayed(delayed, wait_group);
@@ -3441,7 +3447,13 @@ where
             self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
         }
 
-        self.notify_forkchoice_updated(&new_head);
+        let phase = self.store.phase();
+
+        if phase < Phase::Gloas
+            || (phase >= Phase::Gloas && self.store.is_payload_verified(new_head.block_root))
+        {
+            self.notify_forkchoice_updated(&new_head);
+        }
     }
 
     fn request_blobs_from_execution_engine(&self, params: EngineGetBlobsParams<P>) {
