@@ -20,9 +20,6 @@ use rayon::iter::{
     IndexedParallelIterator as _, IntoParallelIterator as _, IntoParallelRefIterator as _,
     ParallelIterator as _,
 };
-use ssz::ContiguousList;
-use tap::Pipe as _;
-use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{consts::PARTICIPATION_FLAG_WEIGHTS, primitives::ParticipationFlags},
@@ -31,12 +28,14 @@ use types::{
     nonstandard::AttestationEpoch,
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
-        containers::{Attestation, PendingAttestation},
+        containers::{AttestationData, PendingAttestation},
         primitives::{H256, ValidatorIndex},
     },
     preset::Preset,
     traits::BeaconState as _,
 };
+
+use crate::attestation_agg_pool::types::PoolAttestation;
 
 /// Constant used to limit number of calls to `select_max_cover_attestation_integer_programming`
 /// It is used when we need a lot of aggregates (more than `MAXIMUM_ATTESTATIONS_WITH_SAME_DATA`)
@@ -50,7 +49,7 @@ const MAXIMUM_ATTESTATIONS_WITH_SAME_DATA: usize = 6;
 const TIME_FRACTION_FOR_SUBPROBLEM: f64 = 0.25;
 
 pub struct PackOutcome<P: Preset> {
-    pub attestations: ContiguousList<Attestation<P>, P::MaxAttestations>,
+    pub attestations: Vec<PoolAttestation<P>>,
     pub deadline_reached: bool,
 }
 
@@ -99,8 +98,8 @@ impl<P: Preset> AttestationPacker<P> {
 
     pub fn pack_proposable_attestations_greedily<'a>(
         &self,
-        previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
-        current_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
+        previous_epoch_aggregates: impl IntoIterator<Item = &'a PoolAttestation<P>>,
+        current_epoch_aggregates: impl IntoIterator<Item = &'a PoolAttestation<P>>,
     ) -> PackOutcome<P> {
         let mut previous_epoch_participation = self.previous_epoch_participation.clone();
         let mut current_epoch_participation = self.current_epoch_participation.clone();
@@ -172,11 +171,7 @@ impl<P: Preset> AttestationPacker<P> {
             .then_some(attestation)
         })
         .take(P::MaxAttestations::USIZE)
-        .pipe(ContiguousList::try_from_iter)
-        .expect(
-            "the call to Iterator::take limits the number \
-             of attestations to P::MaxAttestations::USIZE",
-        );
+        .collect();
 
         PackOutcome {
             attestations,
@@ -186,9 +181,9 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn aggregates_grouped_by_data<'a>(
         &self,
-        previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
-        current_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
-    ) -> Vec<Vec<Attestation<P>>> {
+        previous_epoch_aggregates: impl IntoIterator<Item = &'a PoolAttestation<P>>,
+        current_epoch_aggregates: impl IntoIterator<Item = &'a PoolAttestation<P>>,
+    ) -> Vec<Vec<PoolAttestation<P>>> {
         previous_epoch_aggregates
             .into_iter()
             .chain(current_epoch_aggregates)
@@ -204,7 +199,7 @@ impl<P: Preset> AttestationPacker<P> {
     // this function assumes that every aggregate have same AttestationData
     fn find_attestation_weights(
         &self,
-        aggregates: &Vec<Attestation<P>>,
+        aggregates: &Vec<PoolAttestation<P>>,
     ) -> Result<Vec<AttestationWeights>> {
         let mut attestation_weights = Vec::new();
         let base_reward_per_increment = get_base_reward_per_increment(&self.state);
@@ -250,7 +245,7 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn find_optimal_selections(
         &self,
-        aggregates: &[Attestation<P>],
+        aggregates: &[PoolAttestation<P>],
         group_weights: &[AttestationWeights],
     ) -> (Vec<Vec<usize>>, Vec<u64>) {
         let mut choices = vec![vec![]];
@@ -305,8 +300,8 @@ impl<P: Preset> AttestationPacker<P> {
     #[expect(clippy::needless_range_loop, reason = "the intent becomes less clear")]
     pub fn pack_proposable_attestations_optimally<'a>(
         &self,
-        previous_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
-        current_epoch_aggregates: impl IntoIterator<Item = &'a Attestation<P>>,
+        previous_epoch_aggregates: impl IntoIterator<Item = &'a PoolAttestation<P>>,
+        current_epoch_aggregates: impl IntoIterator<Item = &'a PoolAttestation<P>>,
     ) -> PackOutcome<P> {
         let grouped_aggregates =
             self.aggregates_grouped_by_data(previous_epoch_aggregates, current_epoch_aggregates);
@@ -380,10 +375,7 @@ impl<P: Preset> AttestationPacker<P> {
         attestations.truncate(P::MaxAttestations::USIZE);
 
         PackOutcome {
-            attestations: attestations.try_into().expect(
-                "the call to Vec::truncate limits the number \
-                 of attestations to P::MaxAttestations::USIZE",
-            ),
+            attestations,
             deadline_reached: self.deadline_reached(),
         }
     }
@@ -399,7 +391,7 @@ impl<P: Preset> AttestationPacker<P> {
     #[expect(clippy::float_arithmetic)]
     fn select_max_cover_attestation_integer_programming(
         &self,
-        aggregates: &[Attestation<P>],
+        aggregates: &[PoolAttestation<P>],
         group_weights: &[AttestationWeights],
         selected_aggregates_count: usize,
     ) -> Result<(Vec<usize>, u64)> {
@@ -533,7 +525,7 @@ impl<P: Preset> AttestationPacker<P> {
     }
 
     fn select_one_attestation_greedily(
-        attestations: &[Attestation<P>],
+        attestations: &[PoolAttestation<P>],
         group_weights: &[AttestationWeights],
     ) -> (Vec<usize>, u64) {
         let mut best_id = 0;
@@ -568,7 +560,7 @@ impl<P: Preset> AttestationPacker<P> {
         Ok(())
     }
 
-    fn is_valid_for_inclusion(&self, attestation: &Attestation<P>) -> bool {
+    fn is_valid_for_inclusion(&self, attestation: &PoolAttestation<P>) -> bool {
         let low_slot = attestation.data.slot + P::MIN_ATTESTATION_INCLUSION_DELAY.get();
         let high_slot = attestation.data.slot + P::SlotsPerEpoch::U64;
 
@@ -596,7 +588,7 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn added_weight(
         &self,
-        attestation: &Attestation<P>,
+        attestation: &PoolAttestation<P>,
         previous_epoch_participation: &[ParticipationFlags],
         current_epoch_participation: &[ParticipationFlags],
     ) -> Result<u64> {
@@ -656,7 +648,7 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn add_attestation(
         &self,
-        attestation: &Attestation<P>,
+        attestation: &PoolAttestation<P>,
         previous_epoch_participation: &mut [ParticipationFlags],
         current_epoch_participation: &mut [ParticipationFlags],
     ) -> Result<bool> {
@@ -680,7 +672,7 @@ impl<P: Preset> AttestationPacker<P> {
         Ok(any_added_participation_flags)
     }
 
-    fn attestation_epoch(&self, attestation: &Attestation<P>) -> Result<AttestationEpoch> {
+    fn attestation_epoch(&self, attestation: &PoolAttestation<P>) -> Result<AttestationEpoch> {
         accessors::attestation_epoch(&self.state, attestation.data.target.epoch)
     }
 
@@ -710,7 +702,7 @@ impl<P: Preset> AttestationPacker<P> {
         tick.is_start_of_slot()
     }
 
-    fn participation_flags(&self, attestation: &Attestation<P>) -> Result<ParticipationFlags> {
+    fn participation_flags(&self, attestation: &PoolAttestation<P>) -> Result<ParticipationFlags> {
         accessors::get_attestation_participation_flags(
             &self.state,
             attestation.data,
@@ -720,10 +712,14 @@ impl<P: Preset> AttestationPacker<P> {
 
     fn attesting_indices<'a>(
         &'a self,
-        attestation: &'a Attestation<P>,
+        attestation: &'a PoolAttestation<P>,
     ) -> Result<impl Iterator<Item = ValidatorIndex> + 'a> {
-        // TODO(feature/electra): use electra::get_attesting_indices for electra attestations
-        phase0::get_attesting_indices(&self.state, attestation.data, &attestation.aggregation_bits)
+        let data = AttestationData {
+            index: attestation.committee_index,
+            ..attestation.data
+        };
+
+        phase0::get_attesting_indices(&self.state, data, &attestation.aggregation_bits)
     }
 }
 
@@ -795,12 +791,36 @@ mod tests {
     use ssz::BitList;
     use std_ext::ArcExt as _;
     use transition_functions::unphased;
-    use types::{config::Config, phase0::containers::AttestationData, preset::Mainnet};
+    use types::{
+        config::Config,
+        phase0::containers::{Attestation, AttestationData},
+        preset::Mainnet,
+    };
 
     use super::*;
 
     type BitListMap<P> =
         HashMap<AttestationData, BitList<<P as Preset>::MaxValidatorsPerCommittee>>;
+
+    fn pool_attestations<P: Preset>(attestations: Vec<Attestation<P>>) -> Vec<PoolAttestation<P>> {
+        attestations
+            .into_iter()
+            .map(|attestation| {
+                let Attestation {
+                    aggregation_bits,
+                    data,
+                    signature,
+                } = attestation;
+
+                PoolAttestation {
+                    aggregation_bits,
+                    data,
+                    committee_index: data.index,
+                    signature,
+                }
+            })
+            .collect()
+    }
 
     fn compute_total_reward<P: Preset>(
         packer: &AttestationPacker<P>,
@@ -847,6 +867,8 @@ mod tests {
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
+        let previous_epoch_aggregates = pool_attestations(previous_epoch_aggregates);
+        let current_epoch_aggregates = pool_attestations(current_epoch_aggregates);
 
         let packer = AttestationPacker::new(
             config.clone_arc(),
@@ -897,6 +919,8 @@ mod tests {
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
+        let previous_epoch_aggregates = pool_attestations(previous_epoch_aggregates);
+        let current_epoch_aggregates = pool_attestations(current_epoch_aggregates);
 
         let packer = AttestationPacker::new(
             config.clone_arc(),
@@ -948,6 +972,8 @@ mod tests {
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
+        let previous_epoch_aggregates = pool_attestations(previous_epoch_aggregates);
+        let current_epoch_aggregates = pool_attestations(current_epoch_aggregates);
 
         let packer = AttestationPacker::new(
             config.clone_arc(),
@@ -999,6 +1025,8 @@ mod tests {
 
         let _unused = accessors::initialize_shuffled_indices(&state, &previous_epoch_aggregates);
         let _unused = accessors::initialize_shuffled_indices(&state, &current_epoch_aggregates);
+        let previous_epoch_aggregates = pool_attestations(previous_epoch_aggregates);
+        let current_epoch_aggregates = pool_attestations(current_epoch_aggregates);
 
         let packer = AttestationPacker::new(
             config.clone_arc(),
@@ -1037,7 +1065,7 @@ mod tests {
         config: &Config,
         pubkey_cache: &PubkeyCache,
         state: &BeaconState<P>,
-        attestations: impl IntoIterator<Item = &'attestations Attestation<P>>,
+        attestations: impl IntoIterator<Item = &'attestations PoolAttestation<P>>,
     ) -> Result<()> {
         let mut already_added = BitListMap::<P>::new();
 
@@ -1061,7 +1089,8 @@ mod tests {
                 }
             }
 
-            unphased::validate_attestation(config, pubkey_cache, state, attestation)?;
+            let attestation = attestation.clone().into_phase0_attestation();
+            unphased::validate_attestation(config, pubkey_cache, state, &attestation)?;
         }
 
         Ok(())

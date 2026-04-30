@@ -49,7 +49,7 @@ use liveness_tracker::ValidatorToLiveness;
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use once_cell::sync::OnceCell;
 use operation_pools::{
-    AttestationAggPool, Origin, PayloadAttestationAggPool, PoolAdditionOutcome,
+    AttestationAggPool, AttestationKey, Origin, PayloadAttestationAggPool, PoolAdditionOutcome,
     SyncCommitteeAggPool,
 };
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
@@ -166,7 +166,7 @@ pub struct Validator<P: Preset, W: Wait> {
     own_ptc_members: Arc<OwnPTCMembers>,
     own_payload_attestations: OnceCell<Vec<PayloadAttestationMessage>>,
     published_own_sync_committee_messages_for: Option<SlotHead<P>>,
-    own_aggregators: BTreeMap<AttestationData, Vec<Aggregator>>,
+    own_aggregators: BTreeMap<AttestationKey, Vec<Aggregator>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
     event_channels: Arc<EventChannels<P>>,
@@ -1508,12 +1508,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     selection_proof,
                 })?;
 
-                let data = AttestationData {
-                    index: committee_index,
-                    ..own_attestation.attestation.data()
+                let data = own_attestation.attestation.data();
+                let key = AttestationKey {
+                    data,
+                    committee_index,
                 };
 
-                Some((data, aggregator))
+                Some((key, aggregator))
             })
             .pipe(group_into_btreemap);
 
@@ -1537,9 +1538,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
             .iter()
-            .map(|(data, aggregators)| async {
+            .map(|(key, aggregators)| async {
                 self.attestation_agg_pool
-                    .best_aggregate_attestation(*data)
+                    .best_aggregate_attestation(*key)
                     .await
                     .into_iter()
                     .flat_map(|aggregate| {
@@ -1558,31 +1559,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                             let aggregate_and_proof = if phase < Phase::Electra {
                                 AggregateAndProof::from(Phase0AggregateAndProof {
                                     aggregator_index,
-                                    aggregate: aggregate.clone(),
+                                    aggregate: aggregate.clone().into_phase0_attestation(),
                                     selection_proof,
                                 })
                             } else {
-                                let mut aggregate =
-                                    operation_pools::convert_to_electra_attestation(
-                                        aggregate.clone(),
-                                    )
-                                    .ok()?;
-
-                                // TODO(gloas): this is a quick fix, we should refactor pool to preserve data.index through
-                                // aggregation so this patch is no longer needed.
-                                // In Gloas, data.index signals payload presence (0 or 1), convert_to_electra_attestation always set it to zeros.
-                                // See: https://github.com/grandinetech/grandine/blob/4413b701c78064c9624e8914eb30592c6f2ac835/types/src/electra/container_impls.rs#L160
-                                // Restore from the local validator's signed attestation, which
-                                // holds the gloas_index all attestors in this slot agreed on.
-                                if phase >= Phase::Gloas
-                                    && let Some(gloas_index) = self
-                                        .own_singular_attestations
-                                        .get()
-                                        .and_then(|a| a.first())
-                                        .map(|a| a.attestation.data().index)
-                                {
-                                    aggregate.data.index = gloas_index;
-                                }
+                                let aggregate =
+                                    aggregate.clone().try_into_electra_attestation().ok()?;
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
                                     aggregator_index,
