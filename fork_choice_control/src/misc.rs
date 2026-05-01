@@ -24,7 +24,9 @@ use types::{
         primitives::BlobIndex,
     },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{SignedExecutionPayloadEnvelope, SignedProposerPreferences},
+    gloas::containers::{
+        PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    },
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -223,7 +225,10 @@ pub enum MutatorRejectionReason {
     InvalidDataColumnSidecar {
         data_column_identifier: DataColumnIdentifier,
     },
-    InvalidExecutionPayloadEnvelope,
+    #[strum(serialize = "invalid_execution_payload_envelope")]
+    InvalidExecutionPayloadEnvelope {
+        payload_envelope_identifier: PayloadEnvelopeIdentifier,
+    },
     InvalidPayloadBid,
     InvalidPayloadAttestation,
     InvalidProposerPreferences,

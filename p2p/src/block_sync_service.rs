@@ -42,7 +42,7 @@ use types::{
     config::Config,
     deneb::containers::BlobIdentifier,
     fulu::containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
-    gloas::primitives::BuilderIndex,
+    gloas::containers::PayloadEnvelopeIdentifier,
     nonstandard::StorageMode,
     phase0::{
         consts::GENESIS_SLOT,
@@ -106,7 +106,7 @@ pub struct BlockSyncService<P: Preset> {
     received_blob_sidecars: Arc<SccHashMap<BlobIdentifier, Slot>>,
     received_block_roots: HashMap<H256, Slot>,
     received_data_column_sidecars: Arc<SccHashMap<DataColumnIdentifier, Slot>>,
-    received_envelopes: HashMap<(H256, BuilderIndex), Slot>,
+    received_envelopes: HashMap<PayloadEnvelopeIdentifier, Slot>,
     data_dumper: Arc<DataDumper>,
     network_globals: Arc<NetworkGlobals>,
     delayed_batches: BTreeMap<Instant, Vec<SyncBatch<P>>>,
@@ -610,9 +610,9 @@ impl<P: Preset> BlockSyncService<P> {
                             match request_direction {
                                 SyncDirection::Forward => {
                                     let envelope_slot = envelope.slot();
-                                    let builder_index = envelope.builder_index();
+                                    let identifier = envelope.as_ref().into();
 
-                                    if self.register_new_received_envelope(block_root, builder_index, envelope_slot) {
+                                    if self.register_new_received_envelope(identifier, envelope_slot) {
                                         self.controller.on_requested_execution_payload_envelope(envelope, peer_id);
 
                                         debug_with_peers!(
@@ -687,6 +687,9 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::DataColumnSidecarRejected(data_column_identifier) => {
                             self.received_data_column_sidecars.remove_async(&data_column_identifier).await;
                         }
+                        P2pToSync::PayloadEnvelopeRejected(payload_envelope_identifier) => {
+                            self.received_envelopes.remove(&payload_envelope_identifier);
+                        }
                         P2pToSync::PeerCgcUpdated(peer_id) => {
                             self.sync_manager.update_peer_cgc(peer_id);
                         }
@@ -701,9 +704,9 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::GossipExecutionPayload(execution_payload_envelope, peer_id, gossip_id) => {
                             let block_slot = execution_payload_envelope.slot();
                             let beacon_block_root = execution_payload_envelope.block_root();
-                            let builder_index = execution_payload_envelope.builder_index();
+                            let identifier = execution_payload_envelope.as_ref().into();
 
-                            if self.register_new_received_envelope(beacon_block_root, builder_index, block_slot) {
+                            if self.register_new_received_envelope(identifier, block_slot) {
                                 debug_with_peers!(
                                     "received execution payload as gossip (slot: {block_slot}, \
                                     beacon_block_root: {beacon_block_root:?}, peer_id: {peer_id})"
@@ -1428,7 +1431,7 @@ impl<P: Preset> BlockSyncService<P> {
         if self
             .received_envelopes
             .keys()
-            .any(|(root, _)| *root == block_root)
+            .any(|identifier| identifier.beacon_block_root == block_root)
         {
             debug_with_peers!(
                 "cannot request ExecutionPayloadEnvelopesByRoot: envelope for block has been \
@@ -1772,12 +1775,11 @@ impl<P: Preset> BlockSyncService<P> {
 
     fn register_new_received_envelope(
         &mut self,
-        block_root: H256,
-        builder_index: BuilderIndex,
+        payload_envelope_identifier: PayloadEnvelopeIdentifier,
         slot: Slot,
     ) -> bool {
         self.received_envelopes
-            .insert((block_root, builder_index), slot)
+            .insert(payload_envelope_identifier, slot)
             .is_none()
     }
 
