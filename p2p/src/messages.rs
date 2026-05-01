@@ -29,8 +29,8 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::containers::{
-        PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-        SignedProposerPreferences,
+        PayloadAttestationMessage, PayloadEnvelopeIdentifier, SignedExecutionPayloadBid,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
     nonstandard::Phase,
     phase0::{
@@ -88,6 +88,7 @@ pub enum P2pToSync<P: Preset> {
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
     BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
+    PayloadEnvelopeRejected(PayloadEnvelopeIdentifier),
     GossipExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>, PeerId, GossipId),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
