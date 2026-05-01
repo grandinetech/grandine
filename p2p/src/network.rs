@@ -487,9 +487,16 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             );
                         }
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
-                            if let MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } = mutator_rejection_reason {
-                                P2pToSync::DataColumnSidecarRejected(data_column_identifier)
-                                    .send(&self.channels.p2p_to_sync_tx)
+                            match mutator_rejection_reason {
+                                MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } => {
+                                    P2pToSync::DataColumnSidecarRejected(data_column_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
+                                MutatorRejectionReason::InvalidExecutionPayloadEnvelope { payload_envelope_identifier } => {
+                                    P2pToSync::PayloadEnvelopeRejected(payload_envelope_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
+                                _ => {}
                             }
 
                             if let Some(gossip_id) = gossip_id {

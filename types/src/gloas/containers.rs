@@ -311,3 +311,11 @@ pub enum CombinedPayloadAttestation<P: Preset> {
     Attestation(PayloadAttestation<P>),
     Message(Arc<PayloadAttestationMessage>),
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct PayloadEnvelopeIdentifier {
+    pub beacon_block_root: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: BuilderIndex,
+}
