@@ -161,7 +161,7 @@ fn generate_csharp_config_interface(mut buffer: impl Write) -> Result<(), io::Er
         writeln!(buffer, "")?;
         writeln!(
             buffer,
-            r#"    [ConfigItem(Description = {description:?}{default})]"#,
+            r#"    [ConfigItem(CliOptionAlias = {arg_name:?}, Description = {description:?}{default})]"#,
             default = default_value
                 .map(|v| format!(", DefaultValue = {v:?}"))
                 .unwrap_or("".to_owned())
