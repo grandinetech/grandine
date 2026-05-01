@@ -145,11 +145,16 @@ jobs:
           # zkVM test - ZiskOS implementation
           - backend: zisk
             install: |
+              export ZISK_VERSION=0.13.0
+              export ZISK_DIR="$HOME/.config/.zisk"
               sudo DEBIAN_FRONTEND='noninteractive' apt-get update
               sudo DEBIAN_FRONTEND='noninteractive' apt-get install -y xz-utils jq curl build-essential qemu-system libomp-dev libgmp-dev nlohmann-json3-dev protobuf-compiler uuid-dev libgrpc++-dev libsecp256k1-dev libsodium-dev libpqxx-dev nasm libopenmpi-dev openmpi-bin openmpi-common libclang-dev clang gcc-riscv64-unknown-elf
-              curl https://raw.githubusercontent.com/0xPolygonHermez/zisk/main/ziskup/install.sh | GH_RUNNER=true ZISK_VERSION=0.13.0 bash
-              echo "/home/runner/.config/.zisk/bin" >> $GITHUB_PATH
-              export PATH="/home/runner/.config/.zisk/bin:$PATH"
+              mkdir -p "$ZISK_DIR/bin"
+              curl -fsSL "https://raw.githubusercontent.com/0xPolygonHermez/zisk/v$ZISK_VERSION/ziskup/ziskup" -o "$ZISK_DIR/bin/ziskup"
+              chmod +x "$ZISK_DIR/bin/ziskup"
+              GH_RUNNER=true "$ZISK_DIR/bin/ziskup" --version "$ZISK_VERSION"
+              echo "$ZISK_DIR/bin" >> "$GITHUB_PATH"
+              export PATH="$ZISK_DIR/bin:$PATH"
               cargo-zisk -V
             execute: RUST_LOG=info cargo run -p zkvm_host --features zisk --release -- --test "$TEST" execute
 
