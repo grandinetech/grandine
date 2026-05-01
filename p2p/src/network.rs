@@ -500,6 +500,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                                     P2pToSync::DataColumnSidecarRejected(data_column_identifier)
                                         .send(&self.channels.p2p_to_sync_tx)
                                 }
+                                MutatorRejectionReason::InvalidExecutionPayloadEnvelope { payload_envelope_identifier } => {
+                                    P2pToSync::PayloadEnvelopeRejected(payload_envelope_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
                                 _ => {}
                             }
 

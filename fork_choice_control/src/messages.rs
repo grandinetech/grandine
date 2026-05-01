@@ -24,7 +24,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::PayloadAttestationMessage,
+    gloas::containers::{PayloadAttestationMessage, PayloadEnvelopeIdentifier},
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -159,6 +159,7 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
+        payload_envelope_identifier: PayloadEnvelopeIdentifier,
         processing_timings: ProcessingTimings,
         tracing_span: Span,
     },

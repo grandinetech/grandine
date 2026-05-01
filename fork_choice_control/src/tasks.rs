@@ -599,6 +599,8 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
                 .start_timer()
         });
 
+        let payload_envelope_identifier = execution_payload_envelope.as_ref().into();
+
         let result = store_snapshot.validate_execution_payload_envelope(
             &execution_payload_envelope,
             &origin,
@@ -610,6 +612,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
             wait_group,
             result,
             origin,
+            payload_envelope_identifier,
             processing_timings,
             tracing_span,
         }

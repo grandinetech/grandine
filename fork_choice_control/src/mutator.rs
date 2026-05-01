@@ -61,7 +61,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::SignedExecutionPayloadEnvelope,
+    gloas::containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
     nonstandard::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -344,12 +344,14 @@ where
                     wait_group,
                     result,
                     origin,
+                    payload_envelope_identifier,
                     processing_timings,
                     tracing_span,
                 } => self.handle_execution_payload_envelope(
                     wait_group,
                     result,
                     origin,
+                    payload_envelope_identifier,
                     processing_timings,
                     tracing_span,
                 ),
@@ -2001,6 +2003,7 @@ where
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
+        payload_envelope_identifier: PayloadEnvelopeIdentifier,
         processing_timings: ProcessingTimings,
         tracing_span: Span,
     ) {
@@ -2281,7 +2284,9 @@ where
                 if gossip_id.is_some() {
                     self.send_to_p2p(P2pMessage::Reject(
                         gossip_id,
-                        MutatorRejectionReason::InvalidExecutionPayloadEnvelope,
+                        MutatorRejectionReason::InvalidExecutionPayloadEnvelope {
+                            payload_envelope_identifier,
+                        },
                     ));
                 }
 
