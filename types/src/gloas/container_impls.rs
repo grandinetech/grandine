@@ -13,7 +13,7 @@ use crate::{
         containers::{
             CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload,
             ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
-            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            PayloadEnvelopeIdentifier, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
         primitives::BuilderIndex,
     },
@@ -106,5 +106,17 @@ impl<P: Preset> SignedExecutionPayloadBid<P> {
         &self,
     ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
         &self.message.blob_kzg_commitments
+    }
+}
+
+impl<P: Preset> From<&SignedExecutionPayloadEnvelope<P>> for PayloadEnvelopeIdentifier {
+    fn from(payload: &SignedExecutionPayloadEnvelope<P>) -> Self {
+        let beacon_block_root = payload.block_root();
+        let builder_index = payload.builder_index();
+
+        Self {
+            beacon_block_root,
+            builder_index,
+        }
     }
 }
