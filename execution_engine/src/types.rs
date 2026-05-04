@@ -498,7 +498,7 @@ pub struct PayloadAttributesV4<P: Preset> {
     pub suggested_fee_recipient: ExecutionAddress,
     pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
     pub parent_beacon_block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub slot_number: Slot,
 }
 
