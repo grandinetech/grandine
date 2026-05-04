@@ -518,7 +518,7 @@ impl<P: Preset> Context<P> {
     }
 
     pub fn on_notified_valid_payload(&self, block: &SignedBeaconBlock<P>) {
-        let execution_block_hash = self.execution_block_hash(block);
+        let execution_block_hash = Self::execution_block_hash(block);
 
         self.on_notified_new_payload(
             block.message().hash_tree_root(),
@@ -542,10 +542,10 @@ impl<P: Preset> Context<P> {
     ) {
         self.on_notified_new_payload(
             block.message().hash_tree_root(),
-            self.execution_block_hash(block),
+            Self::execution_block_hash(block),
             PayloadStatusV1 {
                 status: PayloadValidationStatus::Invalid,
-                latest_valid_hash: latest_valid_block.map(|block| self.execution_block_hash(block)),
+                latest_valid_hash: latest_valid_block.map(Self::execution_block_hash),
                 validation_error: None,
             },
         );
@@ -758,9 +758,9 @@ impl<P: Preset> Context<P> {
         self.p2p_rx.try_recv().ok()
     }
 
-    fn execution_block_hash(&self, block: &SignedBeaconBlock<P>) -> ExecutionBlockHash {
+    fn execution_block_hash(block: &SignedBeaconBlock<P>) -> ExecutionBlockHash {
         block
-            .execution_block_hash(self.config())
+            .execution_block_hash()
             .expect("block should be post-Bellatrix")
     }
 }
