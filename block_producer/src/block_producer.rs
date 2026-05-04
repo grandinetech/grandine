@@ -1407,12 +1407,36 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut exits = self.producer_context.voluntary_exits.lock().await;
 
         let split_index = itertools::partition(exits.iter_mut(), |voluntary_exit| {
-            unphased::validate_voluntary_exit(
-                &self.producer_context.chain_config,
-                &self.producer_context.pubkey_cache,
-                &self.beacon_state,
-                *voluntary_exit,
-            )
+            match self.beacon_state.as_ref() {
+                BeaconState::Phase0(_)
+                | BeaconState::Altair(_)
+                | BeaconState::Bellatrix(_)
+                | BeaconState::Capella(_)
+                | BeaconState::Deneb(_) => unphased::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    &self.beacon_state,
+                    *voluntary_exit,
+                ),
+                BeaconState::Electra(state) => electra::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    state,
+                    *voluntary_exit,
+                ),
+                BeaconState::Fulu(state) => electra::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    state,
+                    *voluntary_exit,
+                ),
+                BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    state,
+                    *voluntary_exit,
+                ),
+            }
             .is_ok()
         });
 
