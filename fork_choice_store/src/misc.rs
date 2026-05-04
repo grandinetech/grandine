@@ -71,8 +71,8 @@ impl<P: Preset> ChainLink<P> {
     }
 
     #[must_use]
-    pub fn execution_block_hash(&self, chain_config: &ChainConfig) -> Option<ExecutionBlockHash> {
-        self.block.execution_block_hash(chain_config)
+    pub fn execution_block_hash(&self) -> Option<ExecutionBlockHash> {
+        self.block.execution_block_hash()
     }
 
     #[must_use]

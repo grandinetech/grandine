@@ -689,24 +689,17 @@ impl<P: Preset> SignedBeaconBlock<P> {
         }
     }
 
-    pub fn execution_block_hash(&self, chain_config: &Config) -> Option<ExecutionBlockHash> {
-        if chain_config.phase_at_slot::<P>(self.message().slot()) >= Phase::Gloas {
-            self.message()
-                .body()
-                .with_payload_bid()
-                .map(|body| body.signed_execution_payload_bid().message.block_hash)
-                .or_else(|| {
-                    self.message()
-                        .body()
-                        .with_execution_payload()
-                        .map(|body| body.execution_payload().block_hash())
-                })
-        } else {
-            self.message()
-                .body()
-                .with_execution_payload()
-                .map(|body| body.execution_payload().block_hash())
-        }
+    pub fn execution_block_hash(&self) -> Option<ExecutionBlockHash> {
+        self.message()
+            .body()
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().message.block_hash)
+            .or_else(|| {
+                self.message()
+                    .body()
+                    .with_execution_payload()
+                    .map(|body| body.execution_payload().block_hash())
+            })
     }
 
     pub fn to_header(&self) -> SignedBeaconBlockHeader {
