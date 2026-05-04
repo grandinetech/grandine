@@ -745,8 +745,7 @@ where
                     if let Some(valid_hash) = payload_status.latest_valid_hash
                         && let Some(parent) = self.store.chain_link(parent_root)
                     {
-                        let parent_execution_block_hash =
-                            parent.block.execution_block_hash(self.store.chain_config());
+                        let parent_execution_block_hash = parent.block.execution_block_hash();
 
                         self.store_mut()
                             .update_chain_payload_statuses(valid_hash, parent_execution_block_hash);
@@ -3026,7 +3025,7 @@ where
                 .observe(processing_duration.as_secs_f64());
         }
 
-        if let Some(hash) = block.execution_block_hash(self.store.chain_config())
+        if let Some(hash) = block.execution_block_hash()
             && let Some(payload_statuses) = self.delayed_until_payload.remove(&hash)
         {
             for (payload_status, _) in payload_statuses {
