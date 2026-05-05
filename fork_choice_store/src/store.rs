@@ -1305,26 +1305,40 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let justified_checkpoint = state.current_justified_checkpoint();
         let finalized_checkpoint = state.finalized_checkpoint();
 
-        // TODO(Grandine Team): Optimize computation of unrealized checkpoints.
-        //                      Unrealized checkpoints must be computed for every block,
-        //                      but `process_justification_and_finalization` is slow.
-        //                      Lighthouse has a check that avoids calling it 1/3 of the time.
-        //                      Calculating balances incrementally is probably a better way to do it,
-        //                      as it would make `process_justification_and_finalization` nearly free.
-        //                      Specializing the `statistics` functions might help too.
         // > Eagerly compute unrealized justification and finality
-        let (unrealized_justified_checkpoint, unrealized_finalized_checkpoint) = {
-            let _span = debug_span!("validate_block_process_justification_and_finalization");
-            let mut state = state.clone_arc();
+        //
+        // If the parent's unrealized justified checkpoint is already at the block's epoch and the
+        // parent's unrealized finalized checkpoint is one epoch behind, the new block cannot
+        // produce different unrealized checkpoints because:
+        // 1. A child block cannot have lower FFG checkpoints than its parent.
+        // 2. A block in epoch N cannot justify anything higher than epoch N.
+        // 3. A block in epoch N cannot finalize anything higher than epoch N - 1.
+        // Skip the expensive O(validators) statistics pass in this case.
+        // This avoids calling `process_justification_and_finalization` approximately 1/3 of the
+        // time during normal finality. Lighthouse applies the same optimization.
+        let block_epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
 
-            // > Pull up the post-state of the block to the next epoch boundary
-            combined::process_justification_and_finalization(state.make_mut())?;
+        let (unrealized_justified_checkpoint, unrealized_finalized_checkpoint) =
+            if parent.unrealized_justified_checkpoint.epoch == block_epoch
+                && parent.unrealized_finalized_checkpoint.epoch + 1 == block_epoch
+            {
+                (
+                    parent.unrealized_justified_checkpoint,
+                    parent.unrealized_finalized_checkpoint,
+                )
+            } else {
+                let _span =
+                    debug_span!("validate_block_process_justification_and_finalization");
+                let mut state = state.clone_arc();
 
-            let justified = state.current_justified_checkpoint();
-            let finalized = state.finalized_checkpoint();
+                // > Pull up the post-state of the block to the next epoch boundary
+                combined::process_justification_and_finalization(state.make_mut())?;
 
-            (justified, finalized)
-        };
+                let justified = state.current_justified_checkpoint();
+                let finalized = state.finalized_checkpoint();
+
+                (justified, finalized)
+            };
 
         let payload_status = Self::initial_payload_status(&state);
 
