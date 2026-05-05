@@ -1316,6 +1316,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Skip the expensive O(validators) statistics pass in this case.
         // This avoids calling `process_justification_and_finalization` approximately 1/3 of the
         // time during normal finality. Lighthouse applies the same optimization.
+
+        // TODO: Calculating balances incrementally is probably a better way to do it,
+        // as it would make `process_justification_and_finalization` nearly free.
+        // Specializing the `statistics` functions might help too.
         let block_epoch = misc::compute_epoch_at_slot::<P>(block.message().slot());
 
         let (unrealized_justified_checkpoint, unrealized_finalized_checkpoint) =
