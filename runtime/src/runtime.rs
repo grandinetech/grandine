@@ -15,6 +15,7 @@ use std::{
 use allocator as _;
 use anyhow::{Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
+use beacon_node_client::{LocalBeaconClient, LocalConfig as BeaconClientLocalConfig};
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use builder_api::{BuilderApi, BuilderConfig};
@@ -623,7 +624,7 @@ pub async fn run_after_genesis<P: Preset>(
     let validator_channels = ValidatorChannels {
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
-        p2p_tx: validator_to_p2p_tx,
+        p2p_tx: validator_to_p2p_tx.clone(),
         p2p_to_validator_rx,
         slasher_to_validator_rx,
         subnet_service_tx: subnet_service_tx.clone(),
@@ -631,10 +632,34 @@ pub async fn run_after_genesis<P: Preset>(
         validator_to_slasher_tx,
     };
 
+    let local_beacon_client = Arc::new(LocalBeaconClient::new(
+        controller.chain_config().clone_arc(),
+        BeaconClientLocalConfig {
+            max_empty_slots: validator_config.max_empty_slots,
+            disable_wait_for_late_blocks: validator_config.disable_wait_for_late_blocks,
+            disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
+            default_builder_boost_factor: validator_config.default_builder_boost_factor,
+        },
+        controller.clone_arc(),
+        block_producer.clone_arc(),
+        attestation_agg_pool.clone_arc(),
+        sync_committee_agg_pool.clone_arc(),
+        event_channels.clone_arc(),
+        anchor_checkpoint_provider.clone(),
+        metrics.clone(),
+        api_to_liveness_tx.clone(),
+        validator_to_p2p_tx.clone(),
+        subnet_service_tx.clone(),
+    ));
+
     let validator = Validator::new(
         validator_config.clone_arc(),
         block_producer.clone_arc(),
         controller.clone_arc(),
+        local_beacon_client.clone(),
+        local_beacon_client.clone(),
+        local_beacon_client.clone(),
+        local_beacon_client.clone(),
         attestation_agg_pool.clone_arc(),
         builder_api,
         doppelganger_protection,

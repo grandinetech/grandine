@@ -2335,6 +2335,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "beacon_node_client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "block_producer",
+ "bls",
+ "eth1_api",
+ "fork_choice_control",
+ "futures",
+ "genesis",
+ "helper_functions",
+ "hex-literal 1.1.0",
+ "itertools 0.14.0",
+ "kzg_utils",
+ "liveness_tracker",
+ "operation_pools",
+ "p2p",
+ "parse-display",
+ "prometheus_metrics",
+ "ssz",
+ "std_ext",
+ "test-case",
+ "tokio",
+ "tokio-stream",
+ "typenum",
+ "types",
+]
+
+[[package]]
 name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7024,6 +7054,7 @@ dependencies = [
  "attestation_verifier",
  "axum 0.8.9",
  "axum-extra",
+ "beacon_node_client",
  "binary_utils",
  "block_producer",
  "bls",
@@ -13096,6 +13127,7 @@ dependencies = [
  "allocator",
  "anyhow",
  "attestation_verifier",
+ "beacon_node_client",
  "binary_utils",
  "block_producer",
  "bls",
@@ -17275,6 +17307,7 @@ dependencies = [
  "attestation_verifier",
  "axum 0.8.9",
  "axum-extra",
+ "beacon_node_client",
  "block_producer",
  "bls",
  "builder_api",

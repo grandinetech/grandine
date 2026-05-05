@@ -10,6 +10,7 @@ workspace = true
 anyhow = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
+beacon_node_client = { workspace = true }
 block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }

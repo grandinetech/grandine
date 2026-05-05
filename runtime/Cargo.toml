@@ -10,6 +10,7 @@ workspace = true
 allocator = { workspace = true }
 anyhow = { workspace = true }
 attestation_verifier = { workspace = true }
+beacon_node_client = { workspace = true }
 binary_utils = { workspace = true }
 block_producer = { workspace = true }
 bls = { workspace = true }

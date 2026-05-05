@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
+use beacon_node_client::{LocalBeaconClient, LocalConfig as BeaconClientLocalConfig};
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use clock::Tick;
@@ -302,7 +303,7 @@ impl<P: Preset> Context<P> {
         let validator_channels = ValidatorChannels {
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
-            p2p_tx: validator_to_p2p_tx,
+            p2p_tx: validator_to_p2p_tx.clone(),
             p2p_to_validator_rx,
             slasher_to_validator_rx: None,
             subnet_service_tx: subnet_service_tx.clone(),
@@ -314,10 +315,34 @@ impl<P: Preset> Context<P> {
         network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
         let network_config = Arc::new(network_config);
 
+        let local_beacon_client = Arc::new(LocalBeaconClient::new(
+            controller.chain_config().clone_arc(),
+            BeaconClientLocalConfig {
+                max_empty_slots: validator_config.max_empty_slots,
+                disable_wait_for_late_blocks: validator_config.disable_wait_for_late_blocks,
+                disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
+                default_builder_boost_factor: validator_config.default_builder_boost_factor,
+            },
+            controller.clone_arc(),
+            block_producer.clone_arc(),
+            attestation_agg_pool.clone_arc(),
+            sync_committee_agg_pool.clone_arc(),
+            event_channels.clone_arc(),
+            anchor_checkpoint_provider.clone(),
+            None,
+            Some(api_to_liveness_tx.clone()),
+            validator_to_p2p_tx.clone(),
+            subnet_service_tx.clone(),
+        ));
+
         let validator = Validator::new(
             validator_config.clone_arc(),
             block_producer.clone_arc(),
             controller.clone_arc(),
+            local_beacon_client.clone(),
+            local_beacon_client.clone(),
+            local_beacon_client.clone(),
+            local_beacon_client.clone(),
             attestation_agg_pool.clone_arc(),
             None,
             None,
