@@ -1920,9 +1920,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let parent_hash = if let Some(state) = state.post_gloas() {
             let parent_bid = state.latest_execution_payload_bid();
             let parent_root = state.latest_block_header().hash_tree_root();
+            let parent_slot = state.latest_block_header().slot;
             let snapshot = self.producer_context.controller.snapshot();
 
-            if snapshot.should_extend_payload(parent_root) {
+            if snapshot.should_extend_payload(parent_root)
+                || chain_config.phase_at_slot::<P>(parent_slot) < Phase::Gloas
+            {
                 parent_bid.block_hash
             } else {
                 parent_bid.parent_block_hash
