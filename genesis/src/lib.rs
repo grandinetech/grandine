@@ -38,7 +38,6 @@ use types::{
         consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
         containers::{
             BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
-            ExecutionRequests,
         },
     },
     fulu::{
@@ -63,7 +62,7 @@ use types::{
         primitives::{DepositIndex, ExecutionBlockHash, H256, UnixSeconds},
     },
     preset::Preset,
-    traits::BeaconState as _,
+    traits::{BeaconState as _, PostGloasBeaconState},
 };
 
 pub struct Incremental<'config, P: Preset> {
@@ -330,10 +329,22 @@ enum GenesisTriggerError {
 /// <https://github.com/ethereum/consensus-specs/blob/2fa396f67df35df236b6aa6fe714a59ee1032dc8/specs/phase0/beacon-chain.md#genesis-block>
 #[must_use]
 pub fn beacon_block<P: Preset>(genesis_state: &BeaconState<P>) -> SignedBeaconBlock<P> {
-    beacon_block_internal(genesis_state.phase(), genesis_state.hash_tree_root())
+    let execution_payload_bid = genesis_state
+        .post_gloas()
+        .map(PostGloasBeaconState::latest_execution_payload_bid)
+        .cloned();
+    beacon_block_internal(
+        genesis_state.phase(),
+        genesis_state.hash_tree_root(),
+        execution_payload_bid,
+    )
 }
 
-fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBeaconBlock<P> {
+fn beacon_block_internal<P: Preset>(
+    phase: Phase,
+    state_root: H256,
+    execution_payload_bid: Option<ExecutionPayloadBid<P>>,
+) -> SignedBeaconBlock<P> {
     // The way the genesis block is constructed makes it possible for many parties to independently
     // produce the same block. But why does the genesis block have to exist at all? Perhaps the
     // first block could be proposed by a validator as well (and not necessarily in slot 0)?
@@ -350,10 +361,7 @@ fn beacon_block_internal<P: Preset>(phase: Phase, state_root: H256) -> SignedBea
         Phase::Gloas => BeaconBlock::from(Hc::new(GloasBeaconBlock {
             body: GloasBeaconBlockBody {
                 signed_execution_payload_bid: SignedExecutionPayloadBid {
-                    message: ExecutionPayloadBid {
-                        execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
-                        ..Default::default()
-                    },
+                    message: execution_payload_bid.unwrap_or_default(),
                     ..Default::default()
                 },
                 ..Default::default()
