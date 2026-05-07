@@ -399,6 +399,16 @@ mod spec_tests {
         run_sync_committee_updates_case::<Minimal>(case);
     }
 
+    #[test_resources("consensus-spec-tests/tests/mainnet/deneb/epoch_processing/*/*/*")]
+    fn mainnet_epoch_processing(case: Case) {
+        run_epoch_case::<Mainnet>(case);
+    }
+
+    #[test_resources("consensus-spec-tests/tests/minimal/deneb/epoch_processing/*/*/*")]
+    fn minimal_epoch_processing(case: Case) {
+        run_epoch_case::<Minimal>(case);
+    }
+
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
             let (statistics, _, _) = altair::statistics_and_summaries(state);
@@ -525,6 +535,26 @@ mod spec_tests {
         let post_option = case.try_ssz_default("post");
 
         let result = sub_transition(&pubkey_cache, &mut state).map(|()| state);
+
+        if let Some(expected_post) = post_option {
+            let actual_post = result.expect("epoch processing should succeed");
+            assert_eq!(actual_post, expected_post);
+        } else {
+            result.expect_err("epoch processing should fail");
+        }
+    }
+
+    fn run_epoch_case<P: Preset>(case: Case) {
+        let pubkey_cache = PubkeyCache::default();
+        // Some sub-transition test cases (e.g. `effective_balance_updates/effective_balance_hysteresis`,
+        // `slashings/{minimal_penalty,scaled_penalties}`) don't ship `pre_epoch`/`post_epoch` SSZ files
+        // because they aren't valid full-epoch transitions. Skip them.
+        let Some(mut state) = case.try_ssz_default::<BeaconState<P>>("pre_epoch") else {
+            return;
+        };
+        let post_option: Option<BeaconState<P>> = case.try_ssz_default("post_epoch");
+
+        let result = process_epoch(&P::default_config(), &pubkey_cache, &mut state).map(|()| state);
 
         if let Some(expected_post) = post_option {
             let actual_post = result.expect("epoch processing should succeed");
