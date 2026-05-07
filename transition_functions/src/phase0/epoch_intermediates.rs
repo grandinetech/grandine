@@ -28,7 +28,7 @@ use types::{
     preset::Preset,
 };
 
-use crate::unphased::{EpochDeltas, ValidatorSummary};
+use crate::unphased::{self, EpochDeltas, ValidatorSummary};
 
 pub trait Statistics: Copy + Default {
     type Performance: Performance;
@@ -657,7 +657,14 @@ pub fn statistics_and_summaries<P: Preset, S: Statistics>(
     // `get_block_root(state, AttestationEpoch::Current)` fails. Returning early causes
     // `compute_pulled_up_tip` from the Fork Choice specification to compute unrealized checkpoints
     // incorrectly. That happens because `compute_pulled_up_tip` does not call `process_slots`.
-    if let Ok(previous_epoch_target_block_root) = get_block_root(state, AttestationEpoch::Previous)
+    //
+    // The Python spec skips attestation processing at genesis epoch (epoch 0) because both
+    // `process_rewards_and_penalties` and `process_justification_and_finalization` return early
+    // then. Test vectors may contain states with crafted attestations that have invalid committee
+    // data (e.g. zero-length aggregation bits) that would panic if processed.
+    if unphased::should_process_rewards_and_penalties(state)
+        && let Ok(previous_epoch_target_block_root) =
+            get_block_root(state, AttestationEpoch::Previous)
     {
         for attestation in &state.previous_epoch_attestations {
             let expected_target = previous_epoch_target_block_root;
