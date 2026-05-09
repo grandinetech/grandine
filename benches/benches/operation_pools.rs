@@ -11,7 +11,7 @@ use allocator as _;
 use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{LazyBeaconState, goerli, holesky};
-use operation_pools::AttestationPacker;
+use operation_pools::{AttestationPacker, PoolAttestation};
 use std_ext::ArcExt as _;
 use types::{config::Config, phase0::containers::Attestation, preset::Preset};
 
@@ -63,15 +63,27 @@ impl Criterion {
                     let previous_aggregates = LazyCell::force(&previous_aggregates);
                     let current_aggregates = LazyCell::force(&current_aggregates);
 
+                    let previous_pool = to_pool_attestations(previous_aggregates);
+                    let current_pool = to_pool_attestations(current_aggregates);
+
                     bencher.iter_with_large_drop(|| {
-                        packer.pack_proposable_attestations_greedily(
-                            previous_aggregates,
-                            current_aggregates,
-                        )
+                        packer.pack_proposable_attestations_greedily(&previous_pool, &current_pool)
                     })
                 },
             );
 
         self
     }
+}
+
+fn to_pool_attestations<P: Preset>(attestations: &[Attestation<P>]) -> Vec<PoolAttestation<P>> {
+    attestations
+        .iter()
+        .map(|a| PoolAttestation {
+            aggregation_bits: a.aggregation_bits.clone(),
+            data: a.data,
+            committee_index: a.data.index,
+            signature: a.signature,
+        })
+        .collect()
 }
