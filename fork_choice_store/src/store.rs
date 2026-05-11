@@ -1436,17 +1436,47 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn safe_execution_payload_hash(&self) -> ExecutionBlockHash {
         self.justified_chain_link()
-            .and_then(ChainLink::execution_block_hash)
+            .map(|chain_link| self.checkpoint_execution_payload_hash(chain_link))
             .unwrap_or_default()
     }
 
+    // In Post-Gloas phases, block being finalized does not guarantee that the block hash in payload bid
+    // corresponds to valid execution block hash. Block may have empty payload status.
     #[must_use]
     pub fn finalized_execution_payload_hash(&self) -> ExecutionBlockHash {
-        // > As per EIP-3675, before a post-transition block is finalized,
-        // > `notify_forkchoice_updated` MUST be called with `finalized_block_hash = Hash32()`.
-        self.last_finalized()
-            .execution_block_hash()
-            .unwrap_or_default()
+        self.checkpoint_execution_payload_hash(self.last_finalized())
+    }
+
+    #[must_use]
+    fn checkpoint_execution_payload_hash<'a>(
+        &'a self,
+        mut chain_link: &'a ChainLink<P>,
+    ) -> ExecutionBlockHash {
+        loop {
+            let block = chain_link.block.message();
+
+            let Some(body_with_payload_bid) = block.body().with_payload_bid() else {
+                return block
+                    .body()
+                    .with_execution_payload()
+                    .map(|body| body.execution_payload().block_hash())
+                    .unwrap_or_default();
+            };
+
+            let payload_bid = &body_with_payload_bid.signed_execution_payload_bid().message;
+
+            if self.is_payload_verified(chain_link.block_root) {
+                return payload_bid.block_hash;
+            } else if chain_link.parent_payload_presence.is_full() {
+                return payload_bid.parent_block_hash;
+            }
+
+            let Some(parent) = self.chain_link(block.parent_root()) else {
+                return ExecutionBlockHash::zero();
+            };
+
+            chain_link = parent;
+        }
     }
 
     #[must_use]
