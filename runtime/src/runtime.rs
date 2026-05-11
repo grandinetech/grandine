@@ -689,6 +689,7 @@ pub async fn run_after_genesis<P: Preset>(
         builder_config.clone_arc(),
         block_producer.clone_arc(),
         controller.clone_arc(),
+        dedicated_executor_normal_priority.clone_arc(),
         signer.clone_arc(),
         event_channels.clone_arc(),
         metrics.clone(),
@@ -1398,7 +1399,6 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         max_empty_slots,
         keystore_storage_password_file: builder_keystore_storage_password_file,
         min_bid_value: 0,
-        always_bid: false,
     });
 
     let store_config = StoreConfig {

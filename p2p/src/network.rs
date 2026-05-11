@@ -618,6 +618,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         BuilderToP2p::PublishPayloadBid(payload_bid) => {
                             self.publish_execution_payload_bid(payload_bid);
                         },
+                        BuilderToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
+                            self.publish_data_column_sidecar(data_column_sidecar);
+                        },
                         BuilderToP2p::PublishExecutionPayloadEnvelope(envelope) => {
                             self.publish_execution_payload_envelope(envelope);
                         }

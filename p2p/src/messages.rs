@@ -263,6 +263,7 @@ pub enum BuilderToP2p<P: Preset> {
     Ignore(GossipId),
     Reject(GossipId, PoolRejectionReason),
     PublishPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
+    PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishExecutionPayloadEnvelope(Arc<SignedExecutionPayloadEnvelope<P>>),
 }
 

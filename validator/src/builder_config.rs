@@ -10,9 +10,6 @@ pub struct BuilderConfig {
     pub max_empty_slots: u64,
     pub keystore_storage_password_file: Option<PathBuf>,
 
-    /// Whether to always submit bids regardless of profitability
-    pub always_bid: bool,
-
     /// Minimum bid value to submit (in gwei)
     pub min_bid_value: Gwei,
 }

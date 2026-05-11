@@ -67,7 +67,7 @@ use types::{
             BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody,
             ExecutionPayload as DenebExecutionPayload,
         },
-        primitives::KzgCommitment,
+        primitives::{Blob, KzgCommitment},
     },
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
@@ -85,7 +85,7 @@ use types::{
         },
         primitives::BuilderIndex,
     },
-    nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
+    nonstandard::{BlockRewards, KzgProofs, Phase, WEI_IN_GWEI, WithBlobsAndMev},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
@@ -1233,9 +1233,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             ..
         }) = payload_with_data
         else {
-            return Err(AnyhowError::msg(
-                "no execution payload to include in make a bid",
-            ));
+            return Err(AnyhowError::msg("no execution payload to make a bid"));
         };
 
         // Cache payload root so compute_execution_payload_envelope can retrieve the full payload
@@ -2343,12 +2341,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }))
     }
 
-    /// Get cached Gloas envelope data from `payload_cache` (called by validator after signing block)
-    /// Returns None if not self-building (external builder publishes envelope)
-    /// Returns only the fields needed to build `ExecutionPayloadEnvelope`
-    async fn get_gloas_envelope_data(
-        &self,
-    ) -> Option<(GloasExecutionPayload<P>, ExecutionRequests<P>)> {
+    async fn get_cached_payload(&self) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
         let payload_root = *self
             .producer_context
             .cached_payload_roots
@@ -2356,19 +2349,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .await
             .cache_get(&self.head_block_root)?;
 
-        let local_payload = self
-            .producer_context
-            .payload_cache
-            .lock()
-            .await
-            .cache_get(&payload_root)
-            .cloned()?;
+        Some(
+            self.producer_context
+                .payload_cache
+                .lock()
+                .await
+                .cache_get(&payload_root)
+                .cloned()?
+                .result,
+        )
+    }
 
+    async fn get_gloas_envelope_data(
+        &self,
+    ) -> Option<(GloasExecutionPayload<P>, ExecutionRequests<P>)> {
         let WithBlobsAndMev {
             value: execution_payload,
             execution_requests,
             ..
-        } = local_payload.result;
+        } = self.get_cached_payload().await?;
 
         let ExecutionPayload::Gloas(payload) = execution_payload else {
             warn_with_peers!("unexpected non-Gloas payload format in Gloas envelope data");
@@ -2376,6 +2375,17 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         Some((payload, execution_requests.unwrap_or_default()))
+    }
+
+    pub async fn cached_blobs_and_proofs(
+        &self,
+    ) -> Option<(
+        ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+        KzgProofs<P>,
+    )> {
+        let WithBlobsAndMev { blobs, proofs, .. } = self.get_cached_payload().await?;
+
+        Some((blobs?, proofs?))
     }
 
     async fn fee_recipient(&self) -> Result<ExecutionAddress> {

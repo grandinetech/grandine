@@ -8,6 +8,7 @@ use block_producer::{BlockBuildOptions, BlockProducer};
 use bls::PublicKeyBytes;
 use clock::{Tick, TickKind};
 use debug_info::HealthCheck;
+use dedicated_executor::DedicatedExecutor;
 use derive_more::Display;
 use eth1_api::ApiController;
 use features::Feature;
@@ -37,7 +38,7 @@ use types::{
             ExecutionPayloadBid, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
     },
-    nonstandard::WithStatus,
+    nonstandard::{BlockOrDataColumnSidecar, WithStatus},
     phase0::primitives::{ExecutionBlockHash, Slot},
     preset::Preset,
     traits::{BeaconState as _, BlockBodyWithPayloadBid, SignedBeaconBlock},
@@ -74,6 +75,7 @@ pub struct Builder<P: Preset, W: Wait> {
     builder_config: Arc<BuilderConfig>,
     block_producer: Arc<BlockProducer<P, W>>,
     controller: ApiController<P, W>,
+    dedicated_executor: Arc<DedicatedExecutor>,
     // api_to_builder_rx: UnboundedReceiver<ApiToBuilder<P>>,
     fork_choice_rx: UnboundedReceiver<BuilderMessage<P, W>>,
     p2p_tx: UnboundedSender<BuilderToP2p<P>>,
@@ -92,6 +94,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         builder_config: Arc<BuilderConfig>,
         block_producer: Arc<BlockProducer<P, W>>,
         controller: ApiController<P, W>,
+        dedicated_executor: Arc<DedicatedExecutor>,
         signer: Arc<Signer>,
         event_channels: Arc<EventChannels<P>>,
         metrics: Option<Arc<Metrics>>,
@@ -107,6 +110,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             builder_config,
             block_producer,
             controller,
+            dedicated_executor,
             // api_to_builder_rx,
             fork_choice_rx,
             p2p_tx,
@@ -149,7 +153,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
                             let span = tracing::debug_span!("BuilderMessage::Head", service = "builder");
                             let _enter = span.enter();
 
-                            if let Err(error) = self.maybe_publish_execution_payload_envelope(wait_group, head).await {
+                            if let Err(error) = self.maybe_publish_data_and_payload_envelope(wait_group, head).await {
                                 panic!("error while handling head: {error:?}");
                             }
                         },
@@ -231,7 +235,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             self.own_signed_payload_bids.take();
         }
 
-        if tick.is_start_of_slot() && self.builder_config.always_bid {
+        if tick.is_start_of_slot() {
             let proposer_index = tokio::task::block_in_place(|| slot_head.proposer_index())?;
             let block_build_context = self.block_producer.new_build_context(
                 slot_head.beacon_state.clone_arc(),
@@ -279,7 +283,7 @@ impl<P: Preset, W: Wait> Builder<P, W> {
         Ok(())
     }
 
-    async fn maybe_publish_execution_payload_envelope(
+    async fn maybe_publish_data_and_payload_envelope(
         &self,
         wait_group: W,
         head: ChainLink<P>,
@@ -351,6 +355,41 @@ impl<P: Preset, W: Wait> Builder<P, W> {
             proposer_index,
             BlockBuildOptions::default(),
         );
+
+        if let Some((blobs, proofs)) = block_build_context.cached_blobs_and_proofs().await {
+            let kzg_backend = self.controller.store_config().kzg_backend;
+            let dedicated_executor = self.dedicated_executor.clone_arc();
+
+            match eip_7594::construct_data_column_sidecars_from_blobs(
+                BlockOrDataColumnSidecar::Block(head.block.clone_arc()),
+                blobs.into_iter(),
+                proofs.into_iter().collect_vec(),
+                kzg_backend,
+                self.metrics.clone(),
+                dedicated_executor,
+            )
+            .await
+            {
+                Ok(data_column_sidecars) => {
+                    let sampling_columns = self.controller.sampling_columns();
+                    for sidecar in data_column_sidecars {
+                        if sampling_columns.contains(&sidecar.index()) {
+                            self.controller
+                                .on_own_data_column_sidecar(wait_group.clone(), sidecar.clone_arc())
+                                .await;
+                        }
+                        BuilderToP2p::PublishDataColumnSidecar(sidecar).send(&self.p2p_tx);
+                    }
+                }
+                Err(error) => {
+                    warn_with_peers!(
+                        "builder {} failed to compute data column sidecars for block {:?}: {error:?}",
+                        builder_index,
+                        beacon_block_root,
+                    );
+                }
+            }
+        }
 
         let Some(envelope) = block_build_context
             .compute_execution_payload_envelope(beacon_block_root, parent_root, builder_index)
