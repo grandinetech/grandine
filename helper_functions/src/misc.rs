@@ -697,11 +697,15 @@ pub fn blob_serve_range_slot<P: Preset>(
 ) -> Slot {
     let current_epoch = compute_epoch_at_slot::<P>(current_slot);
 
-    let epoch = config.deneb_fork_epoch.max(
-        current_epoch
-            .checked_sub(storage_mode.min_epochs_for_blob_sidecars_requests(config))
-            .unwrap_or(GENESIS_EPOCH),
-    );
+    let epoch = if storage_mode.is_archive() {
+        config.deneb_fork_epoch
+    } else {
+        config.deneb_fork_epoch.max(
+            current_epoch
+                .checked_sub(storage_mode.min_epochs_for_blob_sidecars_requests(config))
+                .unwrap_or(GENESIS_EPOCH),
+        )
+    };
 
     compute_start_slot_at_epoch::<P>(epoch)
 }
@@ -840,11 +844,15 @@ pub fn data_column_serve_range_slot<P: Preset>(
     storage_mode: StorageMode,
 ) -> Slot {
     let current_epoch = compute_epoch_at_slot::<P>(current_slot);
-    let epoch = config.fulu_fork_epoch.max(
-        current_epoch
-            .checked_sub(storage_mode.min_epochs_for_data_column_sidecars_requests(config))
-            .unwrap_or(GENESIS_EPOCH),
-    );
+    let epoch = if storage_mode.is_archive() {
+        config.fulu_fork_epoch
+    } else {
+        config.fulu_fork_epoch.max(
+            current_epoch
+                .checked_sub(storage_mode.min_epochs_for_data_column_sidecars_requests(config))
+                .unwrap_or(GENESIS_EPOCH),
+        )
+    };
 
     compute_start_slot_at_epoch::<P>(epoch)
 }
