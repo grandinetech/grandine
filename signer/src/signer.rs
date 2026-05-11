@@ -49,9 +49,15 @@ pub enum KeyOrigin {
     Web3Signer,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum KeyType {
+    Validator,
+    Builder,
+}
+
 #[derive(Clone)]
 enum SignMethod {
-    SecretKey(Arc<SecretKey>, KeyOrigin),
+    SecretKey(Arc<SecretKey>, KeyOrigin, KeyType),
     Web3Signer(RedactingUrl),
 }
 
@@ -61,15 +67,18 @@ pub struct Signer {
 
 impl Signer {
     pub fn new(
-        validator_keys: impl IntoIterator<Item = (PublicKeyBytes, Arc<SecretKey>, KeyOrigin)>,
+        keys: impl IntoIterator<Item = (PublicKeyBytes, Arc<SecretKey>, KeyOrigin, KeyType)>,
         client: Client,
         web3signer_config: Web3SignerConfig,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
-        let sign_methods = validator_keys
+        let sign_methods = keys
             .into_iter()
-            .map(|(public_key, secret_key, origin)| {
-                (public_key, SignMethod::SecretKey(secret_key, origin))
+            .map(|(public_key, secret_key, origin, key_type)| {
+                (
+                    public_key,
+                    SignMethod::SecretKey(secret_key, origin, key_type),
+                )
             })
             .collect();
 
@@ -142,8 +151,9 @@ impl Signer {
         beacon_state: &BeaconState<P>,
         current_slot: Slot,
     ) {
+        // Builder doesn't need doppelganger protection
         let snapshot = self.load();
-        let public_keys = snapshot.keys().copied();
+        let public_keys = snapshot.validator_keys().copied();
 
         if let Some(doppelganger_protection) = &snapshot.doppelganger_protection {
             doppelganger_protection.add_tracked_validators(public_keys, beacon_state, current_slot);
@@ -181,11 +191,19 @@ impl Snapshot {
         self.sign_methods.keys()
     }
 
+    pub fn validator_keys(&self) -> impl Iterator<Item = &PublicKeyBytes> {
+        self.keys_by_type(KeyType::Validator)
+    }
+
+    pub fn builder_keys(&self) -> impl Iterator<Item = &PublicKeyBytes> {
+        self.keys_by_type(KeyType::Builder)
+    }
+
     pub fn keys_with_origin(&self) -> impl Iterator<Item = (PublicKeyBytes, KeyOrigin)> + '_ {
         self.sign_methods
             .iter()
             .map(|(pubkey, sign_method)| match sign_method {
-                SignMethod::SecretKey(_, origin) => (*pubkey, *origin),
+                SignMethod::SecretKey(_, origin, _) => (*pubkey, *origin),
                 SignMethod::Web3Signer(_) => (*pubkey, KeyOrigin::Web3Signer),
             })
     }
@@ -194,7 +212,7 @@ impl Snapshot {
         self.sign_methods
             .iter()
             .filter_map(|(pubkey, sign_method)| match sign_method {
-                SignMethod::SecretKey(_, _) => None,
+                SignMethod::SecretKey(_, _, _) => None,
                 SignMethod::Web3Signer(url) => Some((*pubkey, url.clone())),
             })
     }
@@ -206,12 +224,16 @@ impl Snapshot {
 
     pub fn append_keys(
         &mut self,
-        keys: impl IntoIterator<Item = (PublicKeyBytes, Arc<SecretKey>)>,
+        keys: impl IntoIterator<Item = (PublicKeyBytes, Arc<SecretKey>, KeyType)>,
     ) {
-        for (public_key, secret_key) in keys {
+        for (public_key, secret_key, key_type) in keys {
             self.sign_methods
                 .entry(public_key)
-                .or_insert(SignMethod::SecretKey(secret_key, KeyOrigin::KeymanagerAPI));
+                .or_insert(SignMethod::SecretKey(
+                    secret_key,
+                    KeyOrigin::KeymanagerAPI,
+                    key_type,
+                ));
         }
     }
 
@@ -234,8 +256,23 @@ impl Snapshot {
     }
 
     #[must_use]
-    pub fn no_keys(&self) -> bool {
-        self.sign_methods.is_empty()
+    pub fn no_validator_keys(&self) -> bool {
+        !self.has_keys(KeyType::Validator)
+    }
+
+    #[must_use]
+    pub fn no_builder_keys(&self) -> bool {
+        !self.has_keys(KeyType::Builder)
+    }
+
+    #[must_use]
+    pub fn has_validator_keys(&self) -> bool {
+        self.has_keys(KeyType::Validator)
+    }
+
+    #[must_use]
+    pub fn has_builder_keys(&self) -> bool {
+        self.has_keys(KeyType::Builder)
     }
 
     pub fn save_fetched_keys_from_web3signer(&mut self, keys: &FetchedKeys) {
@@ -260,7 +297,7 @@ impl Snapshot {
         public_key: PublicKeyBytes,
     ) -> Result<Signature> {
         let signature = match self.sign_method(public_key)? {
-            SignMethod::SecretKey(secret_key, _) => secret_key.sign(signing_root),
+            SignMethod::SecretKey(secret_key, _, _) => secret_key.sign(signing_root),
             SignMethod::Web3Signer(url) => self
                 .web3signer
                 .sign(url, message, signing_root, fork_info, public_key)
@@ -344,6 +381,7 @@ impl Snapshot {
                 }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
+                | SigningMessage::ExecutionPayloadBid(_)
                 | SigningMessage::ExecutionPayloadEnvelope(_)
                 | SigningMessage::RandaoReveal { .. }
                 | SigningMessage::SyncCommitteeMessage { .. }
@@ -442,7 +480,7 @@ impl Snapshot {
             } = triple;
 
             match self.sign_method(public_key)? {
-                SignMethod::SecretKey(secret_key, _) => {
+                SignMethod::SecretKey(secret_key, _, _) => {
                     sign_locally.push((index, signing_root, secret_key.clone_arc()));
                 }
                 SignMethod::Web3Signer(_) => {
@@ -494,5 +532,25 @@ impl Snapshot {
             .get(&public_key)
             .ok_or(Error::MissingCredentials { public_key })
             .map_err(Into::into)
+    }
+
+    // TODO(gloas): Update once Web3Signer support sign builder messages
+    fn keys_by_type(&self, key_type: KeyType) -> impl Iterator<Item = &PublicKeyBytes> {
+        self.sign_methods
+            .iter()
+            .filter_map(move |(pubkey, sign_method)| match sign_method {
+                SignMethod::SecretKey(_, _, kt) => (*kt == key_type).then_some(pubkey),
+                SignMethod::Web3Signer(_) => (key_type == KeyType::Validator).then_some(pubkey),
+            })
+    }
+
+    // TODO(gloas): Update once Web3Signer support sign builder messages
+    fn has_keys(&self, key_type: KeyType) -> bool {
+        self.sign_methods
+            .values()
+            .any(|sign_method| match sign_method {
+                SignMethod::SecretKey(_, _, kt) => *kt == key_type,
+                SignMethod::Web3Signer(_) => key_type == KeyType::Validator,
+            })
     }
 }

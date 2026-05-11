@@ -76,8 +76,8 @@ use crate::{
     block_processor::BlockProcessor,
     events::{DependentRootsBundle, EventChannels},
     messages::{
-        AttestationVerifierMessage, MutatorMessage, P2pMessage, PoolMessage, SubnetMessage,
-        SyncMessage, ValidatorMessage,
+        AttestationVerifierMessage, BuilderMessage, MutatorMessage, P2pMessage, PoolMessage,
+        SubnetMessage, SyncMessage, ValidatorMessage,
     },
     misc::{
         BlockBlobAvailability, BlockDataColumnAvailability, Delayed, MutatorRejectionReason,
@@ -103,7 +103,7 @@ use crate::{
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
 
 #[expect(clippy::struct_field_names)]
-pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
+pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS, BS> {
     pubkey_cache: Arc<PubkeyCache>,
     store: Arc<Store<P, Storage<P>>>,
     store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
@@ -152,9 +152,10 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     subnet_tx: NS,
     sync_tx: SS,
     validator_tx: VS,
+    builder_tx: BS,
 }
 
-impl<P, E, W, TS, PS, LS, NS, SS, VS> Mutator<P, E, W, TS, PS, LS, NS, SS, VS>
+impl<P, E, W, TS, PS, LS, NS, SS, VS, BS> Mutator<P, E, W, TS, PS, LS, NS, SS, VS, BS>
 where
     P: Preset,
     E: ExecutionEngine<P> + Clone + Send + Sync + 'static,
@@ -165,6 +166,7 @@ where
     NS: UnboundedSink<SubnetMessage<W>>,
     SS: UnboundedSink<SyncMessage<P>>,
     VS: UnboundedSink<ValidatorMessage<P, W>>,
+    BS: UnboundedSink<BuilderMessage<P, W>>,
 {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -187,6 +189,7 @@ where
         subnet_tx: NS,
         sync_tx: SS,
         validator_tx: VS,
+        builder_tx: BS,
     ) -> Self {
         Self {
             pubkey_cache,
@@ -219,6 +222,7 @@ where
             subnet_tx,
             sync_tx,
             validator_tx,
+            builder_tx,
         }
     }
 
@@ -611,8 +615,7 @@ where
 
         self.update_store_snapshot();
 
-        self.send_to_validator(ValidatorMessage::Tick(wait_group.clone(), tick));
-        self.send_to_pool(PoolMessage::Tick(tick));
+        self.send_tick_message(wait_group, tick);
 
         if changes.is_slot_updated() {
             let slot = tick.slot;
@@ -623,9 +626,7 @@ where
                 self.retry_delayed(delayed, wait_group);
             }
 
-            self.send_to_pool(PoolMessage::Slot(slot));
-            self.send_to_p2p(P2pMessage::Slot(slot));
-            self.send_to_subnet_service(SubnetMessage::Slot(wait_group.clone(), slot));
+            self.send_slot_message(wait_group, slot);
         }
 
         if changes.is_finalized_checkpoint_updated() {
@@ -633,7 +634,7 @@ where
         }
 
         if let ApplyTickChanges::Reorganized { old_head, .. } = changes {
-            self.notify_about_reorganization(wait_group.clone(), &old_head, ReorgSource::Tick);
+            self.notify_about_reorganization(wait_group, &old_head, ReorgSource::Tick);
             self.spawn_preprocess_head_state_for_next_slot_task();
         } else if self.store.tick().kind == TickKind::Attest {
             self.spawn_preprocess_head_state_for_next_slot_task();
@@ -1156,7 +1157,7 @@ where
 
                 if let Some(old_head) = old_head {
                     self.notify_about_reorganization(
-                        wait_group.clone(),
+                        wait_group,
                         &old_head,
                         ReorgSource::AggregateAndProof,
                     );
@@ -1378,7 +1379,7 @@ where
 
                 if let Some(old_head) = old_head {
                     self.notify_about_reorganization(
-                        wait_group.clone(),
+                        wait_group,
                         &old_head,
                         ReorgSource::Attestation,
                     );
@@ -1547,11 +1548,7 @@ where
         self.update_store_snapshot();
 
         if let Some(old_head) = old_head {
-            self.notify_about_reorganization(
-                wait_group.clone(),
-                &old_head,
-                ReorgSource::BlockAttestation,
-            );
+            self.notify_about_reorganization(wait_group, &old_head, ReorgSource::BlockAttestation);
 
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
@@ -1612,7 +1609,7 @@ where
 
                 if let Some(old_head) = old_head {
                     self.notify_about_reorganization(
-                        wait_group.clone(),
+                        wait_group,
                         &old_head,
                         ReorgSource::AttesterSlashing,
                     );
@@ -2493,6 +2490,10 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
+                self.send_to_builder(BuilderMessage::ProposerPreferences(
+                    signed_preferences.clone_arc(),
+                ));
+
                 // TODO: send proposer preferences event once https://github.com/ethereum/beacon-APIs/pull/593 merges
                 self.store_mut()
                     .apply_proposer_preferences(signed_preferences);
@@ -2797,20 +2798,14 @@ where
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if !head_changed && head_was_optimistic && head.is_valid() {
-            self.event_channels
-                .send_head_event(head, |head| self.calculate_dependent_roots(head));
-
             // The call to `Store::notify_about_reorganization` below sends
-            // a `ValidatorMessage::Head` message if the head changed.
-            self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
+            // `ValidatorMessage::Head`, `BuilderMessage::Head` messages and
+            // `Head` event if the head changed.
+            self.send_head_message(wait_group, head);
         }
 
         if head_changed {
-            self.notify_about_reorganization(
-                wait_group.clone(),
-                old_head,
-                ReorgSource::PayloadResponse,
-            );
+            self.notify_about_reorganization(wait_group, old_head, ReorgSource::PayloadResponse);
 
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
@@ -2824,6 +2819,7 @@ where
         PoolMessage::Stop.send(&self.pool_tx);
         SubnetMessage::Stop.send(&self.subnet_tx);
         ValidatorMessage::Stop.send(&self.validator_tx);
+        BuilderMessage::Stop.send(&self.builder_tx);
 
         self.execution_engine.stop();
 
@@ -3177,14 +3173,10 @@ where
 
                 self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
+                // Do not send API events about optimistic blocks.
+                // Vouch treats all head events as non-optimistic.
                 if new_head.is_valid() {
-                    self.event_channels
-                        .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
-
-                    self.send_to_validator(ValidatorMessage::Head(
-                        wait_group.clone(),
-                        new_head.clone(),
-                    ));
+                    self.send_head_message(wait_group, &new_head);
                 }
 
                 // After Gloas, notify FCU should only be called when payload is processed or block produced
@@ -3196,7 +3188,7 @@ where
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
             ApplyBlockChanges::Reorganized { old_head, .. } => {
-                self.notify_about_reorganization(wait_group.clone(), &old_head, ReorgSource::Block);
+                self.notify_about_reorganization(wait_group, &old_head, ReorgSource::Block);
                 self.maybe_spawn_preprocess_head_state_for_current_slot_task(block_slot);
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
@@ -3412,7 +3404,7 @@ where
 
     fn notify_about_reorganization(
         &self,
-        wait_group: W,
+        wait_group: &W,
         old_head: &ChainLink<P>,
         reorg_source: ReorgSource,
     ) {
@@ -3437,13 +3429,10 @@ where
 
         self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
+        // Do not send API events about optimistic blocks.
+        // Vouch treats all head events as non-optimistic.
         if new_head.is_valid() {
-            // Do not send API events about optimistic blocks.
-            // Vouch treats all head events as non-optimistic.
-            self.event_channels
-                .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
-
-            self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
+            self.send_head_message(wait_group, &new_head);
         }
 
         let phase = self.store.phase();
@@ -3919,7 +3908,7 @@ where
     fn take_delayed_until_slot(
         &mut self,
         slot: Slot,
-    ) -> impl Iterator<Item = Delayed<P>> + use<P, E, W, TS, PS, LS, NS, SS, VS> {
+    ) -> impl Iterator<Item = Delayed<P>> + use<P, E, W, TS, PS, LS, NS, SS, VS, BS> {
         match slot.checked_add(1) {
             Some(next_slot) => {
                 let later = self.delayed_until_slot.split_off(&next_slot);
@@ -4511,6 +4500,14 @@ where
             safe_block_hash,
             finalized_block_hash,
         ));
+
+        if state.is_post_gloas() {
+            self.send_to_builder(BuilderMessage::PrepareExecutionPayload(
+                state.slot(),
+                safe_block_hash,
+                finalized_block_hash,
+            ));
+        }
     }
 
     fn spawn_checkpoint_state_task(&self, wait_group: W, checkpoint: Checkpoint) {
@@ -4800,6 +4797,26 @@ where
         self.mutator_tx.clone()
     }
 
+    fn send_tick_message(&self, wait_group: &W, tick: Tick) {
+        self.send_to_validator(ValidatorMessage::Tick(wait_group.clone(), tick));
+        self.send_to_builder(BuilderMessage::Tick(wait_group.clone(), tick));
+        self.send_to_pool(PoolMessage::Tick(tick));
+    }
+
+    fn send_slot_message(&self, wait_group: &W, slot: Slot) {
+        self.send_to_pool(PoolMessage::Slot(slot));
+        self.send_to_p2p(P2pMessage::Slot(slot));
+        self.send_to_subnet_service(SubnetMessage::Slot(wait_group.clone(), slot));
+    }
+
+    fn send_head_message(&self, wait_group: &W, head: &ChainLink<P>) {
+        self.event_channels
+            .send_head_event(head, |head| self.calculate_dependent_roots(head));
+
+        self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
+        self.send_to_builder(BuilderMessage::Head(wait_group.clone(), head.clone()));
+    }
+
     fn send_to_attestation_verifier(&self, message: AttestationVerifierMessage<P, W>) {
         if self.finished_loading_from_storage {
             message.send(&self.attestation_verifier_tx);
@@ -4841,12 +4858,23 @@ where
         }
     }
 
+    fn send_to_builder(&self, message: BuilderMessage<P, W>) {
+        if self.finished_loading_from_storage {
+            message.send(&self.builder_tx);
+        }
+    }
+
     fn track_epoch_transition_metrics(head_state: &Arc<BeaconState<P>>, metrics: &Arc<Metrics>) {
         metrics.set_beacon_processed_deposits_total(head_state.eth1_deposit_index());
         metrics.set_validator_count(head_state.validators().len_usize());
         metrics.set_beacon_current_active_validators(
             accessors::get_active_validator_indices(head_state, RelativeEpoch::Current).count(),
         );
+        if let Some(gloas_state) = head_state.post_gloas() {
+            metrics.set_beacon_current_active_builders(
+                accessors::get_active_builder_indices(gloas_state).count(),
+            );
+        }
     }
 
     fn track_head_metrics(head: &ChainLink<P>, metrics: &Arc<Metrics>) {

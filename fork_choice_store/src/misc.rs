@@ -371,6 +371,7 @@ impl<I> AggregateAndProofOrigin<I> {
 
 #[derive(Debug, AsRefStr)]
 pub enum ExecutionPayloadBidOrigin {
+    Own,
     Gossip(GossipId),
     Api(OneshotSender<Result<ValidationOutcomeWithReason>>),
 }
@@ -395,6 +396,7 @@ impl ExecutionPayloadBidOrigin {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, Some(sender)),
+            Self::Own => (None, None),
         }
     }
 
@@ -402,7 +404,7 @@ impl ExecutionPayloadBidOrigin {
     pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::Api(_) => None,
+            Self::Api(_) | Self::Own => None,
         }
     }
 
@@ -410,7 +412,7 @@ impl ExecutionPayloadBidOrigin {
     pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::Api(_) => None,
+            Self::Api(_) | Self::Own => None,
         }
     }
 
@@ -423,13 +425,7 @@ impl ExecutionPayloadBidOrigin {
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,
-        }
-    }
-
-    #[must_use]
-    pub const fn send_to_validator(&self) -> bool {
-        match self {
-            Self::Gossip(_) | Self::Api(_) => true,
+            Self::Own => false,
         }
     }
 
@@ -439,6 +435,7 @@ impl ExecutionPayloadBidOrigin {
         match self {
             Self::Gossip(_) => "Gossip",
             Self::Api(_) => "Api",
+            Self::Own => "Own",
         }
     }
 }

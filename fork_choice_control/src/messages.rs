@@ -24,7 +24,9 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{PayloadAttestationMessage, PayloadEnvelopeIdentifier},
+    gloas::containers::{
+        PayloadAttestationMessage, PayloadEnvelopeIdentifier, SignedProposerPreferences,
+    },
     phase0::{
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
@@ -298,6 +300,23 @@ impl<P: Preset, W> ValidatorMessage<P, W> {
         // Don't log the value because it can contain entire `BeaconState`s.
         if tx.unbounded_send(self).is_err() {
             debug_with_peers!("send to validator failed because the receiver was dropped");
+        }
+    }
+}
+
+pub enum BuilderMessage<P: Preset, W> {
+    Tick(W, Tick),
+    Head(W, ChainLink<P>),
+    PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),
+    ProposerPreferences(Arc<SignedProposerPreferences>),
+    Stop,
+}
+
+impl<P: Preset, W> BuilderMessage<P, W> {
+    pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
+        // Don't log the value because it can contain entire `BeaconState`s.
+        if tx.unbounded_send(self).is_err() {
+            debug_with_peers!("send to builder failed because the receiver was dropped");
         }
     }
 }

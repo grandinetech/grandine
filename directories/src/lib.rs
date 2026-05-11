@@ -9,6 +9,7 @@ pub struct Directories {
     pub store_directory: Option<PathBuf>,
     pub network_dir: Option<PathBuf>,
     pub validator_dir: Option<PathBuf>,
+    pub builder_dir: Option<PathBuf>,
 }
 
 impl Directories {
@@ -24,6 +25,7 @@ impl Directories {
             store_directory,
             network_dir,
             validator_dir,
+            builder_dir,
         } = &mut self;
 
         // `~/.grandine` or `.grandine`
@@ -47,6 +49,11 @@ impl Directories {
         // `~/.grandine/NETWORK_NAME/validator`
         if validator_dir.is_none() {
             *validator_dir = data_dir.as_ref().map(|data_dir| data_dir.join("validator"));
+        }
+
+        // `~/.grandine/NETWORK_NAME/builder`
+        if builder_dir.is_none() {
+            *builder_dir = data_dir.as_ref().map(|data_dir| data_dir.join("builder"));
         }
 
         self

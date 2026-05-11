@@ -80,8 +80,10 @@ use types::{
         containers::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
             ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
-            ExecutionPayloadEnvelope, PayloadAttestation, SignedExecutionPayloadBid,
+            ExecutionPayloadEnvelope, PayloadAttestation, ProposerPreferences,
+            SignedExecutionPayloadBid,
         },
+        primitives::BuilderIndex,
     },
     nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
     phase0::{
@@ -153,6 +155,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             sync_committee_agg_pool,
             payload_attestation_agg_pool,
             prepared_proposers: Mutex::new(HashMap::new()),
+            proposer_preferences: Mutex::new(HashMap::new()),
             proposer_slashings: Mutex::new(vec![]),
             attester_slashings: Mutex::new(vec![]),
             voluntary_exits: Mutex::new(vec![]),
@@ -199,6 +202,14 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         for proposer in proposers {
             prepared_proposers.insert(proposer.validator_index, proposer.fee_recipient);
         }
+    }
+
+    pub async fn update_proposer_preferences(&self, preferences: ProposerPreferences) {
+        self.producer_context
+            .proposer_preferences
+            .lock()
+            .await
+            .insert(preferences.proposal_slot, preferences);
     }
 
     pub async fn add_new_proposer_slashing(&self, proposer_slashing: ProposerSlashing) {
@@ -291,7 +302,15 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 };
 
                 validator.exit_epoch == FAR_FUTURE_EPOCH
-            })
+            });
+
+        let current_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
+
+        self.producer_context
+            .proposer_preferences
+            .lock()
+            .await
+            .retain(|&slot, _| slot >= current_slot);
     }
 
     pub async fn get_attester_slashings(&self) -> Vec<AttesterSlashing<P>> {
@@ -629,6 +648,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
     prepared_proposers: Mutex<HashMap<ValidatorIndex, ExecutionAddress>>,
+    proposer_preferences: Mutex<HashMap<Slot, ProposerPreferences>>,
     proposer_slashings: Mutex<Vec<ProposerSlashing>>,
     attester_slashings: Mutex<Vec<AttesterSlashing<P>>>,
     voluntary_exits: Mutex<Vec<SignedVoluntaryExit>>,
@@ -1186,6 +1206,52 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Some((beacon_block, block_rewards))
     }
 
+    pub async fn produce_builder_default_payload_bid(
+        &self,
+    ) -> Result<Option<ExecutionPayloadBid<P>>> {
+        let Some(state) = self.beacon_state.post_gloas() else {
+            return Err(AnyhowError::msg(
+                "cannot construct payload bid with pre-Gloas state",
+            ));
+        };
+
+        let mut payload_with_data = None;
+
+        if let Some(handle) = self.get_local_execution_payload() {
+            payload_with_data = handle
+                .await?
+                .map(|value| value.map(|value| value.map(Some)))
+        }
+
+        let Some(WithClientVersions {
+            result:
+                WithBlobsAndMev {
+                    value: execution_payload,
+                    commitments,
+                    ..
+                },
+            ..
+        }) = payload_with_data
+        else {
+            return Err(AnyhowError::msg(
+                "no execution payload to include in make a bid",
+            ));
+        };
+
+        // Cache payload root so compute_execution_payload_envelope can retrieve the full payload
+        // after the block is signed and published (external builders publish their own envelope)
+        if let Some(ref payload) = execution_payload {
+            self.producer_context
+                .cached_payload_roots
+                .lock()
+                .await
+                .cache_set(self.head_block_root, payload.hash_tree_root());
+        }
+
+        self.construct_builder_default_payload_bid(state, execution_payload, commitments)
+            .await
+    }
+
     async fn produce_beacon_block(
         &self,
         block_without_state_root: BeaconBlock<P>,
@@ -1680,8 +1746,74 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             return Ok(None);
         };
 
+        let default_payload_bid = self
+            .construct_default_payload_bid(
+                state,
+                payload,
+                blob_kzg_commitments_opt.unwrap_or_default(),
+            )
+            .await?;
         let fee_recipient = self.fee_recipient().await?;
 
+        let payload_bid = ExecutionPayloadBid {
+            fee_recipient,
+            ..default_payload_bid
+        };
+
+        Ok(Some(SignedExecutionPayloadBid {
+            message: payload_bid,
+            signature: SignatureBytes::empty(),
+        }))
+    }
+
+    async fn construct_builder_default_payload_bid(
+        &self,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
+        execution_payload_opt: Option<ExecutionPayload<P>>,
+        blob_kzg_commitments_opt: Option<
+            ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+        >,
+    ) -> Result<Option<ExecutionPayloadBid<P>>> {
+        let Some(payload) = execution_payload_opt else {
+            return Ok(None);
+        };
+
+        let slot = state.slot();
+
+        let Some(preferences) = self
+            .producer_context
+            .proposer_preferences
+            .lock()
+            .await
+            .get(&slot)
+            .copied()
+        else {
+            return Ok(None);
+        };
+
+        let default_payload_bid = self
+            .construct_default_payload_bid(
+                state,
+                payload,
+                blob_kzg_commitments_opt.unwrap_or_default(),
+            )
+            .await?;
+
+        let payload_bid = ExecutionPayloadBid {
+            fee_recipient: preferences.fee_recipient,
+            gas_limit: preferences.gas_limit,
+            ..default_payload_bid
+        };
+
+        Ok(Some(payload_bid))
+    }
+
+    async fn construct_default_payload_bid(
+        &self,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
+        payload: ExecutionPayload<P>,
+        blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<ExecutionPayloadBid<P>> {
         // TODO(Gloas): this is a quick fix due to time constraits.
         //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
         let (_, requests) = self
@@ -1697,20 +1829,17 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             parent_block_root: parent_root,
             block_hash: payload.block_hash(),
             prev_randao: payload.prev_randao(),
-            fee_recipient,
             gas_limit: payload.gas_limit(),
             builder_index: BUILDER_INDEX_SELF_BUILD,
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments: blob_kzg_commitments_opt.unwrap_or_default(),
+            blob_kzg_commitments,
             execution_requests_root,
+            ..Default::default()
         };
 
-        Ok(Some(SignedExecutionPayloadBid {
-            message: payload_bid,
-            signature: SignatureBytes::empty(),
-        }))
+        Ok(payload_bid)
     }
 
     #[instrument(skip_all, level = "debug")]
@@ -2182,10 +2311,24 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .flatten()
     }
 
+    pub async fn compute_self_execution_payload_envelope(
+        &self,
+        beacon_block_root: H256,
+        parent_beacon_block_root: H256,
+    ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
+        self.compute_execution_payload_envelope(
+            beacon_block_root,
+            parent_beacon_block_root,
+            BUILDER_INDEX_SELF_BUILD,
+        )
+        .await
+    }
+
     pub async fn compute_execution_payload_envelope(
         &self,
         beacon_block_root: H256,
         parent_beacon_block_root: H256,
+        builder_index: BuilderIndex,
     ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
         let Some((payload, execution_requests)) = self.get_gloas_envelope_data().await else {
             return Ok(None);
@@ -2194,7 +2337,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Ok(Some(ExecutionPayloadEnvelope {
             payload,
             execution_requests,
-            builder_index: BUILDER_INDEX_SELF_BUILD,
+            builder_index,
             beacon_block_root,
             parent_beacon_block_root,
         }))

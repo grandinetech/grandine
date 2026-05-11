@@ -43,6 +43,8 @@ pub struct GrandineConfig {
     pub data_dir: PathBuf,
     pub validators: Option<Validators>,
     pub keystore_storage_password_file: Option<PathBuf>,
+    pub builders: Option<Validators>,
+    pub builder_keystore_storage_password_file: Option<PathBuf>,
     pub disable_blockprint_graffiti: bool,
     pub graffiti: Vec<H256>,
     pub max_empty_slots: u64,

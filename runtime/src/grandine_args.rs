@@ -112,6 +112,9 @@ pub struct GrandineArgs {
     #[clap(flatten)]
     validator_api_options: ValidatorApiOptions,
 
+    #[clap(flatten)]
+    builder_options: BuilderOptions,
+
     /// Default block graffiti. Blockprint graffiti will be appended when sufficient space is available.
     /// See `--disable-blockprint-graffiti` to disable this behavior.
     #[clap(long, value_parser = misc::parse_graffiti)]
@@ -969,6 +972,34 @@ impl From<ValidatorApiOptions> for ValidatorApiConfig {
     }
 }
 
+#[derive(Debug, Args)]
+struct BuilderOptions {
+    /// Path to a directory containing EIP-2335 builder keystore files,
+    /// Make sure builder-keystore-dir and keystore-dir are different directories
+    #[clap(long, requires("builder_keystore_password_file"))]
+    builder_keystore_dir: Option<PathBuf>,
+
+    /// Path to a directory containing passwords for builder keystore files
+    #[clap(
+        long,
+        requires("builder_keystore_dir"),
+        conflicts_with("builder_keystore_password_file")
+    )]
+    builder_keystore_password_dir: Option<PathBuf>,
+
+    /// Path to a file containing password for builder keystore files
+    #[clap(
+        long,
+        requires("builder_keystore_dir"),
+        conflicts_with("builder_keystore_password_dir")
+    )]
+    builder_keystore_password_file: Option<PathBuf>,
+
+    /// Path to a file containing password for decrypting imported builder keystores from API
+    #[clap(long)]
+    builder_keystore_storage_password_file: Option<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, Sequence, ValueEnum)]
 enum Network {
     #[cfg(any(feature = "network-mainnet", test))]
@@ -1015,6 +1046,7 @@ impl GrandineArgs {
             mut network_config_options,
             validator_options,
             validator_api_options,
+            builder_options,
             graffiti,
             disable_blockprint_graffiti,
             mut features,
@@ -1121,6 +1153,13 @@ impl GrandineArgs {
             disable_wait_for_late_blocks,
             enable_local_payload_building,
         } = validator_options;
+
+        let BuilderOptions {
+            builder_keystore_dir,
+            builder_keystore_password_dir,
+            builder_keystore_password_file,
+            builder_keystore_storage_password_file,
+        } = builder_options;
 
         if in_memory {
             warn_with_peers!(
@@ -1290,6 +1329,7 @@ impl GrandineArgs {
                 store_directory,
                 network_dir,
                 validator_dir: None,
+                builder_dir: None,
             }
             .set_defaults(&chain_config),
         );
@@ -1363,8 +1403,25 @@ impl GrandineArgs {
             metrics_service_config,
         };
 
+        // Require validator and builder keystores in different directories.
+        if let (Some(validator_keystore), Some(builder_keystore)) =
+            (&keystore_dir, &builder_keystore_dir)
+        {
+            ensure!(
+                validator_keystore != builder_keystore,
+                Error::IdenticalKeystoreDirectory
+            );
+        }
+
         let validators = keystore_dir
             .zip(keystore_password_file.or(keystore_password_dir))
+            .map(|(keystore_dir, keystore_password_file)| Validators {
+                keystore_dir,
+                keystore_password_file,
+            });
+
+        let builders = builder_keystore_dir
+            .zip(builder_keystore_password_file.or(builder_keystore_password_dir))
             .map(|(keystore_dir, keystore_password_file)| Validators {
                 keystore_dir,
                 keystore_password_file,
@@ -1473,6 +1530,8 @@ impl GrandineArgs {
             data_dir: directories.data_dir.clone().unwrap_or_default(),
             validators,
             keystore_storage_password_file,
+            builders,
+            builder_keystore_storage_password_file,
             graffiti,
             disable_blockprint_graffiti,
             max_empty_slots,
@@ -1575,6 +1634,8 @@ enum Error {
         service1: &'static str,
         service2: &'static str,
     },
+    #[error("identical keystore directories for validator and builder, use separate keystore dir")]
+    IdenticalKeystoreDirectory,
 }
 
 fn verify_preset<T: DeserializeOwned + Serialize>(

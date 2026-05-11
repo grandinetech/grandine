@@ -5,8 +5,8 @@ pub use crate::{
         BlockSyncService, Channels as BlockSyncServiceChannels, print_sync_database_info,
     },
     messages::{
-        ApiToP2p, P2pToSlasher, P2pToValidator, SubnetServiceToP2p, SyncToApi, SyncToMetrics,
-        ToSubnetService, ValidatorToP2p,
+        ApiToP2p, BuilderToP2p, P2pToSlasher, P2pToValidator, SubnetServiceToP2p, SyncToApi,
+        SyncToMetrics, ToSubnetService, ValidatorToP2p,
     },
     misc::{BeaconCommitteeSubscription, SyncCommitteeSubscription},
     network::{Channels, Network},

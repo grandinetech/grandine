@@ -256,6 +256,24 @@ impl<P: Preset, W> P2pToValidator<P, W> {
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(bound = "")]
+pub enum BuilderToP2p<P: Preset> {
+    Accept(GossipId),
+    Ignore(GossipId),
+    Reject(GossipId, PoolRejectionReason),
+    PublishPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
+    PublishExecutionPayloadEnvelope(Arc<SignedExecutionPayloadEnvelope<P>>),
+}
+
+impl<P: Preset> BuilderToP2p<P> {
+    pub fn send(self, tx: &UnboundedSender<Self>) {
+        if tx.unbounded_send(self).is_err() {
+            debug_with_peers!("send to p2p failed because the receiver was dropped");
+        }
+    }
+}
+
 pub enum P2pToSlasher<P: Preset> {
     Attestation(Arc<Attestation<P>>),
     Block(Arc<SignedBeaconBlock<P>>),

@@ -24,8 +24,8 @@ use types::{
         BeaconBlock as FuluBeaconBlock, BlindedBeaconBlock as FuluBlindedBeaconBlock,
     },
     gloas::containers::{
-        BeaconBlock as GloasBeaconBlock, ExecutionPayloadEnvelope, PayloadAttestationData,
-        ProposerPreferences,
+        BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid, ExecutionPayloadEnvelope,
+        PayloadAttestationData, ProposerPreferences,
     },
     phase0::{
         containers::{
@@ -73,6 +73,7 @@ pub enum SigningMessage<'block, P: Preset> {
     AggregateAndProof(Box<AggregateAndProof<P>>),
     Attestation(AttestationData),
     BeaconBlock(SigningBlock<'block, P>),
+    ExecutionPayloadBid(ExecutionPayloadBid<P>),
     ExecutionPayloadEnvelope(&'block ExecutionPayloadEnvelope<P>),
     RandaoReveal {
         #[serde(with = "serde_utils::string_or_native")]

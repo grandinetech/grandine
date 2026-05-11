@@ -118,6 +118,9 @@ pub struct Metrics {
     pub validator_own_payload_attestations_init_times: Histogram,
     pub validator_attest_payload_times: Histogram,
 
+    // Builder metrics
+    pub builder_own_signed_payload_bids_init_times: Histogram,
+
     // eth/v1/validator/attestation_data
     pub validator_api_attestation_data_times: Histogram,
 
@@ -581,6 +584,12 @@ impl Metrics {
             validator_attest_payload_times: Histogram::with_opts(histogram_opts!(
                 "VALIDATOR_ATTEST_PAYLOAD_TIMES",
                 "Validator attest payload duty times",
+            ))?,
+
+            // Builder metrics
+            builder_own_signed_payload_bids_init_times: Histogram::with_opts(histogram_opts!(
+                "BUILDER_OWN_SIGNED_PAYLOAD_BIDS_INIT_TIMES",
+                "Builder own_signed_payload_bids init times",
             ))?,
 
             // eth/v1/validator/attestation_data
@@ -1107,6 +1116,9 @@ impl Metrics {
             self.validator_own_payload_attestations_init_times.clone(),
         ))?;
         default_registry.register(Box::new(self.validator_attest_payload_times.clone()))?;
+        default_registry.register(Box::new(
+            self.builder_own_signed_payload_bids_init_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.validator_api_attestation_data_times.clone()))?;
         default_registry.register(Box::new(
             self.validator_api_payload_attestation_data_times.clone(),

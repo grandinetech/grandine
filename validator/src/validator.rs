@@ -667,7 +667,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.register_validators(current_epoch).await;
         }
 
-        let no_validators = self.signer.load().no_keys()
+        let no_validators = self.signer.load().no_validator_keys()
             && self.registered_validators.is_empty()
             && self.block_producer.no_prepared_proposers().await;
 
@@ -1139,13 +1139,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 // have seen the block (and its SignedExecutionPayloadBid) before attesting
                 if slot_head.phase() >= Phase::Gloas
                     && let Some(envelope) = block_build_context
-                        .compute_execution_payload_envelope(
+                        .compute_self_execution_payload_envelope(
                             beacon_block_root,
                             parent_beacon_block_root,
                         )
                         .await?
                 {
                     self.publish_execution_payload_envelope(
+                        &wait_group,
                         slot_head,
                         beacon_block_root,
                         envelope,
@@ -1305,8 +1306,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// Create and sign Gloas execution payload envelope for self-build proposers.
     /// Returns None if envelope data is not available (i.e., not self-building).
+    #[expect(clippy::too_many_arguments)]
     async fn publish_execution_payload_envelope(
         &self,
+        wait_group: &W,
         slot_head: &SlotHead<P>,
         beacon_block_root: H256,
         envelope: ExecutionPayloadEnvelope<P>,
@@ -1350,7 +1353,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         // Publish envelope to controller and P2P
         self.controller
-            .on_own_execution_payload_envelope(signed_envelope.clone_arc());
+            .on_own_execution_payload_envelope(wait_group.clone(), signed_envelope.clone_arc());
 
         ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(&self.p2p_tx);
 
@@ -1927,7 +1930,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     fn own_public_keys(&self) -> HashSet<PublicKeyBytes> {
-        self.signer.load().keys().copied().collect::<HashSet<_>>()
+        self.signer
+            .load()
+            .validator_keys()
+            .copied()
+            .collect::<HashSet<_>>()
     }
 
     #[expect(clippy::too_many_lines)]
@@ -2619,7 +2626,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         tokio::spawn(async move {
             let signer_snapshot = signer.load();
-            let pubkeys = signer_snapshot.keys().copied().collect_vec();
+            let pubkeys = signer_snapshot.validator_keys().copied().collect_vec();
 
             ToSubnetService::SetRegisteredValidators(
                 registered_validators

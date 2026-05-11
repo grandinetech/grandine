@@ -34,6 +34,7 @@ pub enum PoolRejectionReason {
     InvalidProposerSlashing,
     InvalidSyncCommitteeMessage,
     InvalidVoluntaryExit,
+    InvalidProposerPreference,
 }
 
 pub trait PoolTask: Send + 'static {

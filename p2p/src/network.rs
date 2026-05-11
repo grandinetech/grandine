@@ -78,7 +78,7 @@ use types::{
 
 use crate::{
     messages::{
-        ApiToP2p, P2pToSlasher, P2pToSync, P2pToValidator, ServiceInboundMessage,
+        ApiToP2p, BuilderToP2p, P2pToSlasher, P2pToSync, P2pToValidator, ServiceInboundMessage,
         ServiceOutboundMessage, SubnetServiceToP2p, SyncToP2p, ValidatorToP2p,
     },
     misc::{
@@ -120,6 +120,7 @@ pub struct Channels<P: Preset, W: Wait = ()> {
     pub p2p_to_validator_tx: UnboundedSender<P2pToValidator<P, W>>,
     pub sync_to_p2p_rx: UnboundedReceiver<SyncToP2p<P>>,
     pub validator_to_p2p_rx: UnboundedReceiver<ValidatorToP2p<P>>,
+    pub builder_to_p2p_rx: UnboundedReceiver<BuilderToP2p<P>>,
     pub network_to_slasher_tx: Option<UnboundedSender<P2pToSlasher<P>>>,
     pub subnet_service_to_p2p_rx: UnboundedReceiver<SubnetServiceToP2p>,
 }
@@ -589,6 +590,36 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         }
                         ValidatorToP2p::UpdateDataColumnSubnets(custody_group_count) => {
                             self.update_data_column_subnets(custody_group_count);
+                        }
+                    }
+
+                    debug_info.handle();
+                },
+
+                message = self.channels.builder_to_p2p_rx.select_next_some() => {
+                    let debug_info = message_debug_info(&message);
+
+                    match message {
+                        BuilderToP2p::Accept(gossip_id) => {
+                            self.report_outcome(gossip_id, MessageAcceptance::Accept);
+                        }
+                        BuilderToP2p::Ignore(gossip_id) => {
+                            self.report_outcome(gossip_id, MessageAcceptance::Ignore);
+                        }
+                        BuilderToP2p::Reject(gossip_id, pool_rejection_reason) => {
+                            self.report_outcome(gossip_id.clone(), MessageAcceptance::Reject);
+                            self.report_peer(
+                                gossip_id.source,
+                                PeerAction::LowToleranceError,
+                                ReportSource::Processor,
+                                pool_rejection_reason,
+                            );
+                        }
+                        BuilderToP2p::PublishPayloadBid(payload_bid) => {
+                            self.publish_execution_payload_bid(payload_bid);
+                        },
+                        BuilderToP2p::PublishExecutionPayloadEnvelope(envelope) => {
+                            self.publish_execution_payload_envelope(envelope);
                         }
                     }
 

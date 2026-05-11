@@ -29,6 +29,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             SigningMessage::AggregateAndProof(_) => MessageType::AggregateAndProof,
             SigningMessage::Attestation(_) => MessageType::Attestation,
             SigningMessage::BeaconBlock { .. } => MessageType::BlockV2,
+            SigningMessage::ExecutionPayloadBid(_) => MessageType::ExecutionPayloadBid,
             SigningMessage::ExecutionPayloadEnvelope(_) => MessageType::ExecutionPayloadEnvelope,
             SigningMessage::RandaoReveal { .. } => MessageType::RandaoReveal,
             SigningMessage::PayloadAttestation(_) => MessageType::PayloadAttestation,
@@ -56,7 +57,6 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
 // TODO(gloas): Currently, Web3signer only plans to support payload attestation message signing,
 // See this PR for details: https://github.com/Consensys/web3signer/pull/1159, but we expect them
 // to add support for builder message signing in the future. When that happens, we can remove this.
-// TODO
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[cfg_attr(test, derive(Clone, Copy, Deserialize))]
@@ -65,6 +65,7 @@ enum MessageType {
     AggregateAndProof,
     Attestation,
     BlockV2,
+    ExecutionPayloadBid,
     ExecutionPayloadEnvelope,
     RandaoReveal,
     PayloadAttestation,
@@ -95,6 +96,7 @@ mod tests {
                 "AGGREGATE_AND_PROOF",
                 "ATTESTATION",
                 "BLOCK_V2",
+                "EXECUTION_PAYLOAD_BID",
                 "EXECUTION_PAYLOAD_ENVELOPE",
                 "RANDAO_REVEAL",
                 "PAYLOAD_ATTESTATION",
