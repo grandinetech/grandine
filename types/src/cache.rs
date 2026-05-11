@@ -11,7 +11,8 @@ use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 
 use crate::{
-    altair::primitives::NonZeroGwei, nonstandard::RelativeEpoch, phase0::primitives::ValidatorIndex,
+    altair::primitives::NonZeroGwei, gloas::primitives::BuilderIndex, nonstandard::RelativeEpoch,
+    phase0::primitives::ValidatorIndex,
 };
 
 // Possible optimization: cache all proposer indices in an epoch.
@@ -34,6 +35,7 @@ pub struct Cache {
     pub active_validator_indices_shuffled: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
     pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
+    pub builder_indices: OnceCell<HashMap<PublicKeyBytes, BuilderIndex>>,
 }
 
 impl Cache {

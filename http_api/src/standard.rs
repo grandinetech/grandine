@@ -3672,13 +3672,13 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
         return Err(Error::InvalidSlot(slot));
     };
 
-    // TODO(gloas): check builder exist with `builder_indices` cache in beacon state
-    let _ = beacon_state
-        .post_gloas()
-        .ok_or(Error::StatePreGloas)?
-        .builders()
-        .get(builder_index)
-        .map_err(|_| Error::InvalidBuilderIndex(builder_index))?;
+    let Some(gloas_state) = beacon_state.post_gloas() else {
+        return Err(Error::StatePreGloas);
+    };
+
+    if !accessors::get_active_builder_indices(gloas_state).contains(&builder_index) {
+        return Err(Error::InvalidBuilderIndex(builder_index));
+    }
 
     let version = beacon_state.phase();
     let signed_bid = controller

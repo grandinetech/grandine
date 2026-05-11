@@ -184,6 +184,7 @@ pub struct Metrics {
     pub beacon_proposer_index_init_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
     pub validator_indices_init_count: IntCounter,
+    pub builder_indices_init_count: IntCounter,
 
     // Transition function metrics
     pub blinded_block_transition_times: Histogram,
@@ -197,6 +198,7 @@ pub struct Metrics {
     beacon_current_justified_epoch: IntGauge,
     beacon_previous_justified_epoch: IntGauge,
     beacon_current_active_validators: IntGauge,
+    beacon_current_active_builders: IntGauge,
 
     pub beacon_reorgs_total: IntCounter,
 
@@ -847,6 +849,11 @@ impl Metrics {
                 "Validator indices cache init count",
             )?,
 
+            builder_indices_init_count: IntCounter::new(
+                "BUILDER_INDICES_INIT_COUNT",
+                "Builder indices init count",
+            )?,
+
             // Transition function metrics
             blinded_block_transition_times: Histogram::with_opts(histogram_opts!(
                 "BLINDED_BLOCK_TRANSITION_TIMES",
@@ -889,6 +896,11 @@ impl Metrics {
             beacon_current_active_validators: IntGauge::new(
                 "beacon_current_active_validators",
                 "Current total active validators",
+            )?,
+
+            beacon_current_active_builders: IntGauge::new(
+                "beacon_current_active_builders",
+                "Current total active builders",
             )?,
 
             beacon_reorgs_total: IntCounter::new(
@@ -1177,6 +1189,7 @@ impl Metrics {
         default_registry.register(Box::new(self.beacon_proposer_index_init_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
         default_registry.register(Box::new(self.validator_indices_init_count.clone()))?;
+        default_registry.register(Box::new(self.builder_indices_init_count.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
         default_registry.register(Box::new(self.block_transition_times.clone()))?;
         default_registry.register(Box::new(self.epoch_processing_times.clone()))?;
@@ -1186,6 +1199,7 @@ impl Metrics {
         default_registry.register(Box::new(self.beacon_current_justified_epoch.clone()))?;
         default_registry.register(Box::new(self.beacon_previous_justified_epoch.clone()))?;
         default_registry.register(Box::new(self.beacon_current_active_validators.clone()))?;
+        default_registry.register(Box::new(self.beacon_current_active_builders.clone()))?;
         default_registry.register(Box::new(self.beacon_reorgs_total.clone()))?;
         default_registry.register(Box::new(self.beacon_processed_deposits_total.clone()))?;
         default_registry.register(Box::new(
@@ -1512,6 +1526,11 @@ impl Metrics {
     pub fn set_beacon_current_active_validators(&self, validator_count: usize) {
         self.beacon_current_active_validators
             .set(validator_count as i64);
+    }
+
+    pub fn set_beacon_current_active_builders(&self, builder_count: usize) {
+        self.beacon_current_active_builders
+            .set(builder_count as i64);
     }
 
     pub fn set_beacon_processed_deposits_total(&self, total_deposits: u64) {
