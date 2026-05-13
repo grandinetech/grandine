@@ -7,7 +7,9 @@ pub use crate::local::{LocalBeaconClient, LocalConfig};
 
 pub use crate::{
     ids::{BlockId, StateId},
-    traits::{BeaconChainReader, BeaconDutyEndpoints, BeaconEventStream, BeaconPublisher},
+    traits::{
+        BeaconChainReader, BeaconClient, BeaconDutyEndpoints, BeaconEventStream, BeaconPublisher,
+    },
     types::{
         AttesterDuty, BlockEncoding, BlockHeaderSummary, BlockProductionOptions,
         BroadcastValidation, CommitteeIndexAndSlot, DutiesResponse, GenesisData,

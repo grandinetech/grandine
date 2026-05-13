@@ -2349,7 +2349,6 @@ dependencies = [
  "helper_functions",
  "hex-literal 1.1.0",
  "itertools 0.14.0",
- "kzg_utils",
  "liveness_tracker",
  "operation_pools",
  "p2p",

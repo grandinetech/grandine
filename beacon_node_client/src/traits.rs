@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use bls::{PublicKeyBytes, SignatureBytes};
 use fork_choice_control::{Event, Topic};
 use futures::Stream;
-use kzg_utils::KzgBackend;
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use types::{
     altair::containers::{
@@ -79,8 +78,6 @@ pub trait BeaconChainReader<P: Preset>: Send + Sync {
 
     async fn prepared_proposer_indices(&self) -> Vec<ValidatorIndex>;
 
-    fn kzg_backend(&self) -> KzgBackend;
-
     async fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>>;
 
     async fn preprocessed_state_post_block(
@@ -100,7 +97,7 @@ pub trait BeaconDutyEndpoints<P: Preset>: Send + Sync {
         committee_index: CommitteeIndex,
     ) -> Result<AttestationData>;
 
-    async fn produce_block_v3(
+    async fn produce_block(
         &self,
         slot: Slot,
         randao_reveal: SignatureBytes,
@@ -181,4 +178,16 @@ pub trait BeaconPublisher<P: Preset>: Send + Sync {
 pub trait BeaconEventStream<P: Preset>: Send + Sync {
     fn subscribe(&self, topics: &[Topic])
     -> Pin<Box<dyn Stream<Item = Event<P>> + Send + 'static>>;
+}
+
+pub trait BeaconClient<P: Preset>:
+    BeaconChainReader<P> + BeaconDutyEndpoints<P> + BeaconPublisher<P> + BeaconEventStream<P>
+{
+}
+
+impl<P, T> BeaconClient<P> for T
+where
+    P: Preset,
+    T: BeaconChainReader<P> + BeaconDutyEndpoints<P> + BeaconPublisher<P> + BeaconEventStream<P>,
+{
 }

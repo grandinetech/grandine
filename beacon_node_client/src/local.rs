@@ -13,7 +13,6 @@ use futures::{
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use kzg_utils::KzgBackend;
 use liveness_tracker::ApiToLiveness;
 use operation_pools::{AttestationAggPool, SyncCommitteeAggPool, convert_to_electra_attestation};
 use p2p::{
@@ -431,10 +430,6 @@ impl<P: Preset, W: Wait> BeaconChainReader<P> for LocalBeaconClient<P, W> {
         self.block_producer.get_prepared_proposer_indices().await
     }
 
-    fn kzg_backend(&self) -> KzgBackend {
-        self.controller.store_config().kzg_backend
-    }
-
     async fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
         self.controller.preprocessed_state_at_current_slot().await
     }
@@ -587,7 +582,7 @@ impl<P: Preset, W: Wait> BeaconDutyEndpoints<P> for LocalBeaconClient<P, W> {
         })
     }
 
-    async fn produce_block_v3(
+    async fn produce_block(
         &self,
         slot: Slot,
         randao_reveal: SignatureBytes,
