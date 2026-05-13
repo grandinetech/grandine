@@ -8,6 +8,7 @@ use types::phase0::primitives::Slot;
 #[strum(serialize_all = "snake_case")]
 pub enum AppDatabase {
     Beacon,
+    Blobs,
     Sync,
 }
 

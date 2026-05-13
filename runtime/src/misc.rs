@@ -120,6 +120,30 @@ impl StorageConfig {
             .join("beacon_fork_choice")
     }
 
+    pub fn blobs_database(
+        &self,
+        custom_path: Option<PathBuf>,
+        mode: DatabaseMode,
+        restart_tx: Option<UnboundedSender<RestartMessage>>,
+    ) -> Result<Database> {
+        let path = custom_path.unwrap_or_else(|| self.blobs_database_path());
+
+        if mode.is_read_only() {
+            ensure!(
+                path.fs_err_try_exists()?,
+                "blobs database path does not exist: {}",
+                path.display(),
+            );
+        }
+
+        Database::persistent("blobs", path, self.db_size, mode, restart_tx)
+    }
+
+    #[must_use]
+    pub fn blobs_database_path(&self) -> PathBuf {
+        self.directories.blobs_dir.clone().unwrap_or_default()
+    }
+
     pub fn pubkey_cache_database(
         &self,
         custom_path: Option<PathBuf>,

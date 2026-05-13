@@ -7,6 +7,7 @@ use types::config::Config;
 pub struct Directories {
     pub data_dir: Option<PathBuf>,
     pub store_directory: Option<PathBuf>,
+    pub blobs_dir: Option<PathBuf>,
     pub network_dir: Option<PathBuf>,
     pub validator_dir: Option<PathBuf>,
 }
@@ -22,6 +23,7 @@ impl Directories {
         let Self {
             data_dir,
             store_directory,
+            blobs_dir,
             network_dir,
             validator_dir,
         } = &mut self;
@@ -37,6 +39,11 @@ impl Directories {
         // `~/.grandine/NETWORK_NAME/beacon`
         if store_directory.is_none() {
             *store_directory = data_dir.as_ref().map(|data_dir| data_dir.join("beacon"));
+        }
+
+        // `~/.grandine/NETWORK_NAME/blobs`
+        if blobs_dir.is_none() {
+            *blobs_dir = data_dir.as_ref().map(|data_dir| data_dir.join("blobs"));
         }
 
         // `~/.grandine/NETWORK_NAME/network`
@@ -58,9 +65,10 @@ impl Directories {
             |dir: Option<&PathBuf>| dir.as_ref().map(fs_extra::dir::get_size).transpose();
 
         let store_usage = dir_usage(self.store_directory.as_ref())?.unwrap_or_default();
+        let blobs_usage = dir_usage(self.blobs_dir.as_ref())?.unwrap_or_default();
         let network_usage = dir_usage(self.network_dir.as_ref())?.unwrap_or_default();
 
-        Ok(store_usage + network_usage)
+        Ok(store_usage + blobs_usage + network_usage)
     }
 }
 
