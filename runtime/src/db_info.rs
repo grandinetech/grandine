@@ -21,6 +21,12 @@ pub fn print(
 
             fork_choice_control::print_beacon_database_info(&database)?;
         }
+        AppDatabase::Blobs => {
+            let database =
+                storage_config.blobs_database(custom_path, DatabaseMode::ReadOnly, None)?;
+
+            fork_choice_control::print_blobs_database_info(&database)?;
+        }
         AppDatabase::Sync => {
             let database = storage_config.sync_database(custom_path, DatabaseMode::ReadOnly)?;
             p2p::print_sync_database_info(&database)?;
