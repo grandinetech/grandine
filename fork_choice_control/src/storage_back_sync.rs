@@ -302,6 +302,7 @@ mod tests {
             Arc::new(P::default_config()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             NonZeroU64::MIN,
             StorageMode::default(),
             true,

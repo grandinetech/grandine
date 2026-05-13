@@ -31,7 +31,7 @@ pub use crate::{
         EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
         FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
         StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage, StoredBlock, StoredEnvelope,
-        UnfinalizedBlockByRoot, get, print_beacon_database_info, save,
+        UnfinalizedBlockByRoot, get, print_beacon_database_info, print_blobs_database_info, save,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},
     wait::Wait,

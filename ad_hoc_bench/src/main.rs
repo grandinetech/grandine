@@ -39,6 +39,10 @@ struct Options {
     /// If not provided, a temporary directory will be used by default.
     #[clap(long)]
     database_directory: Option<PathBuf>,
+    /// Specifies the directory where benchmark blobs database files will be stored.
+    /// If not provided, a temporary directory will be used by default.
+    #[clap(long)]
+    blobs_database_directory: Option<PathBuf>,
     /// Number of blocks to process in batches.
     #[clap(long, default_value_t = 64)]
     batch_size: usize,
@@ -360,6 +364,7 @@ fn run<P: Preset>(
         mode,
         unfinalized_states_in_memory,
         database_directory,
+        blobs_database_directory,
         batch_size,
         blacklisted_blocks,
     } = options;
@@ -411,11 +416,29 @@ fn run<P: Preset>(
                 .keep())
         })?;
 
+    let blobs_database_dir = blobs_database_directory
+        .map(Ok::<_, anyhow::Error>)
+        .unwrap_or_else(|| {
+            Ok(tempfile::Builder::new()
+                .prefix("ad_hoc_bench_blobs_db_")
+                .rand_bytes(10)
+                .tempdir()?
+                .keep())
+        })?;
+
     info_with_peers!("database dir: {}", database_dir.as_path().display());
 
     let database = Database::persistent(
         "ad_hoc_bench_db",
         database_dir,
+        ByteSize::gib(512),
+        DatabaseMode::ReadWrite,
+        None,
+    )?;
+
+    let blobs_database = Database::persistent(
+        "ad_hoc_bench_blobs_db",
+        blobs_database_dir,
         ByteSize::gib(512),
         DatabaseMode::ReadWrite,
         None,
@@ -428,6 +451,7 @@ fn run<P: Preset>(
         anchor_block,
         anchor_state,
         database,
+        blobs_database,
         futures::sink::drain(),
     );
 
