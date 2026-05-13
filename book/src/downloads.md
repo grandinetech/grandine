@@ -146,7 +146,7 @@ For a complete setup with an execution client, see the Docker Compose example in
 
 | Path in the container | What it holds |
 | --- | --- |
-| `/root/.grandine/NETWORK/beacon` | Beacon database (`beacon_fork_choice`, `eth1_cache`, `pubkey_cache`, `sync`) |
+| `/root/.grandine/NETWORK/beacon` | Beacon database (`beacon_fork_choice`, `blobs`, `eth1_cache`, `pubkey_cache`, `sync`) |
 | `/root/.grandine/NETWORK/network` | Peer-to-peer network key and state |
 | `/root/.grandine/NETWORK/validator` | Validator data, including the slashing protection database |
 | `/root/.grandine/NETWORK/meta.json` | Data directory schema version |

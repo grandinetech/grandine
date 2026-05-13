@@ -153,6 +153,7 @@ impl<P: Preset> Context<P> {
             chain_config.clone_arc(),
             pubkey_cache.clone_arc(),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,

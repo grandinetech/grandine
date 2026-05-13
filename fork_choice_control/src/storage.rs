@@ -92,6 +92,7 @@ pub enum StateLoadStrategy<P: Preset> {
 pub struct Storage<P: Preset> {
     config: Arc<Config>,
     pub(crate) database: Arc<Database>,
+    pub(crate) blobs_database: Arc<Database>,
     storage_mode: StorageMode,
     store_execution_payloads: bool,
     zstd_compression_level: i32,
@@ -135,10 +136,12 @@ impl<P: Preset> Storage<P> {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<Config>,
         pubkey_cache: Arc<PubkeyCache>,
         database: Database,
+        blobs_database: Database,
         storage_mode: StorageMode,
         store_execution_payloads: bool,
         zstd_compression_level: i32,
@@ -170,6 +173,7 @@ impl<P: Preset> Storage<P> {
             config,
             pubkey_cache,
             database: Arc::new(database),
+            blobs_database: Arc::new(blobs_database),
             storage_mode,
             store_execution_payloads,
             zstd_compression_level,
@@ -1041,7 +1045,7 @@ impl<P: Preset> Storage<P> {
             persisted_blob_ids.push(blob_id);
         }
 
-        self.database.put_batch_raw(batch)?;
+        self.blobs_database.put_batch_raw(batch)?;
 
         Ok(persisted_blob_ids)
     }
@@ -1082,12 +1086,12 @@ impl<P: Preset> Storage<P> {
     ) -> Result<Option<Arc<BlobSidecar<P>>>> {
         let BlobIdentifier { block_root, index } = blob_id;
 
-        self.get(BlobSidecarByBlobId(block_root, index))
+        self.get_from_blobs_db(BlobSidecarByBlobId(block_root, index))
     }
 
     pub(crate) fn prune_old_blob_sidecars(&self, up_to_slot: Slot) -> Result<()> {
         let results = self
-            .database
+            .blobs_database
             .iterator_descending_raw(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
 
         let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
@@ -1103,7 +1107,7 @@ impl<P: Preset> Storage<P> {
             keys_to_remove.push(BlobSidecarByBlobId(block_root, index).to_string().into());
         }
 
-        self.database.delete_batch(keys_to_remove)
+        self.blobs_database.delete_batch(keys_to_remove)
     }
 
     fn retained_prune_slots(&self, up_to_slot: Slot) -> Vec<Slot> {
@@ -1276,7 +1280,7 @@ impl<P: Preset> Storage<P> {
             persisted_data_column_ids.push(data_column_id);
         }
 
-        self.database.put_batch_raw(batch)?;
+        self.blobs_database.put_batch_raw(batch)?;
 
         Ok(persisted_data_column_ids)
     }
@@ -1320,7 +1324,7 @@ impl<P: Preset> Storage<P> {
     ) -> Result<Option<Arc<DataColumnSidecar<P>>>> {
         let DataColumnIdentifier { block_root, index } = data_column_id;
 
-        self.get(DataColumnSidecarByColumnId(block_root, index))
+        self.get_from_blobs_db(DataColumnSidecarByColumnId(block_root, index))
     }
 
     pub(crate) fn envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
@@ -1367,7 +1371,7 @@ impl<P: Preset> Storage<P> {
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
         let results = self
-            .database
+            .blobs_database
             .iterator_descending_raw(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
 
         let (mut keys_to_remove, columns_to_remove): (Vec<_>, Vec<_>) =
@@ -1393,7 +1397,7 @@ impl<P: Preset> Storage<P> {
             )
         }
 
-        self.database.delete_batch(keys_to_remove)
+        self.blobs_database.delete_batch(keys_to_remove)
     }
 
     pub(crate) fn prune_old_execution_payload_envelopes(&self, up_to_slot: Slot) -> Result<()> {
@@ -2177,9 +2181,21 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn get<V: SszRead<Config>>(&self, key: impl fmt::Display) -> Result<Option<V>> {
+        self.get_from_db(&self.database, key)
+    }
+
+    fn get_from_blobs_db<V: SszRead<Config>>(&self, key: impl fmt::Display) -> Result<Option<V>> {
+        self.get_from_db(&self.blobs_database, key)
+    }
+
+    fn get_from_db<V: SszRead<Config>>(
+        &self,
+        database: &Database,
+        key: impl fmt::Display,
+    ) -> Result<Option<V>> {
         let key_string = key.to_string();
 
-        if let Some(value_bytes) = self.database.get(key_string)? {
+        if let Some(value_bytes) = database.get(key_string)? {
             let value = V::from_ssz(&self.config, value_bytes)?;
             return Ok(Some(value));
         }
@@ -2394,7 +2410,7 @@ impl<P: Preset> Storage<P> {
 
     pub fn slot_by_blob_id_count(&self) -> Result<usize> {
         let results = self
-            .database
+            .blobs_database
             .iterator_ascending_raw(SlotBlobId(0, H256::zero(), 0).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
@@ -2418,7 +2434,7 @@ impl<P: Preset> Storage<P> {
 
     pub fn blob_sidecar_by_blob_id_count(&self) -> Result<usize> {
         let results = self
-            .database
+            .blobs_database
             .iterator_ascending_raw(BlobSidecarByBlobId(H256::zero(), 0).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
@@ -3144,14 +3160,46 @@ pub fn print_beacon_database_info(database: &Database) -> Result<()> {
     info!("beacon_fork_choice database info:");
 
     match database
-        .iterator_ascending_raw(SlotColumnId(0, H256::zero(), 0).to_string()..)?
+        .iterator_ascending_raw(BlockRootBySlot(0).to_string()..)?
+        .next()
+        .transpose()?
+    {
+        Some((key_bytes, _)) if BlockRootBySlot::has_prefix(&key_bytes) => {
+            let BlockRootBySlot(slot) = BlockRootBySlot::try_from(Cow::Owned(key_bytes))?;
+            info!("oldest block root by slot entry: slot {slot}");
+        }
+        _ => info!("no block root by slot entries found"),
+    }
+
+    Ok(())
+}
+
+pub fn print_blobs_database_info(database: &Database) -> Result<()> {
+    info!("blobs database info:");
+
+    match database
+        .iterator_ascending(SlotBlobId(0, H256::zero(), 0).to_string()..)?
+        .next()
+        .transpose()?
+    {
+        Some((key_bytes, value_bytes)) if SlotBlobId::has_prefix(&key_bytes) => {
+            info!(
+                "oldest blob sidecar entry: {:?}",
+                BlobIdentifier::from_ssz_default(value_bytes)?,
+            );
+        }
+        _ => info!("no blob sidecar entries found"),
+    }
+
+    match database
+        .iterator_ascending(SlotColumnId(0, H256::zero(), 0).to_string()..)?
         .next()
         .transpose()?
     {
         Some((key_bytes, value_bytes)) if SlotColumnId::has_prefix(&key_bytes) => {
             info!(
                 "oldest data column entry: {:?}",
-                DataColumnIdentifier::from_ssz_default(decompress(&value_bytes)?)?,
+                DataColumnIdentifier::from_ssz_default(value_bytes)?,
             );
         }
         _ => info!("no data column entries found"),
@@ -3343,6 +3391,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -3493,6 +3542,14 @@ mod tests {
             None,
         )?;
 
+        let blobs_database = Database::persistent(
+            "test_blobs_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
         let block_1 = block_with_slot(1);
         let block_3 = block_with_slot(3);
         let block_5 = block_with_slot(5);
@@ -3537,6 +3594,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            blobs_database,
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -3569,6 +3627,14 @@ mod tests {
     fn test_prune_old_blocks_and_states() -> Result<()> {
         let database = Database::persistent(
             "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
+        let blobs_database = Database::persistent(
+            "test_blobs_db",
             TempDir::new()?,
             ByteSize::mib(10),
             DatabaseMode::ReadWrite,
@@ -3614,6 +3680,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            blobs_database,
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -3682,6 +3749,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -3718,6 +3786,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -3851,10 +3920,19 @@ mod tests {
             None,
         )?;
 
+        let blobs_database = Database::persistent(
+            "test_blobs_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            blobs_database,
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -3950,6 +4028,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -3988,6 +4067,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -4023,6 +4103,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -4103,6 +4184,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -4168,6 +4250,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -4204,6 +4287,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -4267,6 +4351,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -4336,6 +4421,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -4384,6 +4470,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -4428,6 +4515,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -4719,6 +4807,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet().start_and_stay_in(Phase::Altair)),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -5043,6 +5132,7 @@ mod tests {
             Arc::new(Config::mainnet().start_and_stay_in(Phase::Electra)),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -5311,6 +5401,7 @@ mod tests {
         Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -5818,6 +5909,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -5871,6 +5963,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -5897,6 +5990,7 @@ mod tests {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
             Database::in_memory(),
             StorageMode::default(),
             true,
@@ -6077,6 +6171,7 @@ mod tests {
     #[test]
     fn test_block_root_before_or_at_slot() -> Result<()> {
         let database = Database::in_memory();
+        let blobs_database = Database::in_memory();
 
         database.put_batch_raw(vec![
             serialize(BlockRootBySlot(2), H256::repeat_byte(2))?,
@@ -6087,6 +6182,7 @@ mod tests {
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
+            blobs_database,
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,

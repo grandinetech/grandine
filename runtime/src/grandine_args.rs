@@ -260,7 +260,7 @@ pub struct BeaconNodeOptions {
     back_sync_enabled: bool,
 
     /// Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync.
-    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases.
+    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, blobs, sync, pubkey_cache databases.
     /// [default: disabled]
     #[clap(help_heading = "Storage", long)]
     force_reset_beacon_db: bool,
@@ -320,6 +320,12 @@ pub struct BeaconNodeOptions {
     /// [default: {data_dir}/beacon]
     #[clap(help_heading = "Storage", long)]
     store_directory: Option<PathBuf>,
+
+    /// Directory to store the blobs database (blob and data column sidecars) in.
+    /// The database is stored in its `blobs` subdirectory.
+    /// [default: --store-directory]
+    #[clap(help_heading = "Storage", long)]
+    blobs_dir: Option<PathBuf>,
 
     /// Directory to store application network files
     /// [default: {data_dir}/network]
@@ -511,6 +517,7 @@ impl BeaconNodeOptions {
             builder_max_skipped_slots: _,
             builder_max_skipped_slots_per_epoch: _,
             store_directory: _,
+            blobs_dir: _,
             network_dir: _,
             archive_storage,
             prune_storage,
@@ -1902,6 +1909,9 @@ impl GrandineArgs {
                 store_directory: mode_options
                     .beacon_node_options()
                     .and_then(|options| options.store_directory.clone()),
+                blobs_dir: mode_options
+                    .beacon_node_options()
+                    .and_then(|options| options.blobs_dir.clone()),
                 network_dir: mode_options
                     .beacon_node_options()
                     .and_then(|options| options.network_dir.clone()),
@@ -3197,6 +3207,47 @@ mod tests {
                     .expect("home directory should be accessible")
                     .join(".grandine/mainnet/beacon")
             ),
+        );
+    }
+
+    #[test]
+    fn default_blobs_dir() {
+        let config = config_from_args([]);
+        let node = beacon_node(&config);
+        let store_directory = dirs::home_dir()
+            .expect("home directory should be accessible")
+            .join(".grandine/mainnet/beacon");
+
+        assert_eq!(
+            node.storage_config.directories.blobs_dir,
+            Some(store_directory.clone()),
+        );
+
+        assert_eq!(
+            node.storage_config.blobs_database_path(),
+            store_directory.join("blobs"),
+        );
+    }
+
+    #[test]
+    fn blobs_dir_follows_store_directory() {
+        let config = config_from_args(["--store-directory", "/mnt/beacon"]);
+        let node = beacon_node(&config);
+
+        assert_eq!(
+            node.storage_config.blobs_database_path(),
+            PathBuf::from("/mnt/beacon/blobs"),
+        );
+    }
+
+    #[test]
+    fn blobs_dir_option_is_parent_of_blobs_database() {
+        let config = config_from_args(["--blobs-dir", "/mnt/shared"]);
+        let node = beacon_node(&config);
+
+        assert_eq!(
+            node.storage_config.blobs_database_path(),
+            PathBuf::from("/mnt/shared/blobs"),
         );
     }
 

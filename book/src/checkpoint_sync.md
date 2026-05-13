@@ -171,11 +171,12 @@ choose one of these:
   flag again after the node has started, otherwise every restart downloads a new checkpoint.
 
 - **Reset the beacon databases.** `--force-reset-beacon-db` deletes the `beacon_fork_choice`,
-  `eth1_cache`, `pubkey_cache` and `sync` databases at startup. Combined with
+  `blobs`, `eth1_cache`, `pubkey_cache` and `sync` databases at startup. Combined with
   `--checkpoint-sync-url`, the node then checkpoint syncs into an empty database. This does not
   touch the validator directory or slashing protection data. Remove the flag after use.
 
-- **Delete the beacon directory by hand** while Grandine is stopped. See
+- **Delete the beacon directory by hand** while Grandine is stopped. With `--blobs-dir`, also
+  delete the `blobs` directory inside it. See
   [Storage and database](./storage.md#data-directory-layout).
 
 > **Warning:** Never delete the `validator` directory to fix a sync problem. It holds the slashing

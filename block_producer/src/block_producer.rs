@@ -4468,6 +4468,7 @@ mod test_chain {
                 config.clone_arc(),
                 pubkey_cache.clone_arc(),
                 database::Database::in_memory(),
+                database::Database::in_memory(),
                 StorageMode::default(),
                 true,
                 fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL,

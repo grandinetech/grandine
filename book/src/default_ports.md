@@ -111,6 +111,7 @@ $HOME/.grandine/
     │   ├── eth1_cache/                # deposit contract data
     │   ├── sync/                      # block sync service data (back-sync progress)
     │   ├── pubkey_cache/              # validator public key cache
+    │   ├── blobs/                     # blob and data column sidecars (moved by --blobs-dir)
     │   └── genesis_state.ssz          # downloaded genesis state (Sepolia, Holesky, Hoodi)
     ├── network/                       # --network-dir
     │   ├── key                        # libp2p private key (node identity)
@@ -154,6 +155,7 @@ Notes:
 |---|---|
 | `--data-dir` | The parent of all per-network directories, and the location of `exception.log`. |
 | `--store-directory` | Only the `beacon/` directory. |
+| `--blobs-dir` | Only the `blobs/` database directory, which is created inside the given directory. |
 | `--network-dir` | Only the `network/` directory. |
 | `--libp2p-private-key-file` | The libp2p key file to load. |
 | `--validator-api-token-file` | The validator API token file. |
@@ -175,6 +177,7 @@ the files. See [Running as a service](./running_as_a_service.md).
 - `--validator-api-address` / `--validator-api-port` (default `127.0.0.1:5055`): validator API.
 - `--data-dir` (default `$HOME/.grandine`): parent data directory.
 - `--store-directory` (default `DATA_DIR/NETWORK/beacon`): beacon databases.
+- `--blobs-dir` (default `--store-directory`): parent directory of the `blobs` database.
 - `--network-dir` (default `DATA_DIR/NETWORK/network`): networking files.
 
 See the [Command line reference](./cli_options.md) for all options.

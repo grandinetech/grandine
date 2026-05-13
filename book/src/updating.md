@@ -173,6 +173,11 @@ version wrote. Plan for it:
    databases on startup. It does not touch the validator directory or the slashing protection
    database. Remove the option after this start, or Grandine resets the database on every start.
 
+   Versions that store blob and data column sidecars in a separate `blobs` database also delete it.
+   An older version that predates it does not, and never reads or prunes it. When you downgrade to
+   such a version, delete the `blobs` directory by hand while Grandine is stopped: `beacon/blobs`,
+   or the `blobs` directory inside `--blobs-dir`.
+
 4. **If the slashing protection database cannot be opened** by the older version, move it aside and
    import the export from step 1 before you start validating. The slashing protection database has
    versioned schema migrations, and Grandine refuses to open a database that has a migration it

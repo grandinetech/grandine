@@ -14,7 +14,7 @@ use eth1_api::{ApiController, Eth1Api, Eth1ExecutionEngine};
 use eth2_libp2p::{GossipId, NetworkConfig};
 use features::Feature;
 use fork_choice_control::{
-    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, EventChannels,
+    Controller, DEFAULT_ZSTD_COMPRESSION_LEVEL, EventChannels,
     P2pMessage, Storage, controller::MutatorHandle,
 };
 use fork_choice_store::StoreConfig;
@@ -119,7 +119,7 @@ impl<P: Preset> Context<P> {
             chain_config.clone_arc(),
             pubkey_cache.clone_arc(),
             Database::in_memory(),
-            DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
+            Database::in_memory(),
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
