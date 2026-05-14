@@ -884,6 +884,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    // Before Gloas the execution payload is embedded in the block, so it is always full.
+    #[must_use]
+    pub fn head_payload_status(&self) -> ExecutionPayloadStatus {
+        if self.phase() < Phase::Gloas {
+            return PAYLOAD_STATUS_FULL;
+        }
+
+        self.head_with_payload_status().1
+    }
+
     fn chain_link_payload_status(
         &self,
         chain_link: &ChainLink<P>,

@@ -5,7 +5,7 @@ use execution_engine::{
     PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3,
     PayloadAttributesV4, WithdrawalV1,
 };
-use fork_choice_store::{ChainLink, Storage, Store};
+use fork_choice_store::{ChainLink, PayloadPresence, Storage, Store};
 use helper_functions::misc;
 use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
@@ -28,8 +28,10 @@ use types::{
     electra::containers::SingleAttestation,
     fulu::primitives::ColumnIndex,
     gloas::{
-        containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
-        primitives::BuilderIndex,
+        containers::{
+            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedProposerPreferences,
+        },
+        primitives::{BuilderIndex, PayloadStatus},
     },
     nonstandard::Phase,
     phase0::{
@@ -63,8 +65,10 @@ pub enum Topic {
     ExecutionPayloadGossip,
     FinalizedCheckpoint,
     Head,
-    PayloadAttestation,
+    HeadV2,
+    PayloadAttestationMessage,
     PayloadAttributes,
+    ProposerPreferences,
     ProposerSlashing,
     SingleAttestation,
     VoluntaryExit,
@@ -87,8 +91,10 @@ pub enum Event<P: Preset> {
     ExecutionPayloadGossip(ExecutionPayloadGossipEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
+    HeadV2(HeadV2Event),
     PayloadAttestation(PayloadAttestationEvent),
     PayloadAttributes(PayloadAttributesEvent),
+    ProposerPreferences(ProposerPreferencesEvent),
     ProposerSlashing(Box<ProposerSlashing>),
     SingleAttestation(SingleAttestation),
     VoluntaryExit(Box<SignedVoluntaryExit>),
@@ -113,8 +119,10 @@ impl<P: Preset> Event<P> {
             Self::ExecutionPayloadGossip(_) => Topic::ExecutionPayloadGossip,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
-            Self::PayloadAttestation(_) => Topic::PayloadAttestation,
+            Self::HeadV2(_) => Topic::HeadV2,
+            Self::PayloadAttestation(_) => Topic::PayloadAttestationMessage,
             Self::PayloadAttributes(_) => Topic::PayloadAttributes,
+            Self::ProposerPreferences(_) => Topic::ProposerPreferences,
             Self::ProposerSlashing(_) => Topic::ProposerSlashing,
             Self::SingleAttestation(_) => Topic::SingleAttestation,
             Self::VoluntaryExit(_) => Topic::VoluntaryExit,
@@ -140,8 +148,10 @@ pub struct EventChannels<P: Preset> {
     pub execution_payloads_gossip: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
+    pub heads_v2: Sender<Event<P>>,
     pub payload_attestations: Sender<Event<P>>,
     pub payload_attributes: Sender<Event<P>>,
+    pub proposer_preferences: Sender<Event<P>>,
     pub proposer_slashings: Sender<Event<P>>,
     pub single_attestations: Sender<Event<P>>,
     pub voluntary_exits: Sender<Event<P>>,
@@ -174,8 +184,10 @@ impl<P: Preset> EventChannels<P> {
             execution_payloads_gossip: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
+            heads_v2: broadcast::channel(max_events).0,
             payload_attestations: broadcast::channel(max_events).0,
             payload_attributes: broadcast::channel(max_events).0,
+            proposer_preferences: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
             single_attestations: broadcast::channel(max_events).0,
             voluntary_exits: broadcast::channel(max_events).0,
@@ -201,8 +213,10 @@ impl<P: Preset> EventChannels<P> {
             Topic::ExecutionPayloadGossip => &self.execution_payloads_gossip,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
-            Topic::PayloadAttestation => &self.payload_attestations,
+            Topic::HeadV2 => &self.heads_v2,
+            Topic::PayloadAttestationMessage => &self.payload_attestations,
             Topic::PayloadAttributes => &self.payload_attributes,
+            Topic::ProposerPreferences => &self.proposer_preferences,
             Topic::ProposerSlashing => &self.proposer_slashings,
             Topic::SingleAttestation => &self.single_attestations,
             Topic::VoluntaryExit => &self.voluntary_exits,
@@ -361,12 +375,8 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
-    pub fn send_head_event(
-        &self,
-        head: &ChainLink<P>,
-        calculate_dependent_roots: impl FnOnce(&ChainLink<P>) -> Result<DependentRootsBundle>,
-    ) {
-        if let Err(error) = self.send_head_event_internal(head, calculate_dependent_roots) {
+    pub fn send_head_event(&self, head: &ChainLink<P>, dependent_roots: DependentRootsBundle) {
+        if let Err(error) = self.send_head_event_internal(head, dependent_roots) {
             warn_with_peers!("unable to send head event: {error}");
         }
 
@@ -380,6 +390,18 @@ impl<P: Preset> EventChannels<P> {
             if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
                 warn_with_peers!("unable to send chain reorg event: {error}");
             }
+        }
+    }
+
+    pub fn send_head_v2_event(
+        &self,
+        head: &ChainLink<P>,
+        payload_status: PayloadStatus,
+        dependent_roots: DependentRootsBundle,
+    ) {
+        if let Err(error) = self.send_head_v2_event_internal(head, payload_status, dependent_roots)
+        {
+            warn_with_peers!("unable to send head_v2 event: {error}");
         }
     }
 
@@ -415,6 +437,17 @@ impl<P: Preset> EventChannels<P> {
             parent_block_hash,
         ) {
             warn_with_peers!("unable to send payload attributes event: {error}");
+        }
+    }
+
+    pub fn send_proposer_preferences_event(
+        &self,
+        phase: Phase,
+        signed_preferences: Arc<SignedProposerPreferences>,
+    ) {
+        if let Err(error) = self.send_proposer_preferences_event_internal(phase, signed_preferences)
+        {
+            warn_with_peers!("unable to send proposer preferences event: {error}");
         }
     }
 
@@ -644,6 +677,22 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_proposer_preferences_event_internal(
+        &self,
+        phase: Phase,
+        signed_preferences: Arc<SignedProposerPreferences>,
+    ) -> Result<()> {
+        if self.proposer_preferences.receiver_count() > 0 {
+            let event = Event::ProposerPreferences(ProposerPreferencesEvent {
+                version: phase,
+                data: signed_preferences,
+            });
+            self.proposer_preferences.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -670,12 +719,27 @@ impl<P: Preset> EventChannels<P> {
     fn send_head_event_internal(
         &self,
         head: &ChainLink<P>,
-        calculate_dependent_roots: impl FnOnce(&ChainLink<P>) -> Result<DependentRootsBundle>,
+        dependent_roots: DependentRootsBundle,
     ) -> Result<()> {
         if self.heads.receiver_count() > 0 {
-            let head_event = HeadEvent::new(head, calculate_dependent_roots(head)?);
+            let head_event = HeadEvent::new(head, dependent_roots);
             let event = Event::Head(head_event);
             self.heads.send(event)?;
+        }
+
+        Ok(())
+    }
+
+    fn send_head_v2_event_internal(
+        &self,
+        head: &ChainLink<P>,
+        payload_status: PayloadStatus,
+        dependent_roots: DependentRootsBundle,
+    ) -> Result<()> {
+        if self.heads_v2.receiver_count() > 0 {
+            let head_v2_event = HeadV2Event::new(head, payload_status, dependent_roots);
+            let event = Event::HeadV2(head_v2_event);
+            self.heads_v2.send(event)?;
         }
 
         Ok(())
@@ -956,6 +1020,58 @@ impl HeadEvent {
     }
 }
 
+// See <https://github.com/ethereum/beacon-APIs/pull/590>.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct HeadV2Event {
+    pub version: Phase,
+    pub data: HeadV2EventData,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct HeadV2EventData {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    pub block: H256,
+    pub state: H256,
+    pub payload_status: PayloadPresence,
+    pub epoch_transition: bool,
+    pub current_epoch_dependent_root: H256,
+    pub next_epoch_dependent_root: H256,
+    pub execution_optimistic: bool,
+}
+
+impl HeadV2Event {
+    fn new<P: Preset>(
+        head: &ChainLink<P>,
+        payload_status: PayloadStatus,
+        dependent_roots_bundle: DependentRootsBundle,
+    ) -> Self {
+        let DependentRootsBundle {
+            current_duty_dependent_root,
+            previous_duty_dependent_root,
+        } = dependent_roots_bundle;
+
+        let slot = head.slot();
+
+        Self {
+            version: head.block.phase(),
+            data: HeadV2EventData {
+                slot,
+                block: head.block_root,
+                state: head.block.message().state_root(),
+                payload_status: payload_status.into(),
+                epoch_transition: misc::is_epoch_start::<P>(slot),
+                // #590 names dependent roots by the epoch whose duties the root
+                // determines, inverting the old duty-period labels. The values are
+                // unchanged, so this apparent swap is intentional, not a bug.
+                current_epoch_dependent_root: previous_duty_dependent_root,
+                next_epoch_dependent_root: current_duty_dependent_root,
+                execution_optimistic: head.is_optimistic(),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct PayloadAttestationEvent {
     pub version: Phase,
@@ -980,6 +1096,12 @@ impl PayloadAttestationEvent {
 pub struct ExecutionPayloadBidEvent<P: Preset> {
     pub version: Phase,
     pub data: Arc<SignedExecutionPayloadBid<P>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ProposerPreferencesEvent {
+    pub version: Phase,
+    pub data: Arc<SignedProposerPreferences>,
 }
 
 #[derive(Clone, Debug, Serialize)]
