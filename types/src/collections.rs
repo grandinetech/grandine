@@ -7,6 +7,8 @@
 //!
 //! All bundle sizes are currently set to minimize rehashing at the cost of higher memory usage.
 
+use bls::PublicKeyBytes;
+use im::hashmap::HashMap;
 use ssz::{
     ContiguousVector, IncompletePersistentVector, PersistentList, PersistentVector,
     UnhashedBundleSize,
@@ -36,6 +38,8 @@ pub type HistoricalRoots<P> =
 pub type Eth1DataVotes<P> = PersistentList<Eth1Data, SlotsPerEth1VotingPeriod<P>>;
 
 pub type Validators<P> = PersistentList<Validator, <P as Preset>::ValidatorRegistryLimit>;
+
+pub type ValidatorIndices = HashMap<PublicKeyBytes, ValidatorIndex>;
 
 pub type Balances<P> =
     PersistentList<Gwei, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<Gwei>>;

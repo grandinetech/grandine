@@ -16,6 +16,7 @@ use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
 use ssz::Hc;
+use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -432,6 +433,7 @@ fn apply_deposits<P: Preset>(
                         "state.cache.validator_indices is initialized by \
                          index_of_public_key, which is called before apply_deposits",
                     )
+                    .make_mut()
                     .insert(pubkey, validator_index);
 
                 for amount in amounts {

@@ -387,10 +387,11 @@ where
             return Ok(Some(with_status));
         }
 
-        if let Some(state) = self
-            .storage()
-            .stored_state_by_state_root(state_root, &store.finalized_validators())?
-        {
+        if let Some(state) = self.storage().stored_state_by_state_root(
+            state_root,
+            &store.finalized_validators(),
+            store.finalized_validator_indices().as_ref(),
+        )? {
             let finalized = store.is_slot_finalized(state.slot());
             return Ok(Some(WithStatus::valid(state, finalized)));
         }
@@ -711,10 +712,11 @@ where
             return Ok(state);
         }
 
-        if let Some(state) = self
-            .storage()
-            .state_post_block(block_root, &store.finalized_validators())?
-        {
+        if let Some(state) = self.storage().state_post_block(
+            block_root,
+            &store.finalized_validators(),
+            store.finalized_validator_indices().as_ref(),
+        )? {
             return state_cache.process_slots(pubkey_cache, &store, state, block_root, slot);
         }
 
@@ -742,9 +744,11 @@ where
                 return Ok(state);
             }
 
-            if let Some(state) =
-                storage.state_post_block(block_root, &store.finalized_validators())?
-            {
+            if let Some(state) = storage.state_post_block(
+                block_root,
+                &store.finalized_validators(),
+                store.finalized_validator_indices().as_ref(),
+            )? {
                 return state_cache.process_slots(&pubkey_cache, &store, state, block_root, slot);
             }
 
@@ -1238,10 +1242,11 @@ impl<P: Preset> Snapshot<'_, P> {
             }));
         }
 
-        if let Some(state) = self
-            .storage
-            .stored_state(slot, Some(&store.finalized_validators()))?
-        {
+        if let Some(state) = self.storage.stored_state(
+            slot,
+            Some(&store.finalized_validators()),
+            store.finalized_validator_indices().as_ref(),
+        )? {
             let finalized = store.is_slot_finalized(state.slot());
             return Ok(Some(WithStatus::valid(state, finalized)));
         }

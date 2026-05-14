@@ -497,6 +497,7 @@ pub fn apply_deposits<P: Preset>(
                         "state.cache.validator_indices is initialized by \
                          index_of_public_key, which is called before apply_deposits",
                     )
+                    .make_mut()
                     .insert(public_key_bytes, validator_index);
 
                 for amount in amounts {

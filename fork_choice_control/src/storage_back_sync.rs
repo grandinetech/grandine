@@ -10,7 +10,7 @@ use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
-    Validators,
+    ValidatorIndices, Validators,
     combined::{DataColumnSidecar, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
@@ -43,6 +43,7 @@ impl<P: Preset> Storage<P> {
         anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
         is_exiting: &Arc<AtomicBool>,
         finalized_validators: &Validators<P>,
+        finalized_validator_indices: Option<&Arc<ValidatorIndices>>,
     ) -> Result<()> {
         let WithOrigin { value, origin } = anchor_checkpoint_provider.checkpoint();
 
@@ -56,9 +57,6 @@ impl<P: Preset> Storage<P> {
 
         // check whether archiving was interrupted
         if let Some(slot) = get_latest_archived_slot(&self.database)?
-            && self
-                .stored_state(slot, Some(finalized_validators))?
-                .is_some()
             && slot > start_slot
             && slot <= end_slot
         {
@@ -73,10 +71,14 @@ impl<P: Preset> Storage<P> {
 
             anchor_state
         } else {
-            self.stored_state(start_slot, Some(finalized_validators))?
-                .ok_or(Error::StateNotFound {
-                    state_slot: start_slot,
-                })?
+            self.stored_state(
+                start_slot,
+                Some(finalized_validators),
+                finalized_validator_indices,
+            )?
+            .ok_or(Error::StateNotFound {
+                state_slot: start_slot,
+            })?
         };
 
         let mut previous_block = None;
@@ -258,6 +260,7 @@ mod tests {
             &AnchorCheckpointProvider::custom_from_genesis(genesis_state),
             &Arc::new(AtomicBool::new(false)),
             &finalized_validators,
+            None,
         )?;
 
         // Assert that the mappings from state root to slot are stored.
@@ -270,7 +273,7 @@ mod tests {
         for state_root in [state_1_root, state_22_root, state_96_root, state_128_root] {
             assert_eq!(
                 storage
-                    .stored_state_by_state_root(state_root, &finalized_validators)?
+                    .stored_state_by_state_root(state_root, &finalized_validators, None)?
                     .map(|state| state.hash_tree_root()),
                 Some(state_root),
             );

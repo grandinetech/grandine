@@ -45,7 +45,7 @@ use transition_functions::{
 };
 use typenum::Unsigned as _;
 use types::{
-    Validators,
+    ValidatorIndices, Validators,
     combined::{
         Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
         SignedAggregateAndProof, SignedBeaconBlock,
@@ -1065,6 +1065,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn finalized_validators(&self) -> Validators<P> {
         self.last_finalized().state(self).validators().clone()
+    }
+
+    pub fn finalized_validator_indices(&self) -> Option<Arc<ValidatorIndices>> {
+        self.last_finalized()
+            .state(self)
+            .cache()
+            .validator_indices
+            .get()
+            .cloned()
     }
 
     pub fn validate_block(
@@ -4141,14 +4150,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Instead, use a best-effort approach: read finalized validators only
         // when the finalized state is already present, and fall back to loading
         // validators from disk otherwise.
-        let finalized_validators = self
-            .last_finalized()
-            .state
-            .as_ref()
-            .map(types::traits::BeaconState::validators);
+        let finalized_state = self.last_finalized().state.as_ref();
+        let finalized_validators = finalized_state.map(types::traits::BeaconState::validators);
+        let finalized_validator_indices = finalized_state
+            .and_then(|state| state.cache().validator_indices.get())
+            .cloned();
 
-        self.storage
-            .stored_state_by_block_root(block_root, finalized_validators)
+        self.storage.stored_state_by_block_root(
+            block_root,
+            finalized_validators,
+            finalized_validator_indices.as_ref(),
+        )
     }
 
     #[must_use]

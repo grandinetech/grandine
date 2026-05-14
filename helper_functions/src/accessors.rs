@@ -202,6 +202,7 @@ pub fn index_of_public_key<P: Preset>(
     get_or_init_validator_indices(state, true)
         .get(public_key)
         .copied()
+        .filter(|index| *index < state.validators().len_u64())
 }
 
 pub fn get_or_init_validator_indices<P: Preset>(
@@ -221,7 +222,8 @@ pub fn get_or_init_validator_indices<P: Preset>(
             .into_iter()
             .map(|validator| validator.pubkey)
             .zip(0..)
-            .collect()
+            .collect::<HashMap<_, _>>()
+            .into()
     })
 }
 

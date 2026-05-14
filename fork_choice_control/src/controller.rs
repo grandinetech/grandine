@@ -700,6 +700,7 @@ where
             anchor_checkpoint_provider,
             is_exiting,
             &store.finalized_validators(),
+            store.finalized_validator_indices().as_ref(),
         )
     }
 
