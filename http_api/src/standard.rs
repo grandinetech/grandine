@@ -1835,9 +1835,7 @@ pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
             ApiToP2p::PublishPayloadBid(signed_payload_bid).send(&api_to_p2p_tx);
             Ok(StatusCode::OK)
         }
-        Ok(ValidationOutcomeWithReason::Ignore(message)) => {
-            Err(Error::InvalidPayloadBid(AnyhowError::msg(message)))
-        }
+        Ok(ValidationOutcomeWithReason::Ignore(_)) => Ok(StatusCode::OK),
         Err(error) => Err(Error::InvalidPayloadBid(error)),
     }
 }
