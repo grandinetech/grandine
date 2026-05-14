@@ -1130,6 +1130,11 @@ impl ExecutionPayloadEnvelopeOrigin {
     }
 
     #[must_use]
+    pub const fn should_send_gossip_event(&self) -> bool {
+        matches!(self, Self::Gossip(_) | Self::Api(_))
+    }
+
+    #[must_use]
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
