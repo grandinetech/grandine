@@ -2010,14 +2010,27 @@ where
 
                 let beacon_block_root = envelope.block_root();
                 let slot = envelope.slot();
+                let builder_index = envelope.builder_index();
+                let block_hash = envelope.message.payload.block_hash;
+                let should_send_gossip_event = origin.should_send_gossip_event();
+                let should_generate_event = origin.should_generate_event();
 
                 debug_with_peers!(
                     "execution payload envelope accepted (beacon_block_root: {beacon_block_root:?}, slot: {slot})"
                 );
 
-                if origin.should_generate_event() {
+                if should_generate_event {
                     self.event_channels
                         .send_execution_payload_available_event(slot, beacon_block_root);
+                }
+
+                if should_send_gossip_event {
+                    self.event_channels.send_execution_payload_gossip_event(
+                        slot,
+                        builder_index,
+                        block_hash,
+                        beacon_block_root,
+                    );
                 }
 
                 let (gossip_id, sender) = origin.split();
@@ -2032,6 +2045,18 @@ where
                 );
 
                 self.accept_execution_payload_envelope(&wait_group, envelope);
+
+                if should_generate_event {
+                    if let Some(chain_link) = self.store.chain_link(beacon_block_root) {
+                        self.event_channels.send_execution_payload_event(
+                            slot,
+                            builder_index,
+                            block_hash,
+                            beacon_block_root,
+                            chain_link.is_optimistic(),
+                        );
+                    }
+                }
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
