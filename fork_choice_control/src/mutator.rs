@@ -38,9 +38,9 @@ use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAction, PayloadAttestationAction, PayloadAttestationItem, ProposerPreferencesAction,
-    ProposerPreferencesOrigin, StateCacheProcessor, Store, ValidAttestation,
-    ValidPayloadAttestation,
+    PayloadAction, PayloadAttestationAction, PayloadAttestationItem, PayloadPresence,
+    ProposerPreferencesAction, ProposerPreferencesOrigin, StateCacheProcessor, Store,
+    ValidAttestation, ValidPayloadAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -61,10 +61,7 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::{
-        consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL, PAYLOAD_STATUS_PENDING},
-        containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
-    },
+    gloas::containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
     nonstandard::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -2116,6 +2113,29 @@ where
                         beacon_block_root,
                         chain_link.is_optimistic(),
                     );
+
+                    // Emit a second `head_v2` event reflecting the head's payload
+                    // status transitioning from empty to full once its envelope is
+                    // available.
+                    let head = self.store.head();
+
+                    if head.block_root == beacon_block_root && head.is_valid() {
+                        let head = head.clone();
+                        let payload_status = self.store.head_payload_status();
+
+                        match self.calculate_dependent_roots(&head) {
+                            Ok(dependent_roots) => self.event_channels.send_head_v2_event(
+                                &head,
+                                payload_status,
+                                dependent_roots,
+                            ),
+                            Err(error) => {
+                                warn_with_peers!(
+                                    "unable to calculate dependent roots for head event: {error}"
+                                )
+                            }
+                        }
+                    }
                 }
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {
@@ -2620,7 +2640,11 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
-                // TODO: send proposer preferences event once https://github.com/ethereum/beacon-APIs/pull/593 merges
+                self.event_channels.send_proposer_preferences_event(
+                    self.store.head().block.phase(),
+                    signed_preferences.clone_arc(),
+                );
+
                 self.store_mut()
                     .apply_proposer_preferences(signed_preferences);
 
@@ -2928,8 +2952,7 @@ where
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if !head_changed && head_was_optimistic && head.is_valid() {
-            self.event_channels
-                .send_head_event(head, |head| self.calculate_dependent_roots(head));
+            self.send_head_events(head);
 
             // The call to `Store::notify_about_reorganization` below sends
             // a `ValidatorMessage::Head` message if the head changed.
@@ -3315,8 +3338,7 @@ where
                 self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
                 if new_head.is_valid() {
-                    self.event_channels
-                        .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
+                    self.send_head_events(&new_head);
 
                     self.send_to_validator(ValidatorMessage::Head(
                         wait_group.clone(),
@@ -3585,8 +3607,7 @@ where
         if new_head.is_valid() {
             // Do not send API events about optimistic blocks.
             // Vouch treats all head events as non-optimistic.
-            self.event_channels
-                .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
+            self.send_head_events(&new_head);
 
             self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
         }
@@ -3631,12 +3652,7 @@ where
                     payload timely: {}\
                 )",
                 new_head.slot(),
-                match store.head_with_payload_status().1 {
-                    PAYLOAD_STATUS_EMPTY => "EMPTY",
-                    PAYLOAD_STATUS_FULL => "FULL",
-                    PAYLOAD_STATUS_PENDING => "PENDING",
-                    _ => "",
-                },
+                PayloadPresence::from(store.head_payload_status()),
                 store.is_payload_verified(head_root),
                 store.is_payload_present_timely(head_root),
             );
@@ -3649,6 +3665,23 @@ where
             Either::Left(new_head.block.phase()),
             None,
         );
+    }
+
+    fn send_head_events(&self, head: &ChainLink<P>) {
+        match self.calculate_dependent_roots(head) {
+            Ok(dependent_roots) => {
+                self.event_channels.send_head_event(head, dependent_roots);
+
+                self.event_channels.send_head_v2_event(
+                    head,
+                    self.store.head_payload_status(),
+                    dependent_roots,
+                );
+            }
+            Err(error) => {
+                warn_with_peers!("unable to calculate dependent roots for head events: {error}")
+            }
+        }
     }
 
     // This may even involve a DB lookup so it would be best
