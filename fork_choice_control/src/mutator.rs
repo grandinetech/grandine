@@ -53,7 +53,9 @@ use std_ext::ArcExt as _;
 use tracing::{Span, instrument};
 use typenum::Unsigned as _;
 use types::{
-    combined::{BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, ExecutionPayloadParams, SignedBeaconBlock,
+    },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     nonstandard::{PayloadStatus, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason},
@@ -1226,8 +1228,13 @@ where
                 trace_with_peers!("attestation accepted (attestation: {attestation:?})");
 
                 if attestation.origin.should_generate_event() {
-                    self.event_channels
-                        .send_attestation_event(attestation.item.clone_arc());
+                    if let Attestation::Single(single_attestation) = attestation.item.as_ref() {
+                        self.event_channels
+                            .send_single_attestation_event(*single_attestation);
+                    } else {
+                        self.event_channels
+                            .send_attestation_event(attestation.item.clone_arc());
+                    }
                 }
 
                 if attestation.origin.send_to_validator() {

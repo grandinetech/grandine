@@ -23,6 +23,7 @@ use types::{
         containers::BlobSidecar,
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
+    electra::containers::SingleAttestation,
     fulu::primitives::ColumnIndex,
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::Phase,
@@ -56,6 +57,7 @@ pub enum Topic {
     Head,
     PayloadAttributes,
     ProposerSlashing,
+    SingleAttestation,
     VoluntaryExit,
 }
 
@@ -75,6 +77,7 @@ pub enum Event<P: Preset> {
     Head(HeadEvent),
     PayloadAttributes(PayloadAttributesEvent),
     ProposerSlashing(Box<ProposerSlashing>),
+    SingleAttestation(SingleAttestation),
     VoluntaryExit(Box<SignedVoluntaryExit>),
 }
 
@@ -96,6 +99,7 @@ impl<P: Preset> Event<P> {
             Self::Head(_) => Topic::Head,
             Self::PayloadAttributes(_) => Topic::PayloadAttributes,
             Self::ProposerSlashing(_) => Topic::ProposerSlashing,
+            Self::SingleAttestation(_) => Topic::SingleAttestation,
             Self::VoluntaryExit(_) => Topic::VoluntaryExit,
         }
     }
@@ -118,6 +122,7 @@ pub struct EventChannels<P: Preset> {
     pub heads: Sender<Event<P>>,
     pub payload_attributes: Sender<Event<P>>,
     pub proposer_slashings: Sender<Event<P>>,
+    pub single_attestations: Sender<Event<P>>,
     pub voluntary_exits: Sender<Event<P>>,
     // See <https://github.com/grandinetech/grandine/issues/254> for rationale
     optimistic_reorgs: SccHashMap<(H256, Slot), ChainReorgEvent>,
@@ -147,6 +152,7 @@ impl<P: Preset> EventChannels<P> {
             heads: broadcast::channel(max_events).0,
             payload_attributes: broadcast::channel(max_events).0,
             proposer_slashings: broadcast::channel(max_events).0,
+            single_attestations: broadcast::channel(max_events).0,
             voluntary_exits: broadcast::channel(max_events).0,
             optimistic_reorgs: SccHashMap::default(),
         }
@@ -169,6 +175,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::Head => &self.heads,
             Topic::PayloadAttributes => &self.payload_attributes,
             Topic::ProposerSlashing => &self.proposer_slashings,
+            Topic::SingleAttestation => &self.single_attestations,
             Topic::VoluntaryExit => &self.voluntary_exits,
         }
         .subscribe()
@@ -332,6 +339,12 @@ impl<P: Preset> EventChannels<P> {
     pub fn send_proposer_slashing_event(&self, proposer_slashing: ProposerSlashing) {
         if let Err(error) = self.send_proposer_slashing_event_internal(proposer_slashing) {
             warn_with_peers!("unable to send proposer slashing event: {error}");
+        }
+    }
+
+    pub fn send_single_attestation_event(&self, single_attestation: SingleAttestation) {
+        if let Err(error) = self.send_single_attestation_event_internal(single_attestation) {
+            warn_with_peers!("unable to send single attestation event: {error}");
         }
     }
 
@@ -566,6 +579,18 @@ impl<P: Preset> EventChannels<P> {
         if self.proposer_slashings.receiver_count() > 0 {
             let event = Event::ProposerSlashing(Box::new(proposer_slashing));
             self.proposer_slashings.send(event)?;
+        }
+
+        Ok(())
+    }
+
+    fn send_single_attestation_event_internal(
+        &self,
+        single_attestation: SingleAttestation,
+    ) -> Result<()> {
+        if self.single_attestations.receiver_count() > 0 {
+            let event = Event::SingleAttestation(single_attestation);
+            self.single_attestations.send(event)?;
         }
 
         Ok(())

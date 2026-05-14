@@ -2505,6 +2505,7 @@ pub async fn beacon_events<P: Preset>(
                 Event::Head(data) => ssevent.json_data(data),
                 Event::PayloadAttributes(data) => ssevent.json_data(data),
                 Event::ProposerSlashing(data) => ssevent.json_data(data),
+                Event::SingleAttestation(data) => ssevent.json_data(data),
                 Event::VoluntaryExit(data) => ssevent.json_data(data),
                 Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
             }
