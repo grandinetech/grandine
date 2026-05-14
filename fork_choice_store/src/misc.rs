@@ -24,9 +24,13 @@ use types::{
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
-    gloas::containers::{
-        CombinedPayloadAttestation, PayloadAttestationData, SignedExecutionPayloadBid,
-        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    gloas::{
+        consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
+        containers::{
+            CombinedPayloadAttestation, PayloadAttestationData, SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        },
+        primitives::PayloadStatus as RawPayloadPresence,
     },
     nonstandard::{
         PayloadStatus, Phase, Publishable, StorageMode, ValidationOutcome,
@@ -118,12 +122,23 @@ pub enum PayloadAction {
 
 // It's too cumbersome to rename `PayloadStatus` and all the related fields and methods to something else.
 // So what is called `PayloadStatus` in the Gloas consensus specs, is called `PayloadPresence` in Grandine.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PayloadPresence {
     Empty,
     Full,
     #[default]
     Pending,
+}
+
+impl From<RawPayloadPresence> for PayloadPresence {
+    fn from(payload_status: RawPayloadPresence) -> Self {
+        match payload_status {
+            PAYLOAD_STATUS_EMPTY => Self::Empty,
+            PAYLOAD_STATUS_FULL => Self::Full,
+            _ => Self::Pending,
+        }
+    }
 }
 
 impl PayloadPresence {
