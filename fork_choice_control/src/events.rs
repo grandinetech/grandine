@@ -25,7 +25,10 @@ use types::{
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
     fulu::primitives::ColumnIndex,
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
+    gloas::{
+        containers::{PayloadAttestationMessage, SignedExecutionPayloadBid},
+        primitives::BuilderIndex,
+    },
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -52,8 +55,10 @@ pub enum Topic {
     ChainReorg,
     ContributionAndProof,
     DataColumnSidecar,
+    ExecutionPayload,
     ExecutionPayloadBid,
     ExecutionPayloadAvailable,
+    ExecutionPayloadGossip,
     FinalizedCheckpoint,
     Head,
     PayloadAttestation,
@@ -73,8 +78,10 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
+    ExecutionPayload(ExecutionPayloadEvent),
     ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent),
     ExecutionPayloadBid(ExecutionPayloadBidEvent<P>),
+    ExecutionPayloadGossip(ExecutionPayloadGossipEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     PayloadAttestation(PayloadAttestationEvent),
@@ -96,8 +103,10 @@ impl<P: Preset> Event<P> {
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
+            Self::ExecutionPayload(_) => Topic::ExecutionPayload,
             Self::ExecutionPayloadAvailable(_) => Topic::ExecutionPayloadAvailable,
             Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
+            Self::ExecutionPayloadGossip(_) => Topic::ExecutionPayloadGossip,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::PayloadAttestation(_) => Topic::PayloadAttestation,
@@ -120,8 +129,10 @@ pub struct EventChannels<P: Preset> {
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
+    pub execution_payloads: Sender<Event<P>>,
     pub execution_payload_available: Sender<Event<P>>,
     pub execution_payload_bids: Sender<Event<P>>,
+    pub execution_payloads_gossip: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub payload_attestations: Sender<Event<P>>,
@@ -151,8 +162,10 @@ impl<P: Preset> EventChannels<P> {
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
+            execution_payloads: broadcast::channel(max_events).0,
             execution_payload_available: broadcast::channel(max_events).0,
             execution_payload_bids: broadcast::channel(max_events).0,
+            execution_payloads_gossip: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             payload_attestations: broadcast::channel(max_events).0,
@@ -175,8 +188,10 @@ impl<P: Preset> EventChannels<P> {
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
+            Topic::ExecutionPayload => &self.execution_payloads,
             Topic::ExecutionPayloadAvailable => &self.execution_payload_available,
             Topic::ExecutionPayloadBid => &self.execution_payload_bids,
+            Topic::ExecutionPayloadGossip => &self.execution_payloads_gossip,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::PayloadAttestation => &self.payload_attestations,
@@ -268,6 +283,42 @@ impl<P: Preset> EventChannels<P> {
             self.send_data_column_sidecar_event_internal(block_root, data_column_sidecar)
         {
             warn_with_peers!("unable to send data column sidecar event: {error}");
+        }
+    }
+
+    pub fn send_execution_payload_event(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+        block_hash: ExecutionBlockHash,
+        block_root: H256,
+        execution_optimistic: bool,
+    ) {
+        if let Err(error) = self.send_execution_payload_event_internal(
+            slot,
+            builder_index,
+            block_hash,
+            block_root,
+            execution_optimistic,
+        ) {
+            warn_with_peers!("unable to send execution payload event: {error}");
+        }
+    }
+
+    pub fn send_execution_payload_gossip_event(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+        block_hash: ExecutionBlockHash,
+        block_root: H256,
+    ) {
+        if let Err(error) = self.send_execution_payload_gossip_event_internal(
+            slot,
+            builder_index,
+            block_hash,
+            block_root,
+        ) {
+            warn_with_peers!("unable to send execution payload gossip event: {error}");
         }
     }
 
@@ -505,6 +556,48 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_execution_payload_event_internal(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+        block_hash: ExecutionBlockHash,
+        block_root: H256,
+        execution_optimistic: bool,
+    ) -> Result<()> {
+        if self.execution_payloads.receiver_count() > 0 {
+            let event = Event::ExecutionPayload(ExecutionPayloadEvent {
+                slot,
+                builder_index,
+                block_hash,
+                block_root,
+                execution_optimistic,
+            });
+            self.execution_payloads.send(event)?;
+        }
+
+        Ok(())
+    }
+
+    fn send_execution_payload_gossip_event_internal(
+        &self,
+        slot: Slot,
+        builder_index: BuilderIndex,
+        block_hash: ExecutionBlockHash,
+        block_root: H256,
+    ) -> Result<()> {
+        if self.execution_payloads_gossip.receiver_count() > 0 {
+            let event = Event::ExecutionPayloadGossip(ExecutionPayloadGossipEvent {
+                slot,
+                builder_index,
+                block_hash,
+                block_root,
+            });
+            self.execution_payloads_gossip.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_execution_payload_available_event_internal(
         &self,
         slot: Slot,
@@ -711,6 +804,27 @@ impl<P: Preset> DataColumnSidecarEvent<P> {
             kzg_commitments: data_column_sidecar.kzg_commitments().cloned(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: BuilderIndex,
+    pub block_hash: ExecutionBlockHash,
+    pub block_root: H256,
+    pub execution_optimistic: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadGossipEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: BuilderIndex,
+    pub block_hash: ExecutionBlockHash,
+    pub block_root: H256,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
