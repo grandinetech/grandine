@@ -2493,6 +2493,7 @@ pub async fn beacon_events<P: Preset>(
 
             match event {
                 Event::Attestation(data) => ssevent.json_data(data),
+                Event::SingleAttestation(data) => ssevent.json_data(data),
                 Event::AttesterSlashing(data) => ssevent.json_data(data),
                 Event::BlobSidecar(data) => ssevent.json_data(data),
                 Event::Block(data) => ssevent.json_data(data),

@@ -23,6 +23,7 @@ use types::{
         containers::BlobSidecar,
         primitives::{BlobIndex, KzgCommitment, VersionedHash},
     },
+    electra::containers::SingleAttestation,
     fulu::primitives::ColumnIndex,
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::Phase,
@@ -43,6 +44,7 @@ pub const DEFAULT_MAX_EVENTS: usize = 100;
 #[strum(serialize_all = "snake_case")]
 pub enum Topic {
     Attestation,
+    SingleAttestation,
     AttesterSlashing,
     BlobSidecar,
     Block,
@@ -62,6 +64,7 @@ pub enum Topic {
 #[derive(Clone, Debug)]
 pub enum Event<P: Preset> {
     Attestation(Arc<Attestation<P>>),
+    SingleAttestation(SingleAttestation),
     AttesterSlashing(Box<AttesterSlashing<P>>),
     BlobSidecar(BlobSidecarEvent),
     Block(BlockEvent),
@@ -83,6 +86,7 @@ impl<P: Preset> Event<P> {
     pub const fn topic(&self) -> Topic {
         match self {
             Self::Attestation(_) => Topic::Attestation,
+            Self::SingleAttestation(_) => Topic::SingleAttestation,
             Self::AttesterSlashing(_) => Topic::AttesterSlashing,
             Self::BlobSidecar(_) => Topic::BlobSidecar,
             Self::Block(_) => Topic::Block,
@@ -105,6 +109,7 @@ impl<P: Preset> Event<P> {
 #[derive(Clone, Debug)]
 pub struct EventChannels<P: Preset> {
     pub attestations: Sender<Event<P>>,
+    pub single_attestations: Sender<Event<P>>,
     pub attester_slashings: Sender<Event<P>>,
     pub blob_sidecars: Sender<Event<P>>,
     pub blocks: Sender<Event<P>>,
@@ -134,6 +139,7 @@ impl<P: Preset> EventChannels<P> {
     pub fn new(max_events: usize) -> Self {
         Self {
             attestations: broadcast::channel(max_events).0,
+            single_attestations: broadcast::channel(max_events).0,
             attester_slashings: broadcast::channel(max_events).0,
             blob_sidecars: broadcast::channel(max_events).0,
             blocks: broadcast::channel(max_events).0,
@@ -156,6 +162,7 @@ impl<P: Preset> EventChannels<P> {
     pub fn receiver_for(&self, topic: Topic) -> Receiver<Event<P>> {
         match topic {
             Topic::Attestation => &self.attestations,
+            Topic::SingleAttestation => &self.single_attestations,
             Topic::AttesterSlashing => &self.attester_slashings,
             Topic::BlobSidecar => &self.blob_sidecars,
             Topic::Block => &self.blocks,
@@ -358,7 +365,17 @@ impl<P: Preset> EventChannels<P> {
     }
 
     fn send_attestation_event_internal(&self, attestation: Arc<Attestation<P>>) -> Result<()> {
-        if self.attestations.receiver_count() > 0 {
+        let single_attestation = match attestation.as_ref() {
+            Attestation::Single(single_attestation) => Some(*single_attestation),
+            Attestation::Phase0(_) | Attestation::Electra(_) => None,
+        };
+
+        if let Some(single_attestation) = single_attestation {
+            if self.single_attestations.receiver_count() > 0 {
+                let event = Event::SingleAttestation(single_attestation);
+                self.single_attestations.send(event)?;
+            }
+        } else if self.attestations.receiver_count() > 0 {
             let event = Event::Attestation(attestation);
             self.attestations.send(event)?;
         }
