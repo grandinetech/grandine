@@ -630,6 +630,8 @@ pub struct PayloadAttributesV4<P: Preset> {
     pub parent_beacon_block_root: H256,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub slot_number: Slot,
+    #[serde(with = "serde_utils::prefixed_hex_quantity")]
+    pub target_gas_limit: Gas,
 }
 
 /// [`engine_getPayloadV1` response](https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/paris.md#response-2).
