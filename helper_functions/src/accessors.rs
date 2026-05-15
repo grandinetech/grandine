@@ -1259,7 +1259,7 @@ pub fn is_valid_proposal_slot<P: Preset>(
     let current_epoch = get_current_epoch(state);
     let proposal_epoch = misc::compute_epoch_at_slot::<P>(preferences.proposal_slot);
 
-    if proposal_epoch < current_epoch || proposal_epoch > current_epoch + 1 {
+    if proposal_epoch < current_epoch || proposal_epoch > current_epoch + P::MinSeedLookahead::U64 {
         return false;
     }
 
@@ -1273,8 +1273,7 @@ pub fn is_valid_proposal_slot<P: Preset>(
         .unwrap_or(false)
 }
 
-/// Get the future slots in the current epoch and the slots in the next epoch
-/// for which `validator_index` is proposing.
+/// Get the future proposal slots within the proposer lookahead, i.e. the current epoch up to `MIN_SEED_LOOKAHEAD` epochs ahead.
 ///
 /// Returns empty Vec if state is pre-Fulu (no `proposer_lookahead`).
 /// Uses `post_fulu()` not `post_gloas()` so pre-fork broadcast works one epoch before Gloas
