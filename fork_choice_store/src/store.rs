@@ -1870,14 +1870,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         );
 
-        // > `bid.gas_limit` matches the `gas_limit` from the proposer's `SignedProposerPreferences` associated with `bid.slot`.
-        ensure!(
-            bid.gas_limit == proposer_preference.message.gas_limit,
-            Error::<P>::ExecutionPayloadBidGasLimitMismatch {
-                in_preference: proposer_preference.message.gas_limit,
-                in_bid: bid.gas_limit
-            }
-        );
+        let Some(post_gloas_state) = state.post_gloas() else {
+            return Ok(ExecutionPayloadBidAction::Ignore("state pre-gloas"));
+        };
+
+        // > `bid.parent_block_hash` is known and
+        //   `is_gas_limit_target_compatible(parent_gas_limit, bid.gas_limit, target_gas_limit)` is True.
+        let parent_gas_limit = post_gloas_state.latest_execution_payload_bid().gas_limit;
+        if !predicates::is_gas_limit_target_compatible(
+            parent_gas_limit,
+            bid.gas_limit,
+            proposer_preference.message.target_gas_limit,
+        ) {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "bid gas_limit is not compatible with target_gas_limit",
+            ));
+        }
 
         if builder_index == BUILDER_INDEX_SELF_BUILD {
             ensure!(
@@ -1890,10 +1898,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 Error::<P>::ExecutionPayloadBidValueNonZero { value: bid.value }
             );
         } else {
-            let Some(post_gloas_state) = state.post_gloas() else {
-                return Ok(ExecutionPayloadBidAction::Ignore("state pre-gloas"));
-            };
-
             let builder = post_gloas_state.builders().get(builder_index)?;
 
             // > the `bid.builder_index` is a valid/active builder index
