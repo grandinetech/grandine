@@ -87,9 +87,18 @@ impl NodePeer {
 
         let agent_version = peer_info.client().agent_string.clone();
         let score = Some(peer_info.score().score());
-        let disconnect_reason = peer_info
-            .last_disconnect()
-            .map(|d| map_disconnect_reason(d.reason).to_string());
+        // Per beacon-API spec, `disconnect_reason` MUST only be populated when
+        // `state` is `disconnected` or `disconnecting`.
+        let disconnect_reason = if matches!(
+            state,
+            PeerState::Disconnected | PeerState::Disconnecting
+        ) {
+            peer_info
+                .last_disconnect()
+                .map(|d| map_disconnect_reason(d.reason).to_string())
+        } else {
+            None
+        };
         let downscore_reasons = peer_info
             .last_action()
             .map(|a| vec![map_downscore_reason(a.reason).to_string()]);
