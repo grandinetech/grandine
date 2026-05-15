@@ -14,6 +14,7 @@ use tap::TryConv as _;
 use typenum::Unsigned as _;
 use types::{
     altair::consts::{SyncCommitteeSubnetCount, TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE},
+    bellatrix::primitives::Gas,
     combined::BeaconState as CombinedBeaconState,
     config::Config,
     deneb::{containers::BlobSidecar, primitives::BlobIndex},
@@ -523,6 +524,21 @@ fn validate_indexed_payload_attestation<P: Preset>(
             )
         },
     )?
+}
+
+// > Check if ``gas_limit`` is compatible with ``target_gas_limit`` under the
+//   EIP-1559 transition rule from ``parent_gas_limit``.
+#[must_use]
+pub fn is_gas_limit_target_compatible(
+    parent_gas_limit: Gas,
+    gas_limit: Gas,
+    target_gas_limit: Gas,
+) -> bool {
+    let max_gas_limit_difference = (parent_gas_limit / 1024).max(1) - 1;
+    let min_gas_limit = parent_gas_limit - max_gas_limit_difference;
+    let max_gas_limit = parent_gas_limit + max_gas_limit_difference;
+
+    gas_limit == target_gas_limit.clamp(min_gas_limit, max_gas_limit)
 }
 
 #[cfg(test)]

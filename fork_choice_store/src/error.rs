@@ -176,10 +176,6 @@ pub enum Error<P: Preset> {
         in_preference: Box<ExecutionAddress>,
         in_bid: Box<ExecutionAddress>,
     },
-    #[error(
-        "execution payload bid's gas limit mismatch (in_bid: {in_bid}, in_preference: {in_preference})"
-    )]
-    ExecutionPayloadBidGasLimitMismatch { in_preference: Gas, in_bid: Gas },
     #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
