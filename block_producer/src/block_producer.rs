@@ -49,9 +49,12 @@ use types::{
             SyncAggregate,
         },
     },
-    bellatrix::containers::{
-        BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
-        ExecutionPayload as BellatrixExecutionPayload,
+    bellatrix::{
+        containers::{
+            BeaconBlock as BellatrixBeaconBlock, BeaconBlockBody as BellatrixBeaconBlockBody,
+            ExecutionPayload as BellatrixExecutionPayload,
+        },
+        primitives::Gas,
     },
     capella::containers::{
         BeaconBlock as CapellaBeaconBlock, BeaconBlockBody as CapellaBeaconBlockBody,
@@ -1808,6 +1811,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 })
             }
             BeaconState::Gloas(state) => {
+                let target_gas_limit = self.gas_limit().await?;
                 let parent_root = state.latest_block_header().hash_tree_root();
                 let snapshot = self.producer_context.controller.snapshot();
 
@@ -1841,6 +1845,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     withdrawals,
                     parent_beacon_block_root: parent_root,
                     slot_number: state.slot(),
+                    target_gas_limit,
                 })
             }
         };
@@ -2245,6 +2250,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     .proposer_configs
                     .fee_recipient(*proposer_pubkey)
             })
+    }
+
+    async fn gas_limit(&self) -> Result<Gas> {
+        let proposer_pubkey = accessors::public_key(&self.beacon_state, self.proposer_index)?;
+
+        self.producer_context
+            .proposer_configs
+            .gas_limit(*proposer_pubkey)
     }
 
     fn spawn_job<T, F>(&self, task: T) -> Job<F::Output>
