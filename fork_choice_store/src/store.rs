@@ -1970,11 +1970,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let proposal_slot = preferences.proposal_slot;
         let dependent_root = preferences.dependent_root;
 
-        // [IGNORE] proposal_slot is in the current or next epoch
+        // [IGNORE] proposal_slot is within the proposer lookahead
         let current_epoch = misc::compute_epoch_at_slot::<P>(self.slot());
         let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
 
-        if proposal_epoch < current_epoch || proposal_epoch > current_epoch + 1 {
+        if proposal_epoch < current_epoch
+            || proposal_epoch > current_epoch + P::MinSeedLookahead::U64
+        {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
 
@@ -1992,13 +1994,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // _[REJECT]_ `is_valid_proposal_slot(state, preferences)` returns `True`, where
         // `state` is the checkpoint state at the epoch
-        // `compute_epoch_at_slot(preferences.proposal_slot) - 1` and the root
+        // `compute_epoch_at_slot(preferences.proposal_slot) - MIN_SEED_LOOKAHEAD` and the root
         // `preferences.dependent_root`.
         let Ok(state) = self.state_cache.state_at_slot(
             &self.pubkey_cache,
             self,
             dependent_root,
-            misc::compute_start_slot_at_epoch::<P>(proposal_epoch.saturating_sub(1)),
+            misc::compute_start_slot_at_epoch::<P>(
+                proposal_epoch.saturating_sub(P::MinSeedLookahead::U64),
+            ),
         ) else {
             return Ok(ProposerPreferencesAction::Ignore(false));
         };
