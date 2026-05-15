@@ -184,7 +184,7 @@ impl<N: BitVectorBits> BitVector<N> {
     // Shifting by more than 8 bits is harder to implement correctly.
     pub fn shift_up_by_1(&mut self) {
         let offset = 1;
-        let last_byte_index = N::Bytes::USIZE - 1;
+        let last_byte_index = N::Bytes::USIZE.saturating_sub(1);
         let last_byte_mask = !0 >> (N::USIZE % BITS_PER_BYTE);
 
         let mut carry = 0;
@@ -192,7 +192,7 @@ impl<N: BitVectorBits> BitVector<N> {
         for index in 0..last_byte_index {
             let old = self.bytes[index];
             self.bytes[index] = (old << offset) | carry;
-            carry = old >> (BITS_PER_BYTE - offset);
+            carry = old >> (BITS_PER_BYTE.get().saturating_sub(offset));
         }
 
         let old = self.bytes[last_byte_index];
@@ -207,9 +207,16 @@ impl<N: BitVectorBits> BitVector<N> {
             .try_conv::<usize>()
             .expect("number of bits in a byte should fit in usize");
 
-        let bits_in_last_byte_lower_bound = BITS_PER_BYTE - leading_zeros_in_last_byte;
+        let bits_in_last_byte_lower_bound = BITS_PER_BYTE
+            .get()
+            .saturating_sub(leading_zeros_in_last_byte);
+
         let expected = N::USIZE;
-        let actual = (bytes.len() - 1) * BITS_PER_BYTE + bits_in_last_byte_lower_bound;
+        let actual = bytes
+            .len()
+            .saturating_sub(1)
+            .saturating_mul(BITS_PER_BYTE.get())
+            .saturating_add(bits_in_last_byte_lower_bound);
 
         if actual > expected {
             return Err(ReadError::BitVectorTooLong { expected, actual });
@@ -230,13 +237,13 @@ impl<N: BitVectorBits> Iterator for Bits<N> {
     fn next(&mut self) -> Option<Self::Item> {
         (self.index < N::USIZE).then(|| {
             let bit = self.bit_vector.bytes.get_bit(self.index);
-            self.index += 1;
+            self.index = self.index.saturating_add(1);
             bit
         })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let length = N::USIZE - self.index;
+        let length = N::USIZE.saturating_sub(self.index);
         (length, Some(length))
     }
 

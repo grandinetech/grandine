@@ -242,7 +242,7 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
         let index = usize::try_from(validator_index)?;
         let bits = self.live_validators.entry(epoch).or_default();
 
-        bits.resize(bits.len().max(index + 1), false);
+        bits.resize(bits.len().max(index.saturating_add(1)), false);
         bits.set(index, true);
 
         Ok(())

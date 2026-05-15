@@ -1074,13 +1074,16 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn custody_size<P: Preset>(&self, sampling_column_count: u64) -> u64 {
-        sampling_column_count.saturating_div(self.columns_per_group::<P>())
+    pub const fn custody_size<P: Preset>(&self, sampling_column_count: u64) -> Option<u64> {
+        sampling_column_count.checked_div(self.columns_per_group::<P>())
     }
 
     #[must_use]
     pub const fn columns_per_group<P: Preset>(&self) -> u64 {
-        P::NumberOfColumns::U64.saturating_div(self.number_of_custody_groups)
+        match P::NumberOfColumns::U64.checked_div(self.number_of_custody_groups) {
+            Some(v) => v,
+            None => 0,
+        }
     }
 
     #[must_use]

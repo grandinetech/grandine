@@ -243,7 +243,7 @@ impl SszType {
                 let #offset_ident = match #size_expr {
                     #ssz::Size::Fixed { size } => current_position_in_fixed,
                     #ssz::Size::Variable { .. } => {
-                        let end = current_position_in_fixed + #ssz::BYTES_PER_LENGTH_OFFSET;
+                        let end = current_position_in_fixed + #ssz::BYTES_PER_LENGTH_OFFSET.get();
                         let subslice = #ssz::subslice(bytes, current_position_in_fixed..end)?;
 
                         #ssz::read_offset_unchecked(subslice)?
@@ -465,7 +465,7 @@ impl SszType {
                         .map(|(left, right)| quote! { #ssz::hashing::hash_256_256(#left, #right) })
                         .collect();
 
-                    height += 1;
+                    height = height.saturating_add(1);
                 }
             }
         };

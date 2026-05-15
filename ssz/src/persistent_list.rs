@@ -136,11 +136,11 @@ impl<T, N: Unsigned, B: BundleSize<T>> TryFromIterator<T> for PersistentList<T, 
     // transitions appear to be faster when list nodes are not deduplicated. Is it because more
     // `Arc`s are uniquely owned?
     fn try_from_iter(elements: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
-        let mut length = 0;
+        let mut length: usize = 0;
 
         let mut nodes_with_heights = elements
             .into_iter()
-            .inspect(|_| length += 1)
+            .inspect(|_| length = length.saturating_add(1))
             .chunks(B::USIZE)
             .into_iter()
             .map(Box::from_iter)
@@ -168,7 +168,7 @@ impl<T, N: Unsigned, B: BundleSize<T>> TryFromIterator<T> for PersistentList<T, 
                             left_height,
                             right_height,
                         }),
-                        left_height + 1,
+                        left_height.saturating_add(1),
                     ),
                     (Some(left_over), None) => left_over,
                     _ => unreachable!("Itertools::chunks never yields empty chunks"),
@@ -326,9 +326,9 @@ impl<T, N, B> PersistentList<T, N, B> {
                     left_height,
                     right_height,
                 } => {
-                    assert_eq!(height, left_height + 1);
+                    assert_eq!(height, left_height.saturating_add(1));
 
-                    let bit_index = (height + B::ilog2() - 1).into();
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
 
                     if index.get_bit(bit_index) {
                         height = *right_height;
@@ -372,9 +372,9 @@ impl<T, N, B> PersistentList<T, N, B> {
                     left_height,
                     right_height,
                 } => {
-                    assert_eq!(height, *left_height + 1);
+                    assert_eq!(height, left_height.saturating_add(1));
 
-                    let bit_index = (height + B::ilog2() - 1).into();
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
 
                     if index.get_bit(bit_index) {
                         height = *right_height;
@@ -434,7 +434,7 @@ impl<T, N, B> PersistentList<T, N, B> {
             None => self.root = Some(Node::arc_single(element)),
         }
 
-        self.length += 1;
+        self.length = self.length.saturating_add(1);
 
         Ok(())
     }
@@ -608,7 +608,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                     ..
                 } => {
                     let left_length = length.next_power_of_two() / 2;
-                    let right_length = length - left_length;
+                    let right_length = length.saturating_sub(left_length);
 
                     assert!(0 < right_length);
 
@@ -663,19 +663,19 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                             right_height,
                         }),
                         right: Self::arc_single(element),
-                        left_height: left_height + 1,
+                        left_height: left_height.saturating_add(1),
                         right_height: 0,
                     }
                 } else {
                     let left_length = B::USIZE << left_height;
                     assert!(left_length < current_length_and_new_index);
 
-                    let right_length = current_length_and_new_index - left_length;
+                    let right_length = current_length_and_new_index.saturating_sub(left_length);
                     assert!(right_length < left_length);
 
                     right.make_mut().push(element, right_length);
                     if Self::pushing_increases_height(right_length) {
-                        right_height += 1;
+                        right_height = right_height.saturating_add(1);
                     }
                     assert!(right_height <= left_height);
 

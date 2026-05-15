@@ -161,7 +161,7 @@ impl<M: Measurement> Bencher<'_, M> {
 
     fn benchmark_linear_worst<T: Sequence>(&mut self, length: usize) {
         let sequence = collect::<T::Item, T>(length);
-        self.iter(|| sequence.linear_search(core::hint::black_box(length - 1)))
+        self.iter(|| sequence.linear_search(core::hint::black_box(length.saturating_sub(1))))
     }
 
     fn benchmark_binary_best<T: Sequence>(&mut self, length: usize) {
@@ -176,7 +176,7 @@ impl<M: Measurement> Bencher<'_, M> {
 
     fn benchmark_map<T: Map>(&mut self, length: usize) {
         let map = collect::<T::Item, T>(length);
-        self.iter(|| map.get(core::hint::black_box(length - 1)))
+        self.iter(|| map.get(core::hint::black_box(length.saturating_sub(1))))
     }
 }
 

@@ -565,7 +565,7 @@ pub fn upgrade_to_electra<P: Preset>(
         .fold(earliest_activation_epoch, |earliest, exit_epoch| {
             earliest.max(exit_epoch)
         })
-        + 1;
+        .saturating_add(1);
 
     let mut post = ElectraBeaconState {
         // > Versioning
@@ -941,7 +941,11 @@ fn initialize_ptc_window<P: Preset>(state: &FuluBeaconState<P>) -> Result<PtcWin
     let previous_epoch = (0..P::SlotsPerEpoch::U64).map(|_| Ok(Ptc::<P>::default()));
 
     let current_and_lookahead_epochs = (start_slot
-        ..start_slot + (1 + P::MinSeedLookahead::U64) * P::SlotsPerEpoch::U64)
+        ..start_slot.saturating_add(
+            P::MinSeedLookahead::U64
+                .saturating_add(1)
+                .saturating_mul(P::SlotsPerEpoch::U64),
+        ))
         .map(|slot| accessors::ptc_for_slot(state, slot));
 
     let window = previous_epoch

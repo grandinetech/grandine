@@ -131,12 +131,16 @@ impl Api {
             .saturating_sub(P::SlotsPerEpoch::U64)
             .max(GENESIS_SLOT);
 
-        missing_blocks += nonempty_slots
-            .take_while(|slot| *slot > start_slot)
-            .chain(core::iter::once(start_slot))
-            .tuple_windows()
-            .map(|(slot, parent_slot)| slot.abs_diff(parent_slot.max(start_slot)).saturating_sub(1))
-            .sum::<u64>();
+        missing_blocks = missing_blocks.saturating_add(
+            nonempty_slots
+                .take_while(|slot| *slot > start_slot)
+                .chain(core::iter::once(start_slot))
+                .tuple_windows()
+                .map(|(slot, parent_slot)| {
+                    slot.abs_diff(parent_slot.max(start_slot)).saturating_sub(1)
+                })
+                .sum::<u64>(),
+        );
 
         if missing_blocks > self.config.builder_max_skipped_slots_per_epoch {
             return Err(BuilderApiError::RollingEpochMissingBlocks { missing_blocks });

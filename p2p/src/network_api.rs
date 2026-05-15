@@ -136,10 +136,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
     #[must_use]
     pub fn node_peer_count(&self) -> NodePeerCount {
-        let mut connected = 0;
-        let mut connecting = 0;
-        let mut disconnected = 0;
-        let mut disconnecting = 0;
+        let mut connected: u64 = 0;
+        let mut connecting: u64 = 0;
+        let mut disconnected: u64 = 0;
+        let mut disconnecting: u64 = 0;
 
         self.network_globals()
             .peers
@@ -147,10 +147,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
             .peers()
             .filter_map(|(_, peer_info)| PeerState::try_from(peer_info.connection_status()))
             .for_each(|peer_state| match peer_state {
-                PeerState::Connected => connected += 1,
-                PeerState::Connecting => connecting += 1,
-                PeerState::Disconnected => disconnected += 1,
-                PeerState::Disconnecting => disconnecting += 1,
+                PeerState::Connected => connected = connected.saturating_add(1),
+                PeerState::Connecting => connecting = connecting.saturating_add(1),
+                PeerState::Disconnected => disconnected = disconnected.saturating_add(1),
+                PeerState::Disconnecting => disconnecting = disconnecting.saturating_add(1),
             });
 
         NodePeerCount {

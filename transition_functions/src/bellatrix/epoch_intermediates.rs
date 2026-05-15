@@ -50,13 +50,19 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
                 compute_base_reward::<P>(effective_balance, base_reward_per_increment);
 
             let participation_component_reward = |weight, unslashed_participating_increments| {
-                let reward_numerator = base_reward * weight * unslashed_participating_increments;
-                let reward_denominator = active_increments * WEIGHT_DENOMINATOR.get();
-                reward_numerator / reward_denominator
+                let reward_numerator = base_reward
+                    .saturating_mul(weight)
+                    .saturating_mul(unslashed_participating_increments);
+
+                let reward_denominator = active_increments.saturating_mul(WEIGHT_DENOMINATOR.get());
+
+                reward_numerator
+                    .checked_div(reward_denominator)
+                    .expect("total_active_balance should not be zero")
             };
 
             let participation_component_penalty =
-                |weight| base_reward * weight / WEIGHT_DENOMINATOR;
+                |weight| base_reward.saturating_mul(weight) / WEIGHT_DENOMINATOR;
 
             if !slashed && participation.previous_epoch_matching_source() {
                 if !in_inactivity_leak {
@@ -79,9 +85,10 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
             } else {
                 deltas.add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT));
 
-                let penalty_numerator = effective_balance * inactivity_score;
-                let penalty_denominator = config.inactivity_score_bias.get()
-                    * P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX.get();
+                let penalty_numerator = effective_balance.saturating_mul(*inactivity_score);
+                let penalty_denominator = config
+                    .inactivity_score_bias
+                    .saturating_mul(P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX);
 
                 deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator);
             }

@@ -148,11 +148,9 @@ where
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index.saturating_add(1);
     }
 
     // > Update the next validator index to start the next withdrawal sweep
-    update_next_withdrawal_validator_index(state, expected_withdrawals.as_ref());
-
-    Ok(())
+    update_next_withdrawal_validator_index(state, expected_withdrawals.as_ref())
 }

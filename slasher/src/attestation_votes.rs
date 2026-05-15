@@ -54,7 +54,7 @@ impl AttestationVotes {
     }
 
     pub fn cleanup(&self, current_epoch: Epoch, epochs_to_keep: u64) -> Result<()> {
-        let to_epoch = current_epoch.saturating_sub(epochs_to_keep + 1);
+        let to_epoch = current_epoch.saturating_sub(epochs_to_keep.saturating_add(1));
         let from_epoch = to_epoch.saturating_sub(epochs_to_keep);
 
         let first_key = Self::key(from_epoch, 1);

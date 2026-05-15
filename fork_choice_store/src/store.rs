@@ -1,5 +1,5 @@
 use core::{
-    ops::{AddAssign as _, Bound, SubAssign as _},
+    ops::Bound,
     sync::atomic::{AtomicUsize, Ordering},
 };
 use std::{
@@ -635,7 +635,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let index = match self.finalized.binary_search_by_key(&slot, ChainLink::slot) {
             Ok(index) => index,
             Err(0) => return None,
-            Err(nonzero) => nonzero - 1,
+            Err(nonzero) => nonzero.saturating_sub(1),
         };
 
         Some(&self.finalized[index])
@@ -796,7 +796,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let length = self
             .finalized_indices
             .get(&block_root)
-            .map(|index| index + 1)
+            .map(|index| index.saturating_add(1))
             .unwrap_or_default();
 
         self.finalized.iter().take(length).rev().pipe(Either::Right)
@@ -879,7 +879,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > not more than two epochs ago
         let correct_justified = self.justified_epoch() == GENESIS_EPOCH
             || voting_source.epoch == self.justified_checkpoint.epoch
-            || voting_source.epoch + 2 >= self.current_epoch();
+            || voting_source.epoch.saturating_add(2) >= self.current_epoch();
 
         // `correct_finalized` should always be true because our implementation prunes orphans as
         // soon as possible. We check it anyway to be safe.
@@ -968,14 +968,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > Ties broken by favoring block with lexicographically higher root
         let tiebreaker = unfinalized_block.chain_link.block_root;
 
-        (attestation_score + proposer_score, tiebreaker)
+        (attestation_score.saturating_add(proposer_score), tiebreaker)
     }
 
     fn timely_proposer_score(&self) -> Gwei {
         *self.timely_proposer_score.get_or_init(|| {
             let total_active_balance = self.justified_active_balances.iter().sum::<Gwei>();
             let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
-            committee_weight * self.chain_config.proposer_score_boost / 100
+
+            committee_weight.saturating_mul(self.chain_config.proposer_score_boost) / 100
         })
     }
 
@@ -1268,7 +1269,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         .saturating_sub(missing_indices.len());
 
                     let can_import_with_reconstruction_promise = self.is_forward_synced() &&
-                        available_columns_count * 2 >= P::NumberOfColumns::USIZE &&
+                        available_columns_count.saturating_mul(2) >= P::NumberOfColumns::USIZE &&
                         // avoid importing blocks without triggering reconstruction
                         self.is_sidecars_construction_started(&block_root);
 
@@ -1383,7 +1384,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // > the `bid.slot` is the current slot or the next slot
-        if bid.slot < self.slot() || bid.slot > self.slot() + 1 {
+        if bid.slot < self.slot() || bid.slot > self.slot().saturating_add(1) {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `bid.slot` is the current slot or the next slot",
             ));
@@ -1520,9 +1521,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 })
                 .max_by_key(|b| b.message.value)
                 && bid.value
-                    < highest_bid.message.value
-                        + (highest_bid.message.value * MIN_BID_INCREASE_PERCENTAGE)
-                            .saturating_div(100)
+                    < highest_bid.message.value.saturating_add(
+                        highest_bid
+                            .message
+                            .value
+                            .saturating_mul(MIN_BID_INCREASE_PERCENTAGE)
+                            .saturating_div(100),
+                    )
             {
                 return Ok(ExecutionPayloadBidAction::Ignore(
                     "this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)",
@@ -1580,7 +1585,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // mainnet preset, but `ATTESTATION_PROPAGATION_SLOT_RANGE` is not configurable, so this
             // is not a full replacement for the `target.epoch` validation in
             // `Store::validate_attestation_internal`.
-            if slot + ATTESTATION_PROPAGATION_SLOT_RANGE < self.slot() {
+            if slot.saturating_add(ATTESTATION_PROPAGATION_SLOT_RANGE) < self.slot() {
                 return Ok(AggregateAndProofAction::Ignore);
             }
         }
@@ -1745,7 +1750,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // mainnet preset, but `ATTESTATION_PROPAGATION_SLOT_RANGE` is not configurable, so this
             // is not a full replacement for the `target.epoch` validation in
             // `Store::validate_attestation_internal`.
-            if slot + ATTESTATION_PROPAGATION_SLOT_RANGE < self.slot() {
+            if slot.saturating_add(ATTESTATION_PROPAGATION_SLOT_RANGE) < self.slot() {
                 return Ok(AttestationAction::Ignore(attestation));
             }
         }
@@ -3093,10 +3098,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let balance = self.justified_active_balance(index);
 
-            differences
+            let val = differences
                 .entry(latest_message.beacon_block_root)
-                .or_default()
-                .sub_assign(balance);
+                .or_default();
+
+            *val = val.saturating_sub(balance);
         }
 
         let old_head_segment_id = self.head_segment_id;
@@ -3220,12 +3226,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         accepted_data_columns_count: usize,
     ) -> bool {
         // samples enough columns for reconstruction
-        if self.sampling_columns_count() * 2 < P::NumberOfColumns::USIZE {
+        if self.sampling_columns_count().saturating_mul(2) < P::NumberOfColumns::USIZE {
             return false;
         }
 
         // accepted enough columns for reconstruction or early import
-        if accepted_data_columns_count * 2 < P::NumberOfColumns::USIZE {
+        if accepted_data_columns_count.saturating_mul(2) < P::NumberOfColumns::USIZE {
             return false;
         }
 
@@ -3357,7 +3363,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let block_root = unfinalized_block.chain_link.block_root;
 
                 finalized_indices
-                    .insert(block_root, old_len + offset)
+                    .insert(block_root, old_len.saturating_add(offset))
                     .unwrap_none();
 
                 unfinalized_locations.remove(&block_root).expect(
@@ -3463,17 +3469,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .map(UnfinalizedBlock::slot)
                 .unwrap_or_else(|| segment.last_block().slot());
             let far_ahead_non_canonical_segment =
-                segment_last_slot >= head_slot + P::SlotsPerEpoch::U64;
+                segment_last_slot >= head_slot.saturating_add(P::SlotsPerEpoch::U64);
 
             for unfinalized_block in &mut self.unfinalized[&segment_id] {
                 let chain_link = &mut unfinalized_block.chain_link;
 
                 if far_ahead_non_canonical_segment {
                     // Keep only one epoch of states in memory for far ahead (relative to head) non-canonical chains
-                    if chain_link.slot() + P::SlotsPerEpoch::U64 > segment_last_slot {
+                    if chain_link.slot().saturating_add(P::SlotsPerEpoch::U64) > segment_last_slot {
                         break;
                     }
-                } else if chain_link.slot() + unfinalized_states_in_memory > head_slot {
+                } else if chain_link
+                    .slot()
+                    .saturating_add(unfinalized_states_in_memory)
+                    > head_slot
+                {
                     break;
                 }
 
@@ -3552,7 +3562,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .or_insert_with(|| BitVec::repeat(false, self.justified_active_balances.len()));
 
             if bitfield.len() <= index {
-                bitfield.resize(index + 1, false);
+                bitfield.resize(index.saturating_add(1), false);
             }
 
             bitfield.set(index, true);
@@ -3590,7 +3600,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn extend_latest_messages_after_finalization(&mut self) {
         let old_length = self.latest_messages.len();
         let new_length = self.finalized_validators().len_usize();
-        let added_vacancies = core::iter::repeat_n(None, new_length - old_length);
+        let added_vacancies = core::iter::repeat_n(None, new_length.saturating_sub(old_length));
 
         self.latest_messages.extend(added_vacancies);
     }
@@ -3623,8 +3633,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn prune_state_cache(&self, preserve_unfinalized_fork_tips: bool) {
-        let retain_slots =
-            self.store_config.max_epochs_to_retain_states_in_cache * P::SlotsPerEpoch::U64;
+        let retain_slots = self
+            .store_config
+            .max_epochs_to_retain_states_in_cache
+            .saturating_mul(P::SlotsPerEpoch::U64);
 
         let prune_slot = self
             .head()
@@ -3656,13 +3668,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         .unwrap_or_else(|| segment.last_block().slot()),
                 )
             })
-            .filter(|(_, last_slot)| *last_slot >= head_slot + slots_to_retain);
+            .filter(|(_, last_slot)| *last_slot >= head_slot.saturating_add(slots_to_retain));
 
         for (segment, last_slot) in far_ahead_non_canonical_segments {
             for unfinalized_block in segment {
                 let chain_link = &unfinalized_block.chain_link;
 
-                if chain_link.slot() + slots_to_retain < last_slot {
+                if chain_link.slot().saturating_add(slots_to_retain) < last_slot {
                     pruned_newer_states.insert(chain_link.block_root);
                 }
             }
@@ -3749,16 +3761,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         continue;
                     }
 
-                    differences
-                        .entry(old_beacon_block_root)
-                        .or_default()
-                        .sub_assign(balance);
+                    let val = differences.entry(old_beacon_block_root).or_default();
+                    *val = val.saturating_sub(balance);
                 }
 
-                differences
-                    .entry(beacon_block_root)
-                    .or_default()
-                    .add_assign(balance);
+                let val = differences.entry(beacon_block_root).or_default();
+                *val = val.saturating_add(balance);
 
                 // Note that we mutate `Store.latest_messages` as we go along.
                 // This prevents duplicate attestations from being counted more than once.
@@ -3869,7 +3877,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     previous.location.position = current.location.position;
                 }
 
-                previous.difference += current.difference;
+                previous.difference = previous.difference.saturating_add(current.difference);
             }
 
             if previous.difference != 0 {
@@ -3995,7 +4003,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn latest_archivable_index(&self) -> Option<usize> {
-        let next_archivable_epoch = self.anchor_epoch() + 1;
+        let next_archivable_epoch = self.anchor_epoch().saturating_add(1);
 
         // Restrict the search to valid blocks to avoid archiving optimistic ones.
         // They would be lost because we currently store only valid blocks in the database.
@@ -4153,7 +4161,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn is_forward_synced(&self) -> bool {
-        self.head().slot() + self.store_config.max_empty_slots >= self.slot()
+        self.head()
+            .slot()
+            .saturating_add(self.store_config.max_empty_slots)
+            >= self.slot()
     }
 
     #[must_use]

@@ -84,12 +84,7 @@ pub fn get_custody_groups(
             .expect("number of custody groups must not be zero");
         custody_groups.insert(custody_group);
 
-        if current_id == Uint256::MAX {
-            // > Overflow prevention
-            current_id = Uint256::ZERO;
-        } else {
-            current_id = current_id + Uint256::one();
-        }
+        current_id = current_id.overflowing_add(Uint256::one()).0;
     }
 
     Ok(custody_groups.into_iter().collect())
@@ -111,7 +106,9 @@ pub fn compute_columns_for_custody_group<P: Preset>(
     let mut columns = Vec::new();
     for i in 0..config.columns_per_group::<P>() {
         columns.push(ColumnIndex::from(
-            number_of_custody_groups * i + custody_group,
+            number_of_custody_groups
+                .saturating_mul(i)
+                .saturating_add(custody_group),
         ));
     }
 
@@ -422,7 +419,7 @@ pub async fn try_convert_to_cells_and_kzg_proofs<P: Preset>(
     backend: KzgBackend,
     dedicated_executor: Arc<DedicatedExecutor>,
 ) -> Result<Vec<CellsAndKzgProofs<P>>> {
-    let expected_proofs_length = blobs.len() * P::CellsPerExtBlob::USIZE;
+    let expected_proofs_length = blobs.len().saturating_mul(P::CellsPerExtBlob::USIZE);
     ensure!(
         cell_proofs.len() == expected_proofs_length,
         Error::InvalidCellsProofsLength {
@@ -530,7 +527,9 @@ pub fn get_validator_custody_requirement<P: Preset>(
         .process_results(|iter| iter.sum::<Gwei>())
         .unwrap_or(0);
 
-    let count = total_node_balance.saturating_div(config.balance_per_additional_custody_group);
+    let count = total_node_balance
+        .checked_div(config.balance_per_additional_custody_group)
+        .unwrap_or(0);
 
     count
         .max(config.validator_custody_requirement)

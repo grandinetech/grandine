@@ -1513,6 +1513,7 @@ dependencies = [
  "hashing",
  "im",
  "itertools 0.14.0",
+ "nonzero_ext",
  "num-integer",
  "parse-display",
  "pubkey_cache",
@@ -3367,6 +3368,7 @@ dependencies = [
  "bit_field",
  "hashing",
  "itertools 0.14.0",
+ "nonzero_ext",
  "tap",
  "types",
 ]
@@ -3463,6 +3465,7 @@ dependencies = [
  "generic-array",
  "hashing",
  "itertools 0.14.0",
+ "nonzero_ext",
  "num-traits",
  "once_cell",
  "primitive-types",

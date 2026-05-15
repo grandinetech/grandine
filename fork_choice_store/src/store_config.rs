@@ -1,4 +1,4 @@
-use core::{ops::Mul as _, time::Duration};
+use core::time::Duration;
 
 use derivative::Derivative;
 use kzg_utils::{DEFAULT_KZG_BACKEND, KzgBackend};
@@ -45,6 +45,6 @@ impl StoreConfig {
             .phase0_preset()
             .slots_per_epoch()
             .get()
-            .mul(2)
+            .saturating_mul(2)
     }
 }

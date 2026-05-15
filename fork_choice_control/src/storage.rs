@@ -621,8 +621,8 @@ impl<P: Preset> Storage<P> {
                     .take(
                         // Limit number of entries to prune per single transaction
                         MAX_DATA_COLUMN_EPOCHS_TO_PRUNE
-                            * P::SlotsPerEpoch::USIZE
-                            * P::NumberOfColumns::USIZE,
+                            .saturating_mul(P::SlotsPerEpoch::USIZE)
+                            .saturating_mul(P::NumberOfColumns::USIZE),
                     )
                     .map(|(k, v)| (k.into_owned(), v))
                     .unzip()
@@ -890,9 +890,9 @@ impl<P: Preset> Storage<P> {
                 Error::PersistedSlotCannotContainAnchor { slot: state.slot() },
             );
 
-            let results = self
-                .database
-                .iterator_ascending(BlockRootBySlot(state.slot() + 1).to_string()..)?;
+            let results = self.database.iterator_ascending(
+                BlockRootBySlot(state.slot().saturating_add(1)).to_string()..,
+            )?;
 
             let block_roots = itertools::process_results(results, |pairs| {
                 pairs

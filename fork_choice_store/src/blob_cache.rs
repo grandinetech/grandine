@@ -57,8 +57,9 @@ impl<P: Preset> BlobCache<P> {
     }
 
     pub fn on_slot(&mut self, slot: Slot) {
-        self.blobs
-            .retain(|_, (_, blob_slot, _)| *blob_slot + BLOB_RETAIN_DURATION_IN_SLOTS >= slot);
+        self.blobs.retain(|_, (_, blob_slot, _)| {
+            blob_slot.saturating_add(BLOB_RETAIN_DURATION_IN_SLOTS) >= slot
+        });
     }
 
     pub fn size(&self) -> usize {

@@ -182,8 +182,8 @@ impl<P: Preset> SszRead<Config> for BeaconState<P> {
         // There are 2 fixed parts before `state.slot`:
         // - The contents of `state.genesis_time`.
         // - The contents of `state.genesis_validators_root`.
-        let slot_start = UnixSeconds::SIZE.get() + H256::SIZE.get();
-        let slot_end = slot_start + Slot::SIZE.get();
+        let slot_start = UnixSeconds::SIZE.get().saturating_add(H256::SIZE.get());
+        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
         let slot = Slot::from_ssz_default(slot_bytes)?;
         let phase = config.phase_at_slot::<P>(slot);
@@ -511,12 +511,14 @@ impl<P: Preset> SszRead<Config> for SignedBeaconBlock<P> {
         // There are 2 fixed parts before `block.message.slot`:
         // - The offset of `block.message`.
         // - The contents of `block.signature`.
-        let slot_start = Offset::SIZE.get() + SignatureBytes::SIZE.get();
-        let slot_end = slot_start + Slot::SIZE.get();
+        let slot_start = Offset::SIZE
+            .get()
+            .saturating_add(SignatureBytes::SIZE.get());
+
+        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
         let slot = Slot::from_ssz_default(slot_bytes)?;
         let phase = config.phase_at_slot::<P>(slot);
-
         let block = Self::from_ssz_at_phase(phase, bytes)?;
 
         assert_eq!(slot, block.message().slot());
@@ -1637,7 +1639,8 @@ impl<P: Preset> SszWrite for LightClientBootstrap<P> {
         match self {
             Self::Altair(update) => {
                 let length_before = bytes.len();
-                let length_after = length_before + AltairLightClientBootstrap::<P>::SIZE.get();
+                let length_after =
+                    length_before.saturating_add(AltairLightClientBootstrap::<P>::SIZE.get());
 
                 bytes.resize(length_after, 0);
                 update.write_fixed(&mut bytes[length_before..]);
@@ -1688,7 +1691,8 @@ impl<P: Preset> SszWrite for LightClientFinalityUpdate<P> {
         match self {
             Self::Altair(update) => {
                 let length_before = bytes.len();
-                let length_after = length_before + AltairLightClientFinalityUpdate::<P>::SIZE.get();
+                let length_after =
+                    length_before.saturating_add(AltairLightClientFinalityUpdate::<P>::SIZE.get());
 
                 bytes.resize(length_after, 0);
                 update.write_fixed(&mut bytes[length_before..]);
@@ -1766,7 +1770,7 @@ impl<P: Preset> SszWrite for LightClientOptimisticUpdate<P> {
             Self::Altair(update) => {
                 let size = AltairLightClientOptimisticUpdate::<P>::SIZE.get();
                 let length_before = bytes.len();
-                let length_after = length_before + size;
+                let length_after = length_before.saturating_add(size);
 
                 bytes.resize(length_after, 0);
                 update.write_fixed(&mut bytes[length_before..]);
@@ -1843,7 +1847,8 @@ impl<P: Preset> SszWrite for LightClientUpdate<P> {
         match self {
             Self::Altair(update) => {
                 let length_before = bytes.len();
-                let length_after = length_before + AltairLightClientUpdate::<P>::SIZE.get();
+                let length_after =
+                    length_before.saturating_add(AltairLightClientUpdate::<P>::SIZE.get());
 
                 bytes.resize(length_after, 0);
                 update.write_fixed(&mut bytes[length_before..]);
@@ -2053,7 +2058,7 @@ impl<P: Preset> SszRead<Config> for Attestation<P> {
         // There is 1 fixed part before `attestation.data.slot`:
         // - The offset of `attestation.aggregation_bits`.
         let slot_start = Offset::SIZE.get();
-        let slot_end = slot_start + Slot::SIZE.get();
+        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
         let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
         let slot = Slot::from_ssz_default(slot_bytes)?;
         let phase = config.phase_at_slot::<P>(slot);

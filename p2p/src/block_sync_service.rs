@@ -748,11 +748,12 @@ impl<P: Preset> BlockSyncService<P> {
                     SyncToP2p::UpdateEarliestAvailableSlot(*previous_earliest_available_slot)
                         .send(&self.sync_to_p2p_tx);
 
-                    if let Some(metrics) = self.metrics.as_ref() {
-                        let custody_groups_count = self
+                    if let Some(metrics) = self.metrics.as_ref()
+                        && let Some(custody_groups_count) = self
                             .controller
                             .chain_config()
-                            .custody_size::<P>(self.controller.sampling_columns_count() as u64);
+                            .custody_size::<P>(self.controller.sampling_columns_count() as u64)
+                    {
                         metrics.set_beacon_custody_groups_backfilled(custody_groups_count);
                     }
                 }
@@ -822,7 +823,7 @@ impl<P: Preset> BlockSyncService<P> {
                     misc::blob_serve_range_slot::<P>(chain_config, self.slot, self.storage_mode)
                 };
 
-                if start_slot + count < data_serve_range_slot {
+                if start_slot.saturating_add(count) < data_serve_range_slot {
                     debug_with_peers!(
                         "skipping batch retry: blob back-sync batch is no longer relevant: \
                          {start_slot} + {count} < {data_serve_range_slot}"
@@ -832,7 +833,8 @@ impl<P: Preset> BlockSyncService<P> {
                 }
 
                 if start_slot < data_serve_range_slot {
-                    count = (start_slot + count)
+                    count = start_slot
+                        .saturating_add(count)
                         .checked_sub(data_serve_range_slot)
                         .unwrap_or(1);
 
@@ -926,7 +928,7 @@ impl<P: Preset> BlockSyncService<P> {
                                 peer_id,
                                 start_slot: batch.start_slot,
                                 count: batch.count,
-                                retry_count: batch.retry_count + 1,
+                                retry_count: batch.retry_count.saturating_add(1),
                                 response_received: batch.response_received,
                                 data_columns: Some(columns.clone_arc()),
                                 is_delayed: false,
@@ -1082,7 +1084,7 @@ impl<P: Preset> BlockSyncService<P> {
     fn request_batches(&mut self, batches: Vec<SyncBatch<P>>) -> Result<()> {
         let now = Instant::now();
 
-        for (batch_index, batch) in (1..).zip(batches) {
+        for (batch_index, batch) in (1u64..).zip(batches) {
             let request_id = self.request_id()?;
             let SyncBatch {
                 target,
@@ -1096,7 +1098,10 @@ impl<P: Preset> BlockSyncService<P> {
 
             if direction == SyncDirection::Back && !is_delayed {
                 self.delayed_batches
-                    .entry(now + Duration::from_secs(batch_index * 5))
+                    .entry(
+                        now.checked_add(Duration::from_secs(batch_index.saturating_mul(5)))
+                            .unwrap_or(now),
+                    )
                     .or_default()
                     .push(SyncBatch {
                         is_delayed: true,
@@ -1169,7 +1174,9 @@ impl<P: Preset> BlockSyncService<P> {
 
         let no_blocks = self
             .controller
-            .blocks_by_range(low.slot.saturating_sub(P::SlotsPerEpoch::U64)..low.slot + 1)?
+            .blocks_by_range(
+                low.slot.saturating_sub(P::SlotsPerEpoch::U64)..low.slot.saturating_add(1),
+            )?
             .is_empty();
 
         let back_sync_mode = if no_blocks {

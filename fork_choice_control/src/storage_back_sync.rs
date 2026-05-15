@@ -81,13 +81,13 @@ impl<P: Preset> Storage<P> {
 
         let mut previous_block = None;
         let mut batch = vec![];
-        let mut states_in_batch = 0;
+        let mut states_in_batch: u64 = 0;
 
         if start_slot == anchor_block_slot {
             batch.push(serialize(StateByBlockRoot(anchor_block_root), &state)?);
         }
 
-        for slot in (start_slot + 1)..=end_slot {
+        for slot in start_slot.saturating_add(1)..=end_slot {
             if is_exiting.load(Ordering::Relaxed) {
                 bail!(AnyhowError::msg("received a termination signal"));
             }
@@ -120,7 +120,7 @@ impl<P: Preset> Storage<P> {
                 batch.push(serialize(StateByBlockRoot(block_root), &state)?);
                 batch.push(serialize(ARCHIVER_CHECKPOINT_KEY, slot)?);
 
-                states_in_batch += 1;
+                states_in_batch = states_in_batch.saturating_add(1);
 
                 if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
                     info_with_peers!("archiving back-sync data up to {slot} slot");

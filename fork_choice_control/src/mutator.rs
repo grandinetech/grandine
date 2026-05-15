@@ -585,7 +585,7 @@ where
             if let Some(state) = self.state_cache.existing_state_at_slot(
                 store,
                 store.head().block_root,
-                store.slot() + 1,
+                store.slot().saturating_add(1),
             ) {
                 self.prepare_execution_payload_for_next_slot(&state);
             }
@@ -3305,7 +3305,7 @@ where
                 blocks
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.block.message().slot() - 1 <= finalized_slot
+                        pending.block.message().slot().saturating_sub(1) <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -3347,7 +3347,13 @@ where
                 blob_sidecars
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.blob_sidecar.signed_block_header.message.slot - 1 <= finalized_slot
+                        pending
+                            .blob_sidecar
+                            .signed_block_header
+                            .message
+                            .slot
+                            .saturating_sub(1)
+                            <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -3356,7 +3362,7 @@ where
                 data_column_sidecars
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.data_column_sidecar.slot() - 1 <= finalized_slot
+                        pending.data_column_sidecar.slot().saturating_sub(1) <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -3472,7 +3478,9 @@ where
 
         let current_tick = self.store.tick();
 
-        if current_tick.slot == (block_slot + 1) && current_tick.is_before_attesting_interval() {
+        if current_tick.slot == block_slot.saturating_add(1)
+            && current_tick.is_before_attesting_interval()
+        {
             debug_with_peers!(
                 "spawn preprocess state task for current slot: {block_slot}: {current_tick:?}"
             );
@@ -3499,7 +3507,7 @@ where
             state_cache: self.state_cache.clone_arc(),
             mutator_tx: self.owned_mutator_tx(),
             head_block_root: self.store.head().block_root,
-            next_slot: self.store.slot() + 1,
+            next_slot: self.store.slot().saturating_add(1),
             pubkey_cache: self.pubkey_cache.clone_arc(),
             metrics: self.metrics.clone(),
         })
@@ -3550,7 +3558,7 @@ where
                                     let candidate_slot = candidate.slot();
                                     let candidate_epoch = misc::compute_epoch_at_slot::<P>(candidate_slot);
 
-                                    let is_last_block = candidate_slot + 1 == chain_link.slot();
+                                    let is_last_block = candidate_slot.saturating_add(1) == chain_link.slot();
                                     let is_first_block = candidate_epoch == anchor_epoch.saturating_sub(1)
                                         && misc::is_epoch_start::<P>(candidate_slot);
 
@@ -4009,7 +4017,7 @@ where
             return BlockDataColumnAvailability::AnyPending;
         }
 
-        if available_columns_count * 2 >= P::NumberOfColumns::USIZE
+        if available_columns_count.saturating_mul(2) >= P::NumberOfColumns::USIZE
             && (self.store.is_forward_synced()
                 || !self.store.store_config().sync_without_reconstruction)
         {

@@ -27,6 +27,7 @@ im = { workspace = true }
 integer-sqrt = { workspace = true }
 interop = { workspace = true }
 itertools = { workspace = true }
+nonzero_ext = { workspace = true }
 num-integer = { workspace = true }
 openssl = { workspace = true }
 operation_pools = { workspace = true }

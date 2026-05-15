@@ -66,7 +66,7 @@ pub fn is_eligible_for_activation<P: Preset>(
 #[must_use]
 pub const fn is_eligible_for_penalties(validator: &Validator, previous_epoch: Epoch) -> bool {
     is_active_validator(validator, previous_epoch)
-        || (validator.slashed && previous_epoch + 1 < validator.withdrawable_epoch)
+        || (validator.slashed && previous_epoch.saturating_add(1) < validator.withdrawable_epoch)
 }
 
 // > Check if ``validator`` is slashable.
@@ -373,11 +373,13 @@ pub const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -
     //              └367 body.blob_kzg_commitments[15]
     // ```
     // The index of commitment 0 is offset by 352 because of preceding fields in `BeaconBlockBody`.
-    let fields_before_blob_kzg_commitments = 11;
+    let fields_before_blob_kzg_commitments: u64 = 11;
     let indices_per_field_without_length = P::MaxBlobCommitmentsPerBlock::U64;
-    let indices_per_field_with_length = 2 * indices_per_field_without_length;
-    let index_of_commitment_0 = fields_before_blob_kzg_commitments * indices_per_field_with_length;
-    index_of_commitment_0 + commitment_index
+    let indices_per_field_with_length = 2_u64.saturating_mul(indices_per_field_without_length);
+    let index_of_commitment_0 =
+        fields_before_blob_kzg_commitments.saturating_mul(indices_per_field_with_length);
+
+    index_of_commitment_0.saturating_add(commitment_index)
 }
 
 #[must_use]
@@ -427,7 +429,7 @@ pub fn can_builder_cover_bid<P: Preset>(
     let balance = state.builders().get(builder_index)?.balance;
     let pending_withdrawals_amount =
         accessors::get_pending_balance_to_withdraw_for_builder(state, builder_index);
-    let min_balance = P::MIN_DEPOSIT_AMOUNT + pending_withdrawals_amount;
+    let min_balance = P::MIN_DEPOSIT_AMOUNT.saturating_add(pending_withdrawals_amount);
 
     // Prevent edge case when `bid_amount` = 0
     if balance < min_balance {
@@ -448,8 +450,8 @@ pub fn is_attestation_same_slot<P: Preset>(
 
     let is_matching_blockroot =
         data.beacon_block_root == accessors::get_block_root_at_slot(state, data.slot)?;
-    let is_current_blockroot =
-        data.beacon_block_root != accessors::get_block_root_at_slot(state, data.slot - 1)?;
+    let is_current_blockroot = data.beacon_block_root
+        != accessors::get_block_root_at_slot(state, data.slot.saturating_sub(1))?;
 
     Ok(is_matching_blockroot && is_current_blockroot)
 }
@@ -733,7 +735,7 @@ mod spec_tests {
 
         // Unlike the name suggests, `leaf_index` is actually a generalized index.
         // `is_valid_merkle_branch` expects an index that includes only leaves.
-        let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
+        let index_at_leaf_depth = leaf_index.saturating_sub(leaf_index.prev_power_of_two());
 
         let root = case.ssz::<_, T>(context, "object").hash_tree_root();
 

@@ -1,6 +1,6 @@
 use core::ops::Index as _;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
 use bit_field::BitField as _;
 use bls::traits::SignatureBytes as _;
 use helper_functions::{
@@ -56,7 +56,7 @@ use types::{
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{AttestationData, ProposerSlashing, SignedVoluntaryExit},
-        primitives::{DepositIndex, Epoch, ExecutionAddress, H256},
+        primitives::{DepositIndex, Epoch, ExecutionAddress, Gwei, H256},
     },
     preset::Preset,
     traits::{
@@ -134,7 +134,8 @@ pub fn process_block_for_gossip<P: Preset>(
 }
 
 pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
+    altair::count_required_signatures(block)
+        .saturating_add(block.body.bls_to_execution_changes.len())
 }
 
 pub fn custom_process_block<P: Preset>(
@@ -184,7 +185,7 @@ pub fn get_expected_withdrawals<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
 ) -> Result<(Vec<Withdrawal>, usize, usize, u64)> {
     // This limit is to ensure the last withdrawal is reserve for validator sweep
-    let withdrawal_limit = P::MaxWithdrawalsPerPayload::USIZE - 1;
+    let withdrawal_limit = P::MaxWithdrawalsPerPayload::USIZE.saturating_sub(1);
     let current_epoch = get_current_epoch(state);
     let mut withdrawal_index = state.next_withdrawal_index();
     let mut withdrawals: Vec<Withdrawal> = vec![];
@@ -238,7 +239,7 @@ fn get_builder_withdrawals_count<P: Preset>(
     withdrawals: &mut Vec<Withdrawal>,
     withdrawal_limit: usize,
 ) -> Result<usize> {
-    let mut processed_count = 0;
+    let mut processed_count: usize = 0;
 
     for withdrawal in &state.builder_pending_withdrawals().clone() {
         if withdrawals.len() >= withdrawal_limit {
@@ -256,7 +257,7 @@ fn get_builder_withdrawals_count<P: Preset>(
             .checked_add(1)
             .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
 
-        processed_count += 1;
+        processed_count = processed_count.saturating_add(1);
     }
 
     Ok(processed_count)
@@ -272,7 +273,7 @@ fn get_builders_sweep_withdrawals_count<P: Preset>(
     let total_builders = state.builders().len_u64();
     let bound = total_builders.min(P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP);
     let mut builder_index = state.next_withdrawal_builder_index();
-    let mut processed_count = 0;
+    let mut processed_count: u64 = 0;
 
     for _ in 0..bound {
         if withdrawals.len() >= withdrawal_limit {
@@ -299,7 +300,7 @@ fn get_builders_sweep_withdrawals_count<P: Preset>(
             .checked_rem(total_builders)
             .expect("total_builders being 0 should prevent the loop from being executed");
 
-        processed_count += 1;
+        processed_count = processed_count.saturating_add(1);
     }
 
     Ok(processed_count)
@@ -318,7 +319,7 @@ fn get_pending_partial_withdrawals_count<P: Preset>(
         .len()
         .saturating_add(max_pending_partials_per_withdrawals_sweep)
         .min(withdrawal_limit);
-    let mut processed_count = 0;
+    let mut processed_count: usize = 0;
 
     for withdrawal in &state.pending_partial_withdrawals().clone() {
         if withdrawal.withdrawable_epoch > current_epoch || withdrawals.len() >= bound {
@@ -346,7 +347,7 @@ fn get_pending_partial_withdrawals_count<P: Preset>(
         {
             let withdrawable_balance = withdrawal
                 .amount
-                .min(balance_after_withdrawn - P::MIN_ACTIVATION_BALANCE);
+                .min(balance_after_withdrawn.saturating_sub(P::MIN_ACTIVATION_BALANCE));
 
             let mut address = ExecutionAddress::zero();
 
@@ -364,7 +365,7 @@ fn get_pending_partial_withdrawals_count<P: Preset>(
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
         }
 
-        processed_count += 1;
+        processed_count = processed_count.saturating_add(1);
     }
 
     Ok(processed_count)
@@ -403,7 +404,7 @@ fn process_validators_sweep_withdrawals<P: Preset>(
         let address = validator
             .withdrawal_credentials
             .as_bytes()
-            .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
+            .index(H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes())..)
             .pipe(ExecutionAddress::from_slice);
 
         if is_fully_withdrawable_validator(validator, balance, current_epoch) {
@@ -462,7 +463,7 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index.saturating_add(1);
     }
 
     // > Update payload expected withdrawals
@@ -492,23 +493,29 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     )?;
 
     // > Update next withdrawal builder index to start the next withdrawal sweep
-    update_next_withdrawal_builder_index(state, processed_builders_sweep_count);
+    update_next_withdrawal_builder_index(state, processed_builders_sweep_count)?;
 
     // > Update the next validator index to start the next withdrawal sweep
-    capella::update_next_withdrawal_validator_index(state, &withdrawals);
-
-    Ok(())
+    capella::update_next_withdrawal_validator_index(state, &withdrawals)
 }
 
 pub fn update_next_withdrawal_builder_index<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
     processed_builders_sweep_count: u64,
-) {
+) -> Result<()> {
     let total_builders = state.builders().len_u64();
+
     if total_builders > 0 {
-        let next_index = state.next_withdrawal_builder_index() + processed_builders_sweep_count;
-        *state.next_withdrawal_builder_index_mut() = next_index % total_builders;
+        let next_index = state
+            .next_withdrawal_builder_index()
+            .saturating_add(processed_builders_sweep_count);
+
+        *state.next_withdrawal_builder_index_mut() = next_index
+            .checked_rem(total_builders)
+            .ok_or_else(|| anyhow!("total_builders should not be zero"))?;
     }
+
+    Ok(())
 }
 
 fn apply_withdrawals<P: Preset>(
@@ -721,8 +728,8 @@ where
     let in_block = body.deposits().len().try_into()?;
 
     if state.eth1_deposit_index() < eth1_deposit_index_limit {
-        let computed =
-            P::MaxDeposits::U64.min(eth1_deposit_index_limit - state.eth1_deposit_index());
+        let computed = P::MaxDeposits::U64
+            .min(eth1_deposit_index_limit.saturating_sub(state.eth1_deposit_index()));
 
         ensure!(
             computed == in_block,
@@ -816,7 +823,9 @@ where
         let deposit_count = body.deposits().len();
 
         // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() += DepositIndex::try_from(deposit_count)?;
+        *state.eth1_deposit_index_mut() = state
+            .eth1_deposit_index_mut()
+            .saturating_add(DepositIndex::try_from(deposit_count)?);
 
         electra::apply_deposits(state, combined_deposits, slot_report)?;
     }
@@ -855,7 +864,7 @@ pub fn apply_attestation<P: Preset>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Participation flag indices
-    let inclusion_delay = state.slot() - attestation.data.slot;
+    let inclusion_delay = state.slot().saturating_sub(attestation.data.slot);
     let participation_flags =
         get_attestation_participation_flags(state, attestation.data, inclusion_delay)?;
 
@@ -893,7 +902,7 @@ pub fn apply_attestation<P: Preset>(
         AttestationEpoch::Current => state.current_epoch_participation_mut(),
     };
 
-    let mut proposer_reward_numerator = 0;
+    let mut proposer_reward_numerator: Gwei = 0;
 
     for (validator_index, base_reward, effective_balance) in attesting_indices_with_base_rewards {
         let epoch_participation = epoch_participation.get_mut(validator_index)?;
@@ -904,7 +913,9 @@ pub fn apply_attestation<P: Preset>(
 
         for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
             if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
-                proposer_reward_numerator += base_reward * weight;
+                proposer_reward_numerator =
+                    proposer_reward_numerator.saturating_add(base_reward.saturating_mul(weight));
+
                 will_set_new_flag = true;
             }
         }
@@ -914,15 +925,21 @@ pub fn apply_attestation<P: Preset>(
         // > Add weight for same-slot attestations when any new flag is set
         // This ensures each validator contributes exactly once per slot
         if will_set_new_flag && is_attestation_same_slot && payment.withdrawal.amount > 0 {
-            payment.weight += effective_balance;
+            payment.weight = payment.weight.saturating_add(effective_balance);
         }
     }
 
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(config, state)?;
-    let proposer_reward_denominator =
-        (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get() / PROPOSER_WEIGHT;
-    let proposer_reward = proposer_reward_numerator / proposer_reward_denominator;
+    let proposer_reward_denominator = WEIGHT_DENOMINATOR
+        .get()
+        .saturating_sub(PROPOSER_WEIGHT.get())
+        .saturating_mul(WEIGHT_DENOMINATOR.get())
+        / PROPOSER_WEIGHT;
+
+    let proposer_reward = proposer_reward_numerator
+        .checked_div(proposer_reward_denominator)
+        .ok_or_else(|| anyhow!("proposer_reward_denominator should not be zero"))?;
 
     increase_balance(balance(state, proposer_index)?, proposer_reward);
 
@@ -972,7 +989,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     );
 
     ensure!(
-        attestation_slot + P::MIN_ATTESTATION_INCLUSION_DELAY.get() <= state.slot(),
+        attestation_slot.saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get()) <= state.slot(),
         Error::<P>::AttestationOutsideInclusionRange {
             state_slot: state.slot(),
             attestation_slot,
@@ -1151,7 +1168,7 @@ pub fn process_payload_attestation<P: Preset>(
     // > Check that the attestation is for the previous slot
     let state_slot = state.slot();
     ensure!(
-        data.slot + 1 == state_slot,
+        data.slot.saturating_add(1) == state_slot,
         Error::<P>::PayloadAttestationNotForPreviousSlot {
             in_attestation: data.slot,
             state_slot,
@@ -1607,7 +1624,7 @@ mod spec_tests {
             unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
 
         // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() += 1;
+        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().saturating_add(1);
 
         electra::apply_deposits(state, combined_deposits, NullSlotReport)
     }

@@ -48,12 +48,12 @@ impl Criterion {
     fn benchmark_store_apply_tick(&mut self) -> &mut Self {
         // The slot is at a weird point in the epoch, but it's good enough for benchmarking.
         // We have no attestations from later slots in `eth2-cache`.
-        let last_attestation_slot = 50014;
+        let last_attestation_slot: Slot = 50014;
 
-        let next_ordinary_slot = last_attestation_slot + 1;
+        let next_ordinary_slot = last_attestation_slot.saturating_add(1);
         let next_ordinary_tick = Tick::start_of_slot(next_ordinary_slot);
 
-        let next_epoch_start_slot = next_ordinary_slot + 1;
+        let next_epoch_start_slot = next_ordinary_slot.saturating_add(1);
         let next_epoch_start_tick = Tick::start_of_slot(next_epoch_start_slot);
 
         assert!(misc::is_epoch_start::<Mainnet>(next_epoch_start_slot));
@@ -90,7 +90,7 @@ impl Criterion {
                     Arc::new(SccHashMap::new()),
                 );
 
-                for slot in (anchor_slot + 1)..=last_attestation_slot {
+                for slot in anchor_slot.saturating_add(1)..=last_attestation_slot {
                     process_slot(&mut store, slot)?;
 
                     if let Some(block) = holesky::beacon_blocks(slot..=slot, 6)

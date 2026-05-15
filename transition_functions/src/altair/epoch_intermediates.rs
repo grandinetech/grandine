@@ -104,27 +104,27 @@ impl EpochDeltas for EpochDeltasForTransition {
 
 impl AltairEpochDeltas for EpochDeltasForTransition {
     fn add_source_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_source_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 
     fn add_target_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_target_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 
     fn add_head_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_inactivity_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 }
 
@@ -140,37 +140,41 @@ pub struct EpochDeltasForReport {
 
 impl EpochDeltas for EpochDeltasForReport {
     fn combined_reward(self) -> Gwei {
-        self.source_reward + self.target_reward + self.head_reward
+        self.source_reward
+            .saturating_add(self.target_reward)
+            .saturating_add(self.head_reward)
     }
 
     fn combined_penalty(self) -> Gwei {
-        self.source_penalty + self.target_penalty + self.inactivity_penalty
+        self.source_penalty
+            .saturating_add(self.target_penalty)
+            .saturating_add(self.inactivity_penalty)
     }
 }
 
 impl AltairEpochDeltas for EpochDeltasForReport {
     fn add_source_reward(&mut self, value: Gwei) {
-        self.source_reward += value;
+        self.source_reward = self.source_reward.saturating_add(value);
     }
 
     fn add_source_penalty(&mut self, value: Gwei) {
-        self.source_penalty += value;
+        self.source_penalty = self.source_penalty.saturating_add(value);
     }
 
     fn add_target_reward(&mut self, value: Gwei) {
-        self.target_reward += value;
+        self.target_reward = self.target_reward.saturating_add(value);
     }
 
     fn add_target_penalty(&mut self, value: Gwei) {
-        self.target_penalty += value;
+        self.target_penalty = self.target_penalty.saturating_add(value);
     }
 
     fn add_head_reward(&mut self, value: Gwei) {
-        self.head_reward += value;
+        self.head_reward = self.head_reward.saturating_add(value);
     }
 
     fn add_inactivity_penalty(&mut self, value: Gwei) {
-        self.inactivity_penalty += value;
+        self.inactivity_penalty = self.inactivity_penalty.saturating_add(value);
     }
 }
 
@@ -207,20 +211,28 @@ pub fn statistics_and_summaries<P: Preset, S: PostAltairBeaconState<P>>(
 
                 if active_in_previous_epoch {
                     if participation.previous_epoch_matching_source() {
-                        statistics.previous_epoch_source_participating_balance += effective_balance;
+                        statistics.previous_epoch_source_participating_balance = statistics
+                            .previous_epoch_source_participating_balance
+                            .saturating_add(effective_balance);
                     }
 
                     if participation.previous_epoch_matching_target() {
-                        statistics.previous_epoch_target_participating_balance += effective_balance;
+                        statistics.previous_epoch_target_participating_balance = statistics
+                            .previous_epoch_target_participating_balance
+                            .saturating_add(effective_balance);
                     }
 
                     if participation.previous_epoch_matching_head() {
-                        statistics.previous_epoch_head_participating_balance += effective_balance;
+                        statistics.previous_epoch_head_participating_balance = statistics
+                            .previous_epoch_head_participating_balance
+                            .saturating_add(effective_balance);
                     }
                 }
 
                 if active_in_current_epoch && participation.current_epoch_matching_target() {
-                    statistics.current_epoch_target_participating_balance += effective_balance;
+                    statistics.current_epoch_target_participating_balance = statistics
+                        .current_epoch_target_participating_balance
+                        .saturating_add(effective_balance);
                 }
             }
 
@@ -260,22 +272,30 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Statisti
 
                 if active_in_previous_epoch {
                     if previous_epoch_participation.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
-                        statistics.previous_epoch_source_participating_balance += effective_balance;
+                        statistics.previous_epoch_source_participating_balance = statistics
+                            .previous_epoch_source_participating_balance
+                            .saturating_add(effective_balance);
                     }
 
                     if previous_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX) {
-                        statistics.previous_epoch_target_participating_balance += effective_balance;
+                        statistics.previous_epoch_target_participating_balance = statistics
+                            .previous_epoch_target_participating_balance
+                            .saturating_add(effective_balance);
                     }
 
                     if previous_epoch_participation.get_bit(TIMELY_HEAD_FLAG_INDEX) {
-                        statistics.previous_epoch_head_participating_balance += effective_balance;
+                        statistics.previous_epoch_head_participating_balance = statistics
+                            .previous_epoch_head_participating_balance
+                            .saturating_add(effective_balance);
                     }
                 }
 
                 if active_in_current_epoch
                     && current_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX)
                 {
-                    statistics.current_epoch_target_participating_balance += effective_balance;
+                    statistics.current_epoch_target_participating_balance = statistics
+                        .current_epoch_target_participating_balance
+                        .saturating_add(effective_balance);
                 }
             },
         );
@@ -320,13 +340,19 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
                 compute_base_reward::<P>(effective_balance, base_reward_per_increment);
 
             let participation_component_reward = |weight, unslashed_participating_increments| {
-                let reward_numerator = base_reward * weight * unslashed_participating_increments;
-                let reward_denominator = active_increments * WEIGHT_DENOMINATOR.get();
-                reward_numerator / reward_denominator
+                let reward_numerator = base_reward
+                    .saturating_mul(weight)
+                    .saturating_mul(unslashed_participating_increments);
+
+                let reward_denominator = active_increments.saturating_mul(WEIGHT_DENOMINATOR.get());
+
+                reward_numerator
+                    .checked_div(reward_denominator)
+                    .expect("total_active_balance should not be zero")
             };
 
             let participation_component_penalty =
-                |weight| base_reward * weight / WEIGHT_DENOMINATOR;
+                |weight| base_reward.saturating_mul(weight) / WEIGHT_DENOMINATOR;
 
             if !slashed && participation.previous_epoch_matching_source() {
                 if !in_inactivity_leak {
@@ -349,9 +375,10 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
             } else {
                 deltas.add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT));
 
-                let penalty_numerator = effective_balance * inactivity_score;
-                let penalty_denominator = config.inactivity_score_bias.get()
-                    * P::INACTIVITY_PENALTY_QUOTIENT_ALTAIR.get();
+                let penalty_numerator = effective_balance.saturating_mul(*inactivity_score);
+                let penalty_denominator = config
+                    .inactivity_score_bias
+                    .saturating_mul(P::INACTIVITY_PENALTY_QUOTIENT_ALTAIR);
 
                 deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator);
             }

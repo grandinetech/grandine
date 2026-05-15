@@ -1,4 +1,4 @@
-use core::{cell::LazyCell, ops::Mul as _};
+use core::cell::LazyCell;
 
 use anyhow::Result;
 use helper_functions::{
@@ -145,7 +145,7 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
         slashings
             .into_iter()
             .sum::<Gwei>()
-            .mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
+            .saturating_mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
             .min(total_active_balance)
     });
 
@@ -168,14 +168,20 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
             return;
         }
 
-        if current_epoch + P::EpochsPerSlashingsVector::U64 / 2 != withdrawable_epoch {
+        if current_epoch.saturating_add(P::EpochsPerSlashingsVector::U64 / 2) != withdrawable_epoch
+        {
             return;
         }
 
         // > Factored out from penalty numerator to avoid uint64 overflow
         let increment = P::EFFECTIVE_BALANCE_INCREMENT;
-        let penalty_numerator = effective_balance / increment * *adjusted_total_slashing_balance;
-        let penalty = penalty_numerator / total_active_balance * increment.get();
+        let penalty_numerator =
+            (effective_balance / increment).saturating_mul(*adjusted_total_slashing_balance);
+
+        let penalty = penalty_numerator
+            .checked_div(total_active_balance)
+            .expect("total_active_balance should not be zero")
+            .saturating_mul(increment.get());
 
         decrease_balance(balance, penalty);
 

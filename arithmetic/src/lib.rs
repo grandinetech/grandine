@@ -13,7 +13,7 @@
     reason = "Conflicts with `#[must_use]` has no effect when applied to a provided trait method."
 )]
 
-use core::num::NonZeroU64;
+use core::num::{NonZeroU64, NonZeroUsize};
 
 use easy_ext::ext;
 use typenum::{NonZero, Unsigned};
@@ -23,6 +23,13 @@ pub impl<N: Unsigned + NonZero> N {
     #[inline]
     fn non_zero() -> NonZeroU64 {
         Self::U64
+            .try_into()
+            .expect("the bound on N ensures that it is nonzero")
+    }
+
+    #[inline]
+    fn non_zero_usize() -> NonZeroUsize {
+        Self::USIZE
             .try_into()
             .expect("the bound on N ensures that it is nonzero")
     }
@@ -45,7 +52,7 @@ pub impl usize {
 
     #[inline]
     fn div_typenum<N: Unsigned + NonZero>(self) -> Self {
-        self / N::USIZE
+        self / N::non_zero_usize()
     }
 
     #[inline]
@@ -61,17 +68,17 @@ pub impl usize {
 pub impl u64 {
     #[inline]
     fn prev_multiple_of(self, factor: NonZeroU64) -> Self {
-        self - self % factor
+        self.saturating_sub(self % factor)
     }
 
     #[inline]
     fn div_typenum<N: Unsigned + NonZero>(self) -> Self {
-        self / N::U64
+        self / N::non_zero()
     }
 
     #[inline]
     fn mod_typenum<N: Unsigned + NonZero>(self) -> Self {
-        self % N::U64
+        self % N::non_zero()
     }
 
     #[inline]

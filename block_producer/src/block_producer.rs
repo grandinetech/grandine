@@ -1468,8 +1468,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             for (index, participated) in contribution.aggregation_bits.into_iter().enumerate() {
                 if participated {
                     let participant_index = SyncSubcommitteeSize::<P>::USIZE
-                        * usize::try_from(subcommittee_index)?
-                        + index;
+                        .saturating_mul(usize::try_from(subcommittee_index)?)
+                        .saturating_add(index);
+
                     sync_committee_bits.set(participant_index, true);
                 }
             }

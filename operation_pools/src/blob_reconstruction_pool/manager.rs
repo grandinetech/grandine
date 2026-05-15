@@ -59,7 +59,11 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         delay: Duration,
     ) {
         self.scheduled_reconstructions
-            .entry(Instant::now() + delay)
+            .entry(
+                Instant::now()
+                    .checked_add(delay)
+                    .unwrap_or_else(Instant::now),
+            )
             .or_default()
             .push((wait_group, block_root, block, slot));
     }

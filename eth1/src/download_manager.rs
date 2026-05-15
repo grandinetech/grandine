@@ -66,7 +66,7 @@ impl DownloadManager {
                     block.number,
                 );
 
-                block.number + 1
+                block.number.saturating_add(1)
             } else {
                 self.earliest_downloadable_block_number().await?
             }
@@ -74,8 +74,11 @@ impl DownloadManager {
 
         let latest_downloadable_block = self.latest_downloadable_block_number().await?;
 
-        let mut from_block = starting_block_number
-            .max(latest_downloadable_block.saturating_sub(DOWNLOAD_DISTANCE_FROM_HEAD) + 1);
+        let mut from_block = starting_block_number.max(
+            latest_downloadable_block
+                .saturating_sub(DOWNLOAD_DISTANCE_FROM_HEAD)
+                .saturating_add(1),
+        );
 
         if from_block <= latest_downloadable_block {
             features::log!(
@@ -87,7 +90,11 @@ impl DownloadManager {
         }
 
         while from_block <= latest_downloadable_block {
-            let to_block = latest_downloadable_block.min(from_block + BLOCK_BATCH_SIZE - 1);
+            let to_block = latest_downloadable_block.min(
+                from_block
+                    .saturating_add(BLOCK_BATCH_SIZE)
+                    .saturating_sub(1),
+            );
 
             features::log!(
                 DebugEth1,
@@ -118,7 +125,7 @@ impl DownloadManager {
 
             self.cache.put_blocks(blocks)?;
 
-            from_block = to_block + 1;
+            from_block = to_block.saturating_add(1);
         }
 
         Ok(())
@@ -145,7 +152,7 @@ impl DownloadManager {
              latest_block_number: {latest_block_number}",
         );
 
-        let mut from_block = starting_block_number + 1;
+        let mut from_block = starting_block_number.saturating_add(1);
 
         if from_block <= latest_block_number {
             debug_with_peers!(
@@ -154,7 +161,11 @@ impl DownloadManager {
         }
 
         while from_block <= latest_block_number {
-            let to_block = latest_block_number.min(from_block + DEPOSIT_BATCH_SIZE - 1);
+            let to_block = latest_block_number.min(
+                from_block
+                    .saturating_add(DEPOSIT_BATCH_SIZE)
+                    .saturating_sub(1),
+            );
 
             debug_with_peers!(
                 "downloading Eth1 deposits from block {from_block} to block {to_block}"
@@ -168,10 +179,10 @@ impl DownloadManager {
                 break;
             }
 
-            from_block = to_block + 1;
+            from_block = to_block.saturating_add(1);
         }
 
-        Ok(from_block - 1)
+        Ok(from_block.saturating_sub(1))
     }
 
     pub async fn is_deposit_tree_up_to_date(

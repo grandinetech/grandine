@@ -209,7 +209,7 @@ impl Criterion {
             .throughput(Throughput::Elements(EMPTY_SLOT_COUNT))
             .bench_function("with single state", |bencher| {
                 let state = state.force();
-                let last_slot = state.slot() + EMPTY_SLOT_COUNT;
+                let last_slot = state.slot().saturating_add(EMPTY_SLOT_COUNT);
 
                 bencher.iter_batched_ref(
                     || state.clone_arc(),
@@ -228,7 +228,7 @@ impl Criterion {
             })
             .bench_function("with intermediate states", |bencher| {
                 let state = state.force();
-                let last_slot = state.slot() + EMPTY_SLOT_COUNT;
+                let last_slot = state.slot().saturating_add(EMPTY_SLOT_COUNT);
 
                 bencher.iter_batched(
                     || state.clone_arc(),
@@ -265,7 +265,7 @@ impl Criterion {
             };
 
             let post_slot = last_block.message().slot();
-            let pre_slot = post_slot - 1;
+            let pre_slot = post_slot.saturating_div(1);
 
             assert!(misc::is_epoch_start::<P>(post_slot));
 
@@ -434,7 +434,7 @@ fn empty_slots_with_intermediate_states<P: Preset>(
 ) -> Vec<Arc<BeaconState<P>>> {
     core::iter::successors(Some(state), |previous_state| {
         let mut state = previous_state.clone_arc();
-        let slot = state.slot() + 1;
+        let slot = state.slot().saturating_add(1);
         empty_slots_with_single_state(config, pubkey_cache, state.make_mut(), slot);
         Some(state)
     })

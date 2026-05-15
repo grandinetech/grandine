@@ -726,7 +726,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .compute_proposer_indices(slot_head.beacon_state.clone_arc());
 
         if let Some(state) = slot_head.beacon_state.post_altair() {
-            if misc::is_epoch_start::<P>(state.slot() + 1) {
+            if misc::is_epoch_start::<P>(state.slot().saturating_add(1)) {
                 self.own_sync_committee_members.take();
 
                 self.own_sync_committee_members.get_or_try_init(|| {
@@ -830,7 +830,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let head_slot = head.slot();
         let max_empty_slots = self.validator_config.max_empty_slots;
 
-        if head_slot + max_empty_slots < slot {
+        if head_slot.saturating_add(max_empty_slots) < slot {
             return Ok(Err(HeadFarBehind {
                 head_slot,
                 max_empty_slots,
@@ -1709,7 +1709,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let index = self.next_graffiti_index;
 
-        self.next_graffiti_index = (index + 1) % self.validator_config.graffiti.len();
+        if let Some(next_graffiti_index) = index
+            .saturating_add(1)
+            .checked_rem(self.validator_config.graffiti.len())
+        {
+            self.next_graffiti_index = next_graffiti_index;
+        } else {
+            return None;
+        }
 
         Some(self.validator_config.graffiti[index])
     }
@@ -2181,8 +2188,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .try_into()
             .expect("sampling size should be able to fit into u64");
 
-        let current_custody_requirements =
-            current_sampling_size.saturating_div(self.chain_config.columns_per_group::<P>());
+        let Some(current_custody_requirements) =
+            current_sampling_size.checked_div(self.chain_config.columns_per_group::<P>())
+        else {
+            return;
+        };
 
         if validator_custody_requirement > current_custody_requirements
             || self.last_cgc_update_epoch.is_none()
@@ -2252,8 +2262,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[instrument(level = "debug", skip_all)]
     async fn register_validators(&mut self, current_epoch: Epoch) {
         if let Some(last_registration_epoch) = self.last_registration_epoch {
-            let next_registration_epoch =
-                last_registration_epoch + EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION;
+            let next_registration_epoch = last_registration_epoch
+                .saturating_add(EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION);
 
             if next_registration_epoch < current_epoch {
                 return;

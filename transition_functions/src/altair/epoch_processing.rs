@@ -1,4 +1,4 @@
-use core::{cell::LazyCell, ops::Mul as _};
+use core::cell::LazyCell;
 use std::collections::HashMap;
 
 use anyhow::Result;
@@ -202,7 +202,7 @@ pub fn process_inactivity_updates<P: Preset>(
         if unslashed_and_participating {
             *inactivity_score = inactivity_score.saturating_sub(1);
         } else {
-            *inactivity_score += config.inactivity_score_bias.get();
+            *inactivity_score = inactivity_score.saturating_add(config.inactivity_score_bias.get());
         }
 
         // > Decrease the inactivity score of all eligible validators during a leak-free epoch
@@ -226,7 +226,7 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
             .slashings
             .into_iter()
             .sum::<Gwei>()
-            .mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR)
+            .saturating_mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR)
             .min(total_active_balance)
     });
 
@@ -249,14 +249,20 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
             return;
         }
 
-        if current_epoch + P::EpochsPerSlashingsVector::U64 / 2 != withdrawable_epoch {
+        if current_epoch.saturating_add(P::EpochsPerSlashingsVector::U64 / 2) != withdrawable_epoch
+        {
             return;
         }
 
         // > Factored out from penalty numerator to avoid uint64 overflow
         let increment = P::EFFECTIVE_BALANCE_INCREMENT;
-        let penalty_numerator = effective_balance / increment * *adjusted_total_slashing_balance;
-        let penalty = penalty_numerator / total_active_balance * increment.get();
+        let penalty_numerator =
+            (effective_balance / increment).saturating_mul(*adjusted_total_slashing_balance);
+
+        let penalty = penalty_numerator
+            .checked_div(total_active_balance)
+            .expect("total_active_balance should not be zero")
+            .saturating_mul(increment.get());
 
         decrease_balance(balance, penalty);
 
@@ -278,7 +284,7 @@ pub fn process_sync_committee_updates<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostAltairBeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = get_current_epoch(state) + 1;
+    let next_epoch = get_current_epoch(state).saturating_add(1);
 
     if next_epoch.is_multiple_of(P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD.into()) {
         let committee = get_next_sync_committee(pubkey_cache, state)?;

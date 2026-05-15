@@ -20,7 +20,12 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     attestation: Arc<Attestation<P>>,
 ) -> Result<Phase0Attestation<P>> {
-    if attestation.data().slot + P::SlotsPerEpoch::U64 < controller.slot() {
+    if attestation
+        .data()
+        .slot
+        .saturating_add(P::SlotsPerEpoch::U64)
+        < controller.slot()
+    {
         bail!(AttestationConversionError::Irrelevant);
     }
 

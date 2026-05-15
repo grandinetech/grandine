@@ -21,6 +21,10 @@ pub(crate) enum Error {
     BlobsForPostGloasBlock { root: H256, slot: Slot },
     #[error("committee index is out of bounds")]
     CommitteeIndexOutOfBounds,
+    #[error("committee index start is out of bounds")]
+    CommitteeIndexStartInvalid,
+    #[error("committee index end is out of bounds")]
+    CommitteeIndexEndInvalid,
     #[error(
         "aggregation bitlist length {aggregation_bitlist_length} does not match committee length {committee_length}"
     )]

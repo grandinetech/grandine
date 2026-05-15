@@ -89,14 +89,14 @@ where
     type Error = ReadError;
 
     fn try_from_iter(elements: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
-        let mut length = 0;
+        let mut length: usize = 0;
 
         // Deduplicating only consecutive nodes saves us from having to use a slower data structure
         // and seems to cover all access patterns used in `consensus-specs`.
         let run_length_encoded_result = itertools::process_results(
             elements
                 .into_iter()
-                .inspect(|_| length += 1)
+                .inspect(|_| length = length.saturating_add(1))
                 .chunks(B::USIZE)
                 .into_iter()
                 .map(ContiguousVector::try_from_iter),
@@ -132,9 +132,15 @@ where
                         2 => UpTo3::from([(node.clone_arc(), 1), (node, 1)]),
                         other if other.is_odd() => {
                             if aligned {
-                                UpTo3::from([(node.clone_arc(), count - 1), (node, 1)])
+                                UpTo3::from([
+                                    (node.clone_arc(), count.saturating_sub(1)),
+                                    (node, 1),
+                                ])
                             } else {
-                                UpTo3::from([(node.clone_arc(), 1), (node, count - 1)])
+                                UpTo3::from([
+                                    (node.clone_arc(), 1),
+                                    (node, count.saturating_sub(1)),
+                                ])
                             }
                         }
                         _ => {
@@ -143,7 +149,7 @@ where
                             } else {
                                 UpTo3::from([
                                     (node.clone_arc(), 1),
-                                    (node.clone_arc(), count - 2),
+                                    (node.clone_arc(), count.saturating_sub(2)),
                                     (node, 1),
                                 ])
                             }
@@ -331,7 +337,7 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
         let bundle = loop {
             match node {
                 Node::Internal(left, right) => {
-                    bit_index -= 1;
+                    bit_index = bit_index.saturating_sub(1);
                     let bit = index.get_bit(bit_index.into());
                     node = if bit { right } else { left }
                 }
@@ -358,7 +364,7 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
         let bundle = loop {
             match node {
                 Node::Internal(left, right) => {
-                    bit_index -= 1;
+                    bit_index = bit_index.saturating_sub(1);
                     let bit = index.get_bit(bit_index.into());
                     node = if bit { right } else { left }.make_mut()
                 }
@@ -376,7 +382,7 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
     where
         N: Unsigned + NonZero,
     {
-        N::ilog2() - B::ilog2()
+        N::ilog2().saturating_sub(B::ilog2())
     }
 }
 

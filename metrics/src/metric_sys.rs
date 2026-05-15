@@ -31,13 +31,16 @@ pub fn get_process_cpu_metric() -> Result<ProcessCpuMetric> {
     let mut cpu_process_seconds_total = 0;
     #[expect(unused_assignments)]
     let mut memory_process_bytes = 0;
+
     match Process::current() {
         Ok(process) => {
             match process.cpu_times() {
                 Ok(cpu_times) => {
-                    cpu_process_seconds_total = cpu_times.busy().as_secs()
-                        + cpu_times.children_system().as_secs()
-                        + cpu_times.children_system().as_secs();
+                    cpu_process_seconds_total = cpu_times
+                        .busy()
+                        .as_secs()
+                        .saturating_add(cpu_times.children_user().as_secs())
+                        .saturating_add(cpu_times.children_system().as_secs());
                 }
                 Err(error) => bail!("unable to get current process CPU usage: {error:?}"),
             }

@@ -1,4 +1,4 @@
-use core::num::NonZeroU64;
+use core::{num::NonZeroU64, ops::Rem as _};
 
 use anyhow::Result;
 use bls::{SecretKey, SecretKeyBytes, traits::SecretKey as _};
@@ -67,11 +67,13 @@ pub fn quick_start_beacon_state<P: Preset>(
 pub fn secret_key(validator_index: ValidatorIndex) -> SecretKey {
     let index_hash = hashing::hash_256(validator_index.hash_tree_root());
     let curve_order = BigUint::from_bytes_be(CURVE_ORDER);
-    let secret_key_uint = BigUint::from_bytes_le(index_hash.as_bytes()) % &curve_order;
+    let secret_key_uint = BigUint::from_bytes_le(index_hash.as_bytes()).rem(&curve_order);
     let unpadded = secret_key_uint.to_bytes_be();
     let mut padded = SecretKeyBytes::default();
-    padded.as_mut()[size_of::<SecretKeyBytes>() - unpadded.len()..]
+
+    padded.as_mut()[size_of::<SecretKeyBytes>().saturating_sub(unpadded.len())..]
         .copy_from_slice(unpadded.as_slice());
+
     padded
         .try_into()
         .expect("the algorithm given in the standard should produce valid secret keys")

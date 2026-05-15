@@ -85,7 +85,7 @@ pub fn get_attesting_indices<P: Preset>(
 ) -> Result<HashSet<ValidatorIndex>> {
     let mut output = HashSet::new();
     let committee_indices = get_committee_indices::<P>(attestation.committee_bits);
-    let mut committee_offset = 0;
+    let mut committee_offset: usize = 0;
 
     for index in committee_indices {
         let committee = beacon_committee(state, attestation.data.slot, index)?;
@@ -94,7 +94,10 @@ pub fn get_attesting_indices<P: Preset>(
             .into_iter()
             .enumerate()
             .filter_map(|(i, index)| {
-                (*attestation.aggregation_bits.get(committee_offset + i)?).then_some(index)
+                (*attestation
+                    .aggregation_bits
+                    .get(committee_offset.saturating_add(i))?)
+                .then_some(index)
             })
             .collect::<Vec<_>>();
 
@@ -105,7 +108,7 @@ pub fn get_attesting_indices<P: Preset>(
 
         output.extend(committee_attesters);
 
-        committee_offset += committee.len();
+        committee_offset = committee_offset.saturating_add(committee.len());
     }
 
     // This works the same as `assert len(attestation.aggregation_bits) == committee_offset`
@@ -135,7 +138,7 @@ pub fn initiate_validator_exit<P: Preset>(
 
     // > Compute exit queue epoch
     let exit_queue_epoch =
-        compute_exit_epoch_and_update_churn(config, state, validator.effective_balance);
+        compute_exit_epoch_and_update_churn(config, state, validator.effective_balance)?;
 
     // > Set validator exit epoch and withdrawable epoch
     let validator = state.validators_mut().get_mut(validator_index)?;
@@ -168,9 +171,10 @@ pub fn slash_validator<P: Preset>(
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch
-        .max(epoch + P::EpochsPerSlashingsVector::U64);
+        .max(epoch.saturating_add(P::EpochsPerSlashingsVector::U64));
 
-    *state.slashings_mut().mod_index_mut(epoch) += effective_balance;
+    let s = state.slashings_mut().mod_index_mut(epoch);
+    *s = s.saturating_add(effective_balance);
 
     decrease_balance(balance(state, slashed_index)?, slashing_penalty);
 
@@ -178,8 +182,10 @@ pub fn slash_validator<P: Preset>(
     let proposer_index = get_beacon_proposer_index(config, state)?;
     let whistleblower_index = whistleblower_index.unwrap_or(proposer_index);
     let whistleblower_reward = effective_balance / P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA;
-    let proposer_reward = whistleblower_reward * PROPOSER_WEIGHT / WEIGHT_DENOMINATOR;
-    let remaining_reward = whistleblower_reward - proposer_reward;
+    let proposer_reward =
+        whistleblower_reward.saturating_mul(PROPOSER_WEIGHT.get()) / WEIGHT_DENOMINATOR;
+
+    let remaining_reward = whistleblower_reward.saturating_sub(proposer_reward);
 
     increase_balance(balance(state, proposer_index)?, proposer_reward);
     increase_balance(balance(state, whistleblower_index)?, remaining_reward);

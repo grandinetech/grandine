@@ -125,7 +125,7 @@ pub struct FullConfig {
 
     // Altair incentivization weights
     #[serde(with = "serde_utils::string_or_native")]
-    proposer_weight: u64,
+    proposer_weight: NonZeroU64,
     #[serde(with = "serde_utils::string_or_native")]
     sync_reward_weight: u64,
     #[serde(with = "serde_utils::string_or_native")]

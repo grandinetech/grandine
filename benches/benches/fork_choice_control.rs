@@ -293,7 +293,13 @@ fn process_blocks_in_future_slot_synchronously<P: Preset>(
 
     // Advance to a slot 2 epochs after the last block to make the store ignore any attestations
     // in the blocks.
-    controller.on_slot(last_block.message().slot() + 2 * P::SlotsPerEpoch::U64);
+    controller.on_slot(
+        last_block
+            .message()
+            .slot()
+            .saturating_add(2_u64.saturating_mul(P::SlotsPerEpoch::U64)),
+    );
+
     controller.wait_for_tasks();
 
     for block in blocks {
@@ -315,7 +321,13 @@ fn process_blocks_in_future_slot_asynchronously<P: Preset>(
 
     // Advance to a slot 2 epochs after the last block to make the store ignore any attestations
     // in the blocks.
-    controller.on_slot(last_block.message().slot() + 2 * P::SlotsPerEpoch::U64);
+    controller.on_slot(
+        last_block
+            .message()
+            .slot()
+            .saturating_add(2_u64.saturating_mul(P::SlotsPerEpoch::U64)),
+    );
+
     controller.wait_for_tasks();
 
     for block in blocks {

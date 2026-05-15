@@ -2,7 +2,7 @@
 
 use core::{
     num::{NonZeroU64, TryFromIntError},
-    ops::{Add, AddAssign, Neg as _},
+    ops::Neg as _,
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -140,7 +140,6 @@ pub struct RealSlotReport {
     pub deposits: HashMap<ValidatorIndex, GweiVec>,
     pub sync_committee_deltas: BTreeMap<ValidatorIndex, Delta>,
     pub sync_aggregate_rewards: Option<SyncAggregateRewards>,
-
     pub sources: HashMap<Assignment, H256>,
     pub targets: HashMap<Assignment, AttestationOutcome>,
     pub heads: HashMap<Assignment, AttestationOutcome>,
@@ -185,7 +184,7 @@ impl SlotReport for RealSlotReport {
     fn set_sync_committee_delta(&mut self, participant_index: ValidatorIndex, delta: Delta) {
         self.sync_committee_deltas
             .entry(participant_index)
-            .and_modify(|existing| *existing += delta)
+            .and_modify(|existing| *existing = existing.saturating_add(delta))
             .or_insert(delta);
     }
 
@@ -212,7 +211,7 @@ impl SlotReport for RealSlotReport {
         let target_outcome = AttestationOutcome::compare(actual_target, expected_target);
         let head_outcome = AttestationOutcome::compare(actual_head, expected_head);
 
-        let inclusion_delay = (state.slot() - data.slot)
+        let inclusion_delay = (state.slot().saturating_sub(data.slot))
             .try_into()
             .expect("MIN_ATTESTATION_INCLUSION_DELAY is at least 1 in all presets");
 
@@ -277,12 +276,9 @@ impl Delta {
             Self::Penalty(penalty) => Some(penalty),
         }
     }
-}
 
-impl Add for Delta {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self {
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
         match (self, other) {
             (Self::Penalty(penalty), Self::Penalty(other)) => {
                 Self::Penalty(penalty.saturating_add(other))
@@ -290,21 +286,15 @@ impl Add for Delta {
             (Self::Penalty(penalty), Self::Reward(reward))
             | (Self::Reward(reward), Self::Penalty(penalty)) => {
                 if penalty > reward {
-                    Self::Penalty(penalty - reward)
+                    Self::Penalty(penalty.saturating_sub(reward))
                 } else {
-                    Self::Reward(reward - penalty)
+                    Self::Reward(reward.saturating_sub(penalty))
                 }
             }
             (Self::Reward(reward), Self::Reward(other)) => {
                 Self::Reward(reward.saturating_add(other))
             }
         }
-    }
-}
-
-impl AddAssign for Delta {
-    fn add_assign(&mut self, other: Self) {
-        *self = *self + other;
     }
 }
 
@@ -319,7 +309,7 @@ impl SyncAggregateRewards {
     #[inline]
     #[must_use]
     pub const fn total(self) -> Gwei {
-        self.singular_reward * self.participation
+        self.singular_reward.saturating_mul(self.participation)
     }
 }
 
@@ -338,6 +328,6 @@ mod tests {
     #[test_case(Delta::Reward(2), Delta::Penalty(2) => Delta::Reward(0))]
     #[test_case(Delta::Reward(Gwei::MAX), Delta::Reward(2) => Delta::Reward(Gwei::MAX))]
     fn test_addition_of_deltas(first: Delta, second: Delta) -> Delta {
-        first + second
+        first.saturating_add(second)
     }
 }

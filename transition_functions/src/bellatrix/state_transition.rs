@@ -217,5 +217,5 @@ pub fn verify_signatures<P: Preset>(
 }
 
 fn count_required_signatures(block: &SignedBeaconBlock<impl Preset>) -> usize {
-    1 + altair::count_required_signatures(&block.message)
+    altair::count_required_signatures(&block.message).saturating_add(1)
 }

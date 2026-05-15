@@ -225,8 +225,8 @@ impl ValidatorStatistics {
             .unwrap_or_default();
 
         tokio::task::block_in_place(|| {
-            let mut expected = 0;
-            let mut included = 0;
+            let mut expected: usize = 0;
+            let mut included: usize = 0;
             let mut inclusion_delays = InclusionDelays::default();
 
             let snapshot = controller.snapshot();
@@ -257,7 +257,7 @@ impl ValidatorStatistics {
 
             for validator_index in registered_validators {
                 if epoch_before_previous_assignments.contains_key(validator_index) {
-                    expected += 1;
+                    expected = expected.saturating_add(1);
 
                     let performance = AttestationPerformance::for_previous_epoch(
                         *validator_index,
@@ -266,7 +266,7 @@ impl ValidatorStatistics {
                     );
 
                     if let Some(inclusion_delay) = performance.inclusion_delay {
-                        included += 1;
+                        included = included.saturating_add(1);
                         inclusion_delays.insert(inclusion_delay);
                     } else {
                         trace_with_peers!(
@@ -284,7 +284,7 @@ impl ValidatorStatistics {
                 included: {included} ({}), inclusion delays: {inclusion_delays}",
                 Rate::new(correct_target as u64, total_votes as u64),
                 Rate::new(correct_head as u64, total_votes as u64),
-                Rate::new(included, total_votes as u64),
+                Rate::new(included as u64, total_votes as u64),
             );
 
             votes::report_attestation_votes(vote_summaries);
@@ -319,8 +319,8 @@ impl ValidatorStatistics {
                 return Ok(());
             }
 
-            let mut expected = 0;
-            let mut included = 0;
+            let mut expected: usize = 0;
+            let mut included: usize = 0;
 
             let mut sync_committee_assignments =
                 sync_committees::current_epoch_sync_committee_assignments(&state);
@@ -381,7 +381,12 @@ impl ValidatorStatistics {
                 let sync_committee_assignment = sync_committee_assignments.remove(validator_index);
 
                 if let Some(assignment) = sync_committee_assignment.as_ref() {
-                    expected += assignment.positions.len() * P::SlotsPerEpoch::USIZE;
+                    expected = expected.saturating_add(
+                        assignment
+                            .positions
+                            .len()
+                            .saturating_mul(P::SlotsPerEpoch::USIZE),
+                    );
                 }
 
                 let sync_committee_performance = sync_committees::sync_committee_performance(
@@ -390,11 +395,8 @@ impl ValidatorStatistics {
                 );
 
                 for (_, performance) in sync_committee_performance {
-                    included += performance
-                        .positions
-                        .values()
-                        .filter(|value| **value)
-                        .count();
+                    included = included
+                        .saturating_add(performance.positions.values().filter(|v| **v).count());
                 }
             }
 
@@ -472,12 +474,15 @@ struct Rate {
 
 impl Rate {
     fn new(count: u64, total: u64) -> Self {
-        if total == 0 {
-            return Self::default();
-        }
-
         // Scale to preserve 1 decimal place: e.g., 95.6% becomes 956
-        let scaled = (count * 1000 + total / 2) / total;
+        let Some(scaled) = count
+            .saturating_mul(1000)
+            .saturating_add(total / 2)
+            .checked_div(total)
+        else {
+            return Self::default();
+        };
+
         let whole = scaled / 10;
         let decimal = scaled % 10;
 

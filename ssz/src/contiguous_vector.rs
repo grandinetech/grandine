@@ -72,8 +72,10 @@ impl<T, N: ArrayLength<T>> TryFromIterator<T> for ContiguousVector<T, N> {
     fn try_from_iter(elements: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
         let expected = N::USIZE;
 
-        let mut actual = 0;
-        let mut counting_iterator = elements.into_iter().inspect(|_| actual += 1);
+        let mut actual: usize = 0;
+        let mut counting_iterator = elements
+            .into_iter()
+            .inspect(|_| actual = actual.saturating_add(1));
 
         let Some(elements) = GenericArray::from_exact_iter(counting_iterator.by_ref()) else {
             counting_iterator.count();

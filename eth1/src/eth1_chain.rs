@@ -121,8 +121,10 @@ impl Eth1Chain {
         let mut last_streamed_block_number = deposit_tree.last_added_block_number;
 
         let batches = futures::stream::repeat_with(move || -> Result<_> {
-            let blocks =
-                cache.get_blocks_from(last_streamed_block_number + 1, STREAM_BATCH_SIZE)?;
+            let blocks = cache.get_blocks_from(
+                last_streamed_block_number.saturating_add(1),
+                STREAM_BATCH_SIZE,
+            )?;
 
             if let Some(last_block) = blocks.last() {
                 last_streamed_block_number = last_block.number;

@@ -133,10 +133,10 @@ fn append_to_graffiti(graffiti: &mut H256, data: &str) -> bool {
 
         if first_trailing_position != 0 {
             graffiti[first_trailing_position..=first_trailing_position].copy_from_slice(b" ");
-            first_trailing_position += 1;
+            first_trailing_position = first_trailing_position.saturating_add(1);
         }
 
-        graffiti[first_trailing_position..first_trailing_position + data.len()]
+        graffiti[first_trailing_position..first_trailing_position.saturating_add(data.len())]
             .copy_from_slice(data.as_bytes());
 
         return true;

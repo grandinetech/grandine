@@ -201,7 +201,7 @@ pub fn process_eth1_data<P: Preset>(
         .filter(|vote| **vote == body.eth1_data())
         .count();
 
-    if vote_count * 2 > SlotsPerEth1VotingPeriod::<P>::USIZE {
+    if vote_count.saturating_mul(2) > SlotsPerEth1VotingPeriod::<P>::USIZE {
         *state.eth1_data_mut() = body.eth1_data();
     }
 
@@ -387,8 +387,12 @@ pub fn validate_attestation_with_verifier<P: Preset>(
         },
     );
 
-    let low_slot = attestation.data.slot + P::MIN_ATTESTATION_INCLUSION_DELAY.get();
-    let high_slot = attestation.data.slot + P::SlotsPerEpoch::U64;
+    let low_slot = attestation
+        .data
+        .slot
+        .saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get());
+
+    let high_slot = attestation.data.slot.saturating_add(P::SlotsPerEpoch::U64);
 
     ensure!(
         (low_slot..=high_slot).contains(&state.slot()),
@@ -479,7 +483,7 @@ pub fn validate_deposits<P: Preset>(
                 // > Verify the Merkle branch
                 verify_deposit_merkle_branch(
                     state,
-                    state.eth1_deposit_index() + position,
+                    state.eth1_deposit_index().saturating_add(position),
                     deposit,
                 )?;
             }
@@ -665,7 +669,10 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
 
     // > Verify the validator has been active long enough
     ensure!(
-        current_epoch >= validator.activation_epoch + config.shard_committee_period,
+        current_epoch
+            >= validator
+                .activation_epoch
+                .saturating_add(config.shard_committee_period),
         Error::<P>::ValidatorHasNotBeenActiveLongEnough {
             index,
             activation_epoch: validator.activation_epoch,

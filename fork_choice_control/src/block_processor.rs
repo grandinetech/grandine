@@ -25,7 +25,7 @@ use types::{
     combined::{BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::{BlockRewards, Phase, SlashingKind},
-    phase0::primitives::H256,
+    phase0::primitives::{Gwei, H256},
     preset::Preset,
     traits::{BeaconBlock as _, SignedBeaconBlock as _},
 };
@@ -272,7 +272,7 @@ impl<P: Preset> BlockProcessor<P> {
 }
 
 fn calculate_block_rewards(slot_report: &RealSlotReport) -> BlockRewards {
-    let attestations = slot_report.attestation_rewards.iter().sum();
+    let attestations: Gwei = slot_report.attestation_rewards.iter().sum();
 
     let sync_aggregate = slot_report
         .sync_aggregate_rewards
@@ -288,7 +288,10 @@ fn calculate_block_rewards(slot_report: &RealSlotReport) -> BlockRewards {
         .sum();
 
     BlockRewards {
-        total: attestations + sync_aggregate + proposer_slashings + attester_slashings,
+        total: attestations
+            .saturating_add(sync_aggregate)
+            .saturating_add(proposer_slashings)
+            .saturating_add(attester_slashings),
         attestations,
         sync_aggregate,
         proposer_slashings,

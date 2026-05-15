@@ -220,8 +220,12 @@ pub fn process_operations<P: Preset, V: Verifier>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Verify that outstanding deposits are processed up to the maximum number of deposits
-    let computed =
-        P::MaxDeposits::U64.min(state.eth1_data().deposit_count - state.eth1_deposit_index());
+    let computed = P::MaxDeposits::U64.min(
+        state
+            .eth1_data()
+            .deposit_count
+            .saturating_sub(state.eth1_deposit_index()),
+    );
     let in_block = body.deposits().len().try_into()?;
 
     ensure!(

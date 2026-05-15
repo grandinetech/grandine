@@ -15,7 +15,7 @@
 //           0000 0001 0010 0011 0100 0101 0110 0111 1000 1001 1010 1011 1100 1101 1110 1111
 // ```
 
-use core::ops::{Add, Range};
+use core::ops::Range;
 
 use bit_field::BitField as _;
 use byteorder::LittleEndian;
@@ -187,7 +187,7 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
             // `min_index` is always the index of a left node. It refers to an element of
             // `self.sibling_hashes` when `chunk_indices.start.get_bit(height)` is `true`.
             let min_index = chunk_indices.start >> height & !1;
-            let max_index = (chunk_indices.end - 1) >> height;
+            let max_index = chunk_indices.end.saturating_sub(1) >> height;
             (min_index, max_index)
         };
 
@@ -196,7 +196,7 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
         let cutoff_height = chunk_indices
             .end
             .ilog2()
-            .add(1)
+            .saturating_add(1)
             .min(D::U32)
             .try_into()
             .expect("number of bits in usize should fit in usize");
@@ -205,7 +205,7 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
 
         for height in 0..cutoff_height {
             let (min_index, max_index) = indices_at_height(height);
-            let node_count = max_index - min_index + 1;
+            let node_count = max_index.saturating_sub(min_index).saturating_add(1);
 
             let mut nodes_at_height = Vec::with_capacity(node_count);
 
@@ -216,9 +216,16 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
             if height == 0 {
                 nodes_at_height.extend(chunks.by_ref());
             } else {
-                let right_subtree_empty = !(chunk_indices.end - 1).get_bit(height - 1);
-                let padding = right_subtree_empty.then_some(ZERO_HASHES[height - 1]);
-                let lower = nodes[height - 1].iter().copied().chain(padding);
+                let right_subtree_empty = !chunk_indices
+                    .end
+                    .saturating_sub(1)
+                    .get_bit(height.saturating_sub(1));
+
+                let padding = right_subtree_empty.then_some(ZERO_HASHES[height.saturating_sub(1)]);
+                let lower = nodes[height.saturating_sub(1)]
+                    .iter()
+                    .copied()
+                    .chain(padding);
 
                 nodes_at_height.extend(
                     lower
@@ -255,7 +262,9 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
             if siblings_to_update.get_bit(height) {
                 let (min_index, max_index) = indices_at_height(height);
                 let last_new_sibling_at_height = max_index & !1;
-                self.sibling_hashes[height] = nodes[height][last_new_sibling_at_height - min_index];
+
+                self.sibling_hashes[height] =
+                    nodes[height][last_new_sibling_at_height.saturating_sub(min_index)];
             }
         }
 
@@ -272,7 +281,7 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
                 let proof_node_index = proven_node_index ^ 1;
 
                 proof[height] = nodes[height]
-                    .get(proof_node_index - min_index)
+                    .get(proof_node_index.saturating_sub(min_index))
                     .copied()
                     .unwrap_or(ZERO_HASHES[height]);
             }
@@ -309,7 +318,8 @@ fn hash_of_length(length: usize) -> H256 {
 // - <https://oeis.org/A007814>
 // - <https://mathworld.wolfram.com/BinaryCarrySequence.html>
 fn binary_carry_sequence(index: usize) -> usize {
-    (index + 1)
+    index
+        .saturating_add(1)
         .trailing_zeros()
         .try_into()
         .expect("number of bits in usize should fit in usize")

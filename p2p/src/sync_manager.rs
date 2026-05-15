@@ -3,7 +3,14 @@
     reason = "https://github.com/rust-lang/rust-clippy/issues/13040"
 )]
 
-use core::{fmt::Display, hash::Hash, num::NonZeroUsize, ops::Range, time::Duration};
+use core::{
+    fmt::Display,
+    hash::Hash,
+    num::{NonZeroU64, NonZeroUsize},
+    ops::Range,
+    time::Duration,
+};
+
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -19,6 +26,7 @@ use helper_functions::misc;
 use itertools::Itertools as _;
 use log::{Level, log};
 use lru::LruCache;
+use nonzero_ext::nonzero;
 use prometheus_metrics::Metrics;
 use rand::{prelude::SliceRandom, seq::IteratorRandom as _, thread_rng};
 use scc::HashMap as SccHashMap;
@@ -60,12 +68,13 @@ impl From<&StatusMessage> for ChainId {
 }
 
 const BATCHES_PER_PEER: usize = 1;
-const EPOCHS_PER_REQUEST: u64 = if cfg!(test) {
-    2
+const EPOCHS_PER_REQUEST: NonZeroU64 = if cfg!(test) {
+    nonzero!(2_u64)
 } else {
     // max 32
-    1
+    nonzero!(1_u64)
 };
+
 const MAX_SYNC_DISTANCE_IN_SLOTS: u64 = 10000;
 const NOT_ENOUGH_PEERS_MESSAGE_COOLDOWN: Duration = Duration::from_secs(10);
 const PEER_UPDATE_COOLDOWN: Duration = Duration::from_secs(12);
@@ -250,7 +259,7 @@ impl<P: Preset> SyncManager<P> {
                         peer_id,
                         start_slot: batch.start_slot,
                         count: batch.count,
-                        retry_count: batch.retry_count + 1,
+                        retry_count: batch.retry_count.saturating_add(1),
                         response_received: false,
                         data_columns: batch.data_columns,
                         is_delayed: false,
@@ -311,12 +320,12 @@ impl<P: Preset> SyncManager<P> {
             let should_batch_blobs = current_back_sync_slot > data_availability_serve_range_slot;
 
             let count = if should_batch_blobs {
-                P::SlotsPerEpoch::non_zero().get()
+                P::SlotsPerEpoch::non_zero()
             } else {
-                P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST
+                P::SlotsPerEpoch::non_zero().saturating_mul(EPOCHS_PER_REQUEST)
             };
 
-            let mut start_slot = current_back_sync_slot.saturating_sub(count);
+            let mut start_slot = current_back_sync_slot.saturating_sub(count.get());
             let mut count = current_back_sync_slot.saturating_sub(start_slot);
 
             if count == 0 {
@@ -324,12 +333,16 @@ impl<P: Preset> SyncManager<P> {
             }
 
             if let Some(earliest_slot) = self.peer_earliest_available_slot(peer) {
-                if earliest_slot > start_slot + count {
+                if earliest_slot > start_slot.saturating_add(count) {
                     continue;
                 }
 
-                if earliest_slot > start_slot && earliest_slot < start_slot + count {
-                    count = (start_slot + count).checked_sub(earliest_slot).unwrap_or(1);
+                if earliest_slot > start_slot && earliest_slot < start_slot.saturating_add(count) {
+                    count = start_slot
+                        .saturating_add(count)
+                        .checked_sub(earliest_slot)
+                        .unwrap_or(1);
+
                     start_slot = earliest_slot;
                 }
             }
@@ -339,7 +352,7 @@ impl<P: Preset> SyncManager<P> {
                     Some(next_peer) => {
                         if sync_mode.is_default() {
                             // test if there is enough space for both blobs and blocks batches
-                            if sync_batches.len() + 2 > max_sync_batches {
+                            if sync_batches.len().saturating_add(2) > max_sync_batches {
                                 break;
                             }
                         } else if sync_batches.len() > max_sync_batches {
@@ -350,7 +363,8 @@ impl<P: Preset> SyncManager<P> {
                         let mut count = count;
 
                         if start_slot < data_availability_serve_range_slot {
-                            count = (start_slot + count)
+                            count = start_slot
+                                .saturating_add(count)
                                 .checked_sub(data_availability_serve_range_slot)
                                 .unwrap_or(1);
 
@@ -358,13 +372,17 @@ impl<P: Preset> SyncManager<P> {
                         }
 
                         if let Some(earliest_slot) = self.peer_earliest_available_slot(next_peer) {
-                            if earliest_slot > start_slot + count {
+                            if earliest_slot > start_slot.saturating_add(count) {
                                 continue;
                             }
 
-                            if earliest_slot > start_slot && earliest_slot < start_slot + count {
-                                count =
-                                    (start_slot + count).checked_sub(earliest_slot).unwrap_or(1);
+                            if earliest_slot > start_slot
+                                && earliest_slot < start_slot.saturating_add(count)
+                            {
+                                count = start_slot
+                                    .saturating_add(count)
+                                    .checked_sub(earliest_slot)
+                                    .unwrap_or(1);
 
                                 start_slot = earliest_slot;
                             }
@@ -396,7 +414,7 @@ impl<P: Preset> SyncManager<P> {
                                         "requesting columns ({}): [{}] for slots: {start_slot}..{}",
                                         missing_column_indices.len(),
                                         missing_column_indices.iter().join(", "),
-                                        start_slot + count,
+                                        start_slot.saturating_add(count),
                                     ),
                                 );
 
@@ -535,7 +553,8 @@ impl<P: Preset> SyncManager<P> {
             return vec![];
         }
 
-        let slots_per_request = P::SlotsPerEpoch::non_zero().get() * EPOCHS_PER_REQUEST;
+        let slots_per_request = P::SlotsPerEpoch::non_zero().saturating_mul(EPOCHS_PER_REQUEST);
+
         let mut redownloads_increased = false;
 
         if self.sync_from_finalized
@@ -546,28 +565,30 @@ impl<P: Preset> SyncManager<P> {
 
         let sync_start_slot = {
             if self.sync_from_finalized {
-                core::cmp::max(self.last_sync_range.end, local_finalized_slot) + 1
+                core::cmp::max(self.last_sync_range.end, local_finalized_slot).saturating_add(1)
             } else if local_head_slot <= self.last_sync_head {
                 self.log(Level::Debug, "local head not progressing");
-                self.sequential_redownloads += 1;
+                self.sequential_redownloads = self.sequential_redownloads.saturating_add(1);
                 redownloads_increased = true;
 
                 if self.sequential_redownloads >= SEQUENTIAL_REDOWNLOADS_TILL_RESET {
                     // Redownload failed `SEQUENTIAL_REDOWNLOADS_TILL_RESET` times, time to redownload blocks from last finalized slot
                     self.sequential_redownloads = 0;
                     self.sync_from_finalized = true;
-                    local_finalized_slot + 1
+                    local_finalized_slot.saturating_add(1)
                 } else if self.sequential_redownloads > SEQUENTIAL_REDOWNLOADS_TILL_RESET / 2 {
                     // If head slot has not changed more than `SEQUENTIAL_REDOWNLOADS_TILL_RESET / 2` times,
                     // re-download everything from local head slot minus backtrack distance
-                    local_head_slot.saturating_sub(P::SlotsPerEpoch::U64) + 1
+                    local_head_slot
+                        .saturating_sub(P::SlotsPerEpoch::U64)
+                        .saturating_add(1)
                 } else {
-                    local_head_slot + 1
+                    local_head_slot.saturating_add(1)
                 }
             } else {
                 // Resume download from last sync batch end slot
                 self.sequential_redownloads = 0;
-                core::cmp::max(self.last_sync_range.end, local_head_slot) + 1
+                core::cmp::max(self.last_sync_range.end, local_head_slot).saturating_add(1)
             }
         };
 
@@ -595,7 +616,7 @@ impl<P: Preset> SyncManager<P> {
 
         self.last_sync_head = local_head_slot;
 
-        if sync_start_slot >= local_head_slot + MAX_SYNC_DISTANCE_IN_SLOTS {
+        if sync_start_slot >= local_head_slot.saturating_add(MAX_SYNC_DISTANCE_IN_SLOTS) {
             return vec![];
         }
 
@@ -616,9 +637,11 @@ impl<P: Preset> SyncManager<P> {
         }
 
         let slot_distance = remote_head_slot.saturating_sub(sync_start_slot);
-        let batches_in_front = slot_distance / slots_per_request + 1;
+        let batches_in_front = (slot_distance / slots_per_request).saturating_add(1);
+
         let blob_serve_range_slot =
             misc::blob_serve_range_slot::<P>(config, current_slot, self.storage_mode);
+
         let data_column_serve_range_slot =
             misc::data_column_serve_range_slot::<P>(config, current_slot, self.storage_mode);
 
@@ -633,7 +656,8 @@ impl<P: Preset> SyncManager<P> {
                     break 'outer;
                 }
 
-                let start_slot = sync_start_slot + slots_per_request * batch_index;
+                let start_slot = sync_start_slot
+                    .saturating_add(slots_per_request.get().saturating_mul(batch_index));
 
                 if let Some(earliest_slot) = self.peer_earliest_available_slot(&block_peer_id)
                     && earliest_slot > start_slot
@@ -649,10 +673,13 @@ impl<P: Preset> SyncManager<P> {
                     continue 'outer;
                 }
 
-                let count = remote_head_slot.saturating_sub(start_slot) + 1;
-                let count = count.min(slots_per_request);
+                let count = remote_head_slot
+                    .saturating_sub(start_slot)
+                    .saturating_add(1);
 
-                max_slot = start_slot + count - 1;
+                let count = count.min(slots_per_request.get());
+
+                max_slot = start_slot.saturating_add(count).saturating_sub(1);
 
                 let block_batch = SyncBatch {
                     target: SyncTarget::Block,
@@ -683,7 +710,7 @@ impl<P: Preset> SyncManager<P> {
                         );
 
                         sync_batches.push(block_batch);
-                        batch_index += 1;
+                        batch_index = batch_index.saturating_add(1);
                         continue;
                     }
 
@@ -701,7 +728,7 @@ impl<P: Preset> SyncManager<P> {
 
                             // if no available peers to request for this batch, rollback the
                             // `max_slot` to set the actual sync range.
-                            max_slot = start_slot - 1;
+                            max_slot = start_slot.saturating_sub(1);
 
                             break 'outer;
                         }
@@ -746,7 +773,7 @@ impl<P: Preset> SyncManager<P> {
                 }
 
                 sync_batches.push(block_batch);
-                batch_index += 1;
+                batch_index = batch_index.saturating_add(1);
             }
         }
 
@@ -807,7 +834,7 @@ impl<P: Preset> SyncManager<P> {
                 range: {:?}, retries: {})",
                 app_request_id,
                 batch.peer_id,
-                (batch.start_slot..(batch.start_slot + batch.count)),
+                (batch.start_slot..batch.start_slot.saturating_add(batch.count)),
                 batch.retry_count,
             ),
         );
@@ -843,7 +870,7 @@ impl<P: Preset> SyncManager<P> {
                 range: {:?}, retries: {})",
                 app_request_id,
                 batch.peer_id,
-                (batch.start_slot..(batch.start_slot + batch.count)),
+                (batch.start_slot..batch.start_slot.saturating_add(batch.count)),
                 batch.retry_count,
             ),
         );
@@ -875,7 +902,7 @@ impl<P: Preset> SyncManager<P> {
                 retries: {}, columns: {:?})",
                 app_request_id,
                 batch.peer_id,
-                (batch.start_slot..(batch.start_slot + batch.count)),
+                (batch.start_slot..batch.start_slot.saturating_add(batch.count)),
                 batch.retry_count,
                 batch.data_columns.as_ref().map(AsRef::as_ref),
             ),
@@ -991,8 +1018,9 @@ impl<P: Preset> SyncManager<P> {
             );
 
             if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
-                if misc::compute_epoch_at_slot::<P>(sync_batch.start_slot + sync_batch.count)
-                    < controller.min_checked_block_availability_epoch()
+                if misc::compute_epoch_at_slot::<P>(
+                    sync_batch.start_slot.saturating_add(sync_batch.count),
+                ) < controller.min_checked_block_availability_epoch()
                 {
                     self.add_peer_to_back_sync_black_list(peer_id);
                 }
@@ -1030,7 +1058,7 @@ impl<P: Preset> SyncManager<P> {
             if request_direction == Some(SyncDirection::Back) && !sync_batch.response_received {
                 // Retry no more than 3 times, remove the peer
                 if sync_batch.retry_count < 3 {
-                    sync_batch.retry_count += 1;
+                    sync_batch.retry_count = sync_batch.retry_count.saturating_add(1);
                     let peer_id = sync_batch.peer_id;
                     self.retry_batch(app_request_id, sync_batch, Some(peer_id));
                 } else {
@@ -1205,7 +1233,8 @@ impl<P: Preset> SyncManager<P> {
 
         self.received_data_column_sidecars
             .iter_async(|identifier, slot| {
-                if *slot > local_head_slot && *slot < local_head_slot + max_slot_ahead {
+                if *slot > local_head_slot && *slot < local_head_slot.saturating_add(max_slot_ahead)
+                {
                     let DataColumnIdentifier { block_root, index } = *identifier;
 
                     received
@@ -1671,7 +1700,7 @@ mod tests {
         let current_slot = 20_001;
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
-        let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
+        let slots_per_request = EPOCHS_PER_REQUEST.get() * <Mainnet as Preset>::SlotsPerEpoch::U64;
         let sampling_columns = HashSet::new();
 
         let peer_status = StatusMessage::V1(StatusMessageV1 {
@@ -1723,7 +1752,7 @@ mod tests {
         let current_slot = 20_001;
         let local_head_slot = 3000;
         let local_finalized_slot = 1000;
-        let slots_per_request = EPOCHS_PER_REQUEST * <Mainnet as Preset>::SlotsPerEpoch::U64;
+        let slots_per_request = EPOCHS_PER_REQUEST.get() * <Mainnet as Preset>::SlotsPerEpoch::U64;
         let sampling_columns = HashSet::new();
 
         let peer_status = StatusMessage::V1(StatusMessageV1 {

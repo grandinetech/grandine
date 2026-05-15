@@ -80,7 +80,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
                 self.pool.clear_best_proposable_attestations().await;
             }
             TickKind::AggregateFourth => {
-                let next_slot = slot + 1;
+                let next_slot = slot.saturating_add(1);
 
                 if Feature::AlwaysPrepackAttestations.is_enabled()
                     || self

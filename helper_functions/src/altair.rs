@@ -35,9 +35,10 @@ pub fn slash_validator<P: Preset>(
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch
-        .max(epoch + P::EpochsPerSlashingsVector::U64);
+        .max(epoch.saturating_add(P::EpochsPerSlashingsVector::U64));
 
-    *state.slashings.mod_index_mut(epoch) += effective_balance;
+    let s = state.slashings.mod_index_mut(epoch);
+    *s = s.saturating_add(effective_balance);
 
     decrease_balance(balance(state, slashed_index)?, slashing_penalty);
 
@@ -45,8 +46,10 @@ pub fn slash_validator<P: Preset>(
     let proposer_index = get_beacon_proposer_index(config, state)?;
     let whistleblower_index = whistleblower_index.unwrap_or(proposer_index);
     let whistleblower_reward = effective_balance / P::WHISTLEBLOWER_REWARD_QUOTIENT;
-    let proposer_reward = whistleblower_reward * PROPOSER_WEIGHT / WEIGHT_DENOMINATOR;
-    let remaining_reward = whistleblower_reward - proposer_reward;
+    let proposer_reward =
+        whistleblower_reward.saturating_mul(PROPOSER_WEIGHT.get()) / WEIGHT_DENOMINATOR;
+
+    let remaining_reward = whistleblower_reward.saturating_sub(proposer_reward);
 
     increase_balance(balance(state, proposer_index)?, proposer_reward);
     increase_balance(balance(state, whistleblower_index)?, remaining_reward);

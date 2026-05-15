@@ -14,7 +14,7 @@ impl Size {
 
         while index < sizes.len() {
             size = size.untagged_union(sizes[index]);
-            index += 1;
+            index = index.saturating_add(1);
         }
 
         size
@@ -29,7 +29,7 @@ impl Size {
     pub const fn fixed_part(self) -> usize {
         match self {
             Self::Fixed { size } => size,
-            Self::Variable { .. } => BYTES_PER_LENGTH_OFFSET,
+            Self::Variable { .. } => BYTES_PER_LENGTH_OFFSET.get(),
         }
     }
 
@@ -40,11 +40,11 @@ impl Size {
     pub const fn add(self, other: Self) -> Self {
         match (self, other) {
             (Self::Fixed { size: self_size }, Self::Fixed { size: other_size }) => Self::Fixed {
-                size: self_size + other_size,
+                size: self_size.saturating_add(other_size),
             },
             (Self::Fixed { size }, Self::Variable { minimum_size })
             | (Self::Variable { minimum_size }, Self::Fixed { size }) => Self::Variable {
-                minimum_size: size + minimum_size,
+                minimum_size: size.saturating_add(minimum_size),
             },
             (
                 Self::Variable {
@@ -54,7 +54,7 @@ impl Size {
                     minimum_size: other_minimum_size,
                 },
             ) => Self::Variable {
-                minimum_size: self_minimum_size + other_minimum_size,
+                minimum_size: self_minimum_size.saturating_add(other_minimum_size),
             },
         }
     }
@@ -66,10 +66,10 @@ impl Size {
     pub const fn mul(self, scalar: usize) -> Self {
         match self {
             Self::Fixed { size } => Self::Fixed {
-                size: scalar * size,
+                size: scalar.saturating_mul(size),
             },
             Self::Variable { minimum_size } => Self::Variable {
-                minimum_size: scalar * minimum_size,
+                minimum_size: scalar.saturating_mul(minimum_size),
             },
         }
     }

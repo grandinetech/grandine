@@ -127,7 +127,10 @@ pub fn beacon_blocks<P: Preset>(
 ) -> Vec<Arc<SignedBeaconBlock<P>>> {
     let pattern = format!("beacon_block_slot_{:?<width$}_*", "");
     let low = format!("beacon_block_slot_{:0width$}_*", slots.start());
-    let high = format!("beacon_block_slot_{:0width$}_*", slots.end() + 1);
+    let high = format!(
+        "beacon_block_slot_{:0width$}_*",
+        slots.end().saturating_add(1)
+    );
 
     let blocks = case
         .glob(pattern)
@@ -155,7 +158,10 @@ pub fn blob_sidecars<P: Preset>(
 ) -> BTreeMap<Slot, Vec<Arc<BlobSidecar<P>>>> {
     let pattern = format!("blob_sidecar_slot_{:?<width$}_*", "");
     let low = format!("blob_sidecar_slot_{:0width$}_*", slots.start());
-    let high = format!("blob_sidecar_slot_{:0width$}_*", slots.end() + 1);
+    let high = format!(
+        "blob_sidecar_slot_{:0width$}_*",
+        slots.end().saturating_add(1)
+    );
 
     let blobs = case
         .glob(pattern)

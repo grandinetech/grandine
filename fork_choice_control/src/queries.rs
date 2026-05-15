@@ -311,7 +311,9 @@ where
     pub fn is_last_slot_of_epoch(&self) -> bool {
         let store = self.store_snapshot();
 
-        store.slot() == misc::compute_start_slot_at_epoch::<P>(store.current_epoch() + 1) - 1
+        store.slot()
+            == misc::compute_start_slot_at_epoch::<P>(store.current_epoch().saturating_add(1))
+                .saturating_sub(1)
     }
 
     #[must_use]
@@ -347,11 +349,12 @@ where
 
         let store_epoch = store.current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
-        let max_allowed_epoch = store_epoch + P::MinSeedLookahead::U64;
+        let max_allowed_epoch = store_epoch.saturating_add(P::MinSeedLookahead::U64);
 
         // If it is the last slot of an epoch,
         // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
-        if !(requested_epoch == max_allowed_epoch + 1 && self.is_last_slot_of_epoch()) {
+        if !(requested_epoch == max_allowed_epoch.saturating_add(1) && self.is_last_slot_of_epoch())
+        {
             ensure!(
                 requested_epoch <= max_allowed_epoch,
                 Error::EpochTooFarInTheFuture {
@@ -668,7 +671,7 @@ where
                 &pubkey_cache,
                 &store,
                 store.head().block_root,
-                store.slot() + 1,
+                store.slot().saturating_add(1),
             )
         })
         .await?
@@ -690,7 +693,7 @@ where
             self.pubkey_cache(),
             &store,
             head.block_root,
-            store.slot() + 1,
+            store.slot().saturating_add(1),
         )
     }
 
@@ -759,11 +762,12 @@ where
     ) -> Result<WithStatus<Arc<BeaconState<P>>>> {
         let store = self.store_snapshot();
         let store_epoch = store.current_epoch();
-        let max_allowed_epoch = store_epoch + P::MinSeedLookahead::U64;
+        let max_allowed_epoch = store_epoch.saturating_add(P::MinSeedLookahead::U64);
 
         // If it is the last slot of an epoch,
         // state at this slot can be used to precompute states for next + P::MIN_SEED_LOOKAHEAD epoch
-        if !(requested_epoch == max_allowed_epoch + 1 && self.is_last_slot_of_epoch()) {
+        if !(requested_epoch == max_allowed_epoch.saturating_add(1) && self.is_last_slot_of_epoch())
+        {
             ensure!(
                 requested_epoch <= max_allowed_epoch,
                 Error::EpochTooFarInTheFuture {
@@ -994,7 +998,10 @@ where
         let in_database = self.storage().finalized_block_count()?;
         let overlap = usize::from(in_database > 0);
         let in_memory = self.store_snapshot().finalized().len();
-        Ok(in_database - overlap + in_memory)
+
+        Ok(in_database
+            .saturating_sub(overlap)
+            .saturating_add(in_memory))
     }
 
     #[must_use]
