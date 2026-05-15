@@ -416,6 +416,7 @@ pub struct CPayloadAttributesV4 {
     withdrawals: CVec<CWithdrawalV1>,
     parent_beacon_block_root: CH256,
     slot_number: u64,
+    target_gas_limit: u64,
 }
 
 impl From<PayloadAttributesV4<Mainnet>> for CPayloadAttributesV4 {
@@ -427,6 +428,7 @@ impl From<PayloadAttributesV4<Mainnet>> for CPayloadAttributesV4 {
             withdrawals: value.withdrawals.into_iter().map(Into::into).collect(),
             parent_beacon_block_root: value.parent_beacon_block_root.into(),
             slot_number: value.slot_number,
+            target_gas_limit: value.target_gas_limit,
         }
     }
 }
