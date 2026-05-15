@@ -883,7 +883,7 @@ where
     }
 
     pub fn proposer_dependent_root(&self, state: &BeaconState<P>, epoch: Epoch) -> Result<H256> {
-        self.dependent_root(state, epoch.saturating_sub(1))
+        self.dependent_root(state, epoch.saturating_sub(P::MinSeedLookahead::U64))
     }
 
     #[instrument(skip_all, level = "debug", fields(slot = slot))]
