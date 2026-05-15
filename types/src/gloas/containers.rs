@@ -217,7 +217,7 @@ pub struct ProposerPreferences {
     pub validator_index: ValidatorIndex,
     pub fee_recipient: ExecutionAddress,
     #[serde(with = "serde_utils::string_or_native")]
-    pub gas_limit: Gas,
+    pub target_gas_limit: Gas,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Hash, Serialize, Ssz)]

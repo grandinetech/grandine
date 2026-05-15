@@ -2738,7 +2738,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
 
                     let fee_recipient = proposer_configs.fee_recipient(pubkey).ok()?;
-                    let gas_limit = proposer_configs.gas_limit(pubkey).ok()?;
+                    let target_gas_limit = proposer_configs.gas_limit(pubkey).ok()?;
                     let beacon_state = beacon_state.clone_arc();
                     let controller = controller.clone_arc();
 
@@ -2753,7 +2753,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     proposal_slot,
                                     validator_index,
                                     fee_recipient,
-                                    gas_limit,
+                                    target_gas_limit,
                                 },
                             )),
                             Err(error) => {

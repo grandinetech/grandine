@@ -848,6 +848,7 @@ pub fn upgrade_to_gloas<P: Preset>(
 
     let latest_execution_payload_bid = ExecutionPayloadBid {
         block_hash: latest_execution_payload_header.block_hash,
+        gas_limit: latest_execution_payload_header.gas_limit,
         execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
         ..Default::default()
     };
