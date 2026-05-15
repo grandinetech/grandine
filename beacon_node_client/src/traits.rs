@@ -1,4 +1,4 @@
-use std::{collections::HashSet, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,8 +11,6 @@ use types::{
         SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage,
     },
     combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
-    config::Config as ChainConfig,
-    deneb::containers::BlobSidecar,
     gloas::containers::ExecutionPayloadBid,
     nonstandard::WithBlobsAndMev,
     phase0::{
@@ -38,11 +36,7 @@ use crate::{
 pub trait BeaconChainReader<P: Preset>: Send + Sync {
     async fn genesis(&self) -> Result<GenesisData>;
 
-    async fn chain_config(&self) -> Result<Arc<ChainConfig>>;
-
     async fn syncing_status(&self) -> Result<SyncingStatus>;
-
-    async fn is_forward_synced(&self) -> bool;
 
     async fn head_block_header(&self) -> Result<BlockHeaderSummary>;
 
@@ -69,24 +63,6 @@ pub trait BeaconChainReader<P: Preset>: Send + Sync {
         epoch: Epoch,
         indices: &[ValidatorIndex],
     ) -> Result<Vec<ValidatorLiveness>>;
-
-    async fn is_registered_validator(&self, validator_index: ValidatorIndex) -> bool;
-
-    async fn registered_validator_indices(&self) -> HashSet<ValidatorIndex>;
-
-    async fn no_prepared_proposers(&self) -> bool;
-
-    async fn prepared_proposer_indices(&self) -> Vec<ValidatorIndex>;
-
-    async fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>>;
-
-    async fn preprocessed_state_post_block(
-        &self,
-        block_root: H256,
-        slot: Slot,
-    ) -> Result<Arc<BeaconState<P>>>;
-
-    async fn has_current_slot_blocks_in_processing(&self) -> bool;
 }
 
 #[async_trait]
@@ -131,13 +107,6 @@ pub trait BeaconPublisher<P: Preset>: Send + Sync {
         &self,
         block: Arc<SignedBeaconBlock<P>>,
         validation: BroadcastValidation,
-    ) -> Result<()>;
-
-    async fn publish_blob_sidecar(&self, sidecar: Arc<BlobSidecar<P>>) -> Result<()>;
-
-    async fn publish_data_column_sidecar(
-        &self,
-        sidecar: Arc<types::combined::DataColumnSidecar<P>>,
     ) -> Result<()>;
 
     async fn publish_sync_committee_message(

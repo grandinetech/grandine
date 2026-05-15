@@ -32,9 +32,8 @@ use types::{
             SyncCommitteeMessage,
         },
     },
-    combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
+    combined::{Attestation, AttesterSlashing, BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
-    deneb::containers::BlobSidecar,
     gloas::containers::ExecutionPayloadBid,
     nonstandard::{Phase, RelativeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
@@ -162,14 +161,6 @@ impl<P: Preset, W: Wait> BeaconChainReader<P> for LocalBeaconClient<P, W> {
             genesis_validators_root: anchor_state.genesis_validators_root(),
             genesis_fork_version: self.chain_config.genesis_fork_version.into(),
         })
-    }
-
-    async fn chain_config(&self) -> Result<Arc<ChainConfig>> {
-        Ok(self.chain_config.clone())
-    }
-
-    async fn is_forward_synced(&self) -> bool {
-        self.controller.is_forward_synced()
     }
 
     async fn syncing_status(&self) -> Result<SyncingStatus> {
@@ -410,45 +401,6 @@ impl<P: Preset, W: Wait> BeaconChainReader<P> for LocalBeaconClient<P, W> {
         Ok(liveness)
     }
 
-    async fn is_registered_validator(&self, validator_index: ValidatorIndex) -> bool {
-        self.attestation_agg_pool
-            .is_registered_validator(validator_index)
-            .await
-    }
-
-    async fn registered_validator_indices(&self) -> HashSet<ValidatorIndex> {
-        self.attestation_agg_pool
-            .registered_validator_indices()
-            .await
-    }
-
-    async fn no_prepared_proposers(&self) -> bool {
-        self.block_producer.no_prepared_proposers().await
-    }
-
-    async fn prepared_proposer_indices(&self) -> Vec<ValidatorIndex> {
-        self.block_producer.get_prepared_proposer_indices().await
-    }
-
-    async fn preprocessed_state_at_current_slot(&self) -> Result<Arc<BeaconState<P>>> {
-        self.controller.preprocessed_state_at_current_slot().await
-    }
-
-    async fn preprocessed_state_post_block(
-        &self,
-        block_root: H256,
-        slot: Slot,
-    ) -> Result<Arc<BeaconState<P>>> {
-        let controller = self.controller.clone();
-        tokio::task::spawn_blocking(move || {
-            controller.preprocessed_state_post_block_blocking(block_root, slot)
-        })
-        .await?
-    }
-
-    async fn has_current_slot_blocks_in_processing(&self) -> bool {
-        self.controller.has_current_slot_blocks_in_processing()
-    }
 }
 
 #[async_trait]
@@ -741,16 +693,6 @@ impl<P: Preset, W: Wait> BeaconPublisher<P> for LocalBeaconClient<P, W> {
         _validation: BroadcastValidation,
     ) -> Result<()> {
         ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
-        Ok(())
-    }
-
-    async fn publish_blob_sidecar(&self, sidecar: Arc<BlobSidecar<P>>) -> Result<()> {
-        ValidatorToP2p::PublishBlobSidecar(sidecar).send(&self.p2p_tx);
-        Ok(())
-    }
-
-    async fn publish_data_column_sidecar(&self, sidecar: Arc<DataColumnSidecar<P>>) -> Result<()> {
-        ValidatorToP2p::PublishDataColumnSidecar(sidecar).send(&self.p2p_tx);
         Ok(())
     }
 

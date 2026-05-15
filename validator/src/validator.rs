@@ -556,7 +556,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload
                 .is_enabled()
-                || self.beacon_client.is_registered_validator(proposer_index).await;
+                || self.attestation_agg_pool.is_registered_validator(proposer_index).await;
 
             if !should_prepare_execution_payload {
                 return;
@@ -654,7 +654,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let no_validators = self.signer.load().no_keys()
             && self.registered_validators.is_empty()
-            && self.beacon_client.no_prepared_proposers().await;
+            && self.block_producer.no_prepared_proposers().await;
 
         debug_with_peers!("{kind:?} tick in slot {slot}");
 
@@ -693,7 +693,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
 
-        let own_validator_indices = self.beacon_client.registered_validator_indices().await;
+        let own_validator_indices = self.attestation_agg_pool.registered_validator_indices().await;
 
         if self.last_cgc_update_epoch != Some(current_epoch)
             && self.validator_config.custody_mode != CustodyMode::Super
@@ -861,9 +861,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         let beacon_state = if state.slot() < slot {
-            self.beacon_client
-                .preprocessed_state_post_block(block_root, slot)
-                .await?
+            let controller = self.controller.clone();
+            tokio::task::spawn_blocking(move || {
+                controller.preprocessed_state_post_block_blocking(block_root, slot)
+            })
+            .await??
         } else {
             state
         };
@@ -1208,13 +1210,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         .await;
                 }
 
-                if let Err(error) = self
-                    .beacon_client
-                    .publish_data_column_sidecar(data_column_sidecar)
-                    .await
-                {
-                    warn_with_peers!("publish_data_column_sidecar failed: {error:?}");
-                }
+                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
             }
         } else {
             for blob_sidecar in misc::construct_blob_sidecars(
@@ -1227,9 +1223,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.controller
                     .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
 
-                if let Err(error) = self.beacon_client.publish_blob_sidecar(blob_sidecar).await {
-                    warn_with_peers!("publish_blob_sidecar failed: {error:?}");
-                }
+                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
             }
         }
 
@@ -1622,7 +1616,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         };
 
-        if !self.beacon_client.is_forward_synced().await {
+        if !self.controller.is_forward_synced() {
             return;
         }
 
@@ -2162,13 +2156,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         wait_group: &W,
         slot_head: Option<&SlotHead<P>>,
     ) {
-        if !self.beacon_client.is_forward_synced().await {
+        if !self.controller.is_forward_synced() {
             return;
         }
 
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
             Some(state) => state,
-            None => match self.beacon_client.preprocessed_state_at_current_slot().await {
+            None => match self.controller.preprocessed_state_at_current_slot().await {
                 Ok(state) => state,
                 Err(error) => {
                     let is_too_many_empty_slots = matches!(
@@ -2317,7 +2311,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let chain_config = self.chain_config.clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
-        let prepared_proposer_indices = self.beacon_client.prepared_proposer_indices().await;
+        let prepared_proposer_indices = self.block_producer.get_prepared_proposer_indices().await;
         let registered_validators = self.registered_validators.clone();
         let publisher = self.beacon_client.clone();
 
@@ -2522,7 +2516,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     async fn should_wait_for_late_block(&self) -> bool {
         !self.validator_config.disable_wait_for_late_blocks
-            && self.beacon_client.has_current_slot_blocks_in_processing().await
+            && self.controller.has_current_slot_blocks_in_processing()
     }
 }
 
