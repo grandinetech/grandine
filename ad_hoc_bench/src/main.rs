@@ -441,7 +441,7 @@ fn run<P: Preset>(
     }
 
     let block_count = blocks.len();
-    let slot_count = last_slot - first_slot;
+    let slot_count = last_slot.saturating_sub(first_slot);
 
     info_with_peers!(
         "processing {block_count} blocks in {slot_count} slots (not including anchor)"

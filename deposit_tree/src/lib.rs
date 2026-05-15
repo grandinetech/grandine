@@ -43,7 +43,7 @@ impl DepositTree {
         let chunk = data.hash_tree_root();
 
         self.merkle_tree.push(index, chunk);
-        self.deposit_count += 1;
+        self.deposit_count = self.deposit_count.saturating_add(1);
 
         Ok(())
     }
@@ -63,9 +63,9 @@ impl DepositTree {
         let index = self.validate_index(index)?;
         let chunk = data.hash_tree_root();
         let root = self.merkle_tree.push_and_compute_root(index, chunk);
-        let root_with_length = ssz::mix_in_length(root, index + 1);
+        let root_with_length = ssz::mix_in_length(root, index.saturating_add(1));
 
-        self.deposit_count += 1;
+        self.deposit_count = self.deposit_count.saturating_add(1);
 
         Ok(root_with_length)
     }
@@ -86,7 +86,7 @@ impl DepositTree {
             },
         );
 
-        Self::validate_index_fits(deposit_indices.end - 1)?;
+        Self::validate_index_fits(deposit_indices.end.saturating_sub(1))?;
         self.validate_index_expected(deposit_indices.start)?;
 
         let deposit_indices = deposit_indices.start.try_into()?..deposit_indices.end.try_into()?;
@@ -110,7 +110,7 @@ impl DepositTree {
 
         let deposit_data = proof_indices
             .clone()
-            .map(|index| deposit_data[index - deposit_indices.start])
+            .map(|index: usize| deposit_data[index.saturating_sub(deposit_indices.start)])
             .copied();
 
         let deposits = self
@@ -357,9 +357,9 @@ mod tests {
 
         let mut deposit_tree = DepositTree::default();
 
-        for (expected_deposit, deposit_index) in deposits.zip(0..) {
+        for (expected_deposit, deposit_index) in deposits.zip(0_u64..) {
             let deposit_data = &[&expected_deposit.data];
-            let deposit_indices = deposit_index..deposit_index + 1;
+            let deposit_indices = deposit_index..deposit_index.saturating_add(1);
             let proof_indices = deposit_indices.clone();
 
             let actual_deposit = deposit_tree

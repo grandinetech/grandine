@@ -900,7 +900,8 @@ impl AltairPreset {
 
             // > Sync protocol
             min_sync_committee_participants: P::MIN_SYNC_COMMITTEE_PARTICIPANTS,
-            update_timeout: (P::SlotsPerEpoch::U64 * P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD.get())
+            update_timeout: P::SlotsPerEpoch::U64
+                .saturating_mul(P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD.get())
                 .try_into()
                 .expect("both factors are nonzero"),
         }

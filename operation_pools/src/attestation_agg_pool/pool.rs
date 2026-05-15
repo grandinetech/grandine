@@ -147,8 +147,8 @@ impl<P: Preset> Pool<P> {
         committee_index: CommitteeIndex,
         attestation_slot: Slot,
     ) -> bool {
-        let proposing_from_slot = attestation_slot + 1;
-        let proposing_to_slot = attestation_slot + 2;
+        let proposing_from_slot = attestation_slot.saturating_add(1);
+        let proposing_to_slot = attestation_slot.saturating_add(2);
 
         if Feature::AggregateAllAttestations.is_enabled()
             || self
@@ -275,7 +275,7 @@ impl<P: Preset> Pool<P> {
         epoch: Epoch,
     ) -> Result<()> {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-        let end_slot = misc::compute_start_slot_at_epoch::<P>(epoch + 1);
+        let end_slot = misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1));
 
         if self
             .has_precomputed_proposer_indices_in_slots(start_slot..end_slot)

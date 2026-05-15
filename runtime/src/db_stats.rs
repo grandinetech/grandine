@@ -30,13 +30,13 @@ impl EntriesInfo {
     }
 
     const fn total_size(&self) -> usize {
-        self.key_size + self.value_size
+        self.key_size.saturating_add(self.value_size)
     }
 
     const fn track(&mut self, key: &[u8], length: usize) {
-        self.key_size += key.len();
-        self.value_size += length;
-        self.count += 1;
+        self.key_size = self.key_size.saturating_add(key.len());
+        self.value_size = self.value_size.saturating_add(length);
+        self.count = self.count.saturating_add(1);
     }
 
     fn print_report(&self) -> Result<()> {
@@ -62,7 +62,7 @@ pub fn print<P: Preset>(
 
     info!("collecting beacon_fork_choice database stats..");
 
-    let mut total_size = 0;
+    let mut total_size: usize = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");
     let mut unfinalized_block_root_entries = EntriesInfo::new("unfinalized_block_roots");
     let mut state_by_block_root_entries = EntriesInfo::new("states_by_block_root");
@@ -79,7 +79,7 @@ pub fn print<P: Preset>(
     for result in storage_database.iterate_all_keys_with_lengths()? {
         let (key, length) = result?;
 
-        total_size += key.len() + length;
+        total_size = total_size.saturating_add(key.len().saturating_add(length));
 
         if UnfinalizedBlockByRoot::has_prefix(&key) {
             unfinalized_block_root_entries.track(&key, length);

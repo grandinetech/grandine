@@ -172,7 +172,7 @@ impl<P: Preset> MetricsService<P> {
                         let store_slot = self.controller.slot();
                         let max_empty_slots = self.controller.store_config().max_empty_slots;
 
-                        if head_slot + max_empty_slots >= store_slot {
+                        if head_slot.saturating_add(max_empty_slots) >= store_slot {
                             let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
 
                             let should_update_metrics = epoch_with_metrics

@@ -85,7 +85,7 @@ impl ValidatorVotes {
         // Take beacon blocks from `epoch` and the epoch before it in case the first
         // slot(s) of `epoch` are empty.
         let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
-        let end_slot = misc::compute_start_slot_at_epoch::<P>(epoch + 1);
+        let end_slot = misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1));
 
         // We assume that stored blocks from previous epoch do reflect canonical chain
         let canonical_blocks_with_roots = controller.blocks_by_range(start_slot..end_slot)?;
@@ -100,8 +100,8 @@ impl ValidatorVotes {
             .map(|block_with_root| (block_with_root.block.message().slot(), block_with_root))
             .collect::<HashMap<_, _>>();
 
-        let mut canonical_votes = 0;
-        let mut total_votes = 0;
+        let mut canonical_votes: usize = 0;
+        let mut total_votes: usize = 0;
         let mut vote_summaries: VoteSummaries = BTreeMap::new();
 
         debug_with_peers!(
@@ -116,7 +116,7 @@ impl ValidatorVotes {
         for (voted_slot, block_votes) in validator_votes {
             let total_votes_for_slot = block_votes.values().map(HashSet::len).sum();
 
-            total_votes += total_votes_for_slot;
+            total_votes = total_votes.saturating_add(total_votes_for_slot);
 
             for (voted_root, voter_indices) in block_votes {
                 let canonical_block_at_slot_or_closest = (start_slot..=*voted_slot)
@@ -125,7 +125,7 @@ impl ValidatorVotes {
 
                 let summary = match canonical_block_at_slot_or_closest {
                     Some(canonical_block) if canonical_block.root == *voted_root => {
-                        canonical_votes += voter_indices.len();
+                        canonical_votes = canonical_votes.saturating_add(voter_indices.len());
 
                         VoteSummary::Correct {
                             slot: *voted_slot,
@@ -146,7 +146,7 @@ impl ValidatorVotes {
 
                         if let Some(&ancestor_with_root) = canonical_ancestor {
                             let ancestor_slot = ancestor_with_root.block.message().slot();
-                            let slot_diff = voted_slot - ancestor_slot;
+                            let slot_diff = voted_slot.saturating_sub(ancestor_slot);
 
                             VoteSummary::Outdated {
                                 voted_root: *voted_root,

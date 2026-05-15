@@ -100,10 +100,12 @@ fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Re
 
     ptc_window.copy_within(P::SlotsPerEpoch::USIZE.., 0);
 
-    let target_epoch = get_current_epoch(state).saturating_add(P::MinSeedLookahead::U64 + 1);
+    let target_epoch =
+        get_current_epoch(state).saturating_add(P::MinSeedLookahead::U64.saturating_add(1));
+
     let start_slot = misc::compute_start_slot_at_epoch::<P>(target_epoch);
 
-    let ptcs = (start_slot..start_slot + P::SlotsPerEpoch::U64)
+    let ptcs = (start_slot..start_slot.saturating_add(P::SlotsPerEpoch::U64))
         .map(|slot| ptc_for_slot_for_epoch_processing(state, slot))
         .collect::<Result<Vec<_>>>()?;
 

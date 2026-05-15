@@ -54,7 +54,9 @@ pub fn read_offset_unchecked(bytes: &[u8]) -> Result<usize, ReadError> {
 #[inline]
 pub fn write_offset(bytes: &mut [u8], destination: usize, offset: usize) -> Result<(), WriteError> {
     let offset = Offset::try_from(offset).map_err(|_| WriteError::OffsetTooBig { offset })?;
-    offset.write_fixed(&mut bytes[destination..destination + BYTES_PER_LENGTH_OFFSET]);
+    offset.write_fixed(
+        &mut bytes[destination..destination.saturating_add(BYTES_PER_LENGTH_OFFSET.get())],
+    );
     Ok(())
 }
 
@@ -71,8 +73,8 @@ pub fn read_vector<'all, C, T: SszRead<C> + 'all, N: Unsigned>(
 
         Ok(Either::Left(results))
     } else {
-        let first_offset_subslice = subslice(bytes, 0..BYTES_PER_LENGTH_OFFSET)?;
-        let expected = N::USIZE * BYTES_PER_LENGTH_OFFSET;
+        let first_offset_subslice = subslice(bytes, 0..BYTES_PER_LENGTH_OFFSET.get())?;
+        let expected = N::USIZE.saturating_mul(BYTES_PER_LENGTH_OFFSET.get());
         let actual = read_offset_unchecked(first_offset_subslice)?;
 
         if actual != expected {
@@ -122,7 +124,9 @@ pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>>
         }
 
         // TODO(feature/optimize-ssz-decoding): Benchmark without the early validation if that makes sense.
-        let actual = bytes.len() / size;
+        let actual = bytes.len().checked_div(size).ok_or(ReadError::Custom {
+            message: "fixed size should not be zero",
+        })?;
 
         if actual > maximum {
             return Err(ReadError::ListTooLong { maximum, actual });
@@ -134,10 +138,12 @@ pub fn read_list<C, T: SszRead<C>, L: TryFromIterator<T, Error: Into<ReadError>>
             .process_results(|elements| L::try_from_iter(elements))?
             .map_err(Into::into)
     } else {
-        let first_offset_subslice = subslice(bytes, 0..BYTES_PER_LENGTH_OFFSET)?;
+        let first_offset_subslice = subslice(bytes, 0..BYTES_PER_LENGTH_OFFSET.get())?;
         let first_offset = read_offset_unchecked(first_offset_subslice)?;
 
-        if first_offset % BYTES_PER_LENGTH_OFFSET != 0 || first_offset < BYTES_PER_LENGTH_OFFSET {
+        if first_offset % BYTES_PER_LENGTH_OFFSET != 0
+            || first_offset < BYTES_PER_LENGTH_OFFSET.get()
+        {
             return Err(ReadError::ListFirstOffsetUnaligned { first_offset });
         }
 
@@ -164,7 +170,7 @@ pub fn write_list<T: SszWrite>(
     let length_before = bytes.len();
 
     if let Size::Fixed { size } = T::SIZE {
-        let length_after = length_before + element_count * size;
+        let length_after = length_before.saturating_add(element_count.saturating_mul(size));
 
         bytes.resize(length_after, 0);
 
@@ -174,13 +180,15 @@ pub fn write_list<T: SszWrite>(
             element.write_fixed(subslice);
         }
     } else {
-        let length_with_offsets = length_before + element_count * BYTES_PER_LENGTH_OFFSET;
+        let length_with_offsets = length_before
+            .saturating_add(element_count.saturating_mul(BYTES_PER_LENGTH_OFFSET.get()));
 
         bytes.resize(length_with_offsets, 0);
 
         for (index, element) in elements.enumerate() {
-            let destination = length_before + index * BYTES_PER_LENGTH_OFFSET;
-            let offset = bytes.len() - length_before;
+            let destination =
+                length_before.saturating_add(index.saturating_mul(BYTES_PER_LENGTH_OFFSET.get()));
+            let offset = bytes.len().saturating_sub(length_before);
 
             write_offset(bytes, destination, offset)?;
 
@@ -213,7 +221,7 @@ fn read_variable_elements<'all, C, T: SszRead<C>>(
     first_offset: usize,
 ) -> Result<impl Iterator<Item = Result<T, ReadError>> + 'all, ReadError> {
     let results = subslice(bytes, 0..first_offset)?
-        .chunks_exact(BYTES_PER_LENGTH_OFFSET)
+        .chunks_exact(BYTES_PER_LENGTH_OFFSET.get())
         .map(read_offset_unchecked)
         .chain(core::iter::once(Ok(bytes.len())))
         .tuple_windows()

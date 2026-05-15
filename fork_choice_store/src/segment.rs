@@ -123,7 +123,12 @@ impl<P: Preset> Segment<P> {
 
     #[must_use]
     pub fn last_position(&self) -> Position {
-        Position(self.first_position.get() + self.len().get() - 1)
+        Position(
+            self.first_position
+                .get()
+                .saturating_add(self.len().get())
+                .saturating_sub(1),
+        )
     }
 
     #[must_use]
@@ -138,7 +143,7 @@ impl<P: Preset> Segment<P> {
         {
             Ok(match_index) => match_index,
             Err(0) => return None,
-            Err(nonzero) => nonzero - 1,
+            Err(nonzero) => nonzero.saturating_sub(1),
         };
 
         // The `position` parameter and call to `usize::min` here was needed to implement
@@ -159,7 +164,8 @@ impl<P: Preset> Segment<P> {
 
     #[must_use]
     pub fn len_up_to(&self, last_included: Position) -> NonZeroUsize {
-        (self.resolve_position(last_included) + 1)
+        self.resolve_position(last_included)
+            .saturating_add(1)
             .try_into()
             .expect("range measured by Segment::len_up_to always contains at least one block")
     }
@@ -176,7 +182,7 @@ impl<P: Preset> Segment<P> {
         &self,
         positions: RangeToInclusive<Position>,
     ) -> impl DoubleEndedIterator<Item = &UnfinalizedBlock<P>> {
-        let length = self.resolve_position(positions.end) + 1;
+        let length = self.resolve_position(positions.end).saturating_add(1);
         self.blocks.iter().take(length)
     }
 
@@ -186,7 +192,11 @@ impl<P: Preset> Segment<P> {
     ) -> impl Iterator<Item = &mut UnfinalizedBlock<P>> {
         let (first_included, last_included) = positions.into_inner();
         let start = self.resolve_position(first_included);
-        let length = self.resolve_position(last_included) - start + 1;
+        let length = self
+            .resolve_position(last_included)
+            .saturating_sub(start)
+            .saturating_add(1);
+
         self.blocks.iter_mut().skip(start).take(length)
     }
 
@@ -195,7 +205,7 @@ impl<P: Preset> Segment<P> {
     }
 
     pub fn finalize_up_to(&mut self, last_included: Position) -> Vector<UnfinalizedBlock<P>> {
-        let first_excluded_index = self.resolve_position(last_included) + 1;
+        let first_excluded_index = self.resolve_position(last_included).saturating_add(1);
         let remaining = self.blocks.split_off(first_excluded_index);
 
         assert!(!remaining.is_empty());
@@ -212,12 +222,12 @@ impl<P: Preset> Segment<P> {
         self,
         last_before_split: Position,
     ) -> (Vector<UnfinalizedBlock<P>>, Vector<UnfinalizedBlock<P>>) {
-        let index = self.resolve_position(last_before_split) + 1;
+        let index = self.resolve_position(last_before_split).saturating_add(1);
         self.blocks.split_at(index)
     }
 
     fn resolve_position(&self, position: Position) -> usize {
-        let index = position.get() - self.first_position.get();
+        let index = position.get().saturating_sub(self.first_position.get());
 
         assert!(index < self.len().get());
 

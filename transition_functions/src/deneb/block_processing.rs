@@ -107,7 +107,8 @@ pub fn process_block_for_gossip<P: Preset>(
 
 // TODO(feature/deneb): Reuse function from `transition_functions::capella::block_processing`.
 pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
+    altair::count_required_signatures(block)
+        .saturating_add(block.body.bls_to_execution_changes.len())
 }
 
 pub fn custom_process_block<P: Preset>(
@@ -249,8 +250,12 @@ pub fn process_operations<P: Preset, V: Verifier>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Verify that outstanding deposits are processed up to the maximum number of deposits
-    let computed =
-        P::MaxDeposits::U64.min(state.eth1_data().deposit_count - state.eth1_deposit_index());
+    let computed = P::MaxDeposits::U64.min(
+        state
+            .eth1_data()
+            .deposit_count
+            .saturating_sub(state.eth1_deposit_index()),
+    );
     let in_block = body.deposits().len().try_into()?;
 
     ensure!(
@@ -388,7 +393,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     );
 
     ensure!(
-        attestation_slot + P::MIN_ATTESTATION_INCLUSION_DELAY.get() <= state.slot(),
+        attestation_slot.saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get()) <= state.slot(),
         Error::<P>::AttestationOutsideInclusionRange {
             state_slot: state.slot(),
             attestation_slot,

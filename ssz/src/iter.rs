@@ -35,7 +35,12 @@ impl<T> Iterator for UpTo3<T> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let Self(option1, option2, option3) = self;
-        let length = option1.iter().len() + option2.iter().len() + option3.iter().len();
+        let length = option1
+            .iter()
+            .len()
+            .saturating_add(option2.iter().len())
+            .saturating_add(option3.iter().len());
+
         (length, Some(length))
     }
 }
@@ -55,7 +60,7 @@ impl<I: Iterator> Iterator for ExactSize<I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.inner.next()?;
-        self.size -= 1;
+        self.size = self.size.saturating_sub(1);
         Some(item)
     }
 
@@ -97,7 +102,7 @@ impl<I: Iterator> Iterator for ExactSize<I> {
 impl<T: DoubleEndedIterator> DoubleEndedIterator for ExactSize<T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let item = self.inner.next_back()?;
-        self.size -= 1;
+        self.size = self.size.saturating_sub(1);
         Some(item)
     }
 

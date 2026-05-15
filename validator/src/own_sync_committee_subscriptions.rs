@@ -28,7 +28,7 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
     ) {
         let current_epoch = accessors::get_current_epoch(state);
         let current_period = misc::sync_committee_period::<P>(current_epoch);
-        let next_period = current_period + 1;
+        let next_period = current_period.saturating_add(1);
         let next_period_start = misc::start_of_sync_committee_period::<P>(next_period);
 
         self.subscriptions.entry(current_period).or_insert_with(|| {
@@ -43,7 +43,8 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
         });
 
         self.subscriptions.entry(next_period).or_insert_with(|| {
-            let next_period_expiration = misc::start_of_sync_committee_period::<P>(next_period + 1);
+            let next_period_expiration =
+                misc::start_of_sync_committee_period::<P>(next_period.saturating_add(1));
 
             let mut rng = rand::thread_rng();
 
@@ -64,8 +65,8 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
                 // > of epoch `853,245`.
                 //
                 // [Altair Honest Validator specification]: https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/altair/validator.md#sync-committee-subnet-stability
-                let epoch_to_subscribe_at =
-                    next_period_start - rng.gen_range(1..=SyncCommitteeSubnetCount::U64);
+                let epoch_to_subscribe_at = next_period_start
+                    .saturating_sub(rng.gen_range(1..=SyncCommitteeSubnetCount::U64));
 
                 (epoch_to_subscribe_at, subscription)
             })

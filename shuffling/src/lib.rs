@@ -7,6 +7,7 @@ use core::{
 use anyhow::Result;
 use bit_field::BitArray as _;
 use itertools::izip;
+use nonzero_ext::nonzero;
 use tap::TryConv as _;
 use types::{phase0::primitives::H256, preset::Preset};
 
@@ -27,7 +28,7 @@ pub fn shuffle_slice<P: Preset, T>(slice: &mut [T], seed: H256) -> Result<()> {
             .try_conv::<usize>()
             .expect("remainder of division by number that fits in usize also fits in usize");
 
-        let midpoint = pivot + 1;
+        let midpoint = pivot.saturating_add(1);
         let (low, high) = slice.split_at_mut(midpoint);
 
         // Naively parallelizing these with Rayon causes deadlocks due to the lock held in
@@ -48,10 +49,10 @@ fn swap_around_mirror<T>(seed: H256, round: u8, slice: &mut [T], offset: usize) 
     // `[T]::as_chunks_mut` and `[T]::as_rchunks_mut` could simplify this when stabilized.
 
     let mirror = slice.len() / 2;
-    let offset_mirror = offset + mirror;
-    let offset_length = offset + slice.len();
+    let offset_mirror = offset.saturating_add(mirror);
+    let offset_length = offset.saturating_add(slice.len());
     let trailing = mirror.min(offset_length % BITS_PER_HASH);
-    let leading = (mirror - trailing) % BITS_PER_HASH;
+    let leading = mirror.saturating_sub(trailing) % BITS_PER_HASH;
 
     let (low, mut high) = slice.split_at_mut(mirror);
 
@@ -66,7 +67,7 @@ fn swap_around_mirror<T>(seed: H256, round: u8, slice: &mut [T], offset: usize) 
         let source = compute_source(seed, round, offset_length / BITS_PER_HASH);
         let bit_indices = (0..offset_length % BITS_PER_HASH).rev();
         let low_elements = low[..trailing].iter_mut();
-        let high_elements = high[mirror - trailing..].iter_mut().rev();
+        let high_elements = high[mirror.saturating_sub(trailing)..].iter_mut().rev();
 
         swap_using_source(source, bit_indices, low_elements, high_elements);
     }
@@ -74,7 +75,7 @@ fn swap_around_mirror<T>(seed: H256, round: u8, slice: &mut [T], offset: usize) 
     for (offset_chunk_index, low_chunk, high_chunk) in izip!(
         (0..offset_length / BITS_PER_HASH).rev(),
         low[trailing..].chunks_exact_mut(BITS_PER_HASH),
-        high[..mirror - trailing].rchunks_exact_mut(BITS_PER_HASH),
+        high[..mirror.saturating_sub(trailing)].rchunks_exact_mut(BITS_PER_HASH),
     ) {
         let source = compute_source(seed, round, offset_chunk_index);
         let bit_indices = 0..BITS_PER_HASH;
@@ -87,7 +88,7 @@ fn swap_around_mirror<T>(seed: H256, round: u8, slice: &mut [T], offset: usize) 
     if leading > 0 {
         let source = compute_source(seed, round, offset_mirror / BITS_PER_HASH);
         let bit_indices = (0..BITS_PER_HASH).rev();
-        let low_elements = low[mirror - leading..].iter_mut();
+        let low_elements = low[mirror.saturating_sub(leading)..].iter_mut();
         let high_elements = high[..leading].iter_mut().rev();
 
         swap_using_source(source, bit_indices, low_elements, high_elements);
@@ -115,9 +116,13 @@ pub fn shuffle_single<P: Preset>(mut index: u64, index_count: NonZeroU64, seed: 
 
     for round in 0..P::SHUFFLE_ROUND_COUNT {
         let pivot = compute_pivot(seed, round, index_count);
-        let flip = (pivot + index_count.get() - index) % index_count;
+        let flip = pivot
+            .saturating_add(index_count.get())
+            .saturating_sub(index)
+            % index_count;
+
         let position = index.max(flip);
-        let source = compute_source(seed, round, position / BITS_PER_HASH as u64);
+        let source = compute_source(seed, round, position / nonzero!(BITS_PER_HASH as u64));
         let bit_index = position.to_le_bytes()[0].into();
         let bit = source.as_bytes().get_bit(bit_index);
 

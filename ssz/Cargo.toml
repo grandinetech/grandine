@@ -18,6 +18,7 @@ ethereum-types = { workspace = true }
 generic-array = { workspace = true }
 hashing = { workspace = true }
 itertools = { workspace = true }
+nonzero_ext = { workspace = true }
 num-traits = { workspace = true }
 once_cell = { workspace = true }
 primitive-types = { workspace = true }

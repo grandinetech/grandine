@@ -46,7 +46,9 @@ impl Criterion {
             .bench_function(
                 "MAX_EFFECTIVE_BALANCE * MIN_GENESIS_ACTIVE_VALIDATOR_COUNT",
                 |bencher| {
-                    let balance = max_effective_balance * min_genesis_active_validator_count;
+                    let balance =
+                        max_effective_balance.saturating_mul(min_genesis_active_validator_count);
+
                     bencher.iter(|| function(&core::hint::black_box(balance)))
                 },
             );

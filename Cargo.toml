@@ -137,9 +137,6 @@ wildcard_dependencies   = 'warn'
 # - `clippy::absolute_paths`
 #   It is triggered by functions, which contradicts the Rust convention of qualifying them.
 #
-# - `clippy::arithmetic_side_effects`
-#   It's the static equivalent of `overflow-checks` in `Cargo.toml`, but it hurts readability.
-#
 # - `clippy::error_impl_error`
 #   It's unidiomatic.
 #
@@ -179,6 +176,7 @@ wildcard_dependencies   = 'warn'
 #
 # - `clippy::unimplemented`
 #   It's useful to leave some trait methods unimplemented.
+arithmetic_side_effects           = 'warn'
 alloc_instead_of_core             = 'warn'
 allow_attributes                  = 'warn'
 assertions_on_result_states       = 'warn'

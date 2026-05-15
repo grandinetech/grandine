@@ -72,10 +72,11 @@ impl ProcessingTimings {
             submission_time,
         } = self;
 
-        let delay_duration = delay_duration
-            + delay_time
+        let delay_duration = delay_duration.saturating_add(
+            delay_time
                 .map(|delay_time| Instant::now().duration_since(delay_time))
-                .unwrap_or_default();
+                .unwrap_or_default(),
+        );
 
         Self {
             delay_duration,

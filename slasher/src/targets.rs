@@ -48,7 +48,7 @@ impl<P: Preset> Targets<P> {
         let min_target = min_targets[index].into();
 
         if target_epoch.saturating_sub(source_epoch) % TARGETS_LENGTH > min_target {
-            return Ok(Some(min_target + source_epoch));
+            return Ok(Some(min_target.saturating_add(source_epoch)));
         }
 
         Ok(None)
@@ -66,7 +66,7 @@ impl<P: Preset> Targets<P> {
         let max_target = max_targets[index].into();
 
         if target_epoch.saturating_sub(source_epoch) % TARGETS_LENGTH < max_target {
-            return Ok(Some(max_target + source_epoch));
+            return Ok(Some(max_target.saturating_add(source_epoch)));
         }
 
         Ok(None)
@@ -116,7 +116,7 @@ impl<P: Preset> Targets<P> {
         let min_epoch = current_epoch.saturating_sub(TARGETS_LENGTH);
 
         while epoch > min_epoch {
-            epoch -= 1;
+            epoch = epoch.saturating_sub(1);
             let index = usize::try_from(epoch % TARGETS_LENGTH)?;
 
             if target_epoch < min_targets[index].into() {
@@ -140,14 +140,14 @@ impl<P: Preset> Targets<P> {
     ) -> Result<()> {
         let key = Self::key(validator_index);
         let mut max_targets = self.find_max_targets(validator_index)?;
-        let mut epoch = attestation.source.epoch + 1;
+        let mut epoch = attestation.source.epoch.saturating_add(1);
         let target_epoch = attestation.target.epoch;
 
         while epoch <= current_epoch {
             let index = usize::try_from(epoch % TARGETS_LENGTH)?;
             if target_epoch > max_targets[index].into() {
                 max_targets[index] = u16::try_from(target_epoch.saturating_sub(epoch))?;
-                epoch += 1;
+                epoch = epoch.saturating_add(1);
             } else {
                 break;
             }

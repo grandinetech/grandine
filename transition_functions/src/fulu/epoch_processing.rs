@@ -103,15 +103,18 @@ pub fn process_proposer_lookahead<P: Preset>(
     state: &mut impl PostFuluBeaconState<P>,
 ) -> Result<()> {
     let mut proposer_lookahead = state.proposer_lookahead().into_iter().collect::<Vec<_>>();
-
     let last_epoch_start = proposer_lookahead
         .len()
         .saturating_sub(P::SlotsPerEpoch::USIZE);
+
     proposer_lookahead.copy_within(P::SlotsPerEpoch::USIZE.., 0);
 
-    let target_epoch = get_current_epoch(state).saturating_add(P::MinSeedLookahead::U64 + 1);
+    let target_epoch =
+        get_current_epoch(state).saturating_add(P::MinSeedLookahead::U64.saturating_add(1));
+
     let last_proposers_indices = get_beacon_proposer_indices(config, state, target_epoch)?;
     let refs = last_proposers_indices.iter().collect::<Vec<&_>>();
+
     proposer_lookahead[last_epoch_start..].copy_from_slice(&refs);
 
     *state.proposer_lookahead_mut() =

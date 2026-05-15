@@ -202,7 +202,7 @@ impl<P: Preset> AttestationSubnets<P> {
             return false;
         }
 
-        let expiration = misc::compute_start_slot_at_epoch::<P>(current_epoch + 1);
+        let expiration = misc::compute_start_slot_at_epoch::<P>(current_epoch.saturating_add(1));
 
         self.states = [Persistent { expiration }; AttestationSubnetCount::USIZE];
 
@@ -233,7 +233,7 @@ impl<P: Preset> AttestationSubnets<P> {
             let subnet_state = &mut self.states[subnet_id];
 
             if is_aggregator
-                && current_slot + SUBSCRIBE_IN_ADVANCE_SLOTS >= slot
+                && current_slot.saturating_add(SUBSCRIBE_IN_ADVANCE_SLOTS) >= slot
                 && current_slot <= slot
             {
                 match subnet_state {
@@ -242,13 +242,13 @@ impl<P: Preset> AttestationSubnets<P> {
                     // If there is a subnet subscription at current slot, extend its expiration
                     Subscribed { expiration } => {
                         *subnet_state = Subscribed {
-                            expiration: (*expiration).max(slot + 1),
+                            expiration: (*expiration).max(slot.saturating_add(1)),
                         };
                     }
                     // Make a new subnet subscription
                     Irrelevant | DiscoveringPeers { .. } => {
                         *subnet_state = Subscribed {
-                            expiration: slot + 1,
+                            expiration: slot.saturating_add(1),
                         };
                     }
                 }
@@ -257,12 +257,12 @@ impl<P: Preset> AttestationSubnets<P> {
                 match subnet_state {
                     DiscoveringPeers { expiration } => {
                         *subnet_state = DiscoveringPeers {
-                            expiration: (*expiration).max(slot + 1),
+                            expiration: (*expiration).max(slot.saturating_add(1)),
                         };
                     }
                     Irrelevant => {
                         *subnet_state = DiscoveringPeers {
-                            expiration: slot + 1,
+                            expiration: slot.saturating_add(1),
                         };
                     }
                     _ => {}

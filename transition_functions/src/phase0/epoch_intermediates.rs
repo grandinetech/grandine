@@ -1,6 +1,6 @@
 use core::num::NonZeroU64;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use helper_functions::{
     accessors::{
         get_block_root, get_block_root_at_slot, get_current_epoch, get_finality_delay,
@@ -137,7 +137,9 @@ impl Statistics for StatisticsForTransition {
 
     fn accumulate_validator(&mut self, active_in_current_epoch: bool, validator: &Validator) {
         if active_in_current_epoch {
-            self.current_epoch_active_balance += validator.effective_balance;
+            self.current_epoch_active_balance = self
+                .current_epoch_active_balance
+                .saturating_add(validator.effective_balance);
         }
     }
 
@@ -152,17 +154,26 @@ impl Statistics for StatisticsForTransition {
         effective_balance: Gwei,
     ) {
         if !performance.previous_epoch_matching_source() {
-            self.previous_epoch_source_attesting_balance += effective_balance;
+            self.previous_epoch_source_attesting_balance = self
+                .previous_epoch_source_attesting_balance
+                .saturating_add(effective_balance);
+
             performance.previous_epoch_match = Match::Source;
         }
 
         if !performance.previous_epoch_matching_target() && target {
-            self.previous_epoch_target_attesting_balance += effective_balance;
+            self.previous_epoch_target_attesting_balance = self
+                .previous_epoch_target_attesting_balance
+                .saturating_add(effective_balance);
+
             performance.previous_epoch_match = Match::Target;
         }
 
         if !performance.previous_epoch_matching_head() && target && head {
-            self.previous_epoch_head_attesting_balance += effective_balance;
+            self.previous_epoch_head_attesting_balance = self
+                .previous_epoch_head_attesting_balance
+                .saturating_add(effective_balance);
+
             performance.previous_epoch_match = Match::Head;
         }
 
@@ -201,7 +212,10 @@ impl Statistics for StatisticsForTransition {
         effective_balance: Gwei,
     ) {
         if !performance.current_epoch_matching_target && matching_target {
-            self.current_epoch_target_attesting_balance += effective_balance;
+            self.current_epoch_target_attesting_balance = self
+                .current_epoch_target_attesting_balance
+                .saturating_add(effective_balance);
+
             performance.current_epoch_matching_target = true;
         }
     }
@@ -251,7 +265,9 @@ impl Statistics for StatisticsForReport {
 
     fn accumulate_validator(&mut self, active_in_current_epoch: bool, validator: &Validator) {
         if active_in_current_epoch {
-            self.current_epoch_active_balance += validator.effective_balance;
+            self.current_epoch_active_balance = self
+                .current_epoch_active_balance
+                .saturating_add(validator.effective_balance);
         }
     }
 
@@ -265,20 +281,27 @@ impl Statistics for StatisticsForReport {
         effective_balance: Gwei,
     ) {
         if !performance.previous_epoch_matching_source() {
-            self.previous_epoch_source_attesting_balance += effective_balance;
+            self.previous_epoch_source_attesting_balance = self
+                .previous_epoch_source_attesting_balance
+                .saturating_add(effective_balance);
+
             performance.previous_epoch_source = Some(attestation.data.source.root);
         }
 
         if !performance.previous_epoch_matching_target() {
             if target.is_match() {
-                self.previous_epoch_target_attesting_balance += effective_balance;
+                self.previous_epoch_target_attesting_balance = self
+                    .previous_epoch_target_attesting_balance
+                    .saturating_add(effective_balance);
             }
             performance.previous_epoch_target = Some(target);
         }
 
         if !performance.previous_epoch_matching_head() {
             if target.is_match() && head.is_match() {
-                self.previous_epoch_head_attesting_balance += effective_balance;
+                self.previous_epoch_head_attesting_balance = self
+                    .previous_epoch_head_attesting_balance
+                    .saturating_add(effective_balance);
             }
             performance.previous_epoch_head = Some(head);
         }
@@ -318,7 +341,10 @@ impl Statistics for StatisticsForReport {
         effective_balance: Gwei,
     ) {
         if !performance.current_epoch_matching_target && matching_target {
-            self.current_epoch_target_attesting_balance += effective_balance;
+            self.current_epoch_target_attesting_balance = self
+                .current_epoch_target_attesting_balance
+                .saturating_add(effective_balance);
+
             performance.current_epoch_matching_target = true;
         }
     }
@@ -435,43 +461,43 @@ impl EpochDeltas for EpochDeltasForTransition {
 
 impl Phase0EpochDeltas for EpochDeltasForTransition {
     fn add_source_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_source_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 
     fn add_target_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_target_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 
     fn add_head_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_head_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 
     fn add_proposer_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_inclusion_delay_reward(&mut self, value: Gwei) {
-        self.reward += value;
+        self.reward = self.reward.saturating_add(value);
     }
 
     fn add_canceling_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 
     fn add_inactivity_penalty(&mut self, value: Gwei) {
-        self.penalty += value;
+        self.penalty = self.penalty.saturating_add(value);
     }
 }
 
@@ -492,60 +518,60 @@ pub struct EpochDeltasForReport {
 impl EpochDeltas for EpochDeltasForReport {
     fn combined_reward(self) -> Gwei {
         self.source_reward
-            + self.target_reward
-            + self.head_reward
-            + self.proposer_reward
-            + self.inclusion_delay_reward
+            .saturating_add(self.target_reward)
+            .saturating_add(self.head_reward)
+            .saturating_add(self.proposer_reward)
+            .saturating_add(self.inclusion_delay_reward)
     }
 
     fn combined_penalty(self) -> Gwei {
         self.source_penalty
-            + self.target_penalty
-            + self.head_penalty
-            + self.canceling_penalty
-            + self.inactivity_penalty
+            .saturating_add(self.target_penalty)
+            .saturating_add(self.head_penalty)
+            .saturating_add(self.canceling_penalty)
+            .saturating_add(self.inactivity_penalty)
     }
 }
 
 impl Phase0EpochDeltas for EpochDeltasForReport {
     fn add_source_reward(&mut self, value: Gwei) {
-        self.source_reward += value;
+        self.source_reward = self.source_reward.saturating_add(value);
     }
 
     fn add_source_penalty(&mut self, value: Gwei) {
-        self.source_penalty += value;
+        self.source_penalty = self.source_penalty.saturating_add(value);
     }
 
     fn add_target_reward(&mut self, value: Gwei) {
-        self.target_reward += value;
+        self.target_reward = self.target_reward.saturating_add(value);
     }
 
     fn add_target_penalty(&mut self, value: Gwei) {
-        self.target_penalty += value;
+        self.target_penalty = self.target_penalty.saturating_add(value);
     }
 
     fn add_head_reward(&mut self, value: Gwei) {
-        self.head_reward += value;
+        self.head_reward = self.head_reward.saturating_add(value);
     }
 
     fn add_head_penalty(&mut self, value: Gwei) {
-        self.head_penalty += value;
+        self.head_penalty = self.head_penalty.saturating_add(value);
     }
 
     fn add_proposer_reward(&mut self, value: Gwei) {
-        self.proposer_reward += value;
+        self.proposer_reward = self.proposer_reward.saturating_add(value);
     }
 
     fn add_inclusion_delay_reward(&mut self, value: Gwei) {
-        self.inclusion_delay_reward += value;
+        self.inclusion_delay_reward = self.inclusion_delay_reward.saturating_add(value);
     }
 
     fn add_canceling_penalty(&mut self, value: Gwei) {
-        self.canceling_penalty += value;
+        self.canceling_penalty = self.canceling_penalty.saturating_add(value);
     }
 
     fn add_inactivity_penalty(&mut self, value: Gwei) {
-        self.inactivity_penalty += value;
+        self.inactivity_penalty = self.inactivity_penalty.saturating_add(value);
     }
 }
 
@@ -681,8 +707,10 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
             ..
         } = summary;
 
-        let base_reward = effective_balance * P::BASE_REWARD_FACTOR
-            / total_active_balance_sqrt
+        let base_reward = effective_balance
+            .saturating_mul(P::BASE_REWARD_FACTOR)
+            .checked_div(total_active_balance_sqrt)
+            .ok_or_else(|| anyhow!("total_active_balance_sqrt should not be zero"))?
             / BASE_REWARDS_PER_EPOCH;
 
         let attestation_component_reward = |attesting_balance| {
@@ -692,11 +720,14 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
             if in_inactivity_leak {
                 // > Since full base reward will be canceled out by inactivity penalty deltas,
                 // > optimal participation receives full base reward compensation here.
-                base_reward
+                Ok(base_reward)
             } else {
-                let reward_numerator = base_reward * (attesting_balance / increment);
+                let reward_numerator = base_reward.saturating_mul(attesting_balance / increment);
                 let reward_denominator = statistics.current_epoch_active_balance() / increment;
-                reward_numerator / reward_denominator
+
+                reward_numerator
+                    .checked_div(reward_denominator)
+                    .ok_or_else(|| anyhow!("reward_denominator should not be zero"))
             }
         };
 
@@ -711,7 +742,7 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
             if performance.previous_epoch_matching_source() {
                 deltas.add_source_reward(attestation_component_reward(
                     statistics.previous_epoch_source_attesting_balance(),
-                ));
+                )?);
             } else {
                 deltas.add_source_penalty(base_reward);
             }
@@ -719,7 +750,7 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
             if performance.previous_epoch_matching_target() {
                 deltas.add_target_reward(attestation_component_reward(
                     statistics.previous_epoch_target_attesting_balance(),
-                ));
+                )?);
             } else {
                 deltas.add_target_penalty(base_reward);
             }
@@ -727,7 +758,7 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
             if performance.previous_epoch_matching_head() {
                 deltas.add_head_reward(attestation_component_reward(
                     statistics.previous_epoch_head_attesting_balance(),
-                ));
+                )?);
             } else {
                 deltas.add_head_penalty(base_reward);
             }
@@ -736,12 +767,16 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
                 // > If validator is performing optimally this cancels all rewards for a neutral
                 // > balance
                 deltas.add_canceling_penalty(
-                    BASE_REWARDS_PER_EPOCH.get() * base_reward - proposer_reward,
+                    BASE_REWARDS_PER_EPOCH
+                        .get()
+                        .saturating_mul(base_reward)
+                        .saturating_sub(proposer_reward),
                 );
 
                 if !performance.previous_epoch_matching_target() {
                     deltas.add_inactivity_penalty(
-                        effective_balance * finality_delay / P::INACTIVITY_PENALTY_QUOTIENT,
+                        effective_balance.saturating_mul(finality_delay)
+                            / P::INACTIVITY_PENALTY_QUOTIENT,
                     );
                 }
 
@@ -756,7 +791,7 @@ pub fn epoch_deltas<P: Preset, S: Statistics, D: Phase0EpochDeltas>(
             } = inclusion;
 
             let proposer_index = usize::try_from(proposer_index)?;
-            let max_attester_reward = base_reward - proposer_reward;
+            let max_attester_reward = base_reward.saturating_sub(proposer_reward);
 
             deltas[proposer_index].add_proposer_reward(proposer_reward);
             deltas[index].add_inclusion_delay_reward(max_attester_reward / delay);
@@ -818,18 +853,22 @@ mod spec_tests {
         );
 
         TestDeltas::assert_equal(
-            deltas
-                .iter()
-                .map(|deltas| deltas.proposer_reward + deltas.inclusion_delay_reward),
+            deltas.iter().map(|deltas| {
+                deltas
+                    .proposer_reward
+                    .saturating_add(deltas.inclusion_delay_reward)
+            }),
             core::iter::repeat_n(0, deltas.len()),
             case.ssz_default("inclusion_delay_deltas"),
         );
 
         TestDeltas::assert_equal(
             core::iter::repeat_n(0, deltas.len()),
-            deltas
-                .iter()
-                .map(|deltas| deltas.canceling_penalty + deltas.inactivity_penalty),
+            deltas.iter().map(|deltas| {
+                deltas
+                    .canceling_penalty
+                    .saturating_add(deltas.inactivity_penalty)
+            }),
             case.ssz_default("inactivity_penalty_deltas"),
         );
     }

@@ -111,7 +111,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                 message = self.aggregates_task_to_verifier_rx.select_next_some() => {
                     match message {
                         TaskMessage::Finished(wait_group) => {
-                            self.active_aggregates_task_count -= 1;
+                            self.active_aggregates_task_count = self.active_aggregates_task_count.saturating_sub(1);
                             self.spawn_verify_aggregate_batch_task(&wait_group);
                             self.track_active_task_count();
                         }
@@ -120,7 +120,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                 message = self.attestations_task_to_verifier_rx.select_next_some() => {
                     match message {
                         TaskMessage::Finished(wait_group) => {
-                            self.active_attestations_task_count -= 1;
+                            self.active_attestations_task_count = self.active_attestations_task_count.saturating_sub(1);
                             self.spawn_verify_attestation_batch_task(&wait_group);
                             self.track_active_task_count();
                         }
@@ -129,7 +129,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
                 message = self.batch_attestations_task_to_verifier_rx.select_next_some() => {
                     match message {
                         TaskMessage::Finished(wait_group) => {
-                            self.active_batch_attestations_task_count -= 1;
+                            self.active_batch_attestations_task_count = self.active_batch_attestations_task_count.saturating_sub(1);
                             self.spawn_verify_batch_attestation_task(&wait_group);
                             self.track_active_task_count();
                         }
@@ -183,7 +183,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             return;
         }
 
-        self.active_aggregates_task_count += 1;
+        self.active_aggregates_task_count = self.active_aggregates_task_count.saturating_add(1);
         self.track_active_task_count();
 
         let split_at = self.aggregates.len().saturating_sub(MAX_BATCH_SIZE);
@@ -206,7 +206,7 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             return;
         }
 
-        self.active_attestations_task_count += 1;
+        self.active_attestations_task_count = self.active_attestations_task_count.saturating_add(1);
         self.track_active_task_count();
 
         debug_with_peers!(
@@ -234,7 +234,8 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
             return;
         }
 
-        self.active_batch_attestations_task_count += 1;
+        self.active_batch_attestations_task_count =
+            self.active_batch_attestations_task_count.saturating_add(1);
         self.track_active_task_count();
 
         debug_with_peers!(
@@ -259,8 +260,8 @@ impl<P: Preset, W: Wait> AttestationVerifier<P, W> {
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.set_attestation_verifier_active_task_count(
                 self.active_aggregates_task_count
-                    + self.active_attestations_task_count
-                    + self.active_batch_attestations_task_count,
+                    .saturating_add(self.active_attestations_task_count)
+                    .saturating_add(self.active_batch_attestations_task_count),
             );
         }
     }
@@ -405,7 +406,7 @@ impl<P: Preset, W: Wait> VerifyAggregateBatchTask<P, W> {
         let config = self.controller.chain_config().as_ref();
         let mut verifier = MultiVerifier::default();
 
-        verifier.reserve(aggregates.len() * 3);
+        verifier.reserve(aggregates.len().saturating_mul(3));
 
         let mut messages = vec![];
 

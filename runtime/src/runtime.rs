@@ -1007,7 +1007,7 @@ impl Context {
 
                     if error.downcast_ref::<libmdbx::Error>() == Some(&libmdbx::Error::MapFull) {
                         info_with_peers!("increasing environment map size limits");
-                        db_size_modifier *= 2;
+                        db_size_modifier = db_size_modifier.saturating_mul(2);
                     }
 
                     if matches!(
@@ -1095,7 +1095,8 @@ impl Context {
         let default_deposit_tree = predefined_network.map(PredefinedNetwork::genesis_deposit_tree);
 
         if let Some(deposit_tree) = default_deposit_tree {
-            deposit_contract_starting_block.get_or_insert(deposit_tree.last_added_block_number + 1);
+            deposit_contract_starting_block
+                .get_or_insert_with(|| deposit_tree.last_added_block_number.saturating_add(1));
         }
 
         let eth1_config = Arc::new(Eth1Config {
@@ -1698,7 +1699,9 @@ fn handle_command<P: Preset>(
 
                             info_with_peers!(
                                 "exported {} records for {pubkey:?}",
-                                signed_attestations.len() + signed_blocks.len(),
+                                signed_attestations
+                                    .len()
+                                    .saturating_add(signed_blocks.len()),
                             );
                         }
                     }

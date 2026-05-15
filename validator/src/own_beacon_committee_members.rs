@@ -107,7 +107,7 @@ impl OwnBeaconCommitteeMembers {
     }
 
     pub fn slots_to_compute_in_advance(current_slot: Slot) -> impl Iterator<Item = Slot> {
-        current_slot..current_slot + ComputeInAdvanceSlots::U64
+        current_slot..current_slot.saturating_add(ComputeInAdvanceSlots::U64)
     }
 
     pub async fn needs_to_compute_members_at_slot(&self, dependent_root: H256, slot: Slot) -> bool {

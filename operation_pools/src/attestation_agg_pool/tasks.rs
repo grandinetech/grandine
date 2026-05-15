@@ -97,7 +97,7 @@ impl<P: Preset> PoolTask for ComputeProposerIndicesTask<P> {
 
         pool.compute_proposer_indices_for_epoch(&beacon_state, current_epoch)
             .await?;
-        pool.compute_proposer_indices_for_epoch(&beacon_state, current_epoch + 1)
+        pool.compute_proposer_indices_for_epoch(&beacon_state, current_epoch.saturating_add(1))
             .await?;
 
         Ok(())
@@ -121,7 +121,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
         } = self;
 
         let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
-        let slot = controller.slot() + 1;
+        let slot = controller.slot().saturating_add(1);
 
         let mut attestation_packer = AttestationPacker::new(
             controller.chain_config().clone_arc(),
@@ -151,7 +151,7 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
                     timer.elapsed()
                 );
 
-                iteration += 1;
+                iteration = iteration.saturating_add(1);
                 outcome
             };
 

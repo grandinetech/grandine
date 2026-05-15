@@ -124,10 +124,11 @@ pub fn custom_process_block<P: Preset>(
 pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> usize {
     let body = block.body();
 
-    1 + 2 * body.proposer_slashings().len()
-        + 2 * body.attester_slashings_len()
-        + body.attestations_len()
-        + body.voluntary_exits().len()
+    1_usize
+        .saturating_add(2_usize.saturating_mul(body.proposer_slashings().len()))
+        .saturating_add(2_usize.saturating_mul(body.attester_slashings_len()))
+        .saturating_add(body.attestations_len())
+        .saturating_add(body.voluntary_exits().len())
 }
 
 fn process_operations<P: Preset, V: Verifier>(
@@ -139,8 +140,12 @@ fn process_operations<P: Preset, V: Verifier>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Verify that outstanding deposits are processed up to the maximum number of deposits
-    let computed =
-        P::MaxDeposits::U64.min(state.eth1_data.deposit_count - state.eth1_deposit_index);
+    let computed = P::MaxDeposits::U64.min(
+        state
+            .eth1_data
+            .deposit_count
+            .saturating_sub(state.eth1_deposit_index),
+    );
     let in_block = body.deposits.len().try_into()?;
 
     ensure!(
@@ -306,7 +311,7 @@ fn apply_attestation<P: Preset>(
     let pending_attestation = PendingAttestation {
         data,
         aggregation_bits: attestation.aggregation_bits.clone(),
-        inclusion_delay: state.slot - data.slot,
+        inclusion_delay: state.slot.saturating_sub(data.slot),
         proposer_index: get_beacon_proposer_index(config, state)?,
     };
 
@@ -389,7 +394,9 @@ fn apply_deposits<P: Preset>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Deposits must be processed in order
-    state.eth1_deposit_index += DepositIndex::try_from(deposit_count)?;
+    state.eth1_deposit_index = state
+        .eth1_deposit_index
+        .saturating_add(DepositIndex::try_from(deposit_count)?);
 
     for combined_deposit in combined_deposits {
         match combined_deposit {

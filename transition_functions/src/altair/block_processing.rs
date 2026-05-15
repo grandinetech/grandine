@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use helper_functions::{
@@ -39,7 +39,7 @@ use types::{
         containers::{
             Attestation, AttesterSlashing, DepositData, DepositMessage, ProposerSlashing, Validator,
         },
-        primitives::{DepositIndex, ValidatorIndex},
+        primitives::{DepositIndex, Gwei, ValidatorIndex},
     },
     preset::Preset,
     traits::{BeaconBlock, PostAltairBeaconState},
@@ -147,7 +147,7 @@ pub fn custom_process_block<P: Preset>(
 }
 
 pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> usize {
-    phase0::count_required_signatures(block) + 1
+    phase0::count_required_signatures(block).saturating_add(1)
 }
 
 fn process_operations<P: Preset, V: Verifier>(
@@ -159,8 +159,12 @@ fn process_operations<P: Preset, V: Verifier>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Verify that outstanding deposits are processed up to the maximum number of deposits
-    let computed =
-        P::MaxDeposits::U64.min(state.eth1_data.deposit_count - state.eth1_deposit_index);
+    let computed = P::MaxDeposits::U64.min(
+        state
+            .eth1_data
+            .deposit_count
+            .saturating_sub(state.eth1_deposit_index),
+    );
     let in_block = body.deposits.len().try_into()?;
 
     ensure!(
@@ -329,7 +333,7 @@ pub fn apply_attestation<P: Preset>(
     } = *attestation;
 
     // > Participation flag indices
-    let inclusion_delay = state.slot() - data.slot;
+    let inclusion_delay = state.slot().saturating_sub(data.slot);
     let participation_flags = get_attestation_participation_flags(state, data, inclusion_delay)?;
 
     // > Update epoch participation flags
@@ -347,14 +351,15 @@ pub fn apply_attestation<P: Preset>(
         AttestationEpoch::Current => state.current_epoch_participation_mut(),
     };
 
-    let mut proposer_reward_numerator = 0;
+    let mut proposer_reward_numerator: Gwei = 0;
 
     for (validator_index, base_reward) in attesting_indices_with_base_rewards {
         let epoch_participation = epoch_participation.get_mut(validator_index)?;
 
         for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
             if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
-                proposer_reward_numerator += base_reward * weight;
+                proposer_reward_numerator =
+                    proposer_reward_numerator.saturating_add(base_reward.saturating_mul(weight));
             }
         }
 
@@ -363,9 +368,15 @@ pub fn apply_attestation<P: Preset>(
 
     // > Reward proposer
     let proposer_index = get_beacon_proposer_index(config, state)?;
-    let proposer_reward_denominator =
-        (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT) * WEIGHT_DENOMINATOR.get() / PROPOSER_WEIGHT;
-    let proposer_reward = proposer_reward_numerator / proposer_reward_denominator;
+    let proposer_reward_denominator = WEIGHT_DENOMINATOR
+        .get()
+        .saturating_sub(PROPOSER_WEIGHT.get())
+        .saturating_mul(WEIGHT_DENOMINATOR.get())
+        / PROPOSER_WEIGHT;
+
+    let proposer_reward = proposer_reward_numerator
+        .checked_div(proposer_reward_denominator)
+        .ok_or_else(|| anyhow!("proposer_reward_denominator should not be zero"))?;
 
     increase_balance(balance(state, proposer_index)?, proposer_reward);
 
@@ -450,7 +461,9 @@ pub fn apply_deposits<P: Preset>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Deposits must be processed in order
-    *state.eth1_deposit_index_mut() += DepositIndex::try_from(deposit_count)?;
+    *state.eth1_deposit_index_mut() = state
+        .eth1_deposit_index_mut()
+        .saturating_add(DepositIndex::try_from(deposit_count)?);
 
     for combined_deposit in combined_deposits {
         match combined_deposit {
@@ -537,17 +550,27 @@ pub fn process_sync_aggregate<P: Preset>(
 
     // > Compute participant and proposer rewards
     let total_active_increments = total_active_balance(state) / P::EFFECTIVE_BALANCE_INCREMENT;
-    let total_base_rewards = get_base_reward_per_increment(state) * total_active_increments;
-    let max_participant_rewards = (total_base_rewards * SYNC_REWARD_WEIGHT / WEIGHT_DENOMINATOR)
+    let total_base_rewards =
+        get_base_reward_per_increment(state).saturating_mul(total_active_increments);
+
+    let max_participant_rewards = (total_base_rewards.saturating_mul(SYNC_REWARD_WEIGHT)
+        / WEIGHT_DENOMINATOR)
         .div_typenum::<P::SlotsPerEpoch>();
+
     let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
-    let proposer_reward =
-        participant_reward * PROPOSER_WEIGHT / (WEIGHT_DENOMINATOR.get() - PROPOSER_WEIGHT);
+    let proposer_reward = participant_reward
+        .saturating_mul(PROPOSER_WEIGHT.get())
+        .checked_div(
+            WEIGHT_DENOMINATOR
+                .get()
+                .saturating_sub(PROPOSER_WEIGHT.get()),
+        )
+        .ok_or_else(|| anyhow!("proposer reward denominator should not be zero"))?;
 
     // > Apply participant and proposer rewards
     let proposer_index = get_beacon_proposer_index(config, state)?;
 
-    let mut participation = 0;
+    let mut participation: u64 = 0;
 
     for (participant_pubkey, participation_bit) in state
         .current_sync_committee()
@@ -561,7 +584,7 @@ pub fn process_sync_aggregate<P: Preset>(
 
         if participation_bit {
             increase_balance(balance(state, participant_index)?, participant_reward);
-            participation += 1;
+            participation = participation.saturating_add(1);
         } else {
             decrease_balance(balance(state, participant_index)?, participant_reward);
         }
@@ -578,7 +601,7 @@ pub fn process_sync_aggregate<P: Preset>(
 
     increase_balance(
         balance(state, proposer_index)?,
-        proposer_reward * participation,
+        proposer_reward.saturating_mul(participation),
     );
 
     slot_report.set_sync_aggregate_rewards(SyncAggregateRewards {

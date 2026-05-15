@@ -55,7 +55,10 @@ pub trait BundleSize<T>: ArrayLength<T> + NonZero {
     where
         T: SszHash,
     {
-        let chunk_height = height + Self::ilog2() - T::PackingFactor::ilog2();
+        let chunk_height = height
+            .saturating_add(Self::ilog2())
+            .saturating_sub(T::PackingFactor::ilog2());
+
         ZERO_HASHES[usize::from(chunk_height)]
     }
 }

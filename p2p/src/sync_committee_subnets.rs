@@ -132,7 +132,7 @@ impl<P: Preset> SyncCommitteeSubnets<P> {
             return false;
         }
 
-        let expiration = current_epoch + 1;
+        let expiration = current_epoch.saturating_add(1);
 
         self.states = [Subscribed { expiration }; SyncCommitteeSubnetCount::USIZE];
 

@@ -1,8 +1,8 @@
 use anyhow::{Result, ensure};
+use arithmetic::NonZeroExt as _;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use ssz::{Hc, SszHash as _};
-use typenum::Unsigned as _;
 use types::{
     config::Config,
     gloas::beacon_state::BeaconState,
@@ -31,10 +31,10 @@ pub fn process_slot<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Resu
     *state.block_roots_mut().mod_index_mut(slot) = previous_block_root;
 
     // > Unset the next payload availability
-    let slot_usize: usize = slot.try_into()?;
-    state
-        .execution_payload_availability_mut()
-        .set((slot_usize + 1) % SlotsPerHistoricalRoot::<P>::USIZE, false);
+    state.execution_payload_availability_mut().set(
+        (slot.saturating_add(1) % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?,
+        false,
+    );
 
     state.cache_mut().advance_slot();
 
@@ -59,11 +59,11 @@ pub fn process_slots<P: Preset>(
         process_slot(state)?;
 
         // > Process epoch on the start slot of the next epoch
-        if misc::is_epoch_start::<P>(state.slot + 1) {
+        if misc::is_epoch_start::<P>(state.slot.saturating_add(1)) {
             epoch_processing::process_epoch(config, pubkey_cache, state)?;
         }
 
-        state.slot += 1;
+        state.slot = state.slot.saturating_add(1);
     }
 
     Ok(())

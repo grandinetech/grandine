@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 bit_field = { workspace = true }
 hashing = { workspace = true }
 itertools = { workspace = true }
+nonzero_ext = { workspace = true }
 tap = { workspace = true }
 types = { workspace = true }
 

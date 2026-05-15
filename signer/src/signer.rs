@@ -288,7 +288,7 @@ impl Snapshot {
         let mut signable_messages = vec![];
 
         let fork_info = ForkInfo::from(beacon_state);
-        let mut signing_triples_count = 0;
+        let mut signing_triples_count: usize = 0;
 
         let doppelganger_protection = self
             .doppelganger_protection
@@ -358,7 +358,7 @@ impl Snapshot {
                 }
             }
 
-            signing_triples_count += 1;
+            signing_triples_count = signing_triples_count.saturating_add(1);
         }
 
         let mut protector = slashing_protector.lock().await;

@@ -151,8 +151,8 @@ pub fn process_eth1_data_reset<P: Preset>(state: &mut impl BeaconState<P>) {
 
 pub fn process_effective_balance_updates<P: Preset>(state: &mut impl BeaconState<P>) {
     let hysteresis_increment = P::EFFECTIVE_BALANCE_INCREMENT.get() / P::HYSTERESIS_QUOTIENT;
-    let downward_threshold = hysteresis_increment * P::HYSTERESIS_DOWNWARD_MULTIPLIER;
-    let upward_threshold = hysteresis_increment * P::HYSTERESIS_UPWARD_MULTIPLIER;
+    let downward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_DOWNWARD_MULTIPLIER);
+    let upward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_UPWARD_MULTIPLIER);
 
     let (validators, balances) = state.validators_mut_with_balances();
 
@@ -168,8 +168,8 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl BeaconState
             .next()
             .expect("list of validators and list of balances should have the same length");
 
-        let below = balance + downward_threshold < validator.effective_balance;
-        let above = validator.effective_balance + upward_threshold < balance;
+        let below = balance.saturating_add(downward_threshold) < validator.effective_balance;
+        let above = validator.effective_balance.saturating_add(upward_threshold) < balance;
 
         if below || above {
             validator.effective_balance = balance
@@ -225,8 +225,8 @@ pub fn weigh_justification_and_finalization<P: Preset>(
     *state.previous_justified_checkpoint_mut() = state.current_justified_checkpoint();
     state.justification_bits_mut().shift_up_by_1();
 
-    let mut justify_if_supermajority = |attestation_epoch, bit, target_balance| {
-        if target_balance * 3 >= current_epoch_active_balance * 2 {
+    let mut justify_if_supermajority = |attestation_epoch, bit, target_balance: Gwei| {
+        if target_balance.saturating_mul(3) >= current_epoch_active_balance.saturating_mul(2) {
             let root = get_block_root(state, attestation_epoch).expect(
                 "get_block_root can fail during the first slot of an epoch but \
                  process_justification_and_finalization is only called at the end of an epoch",
@@ -249,22 +249,22 @@ pub fn weigh_justification_and_finalization<P: Preset>(
     let current_epoch = get_current_epoch(state);
 
     // > The 2nd/3rd/4th most recent epochs are justified, the 2nd using the 4th as source
-    if bits[1..4] && old_previous_justified_checkpoint.epoch + 3 == current_epoch {
+    if bits[1..4] && old_previous_justified_checkpoint.epoch.saturating_add(3) == current_epoch {
         *state.finalized_checkpoint_mut() = old_previous_justified_checkpoint
     }
 
     // > The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
-    if bits[1..3] && old_previous_justified_checkpoint.epoch + 2 == current_epoch {
+    if bits[1..3] && old_previous_justified_checkpoint.epoch.saturating_add(2) == current_epoch {
         *state.finalized_checkpoint_mut() = old_previous_justified_checkpoint
     }
 
     // > The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
-    if bits[0..3] && old_current_justified_checkpoint.epoch + 2 == current_epoch {
+    if bits[0..3] && old_current_justified_checkpoint.epoch.saturating_add(2) == current_epoch {
         *state.finalized_checkpoint_mut() = old_current_justified_checkpoint;
     }
 
     // > The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
-    if bits[0..2] && old_current_justified_checkpoint.epoch + 1 == current_epoch {
+    if bits[0..2] && old_current_justified_checkpoint.epoch.saturating_add(1) == current_epoch {
         *state.finalized_checkpoint_mut() = old_current_justified_checkpoint;
     }
 }

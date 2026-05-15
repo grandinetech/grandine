@@ -154,7 +154,7 @@ impl<C, N: Unsigned> SszRead<C> for BitList<N> {
 impl<N> SszWrite for BitList<N> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         let length_before = bytes.len();
-        let length_after = length_before + bytes_with_delimiting_bit(self.len());
+        let length_after = length_before.saturating_add(bytes_with_delimiting_bit(self.len()));
 
         bytes.resize(length_after, 0);
 
@@ -263,12 +263,18 @@ impl<N> BitList<N> {
             .try_into()
             .expect("number of bits in a byte should fit in usize");
 
-        let data_bits_in_last_byte = (BITS_PER_BYTE - 1)
+        let data_bits_in_last_byte = BITS_PER_BYTE
+            .get()
+            .saturating_sub(1)
             .checked_sub(leading_zeros_in_last_byte)
             .ok_or(ReadError::BitListNoDelimitingBit)?;
 
         let maximum = N::USIZE;
-        let actual = (bytes.len() - 1) * BITS_PER_BYTE + data_bits_in_last_byte;
+        let actual = bytes
+            .len()
+            .saturating_sub(1)
+            .saturating_mul(BITS_PER_BYTE.get())
+            .saturating_add(data_bits_in_last_byte);
 
         if actual > maximum {
             return Err(ReadError::BitListTooLong { maximum, actual });
@@ -310,11 +316,11 @@ impl<N> BitList<N> {
 }
 
 const fn bytes_without_delimiting_bit(length: usize) -> usize {
-    length.div_ceil(BITS_PER_BYTE)
+    length.div_ceil(BITS_PER_BYTE.get())
 }
 
 const fn bytes_with_delimiting_bit(length: usize) -> usize {
-    length.saturating_add(1).div_ceil(BITS_PER_BYTE)
+    length.saturating_add(1).div_ceil(BITS_PER_BYTE.get())
 }
 
 #[cfg(test)]

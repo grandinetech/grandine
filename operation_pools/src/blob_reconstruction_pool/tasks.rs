@@ -63,7 +63,7 @@ impl<P: Preset, W: Wait> PoolTask for ReconstructDataColumnSidecarsTask<P, W> {
             return Ok(());
         }
 
-        if available_columns.len() * 2 < P::NumberOfColumns::USIZE {
+        if available_columns.len().saturating_mul(2) < P::NumberOfColumns::USIZE {
             warn_with_peers!(
                 "cannot start reconstruction for block {block_root:?}: \
                 insufficient data columns (available: {})",

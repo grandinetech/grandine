@@ -182,7 +182,7 @@ impl AttestationVotes {
             return Ok(None);
         };
 
-        let mut correct_votes = 0;
+        let mut correct_votes: usize = 0;
 
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
         let state = controller.preprocessed_state_at_epoch(epoch).await?;
@@ -191,7 +191,7 @@ impl AttestationVotes {
         for block_votes in validator_votes.values() {
             for (voted_root, voter_indices) in block_votes {
                 if *voted_root == expected_target {
-                    correct_votes += voter_indices.len();
+                    correct_votes = correct_votes.saturating_add(voter_indices.len());
                 }
             }
         }

@@ -95,7 +95,8 @@ pub fn process_block_for_gossip<P: Preset>(
 
 // TODO(feature/electra): Reuse function from `transition_functions::capella::block_processing`.
 pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
+    altair::count_required_signatures(block)
+        .saturating_add(block.body.bls_to_execution_changes.len())
 }
 
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
@@ -687,7 +688,7 @@ mod spec_tests {
             unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
 
         // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() += 1;
+        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().saturating_add(1);
 
         electra::apply_deposits(state, combined_deposits, NullSlotReport)
     }

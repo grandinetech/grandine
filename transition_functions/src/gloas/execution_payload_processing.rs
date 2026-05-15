@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Result, ensure};
+use arithmetic::NonZeroExt as _;
 use bls::{PublicKeyBytes, SignatureBytes};
 use execution_engine::ExecutionEngine;
 use helper_functions::{
@@ -13,7 +14,6 @@ use helper_functions::{
 };
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
-use typenum::Unsigned as _;
 use types::{
     combined::ExecutionPayloadParams,
     config::Config,
@@ -236,10 +236,12 @@ pub fn process_execution_payload<P: Preset, V: Verifier>(
         .mod_index_mut(payment_slot) = BuilderPendingPayment::default();
 
     // > Cache execution payload header
-    let slot: usize = state.slot().try_into()?;
-    state
-        .execution_payload_availability_mut()
-        .set(slot % SlotsPerHistoricalRoot::<P>::USIZE, true);
+    let slot = state.slot();
+
+    state.execution_payload_availability_mut().set(
+        (slot % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?,
+        true,
+    );
     *state.latest_block_hash_mut() = payload.block_hash;
 
     if !V::IS_NULL {

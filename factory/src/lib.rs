@@ -119,7 +119,7 @@ pub fn block_justifying_previous_epoch<P: Preset>(
     let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
-    let attestation_slots = misc::slots_in_epoch::<P>(epoch - 1);
+    let attestation_slots = misc::slots_in_epoch::<P>(epoch.saturating_sub(1));
     let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
@@ -146,7 +146,9 @@ pub fn block_justifying_current_epoch<P: Preset>(
     graffiti: H256,
     execution_payload: Option<ExecutionPayload<P>>,
 ) -> Result<BlockWithState<P>> {
-    let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch + 1) - 1;
+    let block_slot =
+        misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1)).saturating_sub(1);
+
     let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
     let attestation_slots = misc::compute_start_slot_at_epoch::<P>(epoch)..block_slot;
@@ -266,7 +268,9 @@ pub fn full_blocks_up_to_epoch<P: Preset>(
         let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
         let eth1_data = advanced_state.eth1_data();
         let graffiti = H256::zero();
-        let attestations = full_block_attestations(config, &advanced_state, (slot - 1)..slot)?;
+        let attestations =
+            full_block_attestations(config, &advanced_state, slot.saturating_sub(1)..slot)?;
+
         let deposits = ContiguousList::default();
         let sync_aggregate = full_sync_aggregate(config, &advanced_state);
         let execution_payload = None;
@@ -723,14 +727,27 @@ fn full_block_attestations<P: Preset>(
             let validator_count =
                 accessors::active_validator_count_u64(advanced_state, relative_epoch);
 
-            let committees_in_epoch = committees_per_slot * P::SlotsPerEpoch::U64;
+            let committees_in_epoch = committees_per_slot.saturating_mul(P::SlotsPerEpoch::U64);
             let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
-            let committees_before_slot = slots_since_epoch_start * committees_per_slot;
-            let committees_including_slot = committees_before_slot + committees_per_slot - 1;
-            let start = validator_count * committees_before_slot / committees_in_epoch;
-            let end = validator_count * (committees_including_slot + 1) / committees_in_epoch;
-            let active_validators_in_slot = (end - start).try_into()?;
 
+            let committees_before_slot =
+                slots_since_epoch_start.saturating_mul(committees_per_slot);
+
+            let committees_including_slot = committees_before_slot
+                .saturating_add(committees_per_slot)
+                .saturating_sub(1);
+
+            let start = validator_count
+                .saturating_mul(committees_before_slot)
+                .checked_div(committees_in_epoch)
+                .expect("there should be at least one committee in epoch");
+
+            let end = validator_count
+                .saturating_mul(committees_including_slot.saturating_add(1))
+                .checked_div(committees_in_epoch)
+                .expect("there should be at least one committee in epoch");
+
+            let active_validators_in_slot = end.saturating_sub(start).try_into()?;
             let aggregation_bits = BitList::new(true, active_validators_in_slot);
 
             let data = AttestationData {
@@ -778,7 +795,11 @@ fn full_sync_aggregate<P: Preset>(
     };
 
     let parent_root = accessors::latest_block_root(advanced_state);
-    let signing_root = parent_root.signing_root(config, advanced_state, advanced_state.slot() - 1);
+    let signing_root = parent_root.signing_root(
+        config,
+        advanced_state,
+        advanced_state.slot().saturating_sub(1),
+    );
 
     let sync_committee_signature = advanced_state
         .current_sync_committee()

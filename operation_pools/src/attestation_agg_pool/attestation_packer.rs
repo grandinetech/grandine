@@ -228,13 +228,14 @@ impl<P: Preset> AttestationPacker<P> {
                             && !epoch_participation.get_bit(*flag_index)
                     })
                     .map(|(_, weight)| {
-                        weight
-                            * get_base_reward(
+                        weight.saturating_mul(
+                            get_base_reward(
                                 &self.state,
                                 validator_index,
                                 base_reward_per_increment,
                             )
-                            .unwrap_or(0)
+                            .unwrap_or(0),
+                        )
                     })
                     .sum::<u64>();
                 compressed_validator_indices.push(index);
@@ -329,29 +330,44 @@ impl<P: Preset> AttestationPacker<P> {
             })
             .unzip();
 
-        let mut best_weight =
-            vec![vec![0; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
-        let mut prev = vec![vec![0; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
-        let mut reachable =
-            vec![vec![false; P::MaxAttestations::USIZE + 1]; different_data_count + 1];
+        let mut best_weight = vec![
+            vec![0_u64; P::MaxAttestations::USIZE.saturating_add(1)];
+            different_data_count.saturating_add(1)
+        ];
+
+        let mut prev = vec![
+            vec![0_usize; P::MaxAttestations::USIZE.saturating_add(1)];
+            different_data_count.saturating_add(1)
+        ];
+
+        let mut reachable = vec![
+            vec![false; P::MaxAttestations::USIZE.saturating_add(1)];
+            different_data_count.saturating_add(1)
+        ];
 
         reachable[0][0] = true;
 
         for groups_analyzed in 0..different_data_count {
             for att_selected in 0..=P::MaxAttestations::USIZE {
-                for new_att_selected in 0..min(choices[groups_analyzed].len(), att_selected + 1) {
+                for new_att_selected in 0..min(
+                    choices[groups_analyzed].len(),
+                    att_selected.saturating_add(1),
+                ) {
                     let value_of_new_att = choice_values[groups_analyzed][new_att_selected];
-                    let previously_had_attestations = att_selected - new_att_selected;
+                    let previously_had_attestations = att_selected.saturating_sub(new_att_selected);
                     if reachable[groups_analyzed][previously_had_attestations]
-                        && (best_weight[groups_analyzed + 1][att_selected]
+                        && (best_weight[groups_analyzed.saturating_add(1)][att_selected]
                             <= best_weight[groups_analyzed][previously_had_attestations]
-                                + value_of_new_att)
+                                .saturating_add(value_of_new_att))
                     {
-                        best_weight[groups_analyzed + 1][att_selected] = best_weight
+                        best_weight[groups_analyzed.saturating_add(1)][att_selected] = best_weight
                             [groups_analyzed][previously_had_attestations]
-                            + value_of_new_att;
-                        prev[groups_analyzed + 1][att_selected] = previously_had_attestations;
-                        reachable[groups_analyzed + 1][att_selected] = true;
+                            .saturating_add(value_of_new_att);
+
+                        prev[groups_analyzed.saturating_add(1)][att_selected] =
+                            previously_had_attestations;
+
+                        reachable[groups_analyzed.saturating_add(1)][att_selected] = true;
                     }
                 }
             }
@@ -370,10 +386,13 @@ impl<P: Preset> AttestationPacker<P> {
 
         let mut attestations = Vec::new();
         for groups_analyzed in (1..=different_data_count).rev() {
-            let new_att_selected = att_selected - prev[groups_analyzed][att_selected];
-            for choice in &choices[groups_analyzed - 1][new_att_selected] {
-                attestations.push(grouped_aggregates[groups_analyzed - 1][*choice].clone());
+            let new_att_selected = att_selected.saturating_sub(prev[groups_analyzed][att_selected]);
+
+            for choice in &choices[groups_analyzed.saturating_sub(1)][new_att_selected] {
+                attestations
+                    .push(grouped_aggregates[groups_analyzed.saturating_sub(1)][*choice].clone());
             }
+
             att_selected = prev[groups_analyzed][att_selected];
         }
 
@@ -397,6 +416,10 @@ impl<P: Preset> AttestationPacker<P> {
     // It uses the assumption that all aggregates have the same AttestationData
     #[expect(clippy::too_many_lines)]
     #[expect(clippy::float_arithmetic)]
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "good_lp::Expression does not implement safe arithmetics"
+    )]
     fn select_max_cover_attestation_integer_programming(
         &self,
         aggregates: &[Attestation<P>],
@@ -461,10 +484,10 @@ impl<P: Preset> AttestationPacker<P> {
 
         let mut objective = Expression::with_capacity(0);
 
-        let mut answer_value = 0;
+        let mut answer_value: u64 = 0;
         for i in 0..is_validator_included_variables.len() {
             if validator_in_every_aggregate[i] {
-                answer_value += validator_weights[i];
+                answer_value = answer_value.saturating_add(*validator_weights[i]);
             } else {
                 // here conversion to i32 is needed, since `good_lp` only support i32 integers
                 objective +=
@@ -524,7 +547,7 @@ impl<P: Preset> AttestationPacker<P> {
                         )
                     });
                 if attestation_was_included {
-                    answer_value += validator_weights[i];
+                    answer_value = answer_value.saturating_add(*validator_weights[i]);
                 }
             }
         }
@@ -569,8 +592,12 @@ impl<P: Preset> AttestationPacker<P> {
     }
 
     fn is_valid_for_inclusion(&self, attestation: &Attestation<P>) -> bool {
-        let low_slot = attestation.data.slot + P::MIN_ATTESTATION_INCLUSION_DELAY.get();
-        let high_slot = attestation.data.slot + P::SlotsPerEpoch::U64;
+        let low_slot = attestation
+            .data
+            .slot
+            .saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get());
+
+        let high_slot = attestation.data.slot.saturating_add(P::SlotsPerEpoch::U64);
 
         if !(low_slot..=high_slot).contains(&self.state.slot()) {
             return false;
@@ -621,13 +648,14 @@ impl<P: Preset> AttestationPacker<P> {
                             && !epoch_participation.get_bit(*flag_index)
                     })
                     .map(|(_, weight)| {
-                        weight
-                            * get_base_reward(
+                        weight.saturating_mul(
+                            get_base_reward(
                                 &self.state,
                                 validator_index,
                                 base_reward_per_increment,
                             )
-                            .unwrap_or(0)
+                            .unwrap_or(0),
+                        )
                     })
                     .sum::<u64>();
 
@@ -637,7 +665,7 @@ impl<P: Preset> AttestationPacker<P> {
     }
 
     fn maximum_added_weight(group_weights: &[AttestationWeights]) -> u64 {
-        let mut ans = 0;
+        let mut ans: u64 = 0;
         let mut counted_validator_indices = HashSet::new();
         for attestation_weight in group_weights {
             for (id, weight) in attestation_weight
@@ -646,7 +674,7 @@ impl<P: Preset> AttestationPacker<P> {
                 .zip(attestation_weight.validator_weights.iter())
             {
                 if counted_validator_indices.insert(id) {
-                    ans += weight;
+                    ans = ans.saturating_add(*weight);
                 }
             }
         }
@@ -714,7 +742,7 @@ impl<P: Preset> AttestationPacker<P> {
         accessors::get_attestation_participation_flags(
             &self.state,
             attestation.data,
-            self.state.slot() - attestation.data.slot,
+            self.state.slot().saturating_sub(attestation.data.slot),
         )
     }
 
@@ -811,7 +839,7 @@ mod tests {
         let mut current_epoch_participation =
             compute_epoch_participation(&packer.state, AttestationEpoch::Current)?;
 
-        let mut total = 0;
+        let mut total: u64 = 0;
 
         for attestation in pack_outcome.attestations.clone() {
             let weight = packer.added_weight(
@@ -819,7 +847,9 @@ mod tests {
                 &previous_epoch_participation,
                 &current_epoch_participation,
             )?;
-            total += weight;
+
+            total = total.saturating_add(weight);
+
             let _unused = packer.add_attestation(
                 &attestation,
                 &mut previous_epoch_participation,

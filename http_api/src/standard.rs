@@ -508,7 +508,9 @@ pub async fn expected_withdrawals<P: Preset, W: Wait>(
         finalized,
     } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
 
-    let proposal_slot = query.proposal_slot.unwrap_or_else(|| state.slot() + 1);
+    let proposal_slot = query
+        .proposal_slot
+        .unwrap_or_else(|| state.slot().saturating_add(1));
 
     // If `state` is a preprocessed state (i.e., `state.latest_block_header().slot < state.slot()`),
     // it is possible to compute withdrawals even when `proposal_slot` is equal to `state.slot()`.
@@ -837,7 +839,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
     //                      then in `Controller::state_at_slot`.
     //                      That means twice the amount of database lookups and state transitions.
     if epoch == accessors::get_next_epoch(&state)
-        || epoch == misc::compute_epoch_at_slot::<P>(controller.slot()) + 1
+        || epoch == misc::compute_epoch_at_slot::<P>(controller.slot()).saturating_add(1)
     {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
@@ -906,7 +908,7 @@ pub async fn state_sync_committees<P: Preset, W: Wait>(
 
     let committee = if requested_period == state_period {
         state.current_sync_committee()
-    } else if requested_period == state_period + 1 {
+    } else if requested_period == state_period.saturating_add(1) {
         state.next_sync_committee()
     } else {
         return Err(Error::EpochNotInSyncCommitteePeriod);
@@ -1067,7 +1069,7 @@ pub async fn state_randao<P: Preset, W: Wait>(
     // RANDAO mixes for future epochs are unstable, but so is the one for the current epoch.
     let state_epoch = accessors::get_current_epoch(&state);
     let epoch = query.epoch.unwrap_or(state_epoch).min(state_epoch);
-    let difference = state_epoch - epoch;
+    let difference = state_epoch.saturating_sub(epoch);
 
     if difference > P::EpochsPerHistoricalVector::U64 {
         return Err(Error::EpochOutOfRangeForStateRandao);
@@ -2616,7 +2618,7 @@ pub async fn node_syncing_status<P: Preset, W: Wait>(
         sync_distance: if is_synced {
             0
         } else {
-            controller.slot() - head_slot
+            controller.slot().saturating_sub(head_slot)
         },
         is_syncing: !(is_synced && is_back_synced),
         is_optimistic: snapshot.is_optimistic(),
@@ -2918,7 +2920,7 @@ fn state_sync_committee<P: Preset>(
 
     if requested_period == state_period {
         return Some(state.current_sync_committee().clone_arc());
-    } else if requested_period == state_period + 1 {
+    } else if requested_period == state_period.saturating_add(1) {
         return Some(state.next_sync_committee().clone_arc());
     }
 
@@ -3213,7 +3215,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
     let blinded = validator_block.value.is_blinded();
 
     let consensus_block_value = block_rewards
-        .map(|rewards| Uint256::from_u64(rewards.total) * WEI_IN_GWEI)
+        .map(|rewards| Uint256::from_u64(rewards.total).saturating_mul(WEI_IN_GWEI))
         .or_else(|| {
             warn_with_peers!(
                 "unable to calculate block rewards for validator block (blinded: {blinded}) \
@@ -3271,7 +3273,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     let head_slot = head.slot();
     let max_empty_slots = validator_config.max_empty_slots;
 
-    if head_slot + max_empty_slots < slot {
+    if head_slot.saturating_add(max_empty_slots) < slot {
         return Err(Error::HeadFarBehind {
             head_slot,
             max_empty_slots,
@@ -3511,7 +3513,7 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     let current_slot = controller.slot();
     let beacon_state = if slot == current_slot {
         controller.preprocessed_state_at_current_slot().await?
-    } else if slot == current_slot + 1 {
+    } else if slot == current_slot.saturating_add(1) {
         controller.preprocessed_state_at_next_slot().await?
     } else {
         return Err(Error::InvalidSlot(slot));
@@ -4671,7 +4673,7 @@ async fn construct_blobs_from_data_column_sidecars<P: Preset, W: Wait>(
 
     let mut data_column_sidecars = controller.data_column_sidecars_by_root(block_root)?;
 
-    if data_column_sidecars.len() * 2 < P::NumberOfColumns::USIZE {
+    if data_column_sidecars.len().saturating_mul(2) < P::NumberOfColumns::USIZE {
         return Ok(vec![]);
     }
 

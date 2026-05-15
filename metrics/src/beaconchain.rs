@@ -301,12 +301,12 @@ impl PlatformSpecificSystemMetrics {
 
 impl SystemMetrics {
     pub fn get(system: &System) -> Self {
-        let mut disk_node_bytes_total = 0;
-        let mut disk_node_bytes_free = 0;
+        let mut disk_node_bytes_total: u64 = 0;
+        let mut disk_node_bytes_free: u64 = 0;
 
         for disk in Disks::new_with_refreshed_list().list() {
-            disk_node_bytes_total += disk.total_space();
-            disk_node_bytes_free += disk.available_space();
+            disk_node_bytes_total = disk_node_bytes_total.saturating_add(disk.total_space());
+            disk_node_bytes_free = disk_node_bytes_free.saturating_add(disk.available_space());
         }
 
         let (network_node_bytes_total_receive, network_node_bytes_total_transmit) =

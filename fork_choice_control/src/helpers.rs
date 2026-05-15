@@ -258,7 +258,7 @@ impl<P: Preset> Context<P> {
         let execution_payload = factory::execution_payload(
             self.config(),
             &pre_state,
-            start_of_epoch(epoch + 1) - 1,
+            start_of_epoch(epoch.saturating_add(1)).saturating_sub(1),
             execution_block_hash,
         )
         .expect("execution payload should be constructed successfully");
@@ -567,7 +567,7 @@ impl<P: Preset> Context<P> {
             self.controller().attesting_balance(),
             expected_status
                 .attesting_validators
-                .map(|count| count * P::MAX_EFFECTIVE_BALANCE),
+                .map(|count| count.saturating_mul(P::MAX_EFFECTIVE_BALANCE)),
         );
         assert_eq!(
             self.controller().justified_epoch(),

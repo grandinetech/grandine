@@ -16,6 +16,7 @@ enum-map = { workspace = true }
 enumset = { workspace = true }
 hashing = { workspace = true }
 itertools = { workspace = true }
+nonzero_ext = { workspace = true }
 num-integer = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true, optional = true }
@@ -42,7 +43,6 @@ rayon = { workspace = true }
 [dev-dependencies]
 duplicate = { workspace = true }
 hex-literal = { workspace = true }
-nonzero_ext = { workspace = true }
 spec_test_utils = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }

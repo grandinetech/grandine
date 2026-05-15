@@ -238,8 +238,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         let current_sampling_columns =
                             Self::sampling_columns(chain_config, node_id, current_sampling_size)?;
 
-                        let backfill_column_indices =
-                            &prev_sampling_columns - &current_sampling_columns;
+                        let backfill_column_indices = prev_sampling_columns
+                            .difference(&current_sampling_columns)
+                            .copied()
+                            .collect::<HashSet<_>>();
 
                         if !backfill_column_indices.is_empty() {
                             P2pToSync::RequestCustodyGroupBackfill(
@@ -682,7 +684,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
         {
             let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(next_fork_epoch);
 
-            if slot + NEW_PHASE_TOPICS_ADVANCE_SLOTS == next_phase_slot {
+            if slot.saturating_add(NEW_PHASE_TOPICS_ADVANCE_SLOTS) == next_phase_slot {
                 info_with_peers!(
                     "subscribing to new topics for {next_phase} with digest {next_fork_digest}"
                 );
@@ -694,7 +696,12 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
         if Some(phase_by_slot) > Phase::first() && misc::is_epoch_start::<P>(slot) {
             // Unsubscribe from the topics of previous phases.
-            if self.fork_context.current_fork_epoch() + OLD_PHASE_TOPICS_REMAIN_EPOCHS == epoch {
+            if self
+                .fork_context
+                .current_fork_epoch()
+                .saturating_add(OLD_PHASE_TOPICS_REMAIN_EPOCHS)
+                == epoch
+            {
                 info_with_peers!("unsubscribing from old topics");
 
                 let fork_digest = self.fork_context.current_fork_digest();
@@ -966,8 +973,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
                 let min_ttl = match expiration {
                     Some(expiration) => {
-                        let time_diff = expiration.saturating_sub(current_slot)
-                            * chain_config.slot_duration_ms.as_secs();
+                        let time_diff = expiration
+                            .saturating_sub(current_slot)
+                            .saturating_mul(chain_config.slot_duration_ms.as_secs());
+
                         Instant::now().checked_add(Duration::from_secs(time_diff))
                     }
                     None => None,
@@ -1099,7 +1108,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
         if self.backfill_custody_groups {
             let current_sampling_columns = self.controller.sampling_columns();
-            let backfill_column_indices = &sampling_columns - &current_sampling_columns;
+            let backfill_column_indices = sampling_columns
+                .difference(&current_sampling_columns)
+                .copied()
+                .collect::<HashSet<_>>();
 
             if !backfill_column_indices.is_empty() {
                 P2pToSync::RequestCustodyGroupBackfill(
@@ -2338,11 +2350,12 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 Ordering::Equal => {
                     let max_empty_slots = self.controller.store_config().max_empty_slots;
 
-                    let status = if remote.head_slot() + max_empty_slots < local.head_slot() {
-                        SyncStatus::Behind { info }
-                    } else {
-                        SyncStatus::Synced { info }
-                    };
+                    let status =
+                        if remote.head_slot().saturating_add(max_empty_slots) < local.head_slot() {
+                            SyncStatus::Behind { info }
+                        } else {
+                            SyncStatus::Synced { info }
+                        };
 
                     (Some(local.finalized_root()), status)
                 }

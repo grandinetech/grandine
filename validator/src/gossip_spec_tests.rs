@@ -627,7 +627,7 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
         topic,
     } = case.yaml::<Meta>("meta");
 
-    let mut time = 0;
+    let mut time: u64 = 0;
     let anchor_state = case.ssz::<_, Arc<BeaconState<P>>>(config.as_ref(), "state");
     let genesis_time = anchor_state.genesis_time();
 
@@ -671,7 +671,7 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
     };
 
     if let Some(current_time) = current_time_ms {
-        time += current_time;
+        time = time.saturating_add(current_time);
 
         let tick = tick_at_time(current_time);
         context.on_tick(tick);
@@ -724,7 +724,7 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
         } = test_message;
 
         if let Some(offset_ms) = offset_ms {
-            let tick = tick_at_time(time + offset_ms);
+            let tick = tick_at_time(time.saturating_add(offset_ms));
             context.on_tick(tick);
         }
 

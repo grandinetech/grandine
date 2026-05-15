@@ -208,9 +208,12 @@ impl Tick {
         let Self { slot, kind } = self;
         let slot_duration = config.slot_duration_ms;
         let tick_duration = tick_duration_at_slot::<P>(config, slot);
-        let duration_before_slot = slot_duration.saturating_mul((slot - GENESIS_SLOT).try_into()?);
+
+        let duration_before_slot =
+            slot_duration.saturating_mul(slot.saturating_sub(GENESIS_SLOT).try_into()?);
+
         let duration_after_slot = tick_duration.saturating_mul(kind as u32);
-        let duration_until_tick = duration_before_slot + duration_after_slot;
+        let duration_until_tick = duration_before_slot.saturating_add(duration_after_slot);
 
         Ok(duration_since_genesis.saturating_sub(duration_until_tick))
     }
@@ -230,14 +233,27 @@ impl Tick {
 
         // First, determine the slot based on unix epoch
         let nanos_per_slot = config.slot_duration_ms.as_nanos();
-        let slots_since_genesis = u64::try_from(nanos_since_genesis / nanos_per_slot)?;
-        let slot = GENESIS_SLOT + slots_since_genesis;
+        let slots_since_genesis = u64::try_from(
+            nanos_since_genesis
+                .checked_div(nanos_per_slot)
+                .expect("slot duration must be at least one nanosecond"),
+        )?;
+
+        let slot = GENESIS_SLOT.saturating_add(slots_since_genesis);
 
         // Then, determine which tick within that slot
         let nanos_per_tick = tick_duration_at_slot::<P>(config, slot).as_nanos();
         let ticks_per_slot = u128::try_from(TickKind::ticks_per_slot::<P>(config, slot))?;
-        let ticks_since_genesis = nanos_since_genesis / nanos_per_tick;
-        let ticks_since_slot = usize::try_from(ticks_since_genesis % ticks_per_slot)?;
+
+        let ticks_since_genesis = nanos_since_genesis
+            .checked_div(nanos_per_tick)
+            .expect("tick_duration must be at least one nanosecond");
+
+        let ticks_since_slot = usize::try_from(
+            ticks_since_genesis
+                .checked_rem(ticks_per_slot)
+                .expect("slot should have at least one tick"),
+        )?;
 
         let kind = TickKind::from_index_at_slot::<P>(config, slot, ticks_since_slot)
             .expect("more ticks would add up to additional slots");
@@ -297,7 +313,7 @@ impl TickKind {
             self.next()
         } else {
             let current_idx = Self::pre_gloas_ticks().position(|k| k == self)?;
-            let next_idx = current_idx + 1;
+            let next_idx = current_idx.saturating_add(1);
 
             Self::pre_gloas_ticks().nth(next_idx)
         }
@@ -438,14 +454,21 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
         let genesis_to_now = unix_epoch_to_now
             .checked_sub(unix_epoch_to_genesis)
             .expect("the difference from now to genesis fits in Duration");
-        let slots_since_genesis = genesis_to_now.as_secs() / config.slot_duration_ms.as_secs();
-        let genesis_to_current_slot =
-            Duration::from_secs(slots_since_genesis * config.slot_duration_ms.as_secs());
+
+        let slots_since_genesis = genesis_to_now
+            .as_secs()
+            .checked_div(config.slot_duration_ms.as_secs())
+            .expect("slot_duration must be at least one second");
+
+        let genesis_to_current_slot = Duration::from_secs(
+            slots_since_genesis.saturating_mul(config.slot_duration_ms.as_secs()),
+        );
+
         let current_slot_to_now = genesis_to_now
             .checked_sub(genesis_to_current_slot)
             .expect("the difference from now to current slot fits in Duration");
 
-        next_tick = Tick::start_of_slot(GENESIS_SLOT + slots_since_genesis);
+        next_tick = Tick::start_of_slot(GENESIS_SLOT.saturating_add(slots_since_genesis));
         now_to_next_tick = Duration::ZERO;
 
         // Cache tick duration, and only update when phase changed
@@ -460,7 +483,7 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
                 tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
                 current_phase = next_phase;
             }
-            now_to_next_tick += tick_duration;
+            now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
         }
 
         if only_interval_ticks {
@@ -472,11 +495,11 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
                     tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
                     current_phase = next_phase;
                 }
-                now_to_next_tick += tick_duration;
+                now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
             }
         }
 
-        now_to_next_tick -= current_slot_to_now;
+        now_to_next_tick = now_to_next_tick.saturating_sub(current_slot_to_now);
     }
 
     let next_instant = now_instant
@@ -495,7 +518,8 @@ fn tick_duration_at_slot<P: Preset>(config: &Config, slot: Slot) -> Duration {
     let tick_duration_in_ms = u64::try_from(
         slot_duration
             .as_millis()
-            .saturating_div(ticks_per_slot_u128),
+            .checked_div(ticks_per_slot_u128)
+            .expect("there should be at least one tick per slot"),
     )
     .expect("tick duration in ms should fit in u64");
 

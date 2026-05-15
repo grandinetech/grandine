@@ -1,17 +1,14 @@
-use core::{
-    fmt::Debug,
-    num::NonZeroU64,
-    ops::{Div as _, Mul as _},
-};
+use core::{fmt::Debug, num::NonZeroU64, ops::Div as _};
 use std::sync::Arc;
 
-use anyhow::{Result, bail, ensure};
-use arithmetic::U64Ext as _;
+use anyhow::{Result, anyhow, bail, ensure};
+use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bit_field::BitField as _;
 use bls::{AggregatePublicKey, PublicKeyBytes, traits::PublicKey as _};
 #[cfg(not(target_os = "zkvm"))]
 use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
+use nonzero_ext::nonzero;
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
@@ -74,7 +71,7 @@ pub fn get_current_epoch<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> E
 
 #[must_use]
 pub fn get_next_epoch<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Epoch {
-    get_current_epoch(state) + 1
+    get_current_epoch(state).saturating_add(1)
 }
 
 #[must_use]
@@ -116,7 +113,7 @@ pub fn relative_epoch<P: Preset>(
 
 /// <https://github.com/ethereum/consensus-specs/blob/f7da1a38347155589f5e0403ad3290ffb77f4da6/specs/phase0/beacon-chain.md#helpers>
 pub fn get_finality_delay<P: Preset>(state: &impl BeaconState<P>) -> u64 {
-    get_previous_epoch(state) - state.finalized_checkpoint().epoch
+    get_previous_epoch(state).saturating_sub(state.finalized_checkpoint().epoch)
 }
 
 pub fn get_block_root<P: Preset>(
@@ -138,7 +135,7 @@ pub fn get_block_root_at_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot
     ensure!(slot < state.slot(), Error::SlotOutOfRange);
 
     ensure!(
-        state.slot() <= slot + SlotsPerHistoricalRoot::<P>::U64,
+        state.slot() <= slot.saturating_add(SlotsPerHistoricalRoot::<P>::U64),
         Error::SlotOutOfRange,
     );
 
@@ -401,7 +398,10 @@ fn get_seed_by_epoch<P: Preset>(
 ) -> H256 {
     let mix = get_randao_mix(
         state,
-        epoch + P::EpochsPerHistoricalVector::U64 - P::MinSeedLookahead::U64 - 1,
+        epoch
+            .saturating_add(P::EpochsPerHistoricalVector::U64)
+            .saturating_sub(P::MinSeedLookahead::U64)
+            .saturating_sub(1),
     );
 
     hashing::hash_32_64_256(domain_type.to_fixed_bytes(), epoch, mix)
@@ -441,11 +441,23 @@ pub fn beacon_committee<P: Preset>(
 
     let indices = active_validator_indices_shuffled(state, relative_epoch);
     let validator_count = ValidatorIndex::try_from(indices.len())?;
-    let committees_in_epoch = committees_per_slot * P::SlotsPerEpoch::U64;
+    let committees_in_epoch = committees_per_slot.saturating_mul(P::SlotsPerEpoch::U64);
     let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
-    let index_in_epoch = slots_since_epoch_start * committees_per_slot + committee_index;
-    let start = (validator_count * index_in_epoch / committees_in_epoch).try_into()?;
-    let end = (validator_count * (index_in_epoch + 1) / committees_in_epoch).try_into()?;
+    let index_in_epoch = slots_since_epoch_start
+        .saturating_mul(committees_per_slot)
+        .saturating_add(committee_index);
+
+    let start = validator_count
+        .saturating_mul(index_in_epoch)
+        .checked_div(committees_in_epoch)
+        .ok_or(Error::CommitteeIndexStartInvalid)?
+        .try_into()?;
+
+    let end = validator_count
+        .saturating_mul(index_in_epoch.saturating_add(1))
+        .checked_div(committees_in_epoch)
+        .ok_or(Error::CommitteeIndexEndInvalid)?
+        .try_into()?;
 
     Ok(indices.slice(start..end))
 }
@@ -473,7 +485,7 @@ pub fn get_beacon_proposer_index<P: Preset>(
         .map(PostFuluBeaconState::proposer_lookahead)
     {
         proposer_lookahead
-            .get(state.slot() % P::SlotsPerEpoch::U64)
+            .get(state.slot() % P::SlotsPerEpoch::non_zero())
             .copied()
             .map_err(Into::into)
     } else {
@@ -519,13 +531,13 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
         match relative_epoch {
             RelativeEpoch::Current => {
                 return proposer_lookahead
-                    .get(slot % P::SlotsPerEpoch::U64)
+                    .get(slot % P::SlotsPerEpoch::non_zero())
                     .copied()
                     .map_err(Into::into);
             }
             RelativeEpoch::Next => {
                 return proposer_lookahead
-                    .get(P::SlotsPerEpoch::U64 + slot % P::SlotsPerEpoch::U64)
+                    .get(P::SlotsPerEpoch::U64.saturating_add(slot % P::SlotsPerEpoch::non_zero()))
                     .copied()
                     .map_err(Into::into);
             }
@@ -621,7 +633,7 @@ fn get_next_sync_committee_indices_pre_electra<P: Preset>(
     let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
     let max_random_byte = u64::from(u8::MAX);
 
-    (0..u64::MAX / H256::len_bytes() as u64)
+    (0..u64::MAX / nonzero!(H256::len_bytes() as u64))
         .flat_map(move |quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -646,8 +658,9 @@ fn get_next_sync_committee_indices_pre_electra<P: Preset>(
                 .expect("candidate_index was produced by enumerating active validators")
                 .effective_balance;
 
-            (effective_balance * max_random_byte >= P::MAX_EFFECTIVE_BALANCE * random_byte)
-                .then_some(candidate_index)
+            (effective_balance.saturating_mul(max_random_byte)
+                >= P::MAX_EFFECTIVE_BALANCE.saturating_mul(random_byte))
+            .then_some(candidate_index)
         })
         .take(P::SyncCommitteeSize::USIZE)
         .pipe(ContiguousVector::try_from_iter)
@@ -669,7 +682,7 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
     let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
     let max_random_value = u64::from(u16::MAX);
 
-    (0..u64::MAX / H128::len_bytes() as u64)
+    (0..u64::MAX / nonzero!(H128::len_bytes() as u64))
         .flat_map(|quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -695,9 +708,9 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
                 .expect("candidate_index was produced by enumerating active validators")
                 .effective_balance;
 
-            (effective_balance * max_random_value
-                >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value)
-                .then_some(candidate_index)
+            (effective_balance.saturating_mul(max_random_value)
+                >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.saturating_mul(random_value))
+            .then_some(candidate_index)
         })
         .take(P::SyncCommitteeSize::USIZE)
         .pipe(ContiguousVector::try_from_iter)
@@ -774,14 +787,15 @@ pub fn compute_base_reward<P: Preset>(
     base_reward_per_increment: Gwei,
 ) -> Gwei {
     let increments = effective_balance / P::EFFECTIVE_BALANCE_INCREMENT;
-    increments * base_reward_per_increment
+    increments.saturating_mul(base_reward_per_increment)
 }
 
 pub fn get_base_reward_per_increment<P: Preset>(state: &impl BeaconState<P>) -> Gwei {
     P::EFFECTIVE_BALANCE_INCREMENT
         .get()
-        .mul(P::BASE_REWARD_FACTOR)
-        .div(total_active_balance(state).sqrt())
+        .saturating_mul(P::BASE_REWARD_FACTOR)
+        .checked_div(total_active_balance(state).sqrt())
+        .expect("total_active_balance should not be zero")
 }
 
 pub fn get_attestation_participation_flags<P: Preset>(
@@ -813,11 +827,10 @@ pub fn get_attestation_participation_flags<P: Preset>(
 
             true
         } else {
-            let slot = usize::try_from(data.slot)?;
             let payload_status = u64::from(
                 post_gloas
                     .execution_payload_availability()
-                    .get(slot % SlotsPerHistoricalRoot::<P>::USIZE)
+                    .get((data.slot % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?)
                     .ok_or(Error::PayloadAvailabilityOutOfRange)?,
             );
 
@@ -851,7 +864,7 @@ pub fn get_sync_subcommittee_pubkeys<P: Preset>(
     subcommittee_index: SubcommitteeIndex,
 ) -> Result<&[PublicKeyBytes]> {
     let current_epoch = get_current_epoch(state);
-    let next_slot_epoch = misc::compute_epoch_at_slot::<P>(state.slot() + 1);
+    let next_slot_epoch = misc::compute_epoch_at_slot::<P>(state.slot().saturating_add(1));
 
     let sync_committee = if misc::sync_committee_period::<P>(current_epoch)
         == misc::sync_committee_period::<P>(next_slot_epoch)
@@ -863,9 +876,9 @@ pub fn get_sync_subcommittee_pubkeys<P: Preset>(
 
     let index = usize::try_from(subcommittee_index)?;
     let size = SyncSubcommitteeSize::<P>::USIZE;
-    let offset = index * size;
+    let offset = index.saturating_mul(size);
 
-    Ok(&sync_committee.pubkeys[offset..offset + size])
+    Ok(&sync_committee.pubkeys[offset..offset.saturating_add(size)])
 }
 
 pub fn slashable_indices<P: Preset>(
@@ -975,7 +988,8 @@ pub fn get_consolidation_churn_limit<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
 ) -> Gwei {
-    get_balance_churn_limit(config, state) - get_activation_exit_churn_limit(config, state)
+    get_balance_churn_limit(config, state)
+        .saturating_sub(get_activation_exit_churn_limit(config, state))
 }
 
 #[must_use]
@@ -1057,15 +1071,25 @@ pub fn ptc_for_slot_for_epoch_processing<P: Preset>(
     let committees_per_slot =
         misc::committee_count_from_active_validator_count::<P>(active_validator_count);
 
-    let committees_in_epoch = committees_per_slot * P::SlotsPerEpoch::U64;
+    let committees_in_epoch =
+        NonZeroU64::new(committees_per_slot.saturating_mul(P::SlotsPerEpoch::U64))
+            .ok_or_else(|| anyhow!("there should be some committees per epoch"))?;
+
     let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
 
     let members = (0..committees_per_slot).flat_map(|committee_index| {
-        let index_in_epoch = slots_since_epoch_start * committees_per_slot + committee_index;
-        let start = usize::try_from(validator_count * index_in_epoch / committees_in_epoch)
-            .expect("committee start fits in usize");
-        let end = usize::try_from(validator_count * (index_in_epoch + 1) / committees_in_epoch)
-            .expect("committee end fits in usize");
+        let index_in_epoch = slots_since_epoch_start
+            .saturating_mul(committees_per_slot)
+            .saturating_add(committee_index);
+
+        let start =
+            usize::try_from(validator_count.saturating_mul(index_in_epoch) / committees_in_epoch)
+                .expect("committee start should fit in usize");
+
+        let end = usize::try_from(
+            validator_count.saturating_mul(index_in_epoch.saturating_add(1)) / committees_in_epoch,
+        )
+        .expect("committee end fits in usize");
 
         shuffled[start..end].iter().copied()
     });
@@ -1094,7 +1118,7 @@ fn ptc_from_committee_members<P: Preset>(
 }
 
 pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<RelativeSlot> {
-    match (state.slot() + 1).checked_sub(slot) {
+    match state.slot().saturating_add(1).checked_sub(slot) {
         None => bail!(Error::SlotAfterNext),
         Some(0) => Ok(RelativeSlot::Next),
         Some(1) => Ok(RelativeSlot::Current),
@@ -1109,7 +1133,7 @@ fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: Relative
     match relative_slot {
         RelativeSlot::Previous => state_slot.saturating_sub(1),
         RelativeSlot::Current => state_slot,
-        RelativeSlot::Next => state_slot + 1,
+        RelativeSlot::Next => state_slot.saturating_add(1),
     }
 }
 
@@ -1177,8 +1201,7 @@ pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<
     let active_balances = total_active_balance(state);
 
     // > get_total_active_balance(state) // SLOTS_PER_EPOCH * BUILDER_PAYMENT_THRESHOLD_NUMERATOR
-    let quorum = active_balances
-        .saturating_div(P::SlotsPerEpoch::U64)
+    let quorum = (active_balances / P::SlotsPerEpoch::non_zero())
         .saturating_mul(BUILDER_PAYMENT_THRESHOLD_NUMERATOR);
 
     quorum.saturating_div(BUILDER_PAYMENT_THRESHOLD_DENOMINATOR)

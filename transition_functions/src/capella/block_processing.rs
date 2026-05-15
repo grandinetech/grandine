@@ -1,6 +1,6 @@
-use core::ops::{Add as _, Index as _, Rem as _};
+use core::ops::Index as _;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
@@ -159,7 +159,8 @@ pub fn custom_process_block<P: Preset>(
 }
 
 pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block) + block.body.bls_to_execution_changes.len()
+    altair::count_required_signatures(block)
+        .saturating_add(block.body.bls_to_execution_changes.len())
 }
 
 fn process_execution_payload<P: Preset>(
@@ -229,8 +230,13 @@ pub fn process_operations<P: Preset, V: Verifier>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Verify that outstanding deposits are processed up to the maximum number of deposits
-    let computed =
-        P::MaxDeposits::U64.min(state.eth1_data().deposit_count - state.eth1_deposit_index());
+    let computed = P::MaxDeposits::U64.min(
+        state
+            .eth1_data()
+            .deposit_count
+            .saturating_sub(state.eth1_deposit_index()),
+    );
+
     let in_block = body.deposits().len().try_into()?;
 
     ensure!(
@@ -447,13 +453,11 @@ where
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index + 1;
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index.saturating_add(1);
     }
 
     // > Update the next validator index to start the next withdrawal sweep
-    update_next_withdrawal_validator_index(state, &expected_withdrawals);
-
-    Ok(())
+    update_next_withdrawal_validator_index(state, &expected_withdrawals)
 }
 
 /// [`get_expected_withdrawals`](https://github.com/ethereum/consensus-specs/blob/dc17b1e2b6a4ec3a2104c277a33abae75a43b0fa/specs/capella/beacon-chain.md#new-get_expected_withdrawals)
@@ -475,7 +479,7 @@ pub fn get_expected_withdrawals<P: Preset>(
         let address = validator
             .withdrawal_credentials
             .as_bytes()
-            .index(H256::len_bytes() - ExecutionAddress::len_bytes()..)
+            .index(H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes())..)
             .pipe(ExecutionAddress::from_slice);
 
         if is_fully_withdrawable_validator(validator, balance, epoch) {
@@ -522,7 +526,7 @@ pub fn get_expected_withdrawals<P: Preset>(
 pub fn update_next_withdrawal_validator_index<P: Preset>(
     state: &mut impl PostCapellaBeaconState<P>,
     expected_withdrawals: &[Withdrawal],
-) {
+) -> Result<()> {
     if expected_withdrawals.len() == P::MaxWithdrawalsPerPayload::USIZE {
         // > Next sweep starts after the latest withdrawal's validator index
         let next_validator_index = expected_withdrawals
@@ -532,19 +536,25 @@ pub fn update_next_withdrawal_validator_index<P: Preset>(
                  ensures that expected_withdrawals is not empty",
             )
             .validator_index
-            .add(1)
-            .rem(state.validators().len_u64());
+            .saturating_add(1)
+            .checked_rem(state.validators().len_u64())
+            .ok_or_else(|| anyhow!("state.validators().len_u64() should not be zero"))?;
 
         *state.next_withdrawal_validator_index_mut() = next_validator_index;
     } else {
         // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
-        let next_index =
-            state.next_withdrawal_validator_index() + P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP;
+        let next_index = state
+            .next_withdrawal_validator_index()
+            .saturating_add(P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP);
 
-        let next_validator_index = next_index % state.validators().len_u64();
+        let next_validator_index = next_index
+            .checked_rem(state.validators().len_u64())
+            .ok_or_else(|| anyhow!("state.validators().len_u64() should not be zero"))?;
 
         *state.next_withdrawal_validator_index_mut() = next_validator_index;
     }
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -29,16 +29,16 @@ pub const PARTICIPATION_FLAG_WEIGHTS: [(usize, u64); 3] = [
 ];
 
 pub const SYNC_REWARD_WEIGHT: u64 = 2;
-pub const PROPOSER_WEIGHT: u64 = 8;
+pub const PROPOSER_WEIGHT: NonZeroU64 = nonzero!(8_u64);
 pub const WEIGHT_DENOMINATOR: NonZeroU64 = nonzero!(64_u64);
 
 const_assert_eq!(
     WEIGHT_DENOMINATOR.get(),
     TIMELY_SOURCE_WEIGHT
-        + TIMELY_TARGET_WEIGHT
-        + TIMELY_HEAD_WEIGHT
-        + SYNC_REWARD_WEIGHT
-        + PROPOSER_WEIGHT,
+        .saturating_add(TIMELY_TARGET_WEIGHT)
+        .saturating_add(TIMELY_HEAD_WEIGHT)
+        .saturating_add(SYNC_REWARD_WEIGHT)
+        .saturating_add(PROPOSER_WEIGHT.get()),
 );
 
 pub const TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE: NonZeroU64 = nonzero!(16_u64);

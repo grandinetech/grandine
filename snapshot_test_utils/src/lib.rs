@@ -77,7 +77,7 @@ impl<'path> Case<'path> {
                 failures.is_empty(),
                 "{}/{} requests failed{separator}{:?}",
                 failures.len(),
-                successes.len() + failures.len(),
+                successes.len().saturating_add(failures.len()),
                 failures.into_iter().join(separator),
             );
 
@@ -229,8 +229,9 @@ fn normalize_response_headers(bytes: &mut Vec<u8>) -> Result<()> {
             // The name comparison ignores case, just like `str::eq_ignore_ascii_case`.
             if header.name == DATE && header.value != NORMALIZED_DATE.as_bytes() {
                 let Range { start, end } = header.value.as_ptr_range();
-                let start_offset = start as usize - bytes.as_slice().as_ptr() as usize;
-                let end_offset = end as usize - bytes.as_slice().as_ptr() as usize;
+                let start_offset =
+                    (start as usize).saturating_sub(bytes.as_slice().as_ptr() as usize);
+                let end_offset = (end as usize).saturating_sub(bytes.as_slice().as_ptr() as usize);
 
                 bytes.splice(start_offset..end_offset, NORMALIZED_DATE.bytes());
 
@@ -251,7 +252,7 @@ fn normalize_response_body(bytes: &mut Vec<u8>) -> Result<()> {
 
     // If the response body is valid JSON, pretty-print it.
     if let Ok(json) = serde_json::from_slice::<Value>(body) {
-        let body_offset = bytes.len() - body.len();
+        let body_offset = bytes.len().saturating_sub(body.len());
         let pretty_printed = serde_json::to_string_pretty(&json)?;
 
         bytes.truncate(body_offset);

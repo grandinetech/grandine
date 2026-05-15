@@ -111,7 +111,9 @@ impl<P: Preset> MultiPhaseAggregateAndProofSets<P> {
 
     #[cfg(test)]
     pub fn len(&self) -> usize {
-        self.phase0_supersets.len() + self.electra_supersets.len()
+        self.phase0_supersets
+            .len()
+            .saturating_add(self.electra_supersets.len())
     }
 }
 

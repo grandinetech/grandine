@@ -114,14 +114,20 @@ pub struct ImportReport {
 impl ImportReport {
     #[must_use]
     pub const fn imported_records(&self) -> usize {
-        self.validators.succeeded.len()
-            + self.blocks.succeeded.len()
-            + self.attestations.succeeded.len()
+        self.validators
+            .succeeded
+            .len()
+            .saturating_add(self.blocks.succeeded.len())
+            .saturating_add(self.attestations.succeeded.len())
     }
 
     #[must_use]
     pub const fn failed_records(&self) -> usize {
-        self.validators.failed.len() + self.blocks.failed.len() + self.attestations.failed.len()
+        self.validators
+            .failed
+            .len()
+            .saturating_add(self.blocks.failed.len())
+            .saturating_add(self.attestations.failed.len())
     }
 }
 

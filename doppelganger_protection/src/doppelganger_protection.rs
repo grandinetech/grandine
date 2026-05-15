@@ -45,7 +45,8 @@ impl DoppelgangerProtection {
     }
 
     pub fn activate_validators_that_pass_checks<P: Preset>(&self, current_slot: Slot) {
-        let check_duration_in_slots = DOPPELGANGER_CHECK_DURATION_IN_EPOCHS * P::SlotsPerEpoch::U64;
+        let check_duration_in_slots =
+            DOPPELGANGER_CHECK_DURATION_IN_EPOCHS.saturating_mul(P::SlotsPerEpoch::U64);
 
         let (validators_to_activate, validators_to_track): (HashMap<_, _>, HashMap<_, _>) = self
             .load()
@@ -53,7 +54,10 @@ impl DoppelgangerProtection {
             .iter()
             .map(|(public_key, validator)| (*public_key, *validator))
             .partition(|(_, validator)| {
-                validator.added_in_slot + check_duration_in_slots <= current_slot
+                validator
+                    .added_in_slot
+                    .saturating_add(check_duration_in_slots)
+                    <= current_slot
             });
 
         if validators_to_activate.is_empty() {
@@ -144,8 +148,11 @@ impl DoppelgangerProtection {
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
         if current_epoch > GENESIS_EPOCH {
-            self.detect_doppelgangers_in_epoch(current_epoch - 1, &validator_indices_with_pubkeys)
-                .await?;
+            self.detect_doppelgangers_in_epoch(
+                current_epoch.saturating_sub(1),
+                &validator_indices_with_pubkeys,
+            )
+            .await?;
         }
 
         self.detect_doppelgangers_in_epoch(current_epoch, &validator_indices_with_pubkeys)
@@ -222,8 +229,9 @@ impl Snapshot {
         self.tracked_validators
             .get(&public_key)
             .map(|validator| {
-                validator.added_in_slot
-                    + DOPPELGANGER_CHECK_DURATION_IN_EPOCHS * P::SlotsPerEpoch::U64
+                validator.added_in_slot.saturating_add(
+                    DOPPELGANGER_CHECK_DURATION_IN_EPOCHS.saturating_mul(P::SlotsPerEpoch::U64),
+                )
             })
             .unwrap_or(Slot::MAX)
     }

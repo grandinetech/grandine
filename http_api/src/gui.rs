@@ -137,8 +137,12 @@ impl ValidatorEpochRangeReport {
         current_epoch: Epoch,
         report: ValidatorEpochReport,
     ) {
-        self.active_epochs +=
-            usize::from(predicates::is_active_validator(validator, current_epoch));
+        self.active_epochs =
+            self.active_epochs
+                .saturating_add(usize::from(predicates::is_active_validator(
+                    validator,
+                    current_epoch,
+                )));
 
         match &report {
             ValidatorEpochReport::Phase0 {
@@ -148,28 +152,48 @@ impl ValidatorEpochRangeReport {
                 previous_epoch_slot_deltas,
                 ..
             } => {
-                self.source_matches += usize::from(performance.previous_epoch_matching_source());
-                self.target_matches += usize::from(performance.previous_epoch_matching_target());
-                self.head_matches += usize::from(performance.previous_epoch_matching_head());
+                self.source_matches = self
+                    .source_matches
+                    .saturating_add(usize::from(performance.previous_epoch_matching_source()));
 
-                self.inclusion_delay_sum += performance
-                    .previous_epoch_fastest_inclusion()
-                    .map(|inclusion| inclusion.delay.get())
-                    .unwrap_or_default();
+                self.target_matches = self
+                    .target_matches
+                    .saturating_add(usize::from(performance.previous_epoch_matching_target()));
 
-                self.rewards += epoch_deltas.combined_reward();
-                self.penalties += epoch_deltas.combined_penalty();
-                self.penalties += slashing_penalty.unwrap_or_default();
+                self.head_matches = self
+                    .head_matches
+                    .saturating_add(usize::from(performance.previous_epoch_matching_head()));
 
-                self.rewards += previous_epoch_slot_deltas
-                    .values()
-                    .map(IndividualSlotDeltas::combined_reward)
-                    .sum::<Gwei>();
+                self.inclusion_delay_sum = self.inclusion_delay_sum.saturating_add(
+                    performance
+                        .previous_epoch_fastest_inclusion()
+                        .map(|inclusion| inclusion.delay.get())
+                        .unwrap_or_default(),
+                );
 
-                self.penalties += previous_epoch_slot_deltas
-                    .values()
-                    .map(IndividualSlotDeltas::combined_penalty)
-                    .sum::<Gwei>();
+                self.rewards = self.rewards.saturating_add(epoch_deltas.combined_reward());
+
+                self.penalties = self
+                    .penalties
+                    .saturating_add(epoch_deltas.combined_penalty());
+
+                self.penalties = self
+                    .penalties
+                    .saturating_add(slashing_penalty.unwrap_or_default());
+
+                self.rewards = self.rewards.saturating_add(
+                    previous_epoch_slot_deltas
+                        .values()
+                        .map(IndividualSlotDeltas::combined_reward)
+                        .sum::<Gwei>(),
+                );
+
+                self.penalties = self.penalties.saturating_add(
+                    previous_epoch_slot_deltas
+                        .values()
+                        .map(IndividualSlotDeltas::combined_penalty)
+                        .sum::<Gwei>(),
+                );
             }
             ValidatorEpochReport::PostAltair {
                 epoch_deltas,
@@ -179,29 +203,49 @@ impl ValidatorEpochRangeReport {
                 ..
             } => {
                 if let Some(attestation_performance) = previous_epoch_attestation_performance {
-                    self.source_matches += usize::from(attestation_performance.matching_source());
-                    self.target_matches += usize::from(attestation_performance.matching_target());
-                    self.head_matches += usize::from(attestation_performance.matching_head());
+                    self.source_matches = self
+                        .source_matches
+                        .saturating_add(usize::from(attestation_performance.matching_source()));
 
-                    self.inclusion_delay_sum += attestation_performance
-                        .inclusion_delay
-                        .map(NonZeroU64::get)
-                        .unwrap_or_default();
+                    self.target_matches = self
+                        .target_matches
+                        .saturating_add(usize::from(attestation_performance.matching_target()));
+
+                    self.head_matches = self
+                        .head_matches
+                        .saturating_add(usize::from(attestation_performance.matching_head()));
+
+                    self.inclusion_delay_sum = self.inclusion_delay_sum.saturating_add(
+                        attestation_performance
+                            .inclusion_delay
+                            .map(NonZeroU64::get)
+                            .unwrap_or_default(),
+                    );
                 }
 
-                self.rewards += epoch_deltas.combined_reward();
-                self.penalties += epoch_deltas.combined_penalty();
-                self.penalties += slashing_penalty.unwrap_or_default();
+                self.rewards = self.rewards.saturating_add(epoch_deltas.combined_reward());
 
-                self.rewards += previous_epoch_slot_deltas
-                    .values()
-                    .map(IndividualSlotDeltas::combined_reward)
-                    .sum::<Gwei>();
+                self.penalties = self
+                    .penalties
+                    .saturating_add(epoch_deltas.combined_penalty());
 
-                self.penalties += previous_epoch_slot_deltas
-                    .values()
-                    .map(IndividualSlotDeltas::combined_penalty)
-                    .sum::<Gwei>();
+                self.penalties = self
+                    .penalties
+                    .saturating_add(slashing_penalty.unwrap_or_default());
+
+                self.rewards = self.rewards.saturating_add(
+                    previous_epoch_slot_deltas
+                        .values()
+                        .map(IndividualSlotDeltas::combined_reward)
+                        .sum::<Gwei>(),
+                );
+
+                self.penalties = self.penalties.saturating_add(
+                    previous_epoch_slot_deltas
+                        .values()
+                        .map(IndividualSlotDeltas::combined_penalty)
+                        .sum::<Gwei>(),
+                );
             }
         }
 
@@ -345,7 +389,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         previous_epoch_sync_aggregates_with_roots = HashMap::new();
         previous_epoch_slot_reports = SlotReports::new();
     } else {
-        let previous_epoch = query.start - 1;
+        let previous_epoch = query.start.saturating_sub(1);
         let start_slot = misc::compute_start_slot_at_epoch::<P>(previous_epoch);
         let slot_before_previous_epoch = misc::previous_slot(start_slot);
 

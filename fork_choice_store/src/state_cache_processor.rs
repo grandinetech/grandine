@@ -265,9 +265,12 @@ fn process_slots<P: Preset, S: Storage<P>>(
         return Ok(state);
     }
 
-    let max_empty_slots = store.store_config().max_empty_slots * allowed_empty_slots_multiplier;
+    let max_empty_slots = store
+        .store_config()
+        .max_empty_slots
+        .saturating_mul(allowed_empty_slots_multiplier);
 
-    if from_slot + max_empty_slots < slot {
+    if from_slot.saturating_add(max_empty_slots) < slot {
         bail!(Error::StateFarBehind {
             state_slot: from_slot,
             max_empty_slots,

@@ -264,6 +264,17 @@ impl Uint256 {
     }
 
     #[must_use]
+    pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+        let (result, overflow) = self.into_raw().overflowing_add(rhs.into_raw());
+        (Self(result), overflow)
+    }
+
+    #[must_use]
+    pub fn saturating_add(self, rhs: Self) -> Self {
+        Self(self.into_raw().saturating_add(rhs.into_raw()))
+    }
+
+    #[must_use]
     pub fn saturating_mul(self, rhs: Self) -> Self {
         Self(self.into_raw().saturating_mul(rhs.into_raw()))
     }

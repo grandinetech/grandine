@@ -1,4 +1,4 @@
-use core::{cell::LazyCell, ops::Mul as _};
+use core::cell::LazyCell;
 
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
@@ -237,11 +237,12 @@ pub fn process_pending_deposits<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = get_current_epoch(state) + 1;
-    let available_for_processing =
-        state.deposit_balance_to_consume() + get_activation_exit_churn_limit(config, state);
+    let next_epoch = get_current_epoch(state).saturating_add(1);
+    let available_for_processing = state
+        .deposit_balance_to_consume()
+        .saturating_add(get_activation_exit_churn_limit(config, state));
 
-    let mut processed_amount = 0;
+    let mut processed_amount: Gwei = 0;
     let mut next_deposit_index: u64 = 0;
     let mut deposits_to_postpone = vec![];
     let mut is_churn_limit_reached = false;
@@ -283,19 +284,20 @@ pub fn process_pending_deposits<P: Preset>(
             deposits_to_postpone.push(*deposit);
         } else {
             // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
-            is_churn_limit_reached = processed_amount + deposit.amount > available_for_processing;
+            is_churn_limit_reached =
+                processed_amount.saturating_add(deposit.amount) > available_for_processing;
 
             if is_churn_limit_reached {
                 break;
             }
 
             // > Consume churn and apply deposit.
-            processed_amount += deposit.amount;
+            processed_amount = processed_amount.saturating_add(deposit.amount);
             apply_pending_deposit(config, pubkey_cache, state, deposit)?;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.
-        next_deposit_index += 1;
+        next_deposit_index = next_deposit_index.saturating_add(1);
     }
 
     *state.pending_deposits_mut() = PersistentList::try_from_iter(
@@ -308,7 +310,8 @@ pub fn process_pending_deposits<P: Preset>(
     )?;
 
     if is_churn_limit_reached {
-        *state.deposit_balance_to_consume_mut() = available_for_processing - processed_amount;
+        *state.deposit_balance_to_consume_mut() =
+            available_for_processing.saturating_sub(processed_amount);
     } else {
         *state.deposit_balance_to_consume_mut() = 0;
     }
@@ -371,14 +374,14 @@ pub fn is_valid_deposit_signature(
 pub fn process_pending_consolidations<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = get_current_epoch(state) + 1;
-    let mut next_pending_consolidation = 0;
+    let next_epoch = get_current_epoch(state).saturating_add(1);
+    let mut next_pending_consolidation: usize = 0;
 
     for pending_consolidation in &state.pending_consolidations().clone() {
         let source_validator = state.validators().get(pending_consolidation.source_index)?;
 
         if source_validator.slashed {
-            next_pending_consolidation += 1;
+            next_pending_consolidation = next_pending_consolidation.saturating_add(1);
             continue;
         }
 
@@ -404,7 +407,7 @@ pub fn process_pending_consolidations<P: Preset>(
             source_effective_balance,
         );
 
-        next_pending_consolidation += 1;
+        next_pending_consolidation = next_pending_consolidation.saturating_add(1);
     }
 
     *state.pending_consolidations_mut() = PersistentList::try_from_iter(
@@ -420,8 +423,8 @@ pub fn process_pending_consolidations<P: Preset>(
 
 pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectraBeaconState<P>) {
     let hysteresis_increment = P::EFFECTIVE_BALANCE_INCREMENT.get() / P::HYSTERESIS_QUOTIENT;
-    let downward_threshold = hysteresis_increment * P::HYSTERESIS_DOWNWARD_MULTIPLIER;
-    let upward_threshold = hysteresis_increment * P::HYSTERESIS_UPWARD_MULTIPLIER;
+    let downward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_DOWNWARD_MULTIPLIER);
+    let upward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_UPWARD_MULTIPLIER);
 
     let (validators, balances) = state.validators_mut_with_balances();
 
@@ -439,8 +442,8 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectra
             .next()
             .expect("list of validators and list of balances should have the same length");
 
-        let below = balance + downward_threshold < validator.effective_balance;
-        let above = validator.effective_balance + upward_threshold < balance;
+        let below = balance.saturating_add(downward_threshold) < validator.effective_balance;
+        let above = validator.effective_balance.saturating_add(upward_threshold) < balance;
 
         if below || above {
             validator.effective_balance = balance
@@ -480,7 +483,7 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
         slashings
             .into_iter()
             .sum::<Gwei>()
-            .mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
+            .saturating_mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
             .min(total_active_balance)
     });
 
@@ -490,8 +493,9 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
     // > Factored out from penalty numerator to avoid uint64 overflow
     let increment = P::EFFECTIVE_BALANCE_INCREMENT;
 
-    let penalty_per_effective_balance_increment =
-        *adjusted_total_slashing_balance / (total_active_balance / increment);
+    let penalty_per_effective_balance_increment = adjusted_total_slashing_balance
+        .checked_div(total_active_balance / increment)
+        .expect("total_active_balance(state) / increment should not be zero");
 
     balances.update(|balance| {
         let (validator_index, summary) = summaries
@@ -509,14 +513,16 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
             return;
         }
 
-        if current_epoch + P::EpochsPerSlashingsVector::U64 / 2 != withdrawable_epoch {
+        if current_epoch.saturating_add(P::EpochsPerSlashingsVector::U64 / 2) != withdrawable_epoch
+        {
             return;
         }
 
         let effective_balance_increments = effective_balance / increment;
 
         // > [Modified in Electra:EIP7251]
-        let penalty = penalty_per_effective_balance_increment * effective_balance_increments;
+        let penalty =
+            penalty_per_effective_balance_increment.saturating_mul(effective_balance_increments);
 
         decrease_balance(balance, penalty);
 

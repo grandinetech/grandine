@@ -108,18 +108,18 @@ where
         let mut length = 0usize;
         let elements = elements
             .into_iter()
-            .inspect(|_| length += 1)
+            .inspect(|_| length = length.saturating_add(1))
             .chunks(B::USIZE);
         let mut chunks = elements.into_iter();
 
-        let mut full_chunks_len = 0;
+        let mut full_chunks_len: usize = 0;
         // Deduplicating only consecutive nodes saves us from having to use a slower data structure
         // and seems to cover all access patterns used in `consensus-specs`.
         let run_length_encoded_result = itertools::process_results(
             chunks
                 .by_ref()
-                .take(N::USIZE / B::USIZE)
-                .inspect(|_| full_chunks_len += 1)
+                .take(N::USIZE / B::non_zero_usize())
+                .inspect(|_| full_chunks_len = full_chunks_len.saturating_add(1))
                 .map(ContiguousVector::try_from_iter),
             |packs| {
                 packs
@@ -132,7 +132,7 @@ where
         );
 
         let mut run_length_encoded_nodes = match run_length_encoded_result {
-            Ok(nodes) if full_chunks_len == N::USIZE / B::USIZE => nodes,
+            Ok(nodes) if full_chunks_len == N::USIZE / B::non_zero_usize() => nodes,
             _ => {
                 chunks.flatten().count();
                 return Err(ReadError::VectorSizeMismatch {
@@ -142,7 +142,7 @@ where
             }
         };
 
-        if N::USIZE % B::USIZE != 0 {
+        if N::USIZE % B::non_zero_usize() != 0 {
             let Some(last_chunk) = chunks
                 .next()
                 .map(ContiguousVector::try_from_iter)
@@ -313,9 +313,9 @@ where
                     2 => UpTo3::from([(node.clone_arc(), 1), (node, 1)]),
                     _ if count.is_odd() => {
                         if aligned {
-                            UpTo3::from([(node.clone_arc(), count - 1), (node, 1)])
+                            UpTo3::from([(node.clone_arc(), count.saturating_sub(1)), (node, 1)])
                         } else {
-                            UpTo3::from([(node.clone_arc(), 1), (node, count - 1)])
+                            UpTo3::from([(node.clone_arc(), 1), (node, count.saturating_sub(1))])
                         }
                     }
                     _ => {
@@ -324,7 +324,7 @@ where
                         } else {
                             UpTo3::from([
                                 (node.clone_arc(), 1),
-                                (node.clone_arc(), count - 2),
+                                (node.clone_arc(), count.saturating_sub(2)),
                                 (node, 1),
                             ])
                         }
@@ -416,9 +416,9 @@ where
                     left_height,
                     right_height,
                 } => {
-                    assert_eq!(height, left_height + 1);
+                    assert_eq!(height, left_height.saturating_add(1));
 
-                    let bit_index = (height + B::ilog2() - 1).into();
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
 
                     if index.get_bit(bit_index) {
                         height = *right_height;
@@ -451,9 +451,9 @@ where
                     left_height,
                     right_height,
                 } => {
-                    assert_eq!(height, *left_height + 1);
+                    assert_eq!(height, left_height.saturating_add(1));
 
-                    let bit_index = (height + B::ilog2() - 1).into();
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
 
                     if index.get_bit(bit_index) {
                         height = *right_height;

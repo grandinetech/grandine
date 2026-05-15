@@ -173,7 +173,8 @@ impl<'config, P: Preset> Incremental<'config, P> {
     }
 
     pub fn set_eth1_timestamp(&mut self, eth1_timestamp: UnixSeconds) {
-        *self.beacon_state.genesis_time_mut() = eth1_timestamp + self.config.genesis_delay;
+        *self.beacon_state.genesis_time_mut() =
+            eth1_timestamp.saturating_add(self.config.genesis_delay);
     }
 
     pub fn add_deposit_data(

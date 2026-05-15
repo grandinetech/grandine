@@ -36,7 +36,7 @@ pub fn export_state_and_blocks<P: Preset>(
                 let mut temporary_state =
                     anchor_checkpoint_provider.clone().checkpoint().value.state;
 
-                for current_slot in (temporary_state.slot() + 1)..=state_slot {
+                for current_slot in temporary_state.slot().saturating_add(1)..=state_slot {
                     if let Some((block, _)) = storage.finalized_block_by_slot(current_slot)? {
                         combined::untrusted_state_transition(
                             storage.config(),
@@ -101,7 +101,7 @@ pub fn replay_blocks<P: Preset>(
 
     assert_eq!(state.slot(), from_slot);
 
-    for current_slot in (from_slot + 1)..=to_slot {
+    for current_slot in from_slot.saturating_add(1)..=to_slot {
         let block_file_prefix = format!("beacon_block_slot_{current_slot:06}_root_");
         if let Some(block) = from_prefixed_file(config, input_dir, &block_file_prefix)? {
             combined::untrusted_state_transition(config, pubkey_cache, &mut state, &block)?;

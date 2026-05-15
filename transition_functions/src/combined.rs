@@ -614,7 +614,7 @@ fn process_slots_for_epoch_report<P: Preset>(
     state: &mut BeaconState<P>,
 ) -> Result<()> {
     let next_epoch = accessors::get_next_epoch(state);
-    let last_slot = misc::compute_start_slot_at_epoch::<P>(next_epoch) - 1;
+    let last_slot = misc::compute_start_slot_at_epoch::<P>(next_epoch).saturating_sub(1);
 
     if state.slot() < last_slot {
         process_slots(config, pubkey_cache, state, last_slot)?;
@@ -622,7 +622,7 @@ fn process_slots_for_epoch_report<P: Preset>(
 
     unphased::process_slot(state);
 
-    assert!(misc::is_epoch_start::<P>(state.slot() + 1));
+    assert!(misc::is_epoch_start::<P>(state.slot().saturating_add(1)));
 
     Ok(())
 }
@@ -632,7 +632,7 @@ fn post_process_slots_for_epoch_report<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
 ) -> Result<()> {
-    let post_slot = state.slot() + 1;
+    let post_slot = state.slot().saturating_add(1);
 
     // If multiple phases have the same fork slots,
     // the state may need to be upgraded multiple times in the same slot.
@@ -1153,7 +1153,7 @@ mod spec_tests {
         let mut state = case.ssz::<_, BeaconState<P>>(config, "pre");
         let expected_post = case.ssz(config, "post");
         let slots = case.yaml::<u64>("slots");
-        let last_slot = state.slot() + slots;
+        let last_slot = state.slot().saturating_add(slots);
 
         process_slots(config, &pubkey_cache, &mut state, last_slot)
             .expect("every slot processing test should perform processing successfully");
@@ -1204,7 +1204,10 @@ mod spec_tests {
         let meta = case.meta();
         let blocks_count = meta.blocks_count;
         let fork_epoch = meta.fork_epoch;
-        let pre_block_count = meta.fork_block.map(|index| index + 1).unwrap_or_default();
+        let pre_block_count = meta
+            .fork_block
+            .map(|index| index.saturating_add(1))
+            .unwrap_or_default();
 
         let post_phase = meta
             .post_fork
