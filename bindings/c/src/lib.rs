@@ -10,9 +10,9 @@ use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4,
-    PayloadStatusV1,
+    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3,
+    PayloadAttributesV4, PayloadStatusV1,
 };
 use runtime::{grandine_args::GrandineArgs, run, shutdown};
 use tracing::error;
@@ -27,9 +27,9 @@ use crate::{
     containers::{
         CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CEngineGetPayloadV2Response,
         CEngineGetPayloadV3Response, CEngineGetPayloadV4Response, CEngineGetPayloadV5Response,
-        CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3, CExecutionRequests,
-        CForkChoiceStateV1, CForkChoiceUpdatedResponse, CPayloadAttributesV1, CPayloadAttributesV2,
-        CPayloadAttributesV3, CPayloadAttributesV4, CPayloadStatusV1,
+        CEngineGetPayloadV6Response, CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3,
+        CExecutionRequests, CForkChoiceStateV1, CForkChoiceUpdatedResponse, CPayloadAttributesV1,
+        CPayloadAttributesV2, CPayloadAttributesV3, CPayloadAttributesV4, CPayloadStatusV1,
     },
     generic::{CGrandineString, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
     layout::CLayout,
@@ -82,6 +82,8 @@ pub struct CEmbedAdapter {
         unsafe extern "C" fn(payload_id: CH64) -> CResult<CEngineGetPayloadV4Response>,
     engine_get_payload_v5:
         unsafe extern "C" fn(payload_id: CH64) -> CResult<CEngineGetPayloadV5Response>,
+    engine_get_payload_v6:
+        unsafe extern "C" fn(payload_id: CH64) -> CResult<CEngineGetPayloadV6Response>,
     engine_get_blobs_v1: unsafe extern "C" fn(
         versioned_hashes: CVec<CH256>,
     ) -> CResult<CVec<COption<CBlobAndProofV1>>>,
@@ -269,6 +271,14 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         payload_id: H64,
     ) -> Result<EngineGetPayloadV5Response<Mainnet>> {
         let result = unsafe { (self.engine_get_payload_v5)(payload_id.into()) };
+        Result::<_>::from(result).and_then(|v| Ok(v.try_into()?))
+    }
+
+    fn engine_get_payload_v6(
+        &self,
+        payload_id: H64,
+    ) -> Result<EngineGetPayloadV6Response<Mainnet>> {
+        let result = unsafe { (self.engine_get_payload_v6)(payload_id.into()) };
         Result::<_>::from(result).and_then(|v| Ok(v.try_into()?))
     }
 
