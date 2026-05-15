@@ -18,6 +18,7 @@ use tap::Pipe as _;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use types::{
     altair::containers::SignedContributionAndProof,
+    bellatrix::primitives::Gas,
     capella::{containers::SignedBlsToExecutionChange, primitives::WithdrawalIndex},
     combined::{Attestation, AttesterSlashing, DataColumnSidecar},
     deneb::{
@@ -909,6 +910,8 @@ pub struct PayloadAttributesEventDataV4 {
     pub parent_beacon_block_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot_number: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub target_gas_limit: Gas,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -1003,6 +1006,7 @@ impl<P: Preset> From<PayloadAttributesV4<P>> for PayloadAttributesEventDataV4 {
             withdrawals,
             parent_beacon_block_root,
             slot_number,
+            target_gas_limit,
         } = payload_attributes;
 
         Self {
@@ -1012,6 +1016,7 @@ impl<P: Preset> From<PayloadAttributesV4<P>> for PayloadAttributesEventDataV4 {
             withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
             parent_beacon_block_root,
             slot_number,
+            target_gas_limit,
         }
     }
 }
