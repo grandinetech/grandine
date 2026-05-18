@@ -1810,29 +1810,22 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let parent_root = state.latest_block_header().hash_tree_root();
                 let snapshot = self.producer_context.controller.snapshot();
 
-                let withdrawals = if snapshot.should_extend_payload(parent_root) {
-                    if let Some(envelope) =
+                let withdrawals = if snapshot.should_extend_payload(parent_root)
+                    && let Some(envelope) =
                         snapshot.cached_execution_payload_envelope_by_root(parent_root)
-                    {
-                        let mut state_copy = state.clone();
+                {
+                    let mut state_copy = state.clone();
 
-                        gloas::apply_parent_execution_payload(
-                            chain_config,
-                            &self.producer_context.pubkey_cache,
-                            &mut state_copy,
-                            &envelope.message.execution_requests,
-                        )?;
+                    gloas::apply_parent_execution_payload(
+                        chain_config,
+                        &self.producer_context.pubkey_cache,
+                        &mut state_copy,
+                        &envelope.message.execution_requests,
+                    )?;
 
-                        gloas::get_expected_withdrawals(&state_copy)?.0
-                    } else {
-                        gloas::get_expected_withdrawals(state)?.0
-                    }
+                    gloas::get_expected_withdrawals(&state_copy)?.0
                 } else {
-                    state
-                        .payload_expected_withdrawals()
-                        .into_iter()
-                        .copied()
-                        .collect()
+                    gloas::get_expected_withdrawals(state)?.0
                 };
 
                 let withdrawals = withdrawals
