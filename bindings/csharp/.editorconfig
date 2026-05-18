@@ -384,6 +384,7 @@ dotnet_diagnostic.CS1591.severity = silent
 dotnet_diagnostic.SA1009.severity = silent
 dotnet_diagnostic.SA1010.severity = silent
 dotnet_diagnostic.SA1011.severity = silent
+dotnet_diagnostic.SA1023.severity = silent
 dotnet_diagnostic.SA1600.severity = silent
 dotnet_diagnostic.SA1601.severity = silent
 dotnet_diagnostic.SA1633.severity = silent

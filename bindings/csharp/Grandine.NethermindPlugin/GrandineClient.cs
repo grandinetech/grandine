@@ -7,25 +7,25 @@ using System.Threading.Tasks;
 using Grandine.Native;
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CPayloadStatusV1 EngineNewPayloadV1Delegate(CExecutionPayloadV1 payload);
+internal unsafe delegate CResult_CPayloadStatusV1 EngineNewPayloadV1Delegate(CExecutionPayloadV1* payload);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CPayloadStatusV1 EngineNewPayloadV2Delegate(CExecutionPayloadV2 payload);
+internal unsafe delegate CResult_CPayloadStatusV1 EngineNewPayloadV2Delegate(CExecutionPayloadV2* payload);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CPayloadStatusV1 EngineNewPayloadV3Delegate(CExecutionPayloadV3 payload, CVec_CH256 versionedHashes, CH256 parentBeaconBlockRoot);
+internal unsafe delegate CResult_CPayloadStatusV1 EngineNewPayloadV3Delegate(CExecutionPayloadV3* payload, CVec_CH256* versionedHashes, CH256 parentBeaconBlockRoot);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CPayloadStatusV1 EngineNewPayloadV4Delegate(CExecutionPayloadV3 payload, CVec_CH256 versionedHashes, CH256 parentBeaconBlockRoot, CExecutionRequests executionRequests);
+internal unsafe delegate CResult_CPayloadStatusV1 EngineNewPayloadV4Delegate(CExecutionPayloadV3* payload, CVec_CH256* versionedHashes, CH256 parentBeaconBlockRoot, CExecutionRequests* executionRequests);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV1Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV1 attributes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV2Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV2 attributes);
+internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV2Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV2* attributes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV3 attributes);
+internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV3* attributes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate CResult_CExecutionPayloadV1 EngineGetPayloadV1Delegate(CH64 payloadId);
@@ -43,16 +43,16 @@ internal delegate CResult_CEngineGetPayloadV4Response EngineGetPayloadV4Delegate
 internal delegate CResult_CEngineGetPayloadV5Response EngineGetPayloadV5Delegate(CH64 payloadId);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1Delegate(CVec_CH256 versionedHashes);
+internal unsafe delegate CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1Delegate(CVec_CH256* versionedHashes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2Delegate(CVec_CH256 versionedHashes);
+internal unsafe delegate CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2Delegate(CVec_CH256* versionedHashes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CVec_CGrandineString EngineExchangeCapabilitiesDelegate(CVec_CGrandineString clCapabilities);
+internal unsafe delegate CResult_CVec_CGrandineString EngineExchangeCapabilitiesDelegate(CVec_CGrandineString* clCapabilities);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CVec_CClientVersionV1 EngineGetClientVersionV1Delegate(CClientVersionV1 clVersion);
+internal unsafe delegate CResult_CVec_CClientVersionV1 EngineGetClientVersionV1Delegate(CClientVersionV1* clVersion);
 
 public class GrandineClient : IAsyncDisposable
 {
@@ -124,22 +124,22 @@ public class GrandineClient : IAsyncDisposable
             IntPtr engine_getClientVersionV1 = Marshal.GetFunctionPointerForDelegate(this.engineGetClientVersionV1);
             res = NativeMethods.grandine_set_execution_layer_adapter(new CEmbedAdapter
             {
-                engine_new_payload_v1 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV1, CResult_CPayloadStatusV1>)engine_newPayloadV1Ptr,
-                engine_new_payload_v2 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV2, CResult_CPayloadStatusV1>)engine_newPayloadV2Ptr,
-                engine_new_payload_v3 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV3, CVec_CH256, CH256, CResult_CPayloadStatusV1>)engine_newPayloadV3Ptr,
-                engine_new_payload_v4 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV3, CVec_CH256, CH256, CExecutionRequests, CResult_CPayloadStatusV1>)engine_newPayloadV4Ptr,
+                engine_new_payload_v1 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV1*, CResult_CPayloadStatusV1>)engine_newPayloadV1Ptr,
+                engine_new_payload_v2 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV2*, CResult_CPayloadStatusV1>)engine_newPayloadV2Ptr,
+                engine_new_payload_v3 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV3*, CVec_CH256*, CH256, CResult_CPayloadStatusV1>)engine_newPayloadV3Ptr,
+                engine_new_payload_v4 = (delegate* unmanaged[Cdecl]<CExecutionPayloadV3*, CVec_CH256*, CH256, CExecutionRequests*, CResult_CPayloadStatusV1>)engine_newPayloadV4Ptr,
                 engine_forkchoice_updated_v1 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV1, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV1Ptr,
-                engine_forkchoice_updated_v2 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV2, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV2Ptr,
-                engine_forkchoice_updated_v3 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV3, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV3Ptr,
+                engine_forkchoice_updated_v2 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV2*, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV2Ptr,
+                engine_forkchoice_updated_v3 = (delegate* unmanaged[Cdecl]<CForkChoiceStateV1, COption_CPayloadAttributesV3*, CResult_CForkChoiceUpdatedResponse>)engine_forkchoiceUpdatedV3Ptr,
                 engine_get_payload_v1 = (delegate* unmanaged[Cdecl]<CH64, CResult_CExecutionPayloadV1>)engine_getPayloadV1Ptr,
                 engine_get_payload_v2 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV2Response>)engine_getPayloadV2Ptr,
                 engine_get_payload_v3 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV3Response>)engine_getPayloadV3Ptr,
                 engine_get_payload_v4 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV4Response>)engine_getPayloadV4Ptr,
                 engine_get_payload_v5 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV5Response>)engine_getPayloadV5Ptr,
-                engine_get_blobs_v1 = (delegate* unmanaged[Cdecl]<CVec_CH256, CResult_CVec_COption_CBlobAndProofV1>)engine_getBlobsV1Ptr,
-                engine_get_blobs_v2 = (delegate* unmanaged[Cdecl]<CVec_CH256, CResult_COption_CVec_CBlobAndProofV2>)engine_getBlobsV2Ptr,
-                engine_exchange_capabilities = (delegate* unmanaged[Cdecl]<CVec_CGrandineString, CResult_CVec_CGrandineString>)engine_exchangeCapabilitiesPtr,
-                engine_get_client_version_v1 = (delegate* unmanaged[Cdecl]<CClientVersionV1, CResult_CVec_CClientVersionV1>)engine_getClientVersionV1,
+                engine_get_blobs_v1 = (delegate* unmanaged[Cdecl]<CVec_CH256*, CResult_CVec_COption_CBlobAndProofV1>)engine_getBlobsV1Ptr,
+                engine_get_blobs_v2 = (delegate* unmanaged[Cdecl]<CVec_CH256*, CResult_COption_CVec_CBlobAndProofV2>)engine_getBlobsV2Ptr,
+                engine_exchange_capabilities = (delegate* unmanaged[Cdecl]<CVec_CGrandineString*, CResult_CVec_CGrandineString>)engine_exchangeCapabilitiesPtr,
+                engine_get_client_version_v1 = (delegate* unmanaged[Cdecl]<CClientVersionV1*, CResult_CVec_CClientVersionV1>)engine_getClientVersionV1,
             });
         }
 

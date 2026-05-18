@@ -18,12 +18,14 @@ public class GrandineEngineApi : IGrandineEngineApi
         this.engineRpc = engineRpc;
     }
 
-    public CResult_CPayloadStatusV1 EngineNewPayloadV1(CExecutionPayloadV1 payload)
+    public unsafe CResult_CPayloadStatusV1 EngineNewPayloadV1(CExecutionPayloadV1* payloadPtr)
     {
         this.logger.Debug("Received engine_newPayloadV1 request from grandine");
 
         try
         {
+            var payload = *payloadPtr;
+
             var payloadStatus = this.engineRpc.engine_newPayloadV1(new ExecutionPayload
             {
                 ParentHash = payload.parent_hash.ToHash256(),
@@ -53,12 +55,13 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CPayloadStatusV1 EngineNewPayloadV2(CExecutionPayloadV2 payload)
+    public unsafe CResult_CPayloadStatusV1 EngineNewPayloadV2(CExecutionPayloadV2* payloadPtr)
     {
         this.logger.Debug("Received engine_newPayloadV2 request from grandine");
 
         try
         {
+            var payload = *payloadPtr;
             var withdrawals = GrandineUtils.WithdrawalsFromNative(payload.withdrawals);
 
             var payloadStatus = this.engineRpc.engine_newPayloadV2(new ExecutionPayload
@@ -93,12 +96,13 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CPayloadStatusV1 EngineNewPayloadV3(CExecutionPayloadV3 payload, CVec_CH256 versionedHashes, CH256 parentBeaconBlockRoot)
+    public unsafe CResult_CPayloadStatusV1 EngineNewPayloadV3(CExecutionPayloadV3* payloadPtr, CVec_CH256* versionedHashesPtr, CH256 parentBeaconBlockRoot)
     {
         this.logger.Debug("Received engine_newPayloadV3 request from grandine");
 
         try
         {
+            var payload = *payloadPtr;
             var withdrawals = GrandineUtils.WithdrawalsFromNative(payload.withdrawals);
             var parentBeaconBlockRootConverted = parentBeaconBlockRoot.ToHash256();
 
@@ -124,7 +128,7 @@ public class GrandineEngineApi : IGrandineEngineApi
                     ExcessBlobGas = payload.excess_blob_gas,
                     ParentBeaconBlockRoot = parentBeaconBlockRootConverted,
                 },
-                GrandineUtils.ConvertVersionedHashes(versionedHashes),
+                GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr),
                 parentBeaconBlockRootConverted)
             .Result;
 
@@ -141,14 +145,15 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CPayloadStatusV1 EngineNewPayloadV4(CExecutionPayloadV3 payload, CVec_CH256 versionedHashes, CH256 parentBeaconBlockRoot, CExecutionRequests executionRequests)
+    public unsafe CResult_CPayloadStatusV1 EngineNewPayloadV4(CExecutionPayloadV3* payloadPtr, CVec_CH256* versionedHashesPtr, CH256 parentBeaconBlockRoot, CExecutionRequests* executionRequestsPtr)
     {
         this.logger.Debug("Received engine_newPayloadV4 request from grandine");
 
         try
         {
+            var payload = *payloadPtr;
             var withdrawals = GrandineUtils.WithdrawalsFromNative(payload.withdrawals);
-            var executionRequestsConverted = GrandineUtils.ConvertExecutionRequests(executionRequests);
+            var executionRequestsConverted = GrandineUtils.ConvertExecutionRequests(*executionRequestsPtr);
             var parentBeaconBlockRootConverted = parentBeaconBlockRoot.ToHash256();
 
             var payloadStatus = this.engineRpc.engine_newPayloadV4(
@@ -174,7 +179,7 @@ public class GrandineEngineApi : IGrandineEngineApi
                     ParentBeaconBlockRoot = parentBeaconBlockRootConverted,
                     ExecutionRequests = executionRequestsConverted,
                 },
-                GrandineUtils.ConvertVersionedHashes(versionedHashes),
+                GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr),
                 parentBeaconBlockRootConverted,
                 executionRequestsConverted)
             .Result;
@@ -213,7 +218,7 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV2(CForkChoiceStateV1 state, COption_CPayloadAttributesV2 payload)
+    public unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV2(CForkChoiceStateV1 state, COption_CPayloadAttributesV2* payloadPtr)
     {
         this.logger.Debug("Received engine_forkchoiceUpdatedV2 request from grandine");
 
@@ -221,7 +226,7 @@ public class GrandineEngineApi : IGrandineEngineApi
         {
             var forkchoiceUpdatedResult = this.engineRpc.engine_forkchoiceUpdatedV2(
                 state.ToForkchoiceStateV1(),
-                GrandineUtils.ConvertPayloadAttributes(payload)).Result;
+                GrandineUtils.ConvertPayloadAttributes(*payloadPtr)).Result;
 
             return forkchoiceUpdatedResult.Result != Result.Success
                 ? CResult_CForkChoiceUpdatedResponse.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, forkchoiceUpdatedResult.Result.Error)
@@ -234,7 +239,7 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3(CForkChoiceStateV1 state, COption_CPayloadAttributesV3 payload)
+    public unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3(CForkChoiceStateV1 state, COption_CPayloadAttributesV3* payloadPtr)
     {
         this.logger.Debug("Received engine_forkchoiceUpdatedV3 request from grandine");
 
@@ -242,7 +247,7 @@ public class GrandineEngineApi : IGrandineEngineApi
         {
             var forkchoiceUpdatedResult = this.engineRpc.engine_forkchoiceUpdatedV3(
                 state.ToForkchoiceStateV1(),
-                GrandineUtils.ConvertPayloadAttributes(payload)).Result;
+                GrandineUtils.ConvertPayloadAttributes(*payloadPtr)).Result;
 
             return forkchoiceUpdatedResult.Result != Result.Success
                 ? CResult_CForkChoiceUpdatedResponse.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, forkchoiceUpdatedResult.Result.Error)
@@ -390,13 +395,13 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1(CVec_CH256 versionedHashes)
+    public unsafe CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1(CVec_CH256* versionedHashesPtr)
     {
         this.logger.Debug("Received engine_getBlobsV1 request from grandine");
 
         try
         {
-            var blobs = this.engineRpc.engine_getBlobsV1(GrandineUtils.ConvertVersionedHashes(versionedHashes)).Result;
+            var blobs = this.engineRpc.engine_getBlobsV1(GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr)).Result;
 
             if (blobs.Result != Result.Success)
             {
@@ -422,13 +427,13 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2(CVec_CH256 versionedHashes)
+    public unsafe CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2(CVec_CH256* versionedHashesPtr)
     {
         this.logger.Debug("Received engine_getBlobsV2 request from grandine");
 
         try
         {
-            var blobs = this.engineRpc.engine_getBlobsV2(GrandineUtils.ConvertVersionedHashes(versionedHashes)).Result;
+            var blobs = this.engineRpc.engine_getBlobsV2(GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr)).Result;
 
             if (blobs.Result != Result.Success)
             {
@@ -454,13 +459,13 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CVec_CGrandineString EngineExchangeCapabilities(CVec_CGrandineString capabilities)
+    public unsafe CResult_CVec_CGrandineString EngineExchangeCapabilities(CVec_CGrandineString* capabilitiesPtr)
     {
         this.logger.Debug("Received engine_exchangeCapabilities request from grandine");
 
         try
         {
-            var outputCapabilities = this.engineRpc.engine_exchangeCapabilities(GrandineUtils.ConvertCapabilities(capabilities));
+            var outputCapabilities = this.engineRpc.engine_exchangeCapabilities(GrandineUtils.ConvertCapabilities(*capabilitiesPtr));
 
             if (outputCapabilities.Result != Result.Success)
             {
@@ -481,13 +486,13 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CVec_CClientVersionV1 EngineGetClientVersionV1(CClientVersionV1 version)
+    public unsafe CResult_CVec_CClientVersionV1 EngineGetClientVersionV1(CClientVersionV1* versionPtr)
     {
         this.logger.Debug("Received engine_getClientVersionV1 request from grandine");
 
         try
         {
-            var clClientVersion = GrandineUtils.ConvertClientVersion(version);
+            var clClientVersion = GrandineUtils.ConvertClientVersion(*versionPtr);
 
             var response = this.engineRpc.engine_getClientVersionV1(clClientVersion);
 
