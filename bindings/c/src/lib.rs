@@ -42,19 +42,19 @@ mod layout;
 #[repr(C)]
 pub struct CEmbedAdapter {
     engine_new_payload_v1:
-        unsafe extern "C" fn(payload: CExecutionPayloadV1) -> CResult<CPayloadStatusV1>,
+        unsafe extern "C" fn(payload: *const CExecutionPayloadV1) -> CResult<CPayloadStatusV1>,
     engine_new_payload_v2:
-        unsafe extern "C" fn(payload: CExecutionPayloadV2) -> CResult<CPayloadStatusV1>,
+        unsafe extern "C" fn(payload: *const CExecutionPayloadV2) -> CResult<CPayloadStatusV1>,
     engine_new_payload_v3: unsafe extern "C" fn(
-        payload: CExecutionPayloadV3,
-        versioned_hashes: CVec<CH256>,
+        payload: *const CExecutionPayloadV3,
+        versioned_hashes: *const CVec<CH256>,
         parent_beacon_block_root: CH256,
     ) -> CResult<CPayloadStatusV1>,
     engine_new_payload_v4: unsafe extern "C" fn(
-        payload: CExecutionPayloadV3,
-        versioned_hashes: CVec<CH256>,
+        payload: *const CExecutionPayloadV3,
+        versioned_hashes: *const CVec<CH256>,
         parent_beacon_block_root: CH256,
-        execution_requests: CExecutionRequests,
+        execution_requests: *const CExecutionRequests,
     ) -> CResult<CPayloadStatusV1>,
     engine_forkchoice_updated_v1: unsafe extern "C" fn(
         state: CForkChoiceStateV1,
@@ -62,11 +62,11 @@ pub struct CEmbedAdapter {
     ) -> CResult<CForkChoiceUpdatedResponse>,
     engine_forkchoice_updated_v2: unsafe extern "C" fn(
         state: CForkChoiceStateV1,
-        payload: COption<CPayloadAttributesV2>,
+        payload: *const COption<CPayloadAttributesV2>,
     ) -> CResult<CForkChoiceUpdatedResponse>,
     engine_forkchoice_updated_v3: unsafe extern "C" fn(
         state: CForkChoiceStateV1,
-        payload: COption<CPayloadAttributesV3>,
+        payload: *const COption<CPayloadAttributesV3>,
     ) -> CResult<CForkChoiceUpdatedResponse>,
     engine_get_payload_v1: unsafe extern "C" fn(payload_id: CH64) -> CResult<CExecutionPayloadV1>,
     engine_get_payload_v2:
@@ -78,15 +78,16 @@ pub struct CEmbedAdapter {
     engine_get_payload_v5:
         unsafe extern "C" fn(payload_id: CH64) -> CResult<CEngineGetPayloadV5Response>,
     engine_get_blobs_v1: unsafe extern "C" fn(
-        versioned_hashes: CVec<CH256>,
+        versioned_hashes: *const CVec<CH256>,
     ) -> CResult<CVec<COption<CBlobAndProofV1>>>,
     engine_get_blobs_v2: unsafe extern "C" fn(
-        versioned_hashes: CVec<CH256>,
+        versioned_hashes: *const CVec<CH256>,
     ) -> CResult<COption<CVec<CBlobAndProofV2>>>,
-    engine_exchange_capabilities:
-        unsafe extern "C" fn(capabilities: CVec<CGrandineString>) -> CResult<CVec<CGrandineString>>,
+    engine_exchange_capabilities: unsafe extern "C" fn(
+        capabilities: *const CVec<CGrandineString>,
+    ) -> CResult<CVec<CGrandineString>>,
     engine_get_client_version_v1:
-        unsafe extern "C" fn(version: CClientVersionV1) -> CResult<CVec<CClientVersionV1>>,
+        unsafe extern "C" fn(version: *const CClientVersionV1) -> CResult<CVec<CClientVersionV1>>,
 }
 
 impl eth1_api::EmbedAdapter for CEmbedAdapter {
@@ -112,7 +113,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
     ) -> Result<PayloadStatusV1> {
         let payload = payload.into();
 
-        let result = unsafe { (self.engine_new_payload_v1)(payload) };
+        let result = unsafe { (self.engine_new_payload_v1)(&payload) };
 
         Result::<_>::from(result).map(Into::into)
     }
@@ -123,7 +124,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
     ) -> Result<PayloadStatusV1> {
         let payload = payload.into();
 
-        let result = unsafe { (self.engine_new_payload_v2)(payload) };
+        let result = unsafe { (self.engine_new_payload_v2)(&payload) };
 
         Result::<_>::from(result).map(Into::into)
     }
@@ -142,7 +143,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         let parent_beacon_block_root = parent_beacon_block_root.into();
 
         let result = unsafe {
-            (self.engine_new_payload_v3)(payload, versioned_hashes, parent_beacon_block_root)
+            (self.engine_new_payload_v3)(&payload, &versioned_hashes, parent_beacon_block_root)
         };
 
         Result::<_>::from(result).map(Into::into)
@@ -165,10 +166,10 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
 
         let result = unsafe {
             (self.engine_new_payload_v4)(
-                payload,
-                versioned_hashes,
+                &payload,
+                &versioned_hashes,
                 parent_beacon_block_root,
-                execution_requests,
+                &execution_requests,
             )
         };
 
@@ -196,7 +197,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         let state: CForkChoiceStateV1 = state.into();
         let payload: Option<CPayloadAttributesV2> = payload.map(Into::into);
         let payload = payload.into();
-        let result = unsafe { (self.engine_forkchoice_updated_v2)(state, payload) };
+        let result = unsafe { (self.engine_forkchoice_updated_v2)(state, &payload) };
 
         Result::from(result).map(Into::into)
     }
@@ -209,7 +210,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         let state: CForkChoiceStateV1 = state.into();
         let payload: Option<CPayloadAttributesV3> = payload.map(Into::into);
         let payload = payload.into();
-        let result = unsafe { (self.engine_forkchoice_updated_v3)(state, payload) };
+        let result = unsafe { (self.engine_forkchoice_updated_v3)(state, &payload) };
 
         Result::<_>::from(result).map(Into::into)
     }
@@ -263,7 +264,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             .map(|hash| hash.into())
             .collect::<CVec<_>>();
 
-        let result = unsafe { (self.engine_get_blobs_v1)(versioned_hashes) };
+        let result = unsafe { (self.engine_get_blobs_v1)(&versioned_hashes) };
 
         let result: Result<_> = result.into();
 
@@ -290,7 +291,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             .map(|hash| hash.into())
             .collect::<CVec<_>>();
 
-        let result = unsafe { (self.engine_get_blobs_v2)(versioned_hashes) };
+        let result = unsafe { (self.engine_get_blobs_v2)(&versioned_hashes) };
 
         let result: Result<_> = result.into();
 
@@ -317,7 +318,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
             .collect::<Result<_, _>>()
             .context("invalid capabilities")?;
 
-        let result = unsafe { (self.engine_exchange_capabilities)(capabilities) };
+        let result = unsafe { (self.engine_exchange_capabilities)(&capabilities) };
         let result: Result<_> = result.into();
 
         result.and_then(|v| {
@@ -341,7 +342,8 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         &self,
         own_version: ClientVersionV1,
     ) -> Result<Vec<ClientVersionV1>> {
-        let result = unsafe { (self.engine_get_client_version_v1)(own_version.try_into()?) };
+        let own_version = own_version.try_into()?;
+        let result = unsafe { (self.engine_get_client_version_v1)(&own_version) };
 
         let result: Result<_> = result.into();
 
