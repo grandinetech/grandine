@@ -12,5 +12,8 @@ ignore = [
     # TODO: remove this when this no longer the case
     'RUSTSEC-2026-0098',
     'RUSTSEC-2026-0099',
-    'RUSTSEC-2026-0104'
+    'RUSTSEC-2026-0104',
+    # TODO: revisit once libp2p and zkm-sdk are updated
+    'RUSTSEC-2026-0118',
+    'RUSTSEC-2026-0119'
 ]
