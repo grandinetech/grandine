@@ -138,7 +138,7 @@ jobs:
             install: |
               rustup install nightly-2025-08-04
               rustup component add rust-src --toolchain nightly-2025-08-04
-              cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico pico-cli
+              cargo +nightly-2025-08-04 install --git https://github.com/brevis-network/pico --tag v1.3.0 pico-cli
               cargo pico --version
             execute: RUST_LOG=info cargo +nightly-2025-08-04 run -p zkvm_host --features pico --release -- --test "$TEST" execute
 
