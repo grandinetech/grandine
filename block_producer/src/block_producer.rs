@@ -1827,7 +1827,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let parent_root = state.latest_block_header().hash_tree_root();
                 let snapshot = self.producer_context.controller.snapshot();
 
-                let withdrawals = if snapshot.should_extend_payload(parent_root)
+                let withdrawals = if snapshot.should_build_on_full(parent_root)
                     && let Some(envelope) =
                         snapshot.cached_execution_payload_envelope_by_root(parent_root)
                 {
@@ -1841,8 +1841,20 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     )?;
 
                     gloas::get_expected_withdrawals(&state_copy)?.0
-                } else {
+                } else if state.latest_execution_payload_bid().block_hash
+                    == state.latest_block_hash()
+                {
+                    // Fork-boundary case: the parent is a pre-Gloas block, so there is no
+                    // Gloas envelope to apply, but `upgrade_to_gloas` initialized the state
+                    // with `latest_execution_payload_bid.block_hash == latest_block_hash`,
+                    // so the block's `process_withdrawals` will run normally. Mirror it.
                     gloas::get_expected_withdrawals(state)?.0
+                } else {
+                    state
+                        .payload_expected_withdrawals()
+                        .into_iter()
+                        .copied()
+                        .collect()
                 };
 
                 let withdrawals = withdrawals
