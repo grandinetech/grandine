@@ -1457,35 +1457,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    fn checkpoint_execution_payload_hash<'a>(
-        &'a self,
-        mut chain_link: &'a ChainLink<P>,
-    ) -> ExecutionBlockHash {
-        loop {
-            let block = chain_link.block.message();
+    fn checkpoint_execution_payload_hash(&self, chain_link: &ChainLink<P>) -> ExecutionBlockHash {
+        let block = chain_link.block.message();
 
-            let Some(body_with_payload_bid) = block.body().with_payload_bid() else {
-                return block
-                    .body()
-                    .with_execution_payload()
-                    .map(|body| body.execution_payload().block_hash())
-                    .unwrap_or_default();
-            };
+        if let Some(body_with_payload_bid) = block.body().with_payload_bid() {
+            return body_with_payload_bid
+                .signed_execution_payload_bid()
+                .message
+                .parent_block_hash;
+        };
 
-            let payload_bid = &body_with_payload_bid.signed_execution_payload_bid().message;
-
-            if self.is_payload_verified(chain_link.block_root) {
-                return payload_bid.block_hash;
-            } else if chain_link.parent_payload_presence.is_full() {
-                return payload_bid.parent_block_hash;
-            }
-
-            let Some(parent) = self.chain_link(block.parent_root()) else {
-                return ExecutionBlockHash::zero();
-            };
-
-            chain_link = parent;
-        }
+        return block
+            .body()
+            .with_execution_payload()
+            .map(|body| body.execution_payload().block_hash())
+            .unwrap_or_default();
     }
 
     #[must_use]
