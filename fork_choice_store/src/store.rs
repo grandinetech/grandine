@@ -875,6 +875,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    #[must_use]
+    pub fn should_build_on_full(&self, block_root: H256) -> bool {
+        let (head, payload_status) = self.head_with_payload_status();
+
+        if head.block_root == block_root {
+            return payload_status != PAYLOAD_STATUS_EMPTY;
+        }
+
+        self.is_payload_verified(block_root)
+    }
+
     pub fn should_extend_payload(&self, block_root: H256) -> bool {
         if !self.is_payload_verified(block_root) {
             return false;
