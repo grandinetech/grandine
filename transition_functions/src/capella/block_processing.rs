@@ -1,6 +1,7 @@
 use core::ops::Index as _;
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Result, ensure};
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
@@ -44,6 +45,8 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
+pub use helper_functions::misc::PREFIX_LEN;
+
 /// [`process_block`](https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/capella/beacon-chain.md#block-processing)
 ///
 /// This also serves as a substitute for [`compute_new_state_root`]. `compute_new_state_root` as
@@ -68,7 +71,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -158,9 +161,10 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block)
-        .saturating_add(block.body.bls_to_execution_changes.len())
+pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> Result<usize> {
+    altair::count_required_signatures(block)?
+        .try_add(block.body.bls_to_execution_changes.len())
+        .map_err(Into::into)
 }
 
 fn process_execution_payload<P: Preset>(
@@ -210,7 +214,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let computed = compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload.timestamp;
 
     ensure!(
@@ -234,7 +238,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
         state
             .eth1_data()
             .deposit_count
-            .saturating_sub(state.eth1_deposit_index()),
+            .try_sub(state.eth1_deposit_index())?,
     );
 
     let in_block = body.deposits().len().try_into()?;
@@ -453,7 +457,7 @@ where
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index.saturating_add(1);
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index.try_add(1)?;
     }
 
     // > Update the next validator index to start the next withdrawal sweep
@@ -479,7 +483,7 @@ pub fn get_expected_withdrawals<P: Preset>(
         let address = validator
             .withdrawal_credentials
             .as_bytes()
-            .index(H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes())..)
+            .index(PREFIX_LEN..)
             .pipe(ExecutionAddress::from_slice);
 
         if is_fully_withdrawable_validator(validator, balance, epoch) {
@@ -536,20 +540,17 @@ pub fn update_next_withdrawal_validator_index<P: Preset>(
                  ensures that expected_withdrawals is not empty",
             )
             .validator_index
-            .saturating_add(1)
-            .checked_rem(state.validators().len_u64())
-            .ok_or_else(|| anyhow!("state.validators().len_u64() should not be zero"))?;
+            .try_add(1)?
+            .try_rem(state.validators().len_u64())?;
 
         *state.next_withdrawal_validator_index_mut() = next_validator_index;
     } else {
         // > Advance sweep by the max length of the sweep if there was not a full set of withdrawals
         let next_index = state
             .next_withdrawal_validator_index()
-            .saturating_add(P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP);
+            .try_add(P::MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP)?;
 
-        let next_validator_index = next_index
-            .checked_rem(state.validators().len_u64())
-            .ok_or_else(|| anyhow!("state.validators().len_u64() should not be zero"))?;
+        let next_validator_index = next_index.try_rem(state.validators().len_u64())?;
 
         *state.next_withdrawal_validator_index_mut() = next_validator_index;
     }

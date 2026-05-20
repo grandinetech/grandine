@@ -1,6 +1,7 @@
 use core::marker::PhantomData;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use anyhow::Result;
 use bls::PublicKeyBytes;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
@@ -25,11 +26,11 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
         &mut self,
         state: &(impl PostAltairBeaconState<P> + ?Sized),
         own_public_keys: &HashSet<PublicKeyBytes>,
-    ) {
+    ) -> Result<()> {
         let current_epoch = accessors::get_current_epoch(state);
         let current_period = misc::sync_committee_period::<P>(current_epoch);
         let next_period = current_period.saturating_add(1);
-        let next_period_start = misc::start_of_sync_committee_period::<P>(next_period);
+        let next_period_start = misc::start_of_sync_committee_period::<P>(next_period)?;
 
         self.subscriptions.entry(current_period).or_insert_with(|| {
             core::iter::repeat(current_epoch)
@@ -42,10 +43,10 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
                 .into_group_map()
         });
 
-        self.subscriptions.entry(next_period).or_insert_with(|| {
-            let next_period_expiration =
-                misc::start_of_sync_committee_period::<P>(next_period.saturating_add(1));
+        let next_period_expiration =
+            misc::start_of_sync_committee_period::<P>(next_period.saturating_add(1))?;
 
+        self.subscriptions.entry(next_period).or_insert_with(|| {
             let mut rng = rand::thread_rng();
 
             sync_committee_subscriptions(
@@ -72,6 +73,8 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
             })
             .into_group_map()
         });
+
+        Ok(())
     }
 
     pub fn discard_old_subscriptions(&mut self, current_epoch: Epoch) {
@@ -146,7 +149,7 @@ mod tests {
                     // non sync committee member
                     PublicKeyBytes::from(hex!("83f66b69582ca67b8f0fc1e678015e72cce821d0930bcea582a011b495d6fed1e6c550b26d1a66331d8607ae34fd4423")),
                 ])
-        );
+        ).expect("building own sync committee subscriptions should not fail");
 
         let state_slot = state.slot();
         let current_epoch = misc::compute_epoch_at_slot::<Mainnet>(state_slot);

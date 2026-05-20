@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use arithmetic::U64Ext as _;
 
 use helper_functions::{
     accessors, misc,
@@ -114,7 +115,7 @@ fn process_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
-    let computed = misc::compute_timestamp_at_slot(config, state, state.slot);
+    let computed = misc::compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload_header.timestamp;
 
     ensure!(
@@ -168,7 +169,7 @@ where
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index.saturating_add(1);
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index.try_add(1)?;
     }
 
     // > Update the next validator index to start the next withdrawal sweep

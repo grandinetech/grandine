@@ -1537,7 +1537,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
 
         let epoch = accessors::get_current_epoch(state);
-        let timestamp = misc::compute_timestamp_at_slot(chain_config, state, state.slot());
+        let timestamp = misc::compute_timestamp_at_slot(chain_config, state, state.slot())?;
         let suggested_fee_recipient = self.fee_recipient().await?;
 
         let prev_randao = accessors::get_randao_mix(state, epoch);
@@ -1697,7 +1697,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let chain_config = &self.producer_context.chain_config;
         let state = self.beacon_state.as_ref();
         let epoch = accessors::get_current_epoch(state);
-        let timestamp = misc::compute_timestamp_at_slot(chain_config, state, state.slot());
+        let timestamp = misc::compute_timestamp_at_slot(chain_config, state, state.slot())?;
 
         let (sender, receiver) = futures::channel::oneshot::channel();
 

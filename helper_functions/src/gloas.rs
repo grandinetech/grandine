@@ -39,7 +39,7 @@ pub fn apply_deposit_for_builder<P: Preset>(
     {
         let builder_index = builder_index.try_into()?;
 
-        increase_balance(builder_balance(state, builder_index)?, amount);
+        increase_balance(builder_balance(state, builder_index)?, amount)?;
     } else {
         // > Verify the deposit signature (proof of possession)
         // > which is not checked by the deposit contract

@@ -658,6 +658,7 @@ impl<P: Preset, W> Run for CheckpointStateTask<P, W> {
             .map(|metrics| metrics.fc_checkpoint_state_task_times.start_timer());
 
         let Checkpoint { epoch, root } = checkpoint;
+
         let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
 
         let checkpoint_state = match state_cache.try_state_at_slot(
@@ -768,8 +769,8 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     state: &impl BeaconState<P>,
 ) -> Result<()> {
     accessors::get_or_try_init_beacon_proposer_index(config, state, false)?;
-    accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Current, false);
-    accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Next, false);
+    accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Current, false)?;
+    accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Next, false)?;
     accessors::get_or_init_total_active_balance(state, false);
     accessors::get_or_init_validator_indices(state, false);
 

@@ -66,7 +66,7 @@ pub fn validate_execution_payload_envelope_for_gossip<P: Preset>(
     let payload = &envelope.payload;
 
     // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot());
+    let computed = compute_timestamp_at_slot(config, state, state.slot())?;
     let in_block = payload.timestamp;
 
     ensure!(
@@ -223,7 +223,7 @@ pub fn process_execution_payload<P: Preset, V: Verifier>(
     process_execution_requests(config, pubkey_cache, state, &envelope.execution_requests)?;
 
     // > Queue the builder payment
-    let payment_slot = misc::builder_payment_index_for_current_epoch::<P>(state.slot());
+    let payment_slot = misc::builder_payment_index_for_current_epoch::<P>(state.slot())?;
     let payment = *state.builder_pending_payments().get(payment_slot)?;
     let amount = payment.withdrawal.amount;
     if amount > 0 {

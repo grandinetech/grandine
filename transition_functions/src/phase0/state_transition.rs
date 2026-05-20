@@ -1,6 +1,7 @@
 use core::ops::Not as _;
 
 use anyhow::Result;
+use arithmetic::UsizeExt as _;
 use helper_functions::{
     accessors,
     error::SignatureKind,
@@ -93,7 +94,7 @@ pub fn verify_signatures<P: Preset>(
         return Ok(());
     }
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     // Block signature
 
@@ -206,6 +207,8 @@ pub fn verify_signatures<P: Preset>(
     verifier.finish()
 }
 
-fn count_required_signatures(block: &SignedBeaconBlock<impl Preset>) -> usize {
-    block_processing::count_required_signatures(&block.message).saturating_add(1)
+fn count_required_signatures(block: &SignedBeaconBlock<impl Preset>) -> Result<usize> {
+    block_processing::count_required_signatures(&block.message)?
+        .try_add(1)
+        .map_err(Into::into)
 }

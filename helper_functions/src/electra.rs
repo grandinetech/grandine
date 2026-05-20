@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Result, ensure};
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use ssz::ContiguousList;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -89,17 +90,19 @@ pub fn get_attesting_indices<P: Preset>(
 
     for index in committee_indices {
         let committee = beacon_committee(state, attestation.data.slot, index)?;
+        let mut committee_attesters = vec![];
 
-        let committee_attesters = committee
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, index)| {
-                (*attestation
-                    .aggregation_bits
-                    .get(committee_offset.saturating_add(i))?)
-                .then_some(index)
-            })
-            .collect::<Vec<_>>();
+        for (i, index) in committee.into_iter().enumerate() {
+            let bit_index = committee_offset.try_add(i)?;
+
+            if attestation
+                .aggregation_bits
+                .get(bit_index)
+                .is_some_and(|b| *b)
+            {
+                committee_attesters.push(index);
+            }
+        }
 
         ensure!(
             !committee_attesters.is_empty(),
@@ -108,7 +111,7 @@ pub fn get_attesting_indices<P: Preset>(
 
         output.extend(committee_attesters);
 
-        committee_offset = committee_offset.saturating_add(committee.len());
+        committee_offset = committee_offset.try_add(committee.len())?;
     }
 
     // This works the same as `assert len(attestation.aggregation_bits) == committee_offset`
@@ -171,10 +174,10 @@ pub fn slash_validator<P: Preset>(
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch
-        .max(epoch.saturating_add(P::EpochsPerSlashingsVector::U64));
+        .max(epoch.try_add(P::EpochsPerSlashingsVector::U64)?);
 
     let s = state.slashings_mut().mod_index_mut(epoch);
-    *s = s.saturating_add(effective_balance);
+    *s = s.try_add(effective_balance)?;
 
     decrease_balance(balance(state, slashed_index)?, slashing_penalty);
 
@@ -182,13 +185,11 @@ pub fn slash_validator<P: Preset>(
     let proposer_index = get_beacon_proposer_index(config, state)?;
     let whistleblower_index = whistleblower_index.unwrap_or(proposer_index);
     let whistleblower_reward = effective_balance / P::WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA;
-    let proposer_reward =
-        whistleblower_reward.saturating_mul(PROPOSER_WEIGHT.get()) / WEIGHT_DENOMINATOR;
+    let proposer_reward = whistleblower_reward.try_mul(PROPOSER_WEIGHT.get())? / WEIGHT_DENOMINATOR;
+    let remaining_reward = whistleblower_reward.try_sub(proposer_reward)?;
 
-    let remaining_reward = whistleblower_reward.saturating_sub(proposer_reward);
-
-    increase_balance(balance(state, proposer_index)?, proposer_reward);
-    increase_balance(balance(state, whistleblower_index)?, remaining_reward);
+    increase_balance(balance(state, proposer_index)?, proposer_reward)?;
+    increase_balance(balance(state, whistleblower_index)?, remaining_reward)?;
 
     slot_report.set_slashing_penalty(slashed_index, slashing_penalty);
     slot_report.add_slashing_reward(kind, proposer_reward);

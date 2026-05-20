@@ -149,7 +149,9 @@ pub(crate) mod bellatrix {
 }
 
 pub mod capella {
-    pub use block_processing::{get_expected_withdrawals, validate_bls_to_execution_change};
+    pub use block_processing::{
+        PREFIX_LEN, get_expected_withdrawals, validate_bls_to_execution_change,
+    };
 
     pub(crate) use blinded_block_processing::{
         custom_process_blinded_block, process_withdrawals_root,

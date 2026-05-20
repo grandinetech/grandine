@@ -391,7 +391,9 @@ impl SszType {
 
             quote! {
                 if let #ssz::Size::Variable { .. } = #size_expr {
-                    let offset = bytes.len() - length_before;
+                    let offset = bytes.len().checked_sub(length_before)
+                        .ok_or(#ssz::WriteError::Custom { message: "offset underflow during SSZ write" })?;
+
                     #ssz::write_offset(bytes, #offset_ident, offset)?;
                     #ssz::SszWrite::write_variable(&self.#member, bytes)?;
                 }

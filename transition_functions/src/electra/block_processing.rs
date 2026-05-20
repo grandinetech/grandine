@@ -1,7 +1,7 @@
 use core::ops::Index as _;
 
-use anyhow::{Result, anyhow, ensure};
-use arithmetic::U64Ext as _;
+use anyhow::{Result, ensure};
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use bls::PublicKeyBytes;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
@@ -74,7 +74,8 @@ use types::{
 };
 
 use crate::{
-    altair, capella,
+    altair,
+    capella::{self, PREFIX_LEN},
     unphased::{self, CombinedDeposit, Error},
 };
 
@@ -105,7 +106,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -145,9 +146,10 @@ pub fn process_block_for_gossip<P: Preset>(
 }
 
 // TODO(feature/electra): Reuse function from `transition_functions::capella::block_processing`.
-pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block)
-        .saturating_add(block.body.bls_to_execution_changes.len())
+pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> Result<usize> {
+    altair::count_required_signatures(block)?
+        .try_add(block.body.bls_to_execution_changes.len())
+        .map_err(Into::into)
 }
 
 pub fn custom_process_block<P: Preset>(
@@ -224,7 +226,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let computed = compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload.timestamp;
 
     ensure!(
@@ -292,7 +294,7 @@ where
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
-        *state.next_withdrawal_index_mut() = latest_withdrawal.index.saturating_add(1);
+        *state.next_withdrawal_index_mut() = latest_withdrawal.index.try_add(1)?;
     }
 
     // > Update the next validator index to start the next withdrawal sweep
@@ -335,7 +337,7 @@ pub fn get_expected_withdrawals<P: Preset>(
             .balances()
             .get(withdrawal.validator_index)
             .copied()?
-            .saturating_sub(total_withdrawn);
+            .try_sub(total_withdrawn)?;
         let has_excess_balance = validator_balance > P::MIN_ACTIVATION_BALANCE;
 
         if validator.exit_epoch == FAR_FUTURE_EPOCH
@@ -344,7 +346,7 @@ pub fn get_expected_withdrawals<P: Preset>(
         {
             let withdrawable_balance = withdrawal
                 .amount
-                .min(validator_balance.saturating_sub(P::MIN_ACTIVATION_BALANCE));
+                .min(validator_balance.try_sub(P::MIN_ACTIVATION_BALANCE)?);
 
             let mut address = ExecutionAddress::zero();
 
@@ -357,10 +359,10 @@ pub fn get_expected_withdrawals<P: Preset>(
                 amount: withdrawable_balance,
             });
 
-            withdrawal_index = withdrawal_index.saturating_add(1);
+            withdrawal_index = withdrawal_index.try_add(1)?;
         }
 
-        processed_partial_withdrawals_count = processed_partial_withdrawals_count.saturating_add(1);
+        processed_partial_withdrawals_count = processed_partial_withdrawals_count.try_add(1)?;
     }
 
     // > Sweep for remaining
@@ -377,12 +379,12 @@ pub fn get_expected_withdrawals<P: Preset>(
             .balances()
             .get(validator_index)
             .copied()?
-            .saturating_sub(partially_withdrawn_balance);
+            .try_sub(partially_withdrawn_balance)?;
 
         let address = validator
             .withdrawal_credentials
             .as_bytes()
-            .index(H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes())..)
+            .index(PREFIX_LEN..)
             .pipe(ExecutionAddress::from_slice);
 
         if is_fully_withdrawable_validator(validator, balance, epoch) {
@@ -505,8 +507,8 @@ where
     let in_block = body.deposits().len().try_into()?;
 
     if state.eth1_deposit_index() < eth1_deposit_index_limit {
-        let computed = P::MaxDeposits::U64
-            .min(eth1_deposit_index_limit.saturating_sub(state.eth1_deposit_index()));
+        let computed =
+            P::MaxDeposits::U64.min(eth1_deposit_index_limit.try_sub(state.eth1_deposit_index())?);
 
         ensure!(
             computed == in_block,
@@ -602,7 +604,7 @@ where
         // > Deposits must be processed in order
         *state.eth1_deposit_index_mut() = state
             .eth1_deposit_index_mut()
-            .saturating_add(DepositIndex::try_from(deposit_count)?);
+            .try_add(DepositIndex::try_from(deposit_count)?)?;
 
         apply_deposits(state, combined_deposits, slot_report)?;
     }
@@ -692,12 +694,12 @@ pub fn apply_attestation<P: Preset>(
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Participation flag indices
-    let inclusion_delay = state.slot().saturating_sub(attestation.data.slot);
+    let inclusion_delay = state.slot().try_sub(attestation.data.slot)?;
     let participation_flags =
         get_attestation_participation_flags(state, attestation.data, inclusion_delay)?;
 
     // > Update epoch participation flags
-    let base_reward_per_increment = get_base_reward_per_increment(state);
+    let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
     let attesting_indices_with_base_rewards = get_attesting_indices(state, attestation)?
         .into_iter()
@@ -720,7 +722,7 @@ pub fn apply_attestation<P: Preset>(
         for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
             if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
                 proposer_reward_numerator =
-                    proposer_reward_numerator.saturating_add(base_reward.saturating_mul(weight));
+                    proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?;
             }
         }
 
@@ -731,15 +733,13 @@ pub fn apply_attestation<P: Preset>(
     let proposer_index = get_beacon_proposer_index(config, state)?;
     let proposer_reward_denominator = WEIGHT_DENOMINATOR
         .get()
-        .saturating_sub(PROPOSER_WEIGHT.get())
-        .saturating_mul(WEIGHT_DENOMINATOR.get())
+        .try_sub(PROPOSER_WEIGHT.get())?
+        .try_mul(WEIGHT_DENOMINATOR.get())?
         / PROPOSER_WEIGHT;
 
-    let proposer_reward = proposer_reward_numerator
-        .checked_div(proposer_reward_denominator)
-        .ok_or_else(|| anyhow!("proposer_reward_denominator should not be zero"))?;
+    let proposer_reward = proposer_reward_numerator.try_div(proposer_reward_denominator)?;
 
-    increase_balance(balance(state, proposer_index)?, proposer_reward);
+    increase_balance(balance(state, proposer_index)?, proposer_reward)?;
 
     slot_report.add_attestation_reward(proposer_reward);
     slot_report.update_performance(
@@ -783,7 +783,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     );
 
     ensure!(
-        attestation_slot.saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get()) <= state.slot(),
+        attestation_slot.try_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get())? <= state.slot(),
         Error::<P>::AttestationOutsideInclusionRange {
             state_slot: state.slot(),
             attestation_slot,
@@ -843,7 +843,7 @@ pub fn process_deposit_data<P: Preset>(
         signature,
     } = deposit_data;
 
-    *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().saturating_add(1);
+    *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().try_add(1)?;
 
     if let Some(validator_index) = index_of_public_key(state, &pubkey) {
         let combined_deposit = CombinedDeposit::TopUp {
@@ -1098,7 +1098,7 @@ pub fn process_withdrawal_request<P: Preset>(
     let source_address = validator
         .withdrawal_credentials
         .as_bytes()
-        .index(H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes())..)
+        .index(PREFIX_LEN..)
         .pipe(ExecutionAddress::from_slice);
 
     let is_correct_source_address = source_address == withdrawal_request.source_address;
@@ -1121,7 +1121,7 @@ pub fn process_withdrawal_request<P: Preset>(
     if get_current_epoch(state)
         < validator
             .activation_epoch
-            .saturating_add(config.shard_committee_period)
+            .try_add(config.shard_committee_period)?
     {
         return Ok(());
     }
@@ -1139,7 +1139,7 @@ pub fn process_withdrawal_request<P: Preset>(
 
     let has_sufficient_effective_balance = validator.effective_balance >= P::MIN_ACTIVATION_BALANCE;
     let has_excess_balance =
-        validator_balance > P::MIN_ACTIVATION_BALANCE.saturating_add(pending_balance_to_withdraw);
+        validator_balance > P::MIN_ACTIVATION_BALANCE.try_add(pending_balance_to_withdraw)?;
 
     // > Only allow partial withdrawals with compounding withdrawal credentials
     if has_compounding_withdrawal_credential(validator)
@@ -1148,13 +1148,13 @@ pub fn process_withdrawal_request<P: Preset>(
     {
         let to_withdraw = amount.min(
             validator_balance
-                .saturating_sub(P::MIN_ACTIVATION_BALANCE)
-                .saturating_sub(pending_balance_to_withdraw),
+                .try_sub(P::MIN_ACTIVATION_BALANCE)?
+                .try_sub(pending_balance_to_withdraw)?,
         );
 
         let exit_queue_epoch = compute_exit_epoch_and_update_churn(config, state, to_withdraw)?;
         let withdrawable_epoch =
-            exit_queue_epoch.saturating_add(config.min_validator_withdrawability_delay);
+            exit_queue_epoch.try_add(config.min_validator_withdrawability_delay)?;
 
         state
             .pending_partial_withdrawals_mut()
@@ -1230,7 +1230,7 @@ pub fn process_consolidation_request<P: Preset>(
     }
 
     // > If there is too little available consolidation churn limit, consolidation requests are ignored
-    if get_consolidation_churn_limit(config, state) <= P::MIN_ACTIVATION_BALANCE {
+    if get_consolidation_churn_limit(config, state)? <= P::MIN_ACTIVATION_BALANCE {
         return Ok(());
     }
 
@@ -1281,7 +1281,7 @@ pub fn process_consolidation_request<P: Preset>(
     if current_epoch
         < source_validator
             .activation_epoch
-            .saturating_add(config.shard_committee_period)
+            .try_add(config.shard_committee_period)?
     {
         return Ok(());
     }
@@ -1296,14 +1296,14 @@ pub fn process_consolidation_request<P: Preset>(
         config,
         state,
         source_validator.effective_balance,
-    );
+    )?;
 
     let source_validator = state.validators_mut().get_mut(source_index)?;
 
     source_validator.exit_epoch = exit_epoch;
     source_validator.withdrawable_epoch = source_validator
         .exit_epoch
-        .saturating_add(config.min_validator_withdrawability_delay);
+        .try_add(config.min_validator_withdrawability_delay)?;
 
     state
         .pending_consolidations_mut()
@@ -1363,8 +1363,7 @@ fn is_valid_switch_to_compounding_request<P: Preset>(
 }
 
 fn compute_source_address(validator: &Validator) -> ExecutionAddress {
-    let prefix_len = H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes());
-    ExecutionAddress::from_slice(&validator.withdrawal_credentials[prefix_len..])
+    ExecutionAddress::from_slice(&validator.withdrawal_credentials[PREFIX_LEN..])
 }
 
 #[cfg(test)]
@@ -1799,7 +1798,7 @@ mod spec_tests {
             unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
 
         // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().saturating_add(1);
+        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().try_add(1)?;
 
         apply_deposits(state, combined_deposits, NullSlotReport)
     }

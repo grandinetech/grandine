@@ -2,7 +2,7 @@ use core::{fmt::Debug, num::NonZeroU64, ops::Div as _};
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail, ensure};
-use arithmetic::{NonZeroExt as _, U64Ext as _};
+use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use bls::{AggregatePublicKey, PublicKeyBytes, traits::PublicKey as _};
 #[cfg(not(target_os = "zkvm"))]
@@ -69,19 +69,17 @@ pub fn get_current_epoch<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> E
     misc::compute_epoch_at_slot::<P>(state.slot())
 }
 
-#[must_use]
-pub fn get_next_epoch<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Epoch {
-    get_current_epoch(state).saturating_add(1)
+pub fn get_next_epoch<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Result<Epoch> {
+    get_current_epoch(state).try_add(1).map_err(Into::into)
 }
 
-#[must_use]
 pub fn absolute_epoch<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> Epoch {
+) -> Result<Epoch> {
     match relative_epoch {
-        RelativeEpoch::Previous => get_previous_epoch(state),
-        RelativeEpoch::Current => get_current_epoch(state),
+        RelativeEpoch::Previous => Ok(get_previous_epoch(state)),
+        RelativeEpoch::Current => Ok(get_current_epoch(state)),
         RelativeEpoch::Next => get_next_epoch(state),
     }
 }
@@ -102,7 +100,7 @@ pub fn relative_epoch<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
 ) -> Result<RelativeEpoch> {
-    match get_next_epoch(state).checked_sub(epoch) {
+    match get_next_epoch(state)?.checked_sub(epoch) {
         None => bail!(Error::EpochAfterNext),
         Some(0) => Ok(RelativeEpoch::Next),
         Some(1) => Ok(RelativeEpoch::Current),
@@ -112,8 +110,10 @@ pub fn relative_epoch<P: Preset>(
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/f7da1a38347155589f5e0403ad3290ffb77f4da6/specs/phase0/beacon-chain.md#helpers>
-pub fn get_finality_delay<P: Preset>(state: &impl BeaconState<P>) -> u64 {
-    get_previous_epoch(state).saturating_sub(state.finalized_checkpoint().epoch)
+pub fn get_finality_delay<P: Preset>(state: &impl BeaconState<P>) -> Result<u64> {
+    get_previous_epoch(state)
+        .try_sub(state.finalized_checkpoint().epoch)
+        .map_err(Into::into)
 }
 
 pub fn get_block_root<P: Preset>(
@@ -126,7 +126,7 @@ pub fn get_block_root<P: Preset>(
         AttestationEpoch::Previous | AttestationEpoch::Current => {}
     }
 
-    let epoch = absolute_epoch(state, attestation_epoch.into());
+    let epoch = absolute_epoch(state, attestation_epoch.into())?;
     let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     get_block_root_at_slot(state, slot)
 }
@@ -135,7 +135,7 @@ pub fn get_block_root_at_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot
     ensure!(slot < state.slot(), Error::SlotOutOfRange);
 
     ensure!(
-        state.slot() <= slot.saturating_add(SlotsPerHistoricalRoot::<P>::U64),
+        state.slot() <= slot.try_add(SlotsPerHistoricalRoot::<P>::U64)?,
         Error::SlotOutOfRange,
     );
 
@@ -225,9 +225,9 @@ pub fn get_or_init_validator_indices<P: Preset>(
 pub fn get_active_validator_indices<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> impl Iterator<Item = ValidatorIndex> + '_ {
-    let epoch = absolute_epoch(state, relative_epoch);
-    get_active_validator_indices_by_epoch(state, epoch)
+) -> Result<impl Iterator<Item = ValidatorIndex> + '_> {
+    let epoch = absolute_epoch(state, relative_epoch)?;
+    Ok(get_active_validator_indices_by_epoch(state, epoch))
 }
 
 fn get_active_validator_indices_by_epoch<P: Preset>(
@@ -246,7 +246,7 @@ fn get_active_validator_indices_by_epoch<P: Preset>(
 pub fn active_validator_indices_ordered<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> &PackedIndices {
+) -> Result<&PackedIndices> {
     get_or_init_active_validator_indices_ordered(state, relative_epoch, true)
 }
 
@@ -254,7 +254,7 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
     report_cache_miss: bool,
-) -> &PackedIndices {
+) -> Result<&PackedIndices> {
     fn pack<T>(indices: Vec<ValidatorIndex>) -> Arc<[T]>
     where
         ValidatorIndex: TryInto<T, Error: Debug>,
@@ -273,7 +273,7 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
             .collect()
     }
 
-    state.cache().active_validator_indices_ordered[relative_epoch].get_or_init(|| {
+    state.cache().active_validator_indices_ordered[relative_epoch].get_or_try_init(|| {
         if report_cache_miss {
             #[cfg(feature = "metrics")]
             if let Some(metrics) = METRICS.get() {
@@ -286,21 +286,23 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
         // The cached values would have to be kept up to date as the validator registry changes.
         let mut indices = Vec::with_capacity(state.validators().len_usize());
 
-        indices.extend(get_active_validator_indices(state, relative_epoch));
+        indices.extend(get_active_validator_indices(state, relative_epoch)?);
 
-        match indices.last().copied().unwrap_or_default() {
+        let result: PackedIndices = match indices.last().copied().unwrap_or_default() {
             0..0x100 => PackedIndices::U8(pack(indices)),
             0x100..0x1_0000 => PackedIndices::U16(pack(indices)),
             0x1_0000..0x1_0000_0000 => PackedIndices::U32(pack(indices)),
             0x1_0000_0000..=u64::MAX => PackedIndices::U64(indices.into()),
-        }
+        };
+
+        Ok(result)
     })
 }
 
 pub fn active_validator_indices_shuffled<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> &PackedIndices
+) -> Result<&PackedIndices>
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
@@ -311,7 +313,7 @@ pub fn get_or_init_active_validator_indices_shuffled<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
     report_cache_miss: bool,
-) -> &PackedIndices
+) -> Result<&PackedIndices>
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
@@ -326,7 +328,7 @@ where
         shuffled.into()
     }
 
-    state.cache().active_validator_indices_shuffled[relative_epoch].get_or_init(|| {
+    state.cache().active_validator_indices_shuffled[relative_epoch].get_or_try_init(|| {
         if report_cache_miss {
             #[cfg(feature = "metrics")]
             if let Some(metrics) = METRICS.get() {
@@ -334,60 +336,65 @@ where
             }
         }
 
-        let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_ATTESTER);
+        let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_ATTESTER)?;
 
-        match get_or_init_active_validator_indices_ordered(state, relative_epoch, report_cache_miss)
-        {
+        let result: PackedIndices = match get_or_init_active_validator_indices_ordered(
+            state,
+            relative_epoch,
+            report_cache_miss,
+        )? {
             PackedIndices::U8(ordered) => PackedIndices::U8(shuffle::<P, _>(ordered, seed)),
             PackedIndices::U16(ordered) => PackedIndices::U16(shuffle::<P, _>(ordered, seed)),
             PackedIndices::U32(ordered) => PackedIndices::U32(shuffle::<P, _>(ordered, seed)),
             PackedIndices::U64(ordered) => PackedIndices::U64(shuffle::<P, _>(ordered, seed)),
-        }
+        };
+
+        Ok(result)
     })
 }
 
-#[must_use]
 pub fn active_validator_count_usize<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> usize {
-    active_validator_indices_ordered(state, relative_epoch).len()
+) -> Result<usize> {
+    active_validator_indices_ordered(state, relative_epoch).map(PackedIndices::len)
 }
 
-#[must_use]
 pub fn active_validator_count_u64<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> u64
+) -> Result<u64>
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
-    active_validator_count_usize(state, relative_epoch)
+    active_validator_count_usize(state, relative_epoch)?
         .try_into()
-        .expect("the bound on P::ValidatorRegistryLimit ensures that the count fits in u64")
+        .map_err(Into::into)
 }
 
-#[must_use]
-pub fn get_validator_churn_limit<P: Preset>(config: &Config, state: &impl BeaconState<P>) -> u64 {
-    active_validator_count_u64(state, RelativeEpoch::Current)
+pub fn get_validator_churn_limit<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+) -> Result<u64> {
+    Ok(active_validator_count_u64(state, RelativeEpoch::Current)?
         .div(config.churn_limit_quotient)
-        .max(config.min_per_epoch_churn_limit)
+        .max(config.min_per_epoch_churn_limit))
 }
 
-#[must_use]
 pub fn get_validator_activation_churn_limit<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-) -> u64 {
-    get_validator_churn_limit(config, state).min(config.max_per_epoch_activation_churn_limit)
+) -> Result<u64> {
+    get_validator_churn_limit(config, state)
+        .map(|churn_limit| churn_limit.min(config.max_per_epoch_activation_churn_limit))
 }
 
 fn get_seed<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
     domain_type: DomainType,
-) -> H256 {
-    let epoch = absolute_epoch(state, relative_epoch);
+) -> Result<H256> {
+    let epoch = absolute_epoch(state, relative_epoch)?;
     get_seed_by_epoch(state, epoch, domain_type)
 }
 
@@ -395,16 +402,20 @@ fn get_seed_by_epoch<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     epoch: Epoch,
     domain_type: DomainType,
-) -> H256 {
+) -> Result<H256> {
     let mix = get_randao_mix(
         state,
         epoch
-            .saturating_add(P::EpochsPerHistoricalVector::U64)
-            .saturating_sub(P::MinSeedLookahead::U64)
-            .saturating_sub(1),
+            .try_add(P::EpochsPerHistoricalVector::U64)?
+            .try_sub(P::MinSeedLookahead::U64)?
+            .try_sub(1)?,
     );
 
-    hashing::hash_32_64_256(domain_type.to_fixed_bytes(), epoch, mix)
+    Ok(hashing::hash_32_64_256(
+        domain_type.to_fixed_bytes(),
+        epoch,
+        mix,
+    ))
 }
 
 pub fn get_subnet_for_attestation<P: Preset>(
@@ -412,7 +423,7 @@ pub fn get_subnet_for_attestation<P: Preset>(
     slot: Slot,
     committee_index: CommitteeIndex,
 ) -> Result<SubnetId> {
-    let committees_per_slot = get_committee_count_per_slot(state, RelativeEpoch::Current);
+    let committees_per_slot = get_committee_count_per_slot(state, RelativeEpoch::Current)?;
 
     misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
 }
@@ -420,9 +431,12 @@ pub fn get_subnet_for_attestation<P: Preset>(
 pub fn get_committee_count_per_slot<P: Preset>(
     state: &impl BeaconState<P>,
     relative_epoch: RelativeEpoch,
-) -> u64 {
-    let active_validator_count = active_validator_count_u64(state, relative_epoch);
-    misc::committee_count_from_active_validator_count::<P>(active_validator_count)
+) -> Result<u64> {
+    let active_validator_count = active_validator_count_u64(state, relative_epoch)?;
+
+    Ok(misc::committee_count_from_active_validator_count::<P>(
+        active_validator_count,
+    ))
 }
 
 pub fn beacon_committee<P: Preset>(
@@ -432,29 +446,29 @@ pub fn beacon_committee<P: Preset>(
 ) -> Result<IndexSlice<'_>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
-    let committees_per_slot = get_committee_count_per_slot(state, relative_epoch);
+    let committees_per_slot = get_committee_count_per_slot(state, relative_epoch)?;
 
     ensure!(
         committee_index < committees_per_slot,
         Error::CommitteeIndexOutOfBounds,
     );
 
-    let indices = active_validator_indices_shuffled(state, relative_epoch);
+    let indices = active_validator_indices_shuffled(state, relative_epoch)?;
     let validator_count = ValidatorIndex::try_from(indices.len())?;
-    let committees_in_epoch = committees_per_slot.saturating_mul(P::SlotsPerEpoch::U64);
+    let committees_in_epoch = committees_per_slot.try_mul(P::SlotsPerEpoch::U64)?;
     let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
     let index_in_epoch = slots_since_epoch_start
-        .saturating_mul(committees_per_slot)
-        .saturating_add(committee_index);
+        .try_mul(committees_per_slot)?
+        .try_add(committee_index)?;
 
     let start = validator_count
-        .saturating_mul(index_in_epoch)
+        .try_mul(index_in_epoch)?
         .checked_div(committees_in_epoch)
         .ok_or(Error::CommitteeIndexStartInvalid)?
         .try_into()?;
 
     let end = validator_count
-        .saturating_mul(index_in_epoch.saturating_add(1))
+        .try_mul(index_in_epoch.try_add(1)?)?
         .checked_div(committees_in_epoch)
         .ok_or(Error::CommitteeIndexEndInvalid)?
         .try_into()?;
@@ -468,7 +482,7 @@ pub fn beacon_committees<P: Preset>(
 ) -> Result<impl Iterator<Item = IndexSlice<'_>>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let relative_epoch = relative_epoch(state, epoch)?;
-    let committees_per_slot = get_committee_count_per_slot(state, relative_epoch);
+    let committees_per_slot = get_committee_count_per_slot(state, relative_epoch)?;
 
     Ok((0..committees_per_slot).map(move |committee_index| {
         beacon_committee(state, slot, committee_index)
@@ -537,7 +551,7 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
             }
             RelativeEpoch::Next => {
                 return proposer_lookahead
-                    .get(P::SlotsPerEpoch::U64.saturating_add(slot % P::SlotsPerEpoch::non_zero()))
+                    .get(P::SlotsPerEpoch::U64.try_add(slot % P::SlotsPerEpoch::non_zero())?)
                     .copied()
                     .map_err(Into::into);
             }
@@ -545,8 +559,8 @@ pub fn get_beacon_proposer_index_at_slot<P: Preset>(
         }
     }
 
-    let indices = active_validator_indices_ordered(state, relative_epoch);
-    let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_PROPOSER);
+    let indices = active_validator_indices_ordered(state, relative_epoch)?;
+    let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_PROPOSER)?;
     let seed = hashing::hash_256_64(seed, slot);
 
     misc::compute_proposer_index(config, state, indices, seed, epoch)
@@ -621,7 +635,7 @@ fn get_next_sync_committee_indices<P: Preset>(
 fn get_next_sync_committee_indices_pre_electra<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
 ) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
     let indices = get_active_validator_indices_by_epoch(state, next_epoch).collect_vec();
 
     let total = indices
@@ -630,10 +644,12 @@ fn get_next_sync_committee_indices_pre_electra<P: Preset>(
         .pipe(NonZeroU64::new)
         .ok_or(Error::NoActiveValidators)?;
 
-    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
+    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE)?;
     let max_random_byte = u64::from(u8::MAX);
 
-    (0..u64::MAX / nonzero!(H256::len_bytes() as u64))
+    let mut result = Vec::with_capacity(P::SyncCommitteeSize::USIZE);
+
+    for (random_byte, attempt) in (0..u64::MAX / nonzero!(H256::len_bytes() as u64))
         .flat_map(move |quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -641,36 +657,40 @@ fn get_next_sync_committee_indices_pre_electra<P: Preset>(
                 .map(u64::from)
         })
         .zip(0..)
-        .filter_map(move |(random_byte, attempt)| {
-            let shuffled_index_of_index = misc::compute_shuffled_index::<P>(
-                attempt % total,
-                total,
-                seed,
-            )
-            .try_conv::<usize>()
-            .expect("shuffled_index_of_index fits in usize because it is less than indices.len()");
+    {
+        let shuffled_index_of_index =
+            misc::compute_shuffled_index::<P>(attempt % total, total, seed)
+                .try_conv::<usize>()
+                .expect(
+                    "shuffled_index_of_index fits in usize because it is less than indices.len()",
+                );
 
-            let candidate_index = indices[shuffled_index_of_index];
+        let candidate_index = indices[shuffled_index_of_index];
 
-            let effective_balance = state
-                .validators()
-                .get(candidate_index)
-                .expect("candidate_index was produced by enumerating active validators")
-                .effective_balance;
+        let effective_balance = state
+            .validators()
+            .get(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators")
+            .effective_balance;
 
-            (effective_balance.saturating_mul(max_random_byte)
-                >= P::MAX_EFFECTIVE_BALANCE.saturating_mul(random_byte))
-            .then_some(candidate_index)
-        })
-        .take(P::SyncCommitteeSize::USIZE)
-        .pipe(ContiguousVector::try_from_iter)
-        .map_err(Into::into)
+        if effective_balance.try_mul(max_random_byte)?
+            >= P::MAX_EFFECTIVE_BALANCE.try_mul(random_byte)?
+        {
+            result.push(candidate_index);
+
+            if result.len() >= P::SyncCommitteeSize::USIZE {
+                break;
+            }
+        }
+    }
+
+    ContiguousVector::try_from_iter(result).map_err(Into::into)
 }
 
 fn get_next_sync_committee_indices_post_electra<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
 ) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
     let indices = get_active_validator_indices_by_epoch(state, next_epoch).collect_vec();
 
     let total = indices
@@ -679,10 +699,12 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
         .pipe(NonZeroU64::new)
         .ok_or(Error::NoActiveValidators)?;
 
-    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
+    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE)?;
     let max_random_value = u64::from(u16::MAX);
 
-    (0..u64::MAX / nonzero!(H128::len_bytes() as u64))
+    let mut result = Vec::with_capacity(P::SyncCommitteeSize::USIZE);
+
+    for (random_value, attempt) in (0..u64::MAX / nonzero!(H128::len_bytes() as u64))
         .flat_map(|quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -691,37 +713,41 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
                 .map(|bytes: (u8, u8)| u64::from(u16::from_le_bytes(bytes.into())))
         })
         .zip(0..)
-        .filter_map(move |(random_value, attempt)| {
-            let shuffled_index_of_index = misc::compute_shuffled_index::<P>(
-                attempt % total,
-                total,
-                seed,
-            )
-            .try_conv::<usize>()
-            .expect("shuffled_index_of_index fits in usize because it is less than indices.len()");
+    {
+        let shuffled_index_of_index =
+            misc::compute_shuffled_index::<P>(attempt % total, total, seed)
+                .try_conv::<usize>()
+                .expect(
+                    "shuffled_index_of_index fits in usize because it is less than indices.len()",
+                );
 
-            let candidate_index = indices[shuffled_index_of_index];
+        let candidate_index = indices[shuffled_index_of_index];
 
-            let effective_balance = state
-                .validators()
-                .get(candidate_index)
-                .expect("candidate_index was produced by enumerating active validators")
-                .effective_balance;
+        let effective_balance = state
+            .validators()
+            .get(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators")
+            .effective_balance;
 
-            (effective_balance.saturating_mul(max_random_value)
-                >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.saturating_mul(random_value))
-            .then_some(candidate_index)
-        })
-        .take(P::SyncCommitteeSize::USIZE)
-        .pipe(ContiguousVector::try_from_iter)
-        .map_err(Into::into)
+        if effective_balance.try_mul(max_random_value)?
+            >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
+        {
+            result.push(candidate_index);
+
+            if result.len() >= P::SyncCommitteeSize::USIZE {
+                break;
+            }
+        }
+    }
+
+    ContiguousVector::try_from_iter(result).map_err(Into::into)
 }
 
 fn get_next_sync_committee_indices_post_gloas<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
 ) -> Result<ContiguousVector<ValidatorIndex, P::SyncCommitteeSize>> {
-    let next_epoch = get_next_epoch(state);
-    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE);
+    let next_epoch = get_next_epoch(state)?;
+    let seed = get_seed_by_epoch(state, next_epoch, DOMAIN_SYNC_COMMITTEE)?;
     let indices = PackedIndices::U64(
         get_active_validator_indices_by_epoch(state, next_epoch)
             .collect_vec()
@@ -774,28 +800,26 @@ pub fn get_base_reward<P: Preset>(
     base_reward_per_increment: Gwei,
 ) -> Result<Gwei> {
     let effective_balance = state.validators().get(validator_index)?.effective_balance;
-
-    Ok(compute_base_reward::<P>(
-        effective_balance,
-        base_reward_per_increment,
-    ))
+    compute_base_reward::<P>(effective_balance, base_reward_per_increment)
 }
 
-#[must_use]
 pub fn compute_base_reward<P: Preset>(
     effective_balance: Gwei,
     base_reward_per_increment: Gwei,
-) -> Gwei {
+) -> Result<Gwei> {
     let increments = effective_balance / P::EFFECTIVE_BALANCE_INCREMENT;
-    increments.saturating_mul(base_reward_per_increment)
+
+    increments
+        .try_mul(base_reward_per_increment)
+        .map_err(Into::into)
 }
 
-pub fn get_base_reward_per_increment<P: Preset>(state: &impl BeaconState<P>) -> Gwei {
+pub fn get_base_reward_per_increment<P: Preset>(state: &impl BeaconState<P>) -> Result<Gwei> {
     P::EFFECTIVE_BALANCE_INCREMENT
         .get()
-        .saturating_mul(P::BASE_REWARD_FACTOR)
-        .checked_div(total_active_balance(state).sqrt())
-        .expect("total_active_balance should not be zero")
+        .try_mul(P::BASE_REWARD_FACTOR)?
+        .try_div(total_active_balance(state).sqrt())
+        .map_err(Into::into)
 }
 
 pub fn get_attestation_participation_flags<P: Preset>(
@@ -864,7 +888,7 @@ pub fn get_sync_subcommittee_pubkeys<P: Preset>(
     subcommittee_index: SubcommitteeIndex,
 ) -> Result<&[PublicKeyBytes]> {
     let current_epoch = get_current_epoch(state);
-    let next_slot_epoch = misc::compute_epoch_at_slot::<P>(state.slot().saturating_add(1));
+    let next_slot_epoch = misc::compute_epoch_at_slot::<P>(state.slot().try_add(1)?);
 
     let sync_committee = if misc::sync_committee_period::<P>(current_epoch)
         == misc::sync_committee_period::<P>(next_slot_epoch)
@@ -876,9 +900,9 @@ pub fn get_sync_subcommittee_pubkeys<P: Preset>(
 
     let index = usize::try_from(subcommittee_index)?;
     let size = SyncSubcommitteeSize::<P>::USIZE;
-    let offset = index.saturating_mul(size);
+    let offset = index.try_mul(size)?;
 
-    Ok(&sync_committee.pubkeys[offset..offset.saturating_add(size)])
+    Ok(&sync_committee.pubkeys[offset..offset.try_add(size)?])
 }
 
 pub fn slashable_indices<P: Preset>(
@@ -946,13 +970,15 @@ pub fn initialize_shuffled_indices<'attestations, P: Preset>(
         need_current && !have_current,
     ) {
         (true, true) => {
-            par_utils::join(initialize_previous, initialize_current);
+            let (r1, r2) = par_utils::join(initialize_previous, initialize_current);
+            r1?;
+            r2?;
         }
         (true, false) => {
-            initialize_previous();
+            initialize_previous()?;
         }
         (false, true) => {
-            initialize_current();
+            initialize_current()?;
         }
         (false, false) => {}
     }
@@ -983,13 +1009,13 @@ pub fn get_activation_exit_churn_limit<P: Preset>(
     get_balance_churn_limit(config, state).min(config.max_per_epoch_activation_exit_churn_limit)
 }
 
-#[must_use]
 pub fn get_consolidation_churn_limit<P: Preset>(
     config: &Config,
     state: &impl BeaconState<P>,
-) -> Gwei {
+) -> Result<Gwei> {
     get_balance_churn_limit(config, state)
-        .saturating_sub(get_activation_exit_churn_limit(config, state))
+        .try_sub(get_activation_exit_churn_limit(config, state))
+        .map_err(Into::into)
 }
 
 #[must_use]
@@ -1005,11 +1031,10 @@ pub fn get_pending_balance_to_withdraw<P: Preset>(
         .sum()
 }
 
-#[must_use]
 pub fn get_pending_balance_to_withdraw_for_builder<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
     builder_index: BuilderIndex,
-) -> Gwei {
+) -> Result<Gwei> {
     let builder_pending_withdrawals: Gwei = state
         .builder_pending_withdrawals()
         .into_iter()
@@ -1025,7 +1050,9 @@ pub fn get_pending_balance_to_withdraw_for_builder<P: Preset>(
         .map(|payment| payment.withdrawal.amount)
         .sum();
 
-    builder_pending_withdrawals.saturating_add(builder_pending_payments)
+    builder_pending_withdrawals
+        .try_add(builder_pending_payments)
+        .map_err(Into::into)
 }
 
 pub fn get_beacon_proposer_indices<P: Preset>(
@@ -1034,7 +1061,7 @@ pub fn get_beacon_proposer_indices<P: Preset>(
     epoch: Epoch,
 ) -> Result<Vec<ValidatorIndex>> {
     let indices = get_active_validator_indices_by_epoch(state, epoch);
-    let seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_PROPOSER);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_PROPOSER)?;
 
     misc::compute_proposer_indices(
         config,
@@ -1062,7 +1089,7 @@ pub fn ptc_for_slot_for_epoch_processing<P: Preset>(
         get_active_validator_indices_by_epoch(state, epoch).collect();
 
     let active_validator_count = u64::try_from(ordered.len())?;
-    let attester_seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_ATTESTER);
+    let attester_seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_ATTESTER)?;
     let mut shuffled = ordered;
 
     shuffling::shuffle_slice::<P, _>(&mut shuffled, attester_seed)?;
@@ -1071,28 +1098,31 @@ pub fn ptc_for_slot_for_epoch_processing<P: Preset>(
     let committees_per_slot =
         misc::committee_count_from_active_validator_count::<P>(active_validator_count);
 
-    let committees_in_epoch =
-        NonZeroU64::new(committees_per_slot.saturating_mul(P::SlotsPerEpoch::U64))
-            .ok_or_else(|| anyhow!("there should be some committees per epoch"))?;
+    let committees_in_epoch = NonZeroU64::new(committees_per_slot.try_mul(P::SlotsPerEpoch::U64)?)
+        .ok_or_else(|| anyhow!("there should be some committees per epoch"))?;
 
     let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
 
-    let members = (0..committees_per_slot).flat_map(|committee_index| {
-        let index_in_epoch = slots_since_epoch_start
-            .saturating_mul(committees_per_slot)
-            .saturating_add(committee_index);
+    let ranges = (0..committees_per_slot)
+        .map(|committee_index| -> Result<(usize, usize)> {
+            let index_in_epoch = slots_since_epoch_start
+                .try_mul(committees_per_slot)?
+                .try_add(committee_index)?;
 
-        let start =
-            usize::try_from(validator_count.saturating_mul(index_in_epoch) / committees_in_epoch)
-                .expect("committee start should fit in usize");
+            let start =
+                usize::try_from(validator_count.try_mul(index_in_epoch)? / committees_in_epoch)?;
 
-        let end = usize::try_from(
-            validator_count.saturating_mul(index_in_epoch.saturating_add(1)) / committees_in_epoch,
-        )
-        .expect("committee end fits in usize");
+            let end = usize::try_from(
+                validator_count.try_mul(index_in_epoch.try_add(1)?)? / committees_in_epoch,
+            )?;
 
-        shuffled[start..end].iter().copied()
-    });
+            Ok((start, end))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let members = ranges
+        .into_iter()
+        .flat_map(|(start, end)| shuffled[start..end].iter().copied());
 
     ptc_from_committee_members(state, slot, members)
 }
@@ -1103,7 +1133,7 @@ fn ptc_from_committee_members<P: Preset>(
     members: impl Iterator<Item = ValidatorIndex>,
 ) -> Result<Ptc<P>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
-    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER);
+    let seed = get_seed_by_epoch(state, epoch, DOMAIN_PTC_ATTESTER)?;
     let seed = hashing::hash_256_64(seed, slot);
 
     let selection = misc::compute_balance_weighted_selection::<P>(
@@ -1118,7 +1148,7 @@ fn ptc_from_committee_members<P: Preset>(
 }
 
 pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<RelativeSlot> {
-    match state.slot().saturating_add(1).checked_sub(slot) {
+    match state.slot().try_add(1)?.checked_sub(slot) {
         None => bail!(Error::SlotAfterNext),
         Some(0) => Ok(RelativeSlot::Next),
         Some(1) => Ok(RelativeSlot::Current),
@@ -1128,13 +1158,18 @@ pub fn relative_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Resu
 }
 
 /// Map `RelativeSlot` to actual slot number
-fn absolute_slot<P: Preset>(state: &impl BeaconState<P>, relative_slot: RelativeSlot) -> Slot {
+fn absolute_slot<P: Preset>(
+    state: &impl BeaconState<P>,
+    relative_slot: RelativeSlot,
+) -> Result<Slot> {
     let state_slot = state.slot();
-    match relative_slot {
-        RelativeSlot::Previous => state_slot.saturating_sub(1),
+    let slot = match relative_slot {
+        RelativeSlot::Previous => state_slot.try_sub(1)?,
         RelativeSlot::Current => state_slot,
-        RelativeSlot::Next => state_slot.saturating_add(1),
-    }
+        RelativeSlot::Next => state_slot.try_add(1)?,
+    };
+
+    Ok(slot)
 }
 
 /// Initialize PTC cache for a relative slot and return the cached value.
@@ -1152,7 +1187,7 @@ pub fn get_or_try_init_ptc<P: Preset>(
             }
         }
 
-        let slot = absolute_slot(state, relative_slot);
+        let slot = absolute_slot(state, relative_slot)?;
 
         ptc_for_slot(state, slot).map(|ptc| ptc.into_iter().collect())
     })
@@ -1197,14 +1232,16 @@ pub fn get_indexed_payload_attestation<P: Preset>(
     })
 }
 
-pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<P>) -> u64 {
+pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<P>) -> Result<u64> {
     let active_balances = total_active_balance(state);
 
     // > get_total_active_balance(state) // SLOTS_PER_EPOCH * BUILDER_PAYMENT_THRESHOLD_NUMERATOR
     let quorum = (active_balances / P::SlotsPerEpoch::non_zero())
-        .saturating_mul(BUILDER_PAYMENT_THRESHOLD_NUMERATOR);
+        .try_mul(BUILDER_PAYMENT_THRESHOLD_NUMERATOR)?;
 
-    quorum.saturating_div(BUILDER_PAYMENT_THRESHOLD_DENOMINATOR)
+    quorum
+        .try_div(BUILDER_PAYMENT_THRESHOLD_DENOMINATOR)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -1296,19 +1333,20 @@ mod tests {
     }
 
     #[test]
-    fn test_get_validator_churn_limit() {
+    fn test_get_validator_churn_limit() -> Result<()> {
         let config = Config::minimal();
-
         let state = Phase0BeaconState::<Minimal>::default();
 
         assert_eq!(
-            get_validator_churn_limit(&config, &state),
+            get_validator_churn_limit(&config, &state)?,
             config.min_per_epoch_churn_limit,
         );
+
+        Ok(())
     }
 
     #[test]
-    fn test_get_active_validator_indices() {
+    fn test_get_active_validator_indices() -> Result<()> {
         let state = Phase0BeaconState::<Minimal> {
             slot: 28,
             validators: [
@@ -1330,8 +1368,10 @@ mod tests {
             ..Phase0BeaconState::default()
         };
 
-        let indices = get_active_validator_indices(&state, RelativeEpoch::Current);
+        let indices = get_active_validator_indices(&state, RelativeEpoch::Current)?;
 
         itertools::assert_equal(indices, [0, 2]);
+
+        Ok(())
     }
 }

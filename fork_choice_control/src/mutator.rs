@@ -571,11 +571,13 @@ where
                 self.prune_old_records()?;
             }
 
-            if let Some(metrics) = self.metrics.as_ref() {
-                Self::track_epoch_transition_metrics(
+            if let Some(metrics) = self.metrics.as_ref()
+                && let Err(error) = Self::track_epoch_transition_metrics(
                     &self.store.head().state(&self.store),
                     metrics,
-                );
+                )
+            {
+                debug_with_peers!("unable to track epoch transition metrics: {error:?}")
             }
         }
 
@@ -3776,12 +3778,17 @@ where
         }
     }
 
-    fn track_epoch_transition_metrics(head_state: &Arc<BeaconState<P>>, metrics: &Arc<Metrics>) {
+    fn track_epoch_transition_metrics(
+        head_state: &Arc<BeaconState<P>>,
+        metrics: &Arc<Metrics>,
+    ) -> Result<()> {
         metrics.set_beacon_processed_deposits_total(head_state.eth1_deposit_index());
         metrics.set_validator_count(head_state.validators().len_usize());
         metrics.set_beacon_current_active_validators(
-            accessors::get_active_validator_indices(head_state, RelativeEpoch::Current).count(),
+            accessors::get_active_validator_indices(head_state, RelativeEpoch::Current)?.count(),
         );
+
+        Ok(())
     }
 
     fn track_head_metrics(head: &ChainLink<P>, metrics: &Arc<Metrics>) {

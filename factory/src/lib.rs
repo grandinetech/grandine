@@ -119,7 +119,7 @@ pub fn block_justifying_previous_epoch<P: Preset>(
     let block_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
     let eth1_data = advanced_state.eth1_data();
-    let attestation_slots = misc::slots_in_epoch::<P>(epoch.saturating_sub(1));
+    let attestation_slots = misc::slots_in_epoch::<P>(epoch.saturating_sub(1))?;
     let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
     let deposits = ContiguousList::default();
     let sync_aggregate = SyncAggregate::empty();
@@ -304,12 +304,12 @@ pub fn singular_attestation<P: Preset>(
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let state_in_epoch = advance_state(config, pubkey_cache, state, start_slot)?;
 
-    for slot in misc::slots_in_epoch::<P>(epoch) {
+    for slot in misc::slots_in_epoch::<P>(epoch)? {
         let committees = accessors::beacon_committees(&state_in_epoch, slot)?;
 
         for (committee, committee_index) in committees.zip(0..) {
             let committees_per_slot =
-                accessors::get_committee_count_per_slot(&state_in_epoch, RelativeEpoch::Current);
+                accessors::get_committee_count_per_slot(&state_in_epoch, RelativeEpoch::Current)?;
 
             let subnet_id = misc::compute_subnet_for_attestation::<P>(
                 committees_per_slot,
@@ -411,7 +411,7 @@ pub fn execution_payload<P: Preset>(
     // Using `misc::compute_epoch_at_slot::<P>(slot)` makes the payload invalid unless `state` is
     // advanced to `slot`. See how RANDAO mixes are copied in `process_randao_mixes_reset`.
     let prev_randao = accessors::get_randao_mix(state, accessors::get_current_epoch(state));
-    let timestamp = misc::compute_timestamp_at_slot(config, state, slot);
+    let timestamp = misc::compute_timestamp_at_slot(config, state, slot)?;
 
     let withdrawals = state
         .post_capella()
@@ -722,10 +722,10 @@ fn full_block_attestations<P: Preset>(
             let relative_epoch = attestation_epoch.into();
 
             let committees_per_slot =
-                accessors::get_committee_count_per_slot(advanced_state, relative_epoch);
+                accessors::get_committee_count_per_slot(advanced_state, relative_epoch)?;
 
             let validator_count =
-                accessors::active_validator_count_u64(advanced_state, relative_epoch);
+                accessors::active_validator_count_u64(advanced_state, relative_epoch)?;
 
             let committees_in_epoch = committees_per_slot.saturating_mul(P::SlotsPerEpoch::U64);
             let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);

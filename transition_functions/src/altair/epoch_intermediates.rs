@@ -1,3 +1,5 @@
+use anyhow::{Error, Result};
+use arithmetic::{NonZeroU64Ext as _, U64Ext as _};
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
@@ -34,12 +36,12 @@ use crate::unphased::{EpochDeltas, ValidatorSummary};
 use static_assertions::assert_eq_size;
 
 pub trait AltairEpochDeltas: Default {
-    fn add_source_reward(&mut self, value: Gwei);
-    fn add_source_penalty(&mut self, value: Gwei);
-    fn add_target_reward(&mut self, value: Gwei);
-    fn add_target_penalty(&mut self, value: Gwei);
-    fn add_head_reward(&mut self, value: Gwei);
-    fn add_inactivity_penalty(&mut self, value: Gwei);
+    fn add_source_reward(&mut self, value: Gwei) -> Result<()>;
+    fn add_source_penalty(&mut self, value: Gwei) -> Result<()>;
+    fn add_target_reward(&mut self, value: Gwei) -> Result<()>;
+    fn add_target_penalty(&mut self, value: Gwei) -> Result<()>;
+    fn add_head_reward(&mut self, value: Gwei) -> Result<()>;
+    fn add_inactivity_penalty(&mut self, value: Gwei) -> Result<()>;
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -93,38 +95,44 @@ pub struct EpochDeltasForTransition {
 }
 
 impl EpochDeltas for EpochDeltasForTransition {
-    fn combined_reward(self) -> Gwei {
-        self.reward
+    fn combined_reward(self) -> Result<Gwei> {
+        Ok(self.reward)
     }
 
-    fn combined_penalty(self) -> Gwei {
-        self.penalty
+    fn combined_penalty(self) -> Result<Gwei> {
+        Ok(self.penalty)
     }
 }
 
 impl AltairEpochDeltas for EpochDeltasForTransition {
-    fn add_source_reward(&mut self, value: Gwei) {
-        self.reward = self.reward.saturating_add(value);
+    fn add_source_reward(&mut self, value: Gwei) -> Result<()> {
+        self.reward = self.reward.try_add(value)?;
+        Ok(())
     }
 
-    fn add_source_penalty(&mut self, value: Gwei) {
-        self.penalty = self.penalty.saturating_add(value);
+    fn add_source_penalty(&mut self, value: Gwei) -> Result<()> {
+        self.penalty = self.penalty.try_add(value)?;
+        Ok(())
     }
 
-    fn add_target_reward(&mut self, value: Gwei) {
-        self.reward = self.reward.saturating_add(value);
+    fn add_target_reward(&mut self, value: Gwei) -> Result<()> {
+        self.reward = self.reward.try_add(value)?;
+        Ok(())
     }
 
-    fn add_target_penalty(&mut self, value: Gwei) {
-        self.penalty = self.penalty.saturating_add(value);
+    fn add_target_penalty(&mut self, value: Gwei) -> Result<()> {
+        self.penalty = self.penalty.try_add(value)?;
+        Ok(())
     }
 
-    fn add_head_reward(&mut self, value: Gwei) {
-        self.reward = self.reward.saturating_add(value);
+    fn add_head_reward(&mut self, value: Gwei) -> Result<()> {
+        self.reward = self.reward.try_add(value)?;
+        Ok(())
     }
 
-    fn add_inactivity_penalty(&mut self, value: Gwei) {
-        self.penalty = self.penalty.saturating_add(value);
+    fn add_inactivity_penalty(&mut self, value: Gwei) -> Result<()> {
+        self.penalty = self.penalty.try_add(value)?;
+        Ok(())
     }
 }
 
@@ -139,48 +147,56 @@ pub struct EpochDeltasForReport {
 }
 
 impl EpochDeltas for EpochDeltasForReport {
-    fn combined_reward(self) -> Gwei {
+    fn combined_reward(self) -> Result<Gwei> {
         self.source_reward
-            .saturating_add(self.target_reward)
-            .saturating_add(self.head_reward)
+            .try_add(self.target_reward)?
+            .try_add(self.head_reward)
+            .map_err(Into::into)
     }
 
-    fn combined_penalty(self) -> Gwei {
+    fn combined_penalty(self) -> Result<Gwei> {
         self.source_penalty
-            .saturating_add(self.target_penalty)
-            .saturating_add(self.inactivity_penalty)
+            .try_add(self.target_penalty)?
+            .try_add(self.inactivity_penalty)
+            .map_err(Into::into)
     }
 }
 
 impl AltairEpochDeltas for EpochDeltasForReport {
-    fn add_source_reward(&mut self, value: Gwei) {
-        self.source_reward = self.source_reward.saturating_add(value);
+    fn add_source_reward(&mut self, value: Gwei) -> Result<()> {
+        self.source_reward = self.source_reward.try_add(value)?;
+        Ok(())
     }
 
-    fn add_source_penalty(&mut self, value: Gwei) {
-        self.source_penalty = self.source_penalty.saturating_add(value);
+    fn add_source_penalty(&mut self, value: Gwei) -> Result<()> {
+        self.source_penalty = self.source_penalty.try_add(value)?;
+        Ok(())
     }
 
-    fn add_target_reward(&mut self, value: Gwei) {
-        self.target_reward = self.target_reward.saturating_add(value);
+    fn add_target_reward(&mut self, value: Gwei) -> Result<()> {
+        self.target_reward = self.target_reward.try_add(value)?;
+        Ok(())
     }
 
-    fn add_target_penalty(&mut self, value: Gwei) {
-        self.target_penalty = self.target_penalty.saturating_add(value);
+    fn add_target_penalty(&mut self, value: Gwei) -> Result<()> {
+        self.target_penalty = self.target_penalty.try_add(value)?;
+        Ok(())
     }
 
-    fn add_head_reward(&mut self, value: Gwei) {
-        self.head_reward = self.head_reward.saturating_add(value);
+    fn add_head_reward(&mut self, value: Gwei) -> Result<()> {
+        self.head_reward = self.head_reward.try_add(value)?;
+        Ok(())
     }
 
-    fn add_inactivity_penalty(&mut self, value: Gwei) {
-        self.inactivity_penalty = self.inactivity_penalty.saturating_add(value);
+    fn add_inactivity_penalty(&mut self, value: Gwei) -> Result<()> {
+        self.inactivity_penalty = self.inactivity_penalty.try_add(value)?;
+        Ok(())
     }
 }
 
 pub fn statistics_and_summaries<P: Preset, S: PostAltairBeaconState<P>>(
     state: &S,
-) -> (Statistics, Vec<AltairValidatorSummary>, Vec<Participation>) {
+) -> Result<(Statistics, Vec<AltairValidatorSummary>, Vec<Participation>)> {
     let current_epoch = get_current_epoch(state);
     let previous_epoch = get_previous_epoch(state);
     let participation = combined_participation(state);
@@ -191,67 +207,69 @@ pub fn statistics_and_summaries<P: Preset, S: PostAltairBeaconState<P>>(
         .validators()
         .into_iter()
         .zip(participation.iter().copied())
-        .map(|(validator, participation)| {
-            let Validator {
-                effective_balance,
-                slashed,
-                withdrawable_epoch,
-                ..
-            } = *validator;
+        .map(
+            |(validator, participation)| -> Result<AltairValidatorSummary> {
+                let Validator {
+                    effective_balance,
+                    slashed,
+                    withdrawable_epoch,
+                    ..
+                } = *validator;
 
-            let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
-            let active_in_current_epoch = is_active_validator(validator, current_epoch);
-            let eligible_for_penalties = is_eligible_for_penalties(validator, previous_epoch);
+                let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
+                let active_in_current_epoch = is_active_validator(validator, current_epoch);
+                let eligible_for_penalties = is_eligible_for_penalties(validator, previous_epoch)?;
 
-            if !slashed {
-                // Unlike `get_unslashed_attesting_indices` in Phase 0,
-                // `get_unslashed_participating_indices` in Altair checks if validators were active.
-                // There doesn't seem to be a way for a validator that's not active to attest in
-                // normal operation, but some test cases in `consensus-spec-tests` cover the check.
+                if !slashed {
+                    // Unlike `get_unslashed_attesting_indices` in Phase 0,
+                    // `get_unslashed_participating_indices` in Altair checks if validators were active.
+                    // There doesn't seem to be a way for a validator that's not active to attest in
+                    // normal operation, but some test cases in `consensus-spec-tests` cover the check.
 
-                if active_in_previous_epoch {
-                    if participation.previous_epoch_matching_source() {
-                        statistics.previous_epoch_source_participating_balance = statistics
-                            .previous_epoch_source_participating_balance
-                            .saturating_add(effective_balance);
+                    if active_in_previous_epoch {
+                        if participation.previous_epoch_matching_source() {
+                            statistics.previous_epoch_source_participating_balance = statistics
+                                .previous_epoch_source_participating_balance
+                                .try_add(effective_balance)?;
+                        }
+
+                        if participation.previous_epoch_matching_target() {
+                            statistics.previous_epoch_target_participating_balance = statistics
+                                .previous_epoch_target_participating_balance
+                                .try_add(effective_balance)?;
+                        }
+
+                        if participation.previous_epoch_matching_head() {
+                            statistics.previous_epoch_head_participating_balance = statistics
+                                .previous_epoch_head_participating_balance
+                                .try_add(effective_balance)?;
+                        }
                     }
 
-                    if participation.previous_epoch_matching_target() {
-                        statistics.previous_epoch_target_participating_balance = statistics
-                            .previous_epoch_target_participating_balance
-                            .saturating_add(effective_balance);
-                    }
-
-                    if participation.previous_epoch_matching_head() {
-                        statistics.previous_epoch_head_participating_balance = statistics
-                            .previous_epoch_head_participating_balance
-                            .saturating_add(effective_balance);
+                    if active_in_current_epoch && participation.current_epoch_matching_target() {
+                        statistics.current_epoch_target_participating_balance = statistics
+                            .current_epoch_target_participating_balance
+                            .try_add(effective_balance)?;
                     }
                 }
 
-                if active_in_current_epoch && participation.current_epoch_matching_target() {
-                    statistics.current_epoch_target_participating_balance = statistics
-                        .current_epoch_target_participating_balance
-                        .saturating_add(effective_balance);
-                }
-            }
-
-            AltairValidatorSummary {
-                effective_balance,
-                slashed,
-                withdrawable_epoch,
-                active_in_previous_epoch,
-                eligible_for_penalties,
-            }
-        })
-        .collect();
+                Ok(AltairValidatorSummary {
+                    effective_balance,
+                    slashed,
+                    withdrawable_epoch,
+                    active_in_previous_epoch,
+                    eligible_for_penalties,
+                })
+            },
+        )
+        .collect::<Result<Vec<_>>>()?;
 
     statistics.clamp_balances::<P>();
 
-    (statistics, summaries, participation)
+    Ok((statistics, summaries, participation))
 }
 
-pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Statistics {
+pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Result<Statistics> {
     let current_epoch = get_current_epoch(state);
     let previous_epoch = get_previous_epoch(state);
 
@@ -263,7 +281,7 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Statisti
         .zip(state.previous_epoch_participation())
         .zip(state.current_epoch_participation())
         .filter(|((validator, _), _)| !validator.slashed)
-        .for_each(
+        .try_for_each(
             |((validator, previous_epoch_participation), current_epoch_participation)| {
                 let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
                 let active_in_current_epoch = is_active_validator(validator, current_epoch);
@@ -274,19 +292,19 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Statisti
                     if previous_epoch_participation.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
                         statistics.previous_epoch_source_participating_balance = statistics
                             .previous_epoch_source_participating_balance
-                            .saturating_add(effective_balance);
+                            .try_add(effective_balance)?;
                     }
 
                     if previous_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX) {
                         statistics.previous_epoch_target_participating_balance = statistics
                             .previous_epoch_target_participating_balance
-                            .saturating_add(effective_balance);
+                            .try_add(effective_balance)?;
                     }
 
                     if previous_epoch_participation.get_bit(TIMELY_HEAD_FLAG_INDEX) {
                         statistics.previous_epoch_head_participating_balance = statistics
                             .previous_epoch_head_participating_balance
-                            .saturating_add(effective_balance);
+                            .try_add(effective_balance)?;
                     }
                 }
 
@@ -295,14 +313,16 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Statisti
                 {
                     statistics.current_epoch_target_participating_balance = statistics
                         .current_epoch_target_participating_balance
-                        .saturating_add(effective_balance);
+                        .try_add(effective_balance)?;
                 }
+
+                Ok::<(), Error>(())
             },
-        );
+        )?;
 
     statistics.clamp_balances::<P>();
 
-    statistics
+    Ok(statistics)
 }
 
 pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
@@ -311,9 +331,9 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
     statistics: Statistics,
     summaries: impl IntoIterator<Item = AltairValidatorSummary>,
     participation: impl IntoIterator<Item = Participation>,
-) -> Vec<D> {
-    let in_inactivity_leak = is_in_inactivity_leak(state);
-    let base_reward_per_increment = get_base_reward_per_increment(state);
+) -> Result<Vec<D>> {
+    let in_inactivity_leak = is_in_inactivity_leak(state)?;
+    let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
     let increment = P::EFFECTIVE_BALANCE_INCREMENT;
     let source_increments = statistics.previous_epoch_source_participating_balance / increment;
@@ -322,7 +342,7 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
     let active_increments = total_active_balance(state) / increment;
 
     izip!(summaries, participation, &state.inactivity_scores)
-        .map(|(summary, participation, inactivity_score)| {
+        .map(|(summary, participation, inactivity_score)| -> Result<D> {
             let mut deltas = D::default();
 
             let AltairValidatorSummary {
@@ -333,36 +353,38 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
             } = summary;
 
             if !eligible_for_penalties {
-                return deltas;
+                return Ok(deltas);
             }
 
             let base_reward =
-                compute_base_reward::<P>(effective_balance, base_reward_per_increment);
+                compute_base_reward::<P>(effective_balance, base_reward_per_increment)?;
 
-            let participation_component_reward = |weight, unslashed_participating_increments| {
-                let reward_numerator = base_reward
-                    .saturating_mul(weight)
-                    .saturating_mul(unslashed_participating_increments);
+            let participation_component_reward =
+                |weight, unslashed_participating_increments| -> Result<u64> {
+                    let reward_numerator = base_reward
+                        .try_mul(weight)?
+                        .try_mul(unslashed_participating_increments)?;
 
-                let reward_denominator = active_increments.saturating_mul(WEIGHT_DENOMINATOR.get());
+                    let reward_denominator = active_increments.try_mul(WEIGHT_DENOMINATOR.get())?;
 
-                reward_numerator
-                    .checked_div(reward_denominator)
-                    .expect("total_active_balance should not be zero")
-            };
+                    reward_numerator
+                        .try_div(reward_denominator)
+                        .map_err(Into::into)
+                };
 
             let participation_component_penalty =
-                |weight| base_reward.saturating_mul(weight) / WEIGHT_DENOMINATOR;
+                |weight| -> Result<Gwei> { Ok(base_reward.try_mul(weight)? / WEIGHT_DENOMINATOR) };
 
             if !slashed && participation.previous_epoch_matching_source() {
                 if !in_inactivity_leak {
                     deltas.add_source_reward(participation_component_reward(
                         TIMELY_SOURCE_WEIGHT,
                         source_increments,
-                    ));
+                    )?)?;
                 }
             } else {
-                deltas.add_source_penalty(participation_component_penalty(TIMELY_SOURCE_WEIGHT));
+                deltas
+                    .add_source_penalty(participation_component_penalty(TIMELY_SOURCE_WEIGHT)?)?;
             }
 
             if !slashed && participation.previous_epoch_matching_target() {
@@ -370,27 +392,28 @@ pub fn epoch_deltas<P: Preset, D: AltairEpochDeltas>(
                     deltas.add_target_reward(participation_component_reward(
                         TIMELY_TARGET_WEIGHT,
                         target_increments,
-                    ));
+                    )?)?;
                 }
             } else {
-                deltas.add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT));
+                deltas
+                    .add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT)?)?;
 
-                let penalty_numerator = effective_balance.saturating_mul(*inactivity_score);
+                let penalty_numerator = effective_balance.try_mul(*inactivity_score)?;
                 let penalty_denominator = config
                     .inactivity_score_bias
-                    .saturating_mul(P::INACTIVITY_PENALTY_QUOTIENT_ALTAIR);
+                    .try_mul(P::INACTIVITY_PENALTY_QUOTIENT_ALTAIR)?;
 
-                deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator);
+                deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator)?;
             }
 
             if !slashed && participation.previous_epoch_matching_head() && !in_inactivity_leak {
                 deltas.add_head_reward(participation_component_reward(
                     TIMELY_HEAD_WEIGHT,
                     head_increments,
-                ));
+                )?)?;
             }
 
-            deltas
+            Ok(deltas)
         })
         .collect()
 }
@@ -410,18 +433,18 @@ mod spec_tests {
 
     #[test_resources("consensus-spec-tests/tests/mainnet/altair/rewards/*/*/*")]
     fn mainnet(case: Case) {
-        run_case::<Mainnet>(case);
+        run_case::<Mainnet>(case).expect("altair rewards test should not return an error")
     }
 
     #[test_resources("consensus-spec-tests/tests/minimal/altair/rewards/*/*/*")]
     fn minimal(case: Case) {
-        run_case::<Minimal>(case);
+        run_case::<Minimal>(case).expect("altair rewards test should not return an error")
     }
 
-    fn run_case<P: Preset>(case: Case) {
+    fn run_case<P: Preset>(case: Case) -> Result<()> {
         let state = case.ssz_default::<BeaconState<P>>("pre");
 
-        let (statistics, summaries, participation) = statistics_and_summaries(&state);
+        let (statistics, summaries, participation) = statistics_and_summaries(&state)?;
 
         let epoch_deltas: Vec<EpochDeltasForReport> = epoch_deltas(
             &P::default_config(),
@@ -429,7 +452,7 @@ mod spec_tests {
             statistics,
             summaries,
             participation,
-        );
+        )?;
 
         TestDeltas::assert_equal(
             epoch_deltas.iter().map(|deltas| deltas.source_reward),
@@ -454,5 +477,7 @@ mod spec_tests {
             epoch_deltas.iter().map(|deltas| deltas.inactivity_penalty),
             case.ssz_default("inactivity_penalty_deltas"),
         );
+
+        Ok(())
     }
 }

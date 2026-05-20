@@ -61,7 +61,7 @@ impl<P: Preset> BlockProcessor<P> {
                     skip_randao_verification,
                 )?;
 
-                let block_rewards = calculate_block_rewards(&slot_report);
+                let block_rewards = calculate_block_rewards(&slot_report)?;
 
                 Ok((state, Some(block_rewards)))
             })
@@ -84,7 +84,7 @@ impl<P: Preset> BlockProcessor<P> {
                     &mut slot_report,
                 )?;
 
-                let block_rewards = calculate_block_rewards(&slot_report);
+                let block_rewards = calculate_block_rewards(&slot_report)?;
 
                 Ok((state, Some(block_rewards)))
             })
@@ -109,7 +109,7 @@ impl<P: Preset> BlockProcessor<P> {
                     skip_randao_verification,
                 )?;
 
-                let block_rewards = calculate_block_rewards(&slot_report);
+                let block_rewards = calculate_block_rewards(&slot_report)?;
 
                 Ok((state, Some(block_rewards)))
             })
@@ -132,7 +132,7 @@ impl<P: Preset> BlockProcessor<P> {
                     &mut slot_report,
                 )?;
 
-                let block_rewards = calculate_block_rewards(&slot_report);
+                let block_rewards = calculate_block_rewards(&slot_report)?;
 
                 Ok((state, Some(block_rewards)))
             })
@@ -271,12 +271,13 @@ impl<P: Preset> BlockProcessor<P> {
     }
 }
 
-fn calculate_block_rewards(slot_report: &RealSlotReport) -> BlockRewards {
+fn calculate_block_rewards(slot_report: &RealSlotReport) -> Result<BlockRewards> {
     let attestations: Gwei = slot_report.attestation_rewards.iter().sum();
 
     let sync_aggregate = slot_report
         .sync_aggregate_rewards
         .map(SyncAggregateRewards::total)
+        .transpose()?
         .unwrap_or_default();
 
     let proposer_slashings = slot_report.slashing_rewards[SlashingKind::Proposer]
@@ -287,7 +288,7 @@ fn calculate_block_rewards(slot_report: &RealSlotReport) -> BlockRewards {
         .iter()
         .sum();
 
-    BlockRewards {
+    Ok(BlockRewards {
         total: attestations
             .saturating_add(sync_aggregate)
             .saturating_add(proposer_slashings)
@@ -296,5 +297,5 @@ fn calculate_block_rewards(slot_report: &RealSlotReport) -> BlockRewards {
         sync_aggregate,
         proposer_slashings,
         attester_slashings,
-    }
+    })
 }

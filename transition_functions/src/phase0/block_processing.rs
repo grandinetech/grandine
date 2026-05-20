@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use arithmetic::U64Ext as _;
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use helper_functions::{
     accessors::{
         self, attestation_epoch, get_beacon_proposer_index, index_of_public_key,
@@ -63,7 +63,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -121,14 +121,15 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> usize {
+pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> Result<usize> {
     let body = block.body();
 
     1_usize
-        .saturating_add(2_usize.saturating_mul(body.proposer_slashings().len()))
-        .saturating_add(2_usize.saturating_mul(body.attester_slashings_len()))
-        .saturating_add(body.attestations_len())
-        .saturating_add(body.voluntary_exits().len())
+        .try_add(2_usize.try_mul(body.proposer_slashings().len())?)?
+        .try_add(2_usize.try_mul(body.attester_slashings_len())?)?
+        .try_add(body.attestations_len())?
+        .try_add(body.voluntary_exits().len())
+        .map_err(Into::into)
 }
 
 fn process_operations<P: Preset, V: Verifier>(
@@ -144,7 +145,7 @@ fn process_operations<P: Preset, V: Verifier>(
         state
             .eth1_data
             .deposit_count
-            .saturating_sub(state.eth1_deposit_index),
+            .try_sub(state.eth1_deposit_index)?,
     );
     let in_block = body.deposits.len().try_into()?;
 
@@ -311,7 +312,7 @@ fn apply_attestation<P: Preset>(
     let pending_attestation = PendingAttestation {
         data,
         aggregation_bits: attestation.aggregation_bits.clone(),
-        inclusion_delay: state.slot.saturating_sub(data.slot),
+        inclusion_delay: state.slot.try_sub(data.slot)?,
         proposer_index: get_beacon_proposer_index(config, state)?,
     };
 
@@ -396,7 +397,7 @@ fn apply_deposits<P: Preset>(
     // > Deposits must be processed in order
     state.eth1_deposit_index = state
         .eth1_deposit_index
-        .saturating_add(DepositIndex::try_from(deposit_count)?);
+        .try_add(DepositIndex::try_from(deposit_count)?)?;
 
     for combined_deposit in combined_deposits {
         match combined_deposit {
@@ -453,7 +454,7 @@ fn apply_deposits<P: Preset>(
             } => {
                 let total_amount = amounts.iter().sum();
 
-                increase_balance(balance(state, validator_index)?, total_amount);
+                increase_balance(balance(state, validator_index)?, total_amount)?;
 
                 for amount in amounts {
                     slot_report.add_deposit(validator_index, amount);

@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use arithmetic::U64Ext as _;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use ssz::Hc;
@@ -27,11 +28,11 @@ pub fn process_slots<P: Preset>(
         unphased::process_slot(state);
 
         // > Process epoch on the start slot of the next epoch
-        if misc::is_epoch_start::<P>(state.slot.saturating_add(1)) {
+        if misc::is_epoch_start::<P>(state.slot.try_add(1)?) {
             epoch_processing::process_epoch(config, pubkey_cache, state)?;
         }
 
-        state.slot = state.slot.saturating_add(1);
+        state.slot = state.slot.try_add(1)?;
     }
 
     Ok(())

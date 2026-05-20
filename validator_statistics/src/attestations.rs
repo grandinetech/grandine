@@ -219,7 +219,7 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
 ) -> Result<SlotReports> {
     let snapshot = controller.snapshot();
     let mut slot_reports = SlotReports::new();
-    let blocks = snapshot.blocks_by_range(misc::slots_in_epoch::<P>(epoch))?;
+    let blocks = snapshot.blocks_by_range(misc::slots_in_epoch::<P>(epoch)?)?;
 
     for block_with_root in blocks {
         let slot = block_with_root.block.message().slot();
@@ -270,11 +270,11 @@ pub fn epoch_attestation_assignments<P: Preset>(
     }
 
     let active_validator_count =
-        accessors::active_validator_count_usize(state, RelativeEpoch::Current);
+        accessors::active_validator_count_usize(state, RelativeEpoch::Current)?;
 
     let mut attestation_assignments = HashMap::with_capacity(active_validator_count);
 
-    for slot in misc::slots_in_epoch::<P>(accessors::get_current_epoch(state)) {
+    for slot in misc::slots_in_epoch::<P>(accessors::get_current_epoch(state))? {
         let committees = accessors::beacon_committees(state, slot)?;
 
         for (committee_index, committee) in (0..).zip(committees) {

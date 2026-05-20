@@ -1,3 +1,4 @@
+use anyhow::Result;
 use types::phase0::{containers::Validator, primitives::Gwei};
 
 #[cfg(test)]
@@ -11,8 +12,8 @@ pub trait ValidatorSummary {
 }
 
 pub trait EpochDeltas: Copy {
-    fn combined_reward(self) -> Gwei;
-    fn combined_penalty(self) -> Gwei;
+    fn combined_reward(self) -> Result<Gwei>;
+    fn combined_penalty(self) -> Result<Gwei>;
 }
 
 #[cfg(test)]

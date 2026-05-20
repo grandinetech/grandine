@@ -696,8 +696,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
-        self.update_subnet_subscriptions(&wait_group, slot_head.as_ref())
-            .await;
+        if let Err(error) = self
+            .update_subnet_subscriptions(&wait_group, slot_head.as_ref())
+            .await
+        {
+            warn_with_peers!("failed to update subnet subscriptions: {error:?}");
+        }
 
         if misc::is_epoch_start::<P>(slot) && kind == TickKind::AggregateFourth {
             self.refresh_signer_keys();
@@ -1870,7 +1874,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 SyncCommitteeEpoch::Current => state.current_sync_committee(),
                 SyncCommitteeEpoch::Next => {
                     if misc::sync_committee_period::<P>(accessors::get_current_epoch(state))
-                        == misc::sync_committee_period::<P>(accessors::get_next_epoch(state))
+                        == misc::sync_committee_period::<P>(accessors::get_next_epoch(state)?)
                     {
                         state.current_sync_committee()
                     } else {
@@ -2090,6 +2094,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let up_to_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
                 own_members.prune(up_to_slot).await;
+                Ok::<_, AnyhowError>(())
             })
             .detach()
     }
@@ -2113,12 +2118,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .detach()
     }
 
-    fn update_sync_committee_subscriptions(&mut self, beacon_state: &BeaconState<P>) {
+    fn update_sync_committee_subscriptions(&mut self, beacon_state: &BeaconState<P>) -> Result<()> {
         if let Some(post_altair_state) = beacon_state.post_altair() {
             let own_public_keys = self.own_public_keys();
 
             self.own_sync_committee_subscriptions
-                .build(post_altair_state, &own_public_keys);
+                .build(post_altair_state, &own_public_keys)?;
 
             let current_epoch = accessors::get_current_epoch(beacon_state);
 
@@ -2130,15 +2135,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .send(&self.subnet_service_tx);
             }
         }
+
+        Ok(())
     }
 
     async fn update_subnet_subscriptions(
         &mut self,
         wait_group: &W,
         slot_head: Option<&SlotHead<P>>,
-    ) {
+    ) -> Result<()> {
         if !self.controller.is_forward_synced() {
-            return;
+            return Ok(());
         }
 
         let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
@@ -2155,7 +2162,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         warn_with_peers!("failed to obtain beacon state for current slot: {error}");
                     }
 
-                    return;
+                    return Ok(());
                 }
             },
         };
@@ -2165,7 +2172,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             beacon_state.clone_arc(),
         );
 
-        self.update_sync_committee_subscriptions(&beacon_state);
+        self.update_sync_committee_subscriptions(&beacon_state)
     }
 
     #[instrument(level = "debug", skip_all)]

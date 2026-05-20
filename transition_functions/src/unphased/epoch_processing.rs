@@ -19,7 +19,7 @@ use types::{
     nonstandard::AttestationEpoch,
     phase0::{
         consts::GENESIS_EPOCH,
-        containers::{Checkpoint, HistoricalBatch},
+        containers::{Checkpoint, HistoricalBatch, Validator},
         primitives::{Gwei, ValidatorIndex},
     },
     preset::Preset,
@@ -48,21 +48,34 @@ impl SlashingPenalties for HashMap<ValidatorIndex, Gwei> {
 pub fn process_rewards_and_penalties<P: Preset>(
     state: &mut impl BeaconState<P>,
     deltas: impl IntoIterator<Item = impl EpochDeltas>,
-) {
+) -> Result<()> {
     if !should_process_rewards_and_penalties(state) {
-        return;
+        return Ok(());
     }
 
     let mut deltas = deltas.into_iter();
+    let mut result = Ok(());
 
-    state.balances_mut().update(|balance| {
+    let mut apply_delta = |balance: &mut Gwei| -> Result<()> {
         let deltas = deltas
             .next()
             .expect("deltas should have as many elements as there are validators");
 
-        increase_balance(balance, deltas.combined_reward());
-        decrease_balance(balance, deltas.combined_penalty());
+        increase_balance(balance, deltas.combined_reward()?)?;
+        decrease_balance(balance, deltas.combined_penalty()?);
+
+        Ok(())
+    };
+
+    state.balances_mut().update(|balance| {
+        if result.is_err() {
+            return;
+        }
+
+        result = apply_delta(balance);
     });
+
+    result
 }
 
 pub fn process_registry_updates<P: Preset>(
@@ -71,7 +84,7 @@ pub fn process_registry_updates<P: Preset>(
     summaries: &mut [impl ValidatorSummary],
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
 
     // The indices collected in these do not overlap.
     // See <https://github.com/protolambda/eth2-docs/tree/de65f38857f1e27ffb6f25107d61e795cf1a5ad7#registry-updates>
@@ -127,8 +140,8 @@ pub fn process_registry_updates<P: Preset>(
         .map(|(_, (validator_index, _))| validator_index);
 
     // > Dequeued validators for activation up to churn limit
-    let churn_limit = get_validator_churn_limit(config, state).try_into()?;
-    let activation_exit_epoch = compute_activation_exit_epoch::<P>(current_epoch);
+    let churn_limit = get_validator_churn_limit(config, state)?.try_into()?;
+    let activation_exit_epoch = compute_activation_exit_epoch::<P>(current_epoch)?;
 
     for validator_index in activation_queue.into_iter().take(churn_limit) {
         state
@@ -140,19 +153,21 @@ pub fn process_registry_updates<P: Preset>(
     Ok(())
 }
 
-pub fn process_eth1_data_reset<P: Preset>(state: &mut impl BeaconState<P>) {
-    let next_epoch = get_next_epoch(state);
+pub fn process_eth1_data_reset<P: Preset>(state: &mut impl BeaconState<P>) -> Result<()> {
+    let next_epoch = get_next_epoch(state)?;
 
     // > Reset eth1 data votes
     if next_epoch.is_multiple_of(P::EpochsPerEth1VotingPeriod::non_zero().into()) {
         *state.eth1_data_votes_mut() = PersistentList::default();
     }
+
+    Ok(())
 }
 
-pub fn process_effective_balance_updates<P: Preset>(state: &mut impl BeaconState<P>) {
+pub fn process_effective_balance_updates<P: Preset>(state: &mut impl BeaconState<P>) -> Result<()> {
     let hysteresis_increment = P::EFFECTIVE_BALANCE_INCREMENT.get() / P::HYSTERESIS_QUOTIENT;
-    let downward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_DOWNWARD_MULTIPLIER);
-    let upward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_UPWARD_MULTIPLIER);
+    let downward_threshold = hysteresis_increment.try_mul(P::HYSTERESIS_DOWNWARD_MULTIPLIER)?;
+    let upward_threshold = hysteresis_increment.try_mul(P::HYSTERESIS_UPWARD_MULTIPLIER)?;
 
     let (validators, balances) = state.validators_mut_with_balances();
 
@@ -161,41 +176,58 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl BeaconState
     // The reason why the speedup is so small is likely because values in the balance tree are
     // packed into bundles of 8.
     let mut balances = balances.into_iter().copied();
+    let mut update_result: Result<()> = Ok(());
 
-    // > Update effective balances with hysteresis
-    validators.update(|validator| {
+    let mut update_balances = |validator: &mut Validator| -> Result<()> {
         let balance = balances
             .next()
             .expect("list of validators and list of balances should have the same length");
 
-        let below = balance.saturating_add(downward_threshold) < validator.effective_balance;
-        let above = validator.effective_balance.saturating_add(upward_threshold) < balance;
+        let below = balance.try_add(downward_threshold)? < validator.effective_balance;
+        let above = validator.effective_balance.try_add(upward_threshold)? < balance;
 
         if below || above {
             validator.effective_balance = balance
                 .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
                 .min(P::MAX_EFFECTIVE_BALANCE);
         }
+
+        Ok(())
+    };
+
+    // > Update effective balances with hysteresis
+    validators.update(|validator| {
+        if update_result.is_err() {
+            return;
+        }
+
+        update_result = update_balances(validator);
     });
+
+    update_result
 }
 
-pub fn process_slashings_reset<P: Preset>(state: &mut impl BeaconState<P>) {
-    let next_epoch = get_next_epoch(state);
+pub fn process_slashings_reset<P: Preset>(state: &mut impl BeaconState<P>) -> Result<()> {
+    let next_epoch = get_next_epoch(state)?;
 
     // > Reset slashings
     *state.slashings_mut().mod_index_mut(next_epoch) = 0;
+
+    Ok(())
 }
 
-pub fn process_randao_mixes_reset<P: Preset>(state: &mut impl BeaconState<P>) {
+pub fn process_randao_mixes_reset<P: Preset>(state: &mut impl BeaconState<P>) -> Result<()> {
     let current_epoch = get_current_epoch(state);
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
 
     // > Set randao mix
     *state.randao_mixes_mut().mod_index_mut(next_epoch) = get_randao_mix(state, current_epoch);
+
+    Ok(())
 }
 
 pub fn process_historical_roots_update<P: Preset>(state: &mut impl BeaconState<P>) -> Result<()> {
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
 
     // > Set historical root accumulator
     if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero().into()) {
@@ -217,7 +249,7 @@ pub fn weigh_justification_and_finalization<P: Preset>(
     current_epoch_active_balance: Gwei,
     previous_epoch_target_balance: Gwei,
     current_epoch_target_balance: Gwei,
-) {
+) -> Result<()> {
     let old_previous_justified_checkpoint = state.previous_justified_checkpoint();
     let old_current_justified_checkpoint = state.current_justified_checkpoint();
 
@@ -225,48 +257,53 @@ pub fn weigh_justification_and_finalization<P: Preset>(
     *state.previous_justified_checkpoint_mut() = state.current_justified_checkpoint();
     state.justification_bits_mut().shift_up_by_1();
 
-    let mut justify_if_supermajority = |attestation_epoch, bit, target_balance: Gwei| {
-        if target_balance.saturating_mul(3) >= current_epoch_active_balance.saturating_mul(2) {
-            let root = get_block_root(state, attestation_epoch).expect(
-                "get_block_root can fail during the first slot of an epoch but \
-                 process_justification_and_finalization is only called at the end of an epoch",
-            );
+    let mut justify_if_supermajority =
+        |attestation_epoch, bit, target_balance: Gwei| -> Result<()> {
+            if target_balance.try_mul(3)? >= current_epoch_active_balance.try_mul(2)? {
+                let root = get_block_root(state, attestation_epoch).expect(
+                    "get_block_root can fail during the first slot of an epoch but \
+                     process_justification_and_finalization is only called at the end of an epoch",
+                );
 
-            *state.current_justified_checkpoint_mut() = Checkpoint {
-                epoch: absolute_epoch(state, attestation_epoch.into()),
-                root,
-            };
+                *state.current_justified_checkpoint_mut() = Checkpoint {
+                    epoch: absolute_epoch(state, attestation_epoch.into())?,
+                    root,
+                };
 
-            state.justification_bits_mut().set(bit, true);
-        }
-    };
+                state.justification_bits_mut().set(bit, true);
+            }
 
-    justify_if_supermajority(AttestationEpoch::Previous, 1, previous_epoch_target_balance);
-    justify_if_supermajority(AttestationEpoch::Current, 0, current_epoch_target_balance);
+            Ok(())
+        };
+
+    justify_if_supermajority(AttestationEpoch::Previous, 1, previous_epoch_target_balance)?;
+    justify_if_supermajority(AttestationEpoch::Current, 0, current_epoch_target_balance)?;
 
     // > Process finalizations
     let bits = state.justification_bits();
     let current_epoch = get_current_epoch(state);
 
     // > The 2nd/3rd/4th most recent epochs are justified, the 2nd using the 4th as source
-    if bits[1..4] && old_previous_justified_checkpoint.epoch.saturating_add(3) == current_epoch {
+    if bits[1..4] && old_previous_justified_checkpoint.epoch.try_add(3)? == current_epoch {
         *state.finalized_checkpoint_mut() = old_previous_justified_checkpoint
     }
 
     // > The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
-    if bits[1..3] && old_previous_justified_checkpoint.epoch.saturating_add(2) == current_epoch {
+    if bits[1..3] && old_previous_justified_checkpoint.epoch.try_add(2)? == current_epoch {
         *state.finalized_checkpoint_mut() = old_previous_justified_checkpoint
     }
 
     // > The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
-    if bits[0..3] && old_current_justified_checkpoint.epoch.saturating_add(2) == current_epoch {
+    if bits[0..3] && old_current_justified_checkpoint.epoch.try_add(2)? == current_epoch {
         *state.finalized_checkpoint_mut() = old_current_justified_checkpoint;
     }
 
     // > The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
-    if bits[0..2] && old_current_justified_checkpoint.epoch.saturating_add(1) == current_epoch {
+    if bits[0..2] && old_current_justified_checkpoint.epoch.try_add(1)? == current_epoch {
         *state.finalized_checkpoint_mut() = old_current_justified_checkpoint;
     }
+
+    Ok(())
 }
 
 pub fn should_process_justification_and_finalization<P: Preset>(

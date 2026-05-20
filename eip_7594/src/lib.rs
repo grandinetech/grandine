@@ -369,7 +369,7 @@ pub fn construct_data_column_sidecars<P: Preset>(
                 return Ok(vec![]);
             }
 
-            let kzg_commitments_inclusion_proof = misc::kzg_commitments_inclusion_proof(body);
+            let kzg_commitments_inclusion_proof = misc::kzg_commitments_inclusion_proof(body)?;
 
             get_fulu_data_column_sidecars(
                 signed_block.to_header(),
