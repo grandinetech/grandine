@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
+base64 = { workspace = true }
 bls = { workspace = true }
 cached = { workspace = true }
 clock = { workspace = true }

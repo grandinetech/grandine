@@ -675,6 +675,47 @@ impl<P: Preset> SignedBeaconBlock<P> {
         }
     }
 
+    pub fn transactions_root(&self) -> Option<H256> {
+        match self {
+            Self::Phase0(_) | Self::Altair(_) | Self::Gloas(_) => None,
+            Self::Bellatrix(block) => block
+                .message
+                .body
+                .execution_payload
+                .transactions
+                .hash_tree_root()
+                .into(),
+            Self::Capella(block) => block
+                .message
+                .body
+                .execution_payload
+                .transactions
+                .hash_tree_root()
+                .into(),
+            Self::Deneb(block) => block
+                .message
+                .body
+                .execution_payload
+                .transactions
+                .hash_tree_root()
+                .into(),
+            Self::Electra(block) => block
+                .message
+                .body
+                .execution_payload
+                .transactions
+                .hash_tree_root()
+                .into(),
+            Self::Fulu(block) => block
+                .message
+                .body
+                .execution_payload
+                .transactions
+                .hash_tree_root()
+                .into(),
+        }
+    }
+
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Phase0(_) => Phase::Phase0,
@@ -1541,6 +1582,14 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Bellatrix(payload) => payload.prev_randao,
             Self::Capella(payload) => payload.prev_randao,
             Self::Deneb(payload) => payload.prev_randao,
+        }
+    }
+
+    pub fn transactions_root(&self) -> H256 {
+        match self {
+            Self::Bellatrix(payload) => payload.transactions.hash_tree_root(),
+            Self::Capella(payload) => payload.transactions.hash_tree_root(),
+            Self::Deneb(payload) => payload.transactions.hash_tree_root(),
         }
     }
 }

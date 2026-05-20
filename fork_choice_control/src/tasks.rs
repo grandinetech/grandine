@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
+use base64::prelude::*;
 use eth2_libp2p::GossipId;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
@@ -21,8 +22,8 @@ use helper_functions::{
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
-use tracing::{Span, instrument};
+use ssz::{SszHash as _, SszWrite as _};
+use tracing::{Span, info, instrument, warn};
 use types::{
     combined::{
         AttesterSlashing, BeaconState as CombinedBeaconState, DataColumnSidecar,
@@ -101,6 +102,26 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             metrics,
             tracing_span,
         } = self;
+
+        match block.to_ssz() {
+            Ok(block_ssz) => {
+                let base64_encoded = BASE64_STANDARD.encode(block_ssz);
+
+                info!(
+                    "GRANDINE_PAYLOAD_DUMP slot={} start beacon block {:?} validation task (transactions root: {:?}): {base64_encoded}",
+                    block.message().slot(),
+                    block.message().hash_tree_root(),
+                    block.transactions_root(),
+                );
+            }
+            Err(error) => {
+                warn!(
+                    "GRANDINE_PAYLOAD_DUMP slot={} failed to encode beacon block {:?} to SSZ from RPC: {error:?}",
+                    block.message().slot(),
+                    block.message().hash_tree_root(),
+                );
+            }
+        }
 
         let _timer = metrics.as_ref().map(|metrics| {
             prometheus_metrics::start_timer_vec(&metrics.fc_block_task_times, origin.as_ref())

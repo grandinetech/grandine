@@ -14,6 +14,7 @@ use futures::{
 };
 use logging::warn_with_peers;
 use std_ext::ArcExt as _;
+use tracing::info;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     nonstandard::Phase,
@@ -201,6 +202,11 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
         payload: ExecutionPayload<P>,
         params: Option<ExecutionPayloadParams<P>>,
     ) -> Result<PayloadStatusV1> {
+        info!(
+            "GRANDINE_PAYLOAD_DUMP performing notify new payload for beacon block {beacon_block_root:?} with transactions root: {:?}",
+            Some(payload.transactions_root()),
+        );
+
         let block_number = payload.block_number();
         let block_hash = payload.block_hash();
         let response = self.api.new_payload(payload, params).await?;

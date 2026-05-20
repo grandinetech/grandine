@@ -117,7 +117,7 @@ pub fn initialize_tracing_logger(
         .add_directive("validator=info".parse()?)
         .add_directive("validator_key_cache=info".parse()?)
         .add_directive("validator_statistics=info".parse()?)
-        .add_directive("web3=info".parse()?)
+        .add_directive("web3=debug".parse()?)
         .add_directive(format!("{module_path}=info").parse()?)
         .add_directive(format!("{}=info", module_path!()).parse()?);
 

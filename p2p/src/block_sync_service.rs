@@ -10,6 +10,7 @@ use std::{
 };
 
 use anyhow::Result;
+use base64::prelude::*;
 use data_dumper::DataDumper;
 use database::{Database, PrefixableKey as _};
 use debug_info::HealthCheck;
@@ -30,12 +31,12 @@ use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use scc::HashMap as SccHashMap;
-use ssz::{ContiguousList, SszReadDefault};
+use ssz::{ContiguousList, SszReadDefault, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::select;
 use tokio_stream::wrappers::IntervalStream;
-use tracing::info;
+use tracing::{info, warn};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -464,6 +465,28 @@ impl<P: Preset> BlockSyncService<P> {
                             match request_direction {
                                 SyncDirection::Forward => {
                                     if self.register_new_received_block(block_root, block.message().slot()) {
+                                        match block.to_ssz() {
+                                            Ok(block_ssz) => {
+                                                let base64_encoded = BASE64_STANDARD.encode(block_ssz);
+
+                                                info!(
+                                                    "GRANDINE_PAYLOAD_DUMP slot={} received {} beacon block {:?} from RPC (transactions root: {:?}): {base64_encoded}",
+                                                    block.message().slot(),
+                                                    block.phase(),
+                                                    block.message().hash_tree_root(),
+                                                    block.transactions_root(),
+                                                );
+                                            }
+                                            Err(error) => {
+                                                warn!(
+                                                    "GRANDINE_PAYLOAD_DUMP slot={} failed to encode {} beacon block {:?} to SSZ from RPC: {error:?}",
+                                                    block.message().slot(),
+                                                    block.phase(),
+                                                    block.message().hash_tree_root(),
+                                                );
+                                            }
+                                        }
+
                                         self.data_dumper.dump_signed_beacon_block(block.clone_arc());
                                         self.controller.on_requested_block(block, Some(peer_id));
                                     }
