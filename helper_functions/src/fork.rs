@@ -1,10 +1,6 @@
 use core::ops::BitOrAssign as _;
 use std::sync::Arc;
 
-use crate::{
-    accessors, gloas::apply_deposit_for_builder, misc, mutators, phase0, predicates,
-    signing::SignForAllForks as _,
-};
 use anyhow::Result;
 use arithmetic::U64Ext as _;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
@@ -15,7 +11,7 @@ use std_ext::ArcExt as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    ProposerLookahead, Ptc, PtcWindow,
+    DepositSignatureCache, ProposerLookahead, Ptc, PtcWindow,
     altair::beacon_state::BeaconState as AltairBeaconState,
     bellatrix::{
         beacon_state::BeaconState as BellatrixBeaconState,
@@ -40,12 +36,14 @@ use types::{
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::{DepositMessage, Fork, PendingAttestation},
+        containers::{Fork, PendingAttestation},
         primitives::H256,
     },
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState as _},
 };
+
+use crate::{accessors, gloas::apply_deposit_for_builder, misc, mutators, phase0, predicates};
 
 pub fn upgrade_to_altair<P: Preset>(
     config: &Config,
@@ -965,7 +963,8 @@ fn onboard_builders<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut GloasBeaconState<P>,
 ) -> Result<()> {
-    let mut validator_pubkeys = accessors::get_or_init_validator_indices(state, true)
+    let mut signature_cache = DepositSignatureCache::new();
+    let validator_pubkeys = accessors::get_or_init_validator_indices(state, true)
         .keys()
         .copied()
         .collect_vec();
@@ -986,38 +985,36 @@ fn onboard_builders<P: Preset>(
             continue;
         }
 
-        if builder_pubkeys.contains(&pubkey)
-            || predicates::is_builder_withdrawal_credential(withdrawal_credentials)
-        {
-            builder_pubkeys.push(pubkey);
-            apply_deposit_for_builder(
+        if !builder_pubkeys.contains(&pubkey) {
+            if !predicates::is_builder_withdrawal_credential(withdrawal_credentials) {
+                pending_deposits.push(*deposit);
+                continue;
+            }
+
+            if predicates::is_pending_validator(
                 config,
-                pubkey_cache,
-                state,
+                &pending_deposits,
                 pubkey,
-                withdrawal_credentials,
-                amount,
-                signature,
-                slot,
-            )?;
-            continue;
+                pubkey_cache,
+                &mut signature_cache,
+            ) {
+                pending_deposits.push(*deposit);
+                continue;
+            }
         }
 
-        let deposit_message = DepositMessage {
+        builder_pubkeys.push(pubkey);
+
+        apply_deposit_for_builder(
+            config,
+            pubkey_cache,
+            state,
             pubkey,
             withdrawal_credentials,
             amount,
-        };
-
-        // > Fork-agnostic domain since deposits are valid across forks
-        if let Ok(decompressed) = pubkey_cache.get_or_insert(pubkey)
-            && deposit_message
-                .verify(config, signature, decompressed)
-                .is_ok()
-        {
-            validator_pubkeys.push(pubkey);
-            pending_deposits.push(*deposit);
-        }
+            signature,
+            slot,
+        )?;
     }
 
     *state.pending_deposits_mut() = PersistentList::try_from_iter(pending_deposits)?;
