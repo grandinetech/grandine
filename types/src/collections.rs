@@ -7,6 +7,9 @@
 //!
 //! All bundle sizes are currently set to minimize rehashing at the cost of higher memory usage.
 
+use std::collections::HashMap;
+
+use bls::SignatureBytes;
 use ssz::{
     ContiguousVector, IncompletePersistentVector, PersistentList, PersistentVector,
     UnhashedBundleSize,
@@ -18,7 +21,7 @@ use crate::{
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     gloas::containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
     phase0::{
-        containers::{Eth1Data, PendingAttestation, Validator},
+        containers::{DepositMessage, Eth1Data, PendingAttestation, Validator},
         primitives::{Gwei, H256, ValidatorIndex},
     },
     preset::{
@@ -84,6 +87,8 @@ pub type BuilderPendingPayments<P> = PersistentVector<
 
 pub type BuilderPendingWithdrawals<P> =
     PersistentList<BuilderPendingWithdrawal, <P as Preset>::BuilderPendingWithdrawalsLimit>;
+
+pub type DepositSignatureCache = HashMap<(DepositMessage, SignatureBytes), bool>;
 
 pub type PayloadExpectedWithdrawals<P> =
     PersistentList<Withdrawal, <P as Preset>::MaxWithdrawalsPerPayload>;
