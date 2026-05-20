@@ -8,4 +8,6 @@ workspace = true
 
 [dependencies]
 easy-ext = { workspace = true }
+primitive-types = { workspace = true }
+thiserror = { workspace = true }
 typenum = { workspace = true }

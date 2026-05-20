@@ -831,14 +831,14 @@ pub async fn state_committees<P: Preset, W: Wait>(
             }
             Either::Left(core::iter::once(slot))
         }
-        None => Either::Right(misc::slots_in_epoch::<P>(epoch)),
+        None => Either::Right(misc::slots_in_epoch::<P>(epoch)?),
     };
 
     // TODO(Grandine Team): Optimize state lookup.
     //                      The state is looked up twice, first in `StateId::state` above,
     //                      then in `Controller::state_at_slot`.
     //                      That means twice the amount of database lookups and state transitions.
-    if epoch == accessors::get_next_epoch(&state)
+    if epoch == accessors::get_next_epoch(&state)?
         || epoch == misc::compute_epoch_at_slot::<P>(controller.slot()).saturating_add(1)
     {
         let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
@@ -854,7 +854,7 @@ pub async fn state_committees<P: Preset, W: Wait>(
     }
 
     let relative_epoch = accessors::relative_epoch(&state, epoch)?;
-    let committee_count_per_slot = accessors::get_committee_count_per_slot(&state, relative_epoch);
+    let committee_count_per_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
 
     let indices = query
         .index
@@ -2686,9 +2686,9 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
         .into_iter()
         .collect::<HashSet<ValidatorIndex>>();
 
-    let committees_at_slot = accessors::get_committee_count_per_slot(&state, relative_epoch);
+    let committees_at_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
 
-    let response = misc::slots_in_epoch::<P>(epoch)
+    let response = misc::slots_in_epoch::<P>(epoch)?
         .map(|slot| {
             accessors::beacon_committees(&state, slot)?
                 .zip(0..)
@@ -2809,7 +2809,7 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
         controller.dependent_root(&state, epoch)?
     };
 
-    let response = misc::slots_in_epoch::<P>(epoch)
+    let response = misc::slots_in_epoch::<P>(epoch)?
         .map(|slot| {
             let validator_index =
                 accessors::get_beacon_proposer_index_at_slot(&chain_config, &state, slot)?;
@@ -3424,7 +3424,7 @@ pub async fn validator_subscribe_to_beacon_committee<P: Preset, W: Wait>(
             }
         };
 
-        let computed = accessors::get_committee_count_per_slot(&state, relative_epoch);
+        let computed = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
         let requested = committees_at_slot;
 
         ensure!(
@@ -4409,7 +4409,7 @@ fn build_attestation_item<P: Preset, W: Wait>(
         .map_err(|_| Error::TargetStateNotFound)?;
 
     let committees_per_slot =
-        accessors::get_committee_count_per_slot(&target_state, relative_epoch);
+        accessors::get_committee_count_per_slot(&target_state, relative_epoch)?;
 
     let committee_index = misc::committee_index(&attestation);
 

@@ -366,7 +366,7 @@ impl ValidatorStatistics {
             let mut sync_aggregates_with_roots = HashMap::with_capacity(P::SlotsPerEpoch::USIZE);
 
             for block_with_root in
-                snapshot.blocks_by_range(misc::slots_in_epoch::<P>(previous_epoch))?
+                snapshot.blocks_by_range(misc::slots_in_epoch::<P>(previous_epoch)?)?
             {
                 let slot = block_with_root.block.message().slot();
 

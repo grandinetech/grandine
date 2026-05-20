@@ -7,6 +7,7 @@ use core::{
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
+use arithmetic::{ArithmeticError, U64Ext as _};
 use enum_map::EnumMap;
 use serde::Serialize;
 use types::{
@@ -37,7 +38,13 @@ pub trait SlotReport {
     fn add_whistleblowing_reward(&mut self, whistleblower_index: ValidatorIndex, reward: Gwei);
     fn add_attestation_reward(&mut self, reward: Gwei);
     fn add_deposit(&mut self, validator_index: ValidatorIndex, amount: Gwei);
-    fn set_sync_committee_delta(&mut self, participant_index: ValidatorIndex, delta: Delta);
+
+    fn set_sync_committee_delta(
+        &mut self,
+        participant_index: ValidatorIndex,
+        delta: Delta,
+    ) -> Result<()>;
+
     fn set_sync_aggregate_rewards(&mut self, rewards: SyncAggregateRewards);
 
     fn update_performance<P: Preset>(
@@ -75,8 +82,12 @@ impl<D: SlotReport> SlotReport for &mut D {
     }
 
     #[inline]
-    fn set_sync_committee_delta(&mut self, participant_index: ValidatorIndex, delta: Delta) {
-        (*self).set_sync_committee_delta(participant_index, delta);
+    fn set_sync_committee_delta(
+        &mut self,
+        participant_index: ValidatorIndex,
+        delta: Delta,
+    ) -> Result<()> {
+        (*self).set_sync_committee_delta(participant_index, delta)
     }
 
     #[inline]
@@ -114,7 +125,13 @@ impl SlotReport for NullSlotReport {
     fn add_deposit(&mut self, _validator_index: ValidatorIndex, _value: Gwei) {}
 
     #[inline]
-    fn set_sync_committee_delta(&mut self, _participant_index: ValidatorIndex, _delta: Delta) {}
+    fn set_sync_committee_delta(
+        &mut self,
+        _participant_index: ValidatorIndex,
+        _delta: Delta,
+    ) -> Result<()> {
+        Ok(())
+    }
 
     #[inline]
     fn set_sync_aggregate_rewards(&mut self, _rewards: SyncAggregateRewards) {}
@@ -181,11 +198,22 @@ impl SlotReport for RealSlotReport {
     }
 
     #[inline]
-    fn set_sync_committee_delta(&mut self, participant_index: ValidatorIndex, delta: Delta) {
+    fn set_sync_committee_delta(
+        &mut self,
+        participant_index: ValidatorIndex,
+        delta: Delta,
+    ) -> Result<()> {
+        let mut result = Ok(());
+
         self.sync_committee_deltas
             .entry(participant_index)
-            .and_modify(|existing| *existing = existing.saturating_add(delta))
+            .and_modify(|existing| match existing.try_add(delta) {
+                Ok(new_delta) => *existing = new_delta,
+                Err(error) => result = Err(error.into()),
+            })
             .or_insert(delta);
+
+        result
     }
 
     #[inline]
@@ -211,7 +239,7 @@ impl SlotReport for RealSlotReport {
         let target_outcome = AttestationOutcome::compare(actual_target, expected_target);
         let head_outcome = AttestationOutcome::compare(actual_head, expected_head);
 
-        let inclusion_delay = (state.slot().saturating_sub(data.slot))
+        let inclusion_delay = (state.slot().try_sub(data.slot)?)
             .try_into()
             .expect("MIN_ATTESTATION_INCLUSION_DELAY is at least 1 in all presets");
 
@@ -277,24 +305,23 @@ impl Delta {
         }
     }
 
-    #[must_use]
-    pub const fn saturating_add(self, other: Self) -> Self {
-        match (self, other) {
+    pub fn try_add(self, other: Self) -> Result<Self, ArithmeticError> {
+        let result = match (self, other) {
             (Self::Penalty(penalty), Self::Penalty(other)) => {
-                Self::Penalty(penalty.saturating_add(other))
+                Self::Penalty(penalty.try_add(other)?)
             }
             (Self::Penalty(penalty), Self::Reward(reward))
             | (Self::Reward(reward), Self::Penalty(penalty)) => {
                 if penalty > reward {
-                    Self::Penalty(penalty.saturating_sub(reward))
+                    Self::Penalty(penalty.try_sub(reward)?)
                 } else {
-                    Self::Reward(reward.saturating_sub(penalty))
+                    Self::Reward(reward.try_sub(penalty)?)
                 }
             }
-            (Self::Reward(reward), Self::Reward(other)) => {
-                Self::Reward(reward.saturating_add(other))
-            }
-        }
+            (Self::Reward(reward), Self::Reward(other)) => Self::Reward(reward.try_add(other)?),
+        };
+
+        Ok(result)
     }
 }
 
@@ -306,10 +333,10 @@ pub struct SyncAggregateRewards {
 }
 
 impl SyncAggregateRewards {
-    #[inline]
-    #[must_use]
-    pub const fn total(self) -> Gwei {
-        self.singular_reward.saturating_mul(self.participation)
+    pub fn total(self) -> Result<Gwei> {
+        self.singular_reward
+            .try_mul(self.participation)
+            .map_err(Into::into)
     }
 }
 
@@ -317,17 +344,18 @@ pub type Assignment = (ValidatorIndex, AttestationEpoch);
 
 #[cfg(test)]
 mod tests {
+    use arithmetic::ArithmeticError;
     use test_case::test_case;
 
     use super::*;
 
-    #[test_case(Delta::Reward(2), Delta::Reward(3) => Delta::Reward(5))]
-    #[test_case(Delta::Reward(2), Delta::Penalty(3) => Delta::Penalty(1))]
-    #[test_case(Delta::Penalty(2), Delta::Reward(3) => Delta::Reward(1))]
-    #[test_case(Delta::Penalty(2), Delta::Penalty(3) => Delta::Penalty(5))]
-    #[test_case(Delta::Reward(2), Delta::Penalty(2) => Delta::Reward(0))]
-    #[test_case(Delta::Reward(Gwei::MAX), Delta::Reward(2) => Delta::Reward(Gwei::MAX))]
-    fn test_addition_of_deltas(first: Delta, second: Delta) -> Delta {
-        first.saturating_add(second)
+    #[test_case(Delta::Reward(2), Delta::Reward(3) => Ok(Delta::Reward(5)))]
+    #[test_case(Delta::Reward(2), Delta::Penalty(3) => Ok(Delta::Penalty(1)))]
+    #[test_case(Delta::Penalty(2), Delta::Reward(3) => Ok(Delta::Reward(1)))]
+    #[test_case(Delta::Penalty(2), Delta::Penalty(3) => Ok(Delta::Penalty(5)))]
+    #[test_case(Delta::Reward(2), Delta::Penalty(2) => Ok(Delta::Reward(0)))]
+    #[test_case(Delta::Reward(Gwei::MAX), Delta::Reward(2) => Err(ArithmeticError::AdditionOverflow { lhs: Gwei::MAX, rhs: 2 }))]
+    fn test_addition_of_deltas(first: Delta, second: Delta) -> Result<Delta, ArithmeticError> {
+        first.try_add(second)
     }
 }

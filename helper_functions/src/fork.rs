@@ -6,6 +6,7 @@ use crate::{
     signing::SignForAllForks as _,
 };
 use anyhow::Result;
+use arithmetic::U64Ext as _;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
@@ -556,7 +557,7 @@ pub fn upgrade_to_electra<P: Preset>(
     };
 
     // initial value of `earliest_exit_epoch`
-    let earliest_activation_epoch = misc::compute_activation_exit_epoch::<P>(epoch);
+    let earliest_activation_epoch = misc::compute_activation_exit_epoch::<P>(epoch)?;
 
     let earliest_exit_epoch = validators
         .into_iter()
@@ -565,7 +566,7 @@ pub fn upgrade_to_electra<P: Preset>(
         .fold(earliest_activation_epoch, |earliest, exit_epoch| {
             earliest.max(exit_epoch)
         })
-        .saturating_add(1);
+        .try_add(1)?;
 
     let mut post = ElectraBeaconState {
         // > Versioning
@@ -623,7 +624,8 @@ pub fn upgrade_to_electra<P: Preset>(
     };
 
     post.exit_balance_to_consume = accessors::get_activation_exit_churn_limit(config, &post);
-    post.consolidation_balance_to_consume = accessors::get_consolidation_churn_limit(config, &post);
+    post.consolidation_balance_to_consume =
+        accessors::get_consolidation_churn_limit(config, &post)?;
 
     // > [New in Electra:EIP7251]
     // > add validators that are not yet active to pending balance deposits
@@ -928,7 +930,7 @@ fn initialize_proposer_lookahead<P: Preset>(
 
     for i in 0..=P::MinSeedLookahead::U64 {
         let indices =
-            accessors::get_beacon_proposer_indices(config, state, current_epoch.saturating_add(i))?;
+            accessors::get_beacon_proposer_indices(config, state, current_epoch.try_add(i)?)?;
         lookahead.extend(indices);
     }
 
@@ -941,11 +943,11 @@ fn initialize_ptc_window<P: Preset>(state: &FuluBeaconState<P>) -> Result<PtcWin
     let previous_epoch = (0..P::SlotsPerEpoch::U64).map(|_| Ok(Ptc::<P>::default()));
 
     let current_and_lookahead_epochs = (start_slot
-        ..start_slot.saturating_add(
+        ..start_slot.try_add(
             P::MinSeedLookahead::U64
-                .saturating_add(1)
-                .saturating_mul(P::SlotsPerEpoch::U64),
-        ))
+                .try_add(1)?
+                .try_mul(P::SlotsPerEpoch::U64)?,
+        )?)
         .map(|slot| accessors::ptc_for_slot(state, slot));
 
     let window = previous_epoch

@@ -1,3 +1,5 @@
+use anyhow::Result;
+use arithmetic::{NonZeroU64Ext as _, U64Ext as _};
 use helper_functions::{
     accessors::{compute_base_reward, get_base_reward_per_increment, total_active_balance},
     predicates::is_in_inactivity_leak,
@@ -10,6 +12,7 @@ use types::{
     config::Config,
     fulu::beacon_state::BeaconState,
     nonstandard::Participation,
+    phase0::primitives::Gwei,
     preset::Preset,
 };
 
@@ -21,9 +24,9 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
     statistics: Statistics,
     summaries: impl IntoIterator<Item = ValidatorSummary>,
     participation: impl IntoIterator<Item = Participation>,
-) -> Vec<D> {
-    let in_inactivity_leak = is_in_inactivity_leak(state);
-    let base_reward_per_increment = get_base_reward_per_increment(state);
+) -> Result<Vec<D>> {
+    let in_inactivity_leak = is_in_inactivity_leak(state)?;
+    let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
     let increment = P::EFFECTIVE_BALANCE_INCREMENT;
     let source_increments = statistics.previous_epoch_source_participating_balance / increment;
@@ -32,7 +35,7 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
     let active_increments = total_active_balance(state) / increment;
 
     izip!(summaries, participation, &state.inactivity_scores)
-        .map(|(summary, participation, inactivity_score)| {
+        .map(|(summary, participation, inactivity_score)| -> Result<D> {
             let mut deltas = D::default();
 
             let ValidatorSummary {
@@ -43,36 +46,36 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
             } = summary;
 
             if !eligible_for_penalties {
-                return deltas;
+                return Ok(deltas);
             }
 
             let base_reward =
-                compute_base_reward::<P>(effective_balance, base_reward_per_increment);
+                compute_base_reward::<P>(effective_balance, base_reward_per_increment)?;
 
-            let participation_component_reward = |weight, unslashed_participating_increments| {
-                let reward_numerator = base_reward
-                    .saturating_mul(weight)
-                    .saturating_mul(unslashed_participating_increments);
+            let participation_component_reward =
+                |weight, unslashed_participating_increments| -> Result<Gwei> {
+                    let reward_numerator = base_reward
+                        .try_mul(weight)?
+                        .try_mul(unslashed_participating_increments)?;
 
-                let reward_denominator = active_increments.saturating_mul(WEIGHT_DENOMINATOR.get());
+                    let reward_denominator = active_increments.try_mul(WEIGHT_DENOMINATOR.get())?;
 
-                reward_numerator
-                    .checked_div(reward_denominator)
-                    .expect("total_active_balance should not be zero")
-            };
+                    Ok(reward_numerator.try_div(reward_denominator)?)
+                };
 
             let participation_component_penalty =
-                |weight| base_reward.saturating_mul(weight) / WEIGHT_DENOMINATOR;
+                |weight| -> Result<Gwei> { Ok(base_reward.try_mul(weight)? / WEIGHT_DENOMINATOR) };
 
             if !slashed && participation.previous_epoch_matching_source() {
                 if !in_inactivity_leak {
                     deltas.add_source_reward(participation_component_reward(
                         TIMELY_SOURCE_WEIGHT,
                         source_increments,
-                    ));
+                    )?)?;
                 }
             } else {
-                deltas.add_source_penalty(participation_component_penalty(TIMELY_SOURCE_WEIGHT));
+                deltas
+                    .add_source_penalty(participation_component_penalty(TIMELY_SOURCE_WEIGHT)?)?;
             }
 
             if !slashed && participation.previous_epoch_matching_target() {
@@ -80,27 +83,28 @@ pub fn epoch_deltas<P: Preset, D: EpochDeltas>(
                     deltas.add_target_reward(participation_component_reward(
                         TIMELY_TARGET_WEIGHT,
                         target_increments,
-                    ));
+                    )?)?;
                 }
             } else {
-                deltas.add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT));
+                deltas
+                    .add_target_penalty(participation_component_penalty(TIMELY_TARGET_WEIGHT)?)?;
 
-                let penalty_numerator = effective_balance.saturating_mul(*inactivity_score);
+                let penalty_numerator = effective_balance.try_mul(*inactivity_score)?;
                 let penalty_denominator = config
                     .inactivity_score_bias
-                    .saturating_mul(P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX);
+                    .try_mul(P::INACTIVITY_PENALTY_QUOTIENT_BELLATRIX)?;
 
-                deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator);
+                deltas.add_inactivity_penalty(penalty_numerator / penalty_denominator)?;
             }
 
             if !slashed && participation.previous_epoch_matching_head() && !in_inactivity_leak {
                 deltas.add_head_reward(participation_component_reward(
                     TIMELY_HEAD_WEIGHT,
                     head_increments,
-                ));
+                )?)?;
             }
 
-            deltas
+            Ok(deltas)
         })
         .collect()
 }
@@ -120,18 +124,18 @@ mod spec_tests {
 
     #[test_resources("consensus-spec-tests/tests/mainnet/fulu/rewards/*/*/*")]
     fn mainnet(case: Case) {
-        run_case::<Mainnet>(case);
+        run_case::<Mainnet>(case).expect("fulu rewards test should not return an error")
     }
 
     #[test_resources("consensus-spec-tests/tests/minimal/fulu/rewards/*/*/*")]
     fn minimal(case: Case) {
-        run_case::<Minimal>(case);
+        run_case::<Minimal>(case).expect("fulu rewards test should not return an error")
     }
 
-    fn run_case<P: Preset>(case: Case) {
+    fn run_case<P: Preset>(case: Case) -> Result<()> {
         let state = case.ssz_default::<BeaconState<P>>("pre");
 
-        let (statistics, summaries, participation) = altair::statistics_and_summaries(&state);
+        let (statistics, summaries, participation) = altair::statistics_and_summaries(&state)?;
 
         let epoch_deltas: Vec<EpochDeltasForReport> = epoch_deltas(
             &P::default_config(),
@@ -139,7 +143,7 @@ mod spec_tests {
             statistics,
             summaries,
             participation,
-        );
+        )?;
 
         TestDeltas::assert_equal(
             epoch_deltas.iter().map(|deltas| deltas.source_reward),
@@ -164,5 +168,7 @@ mod spec_tests {
             epoch_deltas.iter().map(|deltas| deltas.inactivity_penalty),
             case.ssz_default("inactivity_penalty_deltas"),
         );
+
+        Ok(())
     }
 }

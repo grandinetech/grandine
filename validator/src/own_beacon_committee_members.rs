@@ -147,7 +147,7 @@ impl OwnBeaconCommitteeMembers {
         let beacon_committees = (0..).zip(accessors::beacon_committees(state, slot)?);
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
         let relative_epoch = accessors::relative_epoch(state, epoch)?;
-        let committees_at_slot = accessors::get_committee_count_per_slot(state, relative_epoch);
+        let committees_at_slot = accessors::get_committee_count_per_slot(state, relative_epoch)?;
 
         for (committee_index, committee) in beacon_committees {
             let committee_size = committee.len();

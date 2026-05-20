@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{
@@ -68,7 +69,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -106,9 +107,10 @@ pub fn process_block_for_gossip<P: Preset>(
 }
 
 // TODO(feature/deneb): Reuse function from `transition_functions::capella::block_processing`.
-pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block)
-        .saturating_add(block.body.bls_to_execution_changes.len())
+pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> Result<usize> {
+    altair::count_required_signatures(block)?
+        .try_add(block.body.bls_to_execution_changes.len())
+        .map_err(Into::into)
 }
 
 pub fn custom_process_block<P: Preset>(
@@ -221,7 +223,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let computed = compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload.timestamp;
 
     ensure!(
@@ -254,7 +256,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
         state
             .eth1_data()
             .deposit_count
-            .saturating_sub(state.eth1_deposit_index()),
+            .try_sub(state.eth1_deposit_index())?,
     );
     let in_block = body.deposits().len().try_into()?;
 
@@ -393,7 +395,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     );
 
     ensure!(
-        attestation_slot.saturating_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get()) <= state.slot(),
+        attestation_slot.try_add(P::MIN_ATTESTATION_INCLUSION_DELAY.get())? <= state.slot(),
         Error::<P>::AttestationOutsideInclusionRange {
             state_slot: state.slot(),
             attestation_slot,

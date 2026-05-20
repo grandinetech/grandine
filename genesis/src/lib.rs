@@ -205,7 +205,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
                         );
 
                     let balance = state.balances_mut().get_mut(validator_index)?;
-                    increase_balance(balance, deposit.amount);
+                    increase_balance(balance, deposit.amount)?;
                 }
 
                 *state.pending_deposits_mut() = PersistentList::default();
@@ -367,7 +367,7 @@ fn validate_genesis_state<P: Preset>(config: &Config, state: &BeaconState<P>) ->
     // `helper_functions::accessors::active_validator_count_u64` cannot be used here.
     // Caching is not designed to work with candidate genesis states.
     let actual_validator_count =
-        accessors::get_active_validator_indices(state, RelativeEpoch::Current)
+        accessors::get_active_validator_indices(state, RelativeEpoch::Current)?
             .count()
             .try_into()?;
 
@@ -524,7 +524,7 @@ mod extra_tests {
 
         assert_eq!(beacon_state.validators().len_usize(), 1);
         assert_eq!(
-            accessors::active_validator_count_usize(&beacon_state, RelativeEpoch::Current),
+            accessors::active_validator_count_usize(&beacon_state, RelativeEpoch::Current)?,
             1,
         );
 

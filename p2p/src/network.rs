@@ -313,7 +313,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 _ = gossipsub_parameter_update_interval.select_next_some() => {
                     let debug_info = message_debug_info("update_gossipsub_parameters");
 
-                    self.update_gossipsub_parameters();
+                    if let Err(error) = self.update_gossipsub_parameters() {
+                        warn_with_peers!("unable to update gossipsub parameters: {error:?}");
+                    }
 
                     debug_info.handle();
                 },
@@ -1028,13 +1030,15 @@ impl<P: Preset, W: Wait> Network<P, W> {
         }
     }
 
-    fn update_gossipsub_parameters(&self) {
+    fn update_gossipsub_parameters(&self) -> Result<()> {
         let head_state = self.controller.head_state().value();
         let active_validator_count =
-            accessors::active_validator_count_u64(&head_state, RelativeEpoch::Current);
+            accessors::active_validator_count_u64(&head_state, RelativeEpoch::Current)?;
 
         ServiceInboundMessage::UpdateGossipsubParameters(active_validator_count, head_state.slot())
             .send(&self.network_to_service_tx);
+
+        Ok(())
     }
 
     fn update_sync_committee_subnets(

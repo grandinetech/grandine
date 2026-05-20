@@ -63,10 +63,9 @@ pub fn is_eligible_for_activation<P: Preset>(
 }
 
 #[inline]
-#[must_use]
-pub const fn is_eligible_for_penalties(validator: &Validator, previous_epoch: Epoch) -> bool {
-    is_active_validator(validator, previous_epoch)
-        || (validator.slashed && previous_epoch.saturating_add(1) < validator.withdrawable_epoch)
+pub fn is_eligible_for_penalties(validator: &Validator, previous_epoch: Epoch) -> Result<bool> {
+    Ok(is_active_validator(validator, previous_epoch)
+        || (validator.slashed && previous_epoch.try_add(1)? < validator.withdrawable_epoch))
 }
 
 // > Check if ``validator`` is slashable.
@@ -231,18 +230,19 @@ pub fn is_valid_merkle_branch(
 /// [`verify_blob_sidecar_inclusion_proof`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.5/specs/deneb/p2p-interface.md#verify_blob_sidecar_inclusion_proof)
 ///
 /// Renamed to match [`is_valid_merkle_branch`].
-#[must_use]
-pub fn is_valid_blob_sidecar_inclusion_proof<P: Preset>(blob_sidecar: &BlobSidecar<P>) -> bool {
+pub fn is_valid_blob_sidecar_inclusion_proof<P: Preset>(
+    blob_sidecar: &BlobSidecar<P>,
+) -> Result<bool> {
     // `consensus-specs` calls this `gindex`, but that is another misleading name.
     // This is NOT a generalized index.
-    let index_at_commitment_depth = index_at_commitment_depth::<P>(blob_sidecar.index);
+    let index_at_commitment_depth = index_at_commitment_depth::<P>(blob_sidecar.index)?;
 
-    is_valid_merkle_branch(
+    Ok(is_valid_merkle_branch(
         blob_sidecar.kzg_commitment.hash_tree_root(),
         blob_sidecar.kzg_commitment_inclusion_proof,
         index_at_commitment_depth,
         blob_sidecar.signed_block_header.message.body_root,
-    )
+    ))
 }
 
 #[must_use]
@@ -261,9 +261,8 @@ pub fn is_valid_data_column_sidecar_inclusion_proof<P: Preset>(
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/f7da1a38347155589f5e0403ad3290ffb77f4da6/specs/phase0/beacon-chain.md#helpers>
-#[must_use]
-pub fn is_in_inactivity_leak<P: Preset>(state: &impl BeaconState<P>) -> bool {
-    accessors::get_finality_delay(state) > P::MIN_EPOCHS_TO_INACTIVITY_PENALTY
+pub fn is_in_inactivity_leak<P: Preset>(state: &impl BeaconState<P>) -> Result<bool> {
+    accessors::get_finality_delay(state).map(|delay| delay > P::MIN_EPOCHS_TO_INACTIVITY_PENALTY)
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/8ae93b8265c66851e6140733a074916453dd2660/specs/bellatrix/beacon-chain.md#is_merge_transition_complete>
@@ -311,8 +310,7 @@ pub fn has_eth1_withdrawal_credential(validator: &Validator) -> bool {
         .starts_with(ETH1_ADDRESS_WITHDRAWAL_PREFIX)
 }
 
-#[must_use]
-pub const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> u64 {
+pub fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -> Result<u64> {
     // When using the minimal preset, `commitment_index` should be in the range `0..16`.
     // 16 is the value of `MAX_BLOB_COMMITMENTS_PER_BLOCK`.
     //
@@ -375,11 +373,11 @@ pub const fn index_at_commitment_depth<P: Preset>(commitment_index: BlobIndex) -
     // The index of commitment 0 is offset by 352 because of preceding fields in `BeaconBlockBody`.
     let fields_before_blob_kzg_commitments: u64 = 11;
     let indices_per_field_without_length = P::MaxBlobCommitmentsPerBlock::U64;
-    let indices_per_field_with_length = 2_u64.saturating_mul(indices_per_field_without_length);
+    let indices_per_field_with_length = 2_u64.try_mul(indices_per_field_without_length)?;
     let index_of_commitment_0 =
-        fields_before_blob_kzg_commitments.saturating_mul(indices_per_field_with_length);
+        fields_before_blob_kzg_commitments.try_mul(indices_per_field_with_length)?;
 
-    index_of_commitment_0.saturating_add(commitment_index)
+    Ok(index_of_commitment_0.try_add(commitment_index)?)
 }
 
 #[must_use]
@@ -428,15 +426,15 @@ pub fn can_builder_cover_bid<P: Preset>(
 ) -> Result<bool> {
     let balance = state.builders().get(builder_index)?.balance;
     let pending_withdrawals_amount =
-        accessors::get_pending_balance_to_withdraw_for_builder(state, builder_index);
-    let min_balance = P::MIN_DEPOSIT_AMOUNT.saturating_add(pending_withdrawals_amount);
+        accessors::get_pending_balance_to_withdraw_for_builder(state, builder_index)?;
+    let min_balance = P::MIN_DEPOSIT_AMOUNT.try_add(pending_withdrawals_amount)?;
 
     // Prevent edge case when `bid_amount` = 0
     if balance < min_balance {
         return Ok(false);
     }
 
-    Ok(balance.saturating_sub(min_balance).ge(&bid_amount))
+    Ok(balance.try_sub(min_balance)?.ge(&bid_amount))
 }
 
 // > Checks if the attestation was for the block proposed at the attestation slot
@@ -450,8 +448,9 @@ pub fn is_attestation_same_slot<P: Preset>(
 
     let is_matching_blockroot =
         data.beacon_block_root == accessors::get_block_root_at_slot(state, data.slot)?;
-    let is_current_blockroot = data.beacon_block_root
-        != accessors::get_block_root_at_slot(state, data.slot.saturating_sub(1))?;
+
+    let is_current_blockroot =
+        data.beacon_block_root != accessors::get_block_root_at_slot(state, data.slot.try_sub(1)?)?;
 
     Ok(is_matching_blockroot && is_current_blockroot)
 }
@@ -609,7 +608,8 @@ mod spec_tests {
         // Unlike the name suggests, `leaf_index` is actually a generalized index.
         // `is_valid_merkle_branch` expects an index that includes only leaves.
         let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
-        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index)
+            .expect("calculating index at commitment depth should not return an error");
 
         let block_body = case.ssz_default::<DenebBeaconBlockBody<preset>>("object");
 
@@ -623,10 +623,17 @@ mod spec_tests {
         ));
 
         // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
-        assert!(is_valid_blob_sidecar_inclusion_proof(
-            &incomplete_deneb_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
+        assert!(
+            is_valid_blob_sidecar_inclusion_proof(
+                &incomplete_deneb_blob_sidecar(
+                    commitment_index,
+                    &block_body,
+                    branch.iter().copied()
+                )
                 .expect("blob sidecar should be constructed successfully")
-        ));
+            )
+            .expect("blob sidecar inclusion proof validation should not return an error")
+        );
 
         let proof = misc::deneb_kzg_commitment_inclusion_proof(&block_body, commitment_index)
             .expect("inclusion proof should be constructed successfully");
@@ -655,7 +662,8 @@ mod spec_tests {
         // Unlike the name suggests, `leaf_index` is actually a generalized index.
         // `is_valid_merkle_branch` expects an index that includes only leaves.
         let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
-        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index)
+            .expect("calculating index at commitment depth should not return an error");
 
         let block_body = case.ssz_default::<ElectraBeaconBlockBody<preset>>("object");
 
@@ -669,10 +677,17 @@ mod spec_tests {
         ));
 
         // Reuse `merkle_proof` test cases to test `is_valid_blob_sidecar_inclusion_proof`.
-        assert!(is_valid_blob_sidecar_inclusion_proof(
-            &incomplete_electra_blob_sidecar(commitment_index, &block_body, branch.iter().copied())
+        assert!(
+            is_valid_blob_sidecar_inclusion_proof(
+                &incomplete_electra_blob_sidecar(
+                    commitment_index,
+                    &block_body,
+                    branch.iter().copied()
+                )
                 .expect("blob sidecar should be constructed successfully")
-        ));
+            )
+            .expect("inclusion proof validation should not return an error")
+        );
 
         let proof = misc::electra_kzg_commitment_inclusion_proof(&block_body, commitment_index)
             .expect("inclusion proof should be constructed successfully");
@@ -698,7 +713,8 @@ mod spec_tests {
         // Unlike the name suggests, `leaf_index` is actually a generalized index.
         // `is_valid_merkle_branch` expects an index that includes only leaves.
         let commitment_index = leaf_index % <preset as Preset>::MaxBlobCommitmentsPerBlock::U64;
-        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index);
+        let index_at_commitment_depth = index_at_commitment_depth::<preset>(commitment_index)
+            .expect("calculating index at commitment depth should not return an error");
         // vs
         // let index_at_leaf_depth = leaf_index - leaf_index.prev_power_of_two();
 
@@ -721,7 +737,8 @@ mod spec_tests {
 
         // > If the implementation supports generating merkle proofs, check that the
         // > self-generated proof matches the `proof` provided with the test.
-        let proof = misc::kzg_commitments_inclusion_proof(&block_body);
+        let proof = misc::kzg_commitments_inclusion_proof(&block_body)
+            .expect("kzg_commitments_inclusion_proof should be constructed successfully");
 
         assert_eq!(proof.as_slice(), branch);
     }
@@ -735,7 +752,9 @@ mod spec_tests {
 
         // Unlike the name suggests, `leaf_index` is actually a generalized index.
         // `is_valid_merkle_branch` expects an index that includes only leaves.
-        let index_at_leaf_depth = leaf_index.saturating_sub(leaf_index.prev_power_of_two());
+        let index_at_leaf_depth = leaf_index
+            .try_sub(leaf_index.prev_power_of_two())
+            .expect("leaf_index subtraction should not overflow");
 
         let root = case.ssz::<_, T>(context, "object").hash_tree_root();
 

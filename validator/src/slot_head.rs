@@ -91,7 +91,7 @@ impl<P: Preset> SlotHead<P> {
 
     pub fn subnet_id(&self, slot: Slot, committee_index: CommitteeIndex) -> Result<SubnetId> {
         let committees_per_slot =
-            accessors::get_committee_count_per_slot(&self.beacon_state, RelativeEpoch::Current);
+            accessors::get_committee_count_per_slot(&self.beacon_state, RelativeEpoch::Current)?;
 
         misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
     }

@@ -1,7 +1,7 @@
 use core::cell::LazyCell;
 
 use anyhow::Result;
-use arithmetic::{NonZeroExt as _, U64Ext as _};
+use arithmetic::{ArithmeticError, NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use helper_functions::{
     accessors::{
         self, get_activation_exit_churn_limit, get_current_epoch, get_next_epoch,
@@ -26,7 +26,7 @@ use types::{
     electra::{beacon_state::BeaconState as ElectraBeaconState, containers::PendingDeposit},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::DepositMessage,
+        containers::{DepositMessage, Validator},
         primitives::Gwei,
     },
     preset::Preset,
@@ -58,16 +58,16 @@ pub fn process_epoch(
 
     // TODO(Grandine Team): Some parts of epoch processing could be done in parallel.
 
-    let (statistics, mut summaries, participation) = altair::statistics_and_summaries(state);
+    let (statistics, mut summaries, participation) = altair::statistics_and_summaries(state)?;
 
-    altair::process_justification_and_finalization(state, statistics);
+    altair::process_justification_and_finalization(state, statistics)?;
 
     altair::process_inactivity_updates(
         config,
         state,
         summaries.iter().copied(),
         participation.iter().copied(),
-    );
+    )?;
 
     // Epoch deltas must be computed after `process_justification_and_finalization` and
     // `process_inactivity_updates` because they depend on updated values of
@@ -80,17 +80,17 @@ pub fn process_epoch(
         statistics,
         summaries.iter().copied(),
         participation,
-    );
+    )?;
 
-    unphased::process_rewards_and_penalties(state, epoch_deltas);
+    unphased::process_rewards_and_penalties(state, epoch_deltas)?;
     process_registry_updates(config, state, summaries.as_mut_slice())?;
-    process_slashings::<_, ()>(state, summaries);
-    unphased::process_eth1_data_reset(state);
+    process_slashings::<_, ()>(state, summaries)?;
+    unphased::process_eth1_data_reset(state)?;
     process_pending_deposits(config, pubkey_cache, state)?;
     process_pending_consolidations(state)?;
-    process_effective_balance_updates(state);
-    unphased::process_slashings_reset(state);
-    unphased::process_randao_mixes_reset(state);
+    process_effective_balance_updates(state)?;
+    unphased::process_slashings_reset(state)?;
+    unphased::process_randao_mixes_reset(state)?;
 
     // > [Modified in Capella]
     process_historical_summaries_update(state)?;
@@ -108,16 +108,16 @@ pub fn epoch_report<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<EpochReport> {
-    let (statistics, mut summaries, participation) = altair::statistics_and_summaries(state);
+    let (statistics, mut summaries, participation) = altair::statistics_and_summaries(state)?;
 
-    altair::process_justification_and_finalization(state, statistics);
+    altair::process_justification_and_finalization(state, statistics)?;
 
     altair::process_inactivity_updates(
         config,
         state,
         summaries.iter().copied(),
         participation.iter().copied(),
-    );
+    )?;
 
     // Rewards and penalties are not applied in the genesis epoch. Return zero deltas for states in
     // the genesis epoch to avoid making misleading reports. The check cannot be done inside
@@ -129,23 +129,23 @@ pub fn epoch_report<P: Preset>(
             statistics,
             summaries.iter().copied(),
             participation,
-        )
+        )?
     } else {
         vec_of_default(state)
     };
 
-    unphased::process_rewards_and_penalties(state, epoch_deltas.iter().copied());
+    unphased::process_rewards_and_penalties(state, epoch_deltas.iter().copied())?;
     process_registry_updates(config, state, summaries.as_mut_slice())?;
 
-    let slashing_penalties = process_slashings(state, summaries.iter().copied());
+    let slashing_penalties = process_slashings(state, summaries.iter().copied())?;
     let post_balances = state.balances().into_iter().copied().collect();
 
     // Do the rest of epoch processing to leave the state valid for further transitions.
     // This way it can be used to calculate statistics for multiple epochs in a row.
-    unphased::process_eth1_data_reset(state);
-    process_effective_balance_updates(state);
-    unphased::process_slashings_reset(state);
-    unphased::process_randao_mixes_reset(state);
+    unphased::process_eth1_data_reset(state)?;
+    process_effective_balance_updates(state)?;
+    unphased::process_slashings_reset(state)?;
+    unphased::process_randao_mixes_reset(state)?;
     unphased::process_historical_roots_update(state)?;
     altair::process_participation_flag_updates(state);
     altair::process_sync_committee_updates(pubkey_cache, state)?;
@@ -167,7 +167,7 @@ pub fn process_registry_updates<P: Preset>(
     summaries: &mut [impl ValidatorSummary],
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
 
     // The indices collected in these do not overlap.
     // See <https://github.com/protolambda/eth2-docs/tree/de65f38857f1e27ffb6f25107d61e795cf1a5ad7#registry-updates>
@@ -213,7 +213,7 @@ pub fn process_registry_updates<P: Preset>(
     }
 
     // > Activate all eligible validators
-    let activation_exit_epoch = compute_activation_exit_epoch::<P>(current_epoch);
+    let activation_exit_epoch = compute_activation_exit_epoch::<P>(current_epoch)?;
 
     for validator_index in activation_queue
         .into_iter()
@@ -237,10 +237,10 @@ pub fn process_pending_deposits<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = get_current_epoch(state).saturating_add(1);
+    let next_epoch = get_current_epoch(state).try_add(1)?;
     let available_for_processing = state
         .deposit_balance_to_consume()
-        .saturating_add(get_activation_exit_churn_limit(config, state));
+        .try_add(get_activation_exit_churn_limit(config, state))?;
 
     let mut processed_amount: Gwei = 0;
     let mut next_deposit_index: u64 = 0;
@@ -285,19 +285,19 @@ pub fn process_pending_deposits<P: Preset>(
         } else {
             // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
             is_churn_limit_reached =
-                processed_amount.saturating_add(deposit.amount) > available_for_processing;
+                processed_amount.try_add(deposit.amount)? > available_for_processing;
 
             if is_churn_limit_reached {
                 break;
             }
 
             // > Consume churn and apply deposit.
-            processed_amount = processed_amount.saturating_add(deposit.amount);
+            processed_amount = processed_amount.try_add(deposit.amount)?;
             apply_pending_deposit(config, pubkey_cache, state, deposit)?;
         }
 
         // > Regardless of how the deposit was handled, we move on in the queue.
-        next_deposit_index = next_deposit_index.saturating_add(1);
+        next_deposit_index = next_deposit_index.try_add(1)?;
     }
 
     *state.pending_deposits_mut() = PersistentList::try_from_iter(
@@ -311,7 +311,7 @@ pub fn process_pending_deposits<P: Preset>(
 
     if is_churn_limit_reached {
         *state.deposit_balance_to_consume_mut() =
-            available_for_processing.saturating_sub(processed_amount);
+            available_for_processing.try_sub(processed_amount)?;
     } else {
         *state.deposit_balance_to_consume_mut() = 0;
     }
@@ -333,7 +333,7 @@ fn apply_pending_deposit<P: Preset>(
     } = deposit;
 
     if let Some(validator_index) = accessors::index_of_public_key(state, &deposit.pubkey) {
-        increase_balance(balance(state, validator_index)?, *amount);
+        increase_balance(balance(state, validator_index)?, *amount)?;
     } else if is_valid_deposit_signature(config, pubkey_cache, deposit) {
         block_processing::add_validator_to_registry::<P>(
             state,
@@ -374,14 +374,14 @@ pub fn is_valid_deposit_signature(
 pub fn process_pending_consolidations<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = get_current_epoch(state).saturating_add(1);
+    let next_epoch = get_current_epoch(state).try_add(1)?;
     let mut next_pending_consolidation: usize = 0;
 
     for pending_consolidation in &state.pending_consolidations().clone() {
         let source_validator = state.validators().get(pending_consolidation.source_index)?;
 
         if source_validator.slashed {
-            next_pending_consolidation = next_pending_consolidation.saturating_add(1);
+            next_pending_consolidation = next_pending_consolidation.try_add(1)?;
             continue;
         }
 
@@ -402,12 +402,13 @@ pub fn process_pending_consolidations<P: Preset>(
             balance(state, pending_consolidation.source_index)?,
             source_effective_balance,
         );
+
         increase_balance(
             balance(state, pending_consolidation.target_index)?,
             source_effective_balance,
-        );
+        )?;
 
-        next_pending_consolidation = next_pending_consolidation.saturating_add(1);
+        next_pending_consolidation = next_pending_consolidation.try_add(1)?;
     }
 
     *state.pending_consolidations_mut() = PersistentList::try_from_iter(
@@ -421,10 +422,12 @@ pub fn process_pending_consolidations<P: Preset>(
     Ok(())
 }
 
-pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectraBeaconState<P>) {
+pub fn process_effective_balance_updates<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+) -> Result<()> {
     let hysteresis_increment = P::EFFECTIVE_BALANCE_INCREMENT.get() / P::HYSTERESIS_QUOTIENT;
-    let downward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_DOWNWARD_MULTIPLIER);
-    let upward_threshold = hysteresis_increment.saturating_mul(P::HYSTERESIS_UPWARD_MULTIPLIER);
+    let downward_threshold = hysteresis_increment.try_mul(P::HYSTERESIS_DOWNWARD_MULTIPLIER)?;
+    let upward_threshold = hysteresis_increment.try_mul(P::HYSTERESIS_UPWARD_MULTIPLIER)?;
 
     let (validators, balances) = state.validators_mut_with_balances();
 
@@ -434,27 +437,43 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl PostElectra
     // packed into bundles of 8.
     let mut balances = balances.into_iter().copied();
 
-    // > Update effective balances with hysteresis
-    validators.update(|validator| {
+    let mut update_result: Result<()> = Ok(());
+
+    let mut update_effective_balance = |validator: &mut Validator| -> Result<()> {
         let max_effective_balance = get_max_effective_balance::<P>(validator);
 
         let balance = balances
             .next()
             .expect("list of validators and list of balances should have the same length");
 
-        let below = balance.saturating_add(downward_threshold) < validator.effective_balance;
-        let above = validator.effective_balance.saturating_add(upward_threshold) < balance;
+        let below = balance.try_add(downward_threshold)? < validator.effective_balance;
+        let above = validator.effective_balance.try_add(upward_threshold)? < balance;
 
         if below || above {
             validator.effective_balance = balance
                 .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
                 .min(max_effective_balance);
         }
+
+        Ok(())
+    };
+
+    // > Update effective balances with hysteresis
+    validators.update(|validator| {
+        if update_result.is_err() {
+            return;
+        }
+
+        update_result = update_effective_balance(validator);
     });
+
+    update_result?;
+
+    Ok(())
 }
 
 fn process_historical_summaries_update<P: Preset>(state: &mut ElectraBeaconState<P>) -> Result<()> {
-    let next_epoch = get_next_epoch(state);
+    let next_epoch = get_next_epoch(state)?;
 
     // > Set historical block root accumulator.
     if next_epoch.is_multiple_of(P::EpochsPerHistoricalRoot::non_zero().into()) {
@@ -472,32 +491,29 @@ fn process_historical_summaries_update<P: Preset>(state: &mut ElectraBeaconState
 pub fn process_slashings<P: Preset, S: SlashingPenalties>(
     state: &mut impl BeaconState<P>,
     summaries: impl IntoIterator<Item = AltairValidatorSummary>,
-) -> S {
+) -> Result<S> {
     let current_epoch = get_current_epoch(state);
     let total_active_balance = total_active_balance(state);
 
     let (balances, slashings) = state.balances_mut_with_slashings();
 
     // Calculating this lazily saves 30-40 μs in typical networks.
-    let adjusted_total_slashing_balance = LazyCell::new(|| {
+    let adjusted_total_slashing_balance = LazyCell::new(|| -> Result<Gwei, ArithmeticError> {
         slashings
             .into_iter()
             .sum::<Gwei>()
-            .saturating_mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
-            .min(total_active_balance)
+            .try_mul(P::PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX)
+            .map(|balance| balance.min(total_active_balance))
     });
 
     let mut summaries = (0..).zip(summaries);
     let mut slashing_penalties = S::default();
+    let mut update_result: Result<()> = Ok(());
 
     // > Factored out from penalty numerator to avoid uint64 overflow
     let increment = P::EFFECTIVE_BALANCE_INCREMENT;
 
-    let penalty_per_effective_balance_increment = adjusted_total_slashing_balance
-        .checked_div(total_active_balance / increment)
-        .expect("total_active_balance(state) / increment should not be zero");
-
-    balances.update(|balance| {
+    let mut apply_slashing = |balance: &mut Gwei| -> Result<()> {
         let (validator_index, summary) = summaries
             .next()
             .expect("list of validators and list of balances should have the same length");
@@ -510,26 +526,40 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
         } = summary;
 
         if !slashed {
-            return;
+            return Ok(());
         }
 
-        if current_epoch.saturating_add(P::EpochsPerSlashingsVector::U64 / 2) != withdrawable_epoch
-        {
-            return;
+        if current_epoch.try_add(P::EpochsPerSlashingsVector::U64 / 2)? != withdrawable_epoch {
+            return Ok(());
         }
 
         let effective_balance_increments = effective_balance / increment;
+        let adjusted = (*adjusted_total_slashing_balance)?;
+
+        let penalty_per_effective_balance_increment =
+            adjusted.try_div(total_active_balance / increment)?;
 
         // > [Modified in Electra:EIP7251]
         let penalty =
-            penalty_per_effective_balance_increment.saturating_mul(effective_balance_increments);
+            penalty_per_effective_balance_increment.try_mul(effective_balance_increments)?;
 
         decrease_balance(balance, penalty);
-
         slashing_penalties.add(validator_index, penalty);
+
+        Ok(())
+    };
+
+    balances.update(|balance| {
+        if update_result.is_err() {
+            return;
+        }
+
+        update_result = apply_slashing(balance);
     });
 
-    slashing_penalties
+    update_result?;
+
+    Ok(slashing_penalties)
 }
 
 #[cfg(test)]
@@ -732,40 +762,34 @@ mod spec_tests {
 
     fn run_justification_and_finalization_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (statistics, _, _) = altair::statistics_and_summaries(state);
+            let (statistics, _, _) = altair::statistics_and_summaries(state)?;
 
-            altair::process_justification_and_finalization(state, statistics);
-
-            Ok(())
+            altair::process_justification_and_finalization(state, statistics)
         });
 
         run_case::<P>(case, |_, state| {
-            let statistics = altair::statistics(state);
+            let statistics = altair::statistics(state)?;
 
-            altair::process_justification_and_finalization(state, statistics);
-
-            Ok(())
+            altair::process_justification_and_finalization(state, statistics)
         });
     }
 
     fn run_inactivity_updates_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (_, summaries, participation) = altair::statistics_and_summaries(state);
+            let (_, summaries, participation) = altair::statistics_and_summaries(state)?;
 
             altair::process_inactivity_updates(
                 &P::default_config(),
                 state,
                 summaries,
                 participation,
-            );
-
-            Ok(())
+            )
         });
     }
 
     fn run_rewards_and_penalties_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (statistics, summaries, participation) = altair::statistics_and_summaries(state);
+            let (statistics, summaries, participation) = altair::statistics_and_summaries(state)?;
 
             let deltas: Vec<EpochDeltasForTransition> = epoch_intermediates::epoch_deltas(
                 &P::default_config(),
@@ -773,11 +797,9 @@ mod spec_tests {
                 statistics,
                 summaries,
                 participation,
-            );
+            )?;
 
-            unphased::process_rewards_and_penalties(state, deltas);
-
-            Ok(())
+            unphased::process_rewards_and_penalties(state, deltas)
         });
     }
 
@@ -791,44 +813,26 @@ mod spec_tests {
 
     fn run_slashings_case<P: Preset>(case: Case) {
         run_case::<P>(case, |_, state| {
-            let (_, summaries, _) = altair::statistics_and_summaries(state);
+            let (_, summaries, _) = altair::statistics_and_summaries(state)?;
 
-            process_slashings::<_, ()>(state, summaries);
-
-            Ok(())
+            process_slashings::<_, ()>(state, summaries)
         });
     }
 
     fn run_eth1_data_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |_, state| {
-            unphased::process_eth1_data_reset(state);
-
-            Ok(())
-        });
+        run_case::<P>(case, |_, state| unphased::process_eth1_data_reset(state));
     }
 
     fn run_effective_balance_updates_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |_, state| {
-            process_effective_balance_updates(state);
-
-            Ok(())
-        });
+        run_case::<P>(case, |_, state| process_effective_balance_updates(state));
     }
 
     fn run_slashings_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |_, state| {
-            unphased::process_slashings_reset(state);
-
-            Ok(())
-        });
+        run_case::<P>(case, |_, state| unphased::process_slashings_reset(state));
     }
 
     fn run_randao_mixes_reset_case<P: Preset>(case: Case) {
-        run_case::<P>(case, |_, state| {
-            unphased::process_randao_mixes_reset(state);
-
-            Ok(())
-        });
+        run_case::<P>(case, |_, state| unphased::process_randao_mixes_reset(state));
     }
 
     fn run_historical_summaries_update_case<P: Preset>(case: Case) {

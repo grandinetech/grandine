@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use arithmetic::UsizeExt as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{self, get_current_epoch, get_randao_mix},
@@ -54,7 +55,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -94,9 +95,10 @@ pub fn process_block_for_gossip<P: Preset>(
 }
 
 // TODO(feature/electra): Reuse function from `transition_functions::capella::block_processing`.
-pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> usize {
-    altair::count_required_signatures(block)
-        .saturating_add(block.body.bls_to_execution_changes.len())
+pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> Result<usize> {
+    altair::count_required_signatures(block)?
+        .try_add(block.body.bls_to_execution_changes.len())
+        .map_err(Into::into)
 }
 
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
@@ -174,7 +176,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let computed = compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload.timestamp;
 
     ensure!(
@@ -257,6 +259,8 @@ fn process_execution_payload<P: Preset>(
 mod spec_tests {
     use core::fmt::Debug;
 
+    use anyhow::Result;
+    use arithmetic::U64Ext as _;
     use execution_engine::MockExecutionEngine;
     use helper_functions::{
         slot_report::NullSlotReport,
@@ -688,7 +692,7 @@ mod spec_tests {
             unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
 
         // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().saturating_add(1);
+        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().try_add(1)?;
 
         electra::apply_deposits(state, combined_deposits, NullSlotReport)
     }

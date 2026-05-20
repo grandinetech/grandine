@@ -2,6 +2,7 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Result;
+use arithmetic::U64Ext as _;
 use bls::PublicKeyBytes;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
@@ -136,7 +137,7 @@ impl ValidatorEpochRangeReport {
         validator: &Validator,
         current_epoch: Epoch,
         report: ValidatorEpochReport,
-    ) {
+    ) -> Result<()> {
         self.active_epochs =
             self.active_epochs
                 .saturating_add(usize::from(predicates::is_active_validator(
@@ -171,22 +172,22 @@ impl ValidatorEpochRangeReport {
                         .unwrap_or_default(),
                 );
 
-                self.rewards = self.rewards.saturating_add(epoch_deltas.combined_reward());
+                self.rewards = self.rewards.saturating_add(epoch_deltas.combined_reward()?);
 
                 self.penalties = self
                     .penalties
-                    .saturating_add(epoch_deltas.combined_penalty());
+                    .saturating_add(epoch_deltas.combined_penalty()?);
 
                 self.penalties = self
                     .penalties
                     .saturating_add(slashing_penalty.unwrap_or_default());
 
-                self.rewards = self.rewards.saturating_add(
+                self.rewards = self.rewards.try_add(
                     previous_epoch_slot_deltas
                         .values()
                         .map(IndividualSlotDeltas::combined_reward)
-                        .sum::<Gwei>(),
-                );
+                        .try_fold(0, |acc, r| -> Result<Gwei> { Ok(acc.try_add(r?)?) })?,
+                )?;
 
                 self.penalties = self.penalties.saturating_add(
                     previous_epoch_slot_deltas
@@ -223,22 +224,22 @@ impl ValidatorEpochRangeReport {
                     );
                 }
 
-                self.rewards = self.rewards.saturating_add(epoch_deltas.combined_reward());
+                self.rewards = self.rewards.saturating_add(epoch_deltas.combined_reward()?);
 
                 self.penalties = self
                     .penalties
-                    .saturating_add(epoch_deltas.combined_penalty());
+                    .saturating_add(epoch_deltas.combined_penalty()?);
 
                 self.penalties = self
                     .penalties
                     .saturating_add(slashing_penalty.unwrap_or_default());
 
-                self.rewards = self.rewards.saturating_add(
+                self.rewards = self.rewards.try_add(
                     previous_epoch_slot_deltas
                         .values()
                         .map(IndividualSlotDeltas::combined_reward)
-                        .sum::<Gwei>(),
-                );
+                        .try_fold(0, |acc, r| -> Result<Gwei> { Ok(acc.try_add(r?)?) })?,
+                )?;
 
                 self.penalties = self.penalties.saturating_add(
                     previous_epoch_slot_deltas
@@ -252,6 +253,8 @@ impl ValidatorEpochRangeReport {
         self.epoch_reports
             .insert(current_epoch, report)
             .expect_none("only one set of reports is produced for each epoch");
+
+        Ok(())
     }
 }
 
@@ -297,16 +300,19 @@ struct IndividualSlotDeltas {
 }
 
 impl IndividualSlotDeltas {
-    fn combined_reward(&self) -> Gwei {
+    fn combined_reward(&self) -> Result<Gwei> {
         chain!(
             self.slashing_rewards.iter().copied(),
             self.whistleblowing_rewards.iter().copied(),
             self.attestation_rewards.iter().copied(),
             self.deposits.iter().copied(),
             self.sync_committee_delta.and_then(Delta::reward),
-            self.sync_aggregate_rewards.map(SyncAggregateRewards::total),
+            self.sync_aggregate_rewards
+                .map(SyncAggregateRewards::total)
+                .transpose()?,
         )
-        .sum()
+        .try_fold(0, Gwei::try_add)
+        .map_err(Into::into)
     }
 
     fn combined_penalty(&self) -> Gwei {
@@ -414,7 +420,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         previous_epoch_slot_reports = SlotReports::new();
 
         for block_with_root in
-            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(previous_epoch))?
+            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(previous_epoch)?)?
         {
             let slot = block_with_root.block.message().slot();
 
@@ -459,7 +465,9 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         let mut current_epoch_sync_aggregates_with_roots =
             HashMap::with_capacity(P::SlotsPerEpoch::USIZE);
 
-        for block_with_root in snapshot.blocks_by_range(misc::slots_in_epoch::<P>(current_epoch))? {
+        for block_with_root in
+            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(current_epoch)?)?
+        {
             let slot = block_with_root.block.message().slot();
 
             let slot_report = (slot > GENESIS_SLOT)
@@ -494,7 +502,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             }) => {
                 let beacon_state_report = BeaconStateEpochReport::Phase0 {
                     post_finalized_epoch: state.finalized_checkpoint().epoch,
-                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state),
+                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state)?,
                     statistics,
                 };
 
@@ -558,7 +566,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report);
+                        .accumulate(validator, current_epoch, validator_report)?;
                 }
             }
             EpochReport::PostAltair(AltairEpochReport {
@@ -570,7 +578,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             }) => {
                 let beacon_state_report = BeaconStateEpochReport::PostAltair {
                     post_finalized_epoch: state.finalized_checkpoint().epoch,
-                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state),
+                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state)?,
                     statistics,
                 };
 
@@ -646,7 +654,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report);
+                        .accumulate(validator, current_epoch, validator_report)?;
                 }
             }
         }
@@ -671,7 +679,9 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
 
         let mut current_epoch_slot_reports = SlotReports::new();
 
-        for block_with_root in snapshot.blocks_by_range(misc::slots_in_epoch::<P>(current_epoch))? {
+        for block_with_root in
+            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(current_epoch)?)?
+        {
             let slot = block_with_root.block.message().slot();
 
             let slot_report = (slot > GENESIS_SLOT)
@@ -700,7 +710,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             }) => {
                 let beacon_state_report = BeaconStateEpochReport::Phase0 {
                     post_finalized_epoch: state.finalized_checkpoint().epoch,
-                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state),
+                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state)?,
                     statistics,
                 };
 
@@ -764,7 +774,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report);
+                        .accumulate(validator, current_epoch, validator_report)?;
                 }
             }
             EpochReport::PostAltair(AltairEpochReport {
@@ -776,7 +786,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             }) => {
                 let beacon_state_report = BeaconStateEpochReport::PostAltair {
                     post_finalized_epoch: state.finalized_checkpoint().epoch,
-                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state),
+                    in_inactivity_leak: predicates::is_in_inactivity_leak(&state)?,
                     statistics,
                 };
 
@@ -852,7 +862,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report);
+                        .accumulate(validator, current_epoch, validator_report)?;
                 }
             }
         }
@@ -921,7 +931,7 @@ fn proposal_assignments<P: Preset>(
 ) -> Result<HashMap<ValidatorIndex, SlotVec>> {
     let mut proposal_assignments = HashMap::<_, SlotVec>::with_capacity(P::SlotsPerEpoch::USIZE);
 
-    for slot in misc::slots_in_epoch::<P>(epoch) {
+    for slot in misc::slots_in_epoch::<P>(epoch)? {
         let proposer_index = accessors::get_beacon_proposer_index_at_slot(config, state, slot)?;
 
         proposal_assignments
@@ -940,7 +950,7 @@ fn previous_epoch_block_roots<P: Preset>(state: &BeaconState<P>) -> Result<HashM
         return Ok(HashMap::new());
     }
 
-    let slots_in_previous_epoch = misc::slots_in_epoch::<P>(accessors::get_previous_epoch(state));
+    let slots_in_previous_epoch = misc::slots_in_epoch::<P>(accessors::get_previous_epoch(state))?;
 
     itertools::process_results(
         slots_in_previous_epoch
@@ -966,11 +976,11 @@ fn previous_epoch_attestation_assignments<P: Preset>(
     }
 
     let active_validator_count =
-        accessors::active_validator_count_usize(state, RelativeEpoch::Previous);
+        accessors::active_validator_count_usize(state, RelativeEpoch::Previous)?;
 
     let mut attestation_assignments = HashMap::with_capacity(active_validator_count);
 
-    for slot in misc::slots_in_epoch::<P>(accessors::get_previous_epoch(state)) {
+    for slot in misc::slots_in_epoch::<P>(accessors::get_previous_epoch(state))? {
         let committees = accessors::beacon_committees(state, slot)?;
 
         for (committee_index, committee) in (0..).zip(committees) {

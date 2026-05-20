@@ -428,14 +428,19 @@ impl<P: Preset> BlockSyncService<P> {
                             if self.register_new_received_block(block_root, block_slot) {
                                 self.data_dumper.dump_signed_beacon_block(beacon_block.clone_arc());
 
-                                let block_slot_timestamp = misc::compute_timestamp_at_slot(
-                                    self.controller.chain_config(),
-                                    &self.controller.head_state().value(),
-                                    block_slot,
-                                );
-
                                 if let Some(metrics) = self.metrics.as_ref() {
-                                    metrics.observe_block_duration_to_slot(block_slot_timestamp);
+                                    match misc::compute_timestamp_at_slot(
+                                        self.controller.chain_config(),
+                                        &self.controller.head_state().value(),
+                                        block_slot,
+                                    ) {
+                                        Ok(block_slot_timestamp) => {
+                                            metrics.observe_block_duration_to_slot(block_slot_timestamp);
+                                        },
+                                        Err(error) => {
+                                            warn_with_peers!("failed to compute timestamp for block slot {block_slot}: {error}");
+                                        }
+                                    }
                                 }
 
                                 debug_with_peers!(
@@ -585,9 +590,7 @@ impl<P: Preset> BlockSyncService<P> {
                             self.request_blobs_and_blocks_if_ready();
                         }
                         P2pToSync::FinalizedCheckpoint(finalized_checkpoint) => {
-                            let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(
-                                finalized_checkpoint.epoch);
-
+                            let start_of_epoch = misc::compute_start_slot_at_epoch::<P>(finalized_checkpoint.epoch);
                             if self.controller.chain_config().fulu_fork_epoch <= finalized_checkpoint.epoch {
                                 self.received_data_column_sidecars.retain_async(|_, slot| *slot >= start_of_epoch).await;
                             } else {
@@ -748,12 +751,12 @@ impl<P: Preset> BlockSyncService<P> {
                     SyncToP2p::UpdateEarliestAvailableSlot(*previous_earliest_available_slot)
                         .send(&self.sync_to_p2p_tx);
 
-                    if let Some(metrics) = self.metrics.as_ref()
-                        && let Some(custody_groups_count) = self
+                    if let Some(metrics) = self.metrics.as_ref() {
+                        let custody_groups_count = self
                             .controller
                             .chain_config()
-                            .custody_size::<P>(self.controller.sampling_columns_count() as u64)
-                    {
+                            .custody_size::<P>(self.controller.sampling_columns_count() as u64);
+
                         metrics.set_beacon_custody_groups_backfilled(custody_groups_count);
                     }
                 }

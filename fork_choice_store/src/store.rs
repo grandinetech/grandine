@@ -1824,7 +1824,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if let Some(actual) = attestation.origin.subnet_id() {
             let committees_per_slot =
-                accessors::get_committee_count_per_slot(&target_state, relative_epoch);
+                match accessors::get_committee_count_per_slot(&target_state, relative_epoch) {
+                    Ok(subnet) => subnet,
+                    Err(source) => {
+                        return Err(AttestationValidationError::Other {
+                            attestation: Box::new(attestation),
+                            source,
+                        });
+                    }
+                };
 
             let expected =
                 match misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, index) {
@@ -2299,7 +2307,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > _[REJECT]_ The sidecar's inclusion proof is valid as
         // > verified by `verify_blob_sidecar_inclusion_proof(blob_sidecar)`.
         ensure!(
-            predicates::is_valid_blob_sidecar_inclusion_proof(&blob_sidecar),
+            predicates::is_valid_blob_sidecar_inclusion_proof(&blob_sidecar)?,
             Error::BlobSidecarInvalidInclusionProof { blob_sidecar },
         );
 

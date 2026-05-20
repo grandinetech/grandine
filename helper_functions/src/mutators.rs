@@ -1,6 +1,7 @@
 use core::cmp::Ordering;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+use arithmetic::U64Ext;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
 use types::{
     config::Config,
@@ -45,12 +46,14 @@ pub fn builder_balance<P: Preset>(
 }
 
 #[inline]
-pub const fn increase_balance(balance: &mut Gwei, delta: Gwei) {
-    *balance = balance.saturating_add(delta);
+pub fn increase_balance(balance: &mut Gwei, delta: Gwei) -> Result<()> {
+    *balance = balance.try_add(delta)?;
+    Ok(())
 }
 
 #[inline]
 pub const fn decrease_balance(balance: &mut Gwei, delta: Gwei) {
+    // Saturating behaviour is expected per spec
     *balance = balance.saturating_sub(delta);
 }
 
@@ -75,7 +78,7 @@ pub fn initiate_validator_exit<P: Preset>(
     // We had implemented this, but the implementation did not update `exit_queue_epoch` correctly,
     // which led to state transitions failing when syncing Goerli. We were able to find the bug, but
     // the optimization didn't have much of an effect anyway, so we reverted it as a precaution.
-    let mut exit_queue_epoch = compute_activation_exit_epoch::<P>(get_current_epoch(state));
+    let mut exit_queue_epoch = compute_activation_exit_epoch::<P>(get_current_epoch(state))?;
     let mut exit_queue_churn: u64 = 0;
 
     for validator in state.validators() {
@@ -87,7 +90,7 @@ pub fn initiate_validator_exit<P: Preset>(
 
         match exit_epoch.cmp(&exit_queue_epoch) {
             Ordering::Less => {}
-            Ordering::Equal => exit_queue_churn = exit_queue_churn.saturating_add(1),
+            Ordering::Equal => exit_queue_churn = exit_queue_churn.try_add(1)?,
             Ordering::Greater => {
                 exit_queue_epoch = exit_epoch;
                 exit_queue_churn = 1;
@@ -95,8 +98,8 @@ pub fn initiate_validator_exit<P: Preset>(
         }
     }
 
-    if exit_queue_churn >= get_validator_churn_limit(config, state) {
-        exit_queue_epoch = exit_queue_epoch.saturating_add(1);
+    if exit_queue_churn >= get_validator_churn_limit(config, state)? {
+        exit_queue_epoch = exit_queue_epoch.try_add(1)?;
     }
 
     // > Set validator exit epoch and withdrawable epoch
@@ -153,7 +156,7 @@ pub fn queue_excess_active_balance<P: Preset>(
     let balance = *state.balances().get(index)?;
 
     if balance > P::MIN_ACTIVATION_BALANCE {
-        let excess_balance = balance.saturating_sub(P::MIN_ACTIVATION_BALANCE);
+        let excess_balance = balance.try_sub(P::MIN_ACTIVATION_BALANCE)?;
 
         *state.balances_mut().get_mut(index)? = P::MIN_ACTIVATION_BALANCE;
 
@@ -181,7 +184,9 @@ pub fn compute_exit_epoch_and_update_churn<P: Preset>(
 ) -> Result<Epoch> {
     let mut earliest_exit_epoch = state
         .earliest_exit_epoch()
-        .max(compute_activation_exit_epoch::<P>(get_current_epoch(state)));
+        .max(compute_activation_exit_epoch::<P>(get_current_epoch(
+            state,
+        ))?);
 
     let per_epoch_churn = get_activation_exit_churn_limit(config, state);
 
@@ -194,20 +199,19 @@ pub fn compute_exit_epoch_and_update_churn<P: Preset>(
 
     // > Exit doesn't fit in the current earliest epoch.
     if exit_balance > exit_balance_to_consume {
-        let balance_to_process = exit_balance.saturating_sub(exit_balance_to_consume);
+        let balance_to_process = exit_balance.try_sub(exit_balance_to_consume)?;
         let additional_epochs = balance_to_process
-            .saturating_sub(1)
-            .checked_div(per_epoch_churn)
-            .ok_or_else(|| anyhow!("per_epoch_churn should not be zero"))?
-            .saturating_add(1);
+            .try_sub(1)?
+            .try_div(per_epoch_churn)?
+            .try_add(1)?;
 
-        earliest_exit_epoch = earliest_exit_epoch.saturating_add(additional_epochs);
-        exit_balance_to_consume = exit_balance_to_consume
-            .saturating_add(additional_epochs.saturating_mul(per_epoch_churn));
+        earliest_exit_epoch = earliest_exit_epoch.try_add(additional_epochs)?;
+        exit_balance_to_consume =
+            exit_balance_to_consume.try_add(additional_epochs.try_mul(per_epoch_churn)?)?;
     }
 
     // > Consume the balance and update state variables.
-    *state.exit_balance_to_consume_mut() = exit_balance_to_consume.saturating_sub(exit_balance);
+    *state.exit_balance_to_consume_mut() = exit_balance_to_consume.try_sub(exit_balance)?;
     *state.earliest_exit_epoch_mut() = earliest_exit_epoch;
 
     Ok(state.earliest_exit_epoch())
@@ -217,13 +221,13 @@ pub fn compute_consolidation_epoch_and_update_churn<P: Preset>(
     config: &Config,
     state: &mut impl PostElectraBeaconState<P>,
     consolidation_balance: Gwei,
-) -> Epoch {
+) -> Result<Epoch> {
     let mut earliest_consolidation_epoch = core::cmp::max(
         state.earliest_consolidation_epoch(),
-        compute_activation_exit_epoch::<P>(get_current_epoch(state)),
+        compute_activation_exit_epoch::<P>(get_current_epoch(state))?,
     );
 
-    let per_epoch_consolidation_churn = get_consolidation_churn_limit(config, state);
+    let per_epoch_consolidation_churn = get_consolidation_churn_limit(config, state)?;
 
     // > New epoch for consolidations.
 
@@ -237,26 +241,25 @@ pub fn compute_consolidation_epoch_and_update_churn<P: Preset>(
     // > Consolidation doesn't fit in the current earliest epoch.
 
     if consolidation_balance > consolidation_balance_to_consume {
-        let balance_to_process =
-            consolidation_balance.saturating_sub(consolidation_balance_to_consume);
+        let balance_to_process = consolidation_balance.try_sub(consolidation_balance_to_consume)?;
         let additional_epochs = balance_to_process
-            .saturating_sub(1)
-            .checked_div(per_epoch_consolidation_churn)
-            .unwrap_or(0)
-            .saturating_add(1);
-        earliest_consolidation_epoch =
-            earliest_consolidation_epoch.saturating_add(additional_epochs);
+            .try_sub(1)?
+            .try_div(per_epoch_consolidation_churn)?
+            .try_add(1)?;
+
+        earliest_consolidation_epoch = earliest_consolidation_epoch.try_add(additional_epochs)?;
+
         consolidation_balance_to_consume = consolidation_balance_to_consume
-            .saturating_add(additional_epochs.saturating_mul(per_epoch_consolidation_churn));
+            .try_add(additional_epochs.try_mul(per_epoch_consolidation_churn)?)?;
     }
 
     // > Consume the balance and update state variables.
 
     *state.consolidation_balance_to_consume_mut() =
-        consolidation_balance_to_consume.saturating_sub(consolidation_balance);
+        consolidation_balance_to_consume.try_sub(consolidation_balance)?;
     *state.earliest_consolidation_epoch_mut() = earliest_consolidation_epoch;
 
-    state.earliest_consolidation_epoch()
+    Ok(state.earliest_consolidation_epoch())
 }
 
 #[cfg(test)]
@@ -308,12 +311,14 @@ mod tests {
     }
 
     #[test]
-    fn test_increase_balance() {
+    fn test_increase_balance() -> Result<()> {
         let mut balance = 5;
 
-        increase_balance(&mut balance, 10);
+        increase_balance(&mut balance, 10)?;
 
         assert_eq!(balance, 15);
+
+        Ok(())
     }
 
     #[test]

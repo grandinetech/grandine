@@ -1,6 +1,7 @@
 use core::ops::Not as _;
 
 use anyhow::Result;
+use arithmetic::UsizeExt as _;
 use execution_engine::ExecutionEngine;
 use helper_functions::{
     accessors,
@@ -90,7 +91,7 @@ pub fn verify_signatures<P: Preset>(
     block: &SignedBeaconBlock<P>,
     mut verifier: impl Verifier,
 ) -> Result<()> {
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     if !verifier.has_option(VerifierOption::SkipBlockBaseSignatures) {
         // Block signature
@@ -216,6 +217,8 @@ pub fn verify_signatures<P: Preset>(
     verifier.finish()
 }
 
-fn count_required_signatures(block: &SignedBeaconBlock<impl Preset>) -> usize {
-    altair::count_required_signatures(&block.message).saturating_add(1)
+fn count_required_signatures(block: &SignedBeaconBlock<impl Preset>) -> Result<usize> {
+    altair::count_required_signatures(&block.message)?
+        .try_add(1)
+        .map_err(Into::into)
 }

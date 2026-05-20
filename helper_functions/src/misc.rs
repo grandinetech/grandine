@@ -5,7 +5,7 @@ use core::{
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
-use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
+use arithmetic::{NonZeroExt as _, U16Ext as _, U64Ext as _, UsizeExt as _};
 use bls::PublicKeyBytes;
 use hashing::ZERO_HASHES;
 use itertools::{Itertools as _, izip};
@@ -53,6 +53,8 @@ use types::{
 
 use crate::{accessors, error::Error, predicates};
 
+pub const PREFIX_LEN: usize = H256::len_bytes() - ExecutionAddress::len_bytes();
+
 #[must_use]
 pub fn compute_epoch_at_slot<P: Preset>(slot: Slot) -> Epoch {
     slot.div_typenum::<P::SlotsPerEpoch>()
@@ -68,9 +70,10 @@ pub fn is_epoch_start<P: Preset>(slot: Slot) -> bool {
     slots_since_epoch_start::<P>(slot) == 0
 }
 
-#[must_use]
-pub fn builder_payment_index_for_current_epoch<P: Preset>(slot: Slot) -> u64 {
-    P::SlotsPerEpoch::U64.saturating_add(slot % P::SlotsPerEpoch::non_zero())
+pub fn builder_payment_index_for_current_epoch<P: Preset>(slot: Slot) -> Result<u64> {
+    P::SlotsPerEpoch::U64
+        .try_add(slot % P::SlotsPerEpoch::non_zero())
+        .map_err(Into::into)
 }
 
 #[must_use]
@@ -84,7 +87,7 @@ pub fn builder_payment_index_for_previous_epoch<P: Preset>(slot: Slot) -> u64 {
 )]
 #[must_use]
 pub fn previous_epoch(epoch: Epoch) -> Epoch {
-    epoch.saturating_sub(1).max(GENESIS_EPOCH)
+    epoch.try_sub(1).unwrap_or(GENESIS_EPOCH).max(GENESIS_EPOCH)
 }
 
 #[expect(
@@ -93,7 +96,7 @@ pub fn previous_epoch(epoch: Epoch) -> Epoch {
 )]
 #[must_use]
 pub fn previous_slot(slot: Slot) -> Slot {
-    slot.saturating_sub(1).max(GENESIS_SLOT)
+    slot.try_sub(1).unwrap_or(GENESIS_SLOT).max(GENESIS_SLOT)
 }
 
 // `consensus-specs` uses this in at least 2 places:
@@ -101,15 +104,15 @@ pub fn previous_slot(slot: Slot) -> Slot {
 // - <https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/validator.md#broadcast-attestation>
 #[must_use]
 pub fn slots_since_epoch_start<P: Preset>(slot: Slot) -> u64 {
-    slot.saturating_sub(compute_start_slot_at_epoch::<P>(
+    slot.try_sub(compute_start_slot_at_epoch::<P>(
         compute_epoch_at_slot::<P>(slot),
     ))
+    .expect("start slot of epoch containing slot is never greater than slot")
 }
 
-#[must_use]
-pub const fn slots_in_epoch<P: Preset>(epoch: Epoch) -> Range<Slot> {
-    let next_epoch = epoch.saturating_add(1);
-    compute_start_slot_at_epoch::<P>(epoch)..compute_start_slot_at_epoch::<P>(next_epoch)
+pub fn slots_in_epoch<P: Preset>(epoch: Epoch) -> Result<Range<Slot>> {
+    let next_epoch = epoch.try_add(1)?;
+    Ok(compute_start_slot_at_epoch::<P>(epoch)..compute_start_slot_at_epoch::<P>(next_epoch))
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/5a4e568d2dc4cae6c470e0acbe4e48b01351500f/specs/altair/validator.md#sync-committee>
@@ -118,14 +121,16 @@ pub fn sync_committee_period<P: Preset>(epoch: Epoch) -> SyncCommitteePeriod {
     epoch / P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD
 }
 
-#[must_use]
-pub const fn start_of_sync_committee_period<P: Preset>(period: SyncCommitteePeriod) -> Epoch {
-    period.saturating_mul(P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD.get())
+pub fn start_of_sync_committee_period<P: Preset>(period: SyncCommitteePeriod) -> Result<Epoch> {
+    period
+        .try_mul(P::EPOCHS_PER_SYNC_COMMITTEE_PERIOD.get())
+        .map_err(Into::into)
 }
 
-#[must_use]
-pub const fn compute_activation_exit_epoch<P: Preset>(epoch: Epoch) -> Epoch {
-    epoch.saturating_add(P::MAX_SEED_LOOKAHEAD.saturating_add(1))
+pub fn compute_activation_exit_epoch<P: Preset>(epoch: Epoch) -> Result<Epoch> {
+    epoch
+        .try_add(P::MAX_SEED_LOOKAHEAD.try_add(1)?)
+        .map_err(Into::into)
 }
 
 // > Return the 32-byte fork data root for the ``current_version`` and ``genesis_validators_root``.
@@ -234,7 +239,7 @@ fn compute_proposer_index_pre_electra<P: Preset>(
 
     let max_random_byte = u64::from(u8::MAX);
 
-    (0..u64::MAX / nonzero!(H256::len_bytes() as u64))
+    for (random_byte, attempt) in (0..u64::MAX / nonzero!(H256::len_bytes() as u64))
         .flat_map(|quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -242,29 +247,29 @@ fn compute_proposer_index_pre_electra<P: Preset>(
                 .map(u64::from)
         })
         .zip(0..)
-        .find_map(|(random_byte, attempt)| {
-            let shuffled_index_of_index = compute_shuffled_index::<P>(attempt % total, total, seed)
-                .try_conv::<usize>()
-                .expect(
-                    "shuffled_index_of_index fits in usize because it is less than indices.len()",
-                );
+    {
+        let shuffled_index_of_index = compute_shuffled_index::<P>(attempt % total, total, seed)
+            .try_conv::<usize>()
+            .expect("shuffled_index_of_index fits in usize because it is less than indices.len()");
 
-            let candidate_index = indices
-                .get(shuffled_index_of_index)
-                .expect("compute_shuffled_index returns a value less than indices.len()");
+        let candidate_index = indices
+            .get(shuffled_index_of_index)
+            .expect("compute_shuffled_index returns a value less than indices.len()");
 
-            let effective_balance = state
-                .validators()
-                .get(candidate_index)
-                .expect("candidate_index was produced by enumerating active validators")
-                .effective_balance;
+        let effective_balance = state
+            .validators()
+            .get(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators")
+            .effective_balance;
 
-            (effective_balance.saturating_mul(max_random_byte)
-                >= P::MAX_EFFECTIVE_BALANCE.saturating_mul(random_byte))
-            .then_some(candidate_index)
-        })
-        .ok_or(Error::FailedToSelectProposer)
-        .map_err(Into::into)
+        if effective_balance.try_mul(max_random_byte)?
+            >= P::MAX_EFFECTIVE_BALANCE.try_mul(random_byte)?
+        {
+            return Ok(candidate_index);
+        }
+    }
+
+    Err(Error::FailedToSelectProposer.into())
 }
 
 fn compute_proposer_index_post_electra<P: Preset>(
@@ -280,7 +285,7 @@ fn compute_proposer_index_post_electra<P: Preset>(
 
     let max_random_value = u64::from(u16::MAX);
 
-    (0..u64::MAX / nonzero!(H128::len_bytes() as u64))
+    for (random_value, attempt) in (0..u64::MAX / nonzero!(H128::len_bytes() as u64))
         .flat_map(|quotient| {
             hashing::hash_256_64(seed, quotient)
                 .to_fixed_bytes()
@@ -289,29 +294,29 @@ fn compute_proposer_index_post_electra<P: Preset>(
                 .map(|bytes: (u8, u8)| u64::from(u16::from_le_bytes(bytes.into())))
         })
         .zip(0..)
-        .find_map(|(random_value, attempt)| {
-            let shuffled_index_of_index = compute_shuffled_index::<P>(attempt % total, total, seed)
-                .try_conv::<usize>()
-                .expect(
-                    "shuffled_index_of_index fits in usize because it is less than indices.len()",
-                );
+    {
+        let shuffled_index_of_index = compute_shuffled_index::<P>(attempt % total, total, seed)
+            .try_conv::<usize>()
+            .expect("shuffled_index_of_index fits in usize because it is less than indices.len()");
 
-            let candidate_index = indices
-                .get(shuffled_index_of_index)
-                .expect("compute_shuffled_index returns a value less than indices.len()");
+        let candidate_index = indices
+            .get(shuffled_index_of_index)
+            .expect("compute_shuffled_index returns a value less than indices.len()");
 
-            let effective_balance = state
-                .validators()
-                .get(candidate_index)
-                .expect("candidate_index was produced by enumerating active validators")
-                .effective_balance;
+        let effective_balance = state
+            .validators()
+            .get(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators")
+            .effective_balance;
 
-            (effective_balance.saturating_mul(max_random_value)
-                >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.saturating_mul(random_value))
-            .then_some(candidate_index)
-        })
-        .ok_or(Error::FailedToSelectProposer)
-        .map_err(Into::into)
+        if effective_balance.try_mul(max_random_value)?
+            >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
+        {
+            return Ok(candidate_index);
+        }
+    }
+
+    Err(Error::FailedToSelectProposer.into())
 }
 
 pub(crate) fn compute_proposer_index<P: Preset>(
@@ -340,12 +345,10 @@ pub fn compute_subnet_for_attestation<P: Preset>(
     );
 
     let slots_since_epoch_start = slots_since_epoch_start::<P>(slot);
-    let committees_since_epoch_start = committees_per_slot.saturating_mul(slots_since_epoch_start);
+    let committees_since_epoch_start = committees_per_slot.try_mul(slots_since_epoch_start)?;
 
-    Ok(
-        (committees_since_epoch_start.saturating_add(committee_index))
-            .mod_typenum::<AttestationSubnetCount>(),
-    )
+    Ok((committees_since_epoch_start.try_add(committee_index)?)
+        .mod_typenum::<AttestationSubnetCount>())
 }
 
 /// [`compute_subnet_for_blob_sidecar`](https://github.com/ethereum/consensus-specs/blob/v1.4.0-beta.1/specs/deneb/validator.md#sidecar)
@@ -375,7 +378,7 @@ pub fn compute_subnets_for_sync_committee<P: Preset>(
     state: &(impl PostAltairBeaconState<P> + ?Sized),
     validator_index: ValidatorIndex,
 ) -> Result<BitVector<SyncCommitteeSubnetCount>> {
-    let next_slot_epoch = compute_epoch_at_slot::<P>(state.slot().saturating_add(1));
+    let next_slot_epoch = compute_epoch_at_slot::<P>(state.slot().try_add(1)?);
 
     let sync_committee = if sync_committee_period::<P>(accessors::get_current_epoch(state))
         == sync_committee_period::<P>(next_slot_epoch)
@@ -407,13 +410,13 @@ pub fn compute_subscribed_subnets<P: Preset>(
     epoch: Epoch,
 ) -> Result<impl Iterator<Item = SubnetId>> {
     let node_id_prefix = node_id
-        .shr(NodeId::BITS.saturating_sub(u16::from(config.attestation_subnet_prefix_bits())))
+        .shr(NodeId::BITS.try_sub(u16::from(config.attestation_subnet_prefix_bits()))?)
         .try_into()?;
 
     let node_offset = node_id % config.epochs_per_subnet_subscription;
 
     let permutation_seed = node_offset
-        .saturating_add(Uint256::from_u64(epoch))
+        .try_add(Uint256::from_u64(epoch))?
         .div(config.epochs_per_subnet_subscription)
         .try_into()
         .map(hashing::hash_64)?;
@@ -441,12 +444,12 @@ pub fn next_subnet_subscription_epoch<P: Preset>(
     let current_subscribed_subnets =
         compute_subscribed_subnets::<P>(node_id, config, current_epoch)?.collect_vec();
 
-    let mut epoch = current_epoch.saturating_add(1);
+    let mut epoch = current_epoch.try_add(1)?;
 
     while compute_subscribed_subnets::<P>(node_id, config, epoch)?.collect_vec()
         == current_subscribed_subnets
     {
-        epoch = epoch.saturating_add(1);
+        epoch = epoch.try_add(1)?;
     }
 
     Ok(epoch)
@@ -464,17 +467,17 @@ pub fn next_subnet_subscription_epoch<P: Preset>(
 ///
 /// [`compute_time_at_slot`]:      https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/specs/phase0/validator.md#get_eth1_data
 /// [`compute_timestamp_at_slot`]: https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/specs/bellatrix/beacon-chain.md#compute_timestamp_at_slot
-#[must_use]
 pub fn compute_timestamp_at_slot<P: Preset>(
     config: &Config,
     state: &(impl BeaconState<P> + ?Sized),
     slot: Slot,
-) -> UnixSeconds {
-    let slots_since_genesis = slot.saturating_sub(GENESIS_SLOT);
+) -> Result<UnixSeconds> {
+    let slots_since_genesis = slot.try_sub(GENESIS_SLOT)?;
 
     state
         .genesis_time()
-        .saturating_add(slots_since_genesis.saturating_mul(config.slot_duration_ms.as_secs()))
+        .try_add(slots_since_genesis.try_mul(config.slot_duration_ms.as_secs())?)
+        .map_err(Into::into)
 }
 
 #[must_use]
@@ -499,8 +502,7 @@ pub fn eth1_address_withdrawal_credentials(address: ExecutionAddress) -> H256 {
     withdrawal_credentials[..ETH1_ADDRESS_WITHDRAWAL_PREFIX.len()]
         .copy_from_slice(ETH1_ADDRESS_WITHDRAWAL_PREFIX);
 
-    withdrawal_credentials[H256::len_bytes().saturating_sub(ExecutionAddress::len_bytes())..]
-        .copy_from_slice(address.as_bytes());
+    withdrawal_credentials[PREFIX_LEN..].copy_from_slice(address.as_bytes());
 
     withdrawal_credentials
 }
@@ -550,8 +552,7 @@ where
         .map(SszHash::hash_tree_root);
 
     let commitment_indices = 0..body.blob_kzg_commitments().len();
-    let proof_indices =
-        commitment_index.try_into()?..commitment_index.saturating_add(1).try_into()?;
+    let proof_indices = commitment_index.try_into()?..commitment_index.try_add(1)?.try_into()?;
 
     let subproof = merkle_tree
         .extend_and_construct_proofs(chunks, commitment_indices, proof_indices)
@@ -560,19 +561,19 @@ where
         .expect("exactly one proof is requested");
 
     // The first 13 or 5 nodes are computed from other elements of `body.blob_kzg_commitments`.
-    proof[..depth.saturating_sub(4)].copy_from_slice(subproof.as_slice());
+    proof[..depth.try_sub(4)?].copy_from_slice(subproof.as_slice());
 
     // The last 4 nodes are computed from other fields of `body`.
-    proof[depth.saturating_sub(4)] = body.bls_to_execution_changes().hash_tree_root();
+    proof[depth.try_sub(4)?] = body.bls_to_execution_changes().hash_tree_root();
 
-    proof[depth.saturating_sub(3)] = hashing::hash_256_256(
+    proof[depth.try_sub(3)?] = hashing::hash_256_256(
         body.sync_aggregate().hash_tree_root(),
         body.execution_payload().hash_tree_root(),
     );
 
-    proof[depth.saturating_sub(2)] = ZERO_HASHES[2];
+    proof[depth.try_sub(2)?] = ZERO_HASHES[2];
 
-    proof[depth.saturating_sub(1)] = hashing::hash_256_256(
+    proof[depth.try_sub(1)?] = hashing::hash_256_256(
         hashing::hash_256_256(
             hashing::hash_256_256(
                 body.randao_reveal().hash_tree_root(),
@@ -615,8 +616,7 @@ where
         .map(SszHash::hash_tree_root);
 
     let commitment_indices = 0..body.blob_kzg_commitments().len();
-    let proof_indices =
-        commitment_index.try_into()?..commitment_index.saturating_add(1).try_into()?;
+    let proof_indices = commitment_index.try_into()?..commitment_index.try_add(1)?.try_into()?;
 
     let subproof = merkle_tree
         .extend_and_construct_proofs(chunks, commitment_indices, proof_indices)
@@ -625,22 +625,22 @@ where
         .expect("exactly one proof is requested");
 
     // The first 13 or 5 nodes are computed from other elements of `body.blob_kzg_commitments`.
-    proof[..depth.saturating_sub(4)].copy_from_slice(subproof.as_slice());
+    proof[..depth.try_sub(4)?].copy_from_slice(subproof.as_slice());
 
     // The last 4 nodes are computed from other fields of `body`.
-    proof[depth.saturating_sub(4)] = body.bls_to_execution_changes().hash_tree_root();
+    proof[depth.try_sub(4)?] = body.bls_to_execution_changes().hash_tree_root();
 
-    proof[depth.saturating_sub(3)] = hashing::hash_256_256(
+    proof[depth.try_sub(3)?] = hashing::hash_256_256(
         body.sync_aggregate().hash_tree_root(),
         body.execution_payload().hash_tree_root(),
     );
 
-    proof[depth.saturating_sub(2)] = hashing::hash_256_256(
+    proof[depth.try_sub(2)?] = hashing::hash_256_256(
         hashing::hash_256_256(body.execution_requests().hash_tree_root(), ZERO_HASHES[0]),
         ZERO_HASHES[1],
     );
 
-    proof[depth.saturating_sub(1)] = hashing::hash_256_256(
+    proof[depth.try_sub(1)?] = hashing::hash_256_256(
         hashing::hash_256_256(
             hashing::hash_256_256(
                 body.randao_reveal().hash_tree_root(),
@@ -660,7 +660,9 @@ where
     Ok(proof)
 }
 
-pub fn kzg_commitments_inclusion_proof<P: Preset, B>(body: &B) -> BlobCommitmentsInclusionProof<P>
+pub fn kzg_commitments_inclusion_proof<P: Preset, B>(
+    body: &B,
+) -> Result<BlobCommitmentsInclusionProof<P>>
 where
     B: BlockBodyWithSyncAggregate<P>
         + BlockBodyWithBlsToExecutionChanges<P>
@@ -671,19 +673,19 @@ where
     let depth = P::KzgCommitmentsInclusionProofDepth::USIZE;
     let mut proof = BlobCommitmentsInclusionProof::<P>::default();
 
-    proof[depth.saturating_sub(4)] = body.bls_to_execution_changes().hash_tree_root();
+    proof[depth.try_sub(4)?] = body.bls_to_execution_changes().hash_tree_root();
 
-    proof[depth.saturating_sub(3)] = hashing::hash_256_256(
+    proof[depth.try_sub(3)?] = hashing::hash_256_256(
         body.sync_aggregate().hash_tree_root(),
         body.execution_payload().hash_tree_root(),
     );
 
-    proof[depth.saturating_sub(2)] = hashing::hash_256_256(
+    proof[depth.try_sub(2)?] = hashing::hash_256_256(
         hashing::hash_256_256(body.execution_requests().hash_tree_root(), ZERO_HASHES[0]),
         ZERO_HASHES[1],
     );
 
-    proof[depth.saturating_sub(1)] = hashing::hash_256_256(
+    proof[depth.try_sub(1)?] = hashing::hash_256_256(
         hashing::hash_256_256(
             hashing::hash_256_256(
                 body.randao_reveal().hash_tree_root(),
@@ -700,7 +702,7 @@ where
         ),
     );
 
-    proof
+    Ok(proof)
 }
 
 #[must_use]
@@ -888,9 +890,10 @@ pub fn compute_proposer_indices<P: Preset>(
     indices: &PackedIndices,
 ) -> Result<Vec<ValidatorIndex>> {
     let start_slot = compute_start_slot_at_epoch::<P>(epoch);
+
     (0..P::SlotsPerEpoch::U64)
         .map(|i| {
-            let seed = hashing::hash_256_64(seed, start_slot.saturating_add(i));
+            let seed = hashing::hash_256_64(seed, start_slot.try_add(i)?);
 
             if state.is_post_gloas() {
                 compute_balance_weighted_selection(state, indices, seed, 1, true)
@@ -936,7 +939,7 @@ pub fn compute_balance_weighted_selection<P: Preset>(
             selected.push(candidate_index);
         }
 
-        i = i.saturating_add(1);
+        i = i.try_add(1)?;
     }
 
     Ok(selected)
@@ -951,10 +954,10 @@ fn compute_balance_weighted_acceptance<P: Preset>(
     let max_random_value = u64::from(u16::MAX);
     let seed = hashing::hash_256_64(seed, i / 16);
     let random_bytes = seed.as_fixed_bytes();
-    let offset = usize::try_from((i % 16).saturating_mul(2))?;
+    let offset = usize::try_from((i % 16).try_mul(2)?)?;
     let random_value = u64::from(u16::from_le_bytes([
         random_bytes[offset],
-        random_bytes[offset.saturating_add(1)],
+        random_bytes[offset.try_add(1)?],
     ]));
 
     let effective_balance = state
@@ -962,8 +965,8 @@ fn compute_balance_weighted_acceptance<P: Preset>(
         .get(index)
         .map(|validator| validator.effective_balance)?;
 
-    Ok(effective_balance.saturating_mul(max_random_value)
-        >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.saturating_mul(random_value))
+    Ok(effective_balance.try_mul(max_random_value)?
+        >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?)
 }
 
 #[must_use]
@@ -1019,8 +1022,9 @@ mod tests {
     }
 
     #[test]
-    fn test_activation_exit_epoch() {
-        assert_eq!(compute_activation_exit_epoch::<Minimal>(1), 6);
+    fn test_activation_exit_epoch() -> Result<()> {
+        assert_eq!(compute_activation_exit_epoch::<Minimal>(1)?, 6);
+        Ok(())
     }
 
     #[test]
@@ -1062,7 +1066,7 @@ mod tests {
         let proposer_index = compute_proposer_index(
             &Config::minimal(),
             &state,
-            accessors::active_validator_indices_ordered(&state, RelativeEpoch::Current),
+            accessors::active_validator_indices_ordered(&state, RelativeEpoch::Current)?,
             H256::random(),
             compute_epoch_at_slot::<Minimal>(state.slot()),
         )?;

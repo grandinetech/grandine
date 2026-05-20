@@ -9,6 +9,7 @@ use core::{
     str::FromStr,
 };
 
+use arithmetic::{ArithmeticError, U256Ext as _};
 use byteorder::ByteOrder as _;
 use derive_more::{Add, Debug, Display, From, Into, LowerHex, Mul, Shr, Sub};
 use ethereum_types::{FromDecStrErr, FromStrRadixErr, H256, U256 as RawUint256};
@@ -269,9 +270,8 @@ impl Uint256 {
         (Self(result), overflow)
     }
 
-    #[must_use]
-    pub fn saturating_add(self, rhs: Self) -> Self {
-        Self(self.into_raw().saturating_add(rhs.into_raw()))
+    pub fn try_add(self, rhs: Self) -> Result<Self, ArithmeticError> {
+        self.into_raw().try_add(rhs.into_raw()).map(Self)
     }
 
     #[must_use]

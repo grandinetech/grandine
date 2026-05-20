@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use arithmetic::U64Ext as _;
 use ssz::{BitList, ContiguousList};
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
@@ -96,10 +97,10 @@ pub fn slash_validator<P: Preset>(
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch
-        .max(epoch.saturating_add(P::EpochsPerSlashingsVector::U64));
+        .max(epoch.try_add(P::EpochsPerSlashingsVector::U64)?);
 
     let s = state.slashings.mod_index_mut(epoch);
-    *s = s.saturating_add(effective_balance);
+    *s = s.try_add(effective_balance)?;
 
     decrease_balance(balance(state, slashed_index)?, slashing_penalty);
 
@@ -108,10 +109,10 @@ pub fn slash_validator<P: Preset>(
     let whistleblower_index = whistleblower_index.unwrap_or(proposer_index);
     let whistleblower_reward = effective_balance / P::WHISTLEBLOWER_REWARD_QUOTIENT;
     let proposer_reward = whistleblower_reward / P::PROPOSER_REWARD_QUOTIENT;
-    let remaining_reward = whistleblower_reward.saturating_sub(proposer_reward);
+    let remaining_reward = whistleblower_reward.try_sub(proposer_reward)?;
 
-    increase_balance(balance(state, proposer_index)?, proposer_reward);
-    increase_balance(balance(state, whistleblower_index)?, remaining_reward);
+    increase_balance(balance(state, proposer_index)?, proposer_reward)?;
+    increase_balance(balance(state, whistleblower_index)?, remaining_reward)?;
 
     slot_report.set_slashing_penalty(slashed_index, slashing_penalty);
     slot_report.add_slashing_reward(kind, proposer_reward);

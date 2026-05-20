@@ -1,5 +1,5 @@
-use anyhow::{Result, anyhow, ensure};
-use arithmetic::U64Ext as _;
+use anyhow::{Result, ensure};
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use helper_functions::{
     accessors::{
@@ -77,7 +77,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(count_required_signatures(block));
+    verifier.reserve(count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -146,8 +146,10 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> usize {
-    phase0::count_required_signatures(block).saturating_add(1)
+pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> Result<usize> {
+    phase0::count_required_signatures(block)?
+        .try_add(1)
+        .map_err(Into::into)
 }
 
 fn process_operations<P: Preset, V: Verifier>(
@@ -163,7 +165,7 @@ fn process_operations<P: Preset, V: Verifier>(
         state
             .eth1_data
             .deposit_count
-            .saturating_sub(state.eth1_deposit_index),
+            .try_sub(state.eth1_deposit_index)?,
     );
     let in_block = body.deposits.len().try_into()?;
 
@@ -333,11 +335,11 @@ pub fn apply_attestation<P: Preset>(
     } = *attestation;
 
     // > Participation flag indices
-    let inclusion_delay = state.slot().saturating_sub(data.slot);
+    let inclusion_delay = state.slot().try_sub(data.slot)?;
     let participation_flags = get_attestation_participation_flags(state, data, inclusion_delay)?;
 
     // > Update epoch participation flags
-    let base_reward_per_increment = get_base_reward_per_increment(state);
+    let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
     let attesting_indices_with_base_rewards = get_attesting_indices(state, data, aggregation_bits)?
         .map(|validator_index| {
@@ -359,7 +361,7 @@ pub fn apply_attestation<P: Preset>(
         for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
             if participation_flags.get_bit(flag_index) && !epoch_participation.get_bit(flag_index) {
                 proposer_reward_numerator =
-                    proposer_reward_numerator.saturating_add(base_reward.saturating_mul(weight));
+                    proposer_reward_numerator.try_add(base_reward.try_mul(weight)?)?
             }
         }
 
@@ -370,15 +372,13 @@ pub fn apply_attestation<P: Preset>(
     let proposer_index = get_beacon_proposer_index(config, state)?;
     let proposer_reward_denominator = WEIGHT_DENOMINATOR
         .get()
-        .saturating_sub(PROPOSER_WEIGHT.get())
-        .saturating_mul(WEIGHT_DENOMINATOR.get())
+        .try_sub(PROPOSER_WEIGHT.get())?
+        .try_mul(WEIGHT_DENOMINATOR.get())?
         / PROPOSER_WEIGHT;
 
-    let proposer_reward = proposer_reward_numerator
-        .checked_div(proposer_reward_denominator)
-        .ok_or_else(|| anyhow!("proposer_reward_denominator should not be zero"))?;
+    let proposer_reward = proposer_reward_numerator.try_div(proposer_reward_denominator)?;
 
-    increase_balance(balance(state, proposer_index)?, proposer_reward);
+    increase_balance(balance(state, proposer_index)?, proposer_reward)?;
 
     slot_report.add_attestation_reward(proposer_reward);
     slot_report.update_performance(
@@ -463,7 +463,7 @@ pub fn apply_deposits<P: Preset>(
     // > Deposits must be processed in order
     *state.eth1_deposit_index_mut() = state
         .eth1_deposit_index_mut()
-        .saturating_add(DepositIndex::try_from(deposit_count)?);
+        .try_add(DepositIndex::try_from(deposit_count)?)?;
 
     for combined_deposit in combined_deposits {
         match combined_deposit {
@@ -524,7 +524,7 @@ pub fn apply_deposits<P: Preset>(
             } => {
                 let total_amount = amounts.iter().sum();
 
-                increase_balance(balance(state, validator_index)?, total_amount);
+                increase_balance(balance(state, validator_index)?, total_amount)?;
 
                 for amount in amounts {
                     slot_report.add_deposit(validator_index, amount);
@@ -551,21 +551,16 @@ pub fn process_sync_aggregate<P: Preset>(
     // > Compute participant and proposer rewards
     let total_active_increments = total_active_balance(state) / P::EFFECTIVE_BALANCE_INCREMENT;
     let total_base_rewards =
-        get_base_reward_per_increment(state).saturating_mul(total_active_increments);
+        get_base_reward_per_increment(state)?.try_mul(total_active_increments)?;
 
-    let max_participant_rewards = (total_base_rewards.saturating_mul(SYNC_REWARD_WEIGHT)
+    let max_participant_rewards = (total_base_rewards.try_mul(SYNC_REWARD_WEIGHT)?
         / WEIGHT_DENOMINATOR)
         .div_typenum::<P::SlotsPerEpoch>();
 
     let participant_reward = max_participant_rewards.div_typenum::<P::SyncCommitteeSize>();
     let proposer_reward = participant_reward
-        .saturating_mul(PROPOSER_WEIGHT.get())
-        .checked_div(
-            WEIGHT_DENOMINATOR
-                .get()
-                .saturating_sub(PROPOSER_WEIGHT.get()),
-        )
-        .ok_or_else(|| anyhow!("proposer reward denominator should not be zero"))?;
+        .try_mul(PROPOSER_WEIGHT.get())?
+        .try_div(WEIGHT_DENOMINATOR.get().try_sub(PROPOSER_WEIGHT.get())?)?;
 
     // > Apply participant and proposer rewards
     let proposer_index = get_beacon_proposer_index(config, state)?;
@@ -583,8 +578,8 @@ pub fn process_sync_aggregate<P: Preset>(
             .expect("public keys in state.current_sync_committee are taken from state.validators");
 
         if participation_bit {
-            increase_balance(balance(state, participant_index)?, participant_reward);
-            participation = participation.saturating_add(1);
+            increase_balance(balance(state, participant_index)?, participant_reward)?;
+            participation = participation.try_add(1)?;
         } else {
             decrease_balance(balance(state, participant_index)?, participant_reward);
         }
@@ -596,13 +591,13 @@ pub fn process_sync_aggregate<P: Preset>(
             } else {
                 Delta::Penalty(participant_reward)
             },
-        );
+        )?;
     }
 
     increase_balance(
         balance(state, proposer_index)?,
-        proposer_reward.saturating_mul(participation),
-    );
+        proposer_reward.try_mul(participation)?,
+    )?;
 
     slot_report.set_sync_aggregate_rewards(SyncAggregateRewards {
         singular_reward: proposer_reward,

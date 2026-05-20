@@ -287,8 +287,12 @@ impl Criterion {
             // Initialize caches used during epoch processing to make the benchmark more
             // representative of real execution. This should make no difference due to the block
             // processing above, but we sometimes modify these benchmarks while profiling.
-            accessors::active_validator_indices_shuffled(&state, RelativeEpoch::Previous);
-            accessors::active_validator_indices_shuffled(&state, RelativeEpoch::Current);
+            accessors::active_validator_indices_shuffled(&state, RelativeEpoch::Previous)
+                .expect("initializing active validator indices for previous epoch should not fail");
+
+            accessors::active_validator_indices_shuffled(&state, RelativeEpoch::Current)
+                .expect("initializing active validator indices for current epoch should not fail");
+
             accessors::total_active_balance(&state);
 
             state

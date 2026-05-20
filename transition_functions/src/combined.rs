@@ -1,4 +1,5 @@
 use anyhow::{Result, bail, ensure};
+use arithmetic::U64Ext as _;
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
@@ -531,35 +532,35 @@ pub fn process_justification_and_finalization(state: &mut BeaconState<impl Prese
         BeaconState::Phase0(state) => {
             let (statistics, _, _) =
                 phase0::statistics_and_summaries::<_, StatisticsForTransition>(state)?;
-            phase0::process_justification_and_finalization(state, statistics);
+            phase0::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Altair(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Bellatrix(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Capella(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Deneb(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Electra(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Fulu(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
         BeaconState::Gloas(state) => {
-            let statistics = altair::statistics(state);
-            altair::process_justification_and_finalization(state, statistics);
+            let statistics = altair::statistics(state)?;
+            altair::process_justification_and_finalization(state, statistics)?;
         }
     }
 
@@ -613,8 +614,8 @@ fn process_slots_for_epoch_report<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = accessors::get_next_epoch(state);
-    let last_slot = misc::compute_start_slot_at_epoch::<P>(next_epoch).saturating_sub(1);
+    let next_epoch = accessors::get_next_epoch(state)?;
+    let last_slot = misc::compute_start_slot_at_epoch::<P>(next_epoch).try_sub(1)?;
 
     if state.slot() < last_slot {
         process_slots(config, pubkey_cache, state, last_slot)?;
@@ -622,7 +623,7 @@ fn process_slots_for_epoch_report<P: Preset>(
 
     unphased::process_slot(state);
 
-    assert!(misc::is_epoch_start::<P>(state.slot().saturating_add(1)));
+    assert!(misc::is_epoch_start::<P>(state.slot().try_add(1)?));
 
     Ok(())
 }
@@ -632,7 +633,7 @@ fn post_process_slots_for_epoch_report<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
 ) -> Result<()> {
-    let post_slot = state.slot().saturating_add(1);
+    let post_slot = state.slot().try_add(1)?;
 
     // If multiple phases have the same fork slots,
     // the state may need to be upgraded multiple times in the same slot.
@@ -1003,13 +1004,13 @@ pub fn statistics<P: Preset>(state: &BeaconState<P>) -> Result<Statistics> {
                 phase0::statistics_and_summaries::<P, StatisticsForReport>(state)?;
             statistics.into()
         }
-        BeaconState::Altair(state) => altair::statistics(state).into(),
-        BeaconState::Bellatrix(state) => altair::statistics(state).into(),
-        BeaconState::Capella(state) => altair::statistics(state).into(),
-        BeaconState::Deneb(state) => altair::statistics(state).into(),
-        BeaconState::Electra(state) => altair::statistics(state).into(),
-        BeaconState::Fulu(state) => altair::statistics(state).into(),
-        BeaconState::Gloas(state) => altair::statistics(state).into(),
+        BeaconState::Altair(state) => altair::statistics(state)?.into(),
+        BeaconState::Bellatrix(state) => altair::statistics(state)?.into(),
+        BeaconState::Capella(state) => altair::statistics(state)?.into(),
+        BeaconState::Deneb(state) => altair::statistics(state)?.into(),
+        BeaconState::Electra(state) => altair::statistics(state)?.into(),
+        BeaconState::Fulu(state) => altair::statistics(state)?.into(),
+        BeaconState::Gloas(state) => altair::statistics(state)?.into(),
     };
 
     Ok(statistics)
@@ -1032,6 +1033,7 @@ pub struct PhaseError {
 
 #[cfg(test)]
 mod spec_tests {
+    use arithmetic::UsizeExt as _;
     use duplicate::duplicate_item;
     use helper_functions::predicates;
     use spec_test_utils::Case;
@@ -1066,7 +1068,7 @@ mod spec_tests {
     #[test_resources(glob)]
     fn function_name(case: Case) {
         let config = preset::default_config().start_and_stay_in(Phase::phase);
-        run_slots_case::<preset>(&config, case);
+        run_slots_case::<preset>(&config, case).expect("slot processing should succeed")
     }
 
     #[duplicate_item(
@@ -1145,20 +1147,22 @@ mod spec_tests {
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
-        run_transition_case::<preset>(case);
+        run_transition_case::<preset>(case)
     }
 
-    fn run_slots_case<P: Preset>(config: &Config, case: Case) {
+    fn run_slots_case<P: Preset>(config: &Config, case: Case) -> Result<()> {
         let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz::<_, BeaconState<P>>(config, "pre");
         let expected_post = case.ssz(config, "post");
         let slots = case.yaml::<u64>("slots");
-        let last_slot = state.slot().saturating_add(slots);
+        let last_slot = state.slot().try_add(slots)?;
 
         process_slots(config, &pubkey_cache, &mut state, last_slot)
             .expect("every slot processing test should perform processing successfully");
 
         assert_eq!(state, expected_post);
+
+        Ok(())
     }
 
     fn run_blocks_case<P: Preset>(config: &Config, case: Case) {
@@ -1206,7 +1210,11 @@ mod spec_tests {
         let fork_epoch = meta.fork_epoch;
         let pre_block_count = meta
             .fork_block
-            .map(|index| index.saturating_add(1))
+            .map(|index| {
+                index
+                    .try_add(1)
+                    .expect("adding one to fork_block should not overflow")
+            })
             .unwrap_or_default();
 
         let post_phase = meta

@@ -73,6 +73,8 @@ name = "arithmetic"
 version = "0.0.0"
 dependencies = [
  "easy-ext",
+ "primitive-types",
+ "thiserror 2.0.16",
  "typenum",
 ]
 

@@ -207,7 +207,7 @@ impl<P: Preset> AttestationPacker<P> {
         aggregates: &Vec<Attestation<P>>,
     ) -> Result<Vec<AttestationWeights>> {
         let mut attestation_weights = Vec::new();
-        let base_reward_per_increment = get_base_reward_per_increment(&self.state);
+        let base_reward_per_increment = get_base_reward_per_increment(&self.state)?;
 
         for attestation in aggregates {
             let attestation_epoch = self.attestation_epoch(attestation)?;
@@ -629,8 +629,7 @@ impl<P: Preset> AttestationPacker<P> {
     ) -> Result<u64> {
         let attestation_epoch = self.attestation_epoch(attestation)?;
         let participation_flags = self.participation_flags(attestation)?;
-
-        let base_reward_per_increment = get_base_reward_per_increment(&self.state);
+        let base_reward_per_increment = get_base_reward_per_increment(&self.state)?;
 
         self.attesting_indices(attestation)?
             .map(|validator_index| {

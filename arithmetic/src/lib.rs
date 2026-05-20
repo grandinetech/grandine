@@ -16,7 +16,23 @@
 use core::num::{NonZeroU64, NonZeroUsize};
 
 use easy_ext::ext;
+use primitive_types::U256;
+use thiserror::Error;
 use typenum::{NonZero, Unsigned};
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
+pub enum ArithmeticError {
+    #[error("{lhs} + {rhs} overflows")]
+    AdditionOverflow { lhs: u64, rhs: u64 },
+    #[error("{lhs} + {rhs} overflows")]
+    AdditionOverflowU256 { lhs: U256, rhs: U256 },
+    #[error("{lhs} - {rhs} underflows")]
+    SubtractionOverflow { lhs: u64, rhs: u64 },
+    #[error("{lhs} * {rhs} overflows")]
+    MultiplicationOverflow { lhs: u64, rhs: u64 },
+    #[error("{lhs} / {rhs} is undefined")]
+    DivisionByZero { lhs: u64, rhs: u64 },
+}
 
 #[ext(NonZeroExt)]
 pub impl<N: Unsigned + NonZero> N {
@@ -62,6 +78,108 @@ pub impl usize {
             .try_into()
             .expect("number of bits in usize should fit in u8")
     }
+
+    #[inline]
+    fn try_add(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_add(rhs)
+            .ok_or(ArithmeticError::AdditionOverflow {
+                lhs: self as u64,
+                rhs: rhs as u64,
+            })
+    }
+
+    #[inline]
+    fn try_sub(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_sub(rhs)
+            .ok_or(ArithmeticError::SubtractionOverflow {
+                lhs: self as u64,
+                rhs: rhs as u64,
+            })
+    }
+
+    #[inline]
+    fn try_mul(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_mul(rhs)
+            .ok_or(ArithmeticError::MultiplicationOverflow {
+                lhs: self as u64,
+                rhs: rhs as u64,
+            })
+    }
+
+    #[inline]
+    fn try_div(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_div(rhs)
+            .ok_or(ArithmeticError::DivisionByZero {
+                lhs: self as u64,
+                rhs: rhs as u64,
+            })
+    }
+}
+
+#[ext(NonZeroU64Ext)]
+pub impl NonZeroU64 {
+    #[inline]
+    fn try_mul(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_mul(rhs)
+            .ok_or_else(|| ArithmeticError::MultiplicationOverflow {
+                lhs: self.get(),
+                rhs: rhs.get(),
+            })
+    }
+}
+
+#[ext(U16Ext)]
+pub impl u16 {
+    #[inline]
+    fn try_add(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_add(rhs)
+            .ok_or_else(|| ArithmeticError::AdditionOverflow {
+                lhs: u64::from(self),
+                rhs: u64::from(rhs),
+            })
+    }
+
+    #[inline]
+    fn try_sub(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_sub(rhs)
+            .ok_or_else(|| ArithmeticError::SubtractionOverflow {
+                lhs: u64::from(self),
+                rhs: u64::from(rhs),
+            })
+    }
+}
+
+#[ext(U256Ext)]
+pub impl U256 {
+    #[inline]
+    fn try_add(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_add(rhs)
+            .ok_or(ArithmeticError::AdditionOverflowU256 { lhs: self, rhs })
+    }
 }
 
 #[ext(U64Ext)]
@@ -92,5 +210,50 @@ pub impl u64 {
             .map_or(Self::BITS, Self::trailing_zeros)
             .try_into()
             .expect("number of bits in u64 should fit in u8")
+    }
+
+    #[inline]
+    fn try_add(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_add(rhs)
+            .ok_or(ArithmeticError::AdditionOverflow { lhs: self, rhs })
+    }
+
+    #[inline]
+    fn try_rem(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_rem(rhs)
+            .ok_or(ArithmeticError::DivisionByZero { lhs: self, rhs })
+    }
+
+    #[inline]
+    fn try_sub(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_sub(rhs)
+            .ok_or(ArithmeticError::SubtractionOverflow { lhs: self, rhs })
+    }
+
+    #[inline]
+    fn try_mul(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_mul(rhs)
+            .ok_or(ArithmeticError::MultiplicationOverflow { lhs: self, rhs })
+    }
+
+    #[inline]
+    fn try_div(self, rhs: Self) -> Result<Self, ArithmeticError>
+    where
+        Self: Sized,
+    {
+        self.checked_div(rhs)
+            .ok_or(ArithmeticError::DivisionByZero { lhs: self, rhs })
     }
 }

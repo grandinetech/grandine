@@ -101,7 +101,7 @@ fn process_execution_payload<P: Preset>(
         Error::<P>::ExecutionPayloadPrevRandaoMismatch { in_state, in_block },
     );
 
-    let computed = misc::compute_timestamp_at_slot(config, state, state.slot);
+    let computed = misc::compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload_header.timestamp;
 
     ensure!(

@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use arithmetic::U64Ext as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
     accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
@@ -62,7 +63,7 @@ pub fn process_block<P: Preset>(
         .get()
         .map(|metrics| metrics.block_transition_times.start_timer());
 
-    verifier.reserve(altair::count_required_signatures(block));
+    verifier.reserve(altair::count_required_signatures(block)?);
 
     custom_process_block(
         config,
@@ -200,7 +201,7 @@ fn process_execution_payload_for_gossip<P: Preset>(
     let payload = &body.execution_payload;
 
     // > Verify timestamp
-    let computed = compute_timestamp_at_slot(config, state, state.slot);
+    let computed = compute_timestamp_at_slot(config, state, state.slot)?;
     let in_block = payload.timestamp;
 
     ensure!(
@@ -224,7 +225,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
         state
             .eth1_data()
             .deposit_count
-            .saturating_sub(state.eth1_deposit_index()),
+            .try_sub(state.eth1_deposit_index())?,
     );
     let in_block = body.deposits().len().try_into()?;
 
