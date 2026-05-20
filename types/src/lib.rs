@@ -101,7 +101,10 @@ pub mod gloas {
     mod spec_tests;
 }
 
-pub use collections::{PayloadExpectedWithdrawals, ProposerLookahead, Ptc, PtcWindow, Validators};
+pub use collections::{
+    DepositSignatureCache, PayloadExpectedWithdrawals, PendingDeposits, ProposerLookahead, Ptc,
+    PtcWindow, Validators,
+};
 
 mod collections;
 
