@@ -13,8 +13,7 @@ use helper_functions::{
         vec_of_default,
     },
     mutators::{balance, decrease_balance, increase_balance},
-    predicates::{is_active_validator, is_eligible_for_activation},
-    signing::SignForAllForks as _,
+    predicates::{is_active_validator, is_eligible_for_activation, is_valid_deposit_signature},
 };
 use pubkey_cache::PubkeyCache;
 use ssz::{PersistentList, SszHash as _};
@@ -26,7 +25,6 @@ use types::{
     electra::{beacon_state::BeaconState as ElectraBeaconState, containers::PendingDeposit},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::DepositMessage,
         primitives::Gwei,
     },
     preset::Preset,
@@ -349,31 +347,6 @@ pub fn apply_pending_deposit<P: Preset>(
     }
 
     Ok(())
-}
-
-pub fn is_valid_deposit_signature(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    deposit: &PendingDeposit,
-) -> bool {
-    let PendingDeposit {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-        signature,
-        ..
-    } = *deposit;
-
-    let deposit_message = DepositMessage {
-        pubkey,
-        withdrawal_credentials,
-        amount,
-    };
-
-    pubkey_cache
-        .get_or_insert(pubkey)
-        .and_then(|decompressed| deposit_message.verify(config, signature, decompressed))
-        .is_ok()
 }
 
 pub fn process_pending_consolidations<P: Preset>(

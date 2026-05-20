@@ -6,19 +6,20 @@ use core::{
 use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::SignatureBytes;
+use bls::{PublicKeyBytes, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
 use tap::TryConv as _;
 use typenum::Unsigned as _;
 use types::{
+    DepositSignatureCache,
     altair::consts::{SyncCommitteeSubnetCount, TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE},
     bellatrix::primitives::Gas,
     combined::BeaconState as CombinedBeaconState,
     config::Config,
     deneb::{containers::BlobSidecar, primitives::BlobIndex},
-    electra::consts::COMPOUNDING_WITHDRAWAL_PREFIX,
+    electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},
     fulu::containers::DataColumnSidecar,
     gloas::{
         consts::BUILDER_WITHDRAWAL_PREFIX,
@@ -27,7 +28,7 @@ use types::{
     },
     phase0::{
         consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
-        containers::{AttestationData, Validator},
+        containers::{AttestationData, DepositMessage, Validator},
         primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot},
         validator_list::PartialValidator,
     },
@@ -41,7 +42,7 @@ use types::{
 use crate::{
     accessors,
     error::{Error, SignatureKind},
-    signing::SignForSingleFork as _,
+    signing::{SignForAllForks as _, SignForSingleFork as _},
     verifier::Verifier,
 };
 
@@ -539,6 +540,71 @@ pub fn is_gas_limit_target_compatible(
     let max_gas_limit = parent_gas_limit + max_gas_limit_difference;
 
     gas_limit == target_gas_limit.clamp(min_gas_limit, max_gas_limit)
+}
+
+// > Check if a pending deposit with a valid signature is in the queue for the given pubkey.
+#[must_use]
+pub fn is_pending_validator<'deposit>(
+    config: &Config,
+    pending_deposits: impl IntoIterator<Item = &'deposit PendingDeposit>,
+    pubkey: PublicKeyBytes,
+    pubkey_cache: &PubkeyCache,
+    signature_cache: &mut DepositSignatureCache,
+) -> bool {
+    for deposit in pending_deposits {
+        if deposit.pubkey != pubkey {
+            continue;
+        }
+
+        let PendingDeposit {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+            signature,
+            ..
+        } = *deposit;
+
+        let deposit_message = DepositMessage {
+            pubkey,
+            withdrawal_credentials,
+            amount,
+        };
+
+        if *signature_cache
+            .entry((deposit_message, signature))
+            .or_insert_with(|| is_valid_deposit_signature(config, pubkey_cache, deposit))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[must_use]
+pub fn is_valid_deposit_signature(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    deposit: &PendingDeposit,
+) -> bool {
+    let PendingDeposit {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+        ..
+    } = *deposit;
+
+    let deposit_message = DepositMessage {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+    };
+
+    pubkey_cache
+        .get_or_insert(pubkey)
+        .and_then(|decompressed| deposit_message.verify(config, signature, decompressed))
+        .is_ok()
 }
 
 #[cfg(test)]
