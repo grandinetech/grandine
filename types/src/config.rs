@@ -277,7 +277,7 @@ impl Default for Config {
             contribution_due_bps: 6667,
 
             // Gloas
-            min_builder_withdrawability_delay: 64,
+            min_builder_withdrawability_delay: 8192,
             attestation_due_bps_gloas: 2500,
             aggregate_due_bps_gloas: 5000,
             sync_message_due_bps_gloas: 2500,

@@ -1,22 +1,18 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
-use bls::{PublicKeyBytes, SignatureBytes};
 use helper_functions::{
-    gloas::apply_deposit_for_builder, predicates::is_builder_withdrawal_credential,
+    gloas::apply_deposit_for_builder,
+    predicates::{is_builder_withdrawal_credential, is_pending_validator},
 };
 use pubkey_cache::PubkeyCache;
 use types::{
+    DepositSignatureCache,
     config::Config,
     electra::containers::{DepositRequest, ExecutionRequests, PendingDeposit},
-    phase0::containers::DepositMessage,
     preset::Preset,
     traits::PostGloasBeaconState,
 };
 
 use crate::electra;
-
-type DepositSignatureCache = HashMap<(DepositMessage, SignatureBytes), bool>;
 
 pub fn process_execution_requests<P: Preset>(
     config: &Config,
@@ -74,7 +70,13 @@ pub fn process_deposit_request<P: Preset>(
                 .validators()
                 .into_iter()
                 .any(|validator| validator.pubkey == pubkey)
-            && !is_pending_validator(config, pubkey_cache, state, pubkey, signature_cache))
+            && !is_pending_validator(
+                config,
+                state.pending_deposits(),
+                pubkey,
+                pubkey_cache,
+                signature_cache,
+            ))
     {
         apply_deposit_for_builder(
             config,
@@ -101,45 +103,10 @@ pub fn process_deposit_request<P: Preset>(
     Ok(())
 }
 
-fn is_pending_validator<P: Preset>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &impl PostGloasBeaconState<P>,
-    pubkey: PublicKeyBytes,
-    signature_cache: &mut DepositSignatureCache,
-) -> bool {
-    for deposit in state.pending_deposits() {
-        if deposit.pubkey != pubkey {
-            continue;
-        }
-
-        let PendingDeposit {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            ..
-        } = *deposit;
-
-        let deposit_message = DepositMessage {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-        };
-
-        if *signature_cache
-            .entry((deposit_message, signature))
-            .or_insert_with(|| electra::is_valid_deposit_signature(config, pubkey_cache, deposit))
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod spec_tests {
+    use std::collections::HashMap;
+
     use spec_test_utils::{BlsSetting, Case};
     use ssz::SszReadDefault;
     use test_generator::test_resources;
