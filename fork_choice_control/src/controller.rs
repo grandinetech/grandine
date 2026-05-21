@@ -739,7 +739,7 @@ where
         })
     }
 
-    pub fn on_api_payload_attestation_batch(
+    pub fn on_payload_attestation_batch(
         &self,
         payload_attestations: Vec<PayloadAttestationItem<P>>,
     ) {
