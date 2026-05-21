@@ -163,6 +163,7 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_mainnet_get_parent_payload_status]      [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_block/*/*"]                       [gloas_mainnet_on_block]                       [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_mainnet_on_execution_payload_envelope]  [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/deposit_with_reorg/*/*"]             [gloas_minimal_deposit_with_reorg]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]                       [gloas_minimal_get_head]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_minimal_get_parent_payload_status]      [Minimal] [Gloas];
