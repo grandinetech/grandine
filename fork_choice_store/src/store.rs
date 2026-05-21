@@ -921,6 +921,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.payloads.contains(&block_root)
     }
 
+    #[must_use]
+    pub fn payload_vote(&self, block_root: H256) -> Option<&BitVector<P::PtcSize>> {
+        self.payload_vote.get(&block_root)
+    }
+
+    #[must_use]
+    pub fn payload_timeliness_vote(&self, block_root: H256) -> Option<&BitVector<P::PtcSize>> {
+        self.payload_timeliness_vote.get(&block_root)
+    }
+
+    #[must_use]
+    pub fn payload_data_availability_vote(
+        &self,
+        block_root: H256,
+    ) -> Option<&BitVector<P::PtcSize>> {
+        self.payload_data_availability_vote.get(&block_root)
+    }
+
     // > Return whether the execution payload for the beacon block with root ``root``
     // > was voted as present by the PTC, and was locally determined to be available.
     fn is_payload_timely(&self, block_root: H256) -> bool {
@@ -3616,16 +3634,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         };
 
+        // TODO: need rough consensus from implementors whether override vote is allowed, or
+        // preventing it as the commented code.
+        //
         // [IGNORE] The payload_attestation_message is the first valid message received from the
         // validator with index payload_attestation_message.validate_index
-        if let Some(votes) = self.payload_vote.get(&block_root)
-            && attesting_indices_positions
-                .iter()
-                .flat_map(|(_, positions)| positions)
-                .any(|&pos| votes[pos])
-        {
-            return Ok(PayloadAttestationAction::Ignore(payload_attestation));
-        }
+        // if let Some(votes) = self.payload_vote.get(&block_root)
+        //     && attesting_indices_positions
+        //         .iter()
+        //         .flat_map(|(_, positions)| positions)
+        //         .any(|&pos| votes[pos])
+        // {
+        //     return Ok(PayloadAttestationAction::Ignore(payload_attestation));
+        // }
 
         Ok(PayloadAttestationAction::Accept {
             payload_attestation,
