@@ -4927,7 +4927,7 @@ async fn submit_payload_attestation_messages_to_pool<P: Preset, W: Wait>(
 
     let (payload_attestation_items, receivers): (Vec<_>, Vec<_>) = prevalidated.into_iter().unzip();
 
-    controller.on_api_payload_attestation_batch(payload_attestation_items);
+    controller.on_payload_attestation_batch(payload_attestation_items);
 
     let (successes, mut validation_failures): (Vec<_>, Vec<_>) = receivers
         .into_iter()
