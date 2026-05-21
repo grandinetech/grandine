@@ -19,7 +19,7 @@ use types::{
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
-    gloas::containers::SignedExecutionPayloadEnvelope,
+    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -56,6 +56,11 @@ enum Step {
     MergeBlock {
         pow_block: PathBuf,
     },
+    PayloadAttestation {
+        payload_attestation_message: PathBuf,
+        #[serde(default = "serde_aux::field_attributes::bool_true")]
+        valid: bool,
+    },
     PayloadStatus(PayloadStatusWithBlockHash),
     AttesterSlashing {
         attester_slashing: PathBuf,
@@ -75,6 +80,8 @@ struct Checks {
     justified_checkpoint: Option<Checkpoint>,
     finalized_checkpoint: Option<Checkpoint>,
     proposer_boost_root: Option<H256>,
+    payload_timeliness_vote: Option<PtcVotes>,
+    payload_data_availability_vote: Option<PtcVotes>,
 }
 
 #[derive(Deserialize)]
@@ -82,6 +89,13 @@ struct Checks {
 struct HeadCheck {
     slot: Slot,
     root: H256,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PtcVotes {
+    block_root: H256,
+    votes: Vec<Option<bool>>,
 }
 
 // Starting with `consensus-specs` version 1.3.0-rc.4,
@@ -163,12 +177,14 @@ struct HeadCheck {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_mainnet_get_parent_payload_status]      [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_block/*/*"]                       [gloas_mainnet_on_block]                       [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_mainnet_on_execution_payload_envelope]  [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_mainnet_on_payload_attestation_message] [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/deposit_with_reorg/*/*"]             [gloas_minimal_deposit_with_reorg]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]                       [gloas_minimal_get_head]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_minimal_get_parent_payload_status]      [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_block/*/*"]                       [gloas_minimal_on_block]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_minimal_on_execution_payload_envelope]  [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_minimal_on_payload_attestation_message] [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/reorg/*/*"]                          [gloas_minimal_reorg]                          [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/withholding/*/*"]                    [gloas_minimal_withholding]                    [Minimal] [Gloas];
 )]
@@ -333,6 +349,21 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
                 context.on_merge_block(block_hash, timed_pow_block);
             }
+            Step::PayloadAttestation {
+                payload_attestation_message,
+                valid,
+            } => {
+                let message = case.ssz::<_, Arc<PayloadAttestationMessage>>(
+                    config.as_ref(),
+                    payload_attestation_message,
+                );
+
+                if valid {
+                    context.on_valid_payload_attestation_message(message);
+                } else {
+                    context.on_invalid_payload_attestation_message(message);
+                }
+            }
             Step::PayloadStatus(payload_status_with_block_hash) => {
                 last_payload_status = Some(payload_status_with_block_hash);
             }
@@ -361,6 +392,8 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     justified_checkpoint,
                     finalized_checkpoint,
                     proposer_boost_root,
+                    payload_timeliness_vote,
+                    payload_data_availability_vote,
                 } = *checks;
 
                 if let Some(HeadCheck { slot, root }) = head {
@@ -390,6 +423,14 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
                 if let Some(proposer_boost_root) = proposer_boost_root {
                     context.assert_proposer_boost_root(proposer_boost_root);
+                }
+
+                if let Some(PtcVotes { block_root, votes }) = payload_timeliness_vote {
+                    context.assert_payload_timeliness_vote(block_root, &votes);
+                }
+
+                if let Some(PtcVotes { block_root, votes }) = payload_data_availability_vote {
+                    context.assert_payload_data_availability_vote(block_root, &votes);
                 }
             }
         }
