@@ -13,6 +13,7 @@ use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
+use ssz::BitVector;
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{
@@ -20,7 +21,7 @@ use types::{
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
     gloas::{
-        containers::SignedExecutionPayloadEnvelope,
+        containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
@@ -462,6 +463,47 @@ impl<P: Preset> Context<P> {
         }
     }
 
+    pub fn on_valid_payload_attestation_message(
+        &mut self,
+        payload_attestation: Arc<PayloadAttestationMessage>,
+    ) {
+        assert!(matches!(
+            self.on_payload_attestation_message(payload_attestation),
+            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+        ));
+    }
+
+    pub fn on_invalid_payload_attestation_message(
+        &mut self,
+        payload_attestation: Arc<PayloadAttestationMessage>,
+    ) {
+        let expected_block_root = payload_attestation.data.beacon_block_root;
+        let next_message = self.on_payload_attestation_message(payload_attestation);
+
+        match next_message {
+            Some(P2pMessage::PayloadEnvelopeNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root);
+
+                // When the referenced block is unknown, `BlockNeeded` is emitted
+                // after `PayloadEnvelopeNeeded`; drain it so it does not trigger
+                // the `next_p2p_message().unwrap_none()` check in `Drop::drop`.
+                if let Some(P2pMessage::BlockNeeded(actual_block_root, _)) = self.next_p2p_message()
+                {
+                    assert!(actual_block_root == expected_block_root);
+                }
+            }
+            Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root)
+            }
+            message => {
+                assert!(matches!(
+                    message,
+                    Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)),
+                ));
+            }
+        }
+    }
+
     pub fn on_acceptable_singular_attestation(
         &mut self,
         state: &Arc<BeaconState<P>>,
@@ -579,6 +621,32 @@ impl<P: Preset> Context<P> {
 
     pub fn assert_proposer_boost_root(&self, expected_root: H256) {
         assert_eq!(self.controller().proposer_boost_root(), expected_root);
+    }
+
+    pub fn assert_payload_timeliness_vote(
+        &self,
+        block_root: H256,
+        expected_votes: &[Option<bool>],
+    ) {
+        let store = self.controller().store_snapshot();
+        let actual = decode_ptc_votes::<P>(
+            store.payload_vote(block_root),
+            store.payload_timeliness_vote(block_root),
+        );
+        assert_eq!(actual, expected_votes);
+    }
+
+    pub fn assert_payload_data_availability_vote(
+        &self,
+        block_root: H256,
+        expected_votes: &[Option<bool>],
+    ) {
+        let store = self.controller().store_snapshot();
+        let actual = decode_ptc_votes::<P>(
+            store.payload_vote(block_root),
+            store.payload_data_availability_vote(block_root),
+        );
+        assert_eq!(actual, expected_votes);
     }
 
     pub fn assert_head(&self, expected_head_slot: Slot, expected_head_root: H256) {
@@ -707,6 +775,16 @@ impl<P: Preset> Context<P> {
         self.next_p2p_message()
     }
 
+    fn on_payload_attestation_message(
+        &mut self,
+        payload_attestation: Arc<PayloadAttestationMessage>,
+    ) -> Option<P2pMessage<P>> {
+        self.controller()
+            .on_gossip_payload_attestation(payload_attestation, GossipId::default());
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
     fn on_singular_attestation(
         &mut self,
         state: &Arc<BeaconState<P>>,
@@ -763,6 +841,25 @@ impl<P: Preset> Context<P> {
             .execution_block_hash()
             .expect("block should be post-Bellatrix")
     }
+}
+
+fn decode_ptc_votes<P: Preset>(
+    payload_vote: Option<&BitVector<P::PtcSize>>,
+    typed_vote: Option<&BitVector<P::PtcSize>>,
+) -> Vec<Option<bool>> {
+    let len = P::PtcSize::USIZE;
+
+    (0..len)
+        .map(|index| {
+            let voted = payload_vote.is_some_and(|votes| votes.get(index) == Some(true));
+
+            if !voted {
+                return None;
+            }
+
+            Some(typed_vote.is_some_and(|votes| votes.get(index) == Some(true)))
+        })
+        .collect()
 }
 
 // This cannot be done with a default type parameter because they are not used for type inference.
