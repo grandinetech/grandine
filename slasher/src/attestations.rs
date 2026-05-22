@@ -2,10 +2,8 @@ use anyhow::Result;
 use database::Database;
 use ssz::SszHash as _;
 use types::{
-    phase0::{
-        containers::{AttesterSlashing, IndexedAttestation},
-        primitives::{Epoch, ValidatorIndex},
-    },
+    electra::containers::{AttesterSlashing, IndexedAttestation},
+    phase0::primitives::{Epoch, ValidatorIndex},
     preset::Preset,
 };
 
@@ -161,6 +159,8 @@ impl<P: Preset> Attestations<P> {
 
 #[cfg(test)]
 mod tests {
+    use ssz::ContiguousList;
+    use try_from_iterator::TryFromIterator as _;
     use types::preset::Mainnet;
     use unwrap_none::UnwrapNone as _;
 
@@ -173,6 +173,56 @@ mod tests {
         indexed_attestation.data.source.epoch = source;
         indexed_attestation.data.target.epoch = target;
         indexed_attestation
+    }
+
+    fn build_attestation_with_indices<P: Preset>(
+        source: Epoch,
+        target: Epoch,
+        attesting_indices: impl IntoIterator<Item = ValidatorIndex>,
+    ) -> IndexedAttestation<P> {
+        let mut indexed_attestation = build_attestation::<P>(source, target);
+        indexed_attestation.attesting_indices =
+            ContiguousList::try_from_iter(attesting_indices).expect("indices fit within the bound");
+        indexed_attestation
+    }
+
+    // An Electra aggregate carries many attesters in a single attestation; the slasher must detect a
+    // violation for each of them and reconstruct it with the full multi-index attestations. This is
+    // the case that Phase 0's smaller `attesting_indices` bound could not represent.
+    #[test]
+    fn detects_double_vote_for_each_attester_in_multi_index_attestation() -> Result<()> {
+        let attestations = build_attestations::<Mainnet>();
+        let current_epoch = 14;
+        let attesters = [3, 7, 11];
+
+        let first = build_attestation_with_indices::<Mainnet>(2, 5, attesters);
+        let second = build_attestation_with_indices::<Mainnet>(3, 5, attesters);
+
+        for index in attesters {
+            attestations.find_slashing(index, &first)?.unwrap_none();
+            attestations.update(index, &first, current_epoch)?;
+        }
+
+        for index in attesters {
+            let explained = attestations
+                .find_slashing(index, &second)?
+                .expect("a double vote must be detected for every attester");
+
+            assert_eq!(explained.reason, AttesterSlashingReason::DoubleVote);
+            assert_eq!(explained.slashing.attestation_1, first);
+            assert_eq!(explained.slashing.attestation_2, second);
+            assert_eq!(
+                explained
+                    .slashing
+                    .attestation_1
+                    .attesting_indices
+                    .into_iter()
+                    .collect::<Vec<ValidatorIndex>>(),
+                attesters.to_vec(),
+            );
+        }
+
+        Ok(())
     }
 
     fn build_attestations<P: Preset>() -> Attestations<P> {

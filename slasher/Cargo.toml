@@ -21,6 +21,7 @@ p2p = { workspace = true }
 ssz = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+try_from_iterator = { workspace = true }
 types = { workspace = true }
 wincode = { workspace = true }
 

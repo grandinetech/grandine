@@ -1319,6 +1319,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .is_ok()
         });
 
+        // Slasher-originated slashings are emitted as `AttesterSlashing::Electra` (see #655), which
+        // `pre_electra` filters out here. That is acceptable: a post-Electra node does not build
+        // pre-Electra blocks, and the Electra proposal path includes them via `post_electra`.
         let slashings = ContiguousList::try_from_iter(
             slashings
                 .drain(0..split_index.min(P::MaxAttesterSlashings::USIZE))

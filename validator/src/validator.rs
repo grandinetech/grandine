@@ -319,7 +319,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 slashing = slasher_to_validator_rx.select_next_some() => match slashing {
                     SlasherToValidator::AttesterSlashing(attester_slashing) => {
-                        self.block_producer.add_new_attester_slashing(AttesterSlashing::Phase0(attester_slashing)).await;
+                        self.block_producer.add_new_attester_slashing(AttesterSlashing::Electra(attester_slashing)).await;
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
                         self.block_producer.add_new_proposer_slashing(proposer_slashing).await;
