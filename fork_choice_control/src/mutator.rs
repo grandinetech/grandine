@@ -3217,6 +3217,10 @@ where
                     self.notify_forkchoice_updated(&new_head);
                 }
 
+                // Keep the old FCU call in post-Gloas phases to help
+                // with recovering from temporary EL problems
+                self.notify_forkchoice_updated(&new_head);
+
                 self.maybe_spawn_preprocess_head_state_for_current_slot_task(block_slot);
                 self.spawn_preprocess_head_state_for_next_slot_task();
             }
@@ -3471,13 +3475,7 @@ where
             self.send_to_validator(ValidatorMessage::Head(wait_group, new_head.clone()));
         }
 
-        let phase = self.store.phase();
-
-        if phase < Phase::Gloas
-            || (phase >= Phase::Gloas && self.store.is_payload_verified(new_head.block_root))
-        {
-            self.notify_forkchoice_updated(&new_head);
-        }
+        self.notify_forkchoice_updated(&new_head);
     }
 
     fn request_blobs_from_execution_engine(&self, params: EngineGetBlobsParams<P>) {
