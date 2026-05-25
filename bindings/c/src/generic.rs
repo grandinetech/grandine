@@ -225,6 +225,13 @@ impl<T> Drop for CVec<T> {
             return;
         }
 
+        unsafe {
+            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(
+                self.data,
+                self.data_len as usize,
+            ));
+        }
+
         let layout = Layout::new::<T>()
             .repeat_packed(self.data_len as usize)
             .expect("layout must be checked before, while allocating vec.");
