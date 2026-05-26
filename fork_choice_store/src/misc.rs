@@ -4,7 +4,7 @@ use core::{
 };
 use std::sync::Arc;
 
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, bail};
 use derivative::Derivative;
 use derive_more::Debug;
 use eth2_libp2p::{GossipId, PeerId};
@@ -42,6 +42,10 @@ use types::{
 };
 
 use crate::{segment::Position, store::Store};
+
+const EMPTY: &str = "empty";
+const FULL: &str = "full";
+const PENDING: &str = "pending";
 
 #[derive(Clone, Derivative)]
 #[derivative(Debug(bound = ""))]
@@ -140,26 +144,76 @@ pub struct AttestingBalances {
 impl AttestingBalances {
     pub fn add_differences(
         mut self,
-        differences: Differences,
+        block_root: H256,
         payload_presence: Option<PayloadPresence>,
-    ) -> Option<Self> {
-        self.pending = self.pending.checked_add_signed(differences.pending)?;
+        differences: Differences,
+    ) -> Result<Self> {
+        self.pending = checked_add_balance(
+            block_root,
+            payload_presence,
+            PENDING,
+            self.pending,
+            differences.pending,
+        )?;
 
         match payload_presence {
             Some(PayloadPresence::Empty) => {
-                self.empty = self.empty.checked_add_signed(differences.pending)?;
+                self.empty = checked_add_balance(
+                    block_root,
+                    payload_presence,
+                    EMPTY,
+                    self.empty,
+                    differences.pending,
+                )?;
             }
             Some(PayloadPresence::Full) => {
-                self.full = self.full.checked_add_signed(differences.pending)?;
+                self.full = checked_add_balance(
+                    block_root,
+                    payload_presence,
+                    FULL,
+                    self.full,
+                    differences.pending,
+                )?;
             }
             Some(PayloadPresence::Pending) => {}
             None => {
-                self.empty = self.empty.checked_add_signed(differences.empty)?;
-                self.full = self.full.checked_add_signed(differences.full)?;
+                self.empty = checked_add_balance(
+                    block_root,
+                    payload_presence,
+                    EMPTY,
+                    self.empty,
+                    differences.empty,
+                )?;
+                self.full = checked_add_balance(
+                    block_root,
+                    payload_presence,
+                    FULL,
+                    self.full,
+                    differences.full,
+                )?;
             }
         }
 
-        Some(self)
+        Ok(self)
+    }
+}
+
+fn checked_add_balance(
+    block_root: H256,
+    payload_presence: Option<PayloadPresence>,
+    balance_kind: &str,
+    current: u64,
+    value: i64,
+) -> Result<u64> {
+    match current.checked_add_signed(value) {
+        Some(balance) => Ok(balance),
+        None => bail!(
+            "attesting balance should never go below zero \
+            (block: {block_root:?} with payload {payload_presence:?}, \
+            balance kind: {balance_kind}, \
+            current value: {current}, \
+            add value: {value})",
+        ),
     }
 }
 
