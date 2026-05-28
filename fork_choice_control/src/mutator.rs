@@ -3278,7 +3278,7 @@ where
         );
 
         let sender = match origin {
-            BlockOrigin::Gossip(gossip_id) => {
+            BlockOrigin::Gossip(gossip_id) | BlockOrigin::Test(gossip_id, _, _) => {
                 self.send_to_p2p(P2pMessage::Reject(
                     Some(gossip_id),
                     MutatorRejectionReason::InvalidBlock,

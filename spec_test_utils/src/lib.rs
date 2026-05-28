@@ -13,7 +13,7 @@ use serde_repr::Deserialize_repr;
 use snap::raw::Decoder;
 use ssz::{H256, SszRead, SszReadDefault};
 
-#[derive(Clone, Copy, Default, Deserialize_repr)]
+#[derive(Clone, Copy, Debug, Default, Deserialize_repr)]
 #[repr(u8)]
 pub enum BlsSetting {
     #[default]
@@ -142,7 +142,7 @@ impl<'path> Case<'path> {
         Some(value)
     }
 
-    fn try_yaml<T: DeserializeOwned>(self, file_name: impl AsRef<Path>) -> Option<T> {
+    pub fn try_yaml<T: DeserializeOwned>(self, file_name: impl AsRef<Path>) -> Option<T> {
         let file_path = self.resolve(file_name).with_extension("yaml");
         let bytes = try_read(file_path)?;
         let value = serde_yaml::from_slice(bytes.as_slice())

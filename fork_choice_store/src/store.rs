@@ -85,17 +85,17 @@ use crate::{
     error::Error,
     execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
     misc::{
-        AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
-        AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
-        AttesterSlashingOrigin, AttestingBalances, BlobSidecarAction, BlobSidecarOrigin,
-        BlockAction, BlockTimeliness, BranchPoint, ChainLink, DataAvailabilityPolicy,
-        DataColumnSidecarAction, DataColumnSidecarOrigin, Difference, DifferenceAtLocation,
-        Differences, DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
-        ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, PayloadAttestationAction,
-        PayloadAttestationItem, PayloadAttestationValidationError, PayloadPresence,
-        ProposerPreferencesAction, ProposerPreferencesOrigin, Score, SegmentId, Storage,
-        UnfinalizedBlock, ValidAttestation, ValidPayloadAttestation,
+        AggregateAndProofAction, AggregateAndProofOrigin, AnchorBlock, AnchorState,
+        ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
+        AttestationValidationError, AttesterSlashingOrigin, AttestingBalances, BlobSidecarAction,
+        BlobSidecarOrigin, BlockAction, BlockTimeliness, BranchPoint, ChainLink,
+        DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin, Difference,
+        DifferenceAtLocation, Differences, DissolvedDifference, ExecutionPayloadBidAction,
+        ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
+        LatestMessage, Location, PartialAttestationAction, PartialBlockAction, PayloadAction,
+        PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationValidationError,
+        PayloadPresence, ProposerPreferencesAction, ProposerPreferencesOrigin, Score, SegmentId,
+        Storage, UnfinalizedBlock, ValidAttestation, ValidPayloadAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -294,20 +294,32 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         chain_config: Arc<ChainConfig>,
         pubkey_cache: Arc<PubkeyCache>,
         store_config: StoreConfig,
-        anchor_block: Arc<SignedBeaconBlock<P>>,
-        anchor_state: Arc<BeaconState<P>>,
+        anchor_block: AnchorBlock<P>,
+        anchor_state: AnchorState<P>,
         storage: Arc<S>,
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
         mut blacklisted_blocks: StdHashSet<H256>,
         sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     ) -> Self {
-        let block_root = anchor_block.message().hash_tree_root();
+        let anchor_state_start_slot = anchor_state.start_slot(&chain_config);
+        let anchor_state = anchor_state.into_state();
         let state_root = anchor_state.hash_tree_root();
 
-        assert!(misc::is_epoch_start::<P>(anchor_block.message().slot()));
-        assert_eq!(anchor_block.message().state_root(), state_root);
-        assert_eq!(accessors::latest_block_root(&anchor_state), block_root);
+        let block_root = match &anchor_block {
+            AnchorBlock::Real(block) => {
+                let root = block.message().hash_tree_root();
+                assert_eq!(accessors::latest_block_root(&anchor_state), root);
+                root
+            }
+            AnchorBlock::Test(_) => accessors::latest_block_root(&anchor_state),
+        };
+
+        assert!(misc::is_epoch_start::<P>(
+            anchor_block.block().message().slot()
+        ));
+
+        assert_eq!(anchor_block.block().message().state_root(), state_root);
 
         let epoch = accessors::get_current_epoch(&anchor_state);
 
@@ -321,7 +333,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let anchor = ChainLink {
             block_root,
-            block: anchor_block,
+            block: anchor_block.into_block(),
             state: Some(anchor_state.clone_arc()),
             current_justified_checkpoint: checkpoint,
             finalized_checkpoint: checkpoint,
@@ -340,7 +352,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             chain_config,
             pubkey_cache,
             store_config,
-            tick: Tick::start_of_slot(anchor_state.slot()),
+            tick: Tick::start_of_slot(anchor_state_start_slot),
             justified_checkpoint: checkpoint,
             finalized_checkpoint: checkpoint,
             unrealized_justified_checkpoint: checkpoint,
@@ -2969,6 +2981,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(BlobSidecarAction::Ignore(true));
         }
 
+        // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
+        // Part 1/2:
+        // Since our fork choice store's implementation doesn't preserve invalid blocks,
+        // it needs to check this before sidecar's block's parent's presence check.
+        ensure!(
+            !self
+                .rejected_block_roots
+                .contains(&block_header.parent_root),
+            Error::BlobSidecarInvalidParentOfBlock { blob_sidecar },
+        );
+
         let Some(state) = state_fn() else {
             // Delay blob validations until the state is available.
             // Alternatively, we could allow slot processing to obtain states for blob sidecar validations,
@@ -2987,17 +3010,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
             SignatureKind::BlockInBlobSidecar,
         )?;
-
-        // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
-        // Part 1/2:
-        // Since our fork choice store's implementation doesn't preserve invalid blocks,
-        // it needs to check this before sidecar's block's parent's presence check
-        ensure!(
-            !self
-                .rejected_block_roots
-                .contains(&block_header.parent_root),
-            Error::BlobSidecarInvalidParentOfBlock { blob_sidecar },
-        );
 
         // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources)
         // (a client MAY queue sidecars for processing once the parent block is retrieved).
@@ -3141,21 +3153,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(DataColumnSidecarAction::Ignore(false));
         }
 
-        // Validate data column sidecars submitted via beacon API even
-        // if they are not part of the sampling group.
-        // This ensures that correct data columns are published to the network.
-        let mut is_non_sampled_with_full_validation = false;
-
-        // Ignore non-sampling data column sidecars unless they are submitted to beacon API
-        // for publishing after proposal
-        if !self.sampling_columns.contains(&column_index) {
-            if origin.is_from_api() {
-                is_non_sampled_with_full_validation = true;
-            } else {
-                return Ok(DataColumnSidecarAction::Ignore(false));
-            }
-        }
-
         let kzg_commitments = if let Some(sidecar) = data_column_sidecar.pre_gloas() {
             &sidecar.kzg_commitments
         } else {
@@ -3194,6 +3191,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 data_column_sidecar
             },
         );
+
+        // Validate data column sidecars submitted via beacon API even
+        // if they are not part of the sampling group.
+        // This ensures that correct data columns are published to the network.
+        let mut is_non_sampled_with_full_validation = false;
+
+        // Ignore non-sampling data column sidecars unless they are submitted to beacon API
+        // for publishing after proposal
+        if !self.sampling_columns.contains(&column_index) {
+            if origin.is_from_api() {
+                is_non_sampled_with_full_validation = true;
+            } else {
+                return Ok(DataColumnSidecarAction::Ignore(false));
+            }
+        }
 
         // [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_data_column_sidecar(sidecar.index) == subnet_id.
         if let Some(actual) = origin.subnet_id() {
@@ -3234,6 +3246,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 return Ok(DataColumnSidecarAction::Ignore(true));
             }
 
+            // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
+            // Part 1/2:
+            // Since our fork choice store's implementation doesn't preserve invalid blocks,
+            // it needs to check this before sidecar's block's parent's presence check
+            ensure!(
+                !self
+                    .rejected_block_roots
+                    .contains(&block_header.parent_root),
+                Error::DataColumnSidecarInvalidParentOfBlock {
+                    data_column_sidecar
+                },
+            );
+
             let Some(state) = state_fn() else {
                 // Delay data column validations until the state is available.
                 // Alternatively, we could allow slot processing to obtain states for data column sidecar validations,
@@ -3252,19 +3277,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     .get_or_insert(*accessors::public_key(&state, block_header.proposer_index)?)?,
                 SignatureKind::BlockInBlobSidecar,
             )?;
-
-            // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
-            // Part 1/2:
-            // Since our fork choice store's implementation doesn't preserve invalid blocks,
-            // it needs to check this before sidecar's block's parent's presence check
-            ensure!(
-                !self
-                    .rejected_block_roots
-                    .contains(&block_header.parent_root),
-                Error::DataColumnSidecarInvalidParentOfBlock {
-                    data_column_sidecar
-                },
-            );
 
             // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources)
             // (a client MAY queue sidecars for processing once the parent block is retrieved).

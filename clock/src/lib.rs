@@ -437,7 +437,7 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
 
     // Tick now operates in milliseconds, so to prevent precision loss by rounding down to unix seconds,
     // We pass genesis time in milliseconds to prevent rounding error and precision calculation and
-    // comparision.
+    // comparison.
     let unix_epoch_to_genesis = Duration::from_millis(genesis_time_in_ms);
 
     // Some platforms do not support negative `Instant`s. Operations that would produce an `Instant`

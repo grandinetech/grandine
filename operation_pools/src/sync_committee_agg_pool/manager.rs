@@ -141,11 +141,13 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
     pub async fn handle_external_contribution_and_proof(
         &self,
+        wait_group: W,
         signed_contribution_and_proof: SignedContributionAndProof<P>,
         origin: Origin,
     ) -> Result<ValidationOutcome> {
         self.spawn_task(HandleExternalContributionTask {
             controller: self.controller.clone_arc(),
+            wait_group,
             pool: self.pool.clone_arc(),
             signed_contribution_and_proof,
             origin,
@@ -157,11 +159,13 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
     pub fn handle_external_contribution_and_proof_detached(
         &self,
+        wait_group: W,
         signed_contribution_and_proof: SignedContributionAndProof<P>,
         origin: Origin,
     ) {
         self.spawn_detached(HandleExternalContributionTask {
             controller: self.controller.clone_arc(),
+            wait_group,
             pool: self.pool.clone_arc(),
             signed_contribution_and_proof,
             origin,
@@ -172,12 +176,14 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
     pub async fn handle_external_message(
         &self,
+        wait_group: W,
         message: SyncCommitteeMessage,
         subnet_id: SubnetId,
         origin: Origin,
     ) -> Result<ValidationOutcome> {
         self.spawn_task(HandleExternalMessageTask {
             controller: self.controller.clone_arc(),
+            wait_group,
             pool: self.pool.clone_arc(),
             message,
             subnet_id,
@@ -191,12 +197,14 @@ impl<P: Preset, W: Wait> Manager<P, W> {
 
     pub fn handle_external_message_detached(
         &self,
+        wait_group: W,
         message: SyncCommitteeMessage,
         subnet_id: SubnetId,
         origin: Origin,
     ) {
         self.spawn_detached(HandleExternalMessageTask {
             controller: self.controller.clone_arc(),
+            wait_group,
             pool: self.pool.clone_arc(),
             message,
             subnet_id,

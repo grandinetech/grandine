@@ -31,7 +31,7 @@ use eth1_api::{
 };
 use features::Feature;
 use fork_choice_control::{Controller, EventChannels, StateLoadStrategy, Storage};
-use fork_choice_store::StoreConfig;
+use fork_choice_store::{AnchorBlock, AnchorState, StoreConfig};
 use futures::{
     channel::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -308,8 +308,8 @@ pub async fn run_after_genesis<P: Preset>(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
         store_config,
-        anchor_block,
-        anchor_state.clone_arc(),
+        AnchorBlock::Real(anchor_block),
+        AnchorState::Real(anchor_state.clone_arc()),
         current_tick,
         event_channels.clone_arc(),
         execution_engine.clone_arc(),

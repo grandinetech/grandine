@@ -18,7 +18,7 @@ use features::Feature;
 use fork_choice_control::{
     Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, StateLoadStrategy, Storage,
 };
-use fork_choice_store::StoreConfig;
+use fork_choice_store::{AnchorBlock, AnchorState, StoreConfig};
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
 use genesis::AnchorCheckpointProvider;
 use keymanager::KeyManager;
@@ -175,8 +175,8 @@ impl<P: Preset> Context<P> {
             chain_config,
             pubkey_cache,
             store_config,
-            anchor_block,
-            anchor_state.clone_arc(),
+            AnchorBlock::Real(anchor_block),
+            AnchorState::Real(anchor_state.clone_arc()),
             tick,
             event_channels.clone_arc(),
             execution_engine.clone_arc(),

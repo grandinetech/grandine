@@ -2581,7 +2581,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(|(index, contribution_and_proof)| async move {
                 let result = self
                     .sync_committee_agg_pool
-                    .handle_external_contribution_and_proof(contribution_and_proof, Origin::Api)
+                    .handle_external_contribution_and_proof(
+                        W::default(),
+                        contribution_and_proof,
+                        Origin::Api,
+                    )
                     .await;
 
                 (index, contribution_and_proof, result)
@@ -2782,7 +2786,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             // `Signer::keys()` iterates a `HashMap` (random order per process).
             // Sort here so the broadcast publishes in deterministic order. not necessary
             // from a gossip perspective but sorting on the other side of assert for validator_to_p2p rx drain is harder.
-            // (more reasonable in comparision to involving all variants of validator_to_p2p messages in the assert order)
+            // (more reasonable in comparison to involving all variants of validator_to_p2p messages in the assert order)
             // So this sort just ensures thats the response generated is actually comparable.
             preferences.sort_by_key(|(_, pref)| (pref.proposal_slot, pref.validator_index));
 

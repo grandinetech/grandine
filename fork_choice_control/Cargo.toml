@@ -40,6 +40,7 @@ scc = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
+spec_test_utils = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }
 std_ext = { workspace = true }
@@ -61,7 +62,6 @@ eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
 fs-err = { workspace = true }
 serde-aux = { workspace = true }
-spec_test_utils = { workspace = true }
 tap = { workspace = true }
 tempfile = { workspace = true }
 test-generator = { workspace = true }

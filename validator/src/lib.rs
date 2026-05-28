@@ -16,8 +16,5 @@ mod tasks;
 mod validator;
 mod validator_config;
 
-// TODO: Gossip spec tests do not yield genesis state since v1.7.0-alpha.5 making it difficult
-// to initialize Store with correct anchor state.
-// See: https://github.com/ethereum/consensus-specs/pull/5050
-// #[cfg(test)]
-// mod gossip_spec_tests;
+#[cfg(test)]
+mod gossip_spec_tests;

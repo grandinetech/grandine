@@ -1015,7 +1015,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                         let parent_execution_requests = if snapshot.should_build_on_full() {
                             // TODO(gloas): the block root needs to be checked if it is gloas or not.
-                            // the current behavior erronously returns empty execution requests when
+                            // the current behavior erroneously returns empty execution requests when
                             // payload envelope is not found, though block may be from gloas phase and
                             // envelope is missing (so it should error out).
                             snapshot
@@ -1688,7 +1688,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let fee_recipient = self.fee_recipient().await?;
 
-        // TODO(Gloas): this is a quick fix due to time constraits.
+        // TODO(Gloas): this is a quick fix due to time constraints.
         //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
         let (_, requests) = self
             .get_gloas_envelope_data()

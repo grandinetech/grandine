@@ -239,7 +239,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                 context.on_tick(tick);
             }
             Step::Attestation { attestation, valid } => {
-                let attestation = case.ssz::<_, Attestation<P>>(config, attestation);
+                let attestation = case.ssz_default::<Attestation<P>>(attestation);
                 if valid {
                     context.on_test_attestation(attestation);
                 } else {

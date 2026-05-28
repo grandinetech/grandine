@@ -5,7 +5,7 @@ use clock::Tick;
 use crossbeam_utils::sync::WaitGroup;
 use database::Database;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
-use fork_choice_store::StoreConfig;
+use fork_choice_store::{AnchorBlock, AnchorState, StoreConfig};
 use futures::sink::Drain;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
@@ -120,8 +120,8 @@ where
             chain_config,
             pubkey_cache,
             store_config,
-            anchor_block,
-            anchor_state,
+            AnchorBlock::Real(anchor_block),
+            AnchorState::Real(anchor_state),
             tick,
             event_channels,
             execution_engine,
