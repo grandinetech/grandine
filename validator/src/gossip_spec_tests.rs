@@ -2,6 +2,7 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
+use beacon_node_client::{LocalBeaconClient, LocalConfig as BeaconClientLocalConfig};
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use clock::{Tick, TickKind};
 use crossbeam_utils::sync::WaitGroup;
@@ -21,6 +22,7 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     lock::Mutex,
 };
+use genesis::AnchorCheckpointProvider;
 use keymanager::KeyManager;
 use operation_pools::{AttestationAggPool, BlsToExecutionChangePool, SyncCommitteeAggPool};
 use p2p::{P2pToValidator, ValidatorToP2p};
@@ -228,20 +230,44 @@ impl<P: Preset> Context<P> {
         let validator_channels = ValidatorChannels {
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
-            p2p_tx: validator_to_p2p_tx,
+            p2p_tx: validator_to_p2p_tx.clone(),
             p2p_to_validator_rx,
             slasher_to_validator_rx: None,
-            subnet_service_tx,
+            subnet_service_tx: subnet_service_tx.clone(),
             validator_to_liveness_tx: None,
             validator_to_slasher_tx: None,
         };
 
         let network_config = Arc::new(NetworkConfig::default());
 
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(controller.head_state().value);
+
+        let local_beacon_client = Arc::new(LocalBeaconClient::new(
+            controller.chain_config().clone_arc(),
+            BeaconClientLocalConfig {
+                max_empty_slots: validator_config.max_empty_slots,
+                disable_wait_for_late_blocks: validator_config.disable_wait_for_late_blocks,
+                disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
+                default_builder_boost_factor: validator_config.default_builder_boost_factor,
+            },
+            controller.clone_arc(),
+            block_producer.clone_arc(),
+            attestation_agg_pool.clone_arc(),
+            sync_committee_agg_pool.clone_arc(),
+            event_channels.clone_arc(),
+            anchor_checkpoint_provider,
+            None,
+            None,
+            validator_to_p2p_tx,
+            subnet_service_tx,
+        ));
+
         let validator = Validator::new(
             validator_config.clone_arc(),
             block_producer.clone_arc(),
             controller.clone_arc(),
+            local_beacon_client.clone(),
             attestation_agg_pool.clone_arc(),
             None,
             None,

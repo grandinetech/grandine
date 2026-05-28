@@ -1,0 +1,37 @@
+[package]
+name = 'beacon_node_client'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[features]
+default = ['bls/blst']
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+bls = { workspace = true }
+block_producer = { workspace = true }
+eth1_api = { workspace = true }
+fork_choice_control = { workspace = true }
+futures = { workspace = true }
+genesis = { workspace = true }
+helper_functions = { workspace = true }
+itertools = { workspace = true }
+liveness_tracker = { workspace = true }
+operation_pools = { workspace = true }
+p2p = { workspace = true }
+parse-display = { workspace = true }
+prometheus_metrics = { workspace = true }
+ssz = { workspace = true }
+std_ext = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+hex-literal = { workspace = true }
+test-case = { workspace = true }

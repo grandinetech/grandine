@@ -64,6 +64,7 @@ validator_statistics = { workspace = true }
 
 [dev-dependencies]
 attestation_verifier = { workspace = true }
+beacon_node_client = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
 database = { workspace = true }

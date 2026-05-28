@@ -4,6 +4,7 @@ members = [
     'allocator',
     'arithmetic',
     'attestation_verifier',
+    'beacon_node_client',
     'benches',
     'binary_utils',
     'bindings/c',
@@ -286,6 +287,7 @@ alloy-rlp = '0.3'
 anyhow = { version = '1', features = ['backtrace'] }
 arc-swap = '1'
 assert-json-diff = '2'
+async-trait = '0.1'
 axum = { version = '0.8' }
 axum-extra = { version = '0.12', features = ['typed-header', 'query'] }
 base64 = '0.22'
@@ -480,6 +482,7 @@ zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
 attestation_verifier = { path = 'attestation_verifier' }
+beacon_node_client = { path = 'beacon_node_client' }
 binary_utils = { path = 'binary_utils' }
 block_producer = { path = 'block_producer' }
 # Replace the line below with `bls = { path = 'bls', features = ['blst'] }` for `ad_hoc_bench` and other utilities
