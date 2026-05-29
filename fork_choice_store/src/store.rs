@@ -1465,7 +1465,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub fn safe_execution_payload_hash(&self) -> ExecutionBlockHash {
         self.justified_chain_link()
-            .map(|chain_link| self.checkpoint_execution_payload_hash(chain_link))
+            .map(Self::checkpoint_execution_payload_hash)
             .unwrap_or_default()
     }
 
@@ -1473,11 +1473,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // corresponds to valid execution block hash. Block may have empty payload status.
     #[must_use]
     pub fn finalized_execution_payload_hash(&self) -> ExecutionBlockHash {
-        self.checkpoint_execution_payload_hash(self.last_finalized())
+        Self::checkpoint_execution_payload_hash(self.last_finalized())
     }
 
     #[must_use]
-    fn checkpoint_execution_payload_hash(&self, chain_link: &ChainLink<P>) -> ExecutionBlockHash {
+    fn checkpoint_execution_payload_hash(chain_link: &ChainLink<P>) -> ExecutionBlockHash {
         let block = chain_link.block.message();
 
         if let Some(body_with_payload_bid) = block.body().with_payload_bid() {
@@ -1485,13 +1485,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .signed_execution_payload_bid()
                 .message
                 .parent_block_hash;
-        };
+        }
 
-        return block
+        block
             .body()
             .with_execution_payload()
             .map(|body| body.execution_payload().block_hash())
-            .unwrap_or_default();
+            .unwrap_or_default()
     }
 
     #[must_use]
@@ -3250,7 +3250,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-        execution_engine: impl ExecutionEngine<P> + Send,
+        execution_engine: &(impl ExecutionEngine<P> + Send),
         _verifier: impl Verifier + Send,
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         let block_root = envelope.block_root();
@@ -3326,7 +3326,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         origin: &ExecutionPayloadEnvelopeOrigin,
         block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
-        execution_engine: impl ExecutionEngine<P> + Send,
+        execution_engine: &(impl ExecutionEngine<P> + Send),
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
