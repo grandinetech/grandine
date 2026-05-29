@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use features::Feature;
-use futures::stream::{FuturesUnordered, StreamExt as _};
+use futures::stream::{FuturesOrdered, StreamExt as _};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use ssz::SszHash;
@@ -140,7 +140,7 @@ impl<P: Preset> Pool<P> {
                     })
                     .collect_vec()
             })
-            .collect::<FuturesUnordered<_>>()
+            .collect::<FuturesOrdered<_>>()
             .collect::<Vec<_>>()
             .await
             .into_iter()
@@ -403,15 +403,8 @@ impl<P: Preset> Pool<P> {
             .get(&epoch)
             .into_iter()
             .flatten()
-            .map(|(_, attestations)| async move {
-                attestations
-                    .read()
-                    .await
-                    .iter()
-                    .cloned()
-                    .collect_vec()
-            })
-            .collect::<FuturesUnordered<_>>()
+            .map(|(_, attestations)| async { attestations.read().await.clone() })
+            .collect::<FuturesOrdered<_>>()
             .collect::<Vec<_>>()
             .await
             .into_iter()

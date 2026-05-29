@@ -967,7 +967,7 @@ fn onboard_builders<P: Preset>(
     state: &mut GloasBeaconState<P>,
 ) -> Result<()> {
     let mut signature_cache = DepositSignatureCache::new();
-    let mut validator_pubkeys = state.validators.pubkeys().clone();
+    let validator_pubkeys = state.validators.pubkeys().clone();
     let mut builder_pubkeys = vec![];
     let mut pending_deposits = vec![];
 

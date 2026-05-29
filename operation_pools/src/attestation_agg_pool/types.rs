@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
@@ -19,9 +19,9 @@ use types::{
 // Use `Mutex` instead of `RwLock` to avoid race conditions in `InsertAttestationTask`.
 // Don't let this comment fool you into thinking the locking is well thought out.
 // There may be other bugs.
-pub type AggregateMap<P> = HashMap<AttestationKey, Arc<Mutex<Vec<Aggregate<P>>>>>;
+pub type AggregateMap<P> = BTreeMap<AttestationKey, Arc<Mutex<Vec<Aggregate<P>>>>>;
 
-pub type AttestationMap<P> = HashMap<AttestationKey, Arc<RwLock<AttestationSet<P>>>>;
+pub type AttestationMap<P> = BTreeMap<AttestationKey, Arc<RwLock<AttestationSet<P>>>>;
 
 // Use `BTreeSet` to make attestation packing deterministic for snapshot testing.
 // This does not affect performance in our benchmarks.
