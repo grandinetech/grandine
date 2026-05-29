@@ -2872,6 +2872,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    // TODO(Gloas): fix optimistic head handling in Gloas
+    #[expect(dead_code)]
     #[instrument(level = "debug", skip_all)]
     async fn wait_for_fully_validated_head(&self, slot_head: SlotHead<P>) -> Option<SlotHead<P>> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
