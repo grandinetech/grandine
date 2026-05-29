@@ -1018,11 +1018,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         // TODO(gloas): payload attestations are valid only for one slot after block.
                         // spec says: "The slot of the parent block is exactly one slot before the proposing slot."
                         let payload_attestations = if parent_block.value().to_header().message.slot
-                            != misc::previous_slot(slot)
+                            == misc::previous_slot(slot)
                         {
-                            Default::default()
-                        } else {
                             self.prepare_payload_attestations().await?
+                        } else {
+                            ContiguousList::default()
                         };
 
                         let parent_execution_requests =
@@ -1703,7 +1703,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let (_, requests) = self
             .get_gloas_envelope_data()
             .await
-            .ok_or(anyhow!("no gloas envelope data"))?;
+            .ok_or_else(|| anyhow!("no gloas envelope data"))?;
         let execution_requests_root = requests.hash_tree_root();
 
         let parent_root = state.latest_block_header().hash_tree_root();
@@ -1823,7 +1823,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 })
             }
             BeaconState::Gloas(state) => {
-                let target_gas_limit = self.gas_limit().await?;
+                let target_gas_limit = self.gas_limit()?;
                 let parent_root = state.latest_block_header().hash_tree_root();
                 let snapshot = self.producer_context.controller.snapshot();
 
@@ -2277,7 +2277,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             })
     }
 
-    async fn gas_limit(&self) -> Result<Gas> {
+    fn gas_limit(&self) -> Result<Gas> {
         let proposer_pubkey = accessors::public_key(&self.beacon_state, self.proposer_index)?;
 
         self.producer_context

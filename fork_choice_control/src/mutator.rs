@@ -2046,16 +2046,16 @@ where
 
                 self.accept_execution_payload_envelope(&wait_group, envelope);
 
-                if should_generate_event {
-                    if let Some(chain_link) = self.store.chain_link(beacon_block_root) {
-                        self.event_channels.send_execution_payload_event(
-                            slot,
-                            builder_index,
-                            block_hash,
-                            beacon_block_root,
-                            chain_link.is_optimistic(),
-                        );
-                    }
+                if should_generate_event
+                    && let Some(chain_link) = self.store.chain_link(beacon_block_root)
+                {
+                    self.event_channels.send_execution_payload_event(
+                        slot,
+                        builder_index,
+                        block_hash,
+                        beacon_block_root,
+                        chain_link.is_optimistic(),
+                    );
                 }
             }
             Ok(ExecutionPayloadEnvelopeAction::Ignore(publishable)) => {

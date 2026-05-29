@@ -604,7 +604,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
         let result = store_snapshot.validate_execution_payload_envelope(
             &execution_payload_envelope,
             &origin,
-            execution_engine,
+            &execution_engine,
             MultiVerifier::default(),
         );
 
