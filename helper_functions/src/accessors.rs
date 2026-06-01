@@ -42,10 +42,10 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
+    nonstandard::{AttestationEpoch, Participation, Phase, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
-        containers::AttestationData,
+        containers::{AttestationData, Validator},
         primitives::{
             CommitteeIndex, DomainType, Epoch, Gwei, H128, H256, Slot, SubnetId, ValidatorIndex,
         },
@@ -237,9 +237,18 @@ fn get_active_validator_indices_by_epoch<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     epoch: Epoch,
 ) -> impl Iterator<Item = ValidatorIndex> + '_ {
+    get_filtered_active_validator_indices_by_epoch(state, epoch, |_| true)
+}
+
+fn get_filtered_active_validator_indices_by_epoch<'a, P: Preset>(
+    state: &'a (impl BeaconState<P> + ?Sized),
+    epoch: Epoch,
+    filter: impl Fn(&Validator) -> bool + 'a,
+) -> impl Iterator<Item = ValidatorIndex> + 'a {
     (0..)
         .zip(state.validators())
         .filter(move |(_, validator)| predicates::is_active_validator(validator, epoch))
+        .filter(move |(_, validator)| filter(validator))
         .map(|(index, _)| index)
 }
 
@@ -1046,7 +1055,11 @@ pub fn get_beacon_proposer_indices<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
 ) -> Result<Vec<ValidatorIndex>> {
-    let indices = get_active_validator_indices_by_epoch(state, epoch);
+    let exclude_slashed = config.phase_at_epoch(epoch) >= Phase::Gloas;
+
+    let indices = get_filtered_active_validator_indices_by_epoch(state, epoch, |validator| {
+        !(exclude_slashed && validator.slashed)
+    });
     let seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_PROPOSER);
 
     misc::compute_proposer_indices(
