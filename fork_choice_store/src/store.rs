@@ -189,6 +189,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // - Obtaining active balances from the justified state requires it to be in the right epoch.
     checkpoint_states: HashMap<Checkpoint, Arc<BeaconState<P>>>,
     payloads: HashSet<H256>,
+    timely_payloads: HashSet<H256>,
     // This field is used to track which PTC members have cast a valid vote for a given block root.
     payload_vote: HashMap<H256, BitVector<P::PtcSize>>,
     payload_timeliness_vote: HashMap<H256, BitVector<P::PtcSize>>,
@@ -358,6 +359,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             seen_gossip_aggregators: BTreeMap::new(),
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             payloads: HashSet::new(),
+            timely_payloads: HashSet::new(),
             payload_vote: HashMap::new(),
             payload_timeliness_vote: HashMap::new(),
             payload_data_availability_vote: HashMap::new(),
@@ -894,7 +896,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let proposer_root = self.proposer_boost_root;
 
         if proposer_root.is_zero()
-            || (self.is_payload_timely(block_root) && self.is_payload_data_available(block_root))
+            || (self.is_payload_voted_timely(block_root)
+                && self.is_payload_data_available(block_root))
         {
             return true;
         }
@@ -921,6 +924,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.payloads.contains(&block_root)
     }
 
+    // > Return whether the execution payload envelope for the beacon block with
+    // > root ``root`` was seen before the ``PAYLOAD_DUE_BPS`` deadline.
+    pub fn is_payload_present_timely(&self, block_root: H256) -> bool {
+        self.timely_payloads.contains(&block_root)
+    }
+
     #[must_use]
     pub fn payload_vote(&self, block_root: H256) -> Option<&BitVector<P::PtcSize>> {
         self.payload_vote.get(&block_root)
@@ -941,7 +950,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     // > Return whether the execution payload for the beacon block with root ``root``
     // > was voted as present by the PTC, and was locally determined to be available.
-    fn is_payload_timely(&self, block_root: H256) -> bool {
+    fn is_payload_voted_timely(&self, block_root: H256) -> bool {
         let Some(payload_timeliness_vote) = self.payload_timeliness_vote.get(&block_root) else {
             return false;
         };
@@ -3850,17 +3859,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // Apply proposer boost to first block in case of equivocation.
         // See <https://github.com/ethereum/consensus-specs/pull/3352>.
         let is_before_attesting_interval = if self.phase() >= Phase::Gloas {
-            let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(
-                &self.chain_config,
-                self.slot(),
-            ))?;
-            let tick_index: u64 = self.tick.kind as u64;
-
-            (tick_index.saturating_add(1)).saturating_mul(BASIS_POINTS)
-                <= self
-                    .chain_config
-                    .attestation_due_bps_gloas
-                    .saturating_mul(ticks_per_slot)
+            self.is_before_due_bps_deadline(self.chain_config.attestation_due_bps_gloas)
         } else {
             self.tick.is_before_attesting_interval()
         };
@@ -4166,6 +4165,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let builder_index = envelope.builder_index();
 
         self.payloads.insert(beacon_block_root);
+
+        if self.is_before_due_bps_deadline(self.chain_config.payload_due_bps) {
+            self.timely_payloads.insert(beacon_block_root);
+        }
 
         self.accepted_execution_payload_envelopes
             .insert((slot, beacon_block_root, builder_index));
@@ -4689,6 +4692,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.execution_payload_envelope_cache
             .prune_finalized(finalized_slot);
         self.payloads
+            .retain(|block_root| self.unfinalized_locations.contains_key(block_root));
+        self.timely_payloads
             .retain(|block_root| self.unfinalized_locations.contains_key(block_root));
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
@@ -5249,6 +5254,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .collect();
 
         archived
+    }
+
+    // Return whether the current tick is before the deadline defined by `due_bps`
+    // basis points into the slot.
+    fn is_before_due_bps_deadline(&self, due_bps: u64) -> bool {
+        let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(
+            &self.chain_config,
+            self.slot(),
+        ))
+        .unwrap_or(u64::MAX);
+        let tick_index = self.tick.kind as u64;
+
+        (tick_index.saturating_add(1)).saturating_mul(BASIS_POINTS)
+            <= due_bps.saturating_mul(ticks_per_slot)
     }
 
     const fn start_of_epoch(epoch: Epoch) -> Slot {
