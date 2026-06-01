@@ -621,6 +621,10 @@ where
         self.store_snapshot().is_payload_verified(block_root)
     }
 
+    pub fn is_payload_present_timely(&self, block_root: H256) -> bool {
+        self.store_snapshot().is_payload_present_timely(block_root)
+    }
+
     pub fn blocks_by_root(
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,

@@ -2251,10 +2251,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(own_payload_attestations);
         }
 
-        let payload_present = self
-            .controller
-            .execution_payload_envelope_by_root(beacon_block_root)?
-            .is_some();
+        let payload_present = self.controller.is_payload_present_timely(beacon_block_root);
 
         let blob_data_available = self
             .controller

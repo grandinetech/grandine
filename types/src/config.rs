@@ -116,6 +116,8 @@ pub struct Config {
     pub contribution_due_bps_gloas: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub payload_attestation_due_bps: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub payload_due_bps: u64,
 
     // Validator cycle
     #[serde(with = "serde_utils::string_or_native")]
@@ -283,6 +285,7 @@ impl Default for Config {
             sync_message_due_bps_gloas: 2500,
             contribution_due_bps_gloas: 5000,
             payload_attestation_due_bps: 7500,
+            payload_due_bps: 7500,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),
