@@ -19,7 +19,10 @@ use types::{
     },
     config::Config,
     deneb::primitives::{Blob, KzgProof},
-    gloas::containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
+    gloas::{
+        containers::{PayloadAttestationMessage, SignedExecutionPayloadEnvelope},
+        primitives::PayloadStatus,
+    },
     nonstandard::{Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
@@ -39,6 +42,8 @@ enum Step {
     },
     Attestation {
         attestation: PathBuf,
+        #[serde(default = "serde_aux::field_attributes::bool_true")]
+        valid: bool,
     },
     Block {
         block: PathBuf,
@@ -74,7 +79,6 @@ enum Step {
 #[serde(deny_unknown_fields)]
 struct Checks {
     head: Option<HeadCheck>,
-    head_payload_status: Option<u8>,
     time: Option<UnixSeconds>,
     genesis_time: Option<UnixSeconds>,
     justified_checkpoint: Option<Checkpoint>,
@@ -89,6 +93,7 @@ struct Checks {
 struct HeadCheck {
     slot: Slot,
     root: H256,
+    payload_status: Option<PayloadStatus>,
 }
 
 #[derive(Deserialize)]
@@ -175,6 +180,7 @@ struct PtcVotes {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/ex_ante/*/*"]                        [gloas_mainnet_ex_ante]                        [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_head/*/*"]                       [gloas_mainnet_get_head]                       [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_mainnet_get_parent_payload_status]      [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_attestation/*/*"]                 [gloas_mainnet_on_attestation]                 [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_block/*/*"]                       [gloas_mainnet_on_block]                       [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_mainnet_on_execution_payload_envelope]  [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_mainnet_on_payload_attestation_message] [Mainnet] [Gloas];
@@ -182,6 +188,7 @@ struct PtcVotes {
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]                       [gloas_minimal_get_head]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_parent_payload_status/*/*"]      [gloas_minimal_get_parent_payload_status]      [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_attestation/*/*"]                 [gloas_minimal_on_attestation]                 [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_block/*/*"]                       [gloas_minimal_on_block]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_minimal_on_execution_payload_envelope]  [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_minimal_on_payload_attestation_message] [Minimal] [Gloas];
@@ -231,9 +238,13 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                 let tick = tick_at_time(tick);
                 context.on_tick(tick);
             }
-            Step::Attestation { attestation } => {
+            Step::Attestation { attestation, valid } => {
                 let attestation = case.ssz::<_, Attestation<P>>(config, attestation);
-                context.on_test_attestation(attestation);
+                if valid {
+                    context.on_test_attestation(attestation);
+                } else {
+                    context.on_invalid_test_attestation(attestation);
+                }
             }
             Step::Block {
                 block,
@@ -386,7 +397,6 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
             Step::Checks { checks } => {
                 let Checks {
                     head,
-                    head_payload_status,
                     time,
                     genesis_time,
                     justified_checkpoint,
@@ -396,12 +406,17 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     payload_data_availability_vote,
                 } = *checks;
 
-                if let Some(HeadCheck { slot, root }) = head {
+                if let Some(HeadCheck {
+                    slot,
+                    root,
+                    payload_status,
+                }) = head
+                {
                     context.assert_head(slot, root);
-                }
 
-                if let Some(payload_status) = head_payload_status {
-                    context.assert_head_payload_status(payload_status);
+                    if let Some(payload_status) = payload_status {
+                        context.assert_head_payload_status(payload_status);
+                    }
                 }
 
                 if let Some(time) = time {

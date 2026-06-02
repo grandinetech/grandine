@@ -877,15 +877,28 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    // > Return whether the proposer should build on the parent's full payload (as
+    // > opposed to its empty variant). The relevant ``head`` is ``get_head(store)``,
+    // > i.e. the parent block the proposer is building on, so we resolve it here.
     #[must_use]
-    pub fn should_build_on_full(&self, block_root: H256) -> bool {
+    pub fn should_build_on_full(&self) -> bool {
         let (head, payload_status) = self.head_with_payload_status();
 
-        if head.block_root == block_root {
-            return payload_status != PAYLOAD_STATUS_EMPTY;
+        // EMPTY was resolved by weight / tiebreaker: build on the empty variant.
+        if payload_status == PAYLOAD_STATUS_EMPTY {
+            return false;
         }
 
-        self.is_payload_verified(block_root)
+        // For a head from an earlier slot the empty/full node was already resolved
+        // by weight in `get_head`; only the previous-slot head still consults the
+        // (possibly stale) PTC data-availability view.
+        // See <https://github.com/ethereum/consensus-specs/pull/5309>.
+        if head.slot().saturating_add(1) != self.slot() {
+            return true;
+        }
+
+        // Force a reorg of the payload if the PTC voted the blob data unavailable.
+        !self.payload_data_availability(head.block_root, false)
     }
 
     pub fn should_extend_payload(&self, block_root: H256) -> bool {
@@ -896,8 +909,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let proposer_root = self.proposer_boost_root;
 
         if proposer_root.is_zero()
-            || (self.is_payload_voted_timely(block_root)
-                && self.is_payload_data_available(block_root))
+            || (self.payload_timeliness(block_root, true)
+                && self.payload_data_availability(block_root, true))
         {
             return true;
         }
@@ -949,41 +962,59 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     // > Return whether the execution payload for the beacon block with root ``root``
-    // > was voted as present by the PTC, and was locally determined to be available.
-    fn is_payload_voted_timely(&self, block_root: H256) -> bool {
-        let Some(payload_timeliness_vote) = self.payload_timeliness_vote.get(&block_root) else {
-            return false;
-        };
-
+    // > is considered ``timely`` (or not, when ``timely`` is ``False``), taking into
+    // > consideration local availability and PTC votes.
+    fn payload_timeliness(&self, block_root: H256, timely: bool) -> bool {
+        // If the payload is not locally available, the payload
+        // is not considered available regardless of the PTC vote.
         if !self.is_payload_verified(block_root) {
-            return false;
+            return !timely;
         }
 
-        let vote_count: u64 = payload_timeliness_vote
-            .count_ones()
+        let present: u64 = self
+            .payload_timeliness_vote
+            .get(&block_root)
+            .map(BitVector::count_ones)
+            .unwrap_or_default()
             .try_into()
             .expect("payload timeliness vote count should fit into u64");
+
+        // A missing or unset vote defaults to "not present"; the NAY count is the
+        // complement of the present votes over the whole PTC.
+        let vote_count = if timely {
+            present
+        } else {
+            P::PtcSize::U64.saturating_sub(present)
+        };
 
         vote_count > PayloadTimelyThreshold::<P>::U64
     }
 
-    // > Return whether the blob data for the beacon block with root ``root``
-    // > was voted as present by the PTC, and was locally determined to be available.
-    fn is_payload_data_available(&self, block_root: H256) -> bool {
-        let Some(payload_data_availability_vote) =
-            self.payload_data_availability_vote.get(&block_root)
-        else {
-            return false;
-        };
-
+    // > Return whether the blob data for the beacon block with root ``root`` is
+    // > considered ``available`` (or not, when ``available`` is ``False``), taking into
+    // > consideration local availability and PTC votes.
+    fn payload_data_availability(&self, block_root: H256, available: bool) -> bool {
+        // If the payload is not locally available, the blob data
+        // is not considered available regardless of the PTC vote.
         if !self.is_payload_verified(block_root) {
-            return false;
+            return !available;
         }
 
-        let vote_count: u64 = payload_data_availability_vote
-            .count_ones()
+        let present: u64 = self
+            .payload_data_availability_vote
+            .get(&block_root)
+            .map(BitVector::count_ones)
+            .unwrap_or_default()
             .try_into()
             .expect("payload data availability vote count should fit into u64");
+
+        // A missing or unset vote defaults to "not available"; the NAY count is the
+        // complement of the available votes over the whole PTC.
+        let vote_count = if available {
+            present
+        } else {
+            P::PtcSize::U64.saturating_sub(present)
+        };
 
         vote_count > DataAvailabilityTimelyThreshold::<P>::U64
     }
@@ -1410,6 +1441,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.finalized_before_or_at(ancestor_slot)
             .map(|chain_link| chain_link.block_root)
+    }
+
+    /// Roughly corresponds to [`get_dependent_root`] from the Fork Choice specification.
+    ///
+    /// Computes the proposer dependent root from the block tree (not from a post-state),
+    /// using the current store epoch. Used to decide whether to apply the proposer score
+    /// boost: the boost is only applied when the candidate block and the canonical chain
+    /// head share the same dependent root.
+    ///
+    /// [`get_dependent_root`]: https://github.com/ethereum/consensus-specs/pull/5306
+    fn proposer_boost_dependent_root(&self, root: H256) -> Option<H256> {
+        let epoch = self.current_epoch();
+
+        // Genesis block parent: both candidate and head collapse to the same value,
+        // so the boost still applies near genesis.
+        if epoch <= P::MinSeedLookahead::U64 {
+            return Some(H256::zero());
+        }
+
+        let dependent_slot =
+            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_sub(P::MinSeedLookahead::U64))
+                .saturating_sub(1);
+
+        self.ancestor(root, dependent_slot)
     }
 
     fn parent_payload_presence(
@@ -1861,11 +1916,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
-        if !self.contains_block(bid.parent_block_root) {
+        let Some(parent) = self.chain_link(bid.parent_block_root) else {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice",
             ));
-        }
+        };
+
+        // > The bid is for a higher slot than its parent block -- i.e. validate
+        // that `bid.slot` is greater than the slot of the block with root
+        // `bid.parent_block_root`.
+        let parent_slot = parent.slot();
+        ensure!(
+            bid.slot > parent_slot,
+            Error::<P>::ExecutionPayloadBidSlotNotGreaterThanParent {
+                bid_slot: bid.slot,
+                parent_slot,
+            }
+        );
 
         let Some(state) =
             self.state_cache
@@ -3604,6 +3671,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
         }
 
+        // [IGNORE] The block referenced by `data.beacon_block_root` is at slot
+        // `data.slot`, i.e. the block has `block.slot == data.slot`.
+        if chain_link.slot() != data.slot {
+            return Ok(PayloadAttestationAction::Ignore(payload_attestation));
+        }
+
         let chain = match payload_attestation.origin {
             PayloadAttestationOrigin::Block(origin_block) => self.chain_link(origin_block),
             _ => Some(self.head()),
@@ -3872,16 +3945,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `Store::insert_block` fails, but only if segment IDs or positions in a segment run out,
         // which is extremely unlikely and at which point the `Store` is unusable anyway.
         if self.slot() == chain_link.slot() && is_before_attesting_interval && is_first_block {
-            let state = self.state_cache.state_at_slot(
-                &self.pubkey_cache,
-                self,
-                old_head.block_root,
-                self.slot(),
-            )?;
+            // > Add proposer score boost only if the block shares the same dependent root
+            // > as the canonical chain head.
+            // See <https://github.com/ethereum/consensus-specs/pull/5306>.
+            let block_dependent_root = self.proposer_boost_dependent_root(chain_link.parent_root());
+            let head_dependent_root = self.proposer_boost_dependent_root(old_head.block_root);
 
-            if chain_link.block.message().proposer_index()
-                == accessors::get_beacon_proposer_index(&self.chain_config, &state)?
-            {
+            if block_dependent_root == head_dependent_root {
                 self.proposer_boost_root = block_root;
             }
         }

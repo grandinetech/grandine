@@ -1013,20 +1013,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             ContiguousList::default()
                         };
 
-                        let parent_execution_requests =
-                            if snapshot.should_extend_payload(parent_root) {
-                                // TODO(gloas): the block root needs to be checked if it is gloas or not.
-                                // the current behavior erronously returns empty execution requests when
-                                // payload envelope is not found, though block may be from gloas phase and
-                                // envelope is missing (so it should error out).
-                                snapshot
-                                    .cached_execution_payload_envelope_by_root(parent_root)
-                                    .ok_or_else(|| anyhow!("no cached payload envelope"))
-                                    .map(|payload| payload.message.execution_requests.clone())
-                                    .unwrap_or_default()
-                            } else {
-                                ExecutionRequests::default()
-                            };
+                        let parent_execution_requests = if snapshot.should_build_on_full() {
+                            // TODO(gloas): the block root needs to be checked if it is gloas or not.
+                            // the current behavior erronously returns empty execution requests when
+                            // payload envelope is not found, though block may be from gloas phase and
+                            // envelope is missing (so it should error out).
+                            snapshot
+                                .cached_execution_payload_envelope_by_root(parent_root)
+                                .ok_or_else(|| anyhow!("no cached payload envelope"))
+                                .map(|payload| payload.message.execution_requests.clone())
+                                .unwrap_or_default()
+                        } else {
+                            ExecutionRequests::default()
+                        };
 
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
                             slot,
@@ -1815,7 +1814,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let parent_root = state.latest_block_header().hash_tree_root();
                 let snapshot = self.producer_context.controller.snapshot();
 
-                let withdrawals = if snapshot.should_build_on_full(parent_root)
+                let withdrawals = if snapshot.should_build_on_full()
                     && let Some(envelope) =
                         snapshot.cached_execution_payload_envelope_by_root(parent_root)
                 {
@@ -1930,11 +1929,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         // See <https://github.com/ethereum/consensus-specs/pull/3350>.
         let parent_hash = if let Some(state) = state.post_gloas() {
             let parent_bid = state.latest_execution_payload_bid();
-            let parent_root = state.latest_block_header().hash_tree_root();
             let parent_slot = state.latest_block_header().slot;
             let snapshot = self.producer_context.controller.snapshot();
 
-            if snapshot.should_extend_payload(parent_root)
+            if snapshot.should_build_on_full()
                 || chain_config.phase_at_slot::<P>(parent_slot) < Phase::Gloas
             {
                 parent_bid.block_hash
