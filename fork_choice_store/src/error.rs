@@ -170,6 +170,10 @@ pub enum Error<P: Preset> {
         epoch: Epoch,
     },
     #[error(
+        "execution payload bid's slot {bid_slot} is not greater than parent slot {parent_slot}"
+    )]
+    ExecutionPayloadBidSlotNotGreaterThanParent { bid_slot: Slot, parent_slot: Slot },
+    #[error(
         "execution payload bid's fee recipient mismatch (in_bid: {in_bid:?}, in_preference: {in_preference:?})"
     )]
     ExecutionPayloadBidFeeRecipientMismatch {
