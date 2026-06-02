@@ -1,7 +1,7 @@
 use core::ops::Index as _;
 
 use anyhow::{Result, ensure};
-use arithmetic::{U64Ext as _, UsizeExt as _};
+use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use bls::traits::SignatureBytes as _;
 use helper_functions::{
@@ -742,7 +742,7 @@ pub fn apply_parent_execution_payload<P: Preset>(
 
     state
         .execution_payload_availability_mut()
-        .set(slot % SlotsPerHistoricalRoot::<P>::USIZE, true);
+        .set(slot % SlotsPerHistoricalRoot::<P>::non_zero_usize(), true);
 
     *state.latest_block_hash_mut() = parent_bid.block_hash;
 

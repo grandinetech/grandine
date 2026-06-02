@@ -3758,7 +3758,7 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
     let head_slot = head.slot();
     let max_empty_slots = validator_config.max_empty_slots;
 
-    if head_slot + max_empty_slots < slot {
+    if head_slot.saturating_add(max_empty_slots) < slot {
         return Err(Error::HeadFarBehind {
             head_slot,
             max_empty_slots,

@@ -535,9 +535,9 @@ pub fn is_gas_limit_target_compatible(
     gas_limit: Gas,
     target_gas_limit: Gas,
 ) -> bool {
-    let max_gas_limit_difference = (parent_gas_limit / 1024).max(1) - 1;
-    let min_gas_limit = parent_gas_limit - max_gas_limit_difference;
-    let max_gas_limit = parent_gas_limit + max_gas_limit_difference;
+    let max_gas_limit_difference = (parent_gas_limit / 1024).max(1).saturating_sub(1);
+    let min_gas_limit = parent_gas_limit.saturating_sub(max_gas_limit_difference);
+    let max_gas_limit = parent_gas_limit.saturating_add(max_gas_limit_difference);
 
     gas_limit == target_gas_limit.clamp(min_gas_limit, max_gas_limit)
 }

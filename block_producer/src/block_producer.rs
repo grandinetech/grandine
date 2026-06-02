@@ -1260,9 +1260,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                     if selected_bid.is_some() {
                         // Set block_mev value to the in-protocol builder bid value
-                        block_mev = selected_bid
-                            .as_ref()
-                            .map(|bid| Uint256::from_u64(bid.message.value) * WEI_IN_GWEI);
+                        block_mev = selected_bid.as_ref().map(|bid| {
+                            Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI)
+                        });
 
                         selected_bid
                     } else {

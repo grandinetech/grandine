@@ -719,7 +719,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
             // Subscribe to proposer_preferences topic one epoch before Gloas activation
             if next_phase == Phase::Gloas
-                && epoch + 1 == next_fork_epoch
+                && epoch.saturating_add(1) == next_fork_epoch
                 && !self.proposer_preferences_subscribed
             {
                 info_with_peers!(

@@ -1151,14 +1151,18 @@ pub fn get_ptc<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<Ptc
     let state_epoch = get_current_epoch(state);
 
     ensure!(
-        (state_epoch.saturating_sub(1)..=state_epoch + P::MinSeedLookahead::U64).contains(&epoch),
+        (state_epoch.saturating_sub(1)..=state_epoch.try_add(P::MinSeedLookahead::U64)?)
+            .contains(&epoch),
         Error::SlotOutOfRange,
     );
 
     // Yields 0 for the previous epoch and (1 + lookahead) * SLOTS_PER_EPOCH at most for future epochs.
     // saturating_sub is used to avoid underflow, but cannot saturate given the range check above.
-    let offset = (epoch + 1).saturating_sub(state_epoch) * P::SlotsPerEpoch::U64;
-    let index = offset + slot % P::SlotsPerEpoch::U64;
+    let offset = epoch
+        .try_add(1)?
+        .saturating_sub(state_epoch)
+        .try_mul(P::SlotsPerEpoch::U64)?;
+    let index = offset.try_add(slot % P::SlotsPerEpoch::non_zero())?;
 
     let state = state.post_gloas().ok_or(Error::InvalidPhase {
         error: anyhow!("get_ptc with pre-Gloas beacon state"),
@@ -1230,12 +1234,15 @@ pub fn is_valid_proposal_slot<P: Preset>(
     let current_epoch = get_current_epoch(state);
     let proposal_epoch = misc::compute_epoch_at_slot::<P>(preferences.proposal_slot);
 
-    if proposal_epoch < current_epoch || proposal_epoch > current_epoch + P::MinSeedLookahead::U64 {
+    if proposal_epoch < current_epoch
+        || proposal_epoch > current_epoch.saturating_add(P::MinSeedLookahead::U64)
+    {
         return false;
     }
 
-    let index = (proposal_epoch - current_epoch) * P::SlotsPerEpoch::U64
-        + (preferences.proposal_slot % P::SlotsPerEpoch::U64);
+    let index = (proposal_epoch.saturating_sub(current_epoch))
+        .saturating_mul(P::SlotsPerEpoch::U64)
+        .saturating_add(preferences.proposal_slot % P::SlotsPerEpoch::non_zero());
 
     post_fulu
         .proposer_lookahead()
@@ -1266,7 +1273,7 @@ pub fn get_upcoming_proposal_slots<P: Preset>(
         .into_iter()
         .enumerate()
         .filter_map(|(offset, proposer)| {
-            let slot = current_epoch_start + offset as u64;
+            let slot = current_epoch_start.saturating_add(offset as u64);
             if slot <= state.slot() {
                 return None;
             }
