@@ -73,7 +73,7 @@ impl<P: Preset> SlotHead<P> {
         accessors::get_beacon_proposer_index_at_slot(
             &self.config,
             &self.beacon_state,
-            self.slot() + 1,
+            self.slot().saturating_add(1),
         )
     }
 
