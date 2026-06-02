@@ -923,7 +923,7 @@ pub fn compute_balance_weighted_selection<P: Preset>(
     let mut i = 0u64;
 
     while selected.len() < size {
-        let offset = usize::try_from((i % 16) * 2)?;
+        let offset = usize::try_from((i % 16).try_mul(2)?)?;
 
         if offset == 0 {
             random_bytes = *hashing::hash_256_64(seed, i / 16).as_fixed_bytes();
@@ -945,7 +945,7 @@ pub fn compute_balance_weighted_selection<P: Preset>(
 
         let random_value = u64::from(u16::from_le_bytes([
             random_bytes[offset],
-            random_bytes[offset + 1],
+            random_bytes[offset.try_add(1)?],
         ]));
 
         let effective_balance = state
@@ -953,7 +953,9 @@ pub fn compute_balance_weighted_selection<P: Preset>(
             .get(candidate_index)
             .map(|validator| validator.effective_balance)?;
 
-        if effective_balance * max_random_value >= P::MAX_EFFECTIVE_BALANCE_ELECTRA * random_value {
+        if effective_balance.try_mul(max_random_value)?
+            >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
+        {
             selected.push(candidate_index);
         }
 
