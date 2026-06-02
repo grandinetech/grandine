@@ -1,16 +1,23 @@
 use anyhow::Result;
 use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
-use helper_functions::accessors::{get_beacon_proposer_indices, get_current_epoch, get_next_epoch};
+use helper_functions::{
+    accessors::{
+        self, get_activation_exit_churn_limit, get_beacon_proposer_indices, get_current_epoch,
+        get_next_epoch,
+    },
+    misc::compute_start_slot_at_epoch,
+};
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentVector, SszHash as _};
+use ssz::{PersistentList, PersistentVector, SszHash as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     capella::containers::HistoricalSummary,
     config::Config,
     fulu::beacon_state::BeaconState as FuluBeaconState,
+    phase0::{consts::FAR_FUTURE_EPOCH, primitives::Gwei},
     preset::Preset,
-    traits::{BeaconState, PostFuluBeaconState},
+    traits::{BeaconState, PostElectraBeaconState, PostFuluBeaconState},
 };
 
 use super::epoch_intermediates;
@@ -62,7 +69,7 @@ pub fn process_epoch(
     electra::process_registry_updates(config, state, summaries.as_mut_slice())?;
     electra::process_slashings::<_, ()>(state, summaries)?;
     unphased::process_eth1_data_reset(state)?;
-    electra::process_pending_deposits(config, pubkey_cache, state)?;
+    process_pending_deposits(config, pubkey_cache, state)?;
     electra::process_pending_consolidations(state)?;
     electra::process_effective_balance_updates(state)?;
     unphased::process_slashings_reset(state)?;
@@ -78,6 +85,91 @@ pub fn process_epoch(
     process_proposer_lookahead(config, state)?;
 
     state.cache.advance_epoch();
+
+    Ok(())
+}
+
+/// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/fulu/beacon-chain.md#modified-process_pending_deposits>
+///
+/// [Modified in Fulu:EIP6110] The Eth1-bridge guard is removed: deposits are no longer
+/// held back until `eth1_deposit_index` reaches `deposit_requests_start_index`.
+pub fn process_pending_deposits<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostElectraBeaconState<P>,
+) -> Result<()> {
+    let next_epoch = get_current_epoch(state).try_add(1)?;
+    let available_for_processing = state
+        .deposit_balance_to_consume()
+        .try_add(get_activation_exit_churn_limit(config, state))?;
+
+    let mut processed_amount: Gwei = 0;
+    let mut next_deposit_index: u64 = 0;
+    let mut deposits_to_postpone = vec![];
+    let mut is_churn_limit_reached = false;
+    let finalized_slot = compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
+
+    for deposit in &state.pending_deposits().clone() {
+        // > Check if deposit has been finalized, otherwise, stop processing.
+        if deposit.slot > finalized_slot {
+            break;
+        }
+
+        // > Check if number of processed deposits has not reached the limit, otherwise, stop processing.
+        if next_deposit_index >= P::MAX_PENDING_DEPOSITS_PER_EPOCH {
+            break;
+        }
+
+        let mut is_validator_exited = false;
+        let is_validator_withdrawn =
+            if let Some(validator_index) = accessors::index_of_public_key(state, &deposit.pubkey) {
+                let validator = state.validators().get(validator_index)?;
+
+                is_validator_exited = validator.exit_epoch < FAR_FUTURE_EPOCH;
+                validator.withdrawable_epoch < next_epoch
+            } else {
+                false
+            };
+
+        if is_validator_withdrawn {
+            // > Deposited balance will never become active. Increase balance but do not consume churn
+            electra::apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+        } else if is_validator_exited {
+            // > Validator is exiting, postpone the deposit until after withdrawable epoch
+            deposits_to_postpone.push(*deposit);
+        } else {
+            // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
+            is_churn_limit_reached =
+                processed_amount.try_add(deposit.amount)? > available_for_processing;
+
+            if is_churn_limit_reached {
+                break;
+            }
+
+            // > Consume churn and apply deposit.
+            processed_amount = processed_amount.try_add(deposit.amount)?;
+            electra::apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+        }
+
+        // > Regardless of how the deposit was handled, we move on in the queue.
+        next_deposit_index = next_deposit_index.try_add(1)?;
+    }
+
+    *state.pending_deposits_mut() = PersistentList::try_from_iter(
+        state
+            .pending_deposits()
+            .into_iter()
+            .copied()
+            .skip(next_deposit_index.try_into()?)
+            .chain(deposits_to_postpone),
+    )?;
+
+    if is_churn_limit_reached {
+        *state.deposit_balance_to_consume_mut() =
+            available_for_processing.try_sub(processed_amount)?;
+    } else {
+        *state.deposit_balance_to_consume_mut() = 0;
+    }
 
     Ok(())
 }
@@ -438,7 +530,7 @@ mod spec_tests {
 
     fn run_pending_deposits_case<P: Preset>(case: Case) {
         run_case::<P>(case, |pubkey_cache, state| {
-            electra::process_pending_deposits(&P::default_config(), pubkey_cache, state)
+            process_pending_deposits(&P::default_config(), pubkey_cache, state)
         });
     }
 

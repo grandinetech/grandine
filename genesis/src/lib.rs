@@ -259,6 +259,13 @@ impl<'config, P: Preset> Incremental<'config, P> {
 
         beacon_state.eth1_data_mut().block_hash = eth1_block_hash;
 
+        // > [New in Fulu:EIP6110] The Eth1 bridge transition is already complete at a
+        // > Fulu (or later) genesis, so mark its completion.
+        if let Some(state) = beacon_state.post_fulu_mut() {
+            let deposit_count = state.eth1_data().deposit_count;
+            *state.deposit_requests_start_index_mut() = deposit_count;
+        }
+
         // > Seed RANDAO with Eth1 entropy
         *beacon_state.randao_mixes_mut() = PersistentVector::repeat_element(eth1_block_hash);
 
