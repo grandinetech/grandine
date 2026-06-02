@@ -2,29 +2,35 @@ use anyhow::{Result, ensure};
 use arithmetic::UsizeExt as _;
 use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use helper_functions::{
-    accessors::{self, get_current_epoch, get_randao_mix},
+    accessors::{self, get_current_epoch, get_randao_mix, initialize_shuffled_indices},
     error::SignatureKind,
     misc::{compute_timestamp_at_slot, kzg_commitment_to_versioned_hash},
     signing::SignForSingleFork as _,
     slot_report::SlotReport,
-    verifier::{SingleVerifier, Verifier},
+    verifier::{SingleVerifier, Triple, Verifier},
 };
 use pubkey_cache::PubkeyCache;
+use rayon::iter::ParallelIterator as _;
 use ssz::{Hc, SszHash as _};
 use types::{
     combined::ExecutionPayloadParams,
     config::Config,
     deneb::containers::ExecutionPayloadHeader,
+    electra::containers::{DepositRequest, PendingDeposit},
     fulu::{
         beacon_state::BeaconState as FuluBeaconState,
         containers::{BeaconBlock, BeaconBlockBody, SignedBeaconBlock},
     },
     phase0::primitives::H256,
     preset::Preset,
+    traits::{
+        BlockBodyWithBlsToExecutionChanges, BlockBodyWithElectraAttestations,
+        PostElectraBeaconState,
+    },
 };
 
 use crate::{
-    altair, electra,
+    altair, capella, electra,
     unphased::{self, Error},
 };
 
@@ -133,8 +139,8 @@ pub fn custom_process_block<P: Preset>(
     unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
-    // > [Modified in Electra:EIP6110:EIP7002:EIP7549:EIP7251]
-    electra::process_operations(
+    // > [Modified in Fulu:EIP6110] (removes former deposit mechanism)
+    process_operations(
         config,
         pubkey_cache,
         state,
@@ -143,9 +149,9 @@ pub fn custom_process_block<P: Preset>(
         &mut slot_report,
     )?;
 
-    // > [New in Electra:EIP6110]
+    // > [Modified in Fulu:EIP6110]
     for deposit_request in &block.body.execution_requests.deposits {
-        electra::process_deposit_request(state, *deposit_request)?;
+        process_deposit_request(state, *deposit_request)?;
     }
 
     // > [New in Electra:EIP7002:EIP7251]
@@ -166,6 +172,142 @@ pub fn custom_process_block<P: Preset>(
         verifier,
         slot_report,
     )
+}
+
+/// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/fulu/beacon-chain.md#modified-process_operations>
+///
+/// [Modified in Fulu:EIP6110] The former (Eth1 bridge) deposit mechanism is removed:
+/// `body.deposits` must be empty and `process_deposit` is no longer applied.
+pub fn process_operations<P: Preset, V: Verifier, B>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostElectraBeaconState<P>,
+    body: &B,
+    mut verifier: V,
+    mut slot_report: impl SlotReport,
+) -> Result<()>
+where
+    B: BlockBodyWithElectraAttestations<P> + BlockBodyWithBlsToExecutionChanges<P>,
+{
+    // > [Modified in Fulu:EIP6110]
+    ensure!(
+        body.deposits().is_empty(),
+        Error::<P>::DepositCountMismatch {
+            computed: 0,
+            in_block: body.deposits().len().try_into()?,
+        },
+    );
+
+    for proposer_slashing in body.proposer_slashings().iter().copied() {
+        electra::process_proposer_slashing(
+            config,
+            pubkey_cache,
+            state,
+            proposer_slashing,
+            &mut verifier,
+            &mut slot_report,
+        )?;
+    }
+
+    for attester_slashing in body.attester_slashings() {
+        electra::process_attester_slashing(
+            config,
+            pubkey_cache,
+            state,
+            attester_slashing,
+            &mut verifier,
+            &mut slot_report,
+        )?;
+    }
+
+    if V::IS_NULL {
+        for attestation in body.attestations() {
+            electra::validate_attestation_with_verifier(
+                config,
+                pubkey_cache,
+                state,
+                attestation,
+                &mut verifier,
+            )?;
+        }
+    } else {
+        initialize_shuffled_indices(state, body.attestations().iter())?;
+
+        let triples = helper_functions::par_iter!(body.attestations())
+            .map(|attestation| {
+                let mut triple = Triple::default();
+
+                electra::validate_attestation_with_verifier(
+                    config,
+                    pubkey_cache,
+                    state,
+                    attestation,
+                    &mut triple,
+                )?;
+
+                Ok(triple)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        verifier.extend(triples, SignatureKind::Attestation)?;
+    }
+
+    for attestation in body.attestations() {
+        electra::apply_attestation(config, state, attestation, &mut slot_report)?;
+    }
+
+    // > [Modified in Fulu:EIP6110] Removed `process_deposit`
+
+    for voluntary_exit in body.voluntary_exits().iter().copied() {
+        electra::process_voluntary_exit(
+            config,
+            pubkey_cache,
+            state,
+            voluntary_exit,
+            &mut verifier,
+        )?;
+    }
+
+    for bls_to_execution_change in body.bls_to_execution_changes().iter().copied() {
+        capella::process_bls_to_execution_change(
+            config,
+            pubkey_cache,
+            state,
+            bls_to_execution_change,
+            &mut verifier,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/fulu/beacon-chain.md#modified-process_deposit_request>
+///
+/// [Modified in Fulu:EIP6110] No longer sets `deposit_requests_start_index`; only
+/// appends a `PendingDeposit`.
+pub fn process_deposit_request<P: Preset>(
+    state: &mut impl PostElectraBeaconState<P>,
+    deposit_request: DepositRequest,
+) -> Result<()> {
+    let DepositRequest {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+        ..
+    } = deposit_request;
+
+    let slot = state.slot();
+
+    state.pending_deposits_mut().push(PendingDeposit {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+        slot,
+    })?;
+
+    Ok(())
 }
 
 fn process_execution_payload_for_gossip<P: Preset>(
@@ -460,7 +602,7 @@ mod spec_tests {
 
     processing_tests! {
         process_deposit_request,
-        |_, _, state, deposit_request, _| electra::process_deposit_request(state, deposit_request),
+        |_, _, state, deposit_request, _| process_deposit_request(state, deposit_request),
         "deposit_request",
         "consensus-spec-tests/tests/mainnet/fulu/operations/deposit_request/*/*",
         "consensus-spec-tests/tests/minimal/fulu/operations/deposit_request/*/*",
