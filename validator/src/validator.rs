@@ -782,7 +782,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // Broadcast proposer preferences once per epoch
         if self.last_proposer_preferences_epoch != Some(current_epoch)
             && (slot_head.beacon_state.post_gloas().is_some()
-                || self.chain_config.gloas_fork_epoch == current_epoch + 1)
+                || self.chain_config.gloas_fork_epoch == current_epoch.saturating_add(1))
         {
             self.broadcast_proposer_preferences(&slot_head).await;
             self.last_proposer_preferences_epoch = Some(current_epoch);

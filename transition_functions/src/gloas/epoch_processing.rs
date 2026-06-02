@@ -105,11 +105,12 @@ fn process_pending_deposits<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
 ) -> Result<()> {
-    let next_epoch = get_current_epoch(state) + 1;
-    let available_for_processing =
-        state.deposit_balance_to_consume() + get_activation_churn_limit(config, state);
+    let next_epoch = get_current_epoch(state).try_add(1)?;
+    let available_for_processing = state
+        .deposit_balance_to_consume()
+        .try_add(get_activation_churn_limit(config, state))?;
 
-    let mut processed_amount = 0;
+    let mut processed_amount: u64 = 0;
     let mut next_deposit_index: u64 = 0;
     let mut deposits_to_postpone = vec![];
     let mut is_churn_limit_reached = false;
@@ -151,17 +152,18 @@ fn process_pending_deposits<P: Preset>(
             deposits_to_postpone.push(*deposit);
         } else {
             // > Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
-            is_churn_limit_reached = processed_amount + deposit.amount > available_for_processing;
+            is_churn_limit_reached =
+                processed_amount.try_add(deposit.amount)? > available_for_processing;
 
             if is_churn_limit_reached {
                 break;
             }
 
-            processed_amount += deposit.amount;
+            processed_amount = processed_amount.try_add(deposit.amount)?;
             apply_pending_deposit(config, pubkey_cache, state, deposit)?;
         }
 
-        next_deposit_index += 1;
+        next_deposit_index = next_deposit_index.try_add(1)?;
     }
 
     *state.pending_deposits_mut() = PersistentList::try_from_iter(
@@ -174,7 +176,8 @@ fn process_pending_deposits<P: Preset>(
     )?;
 
     if is_churn_limit_reached {
-        *state.deposit_balance_to_consume_mut() = available_for_processing - processed_amount;
+        *state.deposit_balance_to_consume_mut() =
+            available_for_processing.try_sub(processed_amount)?;
     } else {
         *state.deposit_balance_to_consume_mut() = 0;
     }

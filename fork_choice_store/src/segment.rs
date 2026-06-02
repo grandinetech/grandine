@@ -153,11 +153,16 @@ impl<P: Preset> Segment<P> {
             //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
             index_of_best = match block.parent_payload_presence() {
                 PayloadPresence::Empty
-                    if parent_empty + proposer_boost > parent_full || !parent_payload_verified =>
+                    if parent_empty.saturating_add(proposer_boost) > parent_full
+                        || !parent_payload_verified =>
                 {
                     index
                 }
-                PayloadPresence::Full if parent_empty <= parent_full + proposer_boost => index,
+                PayloadPresence::Full
+                    if parent_empty <= parent_full.saturating_add(proposer_boost) =>
+                {
+                    index
+                }
                 PayloadPresence::Pending => index,
                 _ => break,
             };
