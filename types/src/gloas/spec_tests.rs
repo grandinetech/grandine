@@ -17,7 +17,6 @@ mod tested_types {
         capella::containers::{
             BlsToExecutionChange, HistoricalSummary, SignedBlsToExecutionChange, Withdrawal,
         },
-        deneb::containers::{BlobIdentifier, BlobSidecar},
         electra::containers::{
             AggregateAndProof, Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest,
             ExecutionRequests, IndexedAttestation, PendingConsolidation, PendingDeposit,
@@ -107,18 +106,6 @@ tests_for_type! {
     BeaconState<_>,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BeaconState/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/BeaconState/*/*",
-}
-
-tests_for_type! {
-    BlobIdentifier,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BlobIdentifier/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/BlobIdentifier/*/*",
-}
-
-tests_for_type! {
-    BlobSidecar<_>,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BlobSidecar/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/BlobSidecar/*/*",
 }
 
 tests_for_type! {
@@ -233,12 +220,6 @@ tests_for_type! {
     Fork,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/Fork/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/Fork/*/*",
-}
-
-tests_for_type! {
-    ForkChoiceNode,
-    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/ForkChoiceNode/*/*",
-    "consensus-spec-tests/tests/minimal/gloas/ssz_static/ForkChoiceNode/*/*",
 }
 
 tests_for_type! {

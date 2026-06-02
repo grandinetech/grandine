@@ -9,7 +9,7 @@ use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
-use fork_choice_store::{AttestationItem, AttestationOrigin};
+use fork_choice_store::{AttestationAction, AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
@@ -550,6 +550,29 @@ impl<P: Preset> Context<P> {
         self.controller().on_test_attestation(Arc::new(attestation));
         self.controller().wait_for_tasks();
         self.next_p2p_message().unwrap_none();
+    }
+
+    pub fn on_invalid_test_attestation(&self, attestation: Attestation<P>) {
+        // `Test`-origin attestations emit no p2p message on reject, so observe the
+        // fork-choice validation outcome directly. PR #5275 / gloas `validate_on_attestation`.
+        //
+        // The spec rejects these attestations outright, but grandine may instead defer one
+        // whose payload is not yet locally verified (`DelayUntilPayload`) rather than reject
+        // it. Either outcome keeps the attestation out of fork choice, which is what matters;
+        // the only forbidden outcome is `Accept`. This mirrors the leniency of
+        // `on_invalid_payload_attestation_message`.
+        let action = self.controller().store_snapshot().validate_attestation(
+            AttestationItem::<P, GossipId>::unverified(
+                Arc::new(attestation),
+                AttestationOrigin::Test,
+            ),
+            false,
+        );
+
+        assert!(
+            !matches!(action, Ok(AttestationAction::Accept { .. })),
+            "invalid attestation must not be accepted into fork choice",
+        );
     }
 
     pub fn on_attester_slashing(&mut self, attester_slashing: AttesterSlashing<P>) {

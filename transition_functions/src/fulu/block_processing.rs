@@ -260,7 +260,6 @@ mod spec_tests {
     use core::fmt::Debug;
 
     use anyhow::Result;
-    use arithmetic::U64Ext as _;
     use execution_engine::MockExecutionEngine;
     use helper_functions::{
         slot_report::NullSlotReport,
@@ -273,9 +272,7 @@ mod spec_tests {
     use types::{
         deneb::containers::ExecutionPayload,
         electra::containers::{Attestation, AttesterSlashing},
-        phase0::containers::Deposit,
         preset::{Mainnet, Minimal},
-        traits::BeaconState as _,
     };
 
     use super::*;
@@ -426,28 +423,6 @@ mod spec_tests {
         "address_change",
         "consensus-spec-tests/tests/mainnet/fulu/operations/bls_to_execution_change/*/*",
         "consensus-spec-tests/tests/minimal/fulu/operations/bls_to_execution_change/*/*",
-    }
-
-    processing_tests! {
-        process_deposit,
-        |config, pubkey_cache, state, deposit, _| process_deposit(config, pubkey_cache, state, deposit),
-        "deposit",
-        "consensus-spec-tests/tests/mainnet/fulu/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/fulu/operations/deposit/*/*",
-    }
-
-    // `process_deposit_data` reimplements deposit validation differently for performance reasons,
-    // so we need to test it separately.
-    processing_tests! {
-        process_deposit_data,
-        |config, pubkey_cache, state, deposit, _| {
-            unphased::verify_deposit_merkle_branch(state, state.eth1_deposit_index, deposit)?;
-            electra::process_deposit_data(config, pubkey_cache, state, deposit.data)?;
-            Ok(())
-        },
-        "deposit",
-        "consensus-spec-tests/tests/mainnet/fulu/operations/deposit/*/*",
-        "consensus-spec-tests/tests/minimal/fulu/operations/deposit/*/*",
     }
 
     processing_tests! {
@@ -680,20 +655,5 @@ mod spec_tests {
         }
 
         electra::apply_attestation(config, state, attestation, NullSlotReport)
-    }
-
-    fn process_deposit<P: Preset>(
-        config: &Config,
-        pubkey_cache: &PubkeyCache,
-        state: &mut FuluBeaconState<P>,
-        deposit: Deposit,
-    ) -> Result<()> {
-        let combined_deposits =
-            unphased::validate_deposits(config, pubkey_cache, state, core::iter::once(deposit))?;
-
-        // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() = state.eth1_deposit_index_mut().try_add(1)?;
-
-        electra::apply_deposits(state, combined_deposits, NullSlotReport)
     }
 }
