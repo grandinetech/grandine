@@ -417,6 +417,19 @@ impl<P: Preset> BeaconState<P> {
         }
     }
 
+    pub fn post_fulu_mut(&mut self) -> Option<&mut dyn PostFuluBeaconState<P>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_) => None,
+            Self::Fulu(state) => Some(state),
+            Self::Gloas(state) => Some(state),
+        }
+    }
+
     #[expect(clippy::same_name_method)]
     pub fn post_gloas(&self) -> Option<&dyn PostGloasBeaconState<P>> {
         match self {

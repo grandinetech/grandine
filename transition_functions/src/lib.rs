@@ -199,20 +199,17 @@ pub mod electra {
     };
 
     pub(crate) use block_processing::{
-        apply_deposits, process_attester_slashing, process_block, process_block_for_gossip,
-        process_consolidation_request, process_deposit_data, process_deposit_request,
-        process_operations, process_withdrawal_request, process_withdrawals,
+        apply_attestation, apply_deposits, process_attester_slashing, process_block,
+        process_block_for_gossip, process_consolidation_request, process_deposit_data,
+        process_deposit_request, process_operations, process_proposer_slashing,
+        process_withdrawal_request, process_withdrawals,
     };
     pub(crate) use epoch_processing::{
         apply_pending_deposit, epoch_report, process_effective_balance_updates, process_epoch,
-        process_pending_consolidations, process_pending_deposits, process_registry_updates,
-        process_slashings,
+        process_pending_consolidations, process_registry_updates, process_slashings,
     };
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
-
-    #[cfg(test)]
-    pub(crate) use block_processing::{apply_attestation, process_proposer_slashing};
 
     mod blinded_block_processing;
     mod block_processing;
