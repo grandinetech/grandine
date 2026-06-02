@@ -4331,7 +4331,9 @@ where
 
             gossip_ids.extend(
                 payload_attestations
-                    .extract_if(.., |pending| pending.data().slot - 1 <= finalized_slot)
+                    .extract_if(.., |pending| {
+                        pending.data().slot.saturating_sub(1) <= finalized_slot
+                    })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
 

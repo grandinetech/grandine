@@ -8,7 +8,6 @@ use std::{
         BTreeMap, HashSet as StdHashSet,
         binary_heap::{BinaryHeap, PeekMut},
     },
-    ops::{AddAssign as _, SubAssign as _},
     sync::{Arc, OnceLock},
 };
 
@@ -861,7 +860,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> u8 {
         let block_root = chain_link.block_root;
 
-        if chain_link.slot() + 1 == self.slot() {
+        if chain_link.slot().saturating_add(1) == self.slot() {
             if self.should_extend_payload(block_root) {
                 PAYLOAD_STATUS_FULL
             } else {
@@ -1188,7 +1187,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let committee_weight = total_active_balance / P::SlotsPerEpoch::non_zero();
 
-        committee_weight * committee_percent / 100
+        committee_weight.saturating_mul(committee_percent) / 100
     }
 
     fn is_head_weak(&self, head_root: H256) -> Result<bool> {
@@ -1223,20 +1222,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let head_state = head.state(self);
 
             for committee in accessors::beacon_committees(&head_state, head.slot())? {
-                head_weight += committee
-                    .into_iter()
-                    .filter(|validator_index| self.equivocating_indices.contains(validator_index))
-                    .map(|validator_index| {
-                        let index: usize = validator_index
-                            .try_into()
-                            .expect("validator index should fit into usize");
+                head_weight = head_weight.saturating_add(
+                    committee
+                        .into_iter()
+                        .filter(|validator_index| {
+                            self.equivocating_indices.contains(validator_index)
+                        })
+                        .map(|validator_index| {
+                            let index: usize = validator_index
+                                .try_into()
+                                .expect("validator index should fit into usize");
 
-                        self.justified_active_balances
-                            .get(index)
-                            .copied()
-                            .unwrap_or_default()
-                    })
-                    .sum::<Gwei>();
+                            self.justified_active_balances
+                                .get(index)
+                                .copied()
+                                .unwrap_or_default()
+                        })
+                        .sum::<Gwei>(),
+                );
             }
         }
 
@@ -1254,7 +1257,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
-        if parent.slot() + 1 < chain_link.slot() {
+        if parent.slot().saturating_add(1) < chain_link.slot() {
             return true;
         }
 
@@ -1310,7 +1313,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // by comparing two first blocks in those competing segments.
         // In-segment best block is selected in `Segment::best_block` method.
         let parent_attestation_score = if let Some(parent) = parent
-            && parent.slot() + 1 != self.slot()
+            && parent.slot().saturating_add(1) != self.slot()
         {
             let parent_payload_verified = self.is_payload_verified(parent.block_root());
 
@@ -2000,7 +2003,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
 
         if proposal_epoch < current_epoch
-            || proposal_epoch > current_epoch + P::MinSeedLookahead::U64
+            || proposal_epoch > current_epoch.saturating_add(P::MinSeedLookahead::U64)
         {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
@@ -3621,7 +3624,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             // > Check that the attestation is for the previous slot
-            if data.slot + 1 != state.slot() {
+            if data.slot.saturating_add(1) != state.slot() {
                 return Err(
                     PayloadAttestationValidationError::BlockPayloadAttestationInvalidSlot {
                         in_state: state.slot(),
@@ -3853,8 +3856,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ))?;
             let tick_index: u64 = self.tick.kind as u64;
 
-            (tick_index + 1) * BASIS_POINTS
-                <= self.chain_config.attestation_due_bps_gloas * ticks_per_slot
+            (tick_index.saturating_add(1)).saturating_mul(BASIS_POINTS)
+                <= self
+                    .chain_config
+                    .attestation_due_bps_gloas
+                    .saturating_mul(ticks_per_slot)
         } else {
             self.tick.is_before_attesting_interval()
         };
@@ -4129,13 +4135,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let differences_entry = differences.entry(latest_message.root).or_default();
 
-            differences_entry.pending.sub_assign(balance);
+            differences_entry.pending = differences_entry.pending.saturating_sub(balance);
 
             if latest_message.post_gloas::<P>(&self.chain_config) {
                 if latest_message.payload_present {
-                    differences_entry.full.sub_assign(balance);
+                    differences_entry.full = differences_entry.full.saturating_sub(balance);
                 } else {
-                    differences_entry.empty.sub_assign(balance);
+                    differences_entry.empty = differences_entry.empty.saturating_sub(balance);
                 }
             }
         }
@@ -4849,7 +4855,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     let differences_entry = differences.entry(old_root).or_default();
 
                     // Subtract balance from node for previous vote
-                    differences_entry.pending.sub_assign(balance);
+                    differences_entry.pending = differences_entry.pending.saturating_sub(balance);
 
                     // Subtract balance from node for previous vote for its payload status
                     if old_message.post_gloas::<P>(&self.chain_config)
@@ -4857,9 +4863,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         && chain_link.slot() < old_slot
                     {
                         if old_payload_present {
-                            differences_entry.full.sub_assign(balance);
+                            differences_entry.full = differences_entry.full.saturating_sub(balance);
                         } else {
-                            differences_entry.empty.sub_assign(balance);
+                            differences_entry.empty =
+                                differences_entry.empty.saturating_sub(balance);
                         }
                     }
                 }
@@ -4867,7 +4874,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let differences_entry = differences.entry(root).or_default();
 
                 // Add balance to node for the new vote
-                differences_entry.pending.add_assign(balance);
+                differences_entry.pending = differences_entry.pending.saturating_add(balance);
 
                 // Add balance to node for the new vote for its payload status
                 if latest_message.post_gloas::<P>(&self.chain_config)
@@ -4875,9 +4882,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     && chain_link.slot() < slot
                 {
                     if payload_present {
-                        differences_entry.full.add_assign(balance);
+                        differences_entry.full = differences_entry.full.saturating_add(balance);
                     } else {
-                        differences_entry.empty.add_assign(balance);
+                        differences_entry.empty = differences_entry.empty.saturating_add(balance);
                     }
                 }
 
@@ -5063,14 +5070,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     if first_block.chain_link.parent_root() == last_finalized_block_root {
                         // Block is descended from finalized block - propagate balance
                         // differences to the last finalized block
-                        last_finalized_differences.pending += previous.differences.pending;
+                        last_finalized_differences.pending = last_finalized_differences
+                            .pending
+                            .saturating_add(previous.differences.pending);
 
                         match first_block.parent_payload_presence() {
                             PayloadPresence::Empty => {
-                                last_finalized_differences.empty += previous.differences.pending;
+                                last_finalized_differences.empty = last_finalized_differences
+                                    .empty
+                                    .saturating_add(previous.differences.pending);
                             }
                             PayloadPresence::Full => {
-                                last_finalized_differences.full += previous.differences.pending;
+                                last_finalized_differences.full = last_finalized_differences
+                                    .full
+                                    .saturating_add(previous.differences.pending);
                             }
                             PayloadPresence::Pending => {}
                         }
