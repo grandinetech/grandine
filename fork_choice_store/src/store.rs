@@ -897,8 +897,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return true;
         }
 
-        // Force a reorg of the payload if the PTC voted the blob data unavailable.
+        // Force a reorg of the payload if the PTC voted the blob data unavailable
+        // or late payload.
+        // See <https://github.com/ethereum/consensus-specs/pull/5210>.
         !self.payload_data_availability(head.block_root, false)
+            && !self.payload_timeliness(head.block_root, false)
     }
 
     pub fn should_extend_payload(&self, block_root: H256) -> bool {
