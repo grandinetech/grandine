@@ -17,7 +17,7 @@ use types::{
     capella::containers::HistoricalSummary,
     config::Config,
     gloas::{beacon_state::BeaconState, containers::BuilderPendingPayment},
-    phase0::consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
+    phase0::consts::FAR_FUTURE_EPOCH,
     preset::{BuilderPendingPaymentsLength, Preset},
     traits::{BeaconState as _, PostElectraBeaconState, PostGloasBeaconState},
 };
@@ -117,13 +117,6 @@ fn process_pending_deposits<P: Preset>(
     let finalized_slot = misc::compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
 
     for deposit in &state.pending_deposits().clone() {
-        // > Do not process deposit requests if Eth1 bridge deposits are not yet applied.
-        if deposit.slot > GENESIS_SLOT
-            && state.eth1_deposit_index() < state.deposit_requests_start_index()
-        {
-            break;
-        }
-
         // > Check if deposit has been finalized, otherwise, stop processing.
         if deposit.slot > finalized_slot {
             break;
