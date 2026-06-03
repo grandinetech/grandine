@@ -35,7 +35,7 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, Participation, Phase, RelativeEpoch},
+    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::{AttestationData, Validator},
@@ -1068,7 +1068,7 @@ pub fn get_beacon_proposer_indices<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
 ) -> Result<Vec<ValidatorIndex>> {
-    let exclude_slashed = config.phase_at_epoch(epoch) >= Phase::Gloas;
+    let exclude_slashed = state.is_post_gloas();
 
     let indices = get_filtered_active_validator_indices_by_epoch(state, epoch, |validator| {
         !(exclude_slashed && validator.slashed)
