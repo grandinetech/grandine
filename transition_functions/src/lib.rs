@@ -199,10 +199,10 @@ pub mod electra {
     };
 
     pub(crate) use block_processing::{
-        apply_attestation, apply_deposits, process_attester_slashing, process_block,
-        process_block_for_gossip, process_consolidation_request, process_deposit_data,
-        process_deposit_request, process_operations, process_proposer_slashing,
-        process_withdrawal_request, process_withdrawals,
+        apply_attestation, process_attester_slashing, process_block, process_block_for_gossip,
+        process_consolidation_request, process_deposit_data, process_deposit_request,
+        process_operations, process_proposer_slashing, process_withdrawal_request,
+        process_withdrawals,
     };
     pub(crate) use epoch_processing::{
         apply_pending_deposit, epoch_report, process_effective_balance_updates, process_epoch,
