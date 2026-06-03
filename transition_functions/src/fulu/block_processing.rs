@@ -10,6 +10,7 @@ use helper_functions::{
     verifier::{SingleVerifier, Triple, Verifier},
 };
 use pubkey_cache::PubkeyCache;
+#[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
 use ssz::{Hc, SszHash as _};
 use types::{
