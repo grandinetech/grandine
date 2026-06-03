@@ -174,10 +174,6 @@ pub fn custom_process_block<P: Preset>(
     )
 }
 
-/// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/fulu/beacon-chain.md#modified-process_operations>
-///
-/// [Modified in Fulu:EIP6110] The former (Eth1 bridge) deposit mechanism is removed:
-/// `body.deposits` must be empty and `process_deposit` is no longer applied.
 pub fn process_operations<P: Preset, V: Verifier, B>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -255,8 +251,6 @@ where
     for attestation in body.attestations() {
         electra::apply_attestation(config, state, attestation, &mut slot_report)?;
     }
-
-    // > [Modified in Fulu:EIP6110] Removed `process_deposit`
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {
         electra::process_voluntary_exit(

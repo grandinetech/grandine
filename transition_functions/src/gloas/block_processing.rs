@@ -57,7 +57,7 @@ use types::{
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{AttestationData, ProposerSlashing, SignedVoluntaryExit},
-        primitives::{DepositIndex, Epoch, ExecutionAddress, Gwei},
+        primitives::{Epoch, ExecutionAddress, Gwei},
     },
     preset::{BuilderPendingPaymentsLength, Preset, SlotsPerHistoricalRoot},
     traits::{
@@ -814,7 +814,6 @@ pub fn process_execution_payload_bid<P: Preset>(
     Ok(())
 }
 
-#[expect(clippy::too_many_lines)]
 pub fn process_operations<P: Preset, V: Verifier, B>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -828,32 +827,14 @@ where
         + BlockBodyWithBlsToExecutionChanges<P>
         + BlockBodyWithPayloadAttestations<P>,
 {
-    // > [Modified in Electra:EIP6110]
-    // > Disable former deposit mechanism once all prior deposits are processed
-    let eth1_deposit_index_limit = state
-        .eth1_data()
-        .deposit_count
-        .min(state.deposit_requests_start_index());
-
-    let in_block = body.deposits().len().try_into()?;
-
-    if state.eth1_deposit_index() < eth1_deposit_index_limit {
-        let computed =
-            P::MaxDeposits::U64.min(eth1_deposit_index_limit.try_sub(state.eth1_deposit_index())?);
-
-        ensure!(
-            computed == in_block,
-            Error::<P>::DepositCountMismatch { computed, in_block },
-        );
-    } else {
-        ensure!(
-            in_block == 0,
-            Error::<P>::DepositCountMismatch {
-                computed: 0,
-                in_block
-            },
-        );
-    }
+    // > [Modified in Fulu:EIP6110]
+    ensure!(
+        body.deposits().is_empty(),
+        Error::<P>::DepositCountMismatch {
+            computed: 0,
+            in_block: body.deposits().len().try_into()?,
+        },
+    );
 
     for proposer_slashing in body.proposer_slashings().iter().copied() {
         process_proposer_slashing(
@@ -918,26 +899,6 @@ where
 
     for attestation in body.attestations() {
         apply_attestation(config, state, attestation, &mut slot_report)?;
-    }
-
-    // The conditional is not needed for correctness.
-    // It only serves to avoid overhead when processing blocks with no deposits.
-    if !body.deposits().is_empty() {
-        let combined_deposits = unphased::validate_deposits(
-            config,
-            pubkey_cache,
-            state,
-            body.deposits().iter().copied(),
-        )?;
-
-        let deposit_count = body.deposits().len();
-
-        // > Deposits must be processed in order
-        *state.eth1_deposit_index_mut() = state
-            .eth1_deposit_index_mut()
-            .try_add(DepositIndex::try_from(deposit_count)?)?;
-
-        electra::apply_deposits(state, combined_deposits, slot_report)?;
     }
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {
