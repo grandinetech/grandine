@@ -2736,9 +2736,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     let upcoming_slots =
                         accessors::get_upcoming_proposal_slots(&beacon_state, validator_index)
                             .into_iter()
-                            .filter(|&slot| {
-                                misc::compute_epoch_at_slot::<P>(slot) == target_epoch
-                            })
+                            .filter(|&slot| misc::compute_epoch_at_slot::<P>(slot) == target_epoch)
                             .collect_vec();
 
                     if upcoming_slots.is_empty() {
