@@ -784,7 +784,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             && (slot_head.beacon_state.post_gloas().is_some()
                 || self.chain_config.gloas_fork_epoch == current_epoch.saturating_add(1))
         {
-            self.broadcast_proposer_preferences(current_epoch).await;
+            self.broadcast_proposer_preferences(&slot_head).await;
             self.last_proposer_preferences_epoch = Some(current_epoch);
         }
 
@@ -2711,19 +2711,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// Broadcasts proposer preferences for the next epoch's slots where we are proposing.
     #[instrument(level = "debug", skip_all)]
-    async fn broadcast_proposer_preferences(&self, current_epoch: Epoch) {
+    async fn broadcast_proposer_preferences(&self, slot_head: &SlotHead<P>) {
         let chain_config = self.chain_config.clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
         let p2p_tx = self.p2p_tx.clone();
-        let beacon_state = self.controller.head_state().value;
+        let beacon_state = slot_head.beacon_state.clone_arc();
         let controller = self.controller.clone_arc();
-
-        let target_epoch = if chain_config.gloas_fork_epoch == current_epoch.saturating_add(1) {
-            chain_config.gloas_fork_epoch
-        } else {
-            current_epoch
-        };
 
         tokio::spawn(async move {
             let signer_snapshot = signer.load();
@@ -2734,10 +2728,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .filter_map(|pubkey| {
                     let validator_index = accessors::index_of_public_key(&beacon_state, &pubkey)?;
                     let upcoming_slots =
-                        accessors::get_upcoming_proposal_slots(&beacon_state, validator_index)
-                            .into_iter()
-                            .filter(|&slot| misc::compute_epoch_at_slot::<P>(slot) == target_epoch)
-                            .collect_vec();
+                        accessors::get_upcoming_proposal_slots(&beacon_state, validator_index);
 
                     if upcoming_slots.is_empty() {
                         return None;
