@@ -26,7 +26,7 @@ use futures::{
 use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
-use logging::{error_with_peers, info_with_peers, warn_with_peers};
+use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, PoolAdditionOutcome,
     PoolAttestation, PoolRejectionReason, SyncCommitteeAggPool,
@@ -1822,14 +1822,20 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 })
             }
             BeaconState::Gloas(state) => {
+                let head_root = self.head_block_root;
                 let target_gas_limit = self.gas_limit()?;
-                let parent_root = state.latest_block_header().hash_tree_root();
                 let snapshot = self.producer_context.controller.snapshot();
 
                 let withdrawals = if snapshot.should_build_on_full()
                     && let Some(envelope) =
-                        snapshot.cached_execution_payload_envelope_by_root(parent_root)
+                        snapshot.cached_execution_payload_envelope_by_root(head_root)
                 {
+                    debug_with_peers!(
+                        "applying parent execution payload from envelope for payload attributes \
+                         preparation (head slot: {}, head root: {head_root:?})",
+                        state.slot(),
+                    );
+
                     let mut state_copy = state.clone();
 
                     gloas::apply_parent_execution_payload(
@@ -1843,12 +1849,20 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 } else if state.latest_execution_payload_bid().block_hash
                     == state.latest_block_hash()
                 {
-                    // Fork-boundary case: the parent is a pre-Gloas block, so there is no
-                    // Gloas envelope to apply, but `upgrade_to_gloas` initialized the state
-                    // with `latest_execution_payload_bid.block_hash == latest_block_hash`,
-                    // so the block's `process_withdrawals` will run normally. Mirror it.
+                    debug_with_peers!(
+                        "fork boundary case for payload attributes preparation \
+                            (head slot: {}, head root: {head_root:?})",
+                        state.slot(),
+                    );
+
                     gloas::get_expected_withdrawals(state)?.0
                 } else {
+                    debug_with_peers!(
+                        "using expected withdrawals from the beacon state for payload attributes preparation, \
+                         falling back to direct state access (head slot: {}, head root: {head_root:?})",
+                        state.slot(),
+                    );
+
                     state
                         .payload_expected_withdrawals()
                         .into_iter()
@@ -1866,7 +1880,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     prev_randao,
                     suggested_fee_recipient,
                     withdrawals,
-                    parent_beacon_block_root: parent_root,
+                    parent_beacon_block_root: state.latest_block_header().hash_tree_root(),
                     slot_number: state.slot(),
                     target_gas_limit,
                 })
