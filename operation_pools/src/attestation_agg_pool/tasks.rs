@@ -493,7 +493,7 @@ fn acceptable_attestation_targets_for_packing<'a, P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     dependent_root: H256,
     dependent_root_epoch: Epoch,
-    attestations: impl IntoIterator<Item = &'a Attestation<P>>,
+    attestations: impl IntoIterator<Item = &'a PoolAttestation<P>>,
 ) -> HashSet<H256> {
     attestations
         .into_iter()
