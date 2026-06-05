@@ -416,7 +416,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route("/eth/v1/beacon/blocks", post(publish_block));
 
     let execution_payload_routes = Router::new().route(
-        "/eth/v1/beacon/execution_payload_bid",
+        "/eth/v1/beacon/execution_payload_bids",
         post(publish_execution_payload_bid),
     );
 
@@ -487,7 +487,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         )
         .route("/eth/v1/beacon/blobs/{block_id}", get(blobs))
         .route(
-            "/eth/v1/beacon/execution_payload_envelope/{block_id}",
+            "/eth/v1/beacon/execution_payload_envelopes/{block_id}",
             get(execution_payload_envelope),
         )
         .route("/eth/v1/beacon/genesis", get(genesis))
@@ -622,7 +622,7 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             post(validator_sync_committee_selections),
         )
         .route(
-            "/eth/v1/validator/execution_payload_bid/{slot}/{builder_index}",
+            "/eth/v1/validator/execution_payload_bids/{slot}/{builder_index}",
             get(validator_execution_payload_bid),
         )
         .route(
