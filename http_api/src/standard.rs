@@ -1407,7 +1407,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         .version(version))
 }
 
-/// `GET /eth/v1/beacon/execution_payload_envelope/{block_id}`
+/// `GET /eth/v1/beacon/execution_payload_envelopes/{block_id}`
 ///
 /// Beacon API source:
 /// <https://github.com/ethereum/beacon-APIs/commit/e25942758161fe82009a20f2d3b1868e0ff611d8>
@@ -1817,7 +1817,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     }
 }
 
-/// `POST /eth/v1/beacon/execution_payload_bid`
+/// `POST /eth/v1/beacon/execution_payload_bids`
 pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
@@ -3659,7 +3659,7 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
     Ok(EthResponse::json(data))
 }
 
-/// `GET /eth/v1/validator/execution_payload_bid/{slot}/{builder_index}`
+/// `GET /eth/v1/validator/execution_payload_bids/{slot}/{builder_index}`
 pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
