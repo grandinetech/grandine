@@ -5337,7 +5337,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             &self.chain_config,
             self.slot(),
         ))
-        .unwrap_or(u64::MAX);
+        .expect("number of ticks per slot should fit in u64");
         let tick_index = self.tick.kind as u64;
 
         (tick_index.saturating_add(1)).saturating_mul(BASIS_POINTS)
