@@ -733,15 +733,6 @@ pub fn upgrade_to_fulu<P: Preset>(
         epoch,
     };
 
-    // > [Modified in Fulu:EIP6110] The Eth1 bridge transition is complete before the
-    // > Fulu fork, so mark its completion if it has not already been set.
-    let deposit_requests_start_index =
-        if deposit_requests_start_index == UNSET_DEPOSIT_REQUESTS_START_INDEX {
-            eth1_data.deposit_count
-        } else {
-            deposit_requests_start_index
-        };
-
     Ok(FuluBeaconState {
         // > Versioning
         genesis_time,
