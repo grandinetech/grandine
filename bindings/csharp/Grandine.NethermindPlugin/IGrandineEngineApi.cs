@@ -18,7 +18,7 @@ public interface IGrandineEngineApi
 
     unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3(CForkChoiceStateV1 state, COption_CPayloadAttributesV3* payload);
 
-    CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4(CForkChoiceStateV1 state, COption_CPayloadAttributesV4 payload);
+    unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4(CForkChoiceStateV1 state, COption_CPayloadAttributesV4* payload);
 
     CResult_CExecutionPayloadV1 EngineGetPayloadV1(CH64 payloadId);
 
@@ -29,6 +29,8 @@ public interface IGrandineEngineApi
     CResult_CEngineGetPayloadV4Response EngineGetPayloadV4(CH64 payloadId);
 
     CResult_CEngineGetPayloadV5Response EngineGetPayloadV5(CH64 payloadId);
+
+    CResult_CEngineGetPayloadV6Response EngineGetPayloadV6(CH64 payloadId);
 
     unsafe CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1(CVec_CH256* versionedHashes);
 
