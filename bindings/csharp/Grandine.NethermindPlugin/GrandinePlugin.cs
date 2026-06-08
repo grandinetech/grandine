@@ -34,7 +34,7 @@ public class GrandinePlugin(IGrandineConfig grandineConfig) : INethermindPlugin
     public Task Init(INethermindApi nethermindApi)
     {
         this.api = nethermindApi;
-        this.logger = nethermindApi.LogManager.GetClassLogger();
+        this.logger = nethermindApi.LogManager.GetClassLogger<GrandinePlugin>();
         this.logger.Info("Initializing grandine plugin...");
 
         var configInterface = typeof(IGrandineConfig);

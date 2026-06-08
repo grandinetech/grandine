@@ -127,6 +127,35 @@ public unsafe partial struct CExecutionPayloadV3
     }
 }
 
+public unsafe partial struct CExecutionPayloadV4
+{
+    public CExecutionPayloadV4(ExecutionPayload payload)
+    {
+        var blockAccessList = payload.BlockAccessList ?? throw new ArgumentException("ExecutionPayload.BlockAccessList must not be null", nameof(payload));
+        var withdrawals = payload.Withdrawals ?? throw new ArgumentException("ExecutionPayload.Withdrawals must not be null", nameof(payload));
+
+        this.slot_number = payload.SlotNumber ?? throw new ArgumentException("ExecutionPayload.SlotNumber must not be null", nameof(payload));
+        this.blob_gas_used = (ulong)(payload.BlobGasUsed ?? throw new ArgumentException("ExecutionPayload.BlobGasUsed must not be null", nameof(payload)));
+        this.excess_blob_gas = (ulong)(payload.ExcessBlobGas ?? throw new ArgumentException("ExecutionPayload.ExcessBlobGas must not be null", nameof(payload)));
+        this.block_access_list = new CVec_u8(blockAccessList);
+        this.withdrawals = GrandineUtils.WithdrawalsToNative(withdrawals);
+        this.parent_hash = new CH256(payload.ParentHash);
+        this.fee_recipient = new CH160(payload.FeeRecipient);
+        this.state_root = new CH256(payload.StateRoot);
+        this.receipts_root = new CH256(payload.ReceiptsRoot);
+        this.logs_bloom = GrandineUtils.ConvertLogsBloom(payload.LogsBloom);
+        this.prev_randao = new CH256(payload.PrevRandao);
+        this.block_number = (ulong)payload.BlockNumber;
+        this.gas_limit = (ulong)payload.GasLimit;
+        this.gas_used = (ulong)payload.GasUsed;
+        this.timestamp = payload.Timestamp;
+        this.extra_data = new CVec_u8(payload.ExtraData);
+        this.base_fee_per_gas = new CH256(payload.BaseFeePerGas);
+        this.block_hash = new CH256(payload.BlockHash);
+        this.transactions = GrandineUtils.TransactionsFromBytes(payload.Transactions);
+    }
+}
+
 public unsafe partial struct CEngineGetPayloadV2Response
 {
     public CEngineGetPayloadV2Response(GetPayloadV2Result result)
@@ -166,6 +195,19 @@ public unsafe partial struct CEngineGetPayloadV5Response
     {
         var requests = result.ExecutionRequests ?? throw new ArgumentException("GetPayloadV5Result.ExecutionRequests must not be null", nameof(result));
         this.execution_payload = new CExecutionPayloadV3(result.ExecutionPayload);
+        this.execution_requests = new CExecutionRequests(requests);
+        this.block_value = new CH256(result.BlockValue);
+        this.blobs_bundle = new CBlobsBundleV1(result.BlobsBundle);
+        this.should_override_builder = result.ShouldOverrideBuilder;
+    }
+}
+
+public unsafe partial struct CEngineGetPayloadV6Response
+{
+    public CEngineGetPayloadV6Response(GetPayloadV6Result result)
+    {
+        var requests = result.ExecutionRequests ?? throw new ArgumentException("GetPayloadV6Result.ExecutionRequests must not be null", nameof(result));
+        this.execution_payload = new CExecutionPayloadV4(result.ExecutionPayload);
         this.execution_requests = new CExecutionRequests(requests);
         this.block_value = new CH256(result.BlockValue);
         this.blobs_bundle = new CBlobsBundleV1(result.BlobsBundle);
@@ -976,6 +1018,15 @@ public unsafe partial struct CResult_CVec_COption_CBlobAndProofV1
     public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
 
     public static CResult_CVec_COption_CBlobAndProofV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
+}
+
+public unsafe partial struct CResult_CEngineGetPayloadV6Response
+{
+    public static CResult_CEngineGetPayloadV6Response Success(CEngineGetPayloadV6Response value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
+
+    public static CResult_CEngineGetPayloadV6Response Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
+
+    public static CResult_CEngineGetPayloadV6Response Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
 public unsafe partial struct CResult_CEngineGetPayloadV5Response
