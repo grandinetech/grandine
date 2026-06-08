@@ -28,7 +28,7 @@ internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpda
 internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV3Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV3* attributes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-internal delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV4 attributes);
+internal unsafe delegate CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4Delegate(CForkChoiceStateV1 state, COption_CPayloadAttributesV4* attributes);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate CResult_CExecutionPayloadV1 EngineGetPayloadV1Delegate(CH64 payloadId);
@@ -44,6 +44,9 @@ internal delegate CResult_CEngineGetPayloadV4Response EngineGetPayloadV4Delegate
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate CResult_CEngineGetPayloadV5Response EngineGetPayloadV5Delegate(CH64 payloadId);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate CResult_CEngineGetPayloadV6Response EngineGetPayloadV6Delegate(CH64 payloadId);
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal unsafe delegate CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1Delegate(CVec_CH256* versionedHashes);
@@ -74,6 +77,7 @@ public class GrandineClient : IAsyncDisposable
     private readonly EngineGetPayloadV3Delegate engineGetPayloadV3;
     private readonly EngineGetPayloadV4Delegate engineGetPayloadV4;
     private readonly EngineGetPayloadV5Delegate engineGetPayloadV5;
+    private readonly EngineGetPayloadV6Delegate engineGetPayloadV6;
     private readonly EngineGetBlobsV1Delegate engineGetBlobsV1;
     private readonly EngineGetBlobsV2Delegate engineGetBlobsV2;
     private readonly EngineExchangeCapabilitiesDelegate engineExchangeCapabilities;
@@ -107,6 +111,7 @@ public class GrandineClient : IAsyncDisposable
             this.engineGetPayloadV3 = this.engineApi.EngineGetPayloadV3;
             this.engineGetPayloadV4 = this.engineApi.EngineGetPayloadV4;
             this.engineGetPayloadV5 = this.engineApi.EngineGetPayloadV5;
+            this.engineGetPayloadV6 = this.engineApi.EngineGetPayloadV6;
             this.engineGetBlobsV1 = this.engineApi.EngineGetBlobsV1;
             this.engineGetBlobsV2 = this.engineApi.EngineGetBlobsV2;
             this.engineExchangeCapabilities = this.engineApi.EngineExchangeCapabilities;
@@ -124,6 +129,7 @@ public class GrandineClient : IAsyncDisposable
             IntPtr engine_getPayloadV3Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV3);
             IntPtr engine_getPayloadV4Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV4);
             IntPtr engine_getPayloadV5Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV5);
+            IntPtr engine_getPayloadV6Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetPayloadV6);
             IntPtr engine_getBlobsV1Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetBlobsV1);
             IntPtr engine_getBlobsV2Ptr = Marshal.GetFunctionPointerForDelegate(this.engineGetBlobsV2);
             IntPtr engine_exchangeCapabilitiesPtr = Marshal.GetFunctionPointerForDelegate(this.engineExchangeCapabilities);
@@ -143,6 +149,7 @@ public class GrandineClient : IAsyncDisposable
                 engine_get_payload_v3 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV3Response>)engine_getPayloadV3Ptr,
                 engine_get_payload_v4 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV4Response>)engine_getPayloadV4Ptr,
                 engine_get_payload_v5 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV5Response>)engine_getPayloadV5Ptr,
+                engine_get_payload_v6 = (delegate* unmanaged[Cdecl]<CH64, CResult_CEngineGetPayloadV6Response>)engine_getPayloadV6Ptr,
                 engine_get_blobs_v1 = (delegate* unmanaged[Cdecl]<CVec_CH256*, CResult_CVec_COption_CBlobAndProofV1>)engine_getBlobsV1Ptr,
                 engine_get_blobs_v2 = (delegate* unmanaged[Cdecl]<CVec_CH256*, CResult_COption_CVec_CBlobAndProofV2>)engine_getBlobsV2Ptr,
                 engine_exchange_capabilities = (delegate* unmanaged[Cdecl]<CVec_CGrandineString*, CResult_CVec_CGrandineString>)engine_exchangeCapabilitiesPtr,

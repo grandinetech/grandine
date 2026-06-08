@@ -260,7 +260,7 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
-    public CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4(CForkChoiceStateV1 state, COption_CPayloadAttributesV4 payload)
+    public unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV4(CForkChoiceStateV1 state, COption_CPayloadAttributesV4* payloadPtr)
     {
         this.logger.Debug("Received engine_forkchoiceUpdatedV4 request from grandine");
 
@@ -268,7 +268,7 @@ public class GrandineEngineApi : IGrandineEngineApi
         {
             var forkchoiceUpdatedResult = this.engineRpc.engine_forkchoiceUpdatedV4(
                 state.ToForkchoiceStateV1(),
-                GrandineUtils.ConvertPayloadAttributes(payload)).Result;
+                GrandineUtils.ConvertPayloadAttributes(*payloadPtr)).Result;
 
             return forkchoiceUpdatedResult.Result != Result.Success
                 ? CResult_CForkChoiceUpdatedResponse.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, forkchoiceUpdatedResult.Result.Error)
@@ -413,6 +413,33 @@ public class GrandineEngineApi : IGrandineEngineApi
         {
             this.logger.Error("Unexpected exception occurred during engine_getPayloadV5 function invocation", e);
             return CResult_CEngineGetPayloadV5Response.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
+    public CResult_CEngineGetPayloadV6Response EngineGetPayloadV6(CH64 payloadId)
+    {
+        this.logger.Debug("Received engine_getPayloadV6 request from grandine");
+
+        try
+        {
+            var payload = this.engineRpc.engine_getPayloadV6(payloadId.ToArray()).Result;
+
+            if (payload.Result != Result.Success)
+            {
+                return CResult_CEngineGetPayloadV6Response.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, payload.Result.Error);
+            }
+
+            if (payload.Data == null)
+            {
+                return CResult_CEngineGetPayloadV6Response.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, "payload not found");
+            }
+
+            return CResult_CEngineGetPayloadV6Response.Success(new CEngineGetPayloadV6Response(payload.Data));
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_getPayloadV6 function invocation", e);
+            return CResult_CEngineGetPayloadV6Response.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
         }
     }
 
