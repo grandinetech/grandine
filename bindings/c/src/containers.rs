@@ -5,9 +5,10 @@ use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, ForkChoiceStateV1,
-    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4,
-    PayloadStatusV1, PayloadValidationStatus, RawExecutionRequests, RequestType, WithdrawalV1,
+    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2,
+    PayloadAttributesV3, PayloadAttributesV4, PayloadStatusV1, PayloadValidationStatus,
+    RawExecutionRequests, RequestType, WithdrawalV1,
 };
 use generic_array::ArrayLength;
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite};
@@ -259,6 +260,66 @@ impl TryInto<ExecutionPayloadV3<Mainnet>> for CExecutionPayloadV3 {
 
 #[derive(Debug)]
 #[repr(C)]
+pub struct CExecutionPayloadV4 {
+    parent_hash: CH256,
+    fee_recipient: CH160,
+    state_root: CH256,
+    receipts_root: CH256,
+    logs_bloom: CVec<u8>,
+    prev_randao: CH256,
+    block_number: u64,
+    gas_limit: u64,
+    gas_used: u64,
+    timestamp: u64,
+    extra_data: CVec<u8>,
+    base_fee_per_gas: CH256,
+    block_hash: CH256,
+    transactions: CVec<CTransaction>,
+    withdrawals: CVec<CWithdrawalV1>,
+    blob_gas_used: u64,
+    excess_blob_gas: u64,
+    block_access_list: CVec<u8>,
+    slot_number: u64,
+}
+
+impl TryInto<ExecutionPayloadV4<Mainnet>> for CExecutionPayloadV4 {
+    type Error = ssz::ReadError;
+
+    fn try_into(self) -> Result<ExecutionPayloadV4<Mainnet>, Self::Error> {
+        let transactions = self
+            .transactions
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ExecutionPayloadV4 {
+            parent_hash: self.parent_hash.into(),
+            fee_recipient: self.fee_recipient.into(),
+            state_root: self.state_root.into(),
+            receipts_root: self.receipts_root.into(),
+            logs_bloom: self.logs_bloom.try_into()?,
+            prev_randao: self.prev_randao.into(),
+            block_number: self.block_number.into(),
+            gas_limit: self.gas_limit,
+            gas_used: self.gas_used,
+            timestamp: self.timestamp,
+            extra_data: Arc::new(self.extra_data.try_into()?),
+            base_fee_per_gas: self.base_fee_per_gas.into(),
+            block_hash: self.block_hash.into(),
+            transactions: Arc::new(ContiguousList::try_from(transactions)?),
+            withdrawals: ContiguousList::try_from_iter(
+                self.withdrawals.into_iter().map(Into::into),
+            )?,
+            blob_gas_used: self.blob_gas_used,
+            excess_blob_gas: self.excess_blob_gas,
+            block_access_list: Arc::new(self.block_access_list.try_into()?),
+            slot_number: self.slot_number,
+        })
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
 pub struct CEngineGetPayloadV2Response {
     execution_payload: CExecutionPayloadV2,
     block_value: CH256,
@@ -338,6 +399,30 @@ impl TryInto<EngineGetPayloadV5Response<Mainnet>> for CEngineGetPayloadV5Respons
 
     fn try_into(self) -> Result<EngineGetPayloadV5Response<Mainnet>, Self::Error> {
         Ok(EngineGetPayloadV5Response {
+            execution_payload: self.execution_payload.try_into()?,
+            block_value: self.block_value.into(),
+            blobs_bundle: self.blobs_bundle.try_into()?,
+            should_override_builder: self.should_override_builder,
+            execution_requests: self.execution_requests.try_into()?,
+        })
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CEngineGetPayloadV6Response {
+    pub execution_payload: CExecutionPayloadV4,
+    block_value: CH256,
+    blobs_bundle: CBlobsBundleV1,
+    should_override_builder: bool,
+    execution_requests: CExecutionRequests,
+}
+
+impl TryInto<EngineGetPayloadV6Response<Mainnet>> for CEngineGetPayloadV6Response {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<EngineGetPayloadV6Response<Mainnet>, Self::Error> {
+        Ok(EngineGetPayloadV6Response {
             execution_payload: self.execution_payload.try_into()?,
             block_value: self.block_value.into(),
             blobs_bundle: self.blobs_bundle.try_into()?,
