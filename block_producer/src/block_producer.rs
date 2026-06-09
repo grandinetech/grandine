@@ -1205,8 +1205,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
-        let should_build_payload = self.should_build_local_payload();
-
         let mut payload_with_data = None;
         if let Some(handle) = local_execution_payload_handle {
             payload_with_data = handle
@@ -1228,14 +1226,15 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         } = match payload_with_data {
             Some(payload_with_mev_and_versions) => payload_with_mev_and_versions,
             None => {
-                let has_no_payload = if self.beacon_state.is_post_gloas() {
-                    should_build_payload
-                } else {
-                    self.beacon_state.post_capella().is_some()
-                        || post_merge_state(&self.beacon_state).is_some()
-                };
+                // In ePBS (post-Gloas) the payload is decoupled from the beacon block, so a
+                // missing local payload is not fatal here: it is handled below by skipping
+                // self-build (and the proposal) rather than erroring. Before Gloas a post-merge
+                // block must carry a payload, so its absence is an error.
+                let payload_required = !self.beacon_state.is_post_gloas()
+                    && (self.beacon_state.post_capella().is_some()
+                        || post_merge_state(&self.beacon_state).is_some());
 
-                if has_no_payload {
+                if payload_required {
                     return Err(AnyhowError::msg("no execution payload to include in block"));
                 }
 
@@ -1245,7 +1244,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut without_state_root_with_payload =
             if let Some(state) = self.beacon_state.post_gloas() {
-                let signed_payload_bid = if should_build_payload {
+                let signed_payload_bid = if self.should_build_local_payload() {
                     self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
                         .await?
                 } else {
@@ -1270,7 +1269,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     }
                 };
 
-                block_without_state_root.with_signed_execution_payload_bid(signed_payload_bid)
+                let Some(signed_payload_bid) = signed_payload_bid else {
+                    return Ok(None);
+                };
+
+                block_without_state_root.with_signed_execution_payload_bid(Some(signed_payload_bid))
             } else {
                 block_without_state_root
                     .with_execution_payload(execution_payload)?
