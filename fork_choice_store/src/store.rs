@@ -4232,6 +4232,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn apply_execution_payload_envelope(
         &mut self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        is_before_deadline: bool,
     ) {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
@@ -4239,7 +4240,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.payloads.insert(beacon_block_root);
 
-        if self.is_before_due_bps_deadline(self.chain_config.payload_due_bps) {
+        if is_before_deadline {
             self.timely_payloads.insert(beacon_block_root);
         }
 
@@ -5332,7 +5333,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     // Return whether the current tick is before the deadline defined by `due_bps`
     // basis points into the slot.
-    fn is_before_due_bps_deadline(&self, due_bps: u64) -> bool {
+    pub fn is_before_due_bps_deadline(&self, due_bps: u64) -> bool {
         let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(
             &self.chain_config,
             self.slot(),
