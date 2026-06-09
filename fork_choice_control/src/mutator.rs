@@ -61,7 +61,10 @@ use types::{
     },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
-    gloas::containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
+    gloas::{
+        consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL, PAYLOAD_STATUS_PENDING},
+        containers::{PayloadEnvelopeIdentifier, SignedExecutionPayloadEnvelope},
+    },
     nonstandard::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
@@ -2018,9 +2021,16 @@ where
                 let block_hash = envelope.message.payload.block_hash;
                 let should_send_gossip_event = origin.should_send_gossip_event();
                 let should_generate_event = origin.should_generate_event();
+                let is_before_deadline = self
+                    .store
+                    .is_before_due_bps_deadline(self.store.chain_config().payload_due_bps);
 
                 debug_with_peers!(
-                    "execution payload envelope accepted (beacon_block_root: {beacon_block_root:?}, slot: {slot})"
+                    "execution payload envelope accepted (\
+                        block root: {beacon_block_root:?}, \
+                        slot: {slot}, \
+                        is before deadline: {is_before_deadline} \
+                    )",
                 );
 
                 if should_generate_event {
@@ -2048,7 +2058,7 @@ where
                     Ok(ValidationOutcome::Accept),
                 );
 
-                self.accept_execution_payload_envelope(&wait_group, envelope);
+                self.accept_execution_payload_envelope(&wait_group, envelope, is_before_deadline);
 
                 if should_generate_event
                     && let Some(chain_link) = self.store.chain_link(beacon_block_root)
@@ -3297,10 +3307,12 @@ where
         &mut self,
         wait_group: &W,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        is_before_deadline: bool,
     ) {
         let beacon_block_root = envelope.block_root();
 
-        self.store_mut().apply_execution_payload_envelope(envelope);
+        self.store_mut()
+            .apply_execution_payload_envelope(envelope, is_before_deadline);
 
         self.update_store_snapshot();
 
@@ -3492,7 +3504,9 @@ where
     }
 
     fn notify_forkchoice_updated(&self, new_head: &ChainLink<P>) {
-        let new_head_state = new_head.state(&self.store);
+        let store = &self.store;
+
+        let new_head_state = new_head.state(store);
 
         let Some(state) = new_head_state.post_bellatrix() else {
             return;
@@ -3502,15 +3516,36 @@ where
             return;
         }
 
-        let safe_block_hash = self.store.safe_execution_payload_hash();
-        let finalized_block_hash = self.store.finalized_execution_payload_hash();
+        let safe_block_hash = store.safe_execution_payload_hash();
+        let finalized_block_hash = store.finalized_execution_payload_hash();
 
-        let head_block_hash =
-            if let Some(post_gloas_state) = new_head.state(&self.store).post_gloas() {
-                post_gloas_state.latest_block_hash()
-            } else {
-                state.latest_execution_payload_header().block_hash()
-            };
+        let head_block_hash = if let Some(post_gloas_state) = new_head.state(store).post_gloas() {
+            post_gloas_state.latest_block_hash()
+        } else {
+            state.latest_execution_payload_header().block_hash()
+        };
+
+        if store.phase() >= Phase::Gloas {
+            let head_root = new_head.block_root;
+
+            debug_with_peers!(
+                "fork choice head at slot {}: {head_root:?} (\
+                    block hash: {head_block_hash:?}, \
+                    payload status: {:?}, \
+                    payload verified: {}, \
+                    payload timely: {}\
+                )",
+                new_head.slot(),
+                match store.head_with_payload_status().1 {
+                    PAYLOAD_STATUS_EMPTY => "EMPTY",
+                    PAYLOAD_STATUS_FULL => "FULL",
+                    PAYLOAD_STATUS_PENDING => "PENDING",
+                    _ => "",
+                },
+                store.is_payload_verified(head_root),
+                store.is_payload_present_timely(head_root),
+            );
+        }
 
         self.execution_engine.notify_forkchoice_updated(
             head_block_hash,
