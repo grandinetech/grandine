@@ -3680,19 +3680,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(PayloadAttestationAction::Ignore(payload_attestation));
         }
 
-        let chain = match payload_attestation.origin {
-            PayloadAttestationOrigin::Block(origin_block) => self.chain_link(origin_block),
-            _ => Some(self.head()),
-        };
+        let state = match payload_attestation.origin {
+            PayloadAttestationOrigin::Block(origin_block) => {
+                let Some(origin_chain_link) = self.chain_link(origin_block) else {
+                    return Ok(PayloadAttestationAction::DelayUntilBlock(
+                        payload_attestation,
+                        origin_block,
+                    ));
+                };
 
-        let Some(chain) = chain else {
-            return Ok(PayloadAttestationAction::DelayUntilBlock(
-                payload_attestation,
-                block_root,
-            ));
+                origin_chain_link.state(self)
+            }
+            _ => chain_link.state(self),
         };
-
-        let state = chain.state(self);
 
         if payload_attestation.origin.is_from_block() {
             let parent_root = state.latest_block_header().parent_root;
