@@ -1339,6 +1339,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         chain_link.epoch() < self.current_epoch()
     }
 
+    const fn is_previous_slot_payload_decision(
+        &self,
+        slot: Slot,
+        payload_presence: PayloadPresence,
+    ) -> bool {
+        let is_previous_slot = slot.saturating_add(1) == self.slot();
+        let is_payload_decision = matches!(
+            payload_presence,
+            PayloadPresence::Empty | PayloadPresence::Full
+        );
+
+        is_previous_slot && is_payload_decision
+    }
+
     /// Like [`get_weight`], but returns the full [`Score`] of a block including the tiebreaker.
     ///
     /// [`get_weight`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_weight
@@ -1348,6 +1362,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         parent: Option<&UnfinalizedBlock<P>>,
         apply_proposer_boost: bool,
     ) -> Score {
+        let parent_payload_presence = unfinalized_block.parent_payload_presence();
+
         // Since Gloas, when comparing two competing blocks,
         // first Score parameter is their parents' empty/full node score.
         // I.e. if parent with an empty payload has highier score than with full,
@@ -1356,11 +1372,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // by comparing two first blocks in those competing segments.
         // In-segment best block is selected in `Segment::best_block` method.
         let parent_attestation_score = if let Some(parent) = parent
-            && parent.slot().saturating_add(1) != self.slot()
+            && !self.is_previous_slot_payload_decision(parent.slot(), parent_payload_presence)
         {
             let parent_payload_verified = self.is_payload_verified(parent.block_root());
 
-            match unfinalized_block.parent_payload_presence() {
+            match parent_payload_presence {
                 PayloadPresence::Empty => parent.attesting_balances.empty,
                 PayloadPresence::Full if parent_payload_verified => parent.attesting_balances.full,
                 PayloadPresence::Full | PayloadPresence::Pending => 0,
