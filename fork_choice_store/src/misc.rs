@@ -142,7 +142,7 @@ pub struct AttestingBalances {
 }
 
 impl AttestingBalances {
-    pub fn add_differences(
+    pub fn apply_differences(
         mut self,
         block_root: H256,
         payload_presence: Option<PayloadPresence>,
@@ -158,22 +158,10 @@ impl AttestingBalances {
 
         match payload_presence {
             Some(PayloadPresence::Empty) => {
-                self.empty = checked_add_balance(
-                    block_root,
-                    payload_presence,
-                    EMPTY,
-                    self.empty,
-                    differences.pending,
-                )?;
+                self.empty = self.pending;
             }
             Some(PayloadPresence::Full) => {
-                self.full = checked_add_balance(
-                    block_root,
-                    payload_presence,
-                    FULL,
-                    self.full,
-                    differences.pending,
-                )?;
+                self.full = self.pending;
             }
             Some(PayloadPresence::Pending) => {}
             None => {
