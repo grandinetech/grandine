@@ -1207,11 +1207,6 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 
     #[must_use]
-    pub fn should_extend_payload(&self, block_root: H256) -> bool {
-        self.store_snapshot.should_extend_payload(block_root)
-    }
-
-    #[must_use]
     pub fn should_build_on_full(&self) -> bool {
         self.store_snapshot.should_build_on_full()
     }
