@@ -4990,7 +4990,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // Apply balance differences for the last finalized block
         if last_finalized_differences.non_zero() {
-            let new_balances = match self.last_finalized_attesting_balances().add_differences(
+            let new_balances = match self.last_finalized_attesting_balances().apply_differences(
                 self.last_finalized().block_root,
                 None,
                 last_finalized_differences,
@@ -5033,7 +5033,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 for unfinalized_block in segment.iter_mut_range_rev(start..=end) {
                     // TODO(Grandine Team): Investigate and fix issue why balances become negative
 
-                    let new_balances = match unfinalized_block.attesting_balances.add_differences(
+                    let new_balances = match unfinalized_block.attesting_balances.apply_differences(
                         unfinalized_block.block_root(),
                         payload_presence,
                         differences,
