@@ -8,18 +8,14 @@ use derive_more::Debug;
 #[cfg(not(target_os = "zkvm"))]
 use im::{
     Vector,
-    hashset::HashSet,
     vector::{Iter, IterMut},
 };
 #[cfg(target_os = "zkvm")]
 use std::vec::Vec as Vector;
 use thiserror::Error;
-use types::{
-    phase0::primitives::{Gwei, H256, Slot},
-    preset::Preset,
-};
+use types::{phase0::primitives::Slot, preset::Preset};
 
-use crate::misc::{ChainLink, PayloadPresence, UnfinalizedBlock};
+use crate::misc::{ChainLink, UnfinalizedBlock};
 
 #[derive(Clone, Debug)]
 pub struct Segment<P: Preset> {
@@ -118,59 +114,6 @@ impl<P: Preset> Segment<P> {
     #[must_use]
     pub fn last_non_invalid_block(&self) -> Option<&UnfinalizedBlock<P>> {
         self.blocks.iter().rev().find(|block| block.non_invalid())
-    }
-
-    // Select the latest block with most votes in segment
-    #[must_use]
-    pub fn best_block(
-        &self,
-        proposer_boost: Gwei,
-        verified_payloads: &HashSet<H256>,
-    ) -> Option<&UnfinalizedBlock<P>> {
-        let mut index_of_best = 0;
-        let mut parent = self.first_block();
-
-        if parent.is_invalid() {
-            return None;
-        }
-
-        for (index, block) in self.blocks.iter().enumerate().skip(1) {
-            if block.is_invalid() {
-                break;
-            }
-
-            let parent_empty = parent.attesting_balances.empty;
-            let parent_full = parent.attesting_balances.full;
-            let parent_payload_verified = verified_payloads.contains(&parent.block_root());
-
-            // Only proceed selecting the child block if:
-            // - it's indicating that it is the child of parent with no payload
-            //   and the parent has more votes that for its empty payload state,
-            //   or parent does not actually have a payload state in store;
-            // - it's indicating that is the child of parent with payload,
-            //   and parent does not have more votes for its empty payload state;
-            // - it's a child of parent with "pending" payload
-            //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
-            index_of_best = match block.parent_payload_presence() {
-                PayloadPresence::Empty
-                    if parent_empty.saturating_add(proposer_boost) > parent_full
-                        || !parent_payload_verified =>
-                {
-                    index
-                }
-                PayloadPresence::Full
-                    if parent_empty <= parent_full.saturating_add(proposer_boost) =>
-                {
-                    index
-                }
-                PayloadPresence::Pending => index,
-                _ => break,
-            };
-
-            parent = block;
-        }
-
-        Some(&self.blocks[index_of_best])
     }
 
     #[must_use]
