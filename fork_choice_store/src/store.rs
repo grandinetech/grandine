@@ -1032,14 +1032,66 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let has_boosted_block = last_block.block_root() == self.proposer_boost_root;
 
-        let applied_proposer_score = if has_boosted_block && self.should_apply_proposer_boost() {
+        let proposer_boost = if has_boosted_block && self.should_apply_proposer_boost() {
             self.timely_proposer_score()
         } else {
             0
         };
 
-        self.head_segment()?
-            .best_block(applied_proposer_score, &self.payloads)
+        let head_segment = self.head_segment()?;
+
+        let mut parent = head_segment.first_block();
+
+        if parent.is_invalid() {
+            return None;
+        }
+
+        for block in head_segment.into_iter().skip(1) {
+            if block.is_invalid() {
+                break;
+            }
+
+            let parent_payload_presence = block.parent_payload_presence();
+
+            if self.is_previous_slot_payload_decision(parent.slot(), parent_payload_presence) {
+                let should_extend_payload = self.should_extend_payload(parent.block_root());
+
+                match parent_payload_presence {
+                    PayloadPresence::Full if !should_extend_payload => break,
+                    _ => {}
+                }
+            } else {
+                let parent_empty = parent.attesting_balances.empty;
+                let parent_full = parent.attesting_balances.full;
+                let parent_payload_verified = self.payloads.contains(&parent.block_root());
+
+                // Only proceed selecting the child block if:
+                // - it's indicating that it is the child of parent with no payload
+                //   or the parent has more votes for its empty payload state;
+                // - it's indicating that is the child of parent with payload,
+                //   and parent does not have more votes for its empty payload state;
+                // - it's a child of parent with "pending" payload
+                //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
+                match parent_payload_presence {
+                    PayloadPresence::Empty
+                        if parent_payload_verified
+                            && parent_empty.saturating_add(proposer_boost) <= parent_full =>
+                    {
+                        break;
+                    }
+                    PayloadPresence::Full
+                        if parent_empty > parent_full.saturating_add(proposer_boost) =>
+                    {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            parent = block;
+        }
+
+        Some(parent)
     }
 
     fn head_segment(&self) -> Option<&Segment<P>> {
@@ -1370,7 +1422,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // it does not matter if full node has a child with high score.
         // Remember, this is only used to choose one of two competing segments
         // by comparing two first blocks in those competing segments.
-        // In-segment best block is selected in `Segment::best_block` method.
+        // In-segment best block is selected in `unfinalized_head` method.
         let parent_attestation_score = if let Some(parent) = parent
             && !self.is_previous_slot_payload_decision(parent.slot(), parent_payload_presence)
         {
