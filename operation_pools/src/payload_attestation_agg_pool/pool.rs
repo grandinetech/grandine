@@ -16,7 +16,7 @@ use typenum::Unsigned as _;
 use types::{
     combined::BeaconState,
     gloas::containers::{PayloadAttestation, PayloadAttestationData, PayloadAttestationMessage},
-    phase0::primitives::Slot,
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 
@@ -125,12 +125,13 @@ impl<P: Preset> Pool<P> {
     pub async fn aggregate_payload_attestations(
         &self,
         slot: Slot,
+        beacon_block_root: H256,
     ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
         self.aggregates
             .read()
             .await
             .iter()
-            .filter(|(data, _)| data.slot == slot)
+            .filter(|(data, _)| data.slot == slot && data.beacon_block_root == beacon_block_root)
             .map(|(data, aggregate)| async {
                 let Aggregate {
                     aggregation_bits,
@@ -171,5 +172,45 @@ impl<P: Preset> Pool<P> {
             .entry(data)
             .or_default()
             .clone_arc()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use types::preset::Minimal;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn aggregate_payload_attestations_filters_by_block_root() -> Result<()> {
+        let pool = Pool::<Minimal>::new();
+        let root_a = H256::repeat_byte(1);
+        let root_b = H256::repeat_byte(2);
+        let slot = 5;
+
+        let data = |beacon_block_root| PayloadAttestationData {
+            beacon_block_root,
+            slot,
+            payload_present: true,
+            blob_data_available: true,
+        };
+
+        pool.pool_aggregate(data(root_a)).await;
+        pool.pool_aggregate(data(root_b)).await;
+
+        let only_a = pool
+            .aggregate_payload_attestations(slot, root_a)
+            .await?
+            .to_vec();
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].data.beacon_block_root, root_a);
+
+        let none = pool
+            .aggregate_payload_attestations(slot + 1, root_a)
+            .await?
+            .to_vec();
+        assert!(none.is_empty());
+
+        Ok(())
     }
 }
