@@ -2398,9 +2398,10 @@ pub async fn pool_payload_attestations<P: Preset, W: Wait>(
 ) -> Result<EthResponse<Vec<PayloadAttestation<P>>>, Error> {
     let slot = query.slot.unwrap_or_else(|| controller.slot());
     let phase = controller.chain_config().phase_at_slot::<P>(slot);
+    let beacon_block_root = controller.head_block_root().value;
 
     let data = payload_attestation_agg_pool
-        .aggregate_payload_attestations(slot)
+        .aggregate_payload_attestations(slot, beacon_block_root)
         .await?
         .to_vec();
 
