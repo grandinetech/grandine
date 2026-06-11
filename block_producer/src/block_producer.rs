@@ -1493,7 +1493,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         self.producer_context
             .payload_attestation_agg_pool
-            .aggregate_payload_attestations(message_slot)
+            .aggregate_payload_attestations(message_slot, self.head_block_root)
             .await
     }
 

@@ -21,7 +21,7 @@ use types::{
     combined::BeaconState,
     config::Config,
     gloas::containers::{PayloadAttestation, PayloadAttestationMessage},
-    phase0::primitives::Slot,
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 
@@ -63,10 +63,12 @@ impl<P: Preset, W: Wait> Manager<P, W> {
     pub async fn aggregate_payload_attestations(
         &self,
         slot: Slot,
+        beacon_block_root: H256,
     ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
         self.spawn_task(AggregatePayloadAttestationsTask {
             pool: self.pool.clone_arc(),
             slot,
+            beacon_block_root,
         })
         .await
     }
