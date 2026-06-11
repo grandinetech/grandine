@@ -1058,6 +1058,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 match parent_payload_presence {
                     PayloadPresence::Full if !should_extend_payload => break,
+                    PayloadPresence::Empty if should_extend_payload => break,
                     _ => {}
                 }
             } else {
@@ -5094,6 +5095,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let start = start.unwrap_or_else(|| segment.first_position());
 
                 let mut payload_presence = last_block_payload_presence;
+                let mut current_differences = differences;
 
                 // Balance updates within a single segment can be easily parallelized with Rayon,
                 // but it adds enough overhead to slow down block processing by around 10% even with
@@ -5104,7 +5106,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     let new_balances = match unfinalized_block.attesting_balances.apply_differences(
                         unfinalized_block.block_root(),
                         payload_presence,
-                        differences,
+                        current_differences,
                     ) {
                         Ok(balances) => balances,
                         Err(error) => {
@@ -5115,7 +5117,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     };
 
                     unfinalized_block.attesting_balances = new_balances;
-                    payload_presence = Some(unfinalized_block.parent_payload_presence());
+
+                    let parent_payload_presence = unfinalized_block.parent_payload_presence();
+
+                    payload_presence = Some(parent_payload_presence);
+
+                    match parent_payload_presence {
+                        PayloadPresence::Empty => {
+                            current_differences.empty = current_differences.pending;
+                            current_differences.full = 0;
+                        }
+                        PayloadPresence::Full => {
+                            current_differences.empty = 0;
+                            current_differences.full = current_differences.pending;
+                        }
+                        PayloadPresence::Pending => {
+                            current_differences.empty = 0;
+                            current_differences.full = 0;
+                        }
+                    }
                 }
             }
         }
@@ -5185,11 +5205,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                              because previous difference always has greater location than current difference",
                         );
 
-                    // Current block's payload presence from in-segment child's perspective
-                    previous.last_block_payload_presence = Some(
-                        self.unfinalized[&segment_id][in_segment_child_position]
-                            .parent_payload_presence(),
-                    );
+                    let payload_presence = self.unfinalized[&segment_id]
+                        [in_segment_child_position]
+                        .parent_payload_presence();
+
+                    previous.last_block_payload_presence = Some(payload_presence);
+
+                    match payload_presence {
+                        PayloadPresence::Empty => {
+                            previous.differences.empty = previous.differences.pending;
+                            previous.differences.full = 0;
+                        }
+                        PayloadPresence::Full => {
+                            previous.differences.empty = 0;
+                            previous.differences.full = previous.differences.pending;
+                        }
+                        PayloadPresence::Pending => {
+                            previous.differences.empty = 0;
+                            previous.differences.full = 0;
+                        }
+                    }
 
                     previous.location.position = current.location.position;
                 }
@@ -5198,41 +5233,73 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     .differences
                     .pending
                     .saturating_add(current.differences.pending);
+                previous.differences.empty = previous
+                    .differences
+                    .empty
+                    .saturating_add(current.differences.empty);
+                previous.differences.full = previous
+                    .differences
+                    .full
+                    .saturating_add(current.differences.full);
             }
 
-            if previous.differences.pending != 0 {
+            if previous.differences.non_zero() {
                 propagated_and_dissolved_differences.push(previous.apply_from_start());
 
                 let segment = &self.unfinalized[&segment_id];
 
-                if let Some(parent) = self.parent_location(segment) {
-                    difference_queue.push(DifferenceAtLocation {
-                        differences: previous.differences,
-                        location: parent,
-                        last_block_payload_presence: previous.last_block_payload_presence,
-                    });
-                } else {
-                    let first_block = segment.first_block();
+                if previous.differences.pending != 0 {
+                    if let Some(parent) = self.parent_location(segment) {
+                        let first_block_presence =
+                            segment.first_block().parent_payload_presence();
 
-                    if first_block.chain_link.parent_root() == last_finalized_block_root {
-                        // Block is descended from finalized block - propagate balance
-                        // differences to the last finalized block
-                        last_finalized_differences.pending = last_finalized_differences
-                            .pending
-                            .saturating_add(previous.differences.pending);
+                        let propagated_differences = match first_block_presence {
+                            PayloadPresence::Empty => Differences {
+                                pending: previous.differences.pending,
+                                empty: previous.differences.pending,
+                                full: 0,
+                            },
+                            PayloadPresence::Full => Differences {
+                                pending: previous.differences.pending,
+                                empty: 0,
+                                full: previous.differences.pending,
+                            },
+                            PayloadPresence::Pending => Differences {
+                                pending: previous.differences.pending,
+                                empty: 0,
+                                full: 0,
+                            },
+                        };
 
-                        match first_block.parent_payload_presence() {
-                            PayloadPresence::Empty => {
-                                last_finalized_differences.empty = last_finalized_differences
-                                    .empty
-                                    .saturating_add(previous.differences.pending);
+                        difference_queue.push(DifferenceAtLocation {
+                            differences: propagated_differences,
+                            location: parent,
+                            last_block_payload_presence: Some(first_block_presence),
+                        });
+                    } else {
+                        let first_block = segment.first_block();
+
+                        if first_block.chain_link.parent_root() == last_finalized_block_root
+                        {
+                            last_finalized_differences.pending = last_finalized_differences
+                                .pending
+                                .saturating_add(previous.differences.pending);
+
+                            match first_block.parent_payload_presence() {
+                                PayloadPresence::Empty => {
+                                    last_finalized_differences.empty =
+                                        last_finalized_differences
+                                            .empty
+                                            .saturating_add(previous.differences.pending);
+                                }
+                                PayloadPresence::Full => {
+                                    last_finalized_differences.full =
+                                        last_finalized_differences
+                                            .full
+                                            .saturating_add(previous.differences.pending);
+                                }
+                                PayloadPresence::Pending => {}
                             }
-                            PayloadPresence::Full => {
-                                last_finalized_differences.full = last_finalized_differences
-                                    .full
-                                    .saturating_add(previous.differences.pending);
-                            }
-                            PayloadPresence::Pending => {}
                         }
                     }
                 }
