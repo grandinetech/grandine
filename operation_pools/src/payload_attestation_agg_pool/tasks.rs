@@ -9,7 +9,7 @@ use ssz::ContiguousList;
 use types::{
     combined::BeaconState,
     gloas::containers::{PayloadAttestation, PayloadAttestationData, PayloadAttestationMessage},
-    phase0::primitives::Slot,
+    phase0::primitives::{H256, Slot},
     preset::Preset,
 };
 
@@ -140,14 +140,20 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
 pub struct AggregatePayloadAttestationsTask<P: Preset> {
     pub pool: Arc<Pool<P>>,
     pub slot: Slot,
+    pub beacon_block_root: H256,
 }
 
 impl<P: Preset> PoolTask for AggregatePayloadAttestationsTask<P> {
     type Output = ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>;
 
     async fn run(self) -> Result<Self::Output> {
-        let Self { pool, slot } = self;
+        let Self {
+            pool,
+            slot,
+            beacon_block_root,
+        } = self;
 
-        pool.aggregate_payload_attestations(slot).await
+        pool.aggregate_payload_attestations(slot, beacon_block_root)
+            .await
     }
 }
