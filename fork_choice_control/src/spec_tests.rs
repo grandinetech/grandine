@@ -246,7 +246,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     // context.on_test_attestation(attestation);
                     context.on_valid_test_attestation(attestation, meta.bls_setting);
                 } else {
-                    context.on_invalid_test_attestation(attestation);
+                    context.on_invalid_test_attestation(attestation, meta.bls_setting);
                 }
             }
             Step::Block {

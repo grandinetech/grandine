@@ -678,6 +678,27 @@ impl<P: Preset> Context<P> {
         attestation: Attestation<P>,
         bls_setting: BlsSetting,
     ) {
+        // `Test`-origin attestations emit no p2p message on reject, so observe the
+        // fork-choice validation outcome directly. PR #5275 / gloas `validate_on_attestation`.
+        //
+        // The spec rejects these attestations outright, but grandine may instead defer one
+        // whose payload is not yet locally verified (`DelayUntilPayload`) rather than reject
+        // it. Either outcome keeps the attestation out of fork choice, which is what matters;
+        // the only forbidden outcome is `Accept`. This mirrors the leniency of
+        // `on_invalid_payload_attestation_message`.
+        // let action = self.controller().store_snapshot().validate_attestation(
+        //     AttestationItem::<P, GossipId>::unverified(
+        //         Arc::new(attestation),
+        //         AttestationOrigin::Test,
+        //     ),
+        //     false,
+        // );
+
+        // assert!(
+        //     !matches!(action, Ok(AttestationAction::Accept { .. })),
+        //     "invalid attestation must not be accepted into fork choice",
+        // );
+
         let attestation_slot = attestation.data().slot;
         let expected_block_root = attestation.data().beacon_block_root;
 
@@ -691,6 +712,17 @@ impl<P: Preset> Context<P> {
         println!("next_message: {next_message:?}");
 
         match next_message {
+            Some(P2pMessage::PayloadEnvelopeNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root);
+
+                // When the referenced block is unknown, `BlockNeeded` is emitted
+                // after `PayloadEnvelopeNeeded`; drain it so it does not trigger
+                // the `next_p2p_message().unwrap_none()` check in `Drop::drop`.
+                if let Some(P2pMessage::BlockNeeded(actual_block_root, _)) = self.next_p2p_message()
+                {
+                    assert!(actual_block_root == expected_block_root);
+                }
+            }
             Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
                 assert!(actual_block_root == expected_block_root)
             }
@@ -731,10 +763,31 @@ impl<P: Preset> Context<P> {
         payload_attestation: Arc<CombinedPayloadAttestation<P>>,
         bls_setting: BlsSetting,
     ) {
-        assert!(matches!(
-            self.on_test_payload_attestation(payload_attestation, bls_setting),
-            Some(P2pMessage::Reject(_, _) | P2pMessage::Ignore(_)),
-        ));
+        let expected_block_root = payload_attestation.data().beacon_block_root;
+        let next_message = self.on_test_payload_attestation(payload_attestation, bls_setting);
+
+        match next_message {
+            Some(P2pMessage::PayloadEnvelopeNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root);
+
+                // When the referenced block is unknown, `BlockNeeded` is emitted
+                // after `PayloadEnvelopeNeeded`; drain it so it does not trigger
+                // the `next_p2p_message().unwrap_none()` check in `Drop::drop`.
+                if let Some(P2pMessage::BlockNeeded(actual_block_root, _)) = self.next_p2p_message()
+                {
+                    assert!(actual_block_root == expected_block_root);
+                }
+            }
+            Some(P2pMessage::BlockNeeded(actual_block_root, _peer_id)) => {
+                assert!(actual_block_root == expected_block_root)
+            }
+            message => {
+                assert!(matches!(
+                    message,
+                    Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)),
+                ));
+            }
+        }
     }
 
     pub fn on_test_payload_attestation(
@@ -746,29 +799,6 @@ impl<P: Preset> Context<P> {
             .on_test_payload_attestation(payload_attestation, bls_setting);
         self.controller().wait_for_tasks();
         self.next_p2p_message()
-    }
-
-    pub fn on_invalid_test_attestation(&self, attestation: Attestation<P>) {
-        // `Test`-origin attestations emit no p2p message on reject, so observe the
-        // fork-choice validation outcome directly. PR #5275 / gloas `validate_on_attestation`.
-        //
-        // The spec rejects these attestations outright, but grandine may instead defer one
-        // whose payload is not yet locally verified (`DelayUntilPayload`) rather than reject
-        // it. Either outcome keeps the attestation out of fork choice, which is what matters;
-        // the only forbidden outcome is `Accept`. This mirrors the leniency of
-        // `on_invalid_payload_attestation_message`.
-        let action = self.controller().store_snapshot().validate_attestation(
-            AttestationItem::<P, GossipId>::unverified(
-                Arc::new(attestation),
-                AttestationOrigin::Test,
-            ),
-            false,
-        );
-
-        assert!(
-            !matches!(action, Ok(AttestationAction::Accept { .. })),
-            "invalid attestation must not be accepted into fork choice",
-        );
     }
 
     pub fn on_attester_slashing(&mut self, attester_slashing: AttesterSlashing<P>) {

@@ -56,7 +56,7 @@ enum Step {
         valid: bool,
     },
     PayloadAttestation {
-        payload_attestation: PathBuf,
+        payload_attestation_message: PathBuf,
         #[serde(default = "serde_aux::field_attributes::bool_true")]
         valid: bool,
     },
@@ -98,6 +98,7 @@ struct Checks {
 struct HeadCheck {
     slot: Slot,
     root: H256,
+    payload_status: Option<PayloadStatus>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -272,11 +273,13 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                 }
             }
             Step::PayloadAttestation {
-                payload_attestation,
+                payload_attestation_message,
                 valid,
             } => {
-                let message =
-                    case.ssz::<_, PayloadAttestationMessage>(config.as_ref(), payload_attestation);
+                let message = case.ssz::<_, PayloadAttestationMessage>(
+                    config.as_ref(),
+                    payload_attestation_message,
+                );
 
                 let combined = Arc::new(CombinedPayloadAttestation::<P>::Message(message.into()));
 
@@ -353,8 +356,17 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     viable_for_head_roots_and_weights: _,
                 } = *checks;
 
-                if let Some(HeadCheck { slot, root }) = head {
+                if let Some(HeadCheck {
+                    slot,
+                    root,
+                    payload_status,
+                }) = head
+                {
                     context.assert_head(slot, root);
+
+                    if let Some(payload_status) = payload_status {
+                        context.assert_head_payload_status(payload_status);
+                    }
                 }
 
                 if let Some(payload_status) = head_payload_status {

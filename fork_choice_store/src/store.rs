@@ -862,6 +862,41 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> u8 {
         let block_root = chain_link.block_root;
 
+        eprintln!(
+            "DEBUG chain_link_payload_status: block_root={block_root:?} chain_link.slot={} self.slot={} is_payload_verified={} attesting_balances={attesting_balances:?} payloads={:?}",
+            chain_link.slot(),
+            self.slot(),
+            self.is_payload_verified(block_root),
+            self.payloads,
+        );
+
+        for segment in self.unfinalized.values() {
+            for unfinalized_block in segment.iter_up_to(..=segment.last_position()) {
+                eprintln!(
+                    "DEBUG block: root={:?} slot={} parent_root={:?} parent_payload_presence={:?} attesting_balances={:?}",
+                    unfinalized_block.block_root(),
+                    unfinalized_block.slot(),
+                    unfinalized_block.chain_link.parent_root(),
+                    unfinalized_block.parent_payload_presence(),
+                    unfinalized_block.attesting_balances,
+                );
+            }
+        }
+
+        for (index, latest_message) in self.latest_messages.iter().enumerate() {
+            if let Some(latest_message) = latest_message {
+                eprintln!(
+                    "DEBUG latest_message: validator={index} slot={} root={:?} payload_present={} balance={} equivocating={}",
+                    latest_message.slot,
+                    latest_message.root,
+                    latest_message.payload_present,
+                    self.justified_active_balance(index),
+                    self.equivocating_indices
+                        .contains(&u64::try_from(index).unwrap()),
+                );
+            }
+        }
+
         if chain_link.slot().saturating_add(1) == self.slot() {
             if self.should_extend_payload(block_root) {
                 PAYLOAD_STATUS_FULL
@@ -2731,18 +2766,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 );
             }
 
+            // > If attesting for a full node, the payload must be known: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/fork-choice.md#modified-validate_on_attestation
+            //
+            // This is an `assert` in `validate_on_attestation`, i.e. an attestation claiming a
+            // verified payload before the payload is actually verified is invalid and must never
+            // affect fork choice, even after the payload is verified later. Retrying it once the
+            // payload arrives would let a stale vote retroactively become a "full" vote, which
+            // can change `chain_link_payload_status` results.
             if index == 1 && !self.is_payload_verified(beacon_block_root) {
-                if is_from_block {
-                    // TODO(gloas): the block should be delayed in this place
+                // if is_from_block {
+                //     // TODO(gloas): the block should be delayed in this place
 
-                    // bail!(Error::AttestationDataInvalidPayloadStatus {
-                    //     attestation: attestation.clone_arc()
-                    // });
-                }
+                //     // bail!(Error::AttestationDataInvalidPayloadStatus {
+                //     //     attestation: attestation.clone_arc()
+                //     // });
+                // }
 
-                return Ok(PartialAttestationAction::DelayUntilPayload(
-                    beacon_block_root,
-                ));
+                // return Ok(PartialAttestationAction::DelayUntilPayload(
+                //     beacon_block_root,
+                // ));
+
+                return Ok(PartialAttestationAction::Ignore);
             }
         }
 
@@ -3728,6 +3772,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let data = payload_attestation.data();
         let block_root = data.beacon_block_root;
 
+        eprintln!(
+            "DEBUG validate_payload_attestation: data={data:?} self.slot={} chain_link={:?}",
+            self.slot(),
+            self.chain_link(block_root)
+                .map(|cl| (cl.slot(), cl.payload_status)),
+        );
+
         if !payload_attestation.origin.is_from_block() {
             // [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. data.slot == current_slot
             if data.slot != self.slot() {
@@ -4327,6 +4378,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
         let builder_index = envelope.builder_index();
+
+        eprintln!(
+            "DEBUG apply_execution_payload_envelope: beacon_block_root={beacon_block_root:?} slot={slot} self.slot={}",
+            self.slot(),
+        );
 
         self.payloads.insert(beacon_block_root);
 
@@ -5001,6 +5057,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let index = usize::try_from(validator_index)?;
                 let balance = self.justified_active_balance(index);
 
+                eprintln!(
+                    "DEBUG attestation: validator={validator_index} root={root:?} slot={slot} payload_present={payload_present} balance={balance} self.slot={}",
+                    self.slot(),
+                );
+
                 if let Some(Some(old_message)) = &self.latest_messages.get(index) {
                     let LatestMessage {
                         slot: old_slot,
@@ -5013,12 +5074,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     }
 
                     if old_root == root && payload_present == old_payload_present {
-                        // If nothing changed, it should still update latest message's slot
-                        if index < self.latest_messages.len() {
-                            self.latest_messages[index] = Some(latest_message.clone_arc());
-                        }
+                        // Even if root and payload presence are unchanged, this vote may have
+                        // moved from "pending" (vote for the current-slot block, doesn't count
+                        // toward empty/full) to "empty" (vote for a now-previous-slot block) if
+                        // `chain_link.slot()` was equal to `old_slot` but is now less than
+                        // `slot` - balances still need updating in that case.
+                        let payload_status_changed = old_message
+                            .post_gloas::<P>(&self.chain_config)
+                            && self.chain_link(old_root).is_some_and(|chain_link| {
+                                (old_slot..slot).contains(&chain_link.slot())
+                            });
 
-                        continue;
+                        if !payload_status_changed {
+                            // If nothing changed, it should still update latest message's slot
+                            if index < self.latest_messages.len() {
+                                self.latest_messages[index] = Some(latest_message.clone_arc());
+                            }
+
+                            continue;
+                        }
                     }
 
                     let differences_entry = differences.entry(old_root).or_default();
@@ -5139,6 +5213,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                     unfinalized_block.attesting_balances = new_balances;
 
+                    eprintln!(
+                        "DEBUG balances: block_root={:?} slot={} new_balances={new_balances:?}",
+                        unfinalized_block.block_root(),
+                        unfinalized_block.slot(),
+                    );
+
                     let parent_payload_presence = unfinalized_block.parent_payload_presence();
 
                     payload_presence = Some(parent_payload_presence);
@@ -5176,6 +5256,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut difference_queue = differences
             .into_iter()
             .filter(|(_, differences)| differences.non_zero())
+            .inspect(|(block_root, differences)| {
+                eprintln!(
+                    "DEBUG diff_input: block_root={block_root:?} differences={differences:?}"
+                );
+            })
             .filter_map(|(block_root, differences)| {
                 // `block_root` may refer to a finalized block.
                 let Some(&location) = self.unfinalized_locations.get(&block_root) else {
@@ -5213,8 +5298,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 if previous.location.position != current.location.position {
                     if previous.differences.non_zero() {
-                        propagated_and_dissolved_differences
-                            .push(previous.apply_after(current.location.position)?);
+                        let dissolved = previous.apply_after(current.location.position)?;
+                        eprintln!("DEBUG dissolved (apply_after): {dissolved:?}");
+                        propagated_and_dissolved_differences.push(dissolved);
                     }
 
                     let in_segment_child_position = current
@@ -5226,8 +5312,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                              because previous difference always has greater location than current difference",
                         );
 
-                    let payload_presence = self.unfinalized[&segment_id]
-                        [in_segment_child_position]
+                    let payload_presence = self.unfinalized[&segment_id][in_segment_child_position]
                         .parent_payload_presence();
 
                     previous.last_block_payload_presence = Some(payload_presence);
@@ -5265,14 +5350,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             if previous.differences.non_zero() {
-                propagated_and_dissolved_differences.push(previous.apply_from_start());
+                let dissolved = previous.apply_from_start();
+                eprintln!("DEBUG dissolved (apply_from_start): {dissolved:?}");
+                propagated_and_dissolved_differences.push(dissolved);
 
                 let segment = &self.unfinalized[&segment_id];
 
                 if previous.differences.pending != 0 {
                     if let Some(parent) = self.parent_location(segment) {
-                        let first_block_presence =
-                            segment.first_block().parent_payload_presence();
+                        let first_block_presence = segment.first_block().parent_payload_presence();
 
                         let propagated_differences = match first_block_presence {
                             PayloadPresence::Empty => Differences {
@@ -5300,24 +5386,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     } else {
                         let first_block = segment.first_block();
 
-                        if first_block.chain_link.parent_root() == last_finalized_block_root
-                        {
+                        if first_block.chain_link.parent_root() == last_finalized_block_root {
                             last_finalized_differences.pending = last_finalized_differences
                                 .pending
                                 .saturating_add(previous.differences.pending);
 
                             match first_block.parent_payload_presence() {
                                 PayloadPresence::Empty => {
-                                    last_finalized_differences.empty =
-                                        last_finalized_differences
-                                            .empty
-                                            .saturating_add(previous.differences.pending);
+                                    last_finalized_differences.empty = last_finalized_differences
+                                        .empty
+                                        .saturating_add(previous.differences.pending);
                                 }
                                 PayloadPresence::Full => {
-                                    last_finalized_differences.full =
-                                        last_finalized_differences
-                                            .full
-                                            .saturating_add(previous.differences.pending);
+                                    last_finalized_differences.full = last_finalized_differences
+                                        .full
+                                        .saturating_add(previous.differences.pending);
                                 }
                                 PayloadPresence::Pending => {}
                             }
