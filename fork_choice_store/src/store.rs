@@ -964,6 +964,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.payload_data_availability_vote.get(&block_root)
     }
 
+    // Number of PTC members that have actually cast a payload attestation for `block_root`.
+    fn ptc_vote_count(&self, block_root: H256) -> u64 {
+        self.payload_vote
+            .get(&block_root)
+            .map(BitVector::count_ones)
+            .unwrap_or_default()
+            .try_into()
+            .expect("PTC vote count should fit into u64")
+    }
+
     // > Return whether the execution payload for the beacon block with root ``root``
     // > is considered ``timely`` (or not, when ``timely`` is ``False``), taking into
     // > consideration local availability and PTC votes.
@@ -982,12 +992,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .try_into()
             .expect("payload timeliness vote count should fit into u64");
 
-        // A missing or unset vote defaults to "not present"; the NAY count is the
-        // complement of the present votes over the whole PTC.
+        // PTC members that never voted are `None` in the spec and count for neither
+        // side, so the NAY count is the complement of the present votes over the
+        // validators that actually voted, not the whole PTC.
         let vote_count = if timely {
             present
         } else {
-            P::PtcSize::U64.saturating_sub(present)
+            self.ptc_vote_count(block_root).saturating_sub(present)
         };
 
         vote_count > PayloadTimelyThreshold::<P>::U64
@@ -1011,12 +1022,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .try_into()
             .expect("payload data availability vote count should fit into u64");
 
-        // A missing or unset vote defaults to "not available"; the NAY count is the
-        // complement of the available votes over the whole PTC.
+        // PTC members that never voted are `None` in the spec and count for neither
+        // side, so the NAY count is the complement of the available votes over the
+        // validators that actually voted, not the whole PTC.
         let vote_count = if available {
             present
         } else {
-            P::PtcSize::U64.saturating_sub(present)
+            self.ptc_vote_count(block_root).saturating_sub(present)
         };
 
         vote_count > DataAvailabilityTimelyThreshold::<P>::U64
@@ -5205,8 +5217,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                              because previous difference always has greater location than current difference",
                         );
 
-                    let payload_presence = self.unfinalized[&segment_id]
-                        [in_segment_child_position]
+                    let payload_presence = self.unfinalized[&segment_id][in_segment_child_position]
                         .parent_payload_presence();
 
                     previous.last_block_payload_presence = Some(payload_presence);
@@ -5250,8 +5261,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 if previous.differences.pending != 0 {
                     if let Some(parent) = self.parent_location(segment) {
-                        let first_block_presence =
-                            segment.first_block().parent_payload_presence();
+                        let first_block_presence = segment.first_block().parent_payload_presence();
 
                         let propagated_differences = match first_block_presence {
                             PayloadPresence::Empty => Differences {
@@ -5279,24 +5289,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     } else {
                         let first_block = segment.first_block();
 
-                        if first_block.chain_link.parent_root() == last_finalized_block_root
-                        {
+                        if first_block.chain_link.parent_root() == last_finalized_block_root {
                             last_finalized_differences.pending = last_finalized_differences
                                 .pending
                                 .saturating_add(previous.differences.pending);
 
                             match first_block.parent_payload_presence() {
                                 PayloadPresence::Empty => {
-                                    last_finalized_differences.empty =
-                                        last_finalized_differences
-                                            .empty
-                                            .saturating_add(previous.differences.pending);
+                                    last_finalized_differences.empty = last_finalized_differences
+                                        .empty
+                                        .saturating_add(previous.differences.pending);
                                 }
                                 PayloadPresence::Full => {
-                                    last_finalized_differences.full =
-                                        last_finalized_differences
-                                            .full
-                                            .saturating_add(previous.differences.pending);
+                                    last_finalized_differences.full = last_finalized_differences
+                                        .full
+                                        .saturating_add(previous.differences.pending);
                                 }
                                 PayloadPresence::Pending => {}
                             }
