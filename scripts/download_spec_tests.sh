@@ -7,8 +7,9 @@ VERSION_FILE="${TESTS_DIR}/.version"
 BASE_URL="https://github.com/ethereum/consensus-specs/releases/download/${SPEC_VERSION}"
 MAX_RETRIES="${MAX_RETRIES:-3}"
 
-# Tarballs to download
-TARBALLS=("general" "minimal" "mainnet")
+# Tarballs to download. "comptests" bundles the fork choice compliance tests
+# that are now part of the consensus-spec release (run by compliance_tests.rs).
+TARBALLS=("general" "minimal" "mainnet" "comptests")
 
 # Normalize paths on Windows Git Bash
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
@@ -33,12 +34,24 @@ echo "Downloading consensus-spec-tests ${SPEC_VERSION}..."
 # Create directory if it doesn't exist
 mkdir -p "$TESTS_DIR"
 
+# Map a tarball name to the relative directory used to verify its extraction.
+# Most tarballs extract into tests/<name>, but comptests merges into the preset
+# directories, so verify one of the compliance test paths it provides.
+verify_subdir() {
+    case "$1" in
+        comptests) echo "tests/minimal/fulu/fork_choice_compliance" ;;
+        *)         echo "tests/$1" ;;
+    esac
+}
+
 # Function to verify tarball extraction was successful
 verify_extraction() {
     local tarball_name="$1"
+    local subdir
+    subdir="$(verify_subdir "$tarball_name")"
 
     # Check if the extracted directory exists and contains files
-    if [[ -d "${TESTS_DIR}/tests/${tarball_name}" ]] && [[ -n "$(ls -A "${TESTS_DIR}/tests/${tarball_name}" 2>/dev/null)" ]]; then
+    if [[ -d "${TESTS_DIR}/${subdir}" ]] && [[ -n "$(ls -A "${TESTS_DIR}/${subdir}" 2>/dev/null)" ]]; then
         return 0
     else
         return 1
@@ -97,7 +110,7 @@ download_tarball() {
         fi
 
         # Clean up any partial extraction
-        rm -rf "${TESTS_DIR}/tests/${tarball_name}"
+        rm -rf "${TESTS_DIR}/$(verify_subdir "$tarball_name")"
 
         if [[ $attempt -lt $MAX_RETRIES ]]; then
             echo "  Retrying in 2 seconds..."
@@ -113,7 +126,7 @@ download_tarball() {
 
 # Check if we can parallelize downloads
 if command -v xargs >/dev/null 2>&1; then
-    export -f download_tarball verify_extraction
+    export -f download_tarball verify_extraction verify_subdir
     export TESTS_DIR BASE_URL MAX_RETRIES
 
     # Parallel downloads using xargs

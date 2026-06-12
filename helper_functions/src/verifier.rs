@@ -69,6 +69,8 @@ pub trait Verifier {
         signature_kind: SignatureKind,
     ) -> Result<()>;
 
+    fn set_option(&mut self, option: VerifierOption) -> bool;
+
     fn finish(&self) -> Result<()>;
 
     fn has_option(&self, option: VerifierOption) -> bool;
@@ -111,6 +113,11 @@ impl<V: Verifier> Verifier for &mut V {
         signature_kind: SignatureKind,
     ) -> Result<()> {
         (*self).extend(triples, signature_kind)
+    }
+
+    #[inline]
+    fn set_option(&mut self, option: VerifierOption) -> bool {
+        (**self).set_option(option)
     }
 
     #[inline]
@@ -161,6 +168,11 @@ impl Verifier for NullVerifier {
         _signature_kind: SignatureKind,
     ) -> Result<()> {
         Ok(())
+    }
+
+    #[inline]
+    fn set_option(&mut self, _option: VerifierOption) -> bool {
+        false
     }
 
     #[inline]
@@ -241,6 +253,11 @@ impl Verifier for SingleVerifier {
     }
 
     #[inline]
+    fn set_option(&mut self, _option: VerifierOption) -> bool {
+        false
+    }
+
+    #[inline]
     fn finish(&self) -> Result<()> {
         Ok(())
     }
@@ -300,6 +317,11 @@ impl Verifier for MultiVerifier {
     ) -> Result<()> {
         self.triples.extend(triples);
         Ok(())
+    }
+
+    #[inline]
+    fn set_option(&mut self, option: VerifierOption) -> bool {
+        self.options.insert(option)
     }
 
     #[inline]
@@ -424,6 +446,11 @@ impl Verifier for Triple {
     }
 
     #[inline]
+    fn set_option(&mut self, _option: VerifierOption) -> bool {
+        false
+    }
+
+    #[inline]
     fn finish(&self) -> Result<()> {
         unimplemented!("<Triple as Verifier>::finish is not used anywhere")
     }
@@ -440,6 +467,7 @@ impl Verifier for Triple {
 #[expect(clippy::enum_variant_names)]
 #[derive(EnumSetType)]
 pub enum VerifierOption {
+    SkipBlockRootSignature,
     SkipBlockBaseSignatures,
     SkipBlockSyncAggregateSignature,
     SkipRandaoVerification,

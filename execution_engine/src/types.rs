@@ -996,7 +996,7 @@ pub enum PayloadId {
     Gloas(H64),
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadStatusWithBlockHash {
     pub block_hash: ExecutionBlockHash,
@@ -1005,7 +1005,7 @@ pub struct PayloadStatusWithBlockHash {
 
 // `PayloadStatusV1` is deserialized from data containing keys in `camelCase`,
 // whereas `consensus-spec-tests` and `grandine-snapshot-tests` use `snake_case`.
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadStatus {
     status: PayloadValidationStatus,

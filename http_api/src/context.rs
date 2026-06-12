@@ -192,6 +192,7 @@ impl<P: Preset> Context<P> {
             true,
             [].into(),
             sidecars_construction_started,
+            None,
         )?;
 
         for block in extra_blocks {

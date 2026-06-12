@@ -1,4 +1,5 @@
 use core::{
+    cell::OnceCell,
     ops::Bound,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -27,7 +28,7 @@ use helper_functions::{
     gloas, misc, phase0, predicates,
     signing::SignForSingleFork as _,
     slot_report::NullSlotReport,
-    verifier::{NullVerifier, SingleVerifier, Verifier},
+    verifier::{NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
 use im::{HashSet, OrdMap, Vector, hashmap, hashmap::HashMap, ordmap, vector};
 use itertools::{Either, EitherOrBoth, Itertools as _, izip};
@@ -71,7 +72,10 @@ use types::{
         BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, StorageMode, WithStatus,
     },
     phase0::{
-        consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, BASIS_POINTS, GENESIS_EPOCH, GENESIS_SLOT},
+        consts::{
+            ATTESTATION_PROPAGATION_SLOT_RANGE, BASIS_POINTS, DOMAIN_BEACON_PROPOSER,
+            GENESIS_EPOCH, GENESIS_SLOT,
+        },
         containers::{AttestationData, Checkpoint, Validator},
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
@@ -81,7 +85,7 @@ use types::{
 use unwrap_none::UnwrapNone as _;
 
 use crate::{
-    PayloadAttestationOrigin,
+    BlockItem, PayloadAttestationOrigin,
     blob_cache::BlobCache,
     data_column_cache::DataColumnCache,
     error::Error,
@@ -1647,16 +1651,30 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_root_policy: StateRootPolicy,
         data_availability_policy: DataAvailabilityPolicy,
         execution_engine: impl ExecutionEngine<P> + Send,
-        verifier: impl Verifier + Send,
+        mut verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
-        self.validate_block_with_custom_state_transition(block, data_availability_policy, |block_root, parent| {
+        let cached = OnceCell::new();
+
+        let state_fn = || {
+            cached
+                .get_or_init(|| {
+                    self.state_cache.before_or_at_slot(
+                        self,
+                        block.message().parent_root(),
+                        block.message().slot(),
+                    )
+                })
+                .clone()
+        };
+
+        self.validate_block_with_custom_state_transition(BlockItem::unverified(block.clone_arc()), data_availability_policy, state_fn, |block, parent| {
             // > Make a copy of the state to avoid mutability issues
-            let mut state = self
-                .state_cache
-                .before_or_at_slot(self, parent.block_root, block.message().slot())
+            let mut state = state_fn()
                 .unwrap_or_else(|| {
                     if Feature::WarnOnStateCacheSlotProcessing.is_enabled() && self.is_forward_synced()
                     {
+                        let block_root = block.item.message().hash_tree_root();
+
                         // `Backtrace::force_capture` can be costly and a warning may be excessive,
                         // but this is controlled by a `Feature` that should be disabled by default.
                         warn_with_peers!(
@@ -1664,7 +1682,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                             (block root: {block_root:?}, parent block root: {:?}, from slot {} to {})\n{}",
                             parent.block_root,
                             parent.slot(),
-                            block.message().slot(),
+                            block.item.message().slot(),
                             Backtrace::force_capture(),
                         );
                     }
@@ -1676,18 +1694,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // See <https://github.com/ethereum/consensus-specs/pull/3232>.
             // It is unclear when modifications to fork choice logic should come into effect.
             // We check the phase of the block rather than the current slot.
-            if block.phase() < Phase::Capella {
+            if block.item.phase() < Phase::Capella {
                 // > [New in Bellatrix]
                 //
                 // The Fork Choice specification does this after the state transition.
                 // We don't because that would require keeping around a clone of the pre-state.
                 if let Some(body) = block
+                    .item
                     .message()
                     .body()
                     .with_execution_payload()
                     .filter(|body| predicates::is_merge_transition_block(&state, *body))
                 {
-                    match validate_merge_block(&self.chain_config, block, body, &execution_engine)?
+                    match validate_merge_block(&self.chain_config, &block.item, body, &execution_engine)?
                     {
                         PartialBlockAction::Accept => {}
                         PartialBlockAction::Ignore => return Ok((state, Some(BlockAction::Ignore(false)))),
@@ -1695,12 +1714,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             }
 
+            if block.base_signature_status.is_verified() {
+                verifier.set_option(VerifierOption::SkipBlockRootSignature);
+            }
+
             // > Check the block is valid and compute the post-state
             combined::custom_state_transition(
                 &self.chain_config,
                 &self.pubkey_cache,
                 state.make_mut(),
-                block,
+                &block.item,
                 ProcessSlots::IfNeeded,
                 state_root_policy,
                 execution_engine,
@@ -1715,75 +1738,128 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[instrument(level = "debug", skip_all)]
     fn validate_gossip_rules(
         &self,
-        block: &Arc<SignedBeaconBlock<P>>,
+        mut block: BlockItem<P>,
         block_root: H256,
-    ) -> Result<Option<BlockAction<P>>> {
+        state_for_signature: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
+    ) -> Result<Either<BlockItem<P>, BlockAction<P>>> {
         // Skip blocks that are already known.
         //
         // This is a slight deviation from `consensus-specs`, but it appears to be compatible with
         // both the fork choice rule and the Networking specification.
         if self.contains_block(block_root) {
-            return Ok(Some(BlockAction::Ignore(true)));
+            return Ok(Either::Right(BlockAction::Ignore(true)));
         }
 
         // > Blocks cannot be in the future.
         // > If they are, their consideration must be delayed until the are in the past.
-        if self.slot() < block.message().slot() {
-            return Ok(Some(BlockAction::DelayUntilSlot(block.clone_arc())));
+        if block.item.message().slot()
+            > self
+                .slot()
+                .saturating_add(self.chain_config.max_gossip_future_slots())
+        {
+            return Ok(Either::Right(BlockAction::Ignore(false)));
+        }
+
+        if self.slot() < block.item.message().slot() {
+            return Ok(Either::Right(BlockAction::DelayUntilSlot(block)));
         }
 
         // > Check that block is later than the finalized epoch slot
         //
         // This is redundant but may be faster than loading the parent block.
-        if block.message().slot() <= self.finalized_slot() {
-            return Ok(Some(BlockAction::Ignore(false)));
+        if block.item.message().slot() <= self.finalized_slot() {
+            return Ok(Either::Right(BlockAction::Ignore(false)));
+        }
+
+        if !block.base_signature_status.is_verified() {
+            let state = state_for_signature().unwrap_or_else(|| self.head().state(self));
+
+            let pubkey = accessors::public_key(&state, block.item.message().proposer_index())
+                 .inspect_err(|error| {
+                     debug_with_peers!(
+                         "unable to verify block {block_root:?} signature for gossip validation: {error:?}"
+                     )})
+                 .ok()
+                 .and_then(|pubkey| self.pubkey_cache.get(pubkey));
+
+            if let Some(pubkey) = pubkey {
+                // # [REJECT] The proposer signature is valid
+                // Slots are not preprocessed here, so manual signing_root calculation is required
+                // to correctly handle hard-forks
+                let epoch = misc::compute_epoch_at_slot::<P>(block.item.message().slot());
+                let fork_version = self.chain_config.version_at_epoch(epoch);
+
+                let domain = misc::compute_domain(
+                    &self.chain_config,
+                    DOMAIN_BEACON_PROPOSER,
+                    Some(fork_version),
+                    Some(state.genesis_validators_root()),
+                );
+
+                let signing_root = misc::compute_signing_root(block.item.message(), domain);
+
+                SingleVerifier.verify_singular(
+                    signing_root,
+                    block.item.signature(),
+                    pubkey,
+                    SignatureKind::Block,
+                )?;
+
+                block = block.into_base_verified();
+            } else {
+                debug_with_peers!(
+                    "unable to verify block {block_root:?} signature for gossip validation: pubkey not found in cache"
+                );
+            }
         }
 
         // > Parent block must be known
-        let parent_root = block.message().parent_root();
+        let parent_root = block.item.message().parent_root();
 
         let Some(parent) = self.chain_link(parent_root) else {
             // # [REJECT] The block's parent passes validation
             ensure!(
                 !self.rejected_block_roots.contains(&parent_root),
                 Error::<P>::BlockParentRejectedBlock {
-                    block: block.clone_arc()
+                    block: block.item.clone_arc()
                 },
             );
 
-            return Ok(Some(BlockAction::DelayUntilParent(block.clone_arc())));
+            return Ok(Either::Right(BlockAction::DelayUntilParent(block)));
         };
 
         // > Check block is a descendant of the finalized block at the checkpoint finalized slot
         //
         // Checking the slot is sufficient because orphans are pruned as soon as possible.
         if parent.slot() < self.finalized_slot() {
-            return Ok(Some(BlockAction::Ignore(false)));
+            return Ok(Either::Right(BlockAction::Ignore(false)));
         }
 
-        Ok(None)
+        Ok(Either::Left(block))
     }
 
     pub fn validate_block_for_gossip(
         &self,
-        block: &Arc<SignedBeaconBlock<P>>,
+        block: BlockItem<P>,
+        state_for_signature: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         state_transition_for_gossip: impl FnOnce(&ChainLink<P>) -> Result<Option<BlockAction<P>>>,
     ) -> Result<Option<BlockAction<P>>> {
-        let block_root = block.message().hash_tree_root();
+        let block_root = block.item.message().hash_tree_root();
 
         if self.blacklisted_blocks.contains(&block_root) {
             bail!("blacklisted beacon block: (block root: {block_root:?})");
         }
 
-        let block_action = self.validate_gossip_rules(block, block_root)?;
+        let block_or_action = self.validate_gossip_rules(block, block_root, state_for_signature)?;
 
-        if let Some(action) = block_action {
-            return Ok(Some(action));
-        }
+        let block = match block_or_action {
+            Either::Left(block_item) => block_item,
+            Either::Right(action) => return Ok(Some(action)),
+        };
 
         // > Parent block must be known
-        let Some(parent) = self.chain_link(block.message().parent_root()) else {
-            return Ok(Some(BlockAction::DelayUntilParent(block.clone_arc())));
+        let Some(parent) = self.chain_link(block.item.message().parent_root()) else {
+            return Ok(Some(BlockAction::DelayUntilParent(block)));
         };
 
         // > Check the block is valid and compute the post-state
@@ -1794,53 +1870,55 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[expect(clippy::too_many_lines)]
     pub fn validate_block_with_custom_state_transition(
         &self,
-        block: &Arc<SignedBeaconBlock<P>>,
+        block: BlockItem<P>,
         data_availability_policy: DataAvailabilityPolicy,
+        state_for_signature: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         state_transition: impl FnOnce(
-            H256,
+            &BlockItem<P>,
             &ChainLink<P>,
         ) -> Result<(Arc<BeaconState<P>>, Option<BlockAction<P>>)>,
     ) -> Result<BlockAction<P>> {
-        let block_root = block.message().hash_tree_root();
-        let parent_root = block.message().parent_root();
+        let block_root = block.item.message().hash_tree_root();
+        let parent_root = block.item.message().parent_root();
 
         if self.blacklisted_blocks.contains(&block_root) {
             bail!("blacklisted beacon block: (block root: {block_root:?})");
         }
 
-        let block_action = self.validate_gossip_rules(block, block_root)?;
+        let block_or_action = self.validate_gossip_rules(block, block_root, state_for_signature)?;
 
-        if let Some(action) = block_action {
-            return Ok(action);
-        }
+        let block = match block_or_action {
+            Either::Left(block_item) => block_item,
+            Either::Right(action) => return Ok(action),
+        };
 
         // > Parent block must be known
         let Some(parent) = self.chain_link(parent_root) else {
-            return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
+            return Ok(BlockAction::DelayUntilParent(block));
         };
 
-        let parent_payload_presence = Self::parent_payload_presence(block, &parent.block);
+        let parent_payload_presence = Self::parent_payload_presence(&block.item, &parent.block);
 
         // > If this block builds on the parent's full payload, that payload must
         // > have been verified by on_execution_payload_envelope
         if parent_payload_presence.is_full() && !self.is_payload_verified(parent_root) {
             if self.rejected_payload_envelopes.contains(&parent_root) {
                 bail!(Error::ParentExecutionPayloadNotVerified {
-                    block: block.clone_arc(),
+                    block: block.item.clone_arc(),
                 });
             }
 
-            return Ok(BlockAction::DelayUntilPayload(block.clone_arc()));
+            return Ok(BlockAction::DelayUntilPayload(block));
         }
 
-        if block.message().slot() == self.slot() {
+        if block.item.message().slot() == self.slot() {
             self.inc_current_slot_blocks_in_processing();
         }
 
         let started_at = std::time::Instant::now();
 
         // > Check the block is valid and compute the post-state
-        let (state, block_action) = state_transition(block_root, parent)?;
+        let (state, block_action) = state_transition(&block, parent)?;
 
         features::log!(
             LogBlockProcessingTime,
@@ -1853,14 +1931,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // Start from Gloas, block can be imported without data availability check
-        if self.should_check_data_availability_at_slot(block.message().slot())
+        if self.should_check_data_availability_at_slot(block.item.message().slot())
             && !state.is_post_gloas()
             && data_availability_policy.check()
         {
             let _span = debug_span!("validate_block_data_availability_check");
 
             if state.phase().is_peerdas_activated() {
-                let missing_indices = self.indices_of_missing_data_columns(block);
+                let missing_indices = self.indices_of_missing_data_columns(&block.item);
 
                 if !missing_indices.is_empty() {
                     let available_columns_count = self
@@ -1881,17 +1959,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     );
 
                     if !can_import_with_reconstruction_promise {
-                        return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
+                        return Ok(BlockAction::DelayUntilBlobs(block, state));
                     }
                 }
-            } else if !self.indices_of_missing_blobs(block).is_empty() {
-                return Ok(BlockAction::DelayUntilBlobs(block.clone_arc(), state));
+            } else if !self.indices_of_missing_blobs(&block.item).is_empty() {
+                return Ok(BlockAction::DelayUntilBlobs(block, state));
             }
         }
 
         let slashings_span = debug_span!("validate_block_validate_attester_slashing");
 
         let attester_slashing_results = block
+            .item
             .message()
             .body()
             .combined_attester_slashings()
@@ -1930,7 +2009,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let chain_link = ChainLink {
             block_root,
-            block: block.clone_arc(),
+            block: block.item.clone_arc(),
             state: Some(state),
             current_justified_checkpoint: justified_checkpoint,
             finalized_checkpoint,
@@ -2692,6 +2771,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 return Ok(PartialAttestationAction::Ignore);
             }
 
+            // [IGNORE] The attestation is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance)
+            if slot
+                > self
+                    .slot()
+                    .saturating_add(self.chain_config.max_gossip_future_slots())
+            {
+                return Ok(PartialAttestationAction::Ignore);
+            }
+
             // TODO(feature/deneb): `IGNORE`ing appears to be specified behavior for aggregates
             //                      starting with Deneb. See the Deneb Networking specification.
             // > If attestation target is from a future epoch,
@@ -2994,6 +3082,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot
         // (a client MAY queue future sidecars for processing at the appropriate slot).
+        if block_header.slot
+            > self
+                .slot()
+                .saturating_add(self.chain_config.max_gossip_future_slots())
+        {
+            return Ok(BlobSidecarAction::Ignore(false));
+        }
+
         if self.slot() < block_header.slot {
             return Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar));
         }
@@ -3259,6 +3355,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             // [IGNORE] The sidecar is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that block_header.slot <= current_slot
             // (a client MAY queue future sidecars for processing at the appropriate slot).
+            if block_header.slot
+                > self
+                    .slot()
+                    .saturating_add(self.chain_config.max_gossip_future_slots())
+            {
+                return Ok(DataColumnSidecarAction::Ignore(false));
+            }
+
             if self.slot() < block_header.slot {
                 return Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar));
             }
@@ -4347,7 +4451,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             differences_entry.pending = differences_entry.pending.saturating_sub(balance);
 
-            if latest_message.post_gloas::<P>(&self.chain_config) {
+            if latest_message.post_gloas::<P>(&self.chain_config)
+                && self
+                    .chain_link(latest_message.root)
+                    .is_some_and(|chain_link| chain_link.slot() < latest_message.slot)
+            {
                 if latest_message.payload_present {
                     differences_entry.full = differences_entry.full.saturating_sub(balance);
                 } else {
@@ -5074,12 +5182,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     }
 
                     if old_root == root && payload_present == old_payload_present {
-                        // If nothing changed, it should still update latest message's slot
-                        if index < self.latest_messages.len() {
-                            self.latest_messages[index] = Some(latest_message.clone_arc());
-                        }
+                        // Even if root and payload presence are unchanged, this vote may have
+                        // moved from "pending" (vote for the current-slot block, doesn't count
+                        // toward empty/full) to "empty" (vote for a now-previous-slot block) if
+                        // `chain_link.slot()` was equal to `old_slot` but is now less than
+                        // `slot` - balances still need updating in that case.
+                        let payload_status_changed = old_message
+                            .post_gloas::<P>(&self.chain_config)
+                            && self.chain_link(old_root).is_some_and(|chain_link| {
+                                (old_slot..slot).contains(&chain_link.slot())
+                            });
 
-                        continue;
+                        if !payload_status_changed {
+                            // If nothing changed, it should still update latest message's slot
+                            if index < self.latest_messages.len() {
+                                self.latest_messages[index] = Some(latest_message.clone_arc());
+                            }
+
+                            continue;
+                        }
                     }
 
                     let differences_entry = differences.entry(old_root).or_default();
@@ -6365,6 +6486,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .values()
                 .map(StdHashSet::len)
                 .sum(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "timely_payloads",
+            self.timely_payloads.len(),
         );
     }
 }

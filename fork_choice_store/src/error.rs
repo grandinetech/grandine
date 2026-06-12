@@ -63,6 +63,8 @@ pub enum Error<P: Preset> {
     BlobSidecarInvalidInclusionProof { blob_sidecar: Arc<BlobSidecar<P>> },
     #[error("blob sidecar index is invalid: {blob_sidecar:?}")]
     BlobSidecarInvalidIndex { blob_sidecar: Arc<BlobSidecar<P>> },
+    #[error("delayed until slot blob sidecar queue is full (slot: {slot})")]
+    BlobSidecarSlotQueueFull { slot: Slot },
     #[error(
         "blob sidecar is not newer than block parent \
          (blob sidecar: {blob_sidecar:?}, parent_slot: {parent_slot})"
@@ -97,6 +99,8 @@ pub enum Error<P: Preset> {
     BlockNotFound { block_root: H256 },
     #[error("block parent rejected (block: {block:?}")]
     BlockParentRejectedBlock { block: Arc<SignedBeaconBlock<P>> },
+    #[error("delayed until slot block queue is full (slot: {slot})")]
+    BlockSlotQueueFull { slot: Slot },
     #[error(
         "the current finalized_checkpoint is not an ancestor of the sidecar's block: {data_column_sidecar:?}"
     )]
@@ -156,6 +160,8 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         block_slot: Slot,
     },
+    #[error("delayed until slot data column sidecar queue is full (slot: {slot})")]
+    DataColumnSidecarSlotQueueFull { slot: Slot },
     #[error(
         "data column sidecar has incorrect proposer index \
          (data_column_sidecar: {data_column_sidecar:?}, computed: {computed})"
@@ -164,6 +170,8 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("delayed objects until parent queue is full")]
+    DelayedUntilParentQueueFull,
     #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
     ExecutionPayloadBidBuilderInactive {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,

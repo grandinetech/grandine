@@ -23,7 +23,7 @@ use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
+    BlobSidecarOrigin, BlockItem, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
     ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
     ProposerPreferencesOrigin, StateCacheProcessor, Store, StoreConfig,
 };
@@ -33,6 +33,7 @@ use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
+use spec_test_utils::BlsSetting;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::{Span, instrument};
@@ -136,6 +137,7 @@ where
         finished_back_sync: bool,
         blacklisted_blocks: HashSet<H256>,
         sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
+        thread_pool_size: Option<usize>,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
         let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
 
@@ -156,7 +158,8 @@ where
 
         let state_cache = store.state_cache();
         let store_snapshot = Arc::new(ArcSwap::from_pointee(store));
-        let thread_pool = ThreadPool::new()?;
+        let thread_pool =
+            ThreadPool::with_worker_count(thread_pool_size.unwrap_or_else(num_cpus::get))?;
         let (mutator_tx, mutator_rx) = std::sync::mpsc::channel();
 
         let block_processor = Arc::new(BlockProcessor::new(
@@ -313,6 +316,10 @@ where
     )]
     pub fn on_own_block(&self, wait_group: W, block: Arc<SignedBeaconBlock<P>>) {
         self.spawn_block_task_with_wait_group(wait_group, block, BlockOrigin::Own)
+    }
+
+    pub fn on_test_block(&self, block: Arc<SignedBeaconBlock<P>>, bls_setting: BlsSetting) {
+        self.spawn_block_task(block, BlockOrigin::Test(bls_setting))
     }
 
     pub fn on_own_blob_sidecar(&self, wait_group: W, blob_sidecar: Arc<BlobSidecar<P>>) {
@@ -496,6 +503,17 @@ where
         );
     }
 
+    pub fn on_test_execution_payload(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        self.spawn_execution_payload_envelope_task(
+            execution_payload_envelope,
+            ExecutionPayloadEnvelopeOrigin::Test(bls_setting),
+        );
+    }
+
     pub fn on_notified_new_payload(
         &self,
         beacon_block_root: H256,
@@ -636,6 +654,21 @@ where
             results,
         }
         .send(&self.mutator_tx)
+    }
+
+    pub fn on_test_attester_slashing(
+        &self,
+        attester_slashing: Box<AttesterSlashing<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        self.spawn(AttesterSlashingTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            attester_slashing,
+            origin: AttesterSlashingOrigin::Test(bls_setting),
+            metrics: self.metrics.clone(),
+        })
     }
 
     pub fn on_gossip_attester_slashing(&self, attester_slashing: Box<AttesterSlashing<P>>) {
@@ -980,7 +1013,7 @@ where
             execution_engine: self.execution_engine.clone(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group,
-            block,
+            block: BlockItem::unverified(block),
             origin,
             processing_timings: ProcessingTimings::new(),
             metrics: self.metrics.clone(),

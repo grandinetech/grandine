@@ -8,17 +8,18 @@ use eth2_libp2p::GossipId;
 use execution_engine::PayloadStatusV1;
 use fork_choice_store::{
     AggregateAndProofAction, AggregateAndProofOrigin, AttestationAction, AttestationItem,
-    AttestationValidationError, BlobSidecarOrigin, BlockOrigin, ChainLink, DataColumnSidecarOrigin,
-    ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction, PayloadAttestationItem,
-    PayloadAttestationValidationError, ProposerPreferencesOrigin,
+    AttestationValidationError, BlobSidecarOrigin, BlockItem, BlockOrigin, ChainLink,
+    DataColumnSidecarOrigin, ExecutionPayloadEnvelopeOrigin, PayloadAttestationAction,
+    PayloadAttestationItem, PayloadAttestationValidationError, ProposerPreferencesOrigin,
 };
 use scc::HashMap as SccHashMap;
 use serde::Serialize;
+use ssz::H256;
 use strum::IntoStaticStr;
 use tokio::sync::broadcast::Sender;
 use tracing::Span;
 use types::{
-    combined::{DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{DataColumnSidecar, SignedAggregateAndProof},
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::BlobIndex,
@@ -38,6 +39,7 @@ pub struct Delayed<P: Preset> {
     // using sets makes logic for handling delayed objects more complicated and seems to worsen
     // performance in benchmarks.
     pub blocks: Vec<PendingBlock<P>>,
+    pub unverified_blocks: Vec<PendingBlock<P>>,
     // There can only be one payload status per block
     pub payload_status: Option<(PayloadStatusV1, Slot)>,
     pub aggregates: Vec<PendingAggregateAndProof<P>>,
@@ -99,6 +101,7 @@ impl<P: Preset> Delayed<P> {
     pub const fn is_empty(&self) -> bool {
         let Self {
             blocks,
+            unverified_blocks,
             payload_status,
             aggregates,
             attestations,
@@ -110,6 +113,7 @@ impl<P: Preset> Delayed<P> {
         } = self;
 
         blocks.is_empty()
+            && unverified_blocks.is_empty()
             && payload_status.is_none()
             && aggregates.is_empty()
             && attestations.is_empty()
@@ -149,7 +153,7 @@ impl<P: Preset> WaitingForCheckpointState<P> {
 
 #[derive(Debug, Clone)]
 pub struct PendingBlock<P: Preset> {
-    pub block: Arc<SignedBeaconBlock<P>>,
+    pub block: BlockItem<P>,
     pub origin: BlockOrigin,
     pub processing_timings: ProcessingTimings,
     pub tracing_span: Span,
@@ -210,6 +214,20 @@ pub type VerifyAttestationResult<P> =
 
 pub type VerifyPayloadAttestationResult<P> =
     Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>>;
+
+#[expect(clippy::enum_variant_names)]
+#[derive(Debug, IntoStaticStr, Serialize)]
+#[strum(serialize_all = "snake_case")]
+pub enum MutatorIgnoreReason {
+    #[strum(serialize = "block_queue_full")]
+    BlockQueueFull { block_root: H256 },
+    #[strum(serialize = "blob_queue_full")]
+    BlobQueueFull { blob_identifier: BlobIdentifier },
+    #[strum(serialize = "data_column_queue_full")]
+    DataColumnQueueFull {
+        data_column_identifier: DataColumnIdentifier,
+    },
+}
 
 #[expect(clippy::enum_variant_names)]
 #[derive(Debug, IntoStaticStr, Serialize)]

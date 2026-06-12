@@ -32,14 +32,19 @@ use crate::{
 use std::sync::Mutex;
 
 #[cfg(test)]
+use spec_test_utils::BlsSetting;
+
+#[cfg(test)]
 use ::{
     execution_engine::MockExecutionEngine,
-    fork_choice_store::{AttestationItem, AttestationOrigin},
-    types::combined::Attestation,
+    fork_choice_store::{
+        AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+    },
+    types::{combined::Attestation, gloas::containers::CombinedPayloadAttestation},
 };
 
 #[cfg(test)]
-use crate::tasks::AttestationTask;
+use crate::tasks::{AttestationTask, PayloadAttestationTask};
 
 pub type AttestationVerifierDrain<P> = Drain<AttestationVerifierMessage<P, WaitGroup>>;
 
@@ -101,6 +106,7 @@ where
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let tick = Tick::block_proposal(&anchor_block);
 
@@ -137,6 +143,7 @@ where
             true,
             [].into(),
             Arc::new(SccHashMap::new()),
+            thread_pool_size,
         )
         .expect("Controller::new should not fail in tests and benchmarks")
     }
@@ -162,6 +169,7 @@ impl<P: Preset> AdHocBenchController<P> {
             NullExecutionEngine,
             None,
             p2p_tx,
+            None,
         )
     }
 }
@@ -185,6 +193,7 @@ impl<P: Preset> BenchController<P> {
             NullExecutionEngine,
             None,
             futures::sink::drain(),
+            None,
         )
     }
 }
@@ -203,6 +212,7 @@ impl<P: Preset> TestController<P> {
             anchor_state,
             Arc::new(Mutex::new(MockExecutionEngine::new(true, false, None))),
             futures::sink::drain(),
+            None,
         )
     }
 
@@ -213,6 +223,7 @@ impl<P: Preset> TestController<P> {
         anchor_state: Arc<BeaconState<P>>,
         execution_engine: TestExecutionEngine<P>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let store_config = StoreConfig::aggressive(&chain_config);
 
@@ -226,15 +237,40 @@ impl<P: Preset> TestController<P> {
             execution_engine,
             None,
             p2p_tx,
+            thread_pool_size,
         )
     }
 
-    pub(crate) fn on_test_attestation(&self, attestation: Arc<Attestation<P>>) {
+    pub(crate) fn on_test_attestation(
+        &self,
+        attestation: Arc<Attestation<P>>,
+        bls_setting: BlsSetting,
+    ) {
         self.spawn(AttestationTask {
             store_snapshot: self.owned_store_snapshot(),
             mutator_tx: self.owned_mutator_tx(),
             wait_group: self.owned_wait_group(),
-            attestation: AttestationItem::unverified(attestation, AttestationOrigin::Test),
+            attestation: AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Test(bls_setting),
+            ),
+            metrics: None,
+        })
+    }
+
+    pub(crate) fn on_test_payload_attestation(
+        &self,
+        payload_attestation: Arc<CombinedPayloadAttestation<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        self.spawn(PayloadAttestationTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            payload_attestation: PayloadAttestationItem::unverified(
+                payload_attestation,
+                PayloadAttestationOrigin::Test(bls_setting),
+            ),
             metrics: None,
         })
     }

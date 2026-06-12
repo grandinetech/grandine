@@ -33,6 +33,7 @@ use types::{
 };
 
 use crate::{
+    MutatorIgnoreReason,
     misc::{
         MutatorRejectionReason, ProcessingTimings, VerifyAggregateAndProofResult,
         VerifyAttestationResult, VerifyPayloadAttestationResult,
@@ -243,6 +244,7 @@ pub enum P2pMessage<P: Preset> {
     Slot(Slot),
     Accept(GossipId),
     Ignore(GossipId),
+    IgnoreWithReason(GossipId, MutatorIgnoreReason),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
