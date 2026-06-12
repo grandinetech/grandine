@@ -50,14 +50,14 @@ impl<P: Preset, E, W> Drop for ThreadPool<P, E, W> {
 }
 
 impl<P: Preset, E, W> ThreadPool<P, E, W> {
-    pub fn new() -> Result<Self>
+    pub(crate) fn with_worker_count(count: usize) -> Result<Self>
     where
         E: ExecutionEngine<P> + Send + 'static,
         W: Wait,
     {
         let shared = Arc::new(Shared::default());
 
-        for index in 0..num_cpus::get() {
+        for index in 0..count {
             let shared = shared.clone_arc();
 
             Builder::new()
@@ -405,6 +405,6 @@ fn run_worker<P: Preset, E: ExecutionEngine<P> + Send, W>(shared: &Shared<P, E, 
 fn thread_name() -> String {
     std::thread::current()
         .name()
-        .expect("ThreadPool::new gives every worker thread a name")
+        .expect("ThreadPool gives every worker thread a name")
         .to_owned()
 }

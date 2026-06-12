@@ -29,7 +29,9 @@ use eth2_libp2p::{
     types::{EnrForkId, ForkContext, GossipEncoding, GossipKind, core_topics_to_subscribe},
 };
 use features::Feature;
-use fork_choice_control::{BlockWithRoot, MutatorRejectionReason, P2pMessage, Wait};
+use fork_choice_control::{
+    BlockWithRoot, MutatorIgnoreReason, MutatorRejectionReason, P2pMessage, Wait,
+};
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
     future::FutureExt as _,
@@ -480,6 +482,24 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         P2pMessage::Ignore(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Ignore);
                         }
+                        P2pMessage::IgnoreWithReason(gossip_id, mutator_ignore_reason) => {
+                            self.report_outcome(gossip_id.clone(), MessageAcceptance::Ignore);
+
+                            match mutator_ignore_reason {
+                                MutatorIgnoreReason::BlockQueueFull { block_root } => {
+                                    P2pToSync::BlockNotConsidered(block_root)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                },
+                                MutatorIgnoreReason::BlobQueueFull { blob_identifier } => {
+                                    P2pToSync::BlobSidecarNotConsidered(blob_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                },
+                                MutatorIgnoreReason::DataColumnQueueFull { data_column_identifier } => {
+                                    P2pToSync::DataColumnSidecarNotConsidered(data_column_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                },
+                            }
+                        },
                         P2pMessage::PublishDataColumnSidecar(data_column_sidecar) => {
                             self.publish_data_column_sidecar(data_column_sidecar);
                         }

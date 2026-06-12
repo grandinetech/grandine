@@ -1151,6 +1151,17 @@ impl Config {
     }
 
     #[must_use]
+    pub fn max_gossip_future_slots(&self) -> Slot {
+        let disparity = self.maximum_gossip_clock_disparity.as_millis();
+        let slot_duration = self.slot_duration_ms.as_millis();
+
+        disparity
+            .div_ceil(slot_duration)
+            .try_into()
+            .expect("max gossip future slots should fit in u64")
+    }
+
+    #[must_use]
     pub fn max_data_columns_by_root_request<P: Preset>(&self) -> usize {
         *self.max_data_columns_by_root_request.get_or_init(|| {
             DynamicList::<DataColumnsByRootIdentifier<P>>::full(
@@ -1234,5 +1245,32 @@ mod tests {
     #[test_case(Config::holesky_devnet())]
     fn config_is_valid(config: Config) -> Result<(), Error> {
         config.validate()
+    }
+
+    #[test_case(Config::mainnet())]
+    #[test_case(Config::minimal())]
+    #[test_case(Config::medalla())]
+    #[test_case(Config::goerli())]
+    #[test_case(Config::sepolia())]
+    #[test_case(Config::withdrawal_devnet_3())]
+    #[test_case(Config::withdrawal_devnet_4())]
+    #[test_case(Config::holesky())]
+    #[test_case(Config::holesky_devnet())]
+    fn config_max_gossip_future_slots_is_one(config: Config) {
+        assert_eq!(config.max_gossip_future_slots(), 1)
+    }
+
+    #[test_case(Config::mainnet())]
+    fn config_max_gossip_future_slots_is_zero_when_disparity_is_zero(mut config: Config) {
+        config.maximum_gossip_clock_disparity = Duration::ZERO;
+        assert_eq!(config.max_gossip_future_slots(), 0)
+    }
+
+    #[test_case(Config::mainnet())]
+    fn config_max_gossip_future_slots_increases_when_disparity_is_above_slot_duration(
+        mut config: Config,
+    ) {
+        config.maximum_gossip_clock_disparity = config.slot_duration_ms.saturating_mul(2);
+        assert_eq!(config.max_gossip_future_slots(), 2)
     }
 }

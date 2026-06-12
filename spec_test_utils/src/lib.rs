@@ -9,11 +9,11 @@ use serde::{
     Deserialize,
     de::{DeserializeOwned, IgnoredAny},
 };
-use serde_repr::Deserialize_repr;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use snap::raw::Decoder;
 use ssz::{H256, SszRead, SszReadDefault};
 
-#[derive(Clone, Copy, Default, Deserialize_repr)]
+#[derive(Clone, Copy, Default, Deserialize_repr, Debug, Serialize_repr)]
 #[repr(u8)]
 pub enum BlsSetting {
     #[default]
@@ -46,12 +46,23 @@ pub struct Meta {
     pub reveal_deadlines_setting: IgnoredAny,
 }
 
+#[derive(Default, Deserialize)]
+#[serde(default)]
+pub struct ComplianceMeta {
+    pub bls_setting: BlsSetting,
+}
+
 #[derive(Clone, Copy, From)]
 pub struct Case<'path> {
     pub case_path_relative_to_workspace_root: &'path str,
 }
 
 impl<'path> Case<'path> {
+    #[must_use]
+    pub fn compliance_meta(self) -> ComplianceMeta {
+        self.try_yaml("meta").unwrap_or_default()
+    }
+
     #[must_use]
     pub fn meta(self) -> Meta {
         self.try_yaml("meta").unwrap_or_default()
