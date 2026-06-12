@@ -5205,8 +5205,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                              because previous difference always has greater location than current difference",
                         );
 
-                    let payload_presence = self.unfinalized[&segment_id]
-                        [in_segment_child_position]
+                    let payload_presence = self.unfinalized[&segment_id][in_segment_child_position]
                         .parent_payload_presence();
 
                     previous.last_block_payload_presence = Some(payload_presence);
@@ -5250,8 +5249,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 if previous.differences.pending != 0 {
                     if let Some(parent) = self.parent_location(segment) {
-                        let first_block_presence =
-                            segment.first_block().parent_payload_presence();
+                        let first_block_presence = segment.first_block().parent_payload_presence();
 
                         let propagated_differences = match first_block_presence {
                             PayloadPresence::Empty => Differences {
@@ -5279,24 +5277,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     } else {
                         let first_block = segment.first_block();
 
-                        if first_block.chain_link.parent_root() == last_finalized_block_root
-                        {
+                        if first_block.chain_link.parent_root() == last_finalized_block_root {
                             last_finalized_differences.pending = last_finalized_differences
                                 .pending
                                 .saturating_add(previous.differences.pending);
 
                             match first_block.parent_payload_presence() {
                                 PayloadPresence::Empty => {
-                                    last_finalized_differences.empty =
-                                        last_finalized_differences
-                                            .empty
-                                            .saturating_add(previous.differences.pending);
+                                    last_finalized_differences.empty = last_finalized_differences
+                                        .empty
+                                        .saturating_add(previous.differences.pending);
                                 }
                                 PayloadPresence::Full => {
-                                    last_finalized_differences.full =
-                                        last_finalized_differences
-                                            .full
-                                            .saturating_add(previous.differences.pending);
+                                    last_finalized_differences.full = last_finalized_differences
+                                        .full
+                                        .saturating_add(previous.differences.pending);
                                 }
                                 PayloadPresence::Pending => {}
                             }
