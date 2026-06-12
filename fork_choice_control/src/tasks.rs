@@ -10,10 +10,10 @@ use execution_engine::{ExecutionEngine, NullExecutionEngine};
 use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAttestationItem, PayloadAttestationOrigin, ProposerPreferencesOrigin,
-    StateCacheProcessor, Store,
+    BlobSidecarOrigin, BlockAction, BlockItem, BlockOrigin, DataColumnSidecarAction,
+    DataColumnSidecarOrigin, ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction,
+    ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+    ProposerPreferencesOrigin, StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -23,6 +23,7 @@ use helper_functions::{
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use spec_test_utils::BlsSetting;
 use ssz::SszHash as _;
 use tracing::{Span, instrument};
 use types::{
@@ -75,7 +76,7 @@ pub struct BlockTask<P: Preset, E, W> {
     pub execution_engine: E,
     pub mutator_tx: Sender<MutatorMessage<P, W>>,
     pub wait_group: W,
-    pub block: Arc<SignedBeaconBlock<P>>,
+    pub block: BlockItem<P>,
     pub origin: BlockOrigin,
     pub processing_timings: ProcessingTimings,
     pub metrics: Option<Arc<Metrics>>,
@@ -89,7 +90,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
         parent = &self.tracing_span,
         fields(
             origin = ?&self.origin,
-            slot = self.block.message().slot()
+            slot = self.block.item.message().slot()
         ),
     )]
     fn run(self) {
@@ -111,12 +112,14 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
         });
 
         let started_at = Instant::now();
+        let block_slot = block.item.message().slot();
+        let block_root = block.item.message().hash_tree_root();
 
         let result = match origin {
             BlockOrigin::Gossip(_) | BlockOrigin::Requested(_) | BlockOrigin::Api(_) => {
                 block_processor.validate_block(
                     &store_snapshot,
-                    &block,
+                    block,
                     origin.state_root_policy(),
                     origin.data_availability_policy(),
                     execution_engine,
@@ -127,7 +130,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 if Feature::TrustOwnBlockSignatures.is_enabled() {
                     block_processor.validate_block(
                         &store_snapshot,
-                        &block,
+                        block,
                         origin.state_root_policy(),
                         origin.data_availability_policy(),
                         execution_engine,
@@ -136,7 +139,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 } else {
                     block_processor.validate_block(
                         &store_snapshot,
-                        &block,
+                        block,
                         origin.state_root_policy(),
                         origin.data_availability_policy(),
                         execution_engine,
@@ -146,26 +149,41 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             }
             BlockOrigin::Persisted => block_processor.validate_block(
                 &store_snapshot,
-                &block,
+                block,
                 origin.state_root_policy(),
                 origin.data_availability_policy(),
                 NullExecutionEngine,
                 NullVerifier,
             ),
+            BlockOrigin::Test(bls_setting) => match bls_setting {
+                BlsSetting::Required | BlsSetting::Optional => block_processor.validate_block(
+                    &store_snapshot,
+                    block,
+                    origin.state_root_policy(),
+                    origin.data_availability_policy(),
+                    execution_engine,
+                    MultiVerifier::default(),
+                ),
+                BlsSetting::Ignored => block_processor.validate_block(
+                    &store_snapshot,
+                    block.into_base_verified(),
+                    origin.state_root_policy(),
+                    origin.data_availability_policy(),
+                    execution_engine,
+                    NullVerifier,
+                ),
+            },
         };
 
         features::log!(
             LogBlockProcessingTime,
-            "block {:?} validated in {:?} ms",
-            block.hash_tree_root(),
+            "block {block_root:?} validated in {:?} ms",
             started_at.elapsed().as_millis(),
         );
 
-        if block.message().slot() == store_snapshot.slot() {
+        if block_slot == store_snapshot.slot() {
             store_snapshot.dec_current_slot_blocks_in_processing();
         }
-
-        let block_root = block.message().hash_tree_root();
 
         MutatorMessage::Block {
             wait_group,

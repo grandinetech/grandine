@@ -12,7 +12,8 @@ use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
 use serde::{Serialize, Serializer};
-use ssz::{ProgressiveList, SszList};
+use spec_test_utils::BlsSetting;
+use ssz::ProgressiveList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
@@ -312,6 +313,7 @@ pub enum BlockOrigin {
     Own,
     Persisted,
     Api(Option<Sender<Result<ValidationOutcome>>>),
+    Test(BlsSetting),
 }
 
 impl BlockOrigin {
@@ -321,6 +323,7 @@ impl BlockOrigin {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
             Self::Requested(_) | Self::Own | Self::Persisted => (None, None),
+            Self::Test(_) => (Some(GossipId::default()), None),
         }
     }
 
@@ -328,7 +331,15 @@ impl BlockOrigin {
     pub fn gossip_id(&self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.clone()),
-            Self::Requested(_) | Self::Own | Self::Persisted | Self::Api(_) => None,
+            Self::Requested(_) | Self::Own | Self::Persisted | Self::Api(_) | Self::Test(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(gossip_id) => Some(gossip_id),
+            Self::Requested(_) | Self::Own | Self::Persisted | Self::Api(_) | Self::Test(_) => None,
         }
     }
 
@@ -337,14 +348,16 @@ impl BlockOrigin {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.source),
             Self::Requested(peer_id) => *peer_id,
-            Self::Own | Self::Persisted | Self::Api(_) => None,
+            Self::Own | Self::Persisted | Self::Api(_) | Self::Test(_) => None,
         }
     }
 
     #[must_use]
     pub fn state_root_policy(&self) -> StateRootPolicy {
         match self {
-            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => StateRootPolicy::Verify,
+            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) | Self::Test(_) => {
+                StateRootPolicy::Verify
+            }
             Self::Own => {
                 if Feature::TrustOwnStateRoots.is_enabled() {
                     StateRootPolicy::Trust
@@ -359,7 +372,7 @@ impl BlockOrigin {
     #[must_use]
     pub const fn data_availability_policy(&self) -> DataAvailabilityPolicy {
         match self {
-            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) | Self::Own => {
+            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) | Self::Own | Self::Test(_) => {
                 DataAvailabilityPolicy::Check
             }
             Self::Persisted => DataAvailabilityPolicy::Trust,
@@ -370,7 +383,7 @@ impl BlockOrigin {
     pub const fn should_send_gossip_event(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,
-            Self::Requested(_) | Self::Own | Self::Persisted => false,
+            Self::Requested(_) | Self::Own | Self::Persisted | Self::Test(_) => false,
         }
     }
 
@@ -383,6 +396,7 @@ impl BlockOrigin {
             Self::Own => "Own",
             Self::Persisted => "Persisted",
             Self::Api(_) => "Api",
+            Self::Test(_) => "Test",
         }
     }
 
@@ -530,6 +544,40 @@ impl ExecutionPayloadBidOrigin {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct BlockItem<P: Preset> {
+    pub item: Arc<SignedBeaconBlock<P>>,
+    pub base_signature_status: SignatureStatus,
+}
+
+impl<P: Preset> BlockItem<P> {
+    #[must_use]
+    pub const fn unverified(item: Arc<SignedBeaconBlock<P>>) -> Self {
+        Self {
+            item,
+            base_signature_status: SignatureStatus::Unverified,
+        }
+    }
+
+    #[must_use]
+    pub const fn verified(item: Arc<SignedBeaconBlock<P>>) -> Self {
+        Self {
+            item,
+            base_signature_status: SignatureStatus::Verified,
+        }
+    }
+
+    #[must_use]
+    pub fn into_base_verified(self) -> Self {
+        let Self { item, .. } = self;
+
+        Self {
+            item,
+            base_signature_status: SignatureStatus::Verified,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AttestationItem<P: Preset, I> {
     pub item: Arc<Attestation<P>>,
@@ -647,7 +695,7 @@ impl<P: Preset> PayloadAttestationItem<P> {
     }
 }
 
-#[derive(Debug, AsRefStr)]
+#[derive(Debug, AsRefStr, Clone, Copy)]
 pub enum SignatureStatus {
     Verified,
     Unverified,
@@ -655,7 +703,7 @@ pub enum SignatureStatus {
 
 impl SignatureStatus {
     #[must_use]
-    pub const fn is_verified(&self) -> bool {
+    pub const fn is_verified(self) -> bool {
         matches!(self, Self::Verified)
     }
 }
@@ -672,34 +720,17 @@ pub enum AttestationOrigin<I> {
     // Some test cases in `consensus-spec-tests` contain data that cannot occur in normal operation.
     // `fork_choice` test cases contain bare aggregate attestations.
     // Normally they can only occur inside blocks or alongside aggregate selection proofs.
-    Test,
+    Test(BlsSetting),
 }
 
 impl<I> AttestationOrigin<I> {
-    #[must_use]
-    pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
-        match self {
-            Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
-            Self::Api(_, sender) => (None, Some(sender)),
-            Self::Own(_) | Self::Block(_) | Self::Test => (None, None),
-        }
-    }
-
     #[must_use]
     pub const fn subnet_id(&self) -> Option<SubnetId> {
         match *self {
             Self::Gossip(subnet_id, _) | Self::Own(subnet_id) | Self::Api(subnet_id, _) => {
                 Some(subnet_id)
             }
-            Self::Block(_) | Self::Test => None,
-        }
-    }
-
-    #[must_use]
-    pub fn gossip_id(self) -> Option<I> {
-        match self {
-            Self::Gossip(_, gossip_id) => Some(gossip_id),
-            _ => None,
+            Self::Block(_) | Self::Test(_) => None,
         }
     }
 
@@ -719,7 +750,7 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub const fn validate_as_gossip(&self) -> bool {
         match self {
-            Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) | Self::Test => true,
+            Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) | Self::Test(_) => true,
             Self::Block(_) => false,
         }
     }
@@ -728,7 +759,7 @@ impl<I> AttestationOrigin<I> {
     pub const fn must_be_singular(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Own(_) | Self::Api(_, _) => true,
-            Self::Block(_) | Self::Test => false,
+            Self::Block(_) | Self::Test(_) => false,
         }
     }
 
@@ -740,9 +771,10 @@ impl<I> AttestationOrigin<I> {
     #[must_use]
     pub fn verify_signatures(&self) -> bool {
         match self {
-            Self::Gossip(_, _) | Self::Api(_, _) | Self::Test => true,
+            Self::Gossip(_, _) | Self::Api(_, _) => true,
             Self::Block(_) => false,
             Self::Own(_) => !Feature::TrustOwnAttestationSignatures.is_enabled(),
+            Self::Test(bls_setting) => !matches!(bls_setting, BlsSetting::Ignored),
         }
     }
 
@@ -750,7 +782,7 @@ impl<I> AttestationOrigin<I> {
     pub const fn send_to_validator(&self) -> bool {
         match self {
             Self::Gossip(_, _) | Self::Api(_, _) => true,
-            Self::Own(_) | Self::Block(_) | Self::Test => false,
+            Self::Own(_) | Self::Block(_) | Self::Test(_) => false,
         }
     }
 
@@ -762,7 +794,28 @@ impl<I> AttestationOrigin<I> {
             Self::Own(_) => "Own",
             Self::Api(_, _) => "Api",
             Self::Block(_) => "Block",
-            Self::Test => "Test",
+            Self::Test(_) => "Test",
+        }
+    }
+}
+
+impl<I: Default> AttestationOrigin<I> {
+    #[must_use]
+    pub fn split(self) -> (Option<I>, Option<OneshotSender<Result<ValidationOutcome>>>) {
+        match self {
+            Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
+            Self::Api(_, sender) => (None, Some(sender)),
+            Self::Own(_) | Self::Block(_) => (None, None),
+            Self::Test(_) => (Some(I::default()), None),
+        }
+    }
+
+    #[must_use]
+    pub fn gossip_id(self) -> Option<I> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
+            Self::Test(_) => Some(I::default()),
+            _ => None,
         }
     }
 }
@@ -772,6 +825,7 @@ pub enum AttesterSlashingOrigin {
     Gossip,
     Block,
     Own,
+    Test(BlsSetting),
 }
 
 impl AttesterSlashingOrigin {
@@ -781,6 +835,7 @@ impl AttesterSlashingOrigin {
             Self::Gossip => true,
             Self::Block => false,
             Self::Own => !Feature::TrustOwnAttesterSlashingSignatures.is_enabled(),
+            Self::Test(bls_setting) => !matches!(bls_setting, BlsSetting::Ignored),
         }
     }
 }
@@ -791,6 +846,7 @@ pub enum PayloadAttestationOrigin {
     Api(OneshotSender<Result<ValidationOutcome>>),
     Block(H256),
     Own,
+    Test(BlsSetting),
 }
 
 impl PayloadAttestationOrigin {
@@ -805,6 +861,7 @@ impl PayloadAttestationOrigin {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, Some(sender)),
             Self::Own | Self::Block(_) => (None, None),
+            Self::Test(_) => (Some(GossipId::default()), None),
         }
     }
 
@@ -813,6 +870,7 @@ impl PayloadAttestationOrigin {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.clone()),
             Self::Own | Self::Block(_) | Self::Api(_) => None,
+            Self::Test(_) => Some(GossipId::default()),
         }
     }
 
@@ -828,7 +886,7 @@ impl PayloadAttestationOrigin {
     pub const fn peer_id(&self) -> Option<PeerId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.source),
-            Self::Api(_) | Self::Own | Self::Block(_) => None,
+            Self::Api(_) | Self::Own | Self::Block(_) | Self::Test(_) => None,
         }
     }
 
@@ -838,6 +896,7 @@ impl PayloadAttestationOrigin {
             Self::Gossip(_) | Self::Api(_) => true,
             Self::Block(_) => false,
             Self::Own => !Feature::TrustOwnAttestationSignatures.is_enabled(),
+            Self::Test(bls_setting) => !matches!(bls_setting, BlsSetting::Ignored),
         }
     }
 
@@ -863,6 +922,7 @@ impl PayloadAttestationOrigin {
             Self::Own => "Own",
             Self::Api(_) => "Api",
             Self::Block(_) => "Block",
+            Self::Test(_) => "Test",
         }
     }
 }
@@ -889,6 +949,18 @@ impl BlobSidecarOrigin {
             Self::Gossip(_, gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
             Self::BackSync | Self::ExecutionLayer | Self::Own | Self::Requested(_) => (None, None),
+        }
+    }
+
+    #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
+            Self::Api(_)
+            | Self::BackSync
+            | Self::ExecutionLayer
+            | Self::Own
+            | Self::Requested(_) => None,
         }
     }
 
@@ -974,6 +1046,18 @@ impl DataColumnSidecarOrigin {
     }
 
     #[must_use]
+    pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
+        match self {
+            Self::Gossip(_, gossip_id) => Some(gossip_id),
+            Self::Api(_)
+            | Self::BackSync
+            | Self::ExecutionLayer
+            | Self::Own
+            | Self::Requested(_) => None,
+        }
+    }
+
+    #[must_use]
     pub const fn peer_id(&self) -> Option<PeerId> {
         match self {
             Self::Gossip(_, gossip_id) => Some(gossip_id.source),
@@ -1013,10 +1097,10 @@ impl DataColumnSidecarOrigin {
 pub enum BlockAction<P: Preset> {
     Accept(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>),
     Ignore(Publishable),
-    DelayUntilBlobs(Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>),
-    DelayUntilParent(Arc<SignedBeaconBlock<P>>),
-    DelayUntilPayload(Arc<SignedBeaconBlock<P>>),
-    DelayUntilSlot(Arc<SignedBeaconBlock<P>>),
+    DelayUntilBlobs(BlockItem<P>, Arc<BeaconState<P>>),
+    DelayUntilParent(BlockItem<P>),
+    DelayUntilPayload(BlockItem<P>),
+    DelayUntilSlot(BlockItem<P>),
     WaitForJustifiedState(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>, Checkpoint),
 }
 
@@ -1047,6 +1131,7 @@ pub enum AggregateAndProofAction<P: Preset> {
     WaitForTargetState(Arc<SignedAggregateAndProof<P>>),
 }
 
+#[derive(Debug)]
 pub enum AttestationAction<P: Preset, I> {
     Accept {
         attestation: AttestationItem<P, I>,
@@ -1185,6 +1270,7 @@ pub enum ExecutionPayloadEnvelopeOrigin {
     Requested(PeerId),
     Own,
     Api(Option<Sender<Result<ValidationOutcome>>>),
+    Test(BlsSetting),
 }
 
 impl ExecutionPayloadEnvelopeOrigin {
@@ -1194,6 +1280,7 @@ impl ExecutionPayloadEnvelopeOrigin {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
             Self::BackSync | Self::Requested(_) | Self::Own => (None, None),
+            Self::Test(_) => (Some(GossipId::default()), None),
         }
     }
 
@@ -1202,6 +1289,7 @@ impl ExecutionPayloadEnvelopeOrigin {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.clone()),
             Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+            Self::Test(_) => Some(GossipId::default()),
         }
     }
 
@@ -1209,7 +1297,7 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) | Self::Test(_) => None,
         }
     }
 
@@ -1228,6 +1316,7 @@ impl ExecutionPayloadEnvelopeOrigin {
         match self {
             Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
             Self::Own => false,
+            Self::Test(bls_setting) => !matches!(bls_setting, BlsSetting::Ignored),
         }
     }
 

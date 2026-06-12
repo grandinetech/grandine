@@ -329,6 +329,7 @@ pub async fn run_after_genesis<P: Preset>(
         !back_sync_enabled || is_anchor_genesis,
         blacklisted_blocks,
         sidecars_construction_started.clone_arc(),
+        None,
     )?;
 
     let received_blob_sidecars = Arc::new(SccHashMap::new());

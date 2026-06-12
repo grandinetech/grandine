@@ -35,7 +35,7 @@ use execution_engine::{
 use fork_choice_store::{
     AggregateAndProofAction, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
     AttestationItem, AttestationOrigin, AttestationValidationError, AttesterSlashingOrigin,
-    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
+    BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockItem, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
     PayloadAction, PayloadAttestationAction, PayloadAttestationItem, PayloadPresence,
@@ -74,7 +74,7 @@ use types::{
 };
 
 use crate::{
-    SidecarsPendingReconstruction,
+    MutatorIgnoreReason, SidecarsPendingReconstruction,
     block_processor::BlockProcessor,
     events::{DependentRootsBundle, EventChannels},
     messages::{
@@ -103,6 +103,8 @@ use crate::{
 };
 
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
+const MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT: usize = 16;
+const MAX_DELAYED_BLOCKS_UNTIL_PARENT: usize = 64;
 
 #[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
@@ -117,11 +119,6 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     delayed_until_block: HashMap<H256, Delayed<P>>,
     delayed_until_data: HashMap<H256, PendingExecutionPayloadEnvelope<P>>,
     delayed_until_envelope: HashMap<H256, Delayed<P>>,
-    // We previously ignored objects that would have to be delayed more than one slot. This was
-    // based on the assumption that one slot is enough to account for clock differences between
-    // nodes. However, this meant that if the application lagged enough to miss multiple slot
-    // updates (not necessarily by its own fault), the fork choice store would start ignoring blocks
-    // and make the application stop syncing.
     delayed_until_slot: BTreeMap<Slot, Delayed<P>>,
     // `Mutator.delayed_until_payload` is needed mainly to run optimistic sync test cases, but the
     // problem it solves can occur in normal operation as well. The execution layer may finish
@@ -439,6 +436,7 @@ where
             let block = result?;
             let origin = BlockOrigin::Persisted;
             let processing_timings = ProcessingTimings::new();
+            let block_root = block.message().hash_tree_root();
 
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
@@ -447,15 +445,13 @@ where
                 .block_processor
                 .validate_block(
                     &self.store,
-                    &block,
+                    BlockItem::verified(block),
                     origin.state_root_policy(),
                     origin.data_availability_policy(),
                     &self.execution_engine,
                     NullVerifier,
                 )
                 .into();
-
-            let block_root = block.message().hash_tree_root();
 
             self.handle_block(
                 wait_group.clone(),
@@ -799,9 +795,9 @@ where
                     tracing_span,
                 };
 
-                if pending_block.block.phase().is_peerdas_activated() {
+                if pending_block.block.item.phase().is_peerdas_activated() {
                     let block_data_column_availability = self.block_data_column_availability(
-                        &pending_block.block,
+                        &pending_block.block.item,
                         self.delayed_until_state
                             .get(&(block_root, state.slot()))
                             .iter()
@@ -811,9 +807,9 @@ where
 
                     debug_with_peers!(
                         "availability for block: {:?} with origin: {:?} at slot: {}: {block_data_column_availability:?}",
-                        pending_block.block.message().hash_tree_root(),
+                        pending_block.block.item.message().hash_tree_root(),
                         pending_block.origin,
-                        pending_block.block.message().slot(),
+                        pending_block.block.item.message().slot(),
                     );
 
                     match block_data_column_availability {
@@ -844,7 +840,7 @@ where
 
                             let missing_indices = self
                                 .store
-                                .indices_of_missing_data_columns(&pending_block.block);
+                                .indices_of_missing_data_columns(&pending_block.block.item);
 
                             if missing_indices.is_empty() {
                                 self.retry_block(wait_group, pending_block);
@@ -854,7 +850,7 @@ where
                                 if !matches!(pending_block.origin, BlockOrigin::Own)
                                     && !self.store.is_sidecars_construction_started(&block_root)
                                 {
-                                    let slot = pending_block.block.message().slot();
+                                    let slot = pending_block.block.item.message().slot();
 
                                     self.store
                                         .mark_sidecar_construction_started(block_root, slot);
@@ -871,8 +867,8 @@ where
                                     self.send_to_pool(PoolMessage::ReconstructDataColumns {
                                         wait_group: wait_group.clone(),
                                         block_root,
-                                        block: pending_block.block.clone_arc(),
-                                        slot: pending_block.block.message().slot(),
+                                        block: pending_block.block.item.clone_arc(),
+                                        slot: pending_block.block.item.message().slot(),
                                         is_from_requested: pending_block.origin.is_requested(),
                                     })
                                 }
@@ -905,7 +901,7 @@ where
                             {
                                 self.store_mut().mark_requested_blobs_from_el(
                                     block_root,
-                                    pending_block.block.message().slot(),
+                                    pending_block.block.item.message().slot(),
                                 );
                                 self.update_store_snapshot();
 
@@ -916,7 +912,11 @@ where
 
                                 self.request_blobs_from_execution_engine(
                                     EngineGetBlobsV2Params {
-                                        block_or_sidecar: pending_block.block.clone_arc().into(),
+                                        block_or_sidecar: pending_block
+                                            .block
+                                            .item
+                                            .clone_arc()
+                                            .into(),
                                         data_column_identifiers,
                                     }
                                     .into(),
@@ -931,7 +931,7 @@ where
                     }
                 } else {
                     let block_blob_availability = self.block_blob_availability(
-                        &pending_block.block,
+                        &pending_block.block.item,
                         self.delayed_until_state
                             .get(&(block_root, state.slot()))
                             .iter()
@@ -980,7 +980,7 @@ where
 
                             self.request_blobs_from_execution_engine(
                                 EngineGetBlobsV1Params {
-                                    block: pending_block.block.clone_arc(),
+                                    block: pending_block.block.item.clone_arc(),
                                     blob_identifiers,
                                     peer_id,
                                 }
@@ -997,7 +997,7 @@ where
             }
             Ok(BlockAction::DelayUntilParent(block)) => {
                 let processing_timings = processing_timings.delayed();
-                let parent_root = block.message().parent_root();
+                let parent_root = block.item.message().parent_root();
 
                 let pending_block = PendingBlock {
                     block,
@@ -1014,19 +1014,31 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    debug_with_peers!("block delayed until parent: {block_root:?}");
-                    trace_with_peers!("block delayed until parent: {pending_block:?}");
-
                     let peer_id = pending_block.origin.peer_id();
 
                     self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
 
-                    self.delay_block_until_parent(pending_block);
+                    trace_with_peers!("attempting to delay block until parent: {pending_block:?}");
+
+                    let gossip_id = pending_block.origin.gossip_id_ref().cloned();
+
+                    if let Err(error) = self.try_delay_block_until_parent(pending_block) {
+                        debug_with_peers!("unable to delay block until parent: {error:?}");
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::BlockQueueFull { block_root },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!("block delayed until parent: {block_root:?}");
+                    }
                 }
             }
             Ok(BlockAction::DelayUntilPayload(block)) => {
                 let processing_timings = processing_timings.delayed();
-                let parent_root = block.message().parent_root();
+                let parent_root = block.item.message().parent_root();
 
                 let pending_block = PendingBlock {
                     block,
@@ -1055,7 +1067,7 @@ where
             }
             Ok(BlockAction::DelayUntilSlot(block)) => {
                 let processing_timings = processing_timings.delayed();
-                let slot = block.message().slot();
+                let slot = block.item.message().slot();
 
                 let pending_block = PendingBlock {
                     block,
@@ -1072,10 +1084,21 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    debug_with_peers!("block delayed until slot: {block_root:?}");
-                    trace_with_peers!("block delayed until slot: {pending_block:?}");
+                    let gossip_id = pending_block.origin.gossip_id_ref().cloned();
 
-                    self.delay_block_until_slot(pending_block);
+                    if let Err(error) = self.try_delay_block_until_slot(pending_block) {
+                        debug_with_peers!("failed to delay block until slot: {error}");
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::BlockQueueFull { block_root },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!("block delayed until slot: {block_root:?}");
+                        trace_with_peers!("block delayed until slot");
+                    }
                 }
             }
             Ok(BlockAction::WaitForJustifiedState(
@@ -1767,8 +1790,6 @@ where
                 if self.store.contains_block(parent_root) {
                     self.retry_blob_sidecar(wait_group, pending_blob_sidecar, None);
                 } else {
-                    debug_with_peers!("blob sidecar delayed until block parent: {parent_root:?}");
-
                     let peer_id = pending_blob_sidecar.origin.peer_id();
 
                     self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
@@ -1778,7 +1799,26 @@ where
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    self.delay_blob_sidecar_until_parent(pending_blob_sidecar);
+                    let gossip_id = pending_blob_sidecar.origin.gossip_id_ref().cloned();
+
+                    if let Err(error) =
+                        self.try_delay_blob_sidecar_until_parent(pending_blob_sidecar)
+                    {
+                        debug_with_peers!(
+                            "unable to delay blob sidecar until block parent: {parent_root:?} {error:?}"
+                        );
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::BlobQueueFull { blob_identifier },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!(
+                            "blob sidecar delayed until block parent: {parent_root:?}"
+                        );
+                    }
                 }
             }
             Ok(BlobSidecarAction::DelayUntilSlot(blob_sidecar)) => {
@@ -1794,14 +1834,26 @@ where
                 if slot <= self.store.slot() {
                     self.retry_blob_sidecar(wait_group, pending_blob_sidecar, None);
                 } else {
-                    debug_with_peers!("blob sidecar delayed until slot: {slot}");
-
                     let pending_blob_sidecar = reply_delayed_blob_sidecar_validation_result(
                         pending_blob_sidecar,
                         Ok(ValidationOutcome::Ignore(false)),
                     );
 
-                    self.delay_blob_sidecar_until_slot(pending_blob_sidecar);
+                    let gossip_id = pending_blob_sidecar.origin.gossip_id_ref().cloned();
+
+                    if let Err(error) = self.try_delay_blob_sidecar_until_slot(pending_blob_sidecar)
+                    {
+                        debug_with_peers!("failed to delay blob sidecar until slot: {error}");
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::BlobQueueFull { blob_identifier },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!("blob sidecar delayed until slot: {slot}");
+                    }
                 }
             }
             Err(error) => {
@@ -1971,12 +2023,8 @@ where
                 if self.store.contains_block_and_data_available(parent_root) {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
-                    debug_with_peers!(
-                        "data column sidecar delayed until block parent: \
-                        {parent_root:?}, identifier: {data_column_identifier:?}",
-                    );
-
                     let peer_id = pending_data_column_sidecar.origin.peer_id();
+                    let gossip_id = pending_data_column_sidecar.origin.gossip_id_ref().cloned();
 
                     self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
 
@@ -1986,7 +2034,27 @@ where
                             Ok(ValidationOutcome::Ignore(false)),
                         );
 
-                    self.delay_data_column_sidecar_until_parent(pending_data_column_sidecar);
+                    if let Err(error) =
+                        self.try_delay_data_column_sidecar_until_parent(pending_data_column_sidecar)
+                    {
+                        debug_with_peers!(
+                            "failed to delay data column sidecar until parent: {error}"
+                        );
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::DataColumnQueueFull {
+                                    data_column_identifier,
+                                },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!(
+                            "data column sidecar delayed until block parent: \
+                            {parent_root:?}, identifier: {data_column_identifier:?}",
+                        );
+                    }
                 }
             }
             Ok(DataColumnSidecarAction::DelayUntilSlot(data_column_sidecar)) => {
@@ -2002,15 +2070,35 @@ where
                 if slot <= self.store.slot() {
                     self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
                 } else {
-                    debug_with_peers!("data column sidecar delayed until slot: {slot}");
-
                     let pending_data_column_sidecar =
                         reply_delayed_data_column_sidecar_validation_result(
                             pending_data_column_sidecar,
                             Ok(ValidationOutcome::Ignore(false)),
                         );
 
-                    self.delay_data_column_sidecar_until_slot(pending_data_column_sidecar);
+                    let gossip_id = pending_data_column_sidecar.origin.gossip_id_ref().cloned();
+                    let data_column_identifier = DataColumnIdentifier::from(
+                        pending_data_column_sidecar.data_column_sidecar.as_ref(),
+                    );
+
+                    if let Err(error) =
+                        self.try_delay_data_column_sidecar_until_slot(pending_data_column_sidecar)
+                    {
+                        debug_with_peers!(
+                            "failed to delay data column sidecar until slot: {error}"
+                        );
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::DataColumnQueueFull {
+                                    data_column_identifier,
+                                },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!("data column sidecar delayed until slot: {slot}");
+                    }
                 }
             }
             Err(error) => {
@@ -3071,6 +3159,27 @@ where
             return Ok(());
         }
 
+        // The block's parent may have been orphaned while the block was being processed or waiting
+        // in a delay queue. The fork choice store is not designed to insert blocks with missing parents.
+        let parent_root = chain_link.parent_root();
+        if !self.store.contains_block(parent_root) {
+            debug_with_peers!(
+                "block's parent was orphaned while block was being processed \
+                 (block_root: {block_root:?}, parent_root: {parent_root:?}, \
+                  origin: {origin:?})",
+            );
+
+            let (gossip_id, sender) = origin.split();
+
+            if let Some(gossip_id) = gossip_id {
+                self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+            }
+
+            reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Ignore(false)));
+
+            return Ok(());
+        }
+
         debug_with_peers!("block accepted (block_root: {block_root:?}, origin: {origin:?})");
         trace_with_peers!(
             "block accepted (block_root: {block_root:?}, block: {block:?}, origin: {origin:?})"
@@ -3413,6 +3522,14 @@ where
                 None
             }
             BlockOrigin::Own | BlockOrigin::Persisted => None,
+            BlockOrigin::Test(_) => {
+                self.send_to_p2p(P2pMessage::Reject(
+                    None,
+                    MutatorRejectionReason::InvalidBlock,
+                ));
+
+                None
+            }
         };
 
         self.store_mut().register_rejected_block(block_root);
@@ -3710,22 +3827,45 @@ where
 
     fn delay_block_until_blobs(&mut self, beacon_block_root: H256, pending_block: PendingBlock<P>) {
         self.store_mut()
-            .delay_block_at_slot(pending_block.block.message().slot(), beacon_block_root);
+            .delay_block_at_slot(pending_block.block.item.message().slot(), beacon_block_root);
         self.update_store_snapshot();
 
         self.delayed_until_blobs
             .insert(beacon_block_root, pending_block);
     }
 
-    fn delay_block_until_parent(&mut self, pending_block: PendingBlock<P>) {
+    fn total_unverified_delayed_block_until_parent(&self) -> usize {
+        self.delayed_until_block
+            .values()
+            .map(|delayed| delayed.unverified_blocks.len())
+            .sum::<usize>()
+    }
+
+    fn try_delay_block_until_parent(&mut self, pending_block: PendingBlock<P>) -> Result<()> {
         // Blocks produced by the application itself should never be delayed.
         assert!(!matches!(pending_block.origin, BlockOrigin::Own));
 
-        self.delayed_until_block
-            .entry(pending_block.block.message().parent_root())
-            .or_default()
-            .blocks
-            .push(pending_block);
+        let parent_root = pending_block.block.item.message().parent_root();
+
+        if pending_block.block.base_signature_status.is_verified() {
+            self.delayed_until_block
+                .entry(parent_root)
+                .or_default()
+                .blocks
+                .push(pending_block);
+        } else if self.total_unverified_delayed_block_until_parent()
+            < MAX_DELAYED_BLOCKS_UNTIL_PARENT
+        {
+            self.delayed_until_block
+                .entry(parent_root)
+                .or_default()
+                .unverified_blocks
+                .push(pending_block);
+        } else {
+            return Err(Error::<P>::DelayedUntilParentQueueFull.into());
+        }
+
+        Ok(())
     }
 
     fn delay_block_until_payload_envelope(
@@ -3952,16 +4092,21 @@ where
             .payload_status = Some(pending_payload_status);
     }
 
-    fn delay_block_until_slot(&mut self, pending_block: PendingBlock<P>) {
+    fn try_delay_block_until_slot(&mut self, pending_block: PendingBlock<P>) -> Result<()> {
         // Requested blocks can also be delayed until a slot if the slot isn't updated on time.
         // Blocks produced by the application itself should never be delayed.
         assert!(!matches!(pending_block.origin, BlockOrigin::Own));
 
-        self.delayed_until_slot
-            .entry(pending_block.block.message().slot())
-            .or_default()
-            .blocks
-            .push(pending_block);
+        let slot = pending_block.block.item.message().slot();
+        let entry = self.delayed_until_slot.entry(slot).or_default();
+
+        if entry.blocks.len() < MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT {
+            entry.blocks.push(pending_block);
+        } else {
+            return Err(Error::<P>::BlockSlotQueueFull { slot }.into());
+        }
+
+        Ok(())
     }
 
     fn delay_aggregate_and_proof_until_slot(
@@ -4037,32 +4182,72 @@ where
             .push(pending_blob_sidecar);
     }
 
-    fn delay_blob_sidecar_until_parent(&mut self, pending_blob_sidecar: PendingBlobSidecar<P>) {
-        self.delayed_until_block
-            .entry(
-                pending_blob_sidecar
-                    .blob_sidecar
-                    .signed_block_header
-                    .message
-                    .parent_root,
-            )
-            .or_default()
-            .blob_sidecars
-            .push(pending_blob_sidecar);
+    fn try_delay_blob_sidecar_until_parent(
+        &mut self,
+        pending_blob_sidecar: PendingBlobSidecar<P>,
+    ) -> Result<()> {
+        let parent_root = pending_blob_sidecar
+            .blob_sidecar
+            .signed_block_header
+            .message
+            .parent_root;
+
+        let epoch = misc::compute_epoch_at_slot::<P>(
+            pending_blob_sidecar
+                .blob_sidecar
+                .signed_block_header
+                .message
+                .slot,
+        );
+
+        let max_delayed_blobs_until_parent = MAX_DELAYED_BLOCKS_UNTIL_PARENT.saturating_mul(
+            usize::try_from(self.store.chain_config().max_blobs_per_block(epoch))?,
+        );
+
+        let total_delayed_blobs_until_parent = self
+            .delayed_until_block
+            .values()
+            .map(|delayed| delayed.blob_sidecars.len())
+            .sum::<usize>();
+
+        if total_delayed_blobs_until_parent < max_delayed_blobs_until_parent {
+            self.delayed_until_block
+                .entry(parent_root)
+                .or_default()
+                .blob_sidecars
+                .push(pending_blob_sidecar);
+        } else {
+            return Err(Error::<P>::DelayedUntilParentQueueFull.into());
+        }
+
+        Ok(())
     }
 
-    fn delay_blob_sidecar_until_slot(&mut self, pending_blob_sidecar: PendingBlobSidecar<P>) {
-        self.delayed_until_slot
-            .entry(
-                pending_blob_sidecar
-                    .blob_sidecar
-                    .signed_block_header
-                    .message
-                    .slot,
-            )
-            .or_default()
-            .blob_sidecars
-            .push(pending_blob_sidecar);
+    fn try_delay_blob_sidecar_until_slot(
+        &mut self,
+        pending_blob_sidecar: PendingBlobSidecar<P>,
+    ) -> Result<()> {
+        let slot = pending_blob_sidecar
+            .blob_sidecar
+            .signed_block_header
+            .message
+            .slot;
+
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        let max_blobs_per_slot = MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT.saturating_mul(
+            usize::try_from(self.store.chain_config().max_blobs_per_block(epoch))?,
+        );
+
+        let entry = self.delayed_until_slot.entry(slot).or_default();
+
+        if entry.blob_sidecars.len() < max_blobs_per_slot {
+            entry.blob_sidecars.push(pending_blob_sidecar);
+        } else {
+            return Err(Error::<P>::BlobSidecarSlotQueueFull { slot }.into());
+        }
+
+        Ok(())
     }
 
     fn delay_data_column_sidecar_until_state(
@@ -4079,34 +4264,57 @@ where
             .push(pending_data_column_sidecar);
     }
 
-    fn delay_data_column_sidecar_until_parent(
+    fn try_delay_data_column_sidecar_until_parent(
         &mut self,
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
-    ) {
+    ) -> Result<()> {
         let Some(parent_root) = pending_data_column_sidecar
             .data_column_sidecar
             .pre_gloas()
             .map(|sidecar| sidecar.signed_block_header.message.parent_root)
         else {
-            return;
+            return Ok(());
         };
 
-        self.delayed_until_block
-            .entry(parent_root)
-            .or_default()
-            .data_column_sidecars
-            .push(pending_data_column_sidecar);
+        let total_delayed_data_columns_until_parent = self
+            .delayed_until_block
+            .values()
+            .map(|delayed| delayed.data_column_sidecars.len())
+            .sum::<usize>();
+
+        let max_data_columns_per_parent =
+            MAX_DELAYED_BLOCKS_UNTIL_PARENT.saturating_mul(P::NumberOfColumns::USIZE);
+
+        if total_delayed_data_columns_until_parent < max_data_columns_per_parent {
+            self.delayed_until_block
+                .entry(parent_root)
+                .or_default()
+                .data_column_sidecars
+                .push(pending_data_column_sidecar);
+        } else {
+            return Err(Error::<P>::DelayedUntilParentQueueFull.into());
+        }
+
+        Ok(())
     }
 
-    fn delay_data_column_sidecar_until_slot(
+    fn try_delay_data_column_sidecar_until_slot(
         &mut self,
         pending_data_column_sidecar: PendingDataColumnSidecar<P>,
-    ) {
-        self.delayed_until_slot
-            .entry(pending_data_column_sidecar.data_column_sidecar.slot())
-            .or_default()
-            .data_column_sidecars
-            .push(pending_data_column_sidecar);
+    ) -> Result<()> {
+        let slot = pending_data_column_sidecar.data_column_sidecar.slot();
+        let entry = self.delayed_until_slot.entry(slot).or_default();
+
+        let max_data_columns_per_slot =
+            MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT.saturating_mul(P::NumberOfColumns::USIZE);
+
+        if entry.data_column_sidecars.len() < max_data_columns_per_slot {
+            entry.data_column_sidecars.push(pending_data_column_sidecar);
+        } else {
+            return Err(Error::<P>::DataColumnSidecarSlotQueueFull { slot }.into());
+        }
+
+        Ok(())
     }
 
     fn take_delayed_until_blobs(&mut self, block_root: H256) -> Option<PendingBlock<P>> {
@@ -4151,6 +4359,7 @@ where
     fn retry_delayed(&self, delayed: Delayed<P>, wait_group: &W) {
         let Delayed {
             blocks,
+            unverified_blocks,
             // Delayed payload status update is applied before accepting block,
             // so a bit earlier than the other delayed items.
             payload_status: _,
@@ -4164,6 +4373,10 @@ where
         } = delayed;
 
         for pending_block in blocks {
+            self.retry_block(wait_group.clone(), pending_block);
+        }
+
+        for pending_block in unverified_blocks {
             self.retry_block(wait_group.clone(), pending_block);
         }
 
@@ -4203,7 +4416,7 @@ where
     fn retry_block(&self, wait_group: W, pending_block: PendingBlock<P>) {
         debug_with_peers!(
             "retrying delayed block: {:?}",
-            pending_block.block.message().hash_tree_root(),
+            pending_block.block.item.message().hash_tree_root(),
         );
 
         let PendingBlock {
@@ -4386,7 +4599,7 @@ where
         let mut gossip_ids = vec![];
 
         self.delayed_until_blobs.retain(|_, pending_block| {
-            if pending_block.block.message().slot() > finalized_slot {
+            if pending_block.block.item.message().slot() > finalized_slot {
                 return true;
             }
 
@@ -4424,6 +4637,7 @@ where
     //
     // It may be possible to prune delayed objects in a background thread.
     // We don't bother doing that either.
+    #[expect(clippy::too_many_lines)]
     fn prune_delayed_until_block(&mut self) -> Vec<GossipId> {
         let finalized_slot = self.store.finalized_slot();
         let previous_epoch = self.store.previous_epoch();
@@ -4433,6 +4647,7 @@ where
         self.delayed_until_block.retain(|_, delayed| {
             let Delayed {
                 blocks,
+                unverified_blocks,
                 payload_status,
                 aggregates,
                 attestations,
@@ -4447,7 +4662,16 @@ where
                 blocks
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.block.message().slot().saturating_sub(1) <= finalized_slot
+                        pending.block.item.message().slot().saturating_sub(1) <= finalized_slot
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                unverified_blocks
+                    .extract_if(.., |pending| {
+                        // The parent of a delayed block cannot be in a finalized slot.
+                        pending.block.item.message().slot().saturating_sub(1) <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -4589,7 +4813,7 @@ where
                 blocks
                     .extract_if(.., |pending| {
                         // The parent of a delayed block cannot be in a finalized slot.
-                        pending.block.message().slot().saturating_sub(1) <= finalized_slot
+                        pending.block.item.message().slot().saturating_sub(1) <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
@@ -5142,6 +5366,16 @@ where
             metrics.set_collection_length(
                 module_path!(),
                 &type_name,
+                "delayed_until_block_unverified_blocks",
+                self.delayed_until_block
+                    .values()
+                    .map(|delayed| delayed.unverified_blocks.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
                 "delayed_until_block_attestations",
                 self.delayed_until_block
                     .values()
@@ -5230,6 +5464,26 @@ where
                 self.delayed_until_slot
                     .values()
                     .map(|delayed| delayed.aggregates.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_slot_blob_sidecars",
+                self.delayed_until_slot
+                    .values()
+                    .map(|delayed| delayed.blob_sidecars.len())
+                    .sum(),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "delayed_until_slot_data_column_sidecars",
+                self.delayed_until_slot
+                    .values()
+                    .map(|delayed| delayed.data_column_sidecars.len())
                     .sum(),
             );
 

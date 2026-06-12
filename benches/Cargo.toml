@@ -38,6 +38,7 @@ serde_json = { workspace = true }
 serde_utils = { workspace = true }
 sha2 = { workspace = true }
 shuffling = { workspace = true }
+spec_test_utils = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }

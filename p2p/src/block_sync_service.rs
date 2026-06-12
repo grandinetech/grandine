@@ -367,6 +367,9 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::PayloadEnvelopeNeeded(block_root, peer_id) => {
                             self.request_needed_execution_payload_envelope(block_root, peer_id)?;
                         }
+                        P2pToSync::BlockNotConsidered(block_root) => {
+                            self.received_block_roots.remove(&block_root);
+                        }
                         P2pToSync::DataColumnsNeeded(data_columns_by_root, slot) => {
                             self.request_needed_data_columns(data_columns_by_root, slot).await?;
                         }
@@ -663,7 +666,12 @@ impl<P: Preset> BlockSyncService<P> {
 
                             self.received_envelopes.retain(|_, slot| *slot >= start_of_epoch);
                         }
-                        P2pToSync::DataColumnSidecarRejected(data_column_identifier) => {
+                        P2pToSync::BlobSidecarRejected(blob_identifier) | P2pToSync::BlobSidecarNotConsidered(blob_identifier) => {
+                            // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
+                            // Grandine should not dismiss newer valid blob sidecars with the same blob identifier
+                            self.received_blob_sidecars.remove_async(&blob_identifier).await;
+                        }
+                        P2pToSync::DataColumnSidecarRejected(data_column_identifier) | P2pToSync::DataColumnSidecarNotConsidered(data_column_identifier) => {
                             self.received_data_column_sidecars.remove_async(&data_column_identifier).await;
                         }
                         P2pToSync::PayloadEnvelopeRejected(payload_envelope_identifier) => {

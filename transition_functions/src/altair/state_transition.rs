@@ -94,12 +94,14 @@ pub fn verify_signatures<P: Preset>(
 
         let pubkey = accessors::public_key(state, block.message.proposer_index)?;
 
-        verifier.verify_singular(
-            block.message.signing_root(config, state),
-            block.signature,
-            pubkey_cache.get_or_insert(*pubkey)?,
-            SignatureKind::Block,
-        )?;
+        if !verifier.has_option(VerifierOption::SkipBlockRootSignature) {
+            verifier.verify_singular(
+                block.message.signing_root(config, state),
+                block.signature,
+                pubkey_cache.get_or_insert(*pubkey)?,
+                SignatureKind::Block,
+            )?;
+        }
 
         // RANDAO reveal
 

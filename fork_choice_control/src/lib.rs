@@ -20,8 +20,8 @@ pub use crate::{
         ValidatorMessage,
     },
     misc::{
-        MutatorRejectionReason, SidecarsPendingReconstruction, VerifyAggregateAndProofResult,
-        VerifyAttestationResult, VerifyPayloadAttestationResult,
+        MutatorIgnoreReason, MutatorRejectionReason, SidecarsPendingReconstruction,
+        VerifyAggregateAndProofResult, VerifyAttestationResult, VerifyPayloadAttestationResult,
     },
     queries::{BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
@@ -54,6 +54,8 @@ mod thread_pool;
 mod unbounded_sink;
 mod wait;
 
+#[cfg(test)]
+mod compliance_tests;
 #[cfg(test)]
 mod extra_tests;
 #[cfg(test)]

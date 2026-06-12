@@ -1,17 +1,19 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use derive_more::Constructor;
 use execution_engine::ExecutionEngine;
 use fork_choice_store::{
-    BlockAction, DataAvailabilityPolicy, PartialBlockAction, StateCacheProcessor, Store,
+    BlockAction, BlockItem, DataAvailabilityPolicy, PartialBlockAction, StateCacheProcessor, Store,
     validate_merge_block,
 };
 use helper_functions::{
     predicates,
     slot_report::{NullSlotReport, RealSlotReport, SlotReport, SyncAggregateRewards},
-    verifier::Verifier,
+    verifier::{Verifier, VerifierOption},
 };
+use logging::debug_with_peers;
+use once_cell::unsync::OnceCell;
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash;
 use state_cache::StateWithRewards;
@@ -25,7 +27,7 @@ use types::{
     combined::{BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::{BlockRewards, Phase, SlashingKind},
-    phase0::primitives::{Gwei, H256},
+    phase0::primitives::{Gwei, H256, Slot},
     preset::Preset,
     traits::{BeaconBlock as _, SignedBeaconBlock as _},
 };
@@ -170,71 +172,98 @@ impl<P: Preset> BlockProcessor<P> {
             .map(|(state, _)| state)
     }
 
+    fn fetch_state_for_block(
+        &self,
+        store: &Store<P, Storage<P>>,
+        parent_root: H256,
+        block_slot: Slot,
+    ) -> Result<Arc<BeaconState<P>>> {
+        self.state_cache
+            .try_state_at_slot_for_block_sync(&self.pubkey_cache, store, parent_root, block_slot)
+            .and_then(|opt| opt.ok_or_else(|| anyhow!("state not found")))
+            .inspect_err(|error| {
+                debug_with_peers!(
+                    "error while fetching state for block_slot: \
+                    {block_slot}, parent_root: {parent_root:?}: {error:?}"
+                )
+            })
+    }
+
     pub fn validate_block_for_gossip(
         &self,
         store: &Store<P, Storage<P>>,
         block: &Arc<SignedBeaconBlock<P>>,
     ) -> Result<Option<BlockAction<P>>> {
-        store.validate_block_for_gossip(block, |parent| {
-            let block_slot = block.message().slot();
+        let block_slot = block.message().slot();
+        let parent_root = block.message().parent_root();
+        let cached = OnceCell::new();
 
-            // > Make a copy of the state to avoid mutability issues
-            let state = self
-                .state_cache
-                .try_state_at_slot_for_block_sync(
+        let state_fn = || {
+            cached
+                .get_or_try_init(|| self.fetch_state_for_block(store, parent_root, block_slot))
+                .ok()
+                .cloned()
+        };
+
+        store.validate_block_for_gossip(
+            BlockItem::unverified(block.clone_arc()),
+            state_fn,
+            |parent| {
+                // > Make a copy of the state to avoid mutability issues
+                let state = state_fn().unwrap_or_else(|| parent.state(store));
+
+                combined::process_block_for_gossip(
+                    &self.chain_config,
                     &self.pubkey_cache,
-                    store,
-                    parent.block_root,
-                    block_slot,
-                )?
-                .unwrap_or_else(|| parent.state(store));
+                    &state,
+                    block,
+                )?;
 
-            combined::process_block_for_gossip(
-                &self.chain_config,
-                &self.pubkey_cache,
-                &state,
-                block,
-            )?;
-
-            Ok(None)
-        })
+                Ok(None)
+            },
+        )
     }
 
     #[instrument(ret(level = "debug"), level = "debug", skip_all)]
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
         store: &Store<P, Storage<P>>,
-        block: &Arc<SignedBeaconBlock<P>>,
+        block: BlockItem<P>,
         state_root_policy: StateRootPolicy,
         data_availability_policy: DataAvailabilityPolicy,
         execution_engine: E,
-        verifier: impl Verifier + Send,
+        mut verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
+        let parent_root = block.item.message().parent_root();
+        let block_slot = block.item.message().slot();
+        let cached = OnceCell::new();
+
+        let state_fn = || {
+            cached
+                .get_or_try_init(|| self.fetch_state_for_block(store, parent_root, block_slot))
+                .ok()
+                .cloned()
+        };
+
         store.validate_block_with_custom_state_transition(
             block,
             data_availability_policy,
-            |block_root, parent| {
+            state_fn,
+            |block, parent| {
                 // > Make a copy of the state to avoid mutability issues
-                let state = self
-                    .state_cache
-                    .try_state_at_slot_for_block_sync(
-                        &self.pubkey_cache,
-                        store,
-                        parent.block_root,
-                        block.message().slot(),
-                    )?
-                    .unwrap_or_else(|| parent.state(store));
+                let state = state_fn().unwrap_or_else(|| parent.state(store));
 
                 // This validation was removed from Capella in `consensus-specs` v1.4.0-alpha.0.
                 // See <https://github.com/ethereum/consensus-specs/pull/3232>.
                 // It is unclear when modifications to fork choice logic should come into effect.
                 // We check the phase of the block rather than the current slot.
-                if block.phase() < Phase::Capella {
+                if block.item.phase() < Phase::Capella {
                     // > [New in Bellatrix]
                     //
                     // The Fork Choice specification does this after the state transition.
                     // We don't because that would require keeping around a clone of the pre-state.
                     if let Some(body) = block
+                        .item
                         .message()
                         .body()
                         .with_execution_payload()
@@ -242,7 +271,7 @@ impl<P: Preset> BlockProcessor<P> {
                     {
                         match validate_merge_block(
                             &self.chain_config,
-                            block,
+                            &block.item,
                             body,
                             &execution_engine,
                         )? {
@@ -254,10 +283,14 @@ impl<P: Preset> BlockProcessor<P> {
                     }
                 }
 
+                if block.base_signature_status.is_verified() {
+                    verifier.set_option(VerifierOption::SkipBlockRootSignature);
+                }
+
                 let state = self.perform_state_transition(
                     state,
-                    block,
-                    block_root,
+                    &block.item,
+                    block.item.message().hash_tree_root(),
                     ProcessSlots::IfNeeded,
                     state_root_policy,
                     execution_engine,
