@@ -30,6 +30,7 @@ prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true }
+spec_test_utils = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }
 static_assertions = { workspace = true }

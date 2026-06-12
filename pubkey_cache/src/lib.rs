@@ -210,7 +210,7 @@ impl PubkeyCache {
         // avoiding storage of validator pubkeys from invalid deposits.
         for validator in state.validators() {
             if let Some(pubkey) = self.unpersisted.remove_sync(&validator.pubkey)
-                && let Some(decompressed) = self.keys.get_sync(&pubkey)
+                && let Some(decompressed) = self.get(&pubkey)
             {
                 batch.push(serialize(&PublicKeyDbKey(pubkey), &decompressed));
             }
@@ -232,9 +232,15 @@ impl PubkeyCache {
         Ok(())
     }
 
+    pub fn get(&self, public_key_bytes: &PublicKeyBytes) -> Option<Arc<PublicKey>> {
+        self.keys
+            .get_sync(public_key_bytes)
+            .map(|pubkey| pubkey.clone_arc())
+    }
+
     pub fn get_or_insert(&self, public_key_bytes: PublicKeyBytes) -> Result<Arc<PublicKey>> {
-        if let Some(pubkey) = self.keys.get_sync(&public_key_bytes) {
-            return Ok(pubkey.clone_arc());
+        if let Some(pubkey) = self.get(&public_key_bytes) {
+            return Ok(pubkey);
         }
 
         let pubkey: Arc<PublicKey> = Arc::new(public_key_bytes.try_into()?);

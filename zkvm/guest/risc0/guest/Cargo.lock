@@ -1209,6 +1209,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "const-hex",
+ "derive_more",
  "either",
  "ethereum-types",
  "futures",
