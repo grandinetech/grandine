@@ -158,7 +158,7 @@ impl AttestingBalances {
 
         match payload_presence {
             Some(PayloadPresence::Pending) => {}
-            Some(PayloadPresence::Empty) | Some(PayloadPresence::Full) | None => {
+            Some(PayloadPresence::Empty | PayloadPresence::Full) | None => {
                 self.empty = checked_add_balance(
                     block_root,
                     payload_presence,
