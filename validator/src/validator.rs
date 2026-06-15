@@ -80,9 +80,12 @@ use types::{
         AggregateAndProof as ElectraAggregateAndProof,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
-    gloas::containers::{
-        ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
-        ProposerPreferences, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{
+            ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
+            ProposerPreferences, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        },
     },
     nonstandard::{
         CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev,
@@ -1125,8 +1128,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let block = Arc::new(*beacon_block);
 
-                // Assuming after Gloas if proposer doesn't self build, `block_blobs` always None
-                if let Some(blobs) = block_blobs
+                let self_built = block
+                    .payload_bid()
+                    .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD);
+
+                if (slot_head.phase() < Phase::Gloas || self_built)
+                    && let Some(blobs) = block_blobs
                     && !blobs.is_empty()
                 {
                     self.publish_blob_data(&wait_group, slot_head, &block, blobs, block_proofs)
@@ -1141,7 +1148,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 // If self-building:
                 // Publish the execution payload envelope after the beacon block so PTC members
                 // have seen the block (and its SignedExecutionPayloadBid) before attesting
-                if slot_head.phase() >= Phase::Gloas
+                if self_built
                     && let Some(envelope) = block_build_context
                         .compute_execution_payload_envelope(
                             beacon_block_root,
