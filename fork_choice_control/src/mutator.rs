@@ -760,7 +760,8 @@ where
                         chain_link.payload_status = PayloadStatus::Valid;
                     }
 
-                    if payload_status.status.is_invalid() {
+                    if payload_status.status.is_invalid() && chain_link.block.phase() < Phase::Gloas
+                    {
                         self.reject_block(
                             Error::<P>::InvalidExecutionPayload.into(),
                             block_root,
@@ -2795,8 +2796,12 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            self.store_mut()
-                .invalidate_block_and_descendant_payloads(beacon_block_root);
+            if let Some(chain_link) = self.store.chain_link(beacon_block_root)
+                && chain_link.block.phase() < Phase::Gloas
+            {
+                self.store_mut()
+                    .invalidate_block_and_descendant_payloads(beacon_block_root);
+            }
         } else {
             return;
         }

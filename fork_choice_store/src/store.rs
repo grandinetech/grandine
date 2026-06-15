@@ -3419,9 +3419,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let block_root = envelope.block_root();
         let chain_link = self.chain_link(block_root);
 
-        let block_info = || {
-            chain_link.map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
-        };
+        let block_info = || chain_link.map(|chain_link| chain_link.block.clone_arc());
 
         let state_fn = || {
             // > Make a copy of the state to avoid mutability issues
@@ -3487,7 +3485,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        block_info: impl FnOnce() -> Option<Arc<SignedBeaconBlock<P>>>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         execution_engine: &(impl ExecutionEngine<P> + Send),
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
@@ -3502,7 +3500,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [REJECT] block passes validation.
-        // Part 1/2:
         ensure!(
             !self.rejected_block_roots.contains(&beacon_block_root),
             Error::<P>::PayloadEnvelopeInvalidBlock {
@@ -3512,22 +3509,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The envelope's beacon_block_root has been seen (via gossip or non-gossip sources)
         // (a client MAY queue envelope for processing once the block is retrieved)
-        let Some((block, block_payload_status)) = block_info() else {
+        let Some(block) = block_info() else {
             // Block not available yet, delay until it arrives
             return Ok(ExecutionPayloadEnvelopeAction::DelayUntilBeaconBlock(
                 envelope,
                 beacon_block_root,
             ));
         };
-
-        // [REJECT] block passes validation.
-        // Part 2/2:
-        ensure!(
-            !block_payload_status.is_invalid(),
-            Error::<P>::PayloadEnvelopeInvalidBlock {
-                payload_envelope: envelope
-            },
-        );
 
         let Some(bid) = block
             .message()
@@ -3727,7 +3715,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [REJECT] The message's block data.beacon_block_root passes validation.
-        // Part 1/2:
         if self.rejected_block_roots.contains(&block_root) {
             return Err(
                 PayloadAttestationValidationError::PayloadAttestationInvalidBlock {
@@ -3744,16 +3731,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 block_root,
             ));
         };
-
-        // [REJECT] The message's block data.beacon_block_root passes validation.
-        // Part 2/2:
-        if chain_link.payload_status.is_invalid() {
-            return Err(
-                PayloadAttestationValidationError::PayloadAttestationInvalidBlock {
-                    payload_attestation: Box::new(payload_attestation),
-                },
-            );
-        }
 
         // [IGNORE] The block referenced by `data.beacon_block_root` is at slot
         // `data.slot`, i.e. the block has `block.slot == data.slot`.
@@ -5157,6 +5134,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     // This could be rewritten to return an `Iterator` instead of a `Vec`,
     // but the cost of using a `Vec` is probably negligible.
+    #[expect(clippy::too_many_lines)]
     fn propagate_and_dissolve_differences(
         &self,
         differences: impl IntoIterator<Item = (H256, Differences)>,
@@ -5709,6 +5687,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         for hash in self
             .unfinalized_chain_ending_with(ending_segment, last_included)
+            .filter(|chain_link| chain_link.block.phase() < Phase::Gloas)
             .map_while(ChainLink::execution_block_hash)
         {
             if hash == ancestor {
