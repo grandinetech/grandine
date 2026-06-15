@@ -496,7 +496,7 @@ impl<P: Preset> Batch<P> {
             controller.validate_execution_payload_envelope_with_state(
                 envelope.clone_arc(),
                 &ExecutionPayloadEnvelopeOrigin::BackSync,
-                || Some((block.clone_arc(), PayloadStatus::Optimistic)),
+                || Some(block.clone_arc()),
                 || Some(head_state.clone_arc()),
                 // TODO(Gloas): not sure if we should notify execution engine when we do back sync
                 &NullExecutionEngine,

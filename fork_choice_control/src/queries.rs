@@ -1007,7 +1007,7 @@ where
         &self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         origin: &ExecutionPayloadEnvelopeOrigin,
-        block_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        block_info: impl FnOnce() -> Option<Arc<SignedBeaconBlock<P>>>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         execution_engine: &(impl ExecutionEngine<P> + Send),
     ) -> Result<ExecutionPayloadEnvelopeAction<P>> {
