@@ -15,11 +15,14 @@ use logging::{exception, warn_with_peers};
 use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use std_ext::ArcExt as _;
+use tap::Pipe as _;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     electra::error::AttestationConversionError,
-    phase0::containers::Attestation,
-    phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex},
+    phase0::{
+        containers::Attestation,
+        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+    },
     preset::Preset,
     traits::BeaconState as _,
 };
@@ -76,8 +79,8 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
         )?;
 
         Ok(
-            pack_attestations_greedily(&attestation_packer, &pool, &beacon_state)
-                .await
+            pack_attestations_greedily(&controller, &attestation_packer, &pool, &beacon_state)
+                .await?
                 .attestations,
         )
     }
@@ -140,8 +143,13 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             } = {
                 let timer = Instant::now();
 
-                let outcome =
-                    pack_attestations_optimally(&attestation_packer, &pool, &beacon_state).await;
+                let outcome = pack_attestations_optimally(
+                    &controller,
+                    &attestation_packer,
+                    &pool,
+                    &beacon_state,
+                )
+                .await?;
 
                 features::log!(
                     DebugAttestationPacker,
@@ -396,30 +404,103 @@ fn aggregate_attestation<P: Preset>(
     Ok(())
 }
 
-async fn pack_attestations_optimally<P: Preset>(
+async fn pack_attestations_optimally<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
     attestation_packer: &AttestationPacker<P>,
     pool: &Pool<P>,
     state: &BeaconState<P>,
-) -> PackOutcome<P> {
+) -> Result<PackOutcome<P>> {
     let previous_epoch = accessors::get_previous_epoch(state);
     let current_epoch = accessors::get_current_epoch(state);
+    let dependent_root = controller.dependent_root(state, previous_epoch)?;
 
-    attestation_packer.pack_proposable_attestations_optimally(
-        &pool.aggregate_attestations_by_epoch(previous_epoch).await,
-        &pool.aggregate_attestations_by_epoch(current_epoch).await,
-    )
+    let previous_epoch_attestations = pool.aggregate_attestations_by_epoch(previous_epoch).await;
+    let current_epoch_attestations = pool.aggregate_attestations_by_epoch(current_epoch).await;
+
+    let acceptable_targets = acceptable_attestation_targets_for_packing(
+        controller,
+        dependent_root,
+        previous_epoch,
+        previous_epoch_attestations
+            .iter()
+            .chain(&current_epoch_attestations),
+    );
+
+    let previous_epoch_attestations = previous_epoch_attestations
+        .iter()
+        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
+
+    let current_epoch_attestations = current_epoch_attestations
+        .iter()
+        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
+
+    attestation_packer
+        .pack_proposable_attestations_optimally(
+            previous_epoch_attestations,
+            current_epoch_attestations,
+        )
+        .pipe(Ok)
 }
 
-async fn pack_attestations_greedily<P: Preset>(
+async fn pack_attestations_greedily<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
     attestation_packer: &AttestationPacker<P>,
     pool: &Pool<P>,
     state: &BeaconState<P>,
-) -> PackOutcome<P> {
+) -> Result<PackOutcome<P>> {
     let previous_epoch = accessors::get_previous_epoch(state);
     let current_epoch = accessors::get_current_epoch(state);
+    let dependent_root = controller.dependent_root(state, previous_epoch)?;
 
-    attestation_packer.pack_proposable_attestations_greedily(
-        &pool.aggregate_attestations_by_epoch(previous_epoch).await,
-        &pool.aggregate_attestations_by_epoch(current_epoch).await,
-    )
+    let previous_epoch_attestations = pool.aggregate_attestations_by_epoch(previous_epoch).await;
+    let current_epoch_attestations = pool.aggregate_attestations_by_epoch(current_epoch).await;
+
+    let acceptable_targets = acceptable_attestation_targets_for_packing(
+        controller,
+        dependent_root,
+        previous_epoch,
+        previous_epoch_attestations
+            .iter()
+            .chain(&current_epoch_attestations),
+    );
+
+    let previous_epoch_attestations = previous_epoch_attestations
+        .iter()
+        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
+
+    let current_epoch_attestations = current_epoch_attestations
+        .iter()
+        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
+
+    attestation_packer
+        .pack_proposable_attestations_greedily(
+            previous_epoch_attestations,
+            current_epoch_attestations,
+        )
+        .pipe(Ok)
+}
+
+fn acceptable_attestation_targets_for_packing<'a, P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    dependent_root: H256,
+    dependent_root_epoch: Epoch,
+    attestations: impl IntoIterator<Item = &'a Attestation<P>>,
+) -> HashSet<H256> {
+    attestations
+        .into_iter()
+        .map(|attestation| attestation.data.target)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter_map(|target| {
+            // `BestProposableAttestationsTask` and `PackProposableAttestationsTask` already run in `DedicatedExecutor`
+            // Attestation target validity is already checked before attestation is submitted to the pool
+            let target_state = controller.checkpoint_state_blocking(target).ok()??;
+
+            let target_dependent_root = controller.dependent_root(&target_state, dependent_root_epoch).expect(
+                "only previous and current epoch attestations are selected from the pool, they should never have their target slots from the future",
+            );
+
+            (target_dependent_root == dependent_root).then_some(target.root)
+        })
+        .collect()
 }
