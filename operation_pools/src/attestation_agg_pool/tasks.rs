@@ -18,11 +18,7 @@ use tap::Pipe as _;
 use types::{
     combined::{Attestation as CombinedAttestation, BeaconState},
     electra::error::AttestationConversionError,
-    nonstandard::Phase,
-    phase0::{
-        containers::Attestation,
-        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
-    },
+    phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
     traits::BeaconState as _,
 };

@@ -425,7 +425,12 @@ where
         let block_root = block.message().hash_tree_root();
 
         store.exhibits_equivocation_on_blobs(block_slot, block_proposer_index, block_root)
-            || store.exhibits_equivocation_on_blocks(block_slot, block_proposer_index, block_root)
+            || store.exhibits_equivocation_on_blocks(
+                block_slot,
+                block_proposer_index,
+                block_root,
+                |_| true,
+            )
     }
 
     pub fn check_block_root(&self, block_root: H256) -> Result<Option<WithStatus<H256>>> {
