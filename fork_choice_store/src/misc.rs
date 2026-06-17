@@ -1643,6 +1643,12 @@ impl DataAvailabilityPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct BlockTimeliness {
+    pub before_attestation_due: bool,
+    pub before_payload_attestation_due: bool,
+}
+
 pub trait Storage<P: Preset>: Sync + Sized {
     fn storage_mode(&self) -> StorageMode;
 
