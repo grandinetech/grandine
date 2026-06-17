@@ -8,6 +8,37 @@ use types::preset::Preset;
 
 use crate::Network;
 
+/// Translates Grandine's internal disconnect reason tag (the `reason` field on
+/// `LastDisconnect`, which is a `'static` variant name of `GoodbyeReason`)
+/// into the simplified `PeerDisconnectReason` vocabulary defined by the
+/// beacon-API peer-scoring proposal.
+fn map_disconnect_reason(reason: &str) -> &'static str {
+    match reason {
+        "BadScore" | "Banned" | "BannedIP" => "bad_score",
+        "ClientShutdown" => "client_shutdown",
+        "IrrelevantNetwork" => "irrelevant_network",
+        "UnableToVerifyNetwork" => "unviable_fork",
+        "TooManyPeers" => "too_many_peers",
+        "Fault" => "io_error",
+        _ => "unknown",
+    }
+}
+
+/// Translates Grandine's internal downscore reason tag (the `reason` field on
+/// `LastAction`, e.g. tags emitted by `rpc_error_msg` or report-peer call
+/// sites) into the simplified `PeerScoreReason` vocabulary defined by the
+/// beacon-API peer-scoring proposal.
+fn map_downscore_reason(reason: &str) -> &'static str {
+    match reason {
+        "rpc_invalid_request" => "rpc_invalid_request",
+        "rpc_rate_limited" => "rpc_rate_limited",
+        "rpc_io_error" => "rpc_io_error",
+        "rpc_stream_timeout" | "rpc_negotiation_timeout" => "rpc_timeout",
+        "rpc_invalid_data" | "rpc_ssz_decode_error" => "rpc_invalid_response",
+        _ => "unknown",
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct NodePeersQuery {
     #[serde(rename(deserialize = "state"))]
@@ -32,6 +63,14 @@ pub struct NodePeer {
     last_seen_p2p_address: Multiaddr,
     state: PeerState,
     direction: PeerDirection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    agent_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disconnect_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    downscore_reasons: Option<Vec<String>>,
 }
 
 impl NodePeer {
@@ -46,12 +85,34 @@ impl NodePeer {
 
         let direction = peer_info.connection_direction().map(Into::into)?;
 
+        let agent_version = peer_info.client().agent_string.clone();
+        let score = Some(peer_info.score().score());
+        // Per beacon-API spec, `disconnect_reason` MUST only be populated when
+        // `state` is `disconnected` or `disconnecting`.
+        let disconnect_reason = if matches!(
+            state,
+            PeerState::Disconnected | PeerState::Disconnecting
+        ) {
+            peer_info
+                .last_disconnect()
+                .map(|d| map_disconnect_reason(d.reason).to_string())
+        } else {
+            None
+        };
+        let downscore_reasons = peer_info
+            .last_action()
+            .map(|a| vec![map_downscore_reason(a.reason).to_string()]);
+
         Some(Self {
             peer_id: peer_id.to_string(),
             enr: peer_info.enr().map(Enr::to_base64),
             last_seen_p2p_address: addr,
             state,
             direction,
+            agent_version,
+            score,
+            disconnect_reason,
+            downscore_reasons,
         })
     }
 }
