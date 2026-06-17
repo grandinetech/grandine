@@ -88,9 +88,9 @@ use crate::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, AttestingBalances, BlobSidecarAction, BlobSidecarOrigin,
-        BlockAction, BranchPoint, ChainLink, DataAvailabilityPolicy, DataColumnSidecarAction,
-        DataColumnSidecarOrigin, Difference, DifferenceAtLocation, Differences,
-        DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
+        BlockAction, BlockTimeliness, BranchPoint, ChainLink, DataAvailabilityPolicy,
+        DataColumnSidecarAction, DataColumnSidecarOrigin, Difference, DifferenceAtLocation,
+        Differences, DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
         ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, LatestMessage, Location,
         PartialAttestationAction, PartialBlockAction, PayloadAction, PayloadAttestationAction,
         PayloadAttestationItem, PayloadAttestationValidationError, PayloadPresence,
@@ -170,6 +170,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // implementing the spec rule:
     // [IGNORE] This is the first valid aggregate for this aggregator in this epoch.
     seen_gossip_aggregators: BTreeMap<Epoch, StdHashSet<ValidatorIndex>>,
+    block_timeliness: HashMap<H256, BlockTimeliness>,
     // `consensus-specs` doesn't explicitly state it, but `Store.checkpoint_states` is effectively a
     // cache, as its contents can be recomputed at any time using data from other fields.
     //
@@ -357,6 +358,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             latest_messages,
             seen_gossip_attesters: BTreeMap::new(),
             seen_gossip_aggregators: BTreeMap::new(),
+            block_timeliness: hashmap! { block_root => BlockTimeliness {
+                before_attestation_due: true,
+                before_payload_attestation_due: true,
+            } },
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
             payloads: HashSet::new(),
             timely_payloads: HashSet::new(),
@@ -622,6 +627,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         slot: Slot,
         proposer_index: ValidatorIndex,
         block_root: H256,
+        predicate: impl Fn(&ChainLink<P>) -> bool,
     ) -> bool {
         self.unfinalized_locations.values().any(|location| {
             let Location {
@@ -634,6 +640,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             chain_link.block.message().slot() == slot
                 && chain_link.block.message().proposer_index() == proposer_index
                 && chain_link.block_root != block_root
+                && predicate(chain_link)
         })
     }
 
@@ -1385,6 +1392,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             chain_link.slot().saturating_sub(1),
             parent.block.message().proposer_index(),
             parent_root,
+            |chain_link| {
+                self.block_timeliness
+                    .get(&chain_link.block_root)
+                    .is_some_and(|timeliness| timeliness.before_payload_attestation_due)
+            },
         )
     }
 
@@ -3990,13 +4002,27 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let old_head_segment_id = self.head_segment_id;
         let old_head = self.head().clone();
 
-        // Apply proposer boost to first block in case of equivocation.
-        // See <https://github.com/ethereum/consensus-specs/pull/3352>.
-        let is_before_attesting_interval = if self.phase() >= Phase::Gloas {
+        let is_before_attestation_due = if self.phase() >= Phase::Gloas {
             self.is_before_due_bps_deadline(self.chain_config.attestation_due_bps_gloas)
         } else {
             self.tick.is_before_attesting_interval()
         };
+
+        let is_before_payload_attestation_due =
+            self.is_before_due_bps_deadline(self.chain_config.payload_attestation_due_bps);
+
+        let is_current_slot = self.slot() == chain_link.slot();
+
+        // Record block timeliness
+        let block_timeliness = BlockTimeliness {
+            before_attestation_due: is_current_slot && is_before_attestation_due,
+            before_payload_attestation_due: is_current_slot && is_before_payload_attestation_due,
+        };
+
+        self.block_timeliness.insert(block_root, block_timeliness);
+
+        // Apply proposer boost to first block in case of equivocation.
+        // See <https://github.com/ethereum/consensus-specs/pull/3352>.
         let is_first_block = self.proposer_boost_root.is_zero();
 
         // > Add proposer score boost if the block is timely
@@ -4005,7 +4031,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // `Store::insert_block` can leave the `Store` in an inconsistent state if
         // `Store::insert_block` fails, but only if segment IDs or positions in a segment run out,
         // which is extremely unlikely and at which point the `Store` is unusable anyway.
-        if self.slot() == chain_link.slot() && is_before_attesting_interval && is_first_block {
+        if block_timeliness.before_attestation_due && is_first_block {
             // > Add proposer score boost only if the block shares the same dependent root
             // > as the canonical chain head.
             // See <https://github.com/ethereum/consensus-specs/pull/5306>.
@@ -4823,6 +4849,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.finalized_attesting_balances.split_off(&finalized_slot);
         self.execution_payload_envelope_cache
             .prune_finalized(finalized_slot);
+        self.block_timeliness
+            .retain(|block_root, _| self.unfinalized_locations.contains_key(block_root));
         self.payloads
             .retain(|block_root| self.unfinalized_locations.contains_key(block_root));
         self.timely_payloads
@@ -6013,6 +6041,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.storage.storage_mode()
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn track_collection_metrics(&self, metrics: &Arc<Metrics>) {
         let type_name = tynm::type_name::<Self>();
 
@@ -6083,8 +6112,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         metrics.set_collection_length(
             module_path!(),
             &type_name,
+            "block_timeliness",
+            self.block_timeliness.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
             "checkpoint_states",
             self.checkpoint_states.len(),
+        );
+
+        metrics.set_collection_length(module_path!(), &type_name, "payloads", self.payloads.len());
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "timely_payloads",
+            self.timely_payloads.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "payload_vote",
+            self.payload_vote.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "payload_timeliness_vote",
+            self.payload_timeliness_vote.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "payload_data_availability_vote",
+            self.payload_data_availability_vote.len(),
         );
 
         metrics.set_collection_length(
