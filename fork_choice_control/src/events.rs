@@ -1,32 +1,26 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use execution_engine::{
-    PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3,
-    PayloadAttributesV4, WithdrawalV1,
-};
-use fork_choice_store::{ChainLink, PayloadPresence, Storage, Store};
+use execution_engine::PayloadAttributes;
+use fork_choice_store::{ChainLink, Storage, Store};
 use helper_functions::misc;
 use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use scc::HashMap as SccHashMap;
-use serde::Serialize;
-use serde_with::DeserializeFromStr;
-use ssz::ContiguousList;
-use strum::{AsRefStr, EnumString};
+use sse::{
+    BlobSidecarEvent, BlockEvent, BlockGossipEvent, ChainReorgEvent, DataColumnSidecarEvent, Event,
+    ExecutionPayloadAvailableEvent, ExecutionPayloadBidEvent, ExecutionPayloadEvent,
+    ExecutionPayloadGossipEvent, FinalizedCheckpointEvent, HeadEvent, HeadV2Event, HeadV2EventData,
+    PayloadAttestationEvent, PayloadAttributesEvent, ProposerPreferencesEvent, Topic,
+};
 use tap::Pipe as _;
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use types::{
     altair::containers::SignedContributionAndProof,
-    bellatrix::primitives::Gas,
-    capella::{containers::SignedBlsToExecutionChange, primitives::WithdrawalIndex},
+    capella::containers::SignedBlsToExecutionChange,
     combined::{Attestation, AttesterSlashing, DataColumnSidecar},
-    deneb::{
-        containers::BlobSidecar,
-        primitives::{BlobIndex, KzgCommitment, VersionedHash},
-    },
+    deneb::containers::BlobSidecar,
     electra::containers::SingleAttestation,
-    fulu::primitives::ColumnIndex,
     gloas::{
         containers::{
             PayloadAttestationMessage, SignedExecutionPayloadBid, SignedProposerPreferences,
@@ -36,99 +30,13 @@ use types::{
     nonstandard::Phase,
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
-        primitives::{
-            Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
-            UnixSeconds, ValidatorIndex,
-        },
+        primitives::{ExecutionBlockHash, ExecutionBlockNumber, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
 
 pub const DEFAULT_MAX_EVENTS: usize = 100;
-
-#[derive(Clone, Copy, AsRefStr, EnumString, DeserializeFromStr)]
-#[strum(serialize_all = "snake_case")]
-pub enum Topic {
-    Attestation,
-    AttesterSlashing,
-    BlobSidecar,
-    Block,
-    BlockGossip,
-    BlsToExecutionChange,
-    ChainReorg,
-    ContributionAndProof,
-    DataColumnSidecar,
-    ExecutionPayload,
-    ExecutionPayloadBid,
-    ExecutionPayloadAvailable,
-    ExecutionPayloadGossip,
-    FinalizedCheckpoint,
-    Head,
-    HeadV2,
-    PayloadAttestationMessage,
-    PayloadAttributes,
-    ProposerPreferences,
-    ProposerSlashing,
-    SingleAttestation,
-    VoluntaryExit,
-}
-
-#[derive(Clone, Debug)]
-pub enum Event<P: Preset> {
-    Attestation(Arc<Attestation<P>>),
-    AttesterSlashing(Box<AttesterSlashing<P>>),
-    BlobSidecar(BlobSidecarEvent),
-    Block(BlockEvent),
-    BlockGossip(BlockGossipEvent),
-    BlsToExecutionChange(Box<SignedBlsToExecutionChange>),
-    ChainReorg(ChainReorgEvent),
-    ContributionAndProof(Box<SignedContributionAndProof<P>>),
-    DataColumnSidecar(DataColumnSidecarEvent<P>),
-    ExecutionPayload(ExecutionPayloadEvent),
-    ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent),
-    ExecutionPayloadBid(ExecutionPayloadBidEvent<P>),
-    ExecutionPayloadGossip(ExecutionPayloadGossipEvent),
-    FinalizedCheckpoint(FinalizedCheckpointEvent),
-    Head(HeadEvent),
-    HeadV2(HeadV2Event),
-    PayloadAttestation(PayloadAttestationEvent),
-    PayloadAttributes(PayloadAttributesEvent),
-    ProposerPreferences(ProposerPreferencesEvent),
-    ProposerSlashing(Box<ProposerSlashing>),
-    SingleAttestation(SingleAttestation),
-    VoluntaryExit(Box<SignedVoluntaryExit>),
-}
-
-impl<P: Preset> Event<P> {
-    #[must_use]
-    pub const fn topic(&self) -> Topic {
-        match self {
-            Self::Attestation(_) => Topic::Attestation,
-            Self::AttesterSlashing(_) => Topic::AttesterSlashing,
-            Self::BlobSidecar(_) => Topic::BlobSidecar,
-            Self::Block(_) => Topic::Block,
-            Self::BlockGossip(_) => Topic::BlockGossip,
-            Self::BlsToExecutionChange(_) => Topic::BlsToExecutionChange,
-            Self::ChainReorg(_) => Topic::ChainReorg,
-            Self::ContributionAndProof(_) => Topic::ContributionAndProof,
-            Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
-            Self::ExecutionPayload(_) => Topic::ExecutionPayload,
-            Self::ExecutionPayloadAvailable(_) => Topic::ExecutionPayloadAvailable,
-            Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
-            Self::ExecutionPayloadGossip(_) => Topic::ExecutionPayloadGossip,
-            Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
-            Self::Head(_) => Topic::Head,
-            Self::HeadV2(_) => Topic::HeadV2,
-            Self::PayloadAttestation(_) => Topic::PayloadAttestationMessage,
-            Self::PayloadAttributes(_) => Topic::PayloadAttributes,
-            Self::ProposerPreferences(_) => Topic::ProposerPreferences,
-            Self::ProposerSlashing(_) => Topic::ProposerSlashing,
-            Self::SingleAttestation(_) => Topic::SingleAttestation,
-            Self::VoluntaryExit(_) => Topic::VoluntaryExit,
-        }
-    }
-}
 
 #[expect(clippy::partial_pub_fields)]
 #[derive(Clone, Debug)]
@@ -271,7 +179,7 @@ impl<P: Preset> EventChannels<P> {
         new_head: &ChainLink<P>,
         old_head: &ChainLink<P>,
     ) {
-        let chain_reorg_event = ChainReorgEvent::new(store, old_head);
+        let chain_reorg_event = new_chain_reorg_event(store, old_head);
 
         if new_head.is_valid() {
             if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
@@ -722,7 +630,7 @@ impl<P: Preset> EventChannels<P> {
         dependent_roots: DependentRootsBundle,
     ) -> Result<()> {
         if self.heads.receiver_count() > 0 {
-            let head_event = HeadEvent::new(head, dependent_roots);
+            let head_event = new_head_event(head, dependent_roots);
             let event = Event::Head(head_event);
             self.heads.send(event)?;
         }
@@ -737,7 +645,7 @@ impl<P: Preset> EventChannels<P> {
         dependent_roots: DependentRootsBundle,
     ) -> Result<()> {
         if self.heads_v2.receiver_count() > 0 {
-            let head_v2_event = HeadV2Event::new(head, payload_status, dependent_roots);
+            let head_v2_event = new_head_v2_event(head, payload_status, dependent_roots);
             let event = Event::HeadV2(head_v2_event);
             self.heads_v2.send(event)?;
         }
@@ -772,17 +680,16 @@ impl<P: Preset> EventChannels<P> {
         parent_block_hash: ExecutionBlockHash,
     ) -> Result<()> {
         if self.payload_attributes.receiver_count() > 0 {
-            let payload_attributes_event = PayloadAttributesEvent {
-                version: phase,
-                data: PayloadAttributesEventData {
-                    proposal_slot,
-                    proposer_index,
-                    parent_block_root,
-                    payload_attributes: payload_attributes.clone().into(),
-                    parent_block_number,
-                    parent_block_hash,
-                },
-            };
+            let payload_attributes_event = PayloadAttributesEvent::new(
+                proposal_slot,
+                parent_block_root,
+                parent_block_number,
+                parent_block_hash,
+                proposer_index,
+                payload_attributes.clone(),
+            );
+
+            debug_assert_eq!(phase, payload_attributes_event.version());
 
             let event = Event::PayloadAttributes(payload_attributes_event);
             self.payload_attributes.send(event)?;
@@ -834,479 +741,97 @@ pub struct DependentRootsBundle {
     pub previous_duty_dependent_root: H256,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct BlobSidecarEvent {
-    pub block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub index: BlobIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub kzg_commitment: KzgCommitment,
-    pub versioned_hash: VersionedHash,
-}
+// Fork-choice-coupled constructors for SSE.
+// They live here rather than in `sse` crate because they read fork-choice state
+// (`ChainLink`, `Store`), which we want the `sse` crate to be used in `builder` client.
 
-impl BlobSidecarEvent {
-    fn new<P: Preset>(block_root: H256, blob_sidecar: &BlobSidecar<P>) -> Self {
-        let kzg_commitment = blob_sidecar.kzg_commitment;
+// The [Eth Beacon Node API specification] does not make it clear how `slot`, `depth`, and
+// `epoch` should be computed. We try to match the behavior of Lighthouse.
+//
+// [Eth Beacon Node API specification]: https://ethereum.github.io/beacon-APIs/
+fn new_chain_reorg_event<P: Preset, S: Storage<P>>(
+    store: &Store<P, S>,
+    old_head: &ChainLink<P>,
+) -> ChainReorgEvent {
+    let new_head = store.head();
+    let old_slot = old_head.slot();
+    let new_slot = new_head.slot();
 
-        Self {
-            block_root,
-            index: blob_sidecar.index,
-            slot: blob_sidecar.slot(),
-            kzg_commitment,
-            versioned_hash: misc::kzg_commitment_to_versioned_hash(kzg_commitment),
-        }
+    let depth = store
+        .common_ancestor(old_head.block_root, new_head.block_root)
+        .map(ChainLink::slot)
+        .unwrap_or_else(|| {
+            // A reorganization may be triggered by an alternate chain being finalized.
+            // The old block will no longer be present in `store` if that happens.
+            // Default to the old finalized slot like Lighthouse does.
+            // A proper solution may require significant changes to `Mutator`.
+            old_head
+                .finalized_checkpoint
+                .epoch
+                .pipe(misc::compute_start_slot_at_epoch::<P>)
+        })
+        .abs_diff(old_slot);
+
+    ChainReorgEvent {
+        slot: new_slot,
+        depth,
+        old_head_block: old_head.block_root,
+        new_head_block: new_head.block_root,
+        old_head_state: old_head.block.message().state_root(),
+        new_head_state: new_head.block.message().state_root(),
+        epoch: misc::compute_epoch_at_slot::<P>(new_slot),
+        execution_optimistic: new_head.is_optimistic(),
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct BlockEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub block: H256,
-    pub execution_optimistic: bool,
-}
+fn new_head_event<P: Preset>(
+    head: &ChainLink<P>,
+    dependent_roots_bundle: DependentRootsBundle,
+) -> HeadEvent {
+    let DependentRootsBundle {
+        current_duty_dependent_root,
+        previous_duty_dependent_root,
+    } = dependent_roots_bundle;
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct BlockGossipEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub block: H256,
-}
+    let slot = head.slot();
 
-#[derive(Clone, Debug, Serialize)]
-pub struct DataColumnSidecarEvent<P: Preset> {
-    pub block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub index: ColumnIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-}
-
-impl<P: Preset> DataColumnSidecarEvent<P> {
-    fn new(block_root: H256, data_column_sidecar: &DataColumnSidecar<P>) -> Self {
-        Self {
-            block_root,
-            index: data_column_sidecar.index(),
-            slot: data_column_sidecar.slot(),
-            kzg_commitments: data_column_sidecar.kzg_commitments().cloned(),
-        }
+    HeadEvent {
+        slot,
+        block: head.block_root,
+        state: head.block.message().state_root(),
+        epoch_transition: misc::is_epoch_start::<P>(slot),
+        previous_duty_dependent_root,
+        current_duty_dependent_root,
+        execution_optimistic: head.is_optimistic(),
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ExecutionPayloadEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub builder_index: BuilderIndex,
-    pub block_hash: ExecutionBlockHash,
-    pub block_root: H256,
-    pub execution_optimistic: bool,
-}
+fn new_head_v2_event<P: Preset>(
+    head: &ChainLink<P>,
+    payload_status: PayloadStatus,
+    dependent_roots_bundle: DependentRootsBundle,
+) -> HeadV2Event {
+    let DependentRootsBundle {
+        current_duty_dependent_root,
+        previous_duty_dependent_root,
+    } = dependent_roots_bundle;
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ExecutionPayloadGossipEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub builder_index: BuilderIndex,
-    pub block_hash: ExecutionBlockHash,
-    pub block_root: H256,
-}
+    let slot = head.slot();
 
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ExecutionPayloadAvailableEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub block_root: H256,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ChainReorgEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub depth: u64,
-    pub old_head_block: H256,
-    pub new_head_block: H256,
-    pub old_head_state: H256,
-    pub new_head_state: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub epoch: Epoch,
-    pub execution_optimistic: bool,
-}
-
-impl ChainReorgEvent {
-    // The [Eth Beacon Node API specification] does not make it clear how `slot`, `depth`, and
-    // `epoch` should be computed. We try to match the behavior of Lighthouse.
-    //
-    // [Eth Beacon Node API specification]: https://ethereum.github.io/beacon-APIs/
-    #[must_use]
-    fn new<P: Preset, S: Storage<P>>(store: &Store<P, S>, old_head: &ChainLink<P>) -> Self {
-        let new_head = store.head();
-        let old_slot = old_head.slot();
-        let new_slot = new_head.slot();
-
-        let depth = store
-            .common_ancestor(old_head.block_root, new_head.block_root)
-            .map(ChainLink::slot)
-            .unwrap_or_else(|| {
-                // A reorganization may be triggered by an alternate chain being finalized.
-                // The old block will no longer be present in `store` if that happens.
-                // Default to the old finalized slot like Lighthouse does.
-                // A proper solution may require significant changes to `Mutator`.
-                old_head
-                    .finalized_checkpoint
-                    .epoch
-                    .pipe(misc::compute_start_slot_at_epoch::<P>)
-            })
-            .abs_diff(old_slot);
-
-        Self {
-            slot: new_slot,
-            depth,
-            old_head_block: old_head.block_root,
-            new_head_block: new_head.block_root,
-            old_head_state: old_head.block.message().state_root(),
-            new_head_state: new_head.block.message().state_root(),
-            epoch: misc::compute_epoch_at_slot::<P>(new_slot),
-            execution_optimistic: new_head.is_optimistic(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct FinalizedCheckpointEvent {
-    pub block: H256,
-    pub state: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub epoch: Epoch,
-    pub execution_optimistic: bool,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct HeadEvent {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub block: H256,
-    pub state: H256,
-    pub epoch_transition: bool,
-    pub previous_duty_dependent_root: H256,
-    pub current_duty_dependent_root: H256,
-    pub execution_optimistic: bool,
-}
-
-impl HeadEvent {
-    fn new<P: Preset>(head: &ChainLink<P>, dependent_roots_bundle: DependentRootsBundle) -> Self {
-        let DependentRootsBundle {
-            current_duty_dependent_root,
-            previous_duty_dependent_root,
-        } = dependent_roots_bundle;
-
-        let slot = head.slot();
-
-        Self {
+    HeadV2Event {
+        version: head.block.phase(),
+        data: HeadV2EventData {
             slot,
             block: head.block_root,
             state: head.block.message().state_root(),
+            payload_status: payload_status.into(),
             epoch_transition: misc::is_epoch_start::<P>(slot),
-            previous_duty_dependent_root,
-            current_duty_dependent_root,
+            // #590 names dependent roots by the epoch whose duties the root
+            // determines, inverting the old duty-period labels. The values are
+            // unchanged, so this apparent swap is intentional, not a bug.
+            current_epoch_dependent_root: previous_duty_dependent_root,
+            next_epoch_dependent_root: current_duty_dependent_root,
             execution_optimistic: head.is_optimistic(),
-        }
-    }
-}
-
-// See <https://github.com/ethereum/beacon-APIs/pull/590>.
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct HeadV2Event {
-    pub version: Phase,
-    pub data: HeadV2EventData,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct HeadV2EventData {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot: Slot,
-    pub block: H256,
-    pub state: H256,
-    pub payload_status: PayloadPresence,
-    pub epoch_transition: bool,
-    pub current_epoch_dependent_root: H256,
-    pub next_epoch_dependent_root: H256,
-    pub execution_optimistic: bool,
-}
-
-impl HeadV2Event {
-    fn new<P: Preset>(
-        head: &ChainLink<P>,
-        payload_status: PayloadStatus,
-        dependent_roots_bundle: DependentRootsBundle,
-    ) -> Self {
-        let DependentRootsBundle {
-            current_duty_dependent_root,
-            previous_duty_dependent_root,
-        } = dependent_roots_bundle;
-
-        let slot = head.slot();
-
-        Self {
-            version: head.block.phase(),
-            data: HeadV2EventData {
-                slot,
-                block: head.block_root,
-                state: head.block.message().state_root(),
-                payload_status: payload_status.into(),
-                epoch_transition: misc::is_epoch_start::<P>(slot),
-                // #590 names dependent roots by the epoch whose duties the root
-                // determines, inverting the old duty-period labels. The values are
-                // unchanged, so this apparent swap is intentional, not a bug.
-                current_epoch_dependent_root: previous_duty_dependent_root,
-                next_epoch_dependent_root: current_duty_dependent_root,
-                execution_optimistic: head.is_optimistic(),
-            },
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct PayloadAttestationEvent {
-    pub version: Phase,
-    pub data: PayloadAttestationMessage,
-}
-
-impl PayloadAttestationEvent {
-    fn new(phase: Phase, payload_attestation: &Arc<PayloadAttestationMessage>) -> Self {
-        Self {
-            version: phase,
-            data: PayloadAttestationMessage {
-                validator_index: payload_attestation.validator_index,
-                data: payload_attestation.data,
-                signature: payload_attestation.signature,
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(bound = "")]
-pub struct ExecutionPayloadBidEvent<P: Preset> {
-    pub version: Phase,
-    pub data: Arc<SignedExecutionPayloadBid<P>>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ProposerPreferencesEvent {
-    pub version: Phase,
-    pub data: Arc<SignedProposerPreferences>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PayloadAttributesEvent {
-    pub version: Phase,
-    pub data: PayloadAttributesEventData,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PayloadAttributesEventData {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub proposal_slot: Slot,
-    pub parent_block_root: H256,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        with = "serde_utils::string_or_native_option"
-    )]
-    pub parent_block_number: Option<ExecutionBlockNumber>,
-    pub parent_block_hash: ExecutionBlockHash,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub proposer_index: ValidatorIndex,
-    pub payload_attributes: CombinedPayloadAttributesEventData,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(untagged, bound = "")]
-pub enum CombinedPayloadAttributesEventData {
-    Bellatrix(PayloadAttributesEventDataV1),
-    Capella(PayloadAttributesEventDataV2),
-    Deneb(PayloadAttributesEventDataV3),
-    Electra(PayloadAttributesEventDataV3),
-    Fulu(PayloadAttributesEventDataV3),
-    Gloas(PayloadAttributesEventDataV4),
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct PayloadAttributesEventDataV1 {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub timestamp: UnixSeconds,
-    pub prev_randao: H256,
-    pub suggested_fee_recipient: ExecutionAddress,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PayloadAttributesEventDataV2 {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub timestamp: UnixSeconds,
-    pub prev_randao: H256,
-    pub suggested_fee_recipient: ExecutionAddress,
-    pub withdrawals: Vec<WithdrawalEventDataV1>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PayloadAttributesEventDataV3 {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub timestamp: UnixSeconds,
-    pub prev_randao: H256,
-    pub suggested_fee_recipient: ExecutionAddress,
-    pub withdrawals: Vec<WithdrawalEventDataV1>,
-    pub parent_beacon_block_root: H256,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct PayloadAttributesEventDataV4 {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub timestamp: UnixSeconds,
-    pub prev_randao: H256,
-    pub suggested_fee_recipient: ExecutionAddress,
-    pub withdrawals: Vec<WithdrawalEventDataV1>,
-    pub parent_beacon_block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub slot_number: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub target_gas_limit: Gas,
-}
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct WithdrawalEventDataV1 {
-    #[serde(with = "serde_utils::string_or_native")]
-    pub index: WithdrawalIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub validator_index: ValidatorIndex,
-    pub address: ExecutionAddress,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub amount: Gwei,
-}
-
-impl From<WithdrawalV1> for WithdrawalEventDataV1 {
-    fn from(withdrawal: WithdrawalV1) -> Self {
-        let WithdrawalV1 {
-            index,
-            validator_index,
-            address,
-            amount,
-        } = withdrawal;
-
-        Self {
-            index,
-            validator_index,
-            address,
-            amount,
-        }
-    }
-}
-
-impl From<PayloadAttributesV1> for PayloadAttributesEventDataV1 {
-    fn from(payload_attributes: PayloadAttributesV1) -> Self {
-        let PayloadAttributesV1 {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-        } = payload_attributes;
-
-        Self {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-        }
-    }
-}
-
-impl<P: Preset> From<PayloadAttributesV2<P>> for PayloadAttributesEventDataV2 {
-    fn from(payload_attributes: PayloadAttributesV2<P>) -> Self {
-        let PayloadAttributesV2 {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-            withdrawals,
-        } = payload_attributes;
-
-        Self {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-            withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
-        }
-    }
-}
-
-impl<P: Preset> From<PayloadAttributesV3<P>> for PayloadAttributesEventDataV3 {
-    fn from(payload_attributes: PayloadAttributesV3<P>) -> Self {
-        let PayloadAttributesV3 {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-            withdrawals,
-            parent_beacon_block_root,
-        } = payload_attributes;
-
-        Self {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-            withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
-            parent_beacon_block_root,
-        }
-    }
-}
-
-impl<P: Preset> From<PayloadAttributesV4<P>> for PayloadAttributesEventDataV4 {
-    fn from(payload_attributes: PayloadAttributesV4<P>) -> Self {
-        let PayloadAttributesV4 {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-            withdrawals,
-            parent_beacon_block_root,
-            slot_number,
-            target_gas_limit,
-        } = payload_attributes;
-
-        Self {
-            timestamp,
-            prev_randao,
-            suggested_fee_recipient,
-            withdrawals: withdrawals.into_iter().map(Into::into).collect::<Vec<_>>(),
-            parent_beacon_block_root,
-            slot_number,
-            target_gas_limit,
-        }
-    }
-}
-
-impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventData {
-    fn from(payload_attributes: PayloadAttributes<P>) -> Self {
-        match payload_attributes {
-            PayloadAttributes::Bellatrix(payload_attributes_v1) => {
-                Self::Bellatrix(payload_attributes_v1.into())
-            }
-            PayloadAttributes::Capella(payload_attributes_v2) => {
-                Self::Capella(payload_attributes_v2.into())
-            }
-            PayloadAttributes::Deneb(payload_attributes_v3) => {
-                Self::Deneb(payload_attributes_v3.into())
-            }
-            PayloadAttributes::Electra(payload_attributes_v3) => {
-                Self::Electra(payload_attributes_v3.into())
-            }
-            PayloadAttributes::Fulu(payload_attributes_v3) => {
-                Self::Fulu(payload_attributes_v3.into())
-            }
-            PayloadAttributes::Gloas(payload_attributes_v4) => {
-                Self::Gloas(payload_attributes_v4.into())
-            }
-        }
+        },
     }
 }

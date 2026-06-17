@@ -4,6 +4,8 @@ use axum::{
     http::{HeaderMap, HeaderValue, header::ACCEPT},
     response::{IntoResponse, Response},
 };
+pub use http_api_utils::ETH_BLOB_DATA_INCLUDED;
+
 use http_api_utils::ETH_CONSENSUS_VERSION;
 use mediatype::{MediaType, MediaTypeList};
 use mime::APPLICATION_OCTET_STREAM;
@@ -16,7 +18,6 @@ use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::
 use crate::error::Error;
 
 const ETH_CONSENSUS_BLOCK_VALUE: &str = "eth-consensus-block-value";
-pub const ETH_BLOB_DATA_INCLUDED: &str = "eth-blob-data-included";
 const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
 const ETH_EXECUTION_PAYLOAD_VALUE: &str = "eth-execution-payload-value";
 const ETH_EXECUTION_PAYLOAD_INCLUDED: &str = "eth-execution-payload-included";

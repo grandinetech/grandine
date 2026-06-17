@@ -14,7 +14,7 @@
 
 pub use crate::{
     controller::Controller,
-    events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
+    events::{DEFAULT_MAX_EVENTS, EventChannels},
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
         ValidatorMessage,

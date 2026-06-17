@@ -4,6 +4,7 @@ members = [
     'allocator',
     'arithmetic',
     'attestation_verifier',
+    'beacon_api_types',
     'benches',
     'binary_utils',
     'bindings/c',
@@ -13,6 +14,7 @@ members = [
     'bls/bls-blst',
     'bls/bls-core',
     'bls/bls-zkcrypto',
+    'builder',
     'builder_api',
     'clock',
     'data_dumper',
@@ -58,6 +60,7 @@ members = [
     'slashing_protection',
     'snapshot_test_utils',
     'spec_test_utils',
+    'sse',
     'ssz',
     'ssz_derive',
     'state_cache',
@@ -327,6 +330,7 @@ enum-map = '2'
 enumset = '1'
 env_logger = '0.11'
 ethereum-types = '0.14'
+eventsource-stream = '0.2'
 ff = '0.13'
 fixed-hash = '0.8'
 fnv = '1'
@@ -479,6 +483,7 @@ zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
 attestation_verifier = { path = 'attestation_verifier' }
+beacon_api_types = { path = 'beacon_api_types' }
 binary_utils = { path = 'binary_utils' }
 block_producer = { path = 'block_producer' }
 # Replace the line below with `bls = { path = 'bls', features = ['blst'] }` for `ad_hoc_bench` and other utilities
@@ -486,6 +491,7 @@ bls = { path = 'bls' }
 bls-blst = { path = 'bls/bls-blst' }
 bls-core = { path = 'bls/bls-core' }
 bls-zkcrypto = { path = 'bls/bls-zkcrypto' }
+builder = { path = 'builder' }
 builder_api = { path = 'builder_api' }
 c_grandine = { path = 'bindings/c', default-features = false }
 clock = { path = 'clock' }
@@ -534,6 +540,7 @@ slasher = { path = 'slasher' }
 slashing_protection = { path = 'slashing_protection' }
 snapshot_test_utils = { path = 'snapshot_test_utils' }
 spec_test_utils = { path = 'spec_test_utils' }
+sse = { path = 'sse' }
 ssz = { path = 'ssz' }
 ssz_derive = { path = 'ssz_derive' }
 state_cache = { path = 'state_cache' }

@@ -33,6 +33,10 @@ check:
 build:
 	cargo build --release --bin grandine $(FEATURES) $(EXCLUDES)
 
+.PHONY: builder
+builder:
+	cargo build --release --bin grandine-builder -p builder
+
 .PHONY: download-spec-tests
 download-spec-tests:
 	./scripts/download_spec_tests.sh
@@ -322,3 +326,57 @@ else
 		--tag $(DOCKER_REPO):$(DOCKER_LABEL)-amd64$(DOCKER_SUFFIX)-nethermind-$(NETHERMIND_VERSION) \
 		./target/x86_64-unknown-linux-gnu/compact
 endif
+
+# ----- GRANDINE-BUILDER DOCKER -----
+
+BUILDER_DOCKER_REPO ?= sifrai/grandine-builder
+
+./target/x86_64-unknown-linux-gnu/compact/grandine-builder:
+	cross build --bin grandine-builder -p builder --target x86_64-unknown-linux-gnu --profile compact
+
+./target/aarch64-unknown-linux-gnu/compact/grandine-builder:
+	cross build --bin grandine-builder -p builder --target aarch64-unknown-linux-gnu --profile compact
+
+.PHONY: builder-docker
+builder-docker: builder-docker-arm64 builder-docker-amd64
+ifeq ($(DOCKER_LABEL),)
+	@echo "Failed to build docker image - please provide DOCKER_LABEL=, either 'stable' or 'unstable'"
+	@exit 1
+endif
+	docker buildx imagetools create -t $(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX) \
+		$(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)-amd64$(DOCKER_SUFFIX) \
+		$(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)-arm64$(DOCKER_SUFFIX)
+ifeq ($(DOCKER_LABEL),stable)
+	docker buildx imagetools create -t $(BUILDER_DOCKER_REPO):$(GRANDINE_VERSION) \
+		$(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)
+	docker buildx imagetools create -t $(BUILDER_DOCKER_REPO):latest \
+		$(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)$(DOCKER_SUFFIX)
+endif
+
+.PHONY: builder-docker-arm64
+builder-docker-arm64: ./target/aarch64-unknown-linux-gnu/compact/grandine-builder
+ifeq ($(DOCKER_LABEL),)
+	@echo "Failed to build docker image - please provide DOCKER_LABEL=, either 'stable' or 'unstable'"
+else
+	docker buildx build \
+		--file Dockerfile.builder.cross \
+		--platform linux/arm64 \
+		--push \
+		--tag $(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)-arm64$(DOCKER_SUFFIX) \
+		./target/aarch64-unknown-linux-gnu/compact
+endif
+
+.PHONY: builder-docker-amd64
+builder-docker-amd64: ./target/x86_64-unknown-linux-gnu/compact/grandine-builder
+ifeq ($(DOCKER_LABEL),)
+	@echo "Failed to build docker image - please provide DOCKER_LABEL=, either 'stable' or 'unstable'"
+else
+	docker buildx build \
+		--file Dockerfile.builder.cross \
+		--platform linux/amd64 \
+		--push \
+		--tag $(BUILDER_DOCKER_REPO):$(DOCKER_LABEL)-amd64$(DOCKER_SUFFIX) \
+		./target/x86_64-unknown-linux-gnu/compact
+endif
+
+

@@ -5,15 +5,15 @@ use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
 use eip_2335::Keystore;
 use logging::{info_with_peers, warn_with_peers};
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
-use signer::KeyOrigin;
 use std_ext::ArcExt;
 use tap::{Pipe as _, TryConv as _};
 use validator_key_cache::ValidatorKeyCache;
 use zeroize::Zeroizing;
 
-#[derive(Default)]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
-pub struct Validators {
+use crate::KeyOrigin;
+
+#[derive(PartialEq, Eq, Default, Debug)]
+pub struct Keystores {
     pub keystore_dir: PathBuf,
     pub keystore_password_file: PathBuf,
 }
@@ -23,7 +23,7 @@ enum KeystoreExtension {
     None,
 }
 
-impl Validators {
+impl Keystores {
     fn keymap_from_paths(&self) -> Result<HashMap<PathBuf, PathBuf>> {
         let keystore_dir = self.keystore_dir.as_path();
         let keystore_password_file = self.keystore_password_file.as_path();

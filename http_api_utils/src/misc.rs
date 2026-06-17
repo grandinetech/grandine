@@ -5,6 +5,7 @@ use parse_display::Display;
 use prometheus_metrics::Metrics;
 
 pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
+pub const ETH_BLOB_DATA_INCLUDED: &str = "eth-blob-data-included";
 
 #[derive(Clone, Copy)]
 enum ApiType {

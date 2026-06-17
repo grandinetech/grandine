@@ -39,7 +39,7 @@ reqwest = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
-serde_with = { workspace = true }
+sse = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }
 std_ext = { workspace = true }

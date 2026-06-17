@@ -30,4 +30,3 @@ mod misc;
 pub mod predefined_network;
 mod runtime;
 mod schema;
-mod validators;

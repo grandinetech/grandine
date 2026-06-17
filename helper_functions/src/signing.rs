@@ -148,6 +148,17 @@ pub trait SignForSingleFork<P: Preset>: SszHash {
         misc::compute_signing_root(self, domain)
     }
 
+    fn signing_root_without_state(&self, config: &Config, genesis_validators_root: H256) -> H256 {
+        let fork_version = config.version_at_epoch(self.epoch());
+        let domain = misc::compute_domain(
+            config,
+            Self::DOMAIN_TYPE,
+            Some(fork_version),
+            Some(genesis_validators_root),
+        );
+        misc::compute_signing_root(self, domain)
+    }
+
     fn sign(
         &self,
         config: &Config,

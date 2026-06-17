@@ -49,6 +49,7 @@ serde_utils = { workspace = true }
 signer = { workspace = true }
 slasher = { workspace = true }
 slashing_protection = { workspace = true }
+sse = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
 std_ext = { workspace = true }

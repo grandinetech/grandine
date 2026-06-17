@@ -24,7 +24,7 @@ use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
+use fork_choice_control::{EventChannels, ValidatorMessage, Wait};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
     PayloadAttestationOrigin, StateCacheError,
@@ -58,6 +58,7 @@ use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
+use sse::{Event, Topic};
 use ssz::{BitList, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;

@@ -12,7 +12,7 @@ use nonzero_ext::nonzero;
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
-use ssz::{ContiguousList, ContiguousVector, FitsInU64, Hc, SszHash as _};
+use ssz::{ContiguousList, ContiguousVector, FitsInU64, Hc, SszHash as _, SszList as _};
 #[cfg(target_os = "zkvm")]
 use std::collections::HashMap;
 use std_ext::CopyExt as _;
@@ -1246,6 +1246,23 @@ pub fn get_builder_payment_quorum_threshold<P: Preset>(state: &impl BeaconState<
     quorum
         .try_div(BUILDER_PAYMENT_THRESHOLD_DENOMINATOR)
         .map_err(Into::into)
+}
+
+pub fn builder_public_key<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    builder_index: BuilderIndex,
+) -> Result<&PublicKeyBytes> {
+    Ok(&state.builders().get(builder_index)?.pubkey)
+}
+
+#[must_use]
+pub fn builder_index_of_public_key<P: Preset>(
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+    public_key: &PublicKeyBytes,
+) -> Option<BuilderIndex> {
+    (0..)
+        .zip(state.builders())
+        .find_map(|(index, builder)| (&builder.pubkey == public_key).then_some(index))
 }
 
 pub fn get_active_builder_indices<P: Preset>(

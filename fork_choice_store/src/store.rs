@@ -68,7 +68,8 @@ use types::{
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
     nonstandard::{
-        BlobSidecarWithId, DataColumnSidecarWithId, PayloadStatus, Phase, StorageMode, WithStatus,
+        BlobSidecarWithId, DataColumnSidecarWithId, PayloadPresence, PayloadStatus, Phase,
+        StorageMode, WithStatus,
     },
     phase0::{
         consts::{ATTESTATION_PROPAGATION_SLOT_RANGE, BASIS_POINTS, GENESIS_EPOCH, GENESIS_SLOT},
@@ -96,8 +97,8 @@ use crate::{
         ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
         LatestMessage, Location, PartialAttestationAction, PartialBlockAction, PayloadAction,
         PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationValidationError,
-        PayloadPresence, ProposerPreferencesAction, ProposerPreferencesOrigin, Score, SegmentId,
-        Storage, UnfinalizedBlock, ValidAttestation, ValidPayloadAttestation,
+        ProposerPreferencesAction, ProposerPreferencesOrigin, Score, SegmentId, Storage,
+        UnfinalizedBlock, ValidAttestation, ValidPayloadAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
