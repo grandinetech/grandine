@@ -254,7 +254,10 @@ impl<P: Preset, W: Wait> Service<P, W> {
         let finalized_state = self.controller.last_finalized_state().value;
 
         self.bls_to_execution_changes.retain(|validator_index, _| {
-            let validator = match finalized_state.validators().get(*validator_index) {
+            let validator = match finalized_state
+                .validators()
+                .partial_validator(*validator_index)
+            {
                 Ok(validator) => validator,
                 Err(error) => {
                     debug_with_peers!("BLS to execution change is too recent to discard: {error}");

@@ -213,7 +213,10 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .retain(|slashing| {
                 let proposer_index = slashing.signed_header_1.message.proposer_index;
 
-                let proposer = match finalized_state.validators().get(proposer_index) {
+                let proposer = match finalized_state
+                    .validators()
+                    .partial_validator(proposer_index)
+                {
                     Ok(proposer) => proposer,
                     Err(error) => {
                         log_with_feature(format_args!(
@@ -233,7 +236,10 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .retain(|slashing| match slashing {
                 AttesterSlashing::Phase0(attester_slashing) => {
                     accessors::slashable_indices(attester_slashing).any(|attester_index| {
-                        let attester = match finalized_state.validators().get(attester_index) {
+                        let attester = match finalized_state
+                            .validators()
+                            .partial_validator(attester_index)
+                        {
                             Ok(attester) => attester,
                             Err(error) => {
                                 log_with_feature(format_args!(
@@ -248,7 +254,10 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 }
                 AttesterSlashing::Electra(attester_slashing) => {
                     accessors::slashable_indices(attester_slashing).any(|attester_index| {
-                        let attester = match finalized_state.validators().get(attester_index) {
+                        let attester = match finalized_state
+                            .validators()
+                            .partial_validator(attester_index)
+                        {
                             Ok(attester) => attester,
                             Err(error) => {
                                 log_with_feature(format_args!(
@@ -270,7 +279,10 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .retain(|voluntary_exit| {
                 let validator_index = voluntary_exit.message.validator_index;
 
-                let validator = match finalized_state.validators().get(validator_index) {
+                let validator = match finalized_state
+                    .validators()
+                    .partial_validator(validator_index)
+                {
                     Ok(validator) => validator,
                     Err(error) => {
                         log_with_feature(format_args!(

@@ -19,7 +19,7 @@ use types::{
     nonstandard::AttestationEpoch,
     phase0::{
         consts::GENESIS_EPOCH,
-        containers::{Checkpoint, HistoricalBatch, Validator},
+        containers::{Checkpoint, HistoricalBatch},
         primitives::{Gwei, ValidatorIndex},
     },
     preset::Preset,
@@ -94,13 +94,18 @@ pub fn process_registry_updates<P: Preset>(
     let mut ejections = vec![];
     let mut activation_queue = vec![];
 
-    for (validator, validator_index) in state.validators().into_iter().zip(0..) {
-        if is_eligible_for_activation_queue::<P>(validator) {
+    for ((validator, &effective_balance), validator_index) in state
+        .validators()
+        .partial_validators()
+        .zip(state.validators().effective_balances())
+        .zip(0..)
+    {
+        if is_eligible_for_activation_queue::<P>(validator, effective_balance) {
             eligible_for_activation_queue.push(validator_index);
         }
 
         if is_active_validator(validator, current_epoch)
-            && validator.effective_balance <= config.ejection_balance
+            && effective_balance <= config.ejection_balance
         {
             ejections.push(validator_index);
         }
@@ -114,7 +119,7 @@ pub fn process_registry_updates<P: Preset>(
     for validator_index in eligible_for_activation_queue {
         state
             .validators_mut()
-            .get_mut(validator_index)?
+            .partial_validator_mut(validator_index)?
             .activation_eligibility_epoch = next_epoch;
     }
 
@@ -126,7 +131,7 @@ pub fn process_registry_updates<P: Preset>(
         // `process_slashings` depends on `Validator.withdrawable_epoch`,
         // which may have been modified by `initiate_validator_exit`.
         // However, no test cases in `consensus-spec-tests` fail if this is absent.
-        summaries[index].update_from(state.validators().get(validator_index)?);
+        summaries[index].update_from(&state.validators().get(validator_index)?);
     }
 
     // > Queue validators eligible for activation and not yet dequeued for activation
@@ -146,7 +151,7 @@ pub fn process_registry_updates<P: Preset>(
     for validator_index in activation_queue.into_iter().take(churn_limit) {
         state
             .validators_mut()
-            .get_mut(validator_index)?
+            .partial_validator_mut(validator_index)?
             .activation_epoch = activation_exit_epoch;
     }
 
@@ -176,35 +181,23 @@ pub fn process_effective_balance_updates<P: Preset>(state: &mut impl BeaconState
     // The reason why the speedup is so small is likely because values in the balance tree are
     // packed into bundles of 8.
     let mut balances = balances.into_iter().copied();
-    let mut update_result: Result<()> = Ok(());
 
-    let mut update_balances = |validator: &mut Validator| -> Result<()> {
+    validators.update_effective_balances(|_, effective_balance| -> Result<Gwei> {
         let balance = balances
             .next()
             .expect("list of validators and list of balances should have the same length");
 
-        let below = balance.try_add(downward_threshold)? < validator.effective_balance;
-        let above = validator.effective_balance.try_add(upward_threshold)? < balance;
+        let below = balance.try_add(downward_threshold)? < effective_balance;
+        let above = effective_balance.try_add(upward_threshold)? < balance;
 
         if below || above {
-            validator.effective_balance = balance
+            return Ok(balance
                 .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
-                .min(P::MAX_EFFECTIVE_BALANCE);
+                .min(P::MAX_EFFECTIVE_BALANCE));
         }
 
-        Ok(())
-    };
-
-    // > Update effective balances with hysteresis
-    validators.update(|validator| {
-        if update_result.is_err() {
-            return;
-        }
-
-        update_result = update_balances(validator);
-    });
-
-    update_result
+        Ok(effective_balance)
+    })
 }
 
 pub fn process_slashings_reset<P: Preset>(state: &mut impl BeaconState<P>) -> Result<()> {

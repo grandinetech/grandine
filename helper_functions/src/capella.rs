@@ -1,7 +1,7 @@
 use types::{
     phase0::{
-        containers::Validator,
         primitives::{Epoch, Gwei},
+        validator_list::PartialValidator,
     },
     preset::Preset,
 };
@@ -12,7 +12,11 @@ use crate::predicates;
 ///
 /// > Check if ``validator`` is fully withdrawable.
 #[must_use]
-pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epoch: Epoch) -> bool {
+pub fn is_fully_withdrawable_validator(
+    validator: &PartialValidator,
+    balance: Gwei,
+    epoch: Epoch,
+) -> bool {
     predicates::has_eth1_withdrawal_credential(validator)
         && validator.withdrawable_epoch <= epoch
         && balance > 0
@@ -23,10 +27,11 @@ pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epo
 /// > Check if ``validator`` is partially withdrawable.
 #[must_use]
 pub fn is_partially_withdrawable_validator<P: Preset>(
-    validator: &Validator,
+    validator: &PartialValidator,
+    effective_balance: Gwei,
     balance: Gwei,
 ) -> bool {
-    let has_max_effective_balance = validator.effective_balance == P::MAX_EFFECTIVE_BALANCE;
+    let has_max_effective_balance = effective_balance == P::MAX_EFFECTIVE_BALANCE;
     let has_excess_balance = balance > P::MAX_EFFECTIVE_BALANCE;
 
     predicates::has_eth1_withdrawal_credential(validator)

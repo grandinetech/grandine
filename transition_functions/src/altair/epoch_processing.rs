@@ -292,7 +292,8 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
 
 pub fn process_participation_flag_updates<P: Preset>(state: &mut impl PostAltairBeaconState<P>) {
     // > Rotate current/previous epoch participation
-    let zero_participation = PersistentList::repeat_zero_with_length_of(state.validators());
+    let zero_participation = PersistentList::repeat_zero(state.validators().len_usize())
+        .expect("validator list and participation lists have the same maximum length");
 
     *state.previous_epoch_participation_mut() =
         core::mem::replace(state.current_epoch_participation_mut(), zero_participation);

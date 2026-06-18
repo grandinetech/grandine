@@ -391,7 +391,8 @@ fn process_validators_sweep_withdrawals<P: Preset>(
             break;
         }
 
-        let validator = state.validators().get(validator_index)?;
+        let validator = state.validators().partial_validator(validator_index)?;
+        let validator_effective_balance = state.validators().effective_balance(validator_index)?;
 
         let partially_withdrawn_balance = withdrawals
             .iter()
@@ -422,7 +423,11 @@ fn process_validators_sweep_withdrawals<P: Preset>(
             *withdrawal_index = withdrawal_index
                 .checked_add(1)
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
-        } else if is_partially_withdrawable_validator::<P>(validator, balance) {
+        } else if is_partially_withdrawable_validator::<P>(
+            validator,
+            validator_effective_balance,
+            balance,
+        ) {
             withdrawals.push(Withdrawal {
                 index: *withdrawal_index,
                 validator_index,
@@ -877,7 +882,7 @@ pub fn apply_attestation<P: Preset>(
         .into_iter()
         .map(|validator_index| {
             let base_reward = get_base_reward(state, validator_index, base_reward_per_increment)?;
-            let effective_balance = state.validators().get(validator_index)?.effective_balance;
+            let effective_balance = state.validators().effective_balance(validator_index)?;
             Ok((validator_index, base_reward, effective_balance))
         })
         .collect::<Result<Vec<_>>>()?;

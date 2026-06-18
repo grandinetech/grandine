@@ -10,8 +10,9 @@ use types::{
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::FAR_FUTURE_EPOCH,
-        containers::{Attestation, AttestationData, IndexedAttestation, Validator},
-        primitives::ValidatorIndex,
+        containers::{Attestation, AttestationData, IndexedAttestation},
+        primitives::{Gwei, ValidatorIndex},
+        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::BeaconState,
@@ -74,9 +75,12 @@ pub fn get_attesting_indices<'all, P: Preset>(
 
 // > Check if ``validator`` is eligible to be placed into the activation queue.
 #[must_use]
-pub const fn is_eligible_for_activation_queue<P: Preset>(validator: &Validator) -> bool {
+pub const fn is_eligible_for_activation_queue<P: Preset>(
+    validator: &PartialValidator,
+    effective_balance: Gwei,
+) -> bool {
     validator.activation_eligibility_epoch == FAR_FUTURE_EPOCH
-        && validator.effective_balance == P::MAX_EFFECTIVE_BALANCE
+        && effective_balance == P::MAX_EFFECTIVE_BALANCE
 }
 
 pub fn slash_validator<P: Preset>(
@@ -90,10 +94,10 @@ pub fn slash_validator<P: Preset>(
     initiate_validator_exit(config, state, slashed_index)?;
 
     let epoch = get_current_epoch(state);
-    let validator = state.validators.get_mut(slashed_index)?;
-    let effective_balance = validator.effective_balance;
+    let effective_balance = state.validators.effective_balance(slashed_index)?;
     let slashing_penalty = effective_balance / P::MIN_SLASHING_PENALTY_QUOTIENT;
 
+    let validator = state.validators.partial_validator_mut(slashed_index)?;
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch
@@ -164,7 +168,7 @@ mod tests {
             &mut slot_report,
         )?;
 
-        let validator = state.validators.get(0)?;
+        let validator = state.validators.partial_validator(0)?;
 
         assert_eq!(validator.exit_epoch, 3 + 1 + 4);
         assert_eq!(validator.withdrawable_epoch, 3 + 8192);

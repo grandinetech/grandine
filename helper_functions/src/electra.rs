@@ -12,8 +12,8 @@ use types::{
     nonstandard::SlashingKind,
     phase0::{
         consts::FAR_FUTURE_EPOCH,
-        containers::Validator,
         primitives::{Epoch, Gwei, ValidatorIndex},
+        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{BeaconState, PostElectraBeaconState},
@@ -30,14 +30,21 @@ use crate::{
 
 // > Check if ``validator`` is eligible to be placed into the activation queue.
 #[must_use]
-pub const fn is_eligible_for_activation_queue<P: Preset>(validator: &Validator) -> bool {
+pub const fn is_eligible_for_activation_queue<P: Preset>(
+    validator: &PartialValidator,
+    effective_balance: Gwei,
+) -> bool {
     validator.activation_eligibility_epoch == FAR_FUTURE_EPOCH
-        && validator.effective_balance >= P::MIN_ACTIVATION_BALANCE
+        && effective_balance >= P::MIN_ACTIVATION_BALANCE
 }
 
 // > Check if ``validator`` is fully withdrawable.
 #[must_use]
-pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epoch: Epoch) -> bool {
+pub fn is_fully_withdrawable_validator(
+    validator: &PartialValidator,
+    balance: Gwei,
+    epoch: Epoch,
+) -> bool {
     has_execution_withdrawal_credential(validator)
         && validator.withdrawable_epoch <= epoch
         && balance > 0
@@ -46,11 +53,12 @@ pub fn is_fully_withdrawable_validator(validator: &Validator, balance: Gwei, epo
 // > Check if ``validator`` is partially withdrawable.
 #[must_use]
 pub fn is_partially_withdrawable_validator<P: Preset>(
-    validator: &Validator,
+    validator: &PartialValidator,
+    effective_balance: Gwei,
     balance: Gwei,
 ) -> bool {
     let max_effective_balance = get_max_effective_balance::<P>(validator);
-    let has_max_effective_balance = validator.effective_balance == max_effective_balance;
+    let has_max_effective_balance = effective_balance == max_effective_balance;
     let has_excess_balance = balance > max_effective_balance;
 
     has_execution_withdrawal_credential(validator)
@@ -132,7 +140,7 @@ pub fn initiate_validator_exit<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     validator_index: ValidatorIndex,
 ) -> Result<()> {
-    let validator = state.validators().get(validator_index)?;
+    let validator = state.validators().partial_validator(validator_index)?;
 
     // > Return if validator already initiated exit
     if validator.exit_epoch != FAR_FUTURE_EPOCH {
@@ -140,11 +148,13 @@ pub fn initiate_validator_exit<P: Preset>(
     }
 
     // > Compute exit queue epoch
-    let exit_queue_epoch =
-        compute_exit_epoch_and_update_churn(config, state, validator.effective_balance)?;
+    let effective_balance = state.validators().effective_balance(validator_index)?;
+    let exit_queue_epoch = compute_exit_epoch_and_update_churn(config, state, effective_balance)?;
 
     // > Set validator exit epoch and withdrawable epoch
-    let validator = state.validators_mut().get_mut(validator_index)?;
+    let validator = state
+        .validators_mut()
+        .partial_validator_mut(validator_index)?;
 
     validator.exit_epoch = exit_queue_epoch;
 
@@ -167,10 +177,12 @@ pub fn slash_validator<P: Preset>(
     initiate_validator_exit(config, state, slashed_index)?;
 
     let epoch = get_current_epoch(state);
-    let validator = state.validators_mut().get_mut(slashed_index)?;
-    let effective_balance = validator.effective_balance;
+    let effective_balance = state.validators().effective_balance(slashed_index)?;
     let slashing_penalty = effective_balance / P::MIN_SLASHING_PENALTY_QUOTIENT_ELECTRA;
 
+    let validator = state
+        .validators_mut()
+        .partial_validator_mut(slashed_index)?;
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch

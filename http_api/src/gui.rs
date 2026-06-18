@@ -38,6 +38,7 @@ use types::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::Validator,
         primitives::{Epoch, Gwei, H256, Slot, ValidatorIndex},
+        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -134,7 +135,7 @@ impl ValidatorEpochRangeReport {
 
     fn accumulate(
         &mut self,
-        validator: &Validator,
+        validator: &PartialValidator,
         current_epoch: Epoch,
         report: ValidatorEpochReport,
     ) -> Result<()> {
@@ -525,7 +526,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     epoch_deltas,
                     post_balances,
                 ) {
-                    if skip_validator(validator) {
+                    if skip_validator(&validator) {
                         continue;
                     }
 
@@ -566,7 +567,11 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report)?;
+                        .accumulate(
+                            state.validators().partial_validator(validator_index)?,
+                            current_epoch,
+                            validator_report,
+                        )?;
                 }
             }
             EpochReport::PostAltair(AltairEpochReport {
@@ -593,7 +598,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     epoch_deltas,
                     post_balances,
                 ) {
-                    if skip_validator(validator) {
+                    if skip_validator(&validator) {
                         continue;
                     }
 
@@ -654,7 +659,11 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report)?;
+                        .accumulate(
+                            state.validators().partial_validator(validator_index)?,
+                            current_epoch,
+                            validator_report,
+                        )?;
                 }
             }
         }
@@ -733,7 +742,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     epoch_deltas,
                     post_balances,
                 ) {
-                    if skip_validator(validator) {
+                    if skip_validator(&validator) {
                         continue;
                     }
 
@@ -774,7 +783,11 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report)?;
+                        .accumulate(
+                            state.validators().partial_validator(validator_index)?,
+                            current_epoch,
+                            validator_report,
+                        )?;
                 }
             }
             EpochReport::PostAltair(AltairEpochReport {
@@ -801,7 +814,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     epoch_deltas,
                     post_balances,
                 ) {
-                    if skip_validator(validator) {
+                    if skip_validator(&validator) {
                         continue;
                     }
 
@@ -862,7 +875,11 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     validator_reports
                         .entry(validator.pubkey)
                         .or_insert_with(|| ValidatorEpochRangeReport::new(validator_index))
-                        .accumulate(validator, current_epoch, validator_report)?;
+                        .accumulate(
+                            state.validators().partial_validator(validator_index)?,
+                            current_epoch,
+                            validator_report,
+                        )?;
                 }
             }
         }
@@ -1103,7 +1120,10 @@ mod tests {
 
         mutators::initiate_validator_exit(&config, &mut state, exiting_validator_index)?;
 
-        let exit_epoch = state.validators().get(exiting_validator_index)?.exit_epoch;
+        let exit_epoch = state
+            .validators()
+            .partial_validator(exiting_validator_index)?
+            .exit_epoch;
         let start_slot = misc::compute_start_slot_at_epoch::<Minimal>(exit_epoch);
 
         combined::process_slots(&config, &pubkey_cache, state.make_mut(), start_slot - 1)?;

@@ -1656,7 +1656,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        let public_key = &target_state.validators().get(aggregator_index)?.pubkey;
+        let public_key = target_state.validators().pubkey(aggregator_index)?;
 
         if !signature_validated && origin.verify_signatures() {
             let chain_config = &self.chain_config;
@@ -3970,11 +3970,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         state
             .validators()
-            .into_iter()
-            .map(|validator| {
+            .partial_validators()
+            .zip(state.validators().effective_balances())
+            .map(|(validator, &effective_balance)| {
                 // The `Validator.slashed` check was added in `consensus-specs` version 1.3.0-rc.4.
                 if predicates::is_active_validator(validator, epoch) && !validator.slashed {
-                    validator.effective_balance
+                    effective_balance
                 } else {
                     0
                 }

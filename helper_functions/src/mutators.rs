@@ -67,7 +67,12 @@ pub fn initiate_validator_exit<P: Preset>(
     validator_index: ValidatorIndex,
 ) -> Result<()> {
     // > Return if validator already initiated exit
-    if state.validators().get(validator_index)?.exit_epoch != FAR_FUTURE_EPOCH {
+    if state
+        .validators()
+        .partial_validator(validator_index)?
+        .exit_epoch
+        != FAR_FUTURE_EPOCH
+    {
         return Ok(());
     }
 
@@ -103,7 +108,9 @@ pub fn initiate_validator_exit<P: Preset>(
     }
 
     // > Set validator exit epoch and withdrawable epoch
-    let validator = state.validators_mut().get_mut(validator_index)?;
+    let validator = state
+        .validators_mut()
+        .partial_validator_mut(validator_index)?;
 
     validator.exit_epoch = exit_queue_epoch;
 
@@ -139,7 +146,7 @@ pub fn switch_to_compounding_validator<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     index: ValidatorIndex,
 ) -> Result<()> {
-    let validator = state.validators_mut().get_mut(index)?;
+    let validator = state.validators_mut().partial_validator_mut(index)?;
 
     validator.withdrawal_credentials[..COMPOUNDING_WITHDRAWAL_PREFIX.len()]
         .copy_from_slice(COMPOUNDING_WITHDRAWAL_PREFIX);
@@ -160,10 +167,11 @@ pub fn queue_excess_active_balance<P: Preset>(
 
         *state.balances_mut().get_mut(index)? = P::MIN_ACTIVATION_BALANCE;
 
-        let validator = state.validators().get(index)?;
-
-        let pubkey = validator.pubkey;
-        let withdrawal_credentials = validator.withdrawal_credentials;
+        let pubkey = state.validators().pubkey(index)?.to_owned();
+        let withdrawal_credentials = state
+            .validators()
+            .partial_validator(index)?
+            .withdrawal_credentials;
 
         state.pending_deposits_mut().push(PendingDeposit {
             pubkey,
@@ -304,8 +312,8 @@ mod tests {
         // `exit_epoch` is `FAR_FUTURE_EPOCH` and should be set to the lowest possible value.
         initiate_validator_exit(&config, &mut state, 1)?;
 
-        assert_eq!(state.validators.get(0)?.exit_epoch, 4);
-        assert_eq!(state.validators.get(1)?.exit_epoch, 5);
+        assert_eq!(state.validators.partial_validator(0)?.exit_epoch, 4);
+        assert_eq!(state.validators.partial_validator(1)?.exit_epoch, 5);
 
         Ok(())
     }

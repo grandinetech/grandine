@@ -369,7 +369,7 @@ pub fn process_bls_to_execution_change<P: Preset>(
 
     let validator = state
         .validators_mut()
-        .get_mut(address_change.validator_index)?;
+        .partial_validator_mut(address_change.validator_index)?;
 
     validator.withdrawal_credentials =
         misc::eth1_address_withdrawal_credentials(address_change.to_execution_address);
@@ -478,7 +478,8 @@ pub fn get_expected_withdrawals<P: Preset>(
 
     for _ in 0..bound {
         let balance = state.balances().get(validator_index).copied()?;
-        let validator = state.validators().get(validator_index)?;
+        let validator = state.validators().partial_validator(validator_index)?;
+        let validator_effective_balance = state.validators().effective_balance(validator_index)?;
 
         let address = validator
             .withdrawal_credentials
@@ -497,7 +498,11 @@ pub fn get_expected_withdrawals<P: Preset>(
             withdrawal_index = withdrawal_index
                 .checked_add(1)
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
-        } else if is_partially_withdrawable_validator::<P>(validator, balance) {
+        } else if is_partially_withdrawable_validator::<P>(
+            validator,
+            validator_effective_balance,
+            balance,
+        ) {
             withdrawals.push(Withdrawal {
                 index: withdrawal_index,
                 validator_index,

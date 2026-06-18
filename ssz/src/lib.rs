@@ -21,7 +21,9 @@ pub use crate::{
     persistent_list::PersistentList,
     persistent_vector::PersistentVector,
     porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszWrite},
-    shared::{read_offset_unchecked, subslice, write_offset},
+    shared::{
+        read_list, read_offset_unchecked, saturating_usize, subslice, write_list, write_offset,
+    },
     size::Size,
     type_level::{
         BitVectorBits, ByteVectorBytes, BytesToDepth, ContiguousVectorElements, FitsInU64,

@@ -124,10 +124,7 @@ impl<P: Preset> Pool<P> {
         let messages = self.sync_committee_messages(contribution_data).await;
 
         for message in messages.read().await.iter() {
-            let validator_pubkey = &beacon_state
-                .validators()
-                .get(message.validator_index)?
-                .pubkey;
+            let validator_pubkey = beacon_state.validators().pubkey(message.validator_index)?;
 
             let positions_in_subcommittee = subcommittee_pubkeys
                 .iter()
@@ -201,10 +198,7 @@ impl<P: Preset> Pool<P> {
         }
 
         for message in messages {
-            let validator_pubkey = &beacon_state
-                .validators()
-                .get(message.validator_index)?
-                .pubkey;
+            let validator_pubkey = beacon_state.validators().pubkey(message.validator_index)?;
 
             let positions_in_subcommittee = subcommittee_pubkeys
                 .iter()

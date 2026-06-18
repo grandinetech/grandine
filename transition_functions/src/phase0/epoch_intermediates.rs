@@ -43,7 +43,7 @@ pub trait Statistics: Copy + Default {
     fn accumulate_validator(
         &mut self,
         active_in_current_epoch: bool,
-        validator: &Validator,
+        effective_balance: Gwei,
     ) -> Result<()>;
 
     fn accumulate_previous_epoch_attestation(
@@ -143,12 +143,12 @@ impl Statistics for StatisticsForTransition {
     fn accumulate_validator(
         &mut self,
         active_in_current_epoch: bool,
-        validator: &Validator,
+        effective_balance: Gwei,
     ) -> Result<()> {
         if active_in_current_epoch {
             self.current_epoch_active_balance = self
                 .current_epoch_active_balance
-                .try_add(validator.effective_balance)?;
+                .try_add(effective_balance)?;
         }
         Ok(())
     }
@@ -279,12 +279,12 @@ impl Statistics for StatisticsForReport {
     fn accumulate_validator(
         &mut self,
         active_in_current_epoch: bool,
-        validator: &Validator,
+        effective_balance: Gwei,
     ) -> Result<()> {
         if active_in_current_epoch {
             self.current_epoch_active_balance = self
                 .current_epoch_active_balance
-                .try_add(validator.effective_balance)?;
+                .try_add(effective_balance)?;
         }
         Ok(())
     }
@@ -628,19 +628,16 @@ pub fn statistics_and_summaries<P: Preset, S: Statistics>(
 
     let summaries = state
         .validators
-        .into_iter()
-        .map(|validator| {
-            let Validator {
-                effective_balance,
-                slashed,
-                withdrawable_epoch,
-                ..
-            } = *validator;
+        .partial_validators()
+        .zip(state.validators.effective_balances())
+        .map(|(validator, &effective_balance)| {
+            let slashed = validator.slashed;
+            let withdrawable_epoch = validator.withdrawable_epoch;
 
             let active_in_current_epoch = is_active_validator(validator, current_epoch);
             let eligible_for_penalties = is_eligible_for_penalties(validator, previous_epoch)?;
 
-            statistics.accumulate_validator(active_in_current_epoch, validator)?;
+            statistics.accumulate_validator(active_in_current_epoch, effective_balance)?;
 
             Ok(Phase0ValidatorSummary {
                 effective_balance,

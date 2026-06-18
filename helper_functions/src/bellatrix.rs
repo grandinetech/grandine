@@ -27,10 +27,12 @@ pub fn slash_validator<P: Preset>(
     initiate_validator_exit(config, state, slashed_index)?;
 
     let epoch = get_current_epoch(state);
-    let validator = state.validators_mut().get_mut(slashed_index)?;
-    let effective_balance = validator.effective_balance;
+    let effective_balance = state.validators().effective_balance(slashed_index)?;
     let slashing_penalty = effective_balance / P::MIN_SLASHING_PENALTY_QUOTIENT_BELLATRIX;
 
+    let validator = state
+        .validators_mut()
+        .partial_validator_mut(slashed_index)?;
     validator.slashed = true;
     validator.withdrawable_epoch = validator
         .withdrawable_epoch
@@ -103,7 +105,7 @@ mod tests {
             &mut slot_report,
         )?;
 
-        let validator = state.validators.get(0)?;
+        let validator = state.validators.partial_validator(0)?;
 
         assert_eq!(validator.exit_epoch, 3 + 1 + 4);
         assert_eq!(validator.withdrawable_epoch, 3 + 8192);
