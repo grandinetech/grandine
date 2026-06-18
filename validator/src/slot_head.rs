@@ -54,15 +54,13 @@ impl<P: Preset> SlotHead<P> {
 
     #[must_use]
     pub fn public_key(&self, validator_index: ValidatorIndex) -> &PublicKeyBytes {
-        &self
-            .beacon_state
+        self.beacon_state
             .validators()
-            .get(validator_index)
+            .pubkey(validator_index)
             .expect(
                 "SlotHead::public_key should only be called with \
                  indices of validators in SlotHead.beacon_state",
             )
-            .pubkey
     }
 
     pub fn proposer_index(&self) -> Result<ValidatorIndex> {

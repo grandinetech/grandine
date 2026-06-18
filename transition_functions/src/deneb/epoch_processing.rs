@@ -154,13 +154,18 @@ fn process_registry_updates<P: Preset>(
     let mut ejections = vec![];
     let mut activation_queue = vec![];
 
-    for (validator, validator_index) in state.validators().into_iter().zip(0..) {
-        if is_eligible_for_activation_queue::<P>(validator) {
+    for ((validator, &effective_balance), validator_index) in state
+        .validators()
+        .partial_validators()
+        .zip(state.validators.effective_balances())
+        .zip(0..)
+    {
+        if is_eligible_for_activation_queue::<P>(validator, effective_balance) {
             eligible_for_activation_queue.push(validator_index);
         }
 
         if is_active_validator(validator, current_epoch)
-            && validator.effective_balance <= config.ejection_balance
+            && effective_balance <= config.ejection_balance
         {
             ejections.push(validator_index);
         }
@@ -174,7 +179,7 @@ fn process_registry_updates<P: Preset>(
     for validator_index in eligible_for_activation_queue {
         state
             .validators_mut()
-            .get_mut(validator_index)?
+            .partial_validator_mut(validator_index)?
             .activation_eligibility_epoch = next_epoch;
     }
 
@@ -186,7 +191,7 @@ fn process_registry_updates<P: Preset>(
         // `process_slashings` depends on `Validator.withdrawable_epoch`,
         // which may have been modified by `initiate_validator_exit`.
         // However, no test cases in `consensus-spec-tests` fail if this is absent.
-        summaries[index].update_from(state.validators().get(validator_index)?);
+        summaries[index].update_from(&state.validators().get(validator_index)?);
     }
 
     // > Queue validators eligible for activation and not yet dequeued for activation
@@ -206,7 +211,7 @@ fn process_registry_updates<P: Preset>(
     for validator_index in activation_queue.into_iter().take(churn_limit) {
         state
             .validators_mut()
-            .get_mut(validator_index)?
+            .partial_validator_mut(validator_index)?
             .activation_epoch = activation_exit_epoch;
     }
 

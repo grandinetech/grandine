@@ -14,7 +14,7 @@ use helper_functions::{
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use std_ext::ArcExt as _;
+use std_ext::{ArcExt as _, CopyExt as _};
 use typenum::Unsigned as _;
 use types::{
     altair::{
@@ -406,18 +406,18 @@ fn validate_external_contribution_and_proof<P: Preset>(
     );
 
     let aggregator_index = contribution_and_proof.aggregator_index;
-    let aggregator = state.validators().get(aggregator_index)?;
+    let aggregator_pubkey = state.validators().pubkey(aggregator_index)?.copy();
     let subcommittee_pubkeys =
         accessors::get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index)?;
 
     ensure!(
-        subcommittee_pubkeys.contains(&aggregator.pubkey),
+        subcommittee_pubkeys.contains(&aggregator_pubkey),
         "aggregator is not in the declared subcommittee",
     );
 
     let mut verifier = MultiVerifier::default();
 
-    let pubkey = pubkey_cache.get_or_insert(aggregator.pubkey)?;
+    let pubkey = pubkey_cache.get_or_insert(aggregator_pubkey)?;
 
     verifier.verify_singular(
         SyncAggregatorSelectionData {
@@ -495,7 +495,7 @@ fn validate_external_message<P: Preset>(
     );
 
     let validator_pubkey =
-        pubkey_cache.get_or_insert(state.validators().get(validator_index)?.pubkey)?;
+        pubkey_cache.get_or_insert(state.validators().pubkey(validator_index)?.copy())?;
 
     message.beacon_block_root.verify(
         config,

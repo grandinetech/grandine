@@ -28,6 +28,7 @@ use types::{
         consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
         containers::{AttestationData, Validator},
         primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot},
+        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{
@@ -46,7 +47,7 @@ use crate::{
 // > Check if ``validator`` is active.
 #[inline]
 #[must_use]
-pub const fn is_active_validator(validator: &Validator, epoch: Epoch) -> bool {
+pub const fn is_active_validator(validator: &PartialValidator, epoch: Epoch) -> bool {
     validator.activation_epoch <= epoch && epoch < validator.exit_epoch
 }
 
@@ -54,7 +55,7 @@ pub const fn is_active_validator(validator: &Validator, epoch: Epoch) -> bool {
 #[must_use]
 pub fn is_eligible_for_activation<P: Preset>(
     state: &impl BeaconState<P>,
-    validator: &Validator,
+    validator: &PartialValidator,
 ) -> bool {
     // > Placement in queue is finalized
     validator.activation_eligibility_epoch <= state.finalized_checkpoint().epoch
@@ -63,7 +64,10 @@ pub fn is_eligible_for_activation<P: Preset>(
 }
 
 #[inline]
-pub fn is_eligible_for_penalties(validator: &Validator, previous_epoch: Epoch) -> Result<bool> {
+pub fn is_eligible_for_penalties(
+    validator: &PartialValidator,
+    previous_epoch: Epoch,
+) -> Result<bool> {
     Ok(is_active_validator(validator, previous_epoch)
         || (validator.slashed && previous_epoch.try_add(1)? < validator.withdrawable_epoch))
 }
@@ -71,7 +75,7 @@ pub fn is_eligible_for_penalties(validator: &Validator, previous_epoch: Epoch) -
 // > Check if ``validator`` is slashable.
 #[inline]
 #[must_use]
-pub const fn is_slashable_validator(validator: &Validator, epoch: Epoch) -> bool {
+pub const fn is_slashable_validator(validator: &PartialValidator, epoch: Epoch) -> bool {
     !validator.slashed
         && epoch < validator.withdrawable_epoch
         && validator.activation_epoch <= epoch
@@ -303,7 +307,7 @@ pub fn is_execution_enabled<P: Preset>(
 ///
 /// > Check if ``validator`` has an 0x01 prefixed "eth1" withdrawal credential.
 #[must_use]
-pub fn has_eth1_withdrawal_credential(validator: &Validator) -> bool {
+pub fn has_eth1_withdrawal_credential(validator: &PartialValidator) -> bool {
     validator
         .withdrawal_credentials
         .as_bytes()
@@ -389,13 +393,13 @@ pub fn is_compounding_withdrawal_credential(withdrawal_credentials: H256) -> boo
 
 // > Check if ``validator`` has an 0x02 prefixed "compounding" withdrawal credential.
 #[must_use]
-pub fn has_compounding_withdrawal_credential(validator: &Validator) -> bool {
+pub fn has_compounding_withdrawal_credential(validator: &PartialValidator) -> bool {
     is_compounding_withdrawal_credential(validator.withdrawal_credentials)
 }
 
 // > Check if ``validator`` has a 0x01 or 0x02 prefixed withdrawal credential.
 #[must_use]
-pub fn has_execution_withdrawal_credential(validator: &Validator) -> bool {
+pub fn has_execution_withdrawal_credential(validator: &PartialValidator) -> bool {
     has_compounding_withdrawal_credential(validator) || has_eth1_withdrawal_credential(validator)
 }
 
@@ -856,7 +860,10 @@ mod extra_tests {
         let validator = inactive_validator();
         let epoch = 10;
 
-        assert!(!is_active_validator(&validator, epoch));
+        assert!(!is_active_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]
@@ -867,7 +874,10 @@ mod extra_tests {
         };
         let epoch = 10;
 
-        assert!(is_active_validator(&validator, epoch));
+        assert!(is_active_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]
@@ -878,7 +888,10 @@ mod extra_tests {
         };
         let epoch = 10;
 
-        assert!(!is_active_validator(&validator, epoch));
+        assert!(!is_active_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]
@@ -889,7 +902,10 @@ mod extra_tests {
         };
         let epoch = 10;
 
-        assert!(!is_slashable_validator(&validator, epoch));
+        assert!(!is_slashable_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]
@@ -897,7 +913,10 @@ mod extra_tests {
         let validator = inactive_validator();
         let epoch = 10;
 
-        assert!(!is_slashable_validator(&validator, epoch));
+        assert!(!is_slashable_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]
@@ -905,7 +924,10 @@ mod extra_tests {
         let validator = exiting_validator();
         let epoch = 11;
 
-        assert!(!is_slashable_validator(&validator, epoch));
+        assert!(!is_slashable_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]
@@ -913,7 +935,10 @@ mod extra_tests {
         let validator = exiting_validator();
         let epoch = 10;
 
-        assert!(is_slashable_validator(&validator, epoch));
+        assert!(is_slashable_validator(
+            &PartialValidator::from(&validator),
+            epoch
+        ));
     }
 
     #[test]

@@ -725,7 +725,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
     let response = StateValidatorResponse {
         balance,
         index: validator_index,
-        status: ValidatorStatus::new(validator, &state),
+        status: ValidatorStatus::new(&validator, &state),
         validator: validator.clone(),
     };
 
@@ -3888,7 +3888,7 @@ fn state_validators<P: Preset, W: Wait>(
     .map(|(index, validator, balance)| StateValidatorResponse {
         index,
         balance,
-        status: ValidatorStatus::new(validator, &state),
+        status: ValidatorStatus::new(&validator, &state),
         validator: validator.clone(),
     })
     .collect();

@@ -213,26 +213,46 @@ impl<'config, P: Preset> Incremental<'config, P> {
 
             let balance = *self.beacon_state.balances().get(validator_index)?;
 
-            let validator = self
-                .beacon_state
-                .validators_mut()
-                .get_mut(validator_index)?;
-
             if is_post_electra {
-                validator.effective_balance = balance
+                let validator = self
+                    .beacon_state
+                    .validators()
+                    .partial_validator(validator_index)?;
+
+                let effective_balance = balance
                     .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
                     .min(misc::get_max_effective_balance::<P>(validator));
 
-                if validator.effective_balance >= P::MIN_ACTIVATION_BALANCE {
+                *self
+                    .beacon_state
+                    .validators_mut()
+                    .effective_balance_mut(validator_index)? = effective_balance;
+
+                if effective_balance >= P::MIN_ACTIVATION_BALANCE {
+                    let validator = self
+                        .beacon_state
+                        .validators_mut()
+                        .partial_validator_mut(validator_index)?;
+
                     validator.activation_eligibility_epoch = GENESIS_EPOCH;
                     validator.activation_epoch = GENESIS_EPOCH;
                 }
             } else {
-                validator.effective_balance = balance
+                let effective_balance = balance
                     .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
                     .min(P::MAX_EFFECTIVE_BALANCE);
 
-                if validator.effective_balance == P::MAX_EFFECTIVE_BALANCE {
+                *self
+                    .beacon_state
+                    .validators_mut()
+                    .effective_balance_mut(validator_index)? = effective_balance;
+
+                if effective_balance == P::MAX_EFFECTIVE_BALANCE {
+                    let validator = self
+                        .beacon_state
+                        .validators_mut()
+                        .partial_validator_mut(validator_index)?;
+
                     validator.activation_eligibility_epoch = GENESIS_EPOCH;
                     validator.activation_epoch = GENESIS_EPOCH;
                 }

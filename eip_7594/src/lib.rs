@@ -518,12 +518,7 @@ pub fn get_validator_custody_requirement<P: Preset>(
 ) -> u64 {
     let total_node_balance = validator_indices
         .iter()
-        .map(|index| {
-            last_finalized_state
-                .validators()
-                .get(*index)
-                .map(|validator| validator.effective_balance)
-        })
+        .map(|index| last_finalized_state.validators().effective_balance(*index))
         .process_results(|iter| iter.sum::<Gwei>())
         .unwrap_or(0);
 

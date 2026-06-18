@@ -139,7 +139,7 @@ pub fn process_block_header<P: Preset>(
 
     // > Verify proposer is not slashed
     let index = block.proposer_index();
-    let proposer = state.validators().get(index)?;
+    let proposer = state.validators().partial_validator(index)?;
 
     ensure!(!proposer.slashed, Error::<P>::ProposerSlashed { index });
 
@@ -159,7 +159,7 @@ pub fn process_randao<P: Preset>(
 
     // > Verify RANDAO reveal
     let proposer_index = get_beacon_proposer_index(config, state)?;
-    let public_key = &state.validators().get(proposer_index)?.pubkey;
+    let public_key = state.validators().pubkey(proposer_index)?;
 
     if !verifier.has_option(VerifierOption::SkipRandaoVerification) {
         verifier.verify_singular(
@@ -260,13 +260,14 @@ pub fn validate_proposer_slashing_with_verifier<P: Preset>(
 
     // > Verify the proposer is slashable
     let index = header_1.proposer_index;
-    let proposer = state.validators().get(index)?;
+    let proposer = state.validators().partial_validator(index)?;
+    let proposer_pubkey = state.validators().pubkey(index)?;
 
     ensure!(
         is_slashable_validator(proposer, get_current_epoch(state)),
         Error::<P>::ProposerNotSlashable {
             index,
-            proposer: proposer.clone(),
+            proposer: state.validators().get(index)?,
         },
     );
 
@@ -278,7 +279,7 @@ pub fn validate_proposer_slashing_with_verifier<P: Preset>(
         verifier.verify_singular(
             signed_header.message.signing_root(config, state),
             signed_header.signature,
-            pubkey_cache.get_or_insert(proposer.pubkey)?,
+            pubkey_cache.get_or_insert(*proposer_pubkey)?,
             SignatureKind::Block,
         )?;
     }
@@ -335,7 +336,7 @@ pub fn validate_attester_slashing_with_verifier<P: Preset>(
         .filter(|attester_index| {
             let attester = state
                 .validators()
-                .get(*attester_index)
+                .partial_validator(*attester_index)
                 .expect("attester indices are validated in validate_received_indexed_attestation");
 
             is_slashable_validator(attester, current_epoch)
@@ -637,7 +638,8 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
 ) -> Result<()> {
     let voluntary_exit = signed_voluntary_exit.message;
     let index = voluntary_exit.validator_index;
-    let validator = state.validators().get(index)?;
+    let validator = state.validators().partial_validator(index)?;
+    let validator_pubkey = state.validators().pubkey(index)?;
     let current_epoch = get_current_epoch(state);
 
     // > Verify the validator is active
@@ -645,7 +647,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
         is_active_validator(validator, current_epoch),
         Error::<P>::ValidatorNotActive {
             index,
-            validator: validator.clone(),
+            validator: state.validators().get(index)?,
             current_epoch,
         },
     );
@@ -685,7 +687,7 @@ pub fn validate_voluntary_exit_with_verifier<P: Preset>(
     verifier.verify_singular(
         voluntary_exit.signing_root(config, state),
         signed_voluntary_exit.signature,
-        pubkey_cache.get_or_insert(validator.pubkey)?,
+        pubkey_cache.get_or_insert(*validator_pubkey)?,
         SignatureKind::VoluntaryExit,
     )?;
 

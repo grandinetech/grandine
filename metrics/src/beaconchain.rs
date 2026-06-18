@@ -207,7 +207,9 @@ impl ValidatorMetrics {
             .iter()
             .filter(|pubkey| {
                 accessors::index_of_public_key(&state, pubkey)
-                    .and_then(|validator_index| state.validators().get(validator_index).ok())
+                    .and_then(|validator_index| {
+                        state.validators().partial_validator(validator_index).ok()
+                    })
                     .is_some_and(|validator| {
                         predicates::is_active_validator(validator, current_epoch)
                     })

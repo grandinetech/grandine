@@ -33,6 +33,7 @@ static_assertions = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
+try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 url = { workspace = true }
 variant_count = { workspace = true }

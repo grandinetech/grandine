@@ -18,8 +18,9 @@ use crate::{
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     gloas::containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
     phase0::{
-        containers::{Eth1Data, PendingAttestation, Validator},
+        containers::{Eth1Data, PendingAttestation},
         primitives::{Gwei, H256, ValidatorIndex},
+        validator_list::ValidatorList,
     },
     preset::{
         BuilderPendingPaymentsLength, MaxAttestationsPerEpoch, Preset, ProposerLookaheadLength,
@@ -35,7 +36,7 @@ pub type HistoricalRoots<P> =
 
 pub type Eth1DataVotes<P> = PersistentList<Eth1Data, SlotsPerEth1VotingPeriod<P>>;
 
-pub type Validators<P> = PersistentList<Validator, <P as Preset>::ValidatorRegistryLimit>;
+pub type Validators<P> = ValidatorList<<P as Preset>::ValidatorRegistryLimit>;
 
 pub type Balances<P> =
     PersistentList<Gwei, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<Gwei>>;

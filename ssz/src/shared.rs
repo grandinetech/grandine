@@ -23,6 +23,7 @@ use crate::{
 //                       Try to avoid referring to `Unsigned::U64` or `Unsigned::U128`.
 // The associated constants in `typenum::Unsigned` are computed using the `<<` operator,
 // which silently discards set bits that are shifted out of range.
+#[must_use]
 pub const fn saturating_usize<N: Unsigned>() -> usize {
     if N::U64 > usize::MAX as u64 {
         usize::MAX

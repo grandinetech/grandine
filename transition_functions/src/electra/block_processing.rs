@@ -65,6 +65,7 @@ use types::{
             Validator,
         },
         primitives::{DepositIndex, ExecutionAddress, Gwei, H256, ValidatorIndex},
+        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{
@@ -367,7 +368,8 @@ pub fn get_expected_withdrawals<P: Preset>(
 
     // > Sweep for remaining
     for _ in 0..bound {
-        let validator = state.validators().get(validator_index)?;
+        let validator = state.validators().partial_validator(validator_index)?;
+        let validator_effective_balance = state.validators().effective_balance(validator_index)?;
 
         let partially_withdrawn_balance = withdrawals
             .iter()
@@ -398,7 +400,11 @@ pub fn get_expected_withdrawals<P: Preset>(
             withdrawal_index = withdrawal_index
                 .checked_add(1)
                 .ok_or(Error::<P>::WithdrawalIndexOverflow)?;
-        } else if is_partially_withdrawable_validator::<P>(validator, balance) {
+        } else if is_partially_withdrawable_validator::<P>(
+            validator,
+            validator_effective_balance,
+            balance,
+        ) {
             withdrawals.push(Withdrawal {
                 index: withdrawal_index,
                 validator_index,
@@ -906,7 +912,7 @@ pub fn add_validator_to_registry<P: Preset>(
         withdrawable_epoch: FAR_FUTURE_EPOCH,
     };
 
-    let max_effective_balance = get_max_effective_balance::<P>(&validator);
+    let max_effective_balance = get_max_effective_balance::<P>(&(&validator).into());
 
     validator.effective_balance = amount
         .prev_multiple_of(P::EFFECTIVE_BALANCE_INCREMENT)
@@ -1091,7 +1097,8 @@ pub fn process_withdrawal_request<P: Preset>(
         return Ok(());
     };
     let validator_balance = *balance(state, validator_index)?;
-    let validator = state.validators().get(validator_index)?;
+    let validator = state.validators().partial_validator(validator_index)?;
+    let validator_effective_balance = state.validators().effective_balance(validator_index)?;
 
     // > Verify withdrawal credentials
     let has_correct_credential = has_execution_withdrawal_credential(validator);
@@ -1137,7 +1144,7 @@ pub fn process_withdrawal_request<P: Preset>(
         return Ok(());
     }
 
-    let has_sufficient_effective_balance = validator.effective_balance >= P::MIN_ACTIVATION_BALANCE;
+    let has_sufficient_effective_balance = validator_effective_balance >= P::MIN_ACTIVATION_BALANCE;
     let has_excess_balance =
         validator_balance > P::MIN_ACTIVATION_BALANCE.try_add(pending_balance_to_withdraw)?;
 
@@ -1242,8 +1249,8 @@ pub fn process_consolidation_request<P: Preset>(
         return Ok(());
     };
 
-    let source_validator = state.validators().get(source_index)?;
-    let target_validator = state.validators().get(target_index)?;
+    let source_validator = state.validators().partial_validator(source_index)?;
+    let target_validator = state.validators().partial_validator(target_index)?;
 
     // > Verify source withdrawal credentials
     let has_correct_credential = has_execution_withdrawal_credential(source_validator);
@@ -1275,8 +1282,6 @@ pub fn process_consolidation_request<P: Preset>(
         return Ok(());
     }
 
-    let source_validator = state.validators().get(source_index)?;
-
     // > Verify the source has been active long enough
     if current_epoch
         < source_validator
@@ -1292,13 +1297,11 @@ pub fn process_consolidation_request<P: Preset>(
     }
 
     // > Initiate source validator exit and append pending consolidation
-    let exit_epoch = compute_consolidation_epoch_and_update_churn(
-        config,
-        state,
-        source_validator.effective_balance,
-    )?;
+    let source_effective_balance = state.validators().effective_balance(source_index)?;
+    let exit_epoch =
+        compute_consolidation_epoch_and_update_churn(config, state, source_effective_balance)?;
 
-    let source_validator = state.validators_mut().get_mut(source_index)?;
+    let source_validator = state.validators_mut().partial_validator_mut(source_index)?;
 
     source_validator.exit_epoch = exit_epoch;
     source_validator.withdrawable_epoch = source_validator
@@ -1335,7 +1338,7 @@ fn is_valid_switch_to_compounding_request<P: Preset>(
         return Ok(false);
     };
 
-    let source_validator = state.validators().get(source_index)?;
+    let source_validator = state.validators().partial_validator(source_index)?;
 
     // > Verify request has been authorized
     if compute_source_address(source_validator) != source_address {
@@ -1362,7 +1365,7 @@ fn is_valid_switch_to_compounding_request<P: Preset>(
     Ok(true)
 }
 
-fn compute_source_address(validator: &Validator) -> ExecutionAddress {
+fn compute_source_address(validator: &PartialValidator) -> ExecutionAddress {
     ExecutionAddress::from_slice(&validator.withdrawal_credentials[PREFIX_LEN..])
 }
 

@@ -14,6 +14,7 @@ use helper_functions::{
 };
 use pubkey_cache::PubkeyCache;
 use ssz::SszHash as _;
+use std_ext::CopyExt as _;
 use types::{
     combined::ExecutionPayloadParams,
     config::Config,
@@ -43,7 +44,7 @@ pub fn verify_execution_payload_envelope_signature<P: Preset>(
     let builder_index = signed_envelope.message.builder_index;
     let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
         let validator_index = state.latest_block_header().proposer_index;
-        state.validators().get(validator_index)?.pubkey
+        state.validators().pubkey(validator_index)?.copy()
     } else {
         state.builders().get(builder_index)?.pubkey
     };

@@ -203,66 +203,63 @@ pub fn statistics_and_summaries<P: Preset, S: PostAltairBeaconState<P>>(
 
     let mut statistics = Statistics::default();
 
-    let summaries = state
-        .validators()
-        .into_iter()
-        .zip(participation.iter().copied())
-        .map(
-            |(validator, participation)| -> Result<AltairValidatorSummary> {
-                let Validator {
-                    effective_balance,
-                    slashed,
-                    withdrawable_epoch,
-                    ..
-                } = *validator;
+    let summaries = izip!(
+        state.validators().partial_validators(),
+        state.validators().effective_balances().copied(),
+        participation.iter().copied(),
+    )
+    .map(
+        |(validator, effective_balance, participation)| -> Result<AltairValidatorSummary> {
+            let slashed = validator.slashed;
+            let withdrawable_epoch = validator.withdrawable_epoch;
 
-                let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
-                let active_in_current_epoch = is_active_validator(validator, current_epoch);
-                let eligible_for_penalties = is_eligible_for_penalties(validator, previous_epoch)?;
+            let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
+            let active_in_current_epoch = is_active_validator(validator, current_epoch);
+            let eligible_for_penalties = is_eligible_for_penalties(validator, previous_epoch)?;
 
-                if !slashed {
-                    // Unlike `get_unslashed_attesting_indices` in Phase 0,
-                    // `get_unslashed_participating_indices` in Altair checks if validators were active.
-                    // There doesn't seem to be a way for a validator that's not active to attest in
-                    // normal operation, but some test cases in `consensus-spec-tests` cover the check.
+            if !slashed {
+                // Unlike `get_unslashed_attesting_indices` in Phase 0,
+                // `get_unslashed_participating_indices` in Altair checks if validators were active.
+                // There doesn't seem to be a way for a validator that's not active to attest in
+                // normal operation, but some test cases in `consensus-spec-tests` cover the check.
 
-                    if active_in_previous_epoch {
-                        if participation.previous_epoch_matching_source() {
-                            statistics.previous_epoch_source_participating_balance = statistics
-                                .previous_epoch_source_participating_balance
-                                .try_add(effective_balance)?;
-                        }
-
-                        if participation.previous_epoch_matching_target() {
-                            statistics.previous_epoch_target_participating_balance = statistics
-                                .previous_epoch_target_participating_balance
-                                .try_add(effective_balance)?;
-                        }
-
-                        if participation.previous_epoch_matching_head() {
-                            statistics.previous_epoch_head_participating_balance = statistics
-                                .previous_epoch_head_participating_balance
-                                .try_add(effective_balance)?;
-                        }
+                if active_in_previous_epoch {
+                    if participation.previous_epoch_matching_source() {
+                        statistics.previous_epoch_source_participating_balance = statistics
+                            .previous_epoch_source_participating_balance
+                            .try_add(effective_balance)?;
                     }
 
-                    if active_in_current_epoch && participation.current_epoch_matching_target() {
-                        statistics.current_epoch_target_participating_balance = statistics
-                            .current_epoch_target_participating_balance
+                    if participation.previous_epoch_matching_target() {
+                        statistics.previous_epoch_target_participating_balance = statistics
+                            .previous_epoch_target_participating_balance
+                            .try_add(effective_balance)?;
+                    }
+
+                    if participation.previous_epoch_matching_head() {
+                        statistics.previous_epoch_head_participating_balance = statistics
+                            .previous_epoch_head_participating_balance
                             .try_add(effective_balance)?;
                     }
                 }
 
-                Ok(AltairValidatorSummary {
-                    effective_balance,
-                    slashed,
-                    withdrawable_epoch,
-                    active_in_previous_epoch,
-                    eligible_for_penalties,
-                })
-            },
-        )
-        .collect::<Result<Vec<_>>>()?;
+                if active_in_current_epoch && participation.current_epoch_matching_target() {
+                    statistics.current_epoch_target_participating_balance = statistics
+                        .current_epoch_target_participating_balance
+                        .try_add(effective_balance)?;
+                }
+            }
+
+            Ok(AltairValidatorSummary {
+                effective_balance,
+                slashed,
+                withdrawable_epoch,
+                active_in_previous_epoch,
+                eligible_for_penalties,
+            })
+        },
+    )
+    .collect::<Result<Vec<_>>>()?;
 
     statistics.clamp_balances::<P>();
 
@@ -275,50 +272,54 @@ pub fn statistics<P: Preset, S: PostAltairBeaconState<P>>(state: &S) -> Result<S
 
     let mut statistics = Statistics::default();
 
-    state
-        .validators()
-        .into_iter()
-        .zip(state.previous_epoch_participation())
-        .zip(state.current_epoch_participation())
-        .filter(|((validator, _), _)| !validator.slashed)
-        .try_for_each(
-            |((validator, previous_epoch_participation), current_epoch_participation)| {
-                let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
-                let active_in_current_epoch = is_active_validator(validator, current_epoch);
+    izip!(
+        state.validators().partial_validators(),
+        state.validators().effective_balances().copied(),
+        state.previous_epoch_participation(),
+        state.current_epoch_participation(),
+    )
+    .filter(|(validator, _, _, _)| !validator.slashed)
+    .try_for_each(
+        |(
+            validator,
+            effective_balance,
+            previous_epoch_participation,
+            current_epoch_participation,
+        )| {
+            let active_in_previous_epoch = is_active_validator(validator, previous_epoch);
+            let active_in_current_epoch = is_active_validator(validator, current_epoch);
 
-                let effective_balance = validator.effective_balance;
-
-                if active_in_previous_epoch {
-                    if previous_epoch_participation.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
-                        statistics.previous_epoch_source_participating_balance = statistics
-                            .previous_epoch_source_participating_balance
-                            .try_add(effective_balance)?;
-                    }
-
-                    if previous_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX) {
-                        statistics.previous_epoch_target_participating_balance = statistics
-                            .previous_epoch_target_participating_balance
-                            .try_add(effective_balance)?;
-                    }
-
-                    if previous_epoch_participation.get_bit(TIMELY_HEAD_FLAG_INDEX) {
-                        statistics.previous_epoch_head_participating_balance = statistics
-                            .previous_epoch_head_participating_balance
-                            .try_add(effective_balance)?;
-                    }
-                }
-
-                if active_in_current_epoch
-                    && current_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX)
-                {
-                    statistics.current_epoch_target_participating_balance = statistics
-                        .current_epoch_target_participating_balance
+            if active_in_previous_epoch {
+                if previous_epoch_participation.get_bit(TIMELY_SOURCE_FLAG_INDEX) {
+                    statistics.previous_epoch_source_participating_balance = statistics
+                        .previous_epoch_source_participating_balance
                         .try_add(effective_balance)?;
                 }
 
-                Ok::<(), Error>(())
-            },
-        )?;
+                if previous_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX) {
+                    statistics.previous_epoch_target_participating_balance = statistics
+                        .previous_epoch_target_participating_balance
+                        .try_add(effective_balance)?;
+                }
+
+                if previous_epoch_participation.get_bit(TIMELY_HEAD_FLAG_INDEX) {
+                    statistics.previous_epoch_head_participating_balance = statistics
+                        .previous_epoch_head_participating_balance
+                        .try_add(effective_balance)?;
+                }
+            }
+
+            if active_in_current_epoch
+                && current_epoch_participation.get_bit(TIMELY_TARGET_FLAG_INDEX)
+            {
+                statistics.current_epoch_target_participating_balance = statistics
+                    .current_epoch_target_participating_balance
+                    .try_add(effective_balance)?;
+            }
+
+            Ok::<(), Error>(())
+        },
+    )?;
 
     statistics.clamp_balances::<P>();
 

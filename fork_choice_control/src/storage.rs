@@ -13,7 +13,7 @@ use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
-use ssz::{PersistentList, Ssz, SszRead, SszReadDefault, SszWrite};
+use ssz::{ContiguousList, Ssz, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::info;
@@ -1020,34 +1020,32 @@ impl<P: Preset> Storage<P> {
         state: &mut BeaconState<P>,
         finalized_validators: Option<&Validators<P>>,
     ) -> Result<()> {
-        let mut disk_validators = None;
+        match finalized_validators {
+            Some(validators) => {
+                state
+                    .validators_mut()
+                    .set_pubkeys(validators.pubkeys())
+                    .context("invalid finalized validators list")?;
+            }
+            None => {
+                info_with_peers!("loading validators from disk");
 
-        for (index, validator) in state.validators_mut().into_iter().enumerate() {
-            if validator.pubkey.is_zero() {
-                // restore validator pubkey, by taking pubkey from the finalized validators list
-                let finalized_validator_pubkey = match finalized_validators {
-                    Some(v) => v.get(index as u64).map(|v| v.pubkey),
-                    None => {
-                        if disk_validators.is_none() {
-                            info_with_peers!("loading validators from disk");
+                let Some(pubkeys) = self
+                    .get::<ContiguousList<PublicKeyBytes, P::ValidatorRegistryLimit>>(
+                        FinalizedValidators,
+                    )?
+                else {
+                    bail!(
+                        "unable to restore validators into state - no saved validators on disk found."
+                    );
+                };
 
-                            let Some(validators) = self.get::<PersistentList<PublicKeyBytes, P::ValidatorRegistryLimit>>(FinalizedValidators)?
-                            else {
-                                bail!("unable to restore validators into state - no saved validators on disk found.");
-                            };
-
-                            disk_validators = Some(validators);
-                        }
-
-                        disk_validators
-                            .as_ref()
-                            .expect("disk_validators are loaded before access above")
-                            .get(index as u64)
-                            .copied()
-                    }
-                }.context("invalid finalized validators list")?;
-
-                validator.pubkey = finalized_validator_pubkey;
+                // TODO: this part can be optimized, by deserializing im::Vector<PublicKeyBytes> directly from stroage,
+                // instead of deserializing ContiguousList and setting keys one-by-one. However, that would require
+                // implementing SszRead/SszWrite for im::Vector, just for this single usecase.
+                for (index, pubkey) in (0..state.validators().len_u64()).zip(pubkeys) {
+                    *state.validators_mut().pubkey_mut(index)? = pubkey;
+                }
             }
         }
 
@@ -1065,8 +1063,10 @@ impl<P: Preset> Storage<P> {
             return Ok(());
         }
 
-        let validator_pubkeys = PersistentList::<_, P::ValidatorRegistryLimit>::try_from_iter(
-            validators.into_iter().map(|v| v.pubkey),
+        // TODO: the same as with deserialization, this part can be optimizing, by serializing im::Vector<_> directly,
+        // instead of first converting it to ContiguousList.
+        let validator_pubkeys = ContiguousList::<_, P::ValidatorRegistryLimit>::try_from_iter(
+            validators.pubkeys().iter().copied(),
         )?;
 
         batch.extend_from_slice(&[
@@ -1447,15 +1447,14 @@ fn prepare_state<P: Preset>(
     mut state: Arc<BeaconState<P>>,
     finalized_validator_list_len: usize,
 ) -> Arc<BeaconState<P>> {
-    for validator in state
-        .make_mut()
+    let state_mut = state.make_mut();
+
+    // pubkeys never change, so they can be restored later from the finalized
+    // validator list; zero out the leading (finalized) prefix to shrink the
+    // serialized state.
+    state_mut
         .validators_mut()
-        .into_iter()
-        .take(finalized_validator_list_len)
-    {
-        // pubkey never changes, so we can restore it later from finalized validator list
-        validator.pubkey = PublicKeyBytes::zero();
-    }
+        .clear_pubkeys(finalized_validator_list_len);
 
     state
 }

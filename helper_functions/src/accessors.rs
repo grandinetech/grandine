@@ -188,7 +188,7 @@ pub fn public_key<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     validator_index: ValidatorIndex,
 ) -> Result<&PublicKeyBytes> {
-    Ok(&state.validators().get(validator_index)?.pubkey)
+    Ok(state.validators().pubkey(validator_index)?)
 }
 
 #[must_use]
@@ -235,8 +235,8 @@ fn get_active_validator_indices_by_epoch<P: Preset>(
     epoch: Epoch,
 ) -> impl Iterator<Item = ValidatorIndex> + '_ {
     (0..)
-        .zip(state.validators())
-        .filter(move |(_, validator)| predicates::is_active_validator(validator, epoch))
+        .zip(state.validators().partial_validators())
+        .filter(move |&(_, validator)| predicates::is_active_validator(validator, epoch))
         .map(|(index, _)| index)
 }
 
@@ -609,9 +609,10 @@ pub fn get_or_init_total_active_balance<P: Preset>(
             let current_epoch = get_current_epoch(state);
             state
                 .validators()
-                .into_iter()
-                .filter(|validator| predicates::is_active_validator(validator, current_epoch))
-                .map(|validator| validator.effective_balance)
+                .partial_validators()
+                .zip(state.validators().effective_balances())
+                .filter(|&(validator, _)| predicates::is_active_validator(validator, current_epoch))
+                .map(|(_, effective_balance)| *effective_balance)
                 .sum::<Gwei>()
                 .max(P::EFFECTIVE_BALANCE_INCREMENT.get())
                 .try_into()
@@ -669,9 +670,8 @@ fn get_next_sync_committee_indices_pre_electra<P: Preset>(
 
         let effective_balance = state
             .validators()
-            .get(candidate_index)
-            .expect("candidate_index was produced by enumerating active validators")
-            .effective_balance;
+            .effective_balance(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators");
 
         if effective_balance.try_mul(max_random_byte)?
             >= P::MAX_EFFECTIVE_BALANCE.try_mul(random_byte)?
@@ -725,9 +725,8 @@ fn get_next_sync_committee_indices_post_electra<P: Preset>(
 
         let effective_balance = state
             .validators()
-            .get(candidate_index)
-            .expect("candidate_index was produced by enumerating active validators")
-            .effective_balance;
+            .effective_balance(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators");
 
         if effective_balance.try_mul(max_random_value)?
             >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
@@ -776,8 +775,7 @@ pub fn get_next_sync_committee<P: Preset>(
     let mut pubkeys = Box::<ContiguousVector<PublicKeyBytes, _>>::default();
 
     for (pubkey, validator_index) in pubkeys.iter_mut().zip(indices) {
-        let validator = state.validators().get(validator_index)?;
-        pubkey.clone_from(&validator.pubkey);
+        pubkey.clone_from(state.validators().pubkey(validator_index)?);
     }
 
     let aggregate_pubkey = itertools::process_results(
@@ -799,7 +797,7 @@ pub fn get_base_reward<P: Preset>(
     validator_index: ValidatorIndex,
     base_reward_per_increment: Gwei,
 ) -> Result<Gwei> {
-    let effective_balance = state.validators().get(validator_index)?.effective_balance;
+    let effective_balance = state.validators().effective_balance(validator_index)?;
     compute_base_reward::<P>(effective_balance, base_reward_per_increment)
 }
 

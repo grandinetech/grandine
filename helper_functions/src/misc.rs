@@ -37,11 +37,12 @@ use types::{
             AttestationSubnetCount, BLS_WITHDRAWAL_PREFIX, ETH1_ADDRESS_WITHDRAWAL_PREFIX,
             GENESIS_EPOCH, GENESIS_SLOT,
         },
-        containers::{ForkData, SignedBeaconBlockHeader, SigningData, Validator},
+        containers::{ForkData, SignedBeaconBlockHeader, SigningData},
         primitives::{
             CommitteeIndex, Domain, DomainType, Epoch, ExecutionAddress, ForkDigest, Gwei, H128,
             H256, NodeId, Slot, SubnetId, Uint256, UnixSeconds, ValidatorIndex, Version,
         },
+        validator_list::PartialValidator,
     },
     preset::{Preset, SyncSubcommitteeSize},
     traits::{
@@ -258,9 +259,8 @@ fn compute_proposer_index_pre_electra<P: Preset>(
 
         let effective_balance = state
             .validators()
-            .get(candidate_index)
-            .expect("candidate_index was produced by enumerating active validators")
-            .effective_balance;
+            .effective_balance(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators");
 
         if effective_balance.try_mul(max_random_byte)?
             >= P::MAX_EFFECTIVE_BALANCE.try_mul(random_byte)?
@@ -305,9 +305,8 @@ fn compute_proposer_index_post_electra<P: Preset>(
 
         let effective_balance = state
             .validators()
-            .get(candidate_index)
-            .expect("candidate_index was produced by enumerating active validators")
-            .effective_balance;
+            .effective_balance(candidate_index)
+            .expect("candidate_index was produced by enumerating active validators");
 
         if effective_balance.try_mul(max_random_value)?
             >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
@@ -388,7 +387,7 @@ pub fn compute_subnets_for_sync_committee<P: Preset>(
         state.next_sync_committee()
     };
 
-    let target_pubkey = &state.validators().get(validator_index)?.pubkey;
+    let target_pubkey = state.validators().pubkey(validator_index)?;
 
     let mut subnets = BitVector::default();
 
@@ -832,7 +831,7 @@ pub fn get_committee_indices<P: Preset>(
 
 // > Get max effective balance for ``validator``.
 #[must_use]
-pub fn get_max_effective_balance<P: Preset>(validator: &Validator) -> Gwei {
+pub fn get_max_effective_balance<P: Preset>(validator: &PartialValidator) -> Gwei {
     if predicates::has_compounding_withdrawal_credential(validator) {
         P::MAX_EFFECTIVE_BALANCE_ELECTRA
     } else {
@@ -960,10 +959,7 @@ fn compute_balance_weighted_acceptance<P: Preset>(
         random_bytes[offset.try_add(1)?],
     ]));
 
-    let effective_balance = state
-        .validators()
-        .get(index)
-        .map(|validator| validator.effective_balance)?;
+    let effective_balance = state.validators().effective_balance(index)?;
 
     Ok(effective_balance.try_mul(max_random_value)?
         >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?)

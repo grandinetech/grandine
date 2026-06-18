@@ -11,7 +11,7 @@ use bls::{SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use ssz::{BitVector, PersistentList, PersistentVector};
-use std_ext::ArcExt as _;
+use std_ext::{ArcExt as _, CopyExt as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -84,8 +84,8 @@ pub fn upgrade_to_altair<P: Preset>(
         epoch,
     };
 
-    let zero_participation = PersistentList::repeat_zero_with_length_of(&validators);
-    let inactivity_scores = PersistentList::repeat_zero_with_length_of(&validators);
+    let zero_participation = PersistentList::repeat_zero(validators.len_usize())?;
+    let inactivity_scores = PersistentList::repeat_zero(validators.len_usize())?;
 
     let mut post = AltairBeaconState {
         // > Versioning
@@ -644,13 +644,16 @@ pub fn upgrade_to_electra<P: Preset>(
 
         *balance = 0;
 
-        let validator = post.validators_mut().get_mut(index)?;
+        *post.validators_mut().effective_balance_mut(index)? = 0;
+        post.validators_mut()
+            .partial_validator_mut(index)?
+            .activation_eligibility_epoch = FAR_FUTURE_EPOCH;
 
-        validator.effective_balance = 0;
-        validator.activation_eligibility_epoch = FAR_FUTURE_EPOCH;
-
-        let withdrawal_credentials = validator.withdrawal_credentials;
-        let pubkey = validator.pubkey;
+        let withdrawal_credentials = post
+            .validators()
+            .partial_validator(index)?
+            .withdrawal_credentials;
+        let pubkey = post.validators().pubkey(index)?.copy();
 
         post.pending_deposits_mut().push(PendingDeposit {
             pubkey,
@@ -663,7 +666,7 @@ pub fn upgrade_to_electra<P: Preset>(
 
     for index in post
         .validators
-        .into_iter()
+        .partial_validators()
         .zip(0..)
         .filter(|(validator, _)| predicates::has_compounding_withdrawal_credential(validator))
         .map(|(_, index)| index)

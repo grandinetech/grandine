@@ -279,17 +279,6 @@ where
 
 impl<T, N, B> PersistentList<T, N, B> {
     #[must_use]
-    pub fn repeat_zero_with_length_of<U, B2>(other: &PersistentList<U, N, B2>) -> Self
-    where
-        T: ZeroDefault + SszHash + SszWrite + Clone,
-        N: Unsigned,
-        B: BundleSize<T> + MerkleElements<T>,
-        B2: BundleSize<U>,
-    {
-        Self::repeat_zero(other.len_usize()).expect("lists have the same maximum length")
-    }
-
-    #[must_use]
     pub const fn len_usize(&self) -> usize {
         self.length
     }
@@ -439,7 +428,7 @@ impl<T, N, B> PersistentList<T, N, B> {
         Ok(())
     }
 
-    fn repeat_zero(length: usize) -> Result<Self, ReadError>
+    pub fn repeat_zero(length: usize) -> Result<Self, ReadError>
     where
         T: ZeroDefault + SszHash + SszWrite + Clone,
         N: Unsigned,
