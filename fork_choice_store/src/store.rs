@@ -104,8 +104,6 @@ use crate::{
     validations::validate_merge_block,
 };
 
-const MIN_BID_INCREASE_PERCENTAGE: u64 = 3;
-
 /// [`Store`] from the Fork Choice specification.
 ///
 /// [`Store`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#store
@@ -2001,34 +1999,29 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             Error::<P>::TooManyBlobKzgCommitments { maximum, in_bid }
         );
 
-        // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
-        if !self
-            .execution_payload_locations
-            .contains_key(&bid.parent_block_hash)
-        {
-            return Ok(ExecutionPayloadBidAction::Ignore(
-                "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
-            ));
-        }
-
-        // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
-        let Some(parent) = self.chain_link(bid.parent_block_root) else {
-            return Ok(ExecutionPayloadBidAction::Ignore(
-                "the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice",
-            ));
-        };
-
-        // > The bid is for a higher slot than its parent block -- i.e. validate
-        // that `bid.slot` is greater than the slot of the block with root
-        // `bid.parent_block_root`.
-        let parent_slot = parent.slot();
-        ensure!(
-            bid.slot > parent_slot,
-            Error::<P>::ExecutionPayloadBidSlotNotGreaterThanParent {
-                bid_slot: bid.slot,
-                parent_slot,
+        if let Some(payload_bids) = self.accepted_payload_bids.get(&bid.slot) {
+            // > this is the first signed bid seen from the given builder for this slot
+            if payload_bids.contains_key(&builder_index) {
+                return Ok(ExecutionPayloadBidAction::Ignore(
+                    "this is the first signed bid seen from the given builder for this slot",
+                ));
             }
-        );
+
+            // > this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
+            if let Some(highest_bid) = payload_bids
+                .values()
+                .filter(|b| {
+                    b.message.parent_block_hash == bid.parent_block_hash
+                        && b.message.parent_block_root == bid.parent_block_root
+                })
+                .max_by_key(|b| b.message.value)
+                && bid.value <= highest_bid.message.value
+            {
+                return Ok(ExecutionPayloadBidAction::Ignore(
+                    "this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)",
+                ));
+            }
+        }
 
         let Some(state) =
             self.state_cache
@@ -2066,8 +2059,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(ExecutionPayloadBidAction::Ignore("state pre-gloas"));
         };
 
-        // > `bid.parent_block_hash` is known and
-        //   `is_gas_limit_target_compatible(parent_gas_limit, bid.gas_limit, target_gas_limit)` is True.
+        // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
+        if !self
+            .execution_payload_locations
+            .contains_key(&bid.parent_block_hash)
+        {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
+            ));
+        }
+
+        // > Check `is_gas_limit_target_compatible(parent_gas_limit, bid.gas_limit, target_gas_limit)` is True.
         let parent_gas_limit = post_gloas_state.latest_execution_payload_bid().gas_limit;
         if !predicates::is_gas_limit_target_compatible(
             parent_gas_limit,
@@ -2078,6 +2080,37 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 "bid gas_limit is not compatible with target_gas_limit",
             ));
         }
+
+        // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
+        let Some(parent) = self.chain_link(bid.parent_block_root) else {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice",
+            ));
+        };
+
+        // > The bid is for a higher slot than its parent block -- i.e. validate
+        // that `bid.slot` is greater than the slot of the block with root
+        // `bid.parent_block_root`.
+        let parent_slot = parent.slot();
+        ensure!(
+            bid.slot > parent_slot,
+            Error::<P>::ExecutionPayloadBidSlotNotGreaterThanParent {
+                bid_slot: bid.slot,
+                parent_slot,
+            }
+        );
+
+        // > `bid.prev_randao` is the correct RANDAO mix - i.e. validate that
+        // `bid.prev_randao == get_randao_mix(parent_state, get_current_epoch(parent_state))`.
+        let epoch = accessors::get_current_epoch(&state);
+        let prev_randao = accessors::get_randao_mix(&state, epoch);
+        ensure!(
+            bid.prev_randao == prev_randao,
+            Error::<P>::ExecutionPayloadBidPrevRandaoIncorrect {
+                bid_prev_randao: Box::new(bid.prev_randao),
+                prev_randao: Box::new(prev_randao),
+            }
+        );
 
         if builder_index == BUILDER_INDEX_SELF_BUILD {
             ensure!(
@@ -2122,38 +2155,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         })
                     );
                 }
-            }
-        }
-
-        if let Some(payload_bids) = self.accepted_payload_bids.get(&bid.slot) {
-            // > this is the first signed bid seen from the given builder for this slot
-            if payload_bids.contains_key(&builder_index) {
-                return Ok(ExecutionPayloadBidAction::Ignore(
-                    "this is the first signed bid seen from the given builder for this slot",
-                ));
-            }
-
-            // > this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
-            // Only accept and forward bid that is greater than the highest bid at least the minimum threshold (e.g. 3%)
-            if let Some(highest_bid) = payload_bids
-                .values()
-                .filter(|b| {
-                    b.message.parent_block_hash == bid.parent_block_hash
-                        && b.message.parent_block_root == bid.parent_block_root
-                })
-                .max_by_key(|b| b.message.value)
-                && bid.value
-                    < highest_bid.message.value.saturating_add(
-                        highest_bid
-                            .message
-                            .value
-                            .saturating_mul(MIN_BID_INCREASE_PERCENTAGE)
-                            .saturating_div(100),
-                    )
-            {
-                return Ok(ExecutionPayloadBidAction::Ignore(
-                    "this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)",
-                ));
             }
         }
 

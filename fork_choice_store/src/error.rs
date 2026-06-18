@@ -184,6 +184,13 @@ pub enum Error<P: Preset> {
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
     },
+    #[error(
+        "execution payload bid's prev rando is incorrect (in_bid: {bid_prev_randao:?}, expected: {prev_randao:?})"
+    )]
+    ExecutionPayloadBidPrevRandaoIncorrect {
+        bid_prev_randao: Box<H256>,
+        prev_randao: Box<H256>,
+    },
     #[error("execution payload bid's signature for self-build is not empty")]
     ExecutionPayloadBidSignatureNotEmpty,
     #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
