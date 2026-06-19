@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SPEC_VERSION="${SPEC_VERSION:-v1.7.0-alpha.10}"
+SPEC_VERSION="${SPEC_VERSION:-v1.7.0-alpha.11}"
 TESTS_DIR="consensus-spec-tests"
 VERSION_FILE="${TESTS_DIR}/.version"
 BASE_URL="https://github.com/ethereum/consensus-specs/releases/download/${SPEC_VERSION}"

@@ -4,7 +4,7 @@ use pubkey_cache::PubkeyCache;
 use ssz::H256;
 use types::{
     config::Config,
-    gloas::{containers::Builder, primitives::BuilderIndex},
+    gloas::{consts::PAYLOAD_BUILDER_VERSION, containers::Builder, primitives::BuilderIndex},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::DepositMessage,
@@ -15,9 +15,7 @@ use types::{
 };
 
 use crate::{
-    accessors::get_current_epoch,
-    misc::compute_epoch_at_slot,
-    mutators::{builder_balance, increase_balance},
+    accessors::get_current_epoch, error::Error, misc::compute_epoch_at_slot,
     signing::SignForAllForks as _,
 };
 
@@ -37,9 +35,25 @@ pub fn apply_deposit_for_builder<P: Preset>(
         .into_iter()
         .position(|builder| builder.pubkey == pubkey)
     {
+        let current_epoch = get_current_epoch(state);
         let builder_index = builder_index.try_into()?;
+        let builder = state
+            .builders_mut()
+            .get_mut(builder_index)
+            .expect("builder index is valid since its pubkey found in builder registry");
 
-        increase_balance(builder_balance(state, builder_index)?, amount)?;
+        builder.balance = builder.balance.checked_add(amount).ok_or_else(|| {
+            anyhow::anyhow!(
+                "balance overflow when applying deposit for builder at index {builder_index}",
+            )
+        })?;
+
+        // > If exited, reset the withdrawable epoch
+        if builder.withdrawable_epoch != FAR_FUTURE_EPOCH {
+            builder.withdrawable_epoch = current_epoch
+                .checked_add(config.min_builder_withdrawability_delay)
+                .ok_or(Error::EpochOverflow)?;
+        }
     } else {
         // > Verify the deposit signature (proof of possession)
         // > which is not checked by the deposit contract
@@ -71,13 +85,12 @@ fn add_builder_to_registry<P: Preset>(
 ) -> Result<()> {
     let builder_index = get_index_for_new_builder(state);
 
-    let version = withdrawal_credentials[0];
     let mut address = ExecutionAddress::zero();
     address.assign_from_slice(&withdrawal_credentials[12..]);
 
     let builder = Builder {
         pubkey,
-        version,
+        version: PAYLOAD_BUILDER_VERSION,
         execution_address: address,
         balance: amount,
         deposit_epoch: compute_epoch_at_slot::<P>(slot),
