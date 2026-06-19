@@ -80,6 +80,8 @@ pub struct BuilderPendingPayment {
     #[serde(with = "serde_utils::string_or_native")]
     pub weight: Gwei,
     pub withdrawal: BuilderPendingWithdrawal,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub proposer_index: ValidatorIndex,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]

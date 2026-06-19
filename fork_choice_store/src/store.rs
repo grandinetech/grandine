@@ -58,7 +58,10 @@ use types::{
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
-        consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
+        consts::{
+            BUILDER_INDEX_SELF_BUILD, PAYLOAD_BUILDER_VERSION, PAYLOAD_STATUS_EMPTY,
+            PAYLOAD_STATUS_FULL,
+        },
         containers::{
             CombinedPayloadAttestation, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
             SignedProposerPreferences,
@@ -891,24 +894,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn should_build_on_full(&self) -> bool {
         let (head, payload_status) = self.head_with_payload_status();
 
-        // EMPTY was resolved by weight / tiebreaker: build on the empty variant.
-        if payload_status == PAYLOAD_STATUS_EMPTY {
-            return false;
-        }
-
         // For a head from an earlier slot the empty/full node was already resolved
         // by weight in `get_head`; only the previous-slot head still consults the
         // (possibly stale) PTC data-availability view.
         // See <https://github.com/ethereum/consensus-specs/pull/5309>.
         if head.slot().saturating_add(1) != self.slot() {
-            return true;
+            return payload_status == PAYLOAD_STATUS_FULL;
+        }
+
+        // EMPTY was resolved by weight / tiebreaker: build on the empty variant.
+        if payload_status == PAYLOAD_STATUS_EMPTY {
+            return false;
         }
 
         // Force a reorg of the payload if the PTC voted the blob data unavailable
         // or late payload.
         // See <https://github.com/ethereum/consensus-specs/pull/5210>.
-        !self.payload_data_availability(head.block_root, false)
-            && !self.payload_timeliness(head.block_root, false)
+        !self.payload_timeliness(head.block_root, false)
+            && !self.payload_data_availability(head.block_root, false)
     }
 
     pub fn should_extend_payload(&self, block_root: H256) -> bool {
@@ -2047,9 +2050,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let current_epoch = accessors::get_current_epoch(&state);
             ensure!(
                 predicates::is_active_builder(builder, state.finalized_checkpoint().epoch),
-                Error::<P>::ExecutionPayloadBidBuilderInactive {
+                Error::ExecutionPayloadBidBuilderInactive {
                     payload_bid,
                     epoch: current_epoch
+                }
+            );
+
+            // > The builder version is `PAYLOAD_BUILDER_VERSION`
+            ensure!(
+                builder.version == PAYLOAD_BUILDER_VERSION,
+                Error::ExecutionPayloadBidBuilderVersionMismatch {
+                    payload_bid,
+                    builder_version: builder.version,
+                    expected: PAYLOAD_BUILDER_VERSION,
                 }
             );
 
