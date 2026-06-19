@@ -39,15 +39,19 @@ pub enum Error<P: Preset> {
     AttestationWithInvalidPayloadStatus { attestation: Attestation<P> },
     #[error("post-Electra attestation with invalid (non-zero) committee index: {attestation:?}")]
     AttestationWithNonZeroCommitteeIndex { attestation: Attestation<P> },
-    #[error("bid slot ({in_bid}) does not match block slot ({in_block})")]
-    BidSlotMismatch { in_bid: Slot, in_block: Slot },
+    #[error("bid at genesis slot")]
+    BidSlotAtGenesis,
+    #[error("bid slot ({in_bid}) does not match state slot ({in_state})")]
+    BidSlotMismatch { in_bid: Slot, in_state: Slot },
     #[error("bid parent block hash ({in_bid}) does not match in state ({in_state})")]
     BidParentBlockHashMismatch {
         in_bid: ExecutionBlockHash,
         in_state: ExecutionBlockHash,
     },
-    #[error("bid parent block root ({in_bid:?}) does not match in block ({in_block:?})")]
-    BidParentBlockRootMismatch { in_bid: H256, in_block: H256 },
+    #[error(
+        "bid parent block root ({in_bid:?}) does not match parent block root in the state ({in_state:?})"
+    )]
+    BidParentBlockRootMismatch { in_bid: H256, in_state: H256 },
     #[error("bid prev randao ({in_bid:?}) does not match in state ({in_state:?})")]
     BidPrevRandaoMismatch { in_bid: H256, in_state: H256 },
     #[error("block is not newer than latest block header ({block_slot} <= {block_header_slot})")]
@@ -63,6 +67,14 @@ pub enum Error<P: Preset> {
     BuilderNotActive {
         index: BuilderIndex,
         current_epoch: Epoch,
+    },
+    #[error(
+        "builder version mismatch for builder {index} (builder_version: {builder_version}, expected: {expected})"
+    )]
+    BuilderVersionMismatch {
+        index: BuilderIndex,
+        builder_version: u8,
+        expected: u8,
     },
     #[error("builder payment index ({index}) out of bounds (length: {length})")]
     BuilderPaymentIndexOutOfBounds { index: u64, length: u64 },
