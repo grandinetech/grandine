@@ -189,6 +189,15 @@ pub enum Error<P: Preset> {
     #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
     ExecutionPayloadBidValueNonZero { value: Gwei },
     #[error(
+        "execution payload bid's builder version mismatch \
+         (payload_bid: {payload_bid:?}, builder_version: {builder_version}, expected: {expected})"
+    )]
+    ExecutionPayloadBidBuilderVersionMismatch {
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
+        builder_version: u8,
+        expected: u8,
+    },
+    #[error(
         "execution payload block hash mismatch (envelope: {envelope:?}, expected: {expected:?})"
     )]
     ExecutionPayloadBlockHashMismatch {
