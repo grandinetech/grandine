@@ -46,7 +46,7 @@ use types::{
     electra::containers::{Attestation, ExecutionRequests},
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
-        consts::BUILDER_INDEX_SELF_BUILD,
+        consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_BUILDER_VERSION},
         containers::{
             BeaconBlock, BuilderPendingPayment, BuilderPendingWithdrawal, ExecutionPayloadBid,
             PayloadAttestation, SignedBeaconBlock, SignedExecutionPayloadBid,
@@ -55,7 +55,7 @@ use types::{
     },
     nonstandard::{AttestationEpoch, SlashingKind},
     phase0::{
-        consts::FAR_FUTURE_EPOCH,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, ProposerSlashing, SignedVoluntaryExit},
         primitives::{Epoch, ExecutionAddress, Gwei},
     },
@@ -164,7 +164,12 @@ pub fn custom_process_block<P: Preset>(
 
     // > [New in Gloas:EIP7732]
     // This function must be called after `process_withdrawals`
-    process_execution_payload_bid(config, pubkey_cache, state, block)?;
+    process_execution_payload_bid(
+        config,
+        pubkey_cache,
+        state,
+        &block.body.signed_execution_payload_bid,
+    )?;
 
     unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
@@ -573,10 +578,9 @@ fn validate_execution_payload_bid<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &impl PostGloasBeaconState<P>,
-    block: &BeaconBlock<P>,
+    signed_bid: &SignedExecutionPayloadBid<P>,
 ) -> Result<()> {
     let current_epoch = get_current_epoch(state);
-    let signed_bid = &block.body.signed_execution_payload_bid;
     let ExecutionPayloadBid {
         builder_index,
         value: amount,
@@ -602,6 +606,14 @@ fn validate_execution_payload_bid<P: Preset>(
             Error::<P>::BuilderNotActive {
                 index: builder_index,
                 current_epoch
+            }
+        );
+        ensure!(
+            builder.version == PAYLOAD_BUILDER_VERSION,
+            Error::<P>::BuilderVersionMismatch {
+                index: builder_index,
+                builder_version: builder.version,
+                expected: PAYLOAD_BUILDER_VERSION,
             }
         );
         ensure!(
@@ -637,12 +649,13 @@ fn validate_execution_payload_bid<P: Preset>(
 
     // > Verify that the bid is for the current slot
     ensure!(
-        slot == block.slot,
+        slot == state.slot(),
         Error::<P>::BidSlotMismatch {
             in_bid: slot,
-            in_block: block.slot
+            in_state: state.slot(),
         }
     );
+    ensure!(state.slot() > GENESIS_SLOT, Error::<P>::BidSlotAtGenesis);
 
     // > Verify that the bid is for the right parent block
     ensure!(
@@ -652,11 +665,15 @@ fn validate_execution_payload_bid<P: Preset>(
             in_state: state.latest_block_hash(),
         }
     );
+
+    let parent_beacon_block_root =
+        accessors::get_block_root_at_slot(state, state.slot().saturating_sub(1))?;
+
     ensure!(
-        parent_block_root == block.parent_root,
+        parent_block_root == parent_beacon_block_root,
         Error::<P>::BidParentBlockRootMismatch {
-            in_bid: parent_block_hash,
-            in_block: block.parent_root,
+            in_bid: parent_block_root,
+            in_state: parent_beacon_block_root,
         }
     );
 
@@ -775,18 +792,17 @@ pub fn process_execution_payload_bid<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
-    block: &BeaconBlock<P>,
+    signed_bid: &SignedExecutionPayloadBid<P>,
 ) -> Result<()> {
-    let payload_bid = block.body.signed_execution_payload_bid.message.clone();
     let ExecutionPayloadBid {
         value: amount,
         builder_index,
         slot,
         fee_recipient,
         ..
-    } = payload_bid;
+    } = signed_bid.message;
 
-    validate_execution_payload_bid(config, pubkey_cache, state, block)?;
+    validate_execution_payload_bid(config, pubkey_cache, state, signed_bid)?;
 
     // > Record the pending payment if there is some payment
     if amount > 0 {
@@ -797,6 +813,7 @@ pub fn process_execution_payload_bid<P: Preset>(
                 amount,
                 builder_index,
             },
+            proposer_index: get_beacon_proposer_index(config, state)?,
         };
         *state
             .builder_pending_payments_mut()
@@ -804,7 +821,7 @@ pub fn process_execution_payload_bid<P: Preset>(
     }
 
     // > Cache the signed execution payload bid
-    *state.latest_execution_payload_bid_mut() = payload_bid;
+    *state.latest_execution_payload_bid_mut() = signed_bid.message.clone();
 
     Ok(())
 }
@@ -1267,27 +1284,36 @@ pub fn process_proposer_slashing<P: Preset>(
         verifier,
     )?;
 
-    // > Remove the BuilderPendingPayment corresponding to this proposal if it is still in the 2-epoch window.
+    // > Remove the BuilderPendingPayment corresponding to this proposal if it is
+    // > still in the 2-epoch window. Only clear it when the slashed validator is
+    // > the proposer associated with the payment; otherwise an unrelated same-slot
+    // > equivocation could grief an honest proposer's payment
     let slot = proposer_slashing.signed_header_1.message.slot;
+    let proposer_index = proposer_slashing.signed_header_1.message.proposer_index;
     let proposal_epoch = compute_epoch_at_slot::<P>(slot);
-    if proposal_epoch == get_current_epoch(state) {
-        *state
-            .builder_pending_payments_mut()
-            .mod_index_mut(builder_payment_index_for_current_epoch::<P>(slot)?) =
-            BuilderPendingPayment::default();
-    } else if proposal_epoch == get_previous_epoch(state) {
-        *state
-            .builder_pending_payments_mut()
-            .mod_index_mut(builder_payment_index_for_previous_epoch::<P>(slot)) =
-            BuilderPendingPayment::default();
-    }
 
-    let index = proposer_slashing.signed_header_1.message.proposer_index;
+    let payment_index = if proposal_epoch == get_current_epoch(state) {
+        Some(builder_payment_index_for_current_epoch::<P>(slot)?)
+    } else if proposal_epoch == get_previous_epoch(state) {
+        Some(builder_payment_index_for_previous_epoch::<P>(slot))
+    } else {
+        None
+    };
+
+    if let Some(payment_index) = payment_index {
+        let payment = state
+            .builder_pending_payments_mut()
+            .mod_index_mut(payment_index);
+
+        if payment.proposer_index == proposer_index {
+            *payment = BuilderPendingPayment::default();
+        }
+    }
 
     slash_validator(
         config,
         state,
-        index,
+        proposer_index,
         None,
         SlashingKind::Proposer,
         slot_report,
@@ -1491,15 +1517,15 @@ mod spec_tests {
 
     processing_tests! {
         process_execution_payload_bid,
-        |config, pubkey_cache, state, block, _| {
+        |config, pubkey_cache, state, execution_payload_bid, _| {
             process_execution_payload_bid(
                 config,
                 pubkey_cache,
                 state,
-                &block,
+                &execution_payload_bid,
             )
         },
-        "block",
+        "execution_payload_bid",
         "consensus-spec-tests/tests/mainnet/gloas/operations/execution_payload_bid/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/execution_payload_bid/*/*",
     }
