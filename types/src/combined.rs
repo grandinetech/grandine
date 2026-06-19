@@ -4,12 +4,12 @@ use duplicate::duplicate_item;
 use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
-    BitVector, ContiguousList, H256, Hc, Offset, ReadError, Size, SszHash, SszRead, SszReadDefault,
-    SszSize, SszWrite, WriteError,
+    BYTES_PER_LENGTH_OFFSET, BitVector, ContiguousList, H256, Hc, Offset, ReadError, Size, SszHash,
+    SszRead, SszReadDefault, SszSize, SszWrite, WriteError,
 };
-use static_assertions::{assert_not_impl_any, const_assert_eq};
+use static_assertions::{assert_not_impl_any, const_assert, const_assert_eq};
 use thiserror::Error;
-use typenum::U1;
+use typenum::{U1, Unsigned as _};
 use variant_count::VariantCount;
 
 use crate::{
@@ -2095,30 +2095,43 @@ impl<P: Preset> SszSize for Attestation<P> {
     ]);
 }
 
-impl<P: Preset> SszRead<Config> for Attestation<P> {
-    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        // There is 1 fixed part before `attestation.data.slot`:
-        // - The offset of `attestation.aggregation_bits`.
-        let slot_start = Offset::SIZE.get();
-        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
-        let phase = config.phase_at_slot::<P>(slot);
+impl<P: Preset> SszRead<()> for Attestation<P> {
+    fn from_ssz_unchecked(_context: &(), bytes: &[u8]) -> Result<Self, ReadError> {
+        // Detect the attestation variant from the first 4 bytes.
+        // Phase0Attestation and ElectraAttestation are variable-size; their first 4 bytes are
+        // the SSZ offset to `aggregation_bits`, equal to the fixed-part size.
+        // SingleAttestation is fixed-size; its first 4 bytes are the start of `committee_index`
+        // (u64), which is always less than MaxCommitteesPerSlot (enforced below by const_assert)
+        // and cannot equal either fixed-part size.
+        let offset_bytes = ssz::subslice(bytes, 0..4)?;
+        let offset = u32::from_ssz_default(offset_bytes)? as usize;
 
-        let attestation = match phase {
-            Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
-                Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
-            }
-            Phase::Electra | Phase::Fulu | Phase::Gloas => {
-                Self::Electra(SszReadDefault::from_ssz_default(bytes)?)
-            }
-        };
+        let phase0_fixed_part = BYTES_PER_LENGTH_OFFSET
+            .get()
+            .saturating_add(AttestationData::SIZE.get())
+            .saturating_add(SignatureBytes::SIZE.get());
 
-        assert_eq!(slot, attestation.data().slot);
+        // Electra adds committee_bits: Bitvector[MaxCommitteesPerSlot]
+        let electra_fixed_part =
+            phase0_fixed_part.saturating_add(P::MaxCommitteesPerSlot::USIZE.div_ceil(8));
 
-        Ok(attestation)
+        if offset == phase0_fixed_part {
+            Ok(Self::Phase0(SszReadDefault::from_ssz_default(bytes)?))
+        } else if offset == electra_fixed_part {
+            Ok(Self::Electra(SszReadDefault::from_ssz_default(bytes)?))
+        } else {
+            Ok(Self::Single(SszReadDefault::from_ssz_default(bytes)?))
+        }
     }
 }
+
+const_assert!(
+    <Mainnet as Preset>::MaxCommitteesPerSlot::USIZE
+        < BYTES_PER_LENGTH_OFFSET
+            .get()
+            .saturating_add(AttestationData::SIZE.get())
+            .saturating_add(SignatureBytes::SIZE.get())
+);
 
 impl<P: Preset> SszWrite for Attestation<P> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
@@ -2396,50 +2409,34 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/phase0/ssz_static/BeaconState/*/*"]          [phase0_minimal_beacon_state]           [BeaconState]       [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/SignedBeaconBlock/*/*"]    [phase0_mainnet_signed_beacon_block]    [SignedBeaconBlock] [Mainnet] [Phase0];
         ["consensus-spec-tests/tests/minimal/phase0/ssz_static/SignedBeaconBlock/*/*"]    [phase0_minimal_signed_beacon_block]    [SignedBeaconBlock] [Minimal] [Phase0];
-        ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/Attestation/*/*"]          [phase0_mainnet_attestation]            [Attestation]       [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/phase0/ssz_static/Attestation/*/*"]          [phase0_minimal_attestation]            [Attestation]       [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/BeaconState/*/*"]          [altair_mainnet_beacon_state]           [BeaconState]       [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/BeaconState/*/*"]          [altair_minimal_beacon_state]           [BeaconState]       [Minimal] [Altair];
         ["consensus-spec-tests/tests/mainnet/altair/ssz_static/SignedBeaconBlock/*/*"]    [altair_mainnet_signed_beacon_block]    [SignedBeaconBlock] [Mainnet] [Altair];
         ["consensus-spec-tests/tests/minimal/altair/ssz_static/SignedBeaconBlock/*/*"]    [altair_minimal_signed_beacon_block]    [SignedBeaconBlock] [Minimal] [Altair];
-        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/Attestation/*/*"]          [altair_mainnet_attestation]            [Attestation]       [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/altair/ssz_static/Attestation/*/*"]          [altair_minimal_attestation]            [Attestation]       [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/BeaconState/*/*"]       [bellatrix_mainnet_beacon_state]        [BeaconState]       [Mainnet] [Bellatrix];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/BeaconState/*/*"]       [bellatrix_minimal_beacon_state]        [BeaconState]       [Minimal] [Bellatrix];
         ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/SignedBeaconBlock/*/*"] [bellatrix_mainnet_signed_beacon_block] [SignedBeaconBlock] [Mainnet] [Bellatrix];
         ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/SignedBeaconBlock/*/*"] [bellatrix_minimal_signed_beacon_block] [SignedBeaconBlock] [Minimal] [Bellatrix];
-        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/Attestation/*/*"]       [bellatrix_mainnet_attestation]         [Attestation]       [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/Attestation/*/*"]       [bellatrix_minimal_attestation]         [Attestation]       [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/BeaconState/*/*"]         [capella_mainnet_beacon_state]          [BeaconState]       [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/BeaconState/*/*"]         [capella_minimal_beacon_state]          [BeaconState]       [Minimal] [Capella];
         ["consensus-spec-tests/tests/mainnet/capella/ssz_static/SignedBeaconBlock/*/*"]   [capella_mainnet_signed_beacon_block]   [SignedBeaconBlock] [Mainnet] [Capella];
         ["consensus-spec-tests/tests/minimal/capella/ssz_static/SignedBeaconBlock/*/*"]   [capella_minimal_signed_beacon_block]   [SignedBeaconBlock] [Minimal] [Capella];
-        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/Attestation/*/*"]         [capella_mainnet_attestation]           [Attestation]       [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/capella/ssz_static/Attestation/*/*"]         [capella_minimal_attestation]           [Attestation]       [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/BeaconState/*/*"]           [deneb_mainnet_beacon_state]            [BeaconState]       [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/BeaconState/*/*"]           [deneb_minimal_beacon_state]            [BeaconState]       [Minimal] [Deneb];
         ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/SignedBeaconBlock/*/*"]     [deneb_mainnet_signed_beacon_block]     [SignedBeaconBlock] [Mainnet] [Deneb];
         ["consensus-spec-tests/tests/minimal/deneb/ssz_static/SignedBeaconBlock/*/*"]     [deneb_minimal_signed_beacon_block]     [SignedBeaconBlock] [Minimal] [Deneb];
-        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/Attestation/*/*"]           [deneb_mainnet_attestation]             [Attestation]       [Mainnet] [Phase0];
-        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/Attestation/*/*"]           [deneb_minimal_attestation]             [Attestation]       [Minimal] [Phase0];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/BeaconState/*/*"]         [electra_mainnet_beacon_state]          [BeaconState]       [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/BeaconState/*/*"]         [electra_minimal_beacon_state]          [BeaconState]       [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/electra/ssz_static/SignedBeaconBlock/*/*"]   [electra_mainnet_signed_beacon_block]   [SignedBeaconBlock] [Mainnet] [Electra];
         ["consensus-spec-tests/tests/minimal/electra/ssz_static/SignedBeaconBlock/*/*"]   [electra_minimal_signed_beacon_block]   [SignedBeaconBlock] [Minimal] [Electra];
-        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/Attestation/*/*"]         [electra_mainnet_attestation]           [Attestation]       [Mainnet] [Electra];
-        ["consensus-spec-tests/tests/minimal/electra/ssz_static/Attestation/*/*"]         [electra_minimal_attestation]           [Attestation]       [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/BeaconState/*/*"]            [fulu_mainnet_beacon_state]             [BeaconState]       [Mainnet] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/ssz_static/BeaconState/*/*"]            [fulu_minimal_beacon_state]             [BeaconState]       [Minimal] [Fulu];
         ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/SignedBeaconBlock/*/*"]      [fulu_mainnet_signed_beacon_block]      [SignedBeaconBlock] [Mainnet] [Fulu];
         ["consensus-spec-tests/tests/minimal/fulu/ssz_static/SignedBeaconBlock/*/*"]      [fulu_minimal_signed_beacon_block]      [SignedBeaconBlock] [Minimal] [Fulu];
-        ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/Attestation/*/*"]            [fulu_mainnet_attestation]              [Attestation]       [Mainnet] [Electra];
-        ["consensus-spec-tests/tests/minimal/fulu/ssz_static/Attestation/*/*"]            [fulu_minimal_attestation]              [Attestation]       [Minimal] [Electra];
         ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/BeaconState/*/*"]           [gloas_mainnet_beacon_state]            [BeaconState]       [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/ssz_static/BeaconState/*/*"]           [gloas_minimal_beacon_state]            [BeaconState]       [Minimal] [Gloas];
         ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedBeaconBlock/*/*"]     [gloas_mainnet_signed_beacon_block]     [SignedBeaconBlock] [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedBeaconBlock/*/*"]     [gloas_minimal_signed_beacon_block]     [SignedBeaconBlock] [Minimal] [Gloas];
-        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/Attestation/*/*"]           [gloas_mainnet_attestation]             [Attestation]       [Mainnet] [Electra];
-        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/Attestation/*/*"]           [gloas_minimal_attestation]             [Attestation]       [Minimal] [Electra];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
@@ -2449,6 +2446,39 @@ mod spec_tests {
         let value = combined_type::<preset>::from_ssz(&config, expected_ssz_bytes.as_slice())
             .expect("SSZ decoding should succeed");
 
+        let actual_ssz_bytes = value.to_ssz().expect("SSZ encoding should succeed");
+
+        assert_eq!(actual_ssz_bytes, expected_ssz_bytes);
+        assert_eq!(value.phase(), Phase::test_phase);
+    }
+
+    #[duplicate_item(
+        glob                                                                             function_name                         combined_type      preset    test_phase;
+        ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/Attestation/*/*"]          [phase0_mainnet_attestation]         [Attestation]      [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/phase0/ssz_static/Attestation/*/*"]          [phase0_minimal_attestation]         [Attestation]      [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/Attestation/*/*"]          [altair_mainnet_attestation]         [Attestation]      [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/altair/ssz_static/Attestation/*/*"]          [altair_minimal_attestation]         [Attestation]      [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/Attestation/*/*"]       [bellatrix_mainnet_attestation]      [Attestation]      [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/Attestation/*/*"]       [bellatrix_minimal_attestation]      [Attestation]      [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/Attestation/*/*"]         [capella_mainnet_attestation]        [Attestation]      [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/capella/ssz_static/Attestation/*/*"]         [capella_minimal_attestation]        [Attestation]      [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/Attestation/*/*"]           [deneb_mainnet_attestation]          [Attestation]      [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/Attestation/*/*"]           [deneb_minimal_attestation]          [Attestation]      [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/Attestation/*/*"]         [electra_mainnet_attestation]        [Attestation]      [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/electra/ssz_static/Attestation/*/*"]         [electra_minimal_attestation]        [Attestation]      [Minimal] [Electra];
+        ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/Attestation/*/*"]            [fulu_mainnet_attestation]           [Attestation]      [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/fulu/ssz_static/Attestation/*/*"]            [fulu_minimal_attestation]           [Attestation]      [Minimal] [Electra];
+        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/Attestation/*/*"]           [gloas_mainnet_attestation]          [Attestation]      [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/Attestation/*/*"]           [gloas_minimal_attestation]          [Attestation]      [Minimal] [Electra];
+        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/SingleAttestation/*/*"]     [gloas_mainnet_single_attestation]   [Attestation]      [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/SingleAttestation/*/*"]     [gloas_minimal_single_attestation]   [Attestation]      [Minimal] [Electra];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let expected_ssz_bytes = case.bytes("serialized.ssz_snappy");
+
+        let value = combined_type::<preset>::from_ssz_default(expected_ssz_bytes.as_slice())
+            .expect("SSZ decoding should succeed");
         let actual_ssz_bytes = value.to_ssz().expect("SSZ encoding should succeed");
 
         assert_eq!(actual_ssz_bytes, expected_ssz_bytes);

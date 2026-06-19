@@ -348,6 +348,29 @@ pub fn beacon_block<P: Preset>(genesis_state: &BeaconState<P>) -> SignedBeaconBl
     )
 }
 
+/// Creates an anchor block matching the state's `latest_block_header` for spec-test initialization.
+///
+/// For non-genesis anchor states (where no block file is provided by the test), the block root in
+/// the store is derived from `latest_block_root(&anchor_state)` rather than from this block's
+/// hash, so the default body (and thus wrong `body_root`) is acceptable.
+#[must_use]
+pub fn beacon_block_from_state<P: Preset>(anchor_state: &BeaconState<P>) -> SignedBeaconBlock<P> {
+    let header = anchor_state.latest_block_header();
+    let execution_payload_bid = anchor_state
+        .post_gloas()
+        .map(PostGloasBeaconState::latest_execution_payload_bid)
+        .cloned();
+
+    beacon_block_from_state_internal(
+        anchor_state.phase(),
+        header.slot,
+        header.proposer_index,
+        header.parent_root,
+        anchor_state.hash_tree_root(),
+        execution_payload_bid,
+    )
+}
+
 fn beacon_block_internal<P: Preset>(
     phase: Phase,
     state_root: H256,
@@ -367,6 +390,75 @@ fn beacon_block_internal<P: Preset>(
         Phase::Electra => BeaconBlock::from(Hc::new(ElectraBeaconBlock::default())),
         Phase::Fulu => BeaconBlock::from(Hc::new(FuluBeaconBlock::default())),
         Phase::Gloas => BeaconBlock::from(Hc::new(GloasBeaconBlock {
+            body: GloasBeaconBlockBody {
+                signed_execution_payload_bid: SignedExecutionPayloadBid {
+                    message: execution_payload_bid.unwrap_or_default(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        })),
+    }
+    .with_state_root(state_root)
+    .with_zero_signature()
+}
+
+fn beacon_block_from_state_internal<P: Preset>(
+    phase: Phase,
+    slot: types::phase0::primitives::Slot,
+    proposer_index: types::phase0::primitives::ValidatorIndex,
+    parent_root: H256,
+    state_root: H256,
+    execution_payload_bid: Option<ExecutionPayloadBid<P>>,
+) -> SignedBeaconBlock<P> {
+    match phase {
+        Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..Phase0BeaconBlock::default()
+        })),
+        Phase::Altair => BeaconBlock::from(Hc::new(AltairBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..AltairBeaconBlock::default()
+        })),
+        Phase::Bellatrix => BeaconBlock::from(Hc::new(BellatrixBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..BellatrixBeaconBlock::default()
+        })),
+        Phase::Capella => BeaconBlock::from(Hc::new(CapellaBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..CapellaBeaconBlock::default()
+        })),
+        Phase::Deneb => BeaconBlock::from(Hc::new(DenebBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..DenebBeaconBlock::default()
+        })),
+        Phase::Electra => BeaconBlock::from(Hc::new(ElectraBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..ElectraBeaconBlock::default()
+        })),
+        Phase::Fulu => BeaconBlock::from(Hc::new(FuluBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
+            ..FuluBeaconBlock::default()
+        })),
+        Phase::Gloas => BeaconBlock::from(Hc::new(GloasBeaconBlock {
+            slot,
+            proposer_index,
+            parent_root,
             body: GloasBeaconBlockBody {
                 signed_execution_payload_bid: SignedExecutionPayloadBid {
                     message: execution_payload_bid.unwrap_or_default(),

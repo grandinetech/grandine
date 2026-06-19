@@ -11,19 +11,21 @@ use duplicate::duplicate_item;
 use eth1::Eth1Config;
 use eth1_api::{ApiController, Eth1Api, Eth1ExecutionEngine};
 use eth2_libp2p::{GossipId, NetworkConfig};
+use execution_engine::{PayloadStatusV1, PayloadValidationStatus};
 use features::Feature;
 use fork_choice_control::{
     Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, P2pMessage, Storage,
     controller::MutatorHandle,
 };
-use fork_choice_store::StoreConfig;
+use fork_choice_store::{AnchorBlock, AnchorState, StoreConfig};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     lock::Mutex,
 };
 use keymanager::KeyManager;
 use operation_pools::{
-    AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
+    AttestationAggPool, BlsToExecutionChangePool, Origin, PayloadAttestationAggPool,
+    PoolAdditionOutcome, PoolToP2pMessage, SyncCommitteeAggPool,
 };
 use p2p::{P2pToValidator, ValidatorToP2p};
 use pubkey_cache::PubkeyCache;
@@ -33,15 +35,19 @@ use serde::Deserialize;
 use signer::{Signer, Web3SignerConfig};
 use slashing_protection::{DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT, SlashingProtector};
 use spec_test_utils::{BlsSetting, Case};
-use ssz::SszHash as _;
 use std_ext::ArcExt;
 use test_generator::test_resources;
+use transition_functions::unphased::StateRootPolicy;
+use typenum::Unsigned as _;
 use types::{
+    altair::containers::{SignedContributionAndProof, SyncCommitteeMessage},
+    capella::containers::SignedBlsToExecutionChange,
     combined::{
-        Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
+        SignedBeaconBlock,
     },
     config::Config,
-    electra::containers::ExecutionRequests,
+    deneb::containers::BlobSidecar,
     nonstandard::{Phase, StorageMode},
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
@@ -55,6 +61,8 @@ use crate::{Validator, ValidatorChannels, ValidatorConfig};
 
 pub struct Context<P: Preset> {
     controller: ApiController<P, WaitGroup>,
+    bls_to_execution_change_pool: Arc<BlsToExecutionChangePool>,
+    sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, WaitGroup>>,
     #[expect(
         dead_code,
         reason = "Keep the `MutatorHandle` around to avoid joining the mutator thread prematurely."
@@ -62,6 +70,7 @@ pub struct Context<P: Preset> {
     mutator_handle: MutatorHandle<P, WaitGroup>,
     fc_to_p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     p2p_to_validator_tx: UnboundedSender<P2pToValidator<P, WaitGroup>>,
+    pool_to_p2p_rx: UnboundedReceiver<PoolToP2pMessage>,
     validator_to_p2p_rx: UnboundedReceiver<ValidatorToP2p<P>>,
 }
 
@@ -69,11 +78,12 @@ impl<P: Preset> Context<P> {
     #[expect(clippy::too_many_lines)]
     pub fn new(
         chain_config: Arc<Config>,
-        anchor_block: Arc<SignedBeaconBlock<P>>,
+        anchor_block: AnchorBlock<P>,
         anchor_state: Arc<BeaconState<P>>,
         blacklisted_blocks: HashSet<H256>,
     ) -> Result<Self> {
         // Enable features that make behaviour more spec-compliant
+        Feature::CacheTargetStates.enable();
         Feature::IgnoreAttestationsForUnknownBlocks.enable();
         Feature::IgnoreFutureAttestations.enable();
 
@@ -87,7 +97,7 @@ impl<P: Preset> Context<P> {
         let (fc_to_validator_tx, fc_to_validator_rx) = futures::channel::mpsc::unbounded();
         let (p2p_to_validator_tx, p2p_to_validator_rx) =
             futures::channel::mpsc::unbounded::<P2pToValidator<P, WaitGroup>>();
-        let (pool_to_p2p_tx, _) = futures::channel::mpsc::unbounded();
+        let (pool_to_p2p_tx, pool_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (subnet_service_tx, _) = futures::channel::mpsc::unbounded();
         let (validator_to_p2p_tx, validator_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (execution_service_tx, _) = futures::channel::mpsc::unbounded();
@@ -124,13 +134,14 @@ impl<P: Preset> Context<P> {
 
         let event_channels = Arc::new(EventChannels::default());
         let sidecars_construction_started = Arc::new(SccHashMap::new());
+        let is_peerdas_activated = anchor_state.phase().is_peerdas_activated();
 
         let (controller, mutator_handle) = Controller::<P, _, _, WaitGroup>::new(
             chain_config,
             pubkey_cache,
             store_config,
             anchor_block,
-            anchor_state,
+            AnchorState::Test(anchor_state),
             Tick {
                 slot: 0,
                 kind: TickKind::Propose,
@@ -150,6 +161,10 @@ impl<P: Preset> Context<P> {
             blacklisted_blocks,
             sidecars_construction_started,
         )?;
+
+        if is_peerdas_activated {
+            controller.on_store_sampling_columns((0..P::NumberOfColumns::U64).collect());
+        }
 
         let dedicated_executor = Arc::new(DedicatedExecutor::new(
             "dedicated-executor",
@@ -207,12 +222,13 @@ impl<P: Preset> Context<P> {
             None,
         );
 
-        let (bls_to_execution_change_pool, _) = BlsToExecutionChangePool::new(
-            controller.clone_arc(),
-            event_channels.clone_arc(),
-            pool_to_p2p_tx,
-            None,
-        );
+        let (bls_to_execution_change_pool, bls_to_execution_change_pool_service) =
+            BlsToExecutionChangePool::new(
+                controller.clone_arc(),
+                event_channels.clone_arc(),
+                pool_to_p2p_tx,
+                None,
+            );
 
         let payload_attestation_agg_pool = PayloadAttestationAggPool::new(
             controller.clone_arc(),
@@ -227,7 +243,7 @@ impl<P: Preset> Context<P> {
             dedicated_executor.clone_arc(),
             execution_engine,
             attestation_agg_pool.clone_arc(),
-            bls_to_execution_change_pool,
+            bls_to_execution_change_pool.clone_arc(),
             sync_committee_agg_pool.clone_arc(),
             payload_attestation_agg_pool.clone_arc(),
             None,
@@ -273,13 +289,17 @@ impl<P: Preset> Context<P> {
         // Spawn the validator so it processes incoming gossip messages and sends responses
         // Synchronization is achieved by passing wait_group along with gossip message
         tokio::spawn(attestation_verifier.run());
+        tokio::spawn(bls_to_execution_change_pool_service.run());
         tokio::spawn(validator.run());
 
         Ok(Self {
             controller,
+            bls_to_execution_change_pool,
+            sync_committee_agg_pool,
             mutator_handle,
             fc_to_p2p_rx,
             p2p_to_validator_tx,
+            pool_to_p2p_rx,
             validator_to_p2p_rx,
         })
     }
@@ -317,7 +337,12 @@ impl<P: Preset> Context<P> {
 
         let response = self.next_p2p_message();
 
-        Self::check_expected_message_from_fork_choice(expected, response.as_ref(), reason);
+        Self::check_expected_message_from_fork_choice(
+            expected,
+            response.as_ref(),
+            reason,
+            Topic::BeaconAggregateAndProof,
+        );
     }
 
     fn on_attestation(
@@ -334,7 +359,12 @@ impl<P: Preset> Context<P> {
 
         let response = self.next_p2p_message();
 
-        Self::check_expected_message_from_fork_choice(Some(expected), response.as_ref(), reason);
+        Self::check_expected_message_from_fork_choice(
+            Some(expected),
+            response.as_ref(),
+            reason,
+            Topic::BeaconAttestation,
+        );
     }
 
     fn on_attester_slashing(
@@ -357,18 +387,144 @@ impl<P: Preset> Context<P> {
         );
     }
 
-    fn on_block(
+    fn on_blob_sidecar(
         &mut self,
-        block: Arc<SignedBeaconBlock<P>>,
+        blob_sidecar: Arc<BlobSidecar<P>>,
+        subnet_id: SubnetId,
         expected: Option<ExpectedResult>,
         reason: Option<&str>,
     ) {
-        self.controller.on_gossip_block(block, GossipId::default());
+        self.controller
+            .on_gossip_blob_sidecar(blob_sidecar, subnet_id, GossipId::default(), false);
+
         self.controller.wait_for_tasks();
 
         let response = self.next_p2p_message();
 
-        Self::check_expected_message_from_fork_choice(expected, response.as_ref(), reason);
+        Self::check_expected_message_from_fork_choice(
+            expected,
+            response.as_ref(),
+            reason,
+            Topic::BlobSidecar,
+        );
+    }
+
+    async fn on_bls_to_execution_change(
+        &self,
+        signed_bls_to_execution_change: Box<SignedBlsToExecutionChange>,
+        expected: ExpectedResult,
+    ) -> Result<()> {
+        let response = self
+            .bls_to_execution_change_pool
+            .handle_external_signed_bls_to_execution_change(
+                signed_bls_to_execution_change,
+                Origin::Gossip(GossipId::default()),
+            )
+            .await?;
+
+        match expected {
+            ExpectedResult::Valid => {
+                assert!(matches!(response, PoolAdditionOutcome::Accept));
+            }
+            ExpectedResult::Ignore => {
+                assert!(matches!(response, PoolAdditionOutcome::Ignore));
+            }
+            ExpectedResult::Reject => {
+                assert!(matches!(response, PoolAdditionOutcome::Reject(..)));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn on_block(
+        &mut self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        bls_setting: BlsSetting,
+        state_root_policy: StateRootPolicy,
+        payload_status: Option<BlockPayloadStatus>,
+        expected: Option<ExpectedResult>,
+        reason: Option<&str>,
+    ) {
+        let beacon_block_root = block.message().hash_tree_root();
+
+        self.controller.on_test_block(
+            block.clone_arc(),
+            GossipId::default(),
+            bls_setting,
+            state_root_policy,
+        );
+
+        self.controller.wait_for_tasks();
+
+        if let Some(payload_status) = payload_status {
+            let execution_block_hash = block
+                .execution_block_hash()
+                .expect("execution_block_hash should be available");
+
+            let payload_status_v1 = match payload_status {
+                BlockPayloadStatus::Valid => PayloadStatusV1 {
+                    status: PayloadValidationStatus::Valid,
+                    latest_valid_hash: Some(execution_block_hash),
+                    validation_error: None,
+                },
+                BlockPayloadStatus::Invalidated => PayloadStatusV1 {
+                    status: PayloadValidationStatus::Invalid,
+                    latest_valid_hash: None,
+                    validation_error: None,
+                },
+                BlockPayloadStatus::NotValidated => PayloadStatusV1 {
+                    status: PayloadValidationStatus::Syncing,
+                    latest_valid_hash: None,
+                    validation_error: None,
+                },
+            };
+
+            self.controller.on_notified_new_payload(
+                beacon_block_root,
+                execution_block_hash,
+                payload_status_v1,
+            );
+
+            self.controller.wait_for_tasks();
+        }
+
+        let response = self.next_p2p_message();
+
+        Self::check_expected_message_from_fork_choice(
+            expected,
+            response.as_ref(),
+            reason,
+            Topic::BeaconBlock,
+        );
+    }
+
+    async fn on_data_column_sidecar(
+        &mut self,
+        data_column_sidecar: Arc<DataColumnSidecar<P>>,
+        subnet_id: SubnetId,
+        expected: Option<ExpectedResult>,
+        reason: Option<&str>,
+    ) {
+        self.controller
+            .on_gossip_data_column_sidecar(
+                data_column_sidecar,
+                subnet_id,
+                GossipId::default(),
+                false,
+            )
+            .await;
+
+        self.controller.wait_for_tasks();
+
+        let response = self.next_p2p_message();
+
+        Self::check_expected_message_from_fork_choice(
+            expected,
+            response.as_ref(),
+            reason,
+            Topic::DataColumnSidecar,
+        );
     }
 
     fn on_proposer_slashing(
@@ -389,6 +545,52 @@ impl<P: Preset> Context<P> {
             reason,
             wait_group,
         );
+    }
+
+    fn on_sync_committee_message(
+        &mut self,
+        sync_committee_message: SyncCommitteeMessage,
+        subnet_id: SubnetId,
+        expected: ExpectedResult,
+        reason: Option<&str>,
+    ) {
+        let wait_group = WaitGroup::new();
+
+        self.sync_committee_agg_pool
+            .handle_external_message_detached(
+                wait_group.clone(),
+                sync_committee_message,
+                subnet_id,
+                Origin::Gossip(GossipId::default()),
+            );
+
+        wait_group.wait();
+
+        let response = self.next_pool_p2p_message_verbose();
+
+        Self::check_expected_message_from_pool(expected, response.as_ref(), reason);
+    }
+
+    fn on_sync_contribution_and_proof(
+        &mut self,
+        signed_contribution_and_proof: SignedContributionAndProof<P>,
+        expected: ExpectedResult,
+        reason: Option<&str>,
+    ) {
+        let wait_group = WaitGroup::new();
+
+        self.sync_committee_agg_pool
+            .handle_external_contribution_and_proof_detached(
+                wait_group.clone(),
+                signed_contribution_and_proof,
+                Origin::Gossip(GossipId::default()),
+            );
+
+        wait_group.wait();
+
+        let response = self.next_pool_p2p_message_verbose();
+
+        Self::check_expected_message_from_pool(expected, response.as_ref(), reason);
     }
 
     fn on_voluntary_exit(
@@ -431,6 +633,7 @@ impl<P: Preset> Context<P> {
         expected: Option<ExpectedResult>,
         response: Option<&P2pMessage<P>>,
         reason: Option<&str>,
+        topic: Topic,
     ) {
         let description = format!(
             "message expected: {expected:?}, received: {response:?}, expected reason: {reason:?}"
@@ -446,12 +649,24 @@ impl<P: Preset> Context<P> {
                     "{description}"
                 );
             }
-            Some(ExpectedResult::Ignore) => {
-                assert!(
-                    matches!(response, Some(P2pMessage::Ignore(_))),
-                    "{description}"
-                );
-            }
+            Some(ExpectedResult::Ignore) => match topic {
+                Topic::BeaconBlock => {
+                    assert!(
+                        matches!(
+                            response,
+                            // same relaxed requirements as in spec_tests for blocks
+                            Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _))
+                        ),
+                        "{description}"
+                    );
+                }
+                _ => {
+                    assert!(
+                        matches!(response, Some(P2pMessage::Ignore(_))),
+                        "{description}"
+                    );
+                }
+            },
             Some(ExpectedResult::Reject) => {
                 assert!(
                     matches!(response, Some(P2pMessage::Reject(_, _))),
@@ -492,6 +707,37 @@ impl<P: Preset> Context<P> {
         }
     }
 
+    fn check_expected_message_from_pool(
+        expected: ExpectedResult,
+        response: Option<&PoolToP2pMessage>,
+        reason: Option<&str>,
+    ) {
+        let description = format!(
+            "gossip message status: {expected:?}, received: {response:?}, reason: {reason:?}"
+        );
+
+        match expected {
+            ExpectedResult::Valid => {
+                assert!(
+                    matches!(response, Some(PoolToP2pMessage::Accept(_))),
+                    "{description}"
+                );
+            }
+            ExpectedResult::Ignore => {
+                assert!(
+                    matches!(response, Some(PoolToP2pMessage::Ignore(_))),
+                    "{description}"
+                );
+            }
+            ExpectedResult::Reject => {
+                assert!(
+                    matches!(response, Some(PoolToP2pMessage::Reject(_, _))),
+                    "{description}"
+                );
+            }
+        }
+    }
+
     fn next_p2p_message(&mut self) -> Option<P2pMessage<P>> {
         loop {
             let option = self.next_p2p_message_verbose();
@@ -517,59 +763,170 @@ impl<P: Preset> Context<P> {
     fn next_validator_p2p_message_verbose(&mut self) -> Option<ValidatorToP2p<P>> {
         self.validator_to_p2p_rx.try_recv().ok()
     }
+
+    fn next_pool_p2p_message_verbose(&mut self) -> Option<PoolToP2pMessage> {
+        self.pool_to_p2p_rx.try_recv().ok()
+    }
 }
 
 #[duplicate_item(
-    glob                                                                                            function_name                                       preset    phase;
-    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_beacon_block/*/*"]                [phase0_mainnet_gossip_beacon_block]                [Mainnet] [Phase0];
-    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_beacon_block/*/*"]                [phase0_minimal_gossip_beacon_block]                [Minimal] [Phase0];
-    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_beacon_attestation/*/*"]          [phase0_mainnet_gossip_beacon_attestation]          [Mainnet] [Phase0];
-    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_beacon_attestation/*/*"]          [phase0_minimal_gossip_beacon_attestation]          [Minimal] [Phase0];
-    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_beacon_aggregate_and_proof/*/*"]  [phase0_mainnet_gossip_beacon_aggregate_and_proof]  [Mainnet] [Phase0];
-    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_beacon_aggregate_and_proof/*/*"]  [phase0_minimal_gossip_beacon_aggregate_and_proof]  [Minimal] [Phase0];
-    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_proposer_slashing/*/*"]           [phase0_mainnet_gossip_proposer_slashing]           [Mainnet] [Phase0];
-    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_proposer_slashing/*/*"]           [phase0_minimal_gossip_proposer_slashing]           [Minimal] [Phase0];
-    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_proposer_slashing/*/*"]           [altair_mainnet_gossip_proposer_slashing]           [Mainnet] [Altair];
-    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_proposer_slashing/*/*"]           [altair_minimal_gossip_proposer_slashing]           [Minimal] [Altair];
-    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_proposer_slashing/*/*"]        [bellatrix_mainnet_gossip_proposer_slashing]        [Mainnet] [Bellatrix];
-    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_proposer_slashing/*/*"]        [bellatrix_minimal_gossip_proposer_slashing]        [Minimal] [Bellatrix];
-    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_proposer_slashing/*/*"]          [capella_mainnet_gossip_proposer_slashing]          [Mainnet] [Capella];
-    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_proposer_slashing/*/*"]          [capella_minimal_gossip_proposer_slashing]          [Minimal] [Capella];
-    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_proposer_slashing/*/*"]            [deneb_mainnet_gossip_proposer_slashing]            [Mainnet] [Deneb];
-    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_proposer_slashing/*/*"]            [deneb_minimal_gossip_proposer_slashing]            [Minimal] [Deneb];
-    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_proposer_slashing/*/*"]             [fulu_mainnet_gossip_proposer_slashing]             [Mainnet] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_proposer_slashing/*/*"]             [fulu_minimal_gossip_proposer_slashing]             [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_proposer_slashing/*/*"]          [electra_mainnet_gossip_proposer_slashing]          [Mainnet] [Electra];
-    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_proposer_slashing/*/*"]          [electra_minimal_gossip_proposer_slashing]          [Minimal] [Electra];
-    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_proposer_slashing/*/*"]            [gloas_mainnet_gossip_proposer_slashing]            [Mainnet] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_proposer_slashing/*/*"]            [gloas_minimal_gossip_proposer_slashing]            [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_attester_slashing/*/*"]           [phase0_mainnet_gossip_attester_slashing]           [Mainnet] [Phase0];
-    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_attester_slashing/*/*"]           [phase0_minimal_gossip_attester_slashing]           [Minimal] [Phase0];
-    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_attester_slashing/*/*"]           [altair_mainnet_gossip_attester_slashing]           [Mainnet] [Altair];
-    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_attester_slashing/*/*"]           [altair_minimal_gossip_attester_slashing]           [Minimal] [Altair];
-    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_attester_slashing/*/*"]        [bellatrix_mainnet_gossip_attester_slashing]        [Mainnet] [Bellatrix];
-    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_attester_slashing/*/*"]        [bellatrix_minimal_gossip_attester_slashing]        [Minimal] [Bellatrix];
-    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_attester_slashing/*/*"]          [capella_mainnet_gossip_attester_slashing]          [Mainnet] [Capella];
-    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_attester_slashing/*/*"]          [capella_minimal_gossip_attester_slashing]          [Minimal] [Capella];
-    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_attester_slashing/*/*"]            [deneb_mainnet_gossip_attester_slashing]            [Mainnet] [Deneb];
-    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_attester_slashing/*/*"]            [deneb_minimal_gossip_attester_slashing]            [Minimal] [Deneb];
-    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_attester_slashing/*/*"]          [electra_mainnet_gossip_attester_slashing]          [Mainnet] [Electra];
-    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_attester_slashing/*/*"]          [electra_minimal_gossip_attester_slashing]          [Minimal] [Electra];
-    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_attester_slashing/*/*"]             [fulu_mainnet_gossip_attester_slashing]             [Mainnet] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_attester_slashing/*/*"]             [fulu_minimal_gossip_attester_slashing]             [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_attester_slashing/*/*"]            [gloas_mainnet_gossip_attester_slashing]            [Mainnet] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_attester_slashing/*/*"]            [gloas_minimal_gossip_attester_slashing]            [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_voluntary_exit/*/*"]              [phase0_mainnet_gossip_voluntary_exit]              [Mainnet] [Phase0];
-    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_voluntary_exit/*/*"]              [phase0_minimal_gossip_voluntary_exit]              [Minimal] [Phase0];
+    glob                                                                                                         function_name                                                    preset    phase;
+    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_attester_slashing/*/*"]                        [phase0_mainnet_gossip_attester_slashing]                        [Mainnet] [Phase0];
+    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_attester_slashing/*/*"]                        [phase0_minimal_gossip_attester_slashing]                        [Minimal] [Phase0];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_attester_slashing/*/*"]                        [altair_mainnet_gossip_attester_slashing]                        [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_attester_slashing/*/*"]                        [altair_minimal_gossip_attester_slashing]                        [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_attester_slashing/*/*"]                     [bellatrix_mainnet_gossip_attester_slashing]                     [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_attester_slashing/*/*"]                     [bellatrix_minimal_gossip_attester_slashing]                     [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_attester_slashing/*/*"]                       [capella_mainnet_gossip_attester_slashing]                       [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_attester_slashing/*/*"]                       [capella_minimal_gossip_attester_slashing]                       [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_attester_slashing/*/*"]                         [deneb_mainnet_gossip_attester_slashing]                         [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_attester_slashing/*/*"]                         [deneb_minimal_gossip_attester_slashing]                         [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_attester_slashing/*/*"]                       [electra_mainnet_gossip_attester_slashing]                       [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_attester_slashing/*/*"]                       [electra_minimal_gossip_attester_slashing]                       [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_attester_slashing/*/*"]                          [fulu_mainnet_gossip_attester_slashing]                          [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_attester_slashing/*/*"]                          [fulu_minimal_gossip_attester_slashing]                          [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_attester_slashing/*/*"]                         [gloas_mainnet_gossip_attester_slashing]                         [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_attester_slashing/*/*"]                         [gloas_minimal_gossip_attester_slashing]                         [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_beacon_block/*/*"]                             [phase0_mainnet_gossip_beacon_block]                             [Mainnet] [Phase0];
+    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_beacon_block/*/*"]                             [phase0_minimal_gossip_beacon_block]                             [Minimal] [Phase0];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_beacon_block/*/*"]                             [altair_mainnet_gossip_beacon_block]                             [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_beacon_block/*/*"]                             [altair_minimal_gossip_beacon_block]                             [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_beacon_block/*/*"]                          [bellatrix_mainnet_gossip_beacon_block]                          [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_beacon_block/*/*"]                          [bellatrix_minimal_gossip_beacon_block]                          [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_beacon_block/*/*"]                            [capella_mainnet_gossip_beacon_block]                            [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_beacon_block/*/*"]                            [capella_minimal_gossip_beacon_block]                            [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_beacon_block/*/*"]                              [deneb_mainnet_gossip_beacon_block]                              [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_beacon_block/*/*"]                              [deneb_minimal_gossip_beacon_block]                              [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_beacon_block/*/*"]                            [electra_mainnet_gossip_beacon_block]                            [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_beacon_block/*/*"]                            [electra_minimal_gossip_beacon_block]                            [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_beacon_block/*/*"]                               [fulu_mainnet_gossip_beacon_block]                               [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_beacon_block/*/*"]                               [fulu_minimal_gossip_beacon_block]                               [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_beacon_aggregate_and_proof/*/*"]               [phase0_mainnet_gossip_beacon_aggregate_and_proof]               [Mainnet] [Phase0];
+    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_beacon_aggregate_and_proof/*/*"]               [phase0_minimal_gossip_beacon_aggregate_and_proof]               [Minimal] [Phase0];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_beacon_aggregate_and_proof/*/*"]               [altair_mainnet_gossip_beacon_aggregate_and_proof]               [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_beacon_aggregate_and_proof/*/*"]               [altair_minimal_gossip_beacon_aggregate_and_proof]               [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_beacon_aggregate_and_proof/*/*"]            [bellatrix_mainnet_gossip_beacon_aggregate_and_proof]            [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_beacon_aggregate_and_proof/*/*"]            [bellatrix_minimal_gossip_beacon_aggregate_and_proof]            [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_beacon_aggregate_and_proof/*/*"]              [capella_mainnet_gossip_beacon_aggregate_and_proof]              [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_beacon_aggregate_and_proof/*/*"]              [capella_minimal_gossip_beacon_aggregate_and_proof]              [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_beacon_aggregate_and_proof/*/*"]                [deneb_mainnet_gossip_beacon_aggregate_and_proof]                [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_beacon_aggregate_and_proof/*/*"]                [deneb_minimal_gossip_beacon_aggregate_and_proof]                [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_beacon_aggregate_and_proof/*/*"]              [electra_mainnet_gossip_beacon_aggregate_and_proof]              [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_beacon_aggregate_and_proof/*/*"]              [electra_minimal_gossip_beacon_aggregate_and_proof]              [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_beacon_aggregate_and_proof/*/*"]                 [fulu_mainnet_gossip_beacon_aggregate_and_proof]                 [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_beacon_aggregate_and_proof/*/*"]                 [fulu_minimal_gossip_beacon_aggregate_and_proof]                 [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_beacon_attestation/*/*"]                       [phase0_mainnet_gossip_beacon_attestation]                       [Mainnet] [Phase0];
+    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_beacon_attestation/*/*"]                       [phase0_minimal_gossip_beacon_attestation]                       [Minimal] [Phase0];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_beacon_attestation/*/*"]                       [altair_mainnet_gossip_beacon_attestation]                       [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_beacon_attestation/*/*"]                       [altair_minimal_gossip_beacon_attestation]                       [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_beacon_attestation/*/*"]                    [bellatrix_mainnet_gossip_beacon_attestation]                    [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_beacon_attestation/*/*"]                    [bellatrix_minimal_gossip_beacon_attestation]                    [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_beacon_attestation/*/*"]                      [capella_mainnet_gossip_beacon_attestation]                      [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_beacon_attestation/*/*"]                      [capella_minimal_gossip_beacon_attestation]                      [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_beacon_attestation/*/*"]                        [deneb_mainnet_gossip_beacon_attestation]                        [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_beacon_attestation/*/*"]                        [deneb_minimal_gossip_beacon_attestation]                        [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_beacon_attestation/*/*"]                      [electra_mainnet_gossip_beacon_attestation]                      [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_beacon_attestation/*/*"]                      [electra_minimal_gossip_beacon_attestation]                      [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_beacon_attestation/*/*"]                         [fulu_mainnet_gossip_beacon_attestation]                         [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_beacon_attestation/*/*"]                         [fulu_minimal_gossip_beacon_attestation]                         [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_blob_sidecar/*/*"]                              [deneb_mainnet_gossip_blob_sidecar]                              [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_blob_sidecar/*/*"]                              [deneb_minimal_gossip_blob_sidecar]                              [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_blob_sidecar/*/*"]                            [electra_mainnet_gossip_blob_sidecar]                            [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_blob_sidecar/*/*"]                            [electra_minimal_gossip_blob_sidecar]                            [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_bls_to_execution_change/*/*"]                 [capella_mainnet_gossip_bls_to_execution_change]                 [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_bls_to_execution_change/*/*"]                 [capella_minimal_gossip_bls_to_execution_change]                 [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_bls_to_execution_change/*/*"]                   [deneb_mainnet_gossip_bls_to_execution_change]                   [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_bls_to_execution_change/*/*"]                   [deneb_minimal_gossip_bls_to_execution_change]                   [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_bls_to_execution_change/*/*"]                    [fulu_mainnet_gossip_bls_to_execution_change]                    [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_bls_to_execution_change/*/*"]                    [fulu_minimal_gossip_bls_to_execution_change]                    [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_bls_to_execution_change/*/*"]                 [electra_mainnet_gossip_bls_to_execution_change]                 [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_bls_to_execution_change/*/*"]                 [electra_minimal_gossip_bls_to_execution_change]                 [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_bls_to_execution_change/*/*"]                   [gloas_mainnet_gossip_bls_to_execution_change]                   [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_bls_to_execution_change/*/*"]                   [gloas_minimal_gossip_bls_to_execution_change]                   [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_data_column_sidecar/*/*"]                        [fulu_mainnet_data_column_sidecar]                               [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_data_column_sidecar/*/*"]                        [fulu_minimal_data_column_sidecar]                               [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_proposer_slashing/*/*"]                        [phase0_mainnet_gossip_proposer_slashing]                        [Mainnet] [Phase0];
+    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_proposer_slashing/*/*"]                        [phase0_minimal_gossip_proposer_slashing]                        [Minimal] [Phase0];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_proposer_slashing/*/*"]                        [altair_mainnet_gossip_proposer_slashing]                        [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_proposer_slashing/*/*"]                        [altair_minimal_gossip_proposer_slashing]                        [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_proposer_slashing/*/*"]                     [bellatrix_mainnet_gossip_proposer_slashing]                     [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_proposer_slashing/*/*"]                     [bellatrix_minimal_gossip_proposer_slashing]                     [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_proposer_slashing/*/*"]                       [capella_mainnet_gossip_proposer_slashing]                       [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_proposer_slashing/*/*"]                       [capella_minimal_gossip_proposer_slashing]                       [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_proposer_slashing/*/*"]                         [deneb_mainnet_gossip_proposer_slashing]                         [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_proposer_slashing/*/*"]                         [deneb_minimal_gossip_proposer_slashing]                         [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_proposer_slashing/*/*"]                          [fulu_mainnet_gossip_proposer_slashing]                          [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_proposer_slashing/*/*"]                          [fulu_minimal_gossip_proposer_slashing]                          [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_proposer_slashing/*/*"]                       [electra_mainnet_gossip_proposer_slashing]                       [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_proposer_slashing/*/*"]                       [electra_minimal_gossip_proposer_slashing]                       [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_proposer_slashing/*/*"]                         [gloas_mainnet_gossip_proposer_slashing]                         [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_proposer_slashing/*/*"]                         [gloas_minimal_gossip_proposer_slashing]                         [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_sync_committee_contribution_and_proof/*/*"]    [altair_mainnet_gossip_sync_committee_contribution_and_proof]    [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_sync_committee_contribution_and_proof/*/*"]    [altair_minimal_gossip_sync_committee_contribution_and_proof]    [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_sync_committee_contribution_and_proof/*/*"] [bellatrix_mainnet_gossip_sync_committee_contribution_and_proof] [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_sync_committee_contribution_and_proof/*/*"] [bellatrix_minimal_gossip_sync_committee_contribution_and_proof] [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_sync_committee_contribution_and_proof/*/*"]   [capella_mainnet_gossip_sync_committee_contribution_and_proof]   [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_sync_committee_contribution_and_proof/*/*"]   [capella_minimal_gossip_sync_committee_contribution_and_proof]   [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_sync_committee_contribution_and_proof/*/*"]     [deneb_mainnet_gossip_sync_committee_contribution_and_proof]     [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_sync_committee_contribution_and_proof/*/*"]     [deneb_minimal_gossip_sync_committee_contribution_and_proof]     [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_sync_committee_contribution_and_proof/*/*"]   [electra_mainnet_gossip_sync_committee_contribution_and_proof]   [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_sync_committee_contribution_and_proof/*/*"]   [electra_minimal_gossip_sync_committee_contribution_and_proof]   [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_sync_committee_contribution_and_proof/*/*"]      [fulu_mainnet_gossip_sync_committee_contribution_and_proof]      [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_sync_committee_contribution_and_proof/*/*"]      [fulu_minimal_gossip_sync_committee_contribution_and_proof]      [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_sync_committee_contribution_and_proof/*/*"]     [gloas_mainnet_gossip_sync_committee_contribution_and_proof]     [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_sync_committee_contribution_and_proof/*/*"]     [gloas_minimal_gossip_sync_committee_contribution_and_proof]     [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_sync_committee_message/*/*"]                   [altair_mainnet_gossip_sync_committee_message]                   [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_sync_committee_message/*/*"]                   [altair_minimal_gossip_sync_committee_message]                   [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_sync_committee_message/*/*"]                [bellatrix_mainnet_gossip_sync_committee_message]                [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_sync_committee_message/*/*"]                [bellatrix_minimal_gossip_sync_committee_message]                [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_sync_committee_message/*/*"]                  [capella_mainnet_gossip_sync_committee_message]                  [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_sync_committee_message/*/*"]                  [capella_minimal_gossip_sync_committee_message]                  [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_sync_committee_message/*/*"]                    [deneb_mainnet_gossip_sync_committee_message]                    [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_sync_committee_message/*/*"]                    [deneb_minimal_gossip_sync_committee_message]                    [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_sync_committee_message/*/*"]                     [fulu_mainnet_gossip_sync_committee_message]                     [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_sync_committee_message/*/*"]                     [fulu_minimal_gossip_sync_committee_message]                     [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_sync_committee_message/*/*"]                  [electra_mainnet_gossip_sync_committee_message]                  [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_sync_committee_message/*/*"]                  [electra_minimal_gossip_sync_committee_message]                  [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/gloas/networking/gossip_sync_committee_message/*/*"]                    [gloas_mainnet_gossip_sync_committee_message]                    [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/networking/gossip_sync_committee_message/*/*"]                    [gloas_minimal_gossip_sync_committee_message]                    [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/phase0/networking/gossip_voluntary_exit/*/*"]                           [phase0_mainnet_gossip_voluntary_exit]                           [Mainnet] [Phase0];
+    ["consensus-spec-tests/tests/minimal/phase0/networking/gossip_voluntary_exit/*/*"]                           [phase0_minimal_gossip_voluntary_exit]                           [Minimal] [Phase0];
+    ["consensus-spec-tests/tests/mainnet/altair/networking/gossip_voluntary_exit/*/*"]                           [altair_mainnet_gossip_voluntary_exit]                           [Mainnet] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/networking/gossip_voluntary_exit/*/*"]                           [altair_minimal_gossip_voluntary_exit]                           [Minimal] [Altair];
+    ["consensus-spec-tests/tests/mainnet/bellatrix/networking/gossip_voluntary_exit/*/*"]                        [bellatrix_mainnet_gossip_voluntary_exit]                        [Mainnet] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/networking/gossip_voluntary_exit/*/*"]                        [bellatrix_minimal_gossip_voluntary_exit]                        [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/mainnet/capella/networking/gossip_voluntary_exit/*/*"]                          [capella_mainnet_gossip_voluntary_exit]                          [Mainnet] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/networking/gossip_voluntary_exit/*/*"]                          [capella_minimal_gossip_voluntary_exit]                          [Minimal] [Capella];
+    ["consensus-spec-tests/tests/mainnet/deneb/networking/gossip_voluntary_exit/*/*"]                            [deneb_mainnet_gossip_voluntary_exit]                            [Mainnet] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/networking/gossip_voluntary_exit/*/*"]                            [deneb_minimal_gossip_voluntary_exit]                            [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/mainnet/electra/networking/gossip_voluntary_exit/*/*"]                          [electra_mainnet_gossip_voluntary_exit]                          [Mainnet] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/networking/gossip_voluntary_exit/*/*"]                          [electra_minimal_gossip_voluntary_exit]                          [Minimal] [Electra];
+    ["consensus-spec-tests/tests/mainnet/fulu/networking/gossip_voluntary_exit/*/*"]                             [fulu_mainnet_gossip_voluntary_exit]                             [Mainnet] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/networking/gossip_voluntary_exit/*/*"]                             [fulu_minimal_gossip_voluntary_exit]                             [Minimal] [Fulu];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case<'_>) {
     let rt = tokio::runtime::Runtime::new().expect("Tokio runtime starts successfully in tests");
-    let config = Arc::new(preset::default_config().start_and_stay_in(Phase::phase));
+
+    let config = Arc::new(
+        case.try_yaml("config")
+            .unwrap_or_else(preset::default_config)
+            .start_and_stay_in(Phase::phase),
+    );
 
     rt.block_on(async {
-        run_gossip_case::<preset>(&config, case).expect("test returns without errors");
+        run_gossip_case::<preset>(&config, case)
+            .await
+            .expect("test returns without errors");
     });
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "SCREAMING_SNAKE_CASE")]
+enum BlockPayloadStatus {
+    Valid,
+    Invalidated,
+    NotValidated,
 }
 
 #[derive(Debug, Deserialize)]
@@ -577,6 +934,7 @@ fn function_name(case: Case<'_>) {
 struct BlockMeta {
     pub block: PathBuf,
     pub failed: Option<bool>,
+    pub payload_status: Option<BlockPayloadStatus>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -606,14 +964,19 @@ enum ExpectedResult {
     Reject,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 enum Topic {
     AttesterSlashing,
     BeaconAggregateAndProof,
     BeaconAttestation,
     BeaconBlock,
+    BlobSidecar,
+    BlsToExecutionChange,
+    DataColumnSidecar,
     ProposerSlashing,
+    SyncCommittee,
+    SyncCommitteeContributionAndProof,
     VoluntaryExit,
 }
 
@@ -628,11 +991,10 @@ struct Message {
 }
 
 #[expect(clippy::too_many_lines)]
-fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()> {
+async fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()> {
     let Meta {
         blocks,
-        // TODO: use `bls_setting` parameter to make tests faster
-        bls_setting: _bls_setting,
+        bls_setting,
         current_time_ms,
         finalized_checkpoint,
         messages,
@@ -642,33 +1004,45 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
     let mut time: u64 = 0;
     let anchor_state = case.ssz::<_, Arc<BeaconState<P>>>(config.as_ref(), "state");
     let genesis_time = anchor_state.genesis_time();
+    let bls_setting = bls_setting.unwrap_or_default();
 
     let (anchor_block, blocks): (Vec<_>, Vec<_>) = blocks
         .unwrap_or_default()
         .into_iter()
         .map(|block_meta| {
-            let BlockMeta { block, failed } = block_meta;
+            let BlockMeta {
+                block,
+                failed,
+                payload_status,
+            } = block_meta;
+
             let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
             let is_valid = !failed.unwrap_or_default();
 
-            (block, is_valid)
+            (block, is_valid, payload_status)
         })
-        .partition(|(block, is_valid)| *is_valid && block.message().slot() == anchor_state.slot());
+        .partition(|(block, is_valid, _)| {
+            *is_valid && block.message().slot() == anchor_state.slot()
+        });
 
     let anchor_block = anchor_block
         .into_iter()
         .next()
-        .map(|(block, _)| block)
-        .unwrap_or_else(|| Arc::new(genesis::beacon_block(&anchor_state)));
+        .map(|(block, _, _)| AnchorBlock::Real(block))
+        .unwrap_or_else(|| {
+            AnchorBlock::Test(Arc::new(genesis::beacon_block_from_state(&anchor_state)))
+        });
 
     // Collect "invalid" block roots to be imported before validation and blacklist them.
     // These are actually valid blocks but should be rejected for testing-purposes.
     // One way mark blocks as rejected is to blacklist their roots and then try importing them.
     let blacklisted_blocks = blocks
         .iter()
-        .filter(|&(_, is_valid)| !is_valid)
-        .map(|(block, _)| block.message().hash_tree_root())
+        .filter(|&(_, is_valid, _)| !is_valid)
+        .map(|(block, _, _)| block.message().hash_tree_root())
         .collect();
+
+    let anchor_state_slot = anchor_state.slot();
 
     let mut context = Context::<P>::new(
         config.clone_arc(),
@@ -687,16 +1061,29 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
 
         let tick = tick_at_time(current_time);
         context.on_tick(tick);
+    } else {
+        context.on_tick(Tick::start_of_slot(anchor_state_slot));
     }
 
-    for (block, is_valid) in blocks {
+    for (block, is_valid, payload_status) in blocks {
         let expected = if is_valid {
-            ExpectedResult::Valid
+            if block.message().slot() < anchor_state_slot {
+                ExpectedResult::Ignore
+            } else {
+                ExpectedResult::Valid
+            }
         } else {
             ExpectedResult::Reject
         };
 
-        context.on_block(block, Some(expected), None);
+        context.on_block(
+            &block,
+            bls_setting,
+            StateRootPolicy::Verify,
+            payload_status,
+            Some(expected),
+            None,
+        );
     }
 
     if let Some(checkpoint) = finalized_checkpoint {
@@ -723,6 +1110,12 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
             // immediately when finalization advances, so the inconsistent state this test
             // requires is unreachable.
             return Ok(());
+        } else if let Some(root) = root {
+            context
+                .controller
+                .override_finalized_checkpoint(Checkpoint { epoch, root });
+
+            context.controller.wait_for_tasks();
         }
     }
 
@@ -774,7 +1167,22 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
                 // TODO: implement `MAXIMUM_GOSSIP_CLOCK_DISPARITY` checks
                 if case
                     .case_path_relative_to_workspace_root
-                    .contains("gossip_beacon_aggregate_and_proof__valid_within_clock_disparity")
+                    .contains("valid_within_clock_disparity")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_one_millisecond_before_slot_start")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_last_slot_one_millisecond_before_slot_start")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_first_slot_when_epoch_window_closes")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_first_slot_when_epoch_window_opens")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_last_slot_when_epoch_window_closes")
                 {
                     expected = Some(ExpectedResult::Ignore)
                 }
@@ -786,12 +1194,27 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
                 );
             }
             Topic::BeaconAttestation => {
-                let attestation = case.ssz::<_, Arc<Attestation<P>>>(config.as_ref(), message);
+                let attestation: Arc<Attestation<P>> = case.ssz_default(message);
 
                 // TODO: implement `MAXIMUM_GOSSIP_CLOCK_DISPARITY` checks
                 if case
                     .case_path_relative_to_workspace_root
-                    .contains("gossip_beacon_attestation__valid_within_clock_disparity")
+                    .contains("valid_within_clock_disparity")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_one_millisecond_before_slot_start")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_last_slot_one_millisecond_before_slot_start")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_first_slot_when_epoch_window_closes")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_first_slot_when_epoch_window_opens")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("accepts_last_slot_when_epoch_window_closes")
                 {
                     expected = ExpectedResult::Ignore;
                 }
@@ -809,13 +1232,13 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
                 // TODO: implement `MAXIMUM_GOSSIP_CLOCK_DISPARITY` checks
                 let expected = if case
                     .case_path_relative_to_workspace_root
-                    .contains("gossip_beacon_block__valid_within_clock_disparity")
+                    .contains("valid_within_clock_disparity")
                     || case
                         .case_path_relative_to_workspace_root
-                        .contains("gossip_beacon_block__ignore_future_slot")
+                        .contains("ignore_future_slot")
                     || case
                         .case_path_relative_to_workspace_root
-                        .contains("gossip_beacon_block__ignore_parent_not_seen")
+                        .contains("ignore_parent_not_seen")
                 {
                     // Block is delayed
                     None
@@ -823,11 +1246,131 @@ fn run_gossip_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) -> Result<()
                     Some(expected)
                 };
 
-                context.on_block(block, expected, reason.as_deref());
+                // These tests contain test message with randao_reveal set to zero and mark the block as valid
+                let state_root_policy = if case
+                    .case_path_relative_to_workspace_root
+                    .contains("valid_parent_execution_verified_valid")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("valid_parent_optimistic")
+                {
+                    StateRootPolicy::Trust
+                } else {
+                    StateRootPolicy::Verify
+                };
+
+                context.on_block(
+                    &block,
+                    bls_setting,
+                    state_root_policy,
+                    None,
+                    expected,
+                    reason.as_deref(),
+                );
+            }
+            Topic::BlsToExecutionChange => {
+                let signed_bls_to_execution_change =
+                    case.ssz::<_, Box<SignedBlsToExecutionChange>>(config.as_ref(), message);
+
+                // test Config has CAPELLA_FORK_EPOCH=1 and yet store is initialized with Capella genesis state at slot 0
+                if case
+                    .case_path_relative_to_workspace_root
+                    .contains("ignore_pre_capella")
+                {
+                    expected = ExpectedResult::Valid;
+                }
+
+                context
+                    .on_bls_to_execution_change(signed_bls_to_execution_change, expected)
+                    .await?;
+            }
+            Topic::BlobSidecar => {
+                let blob_sidecar = case.ssz::<_, Arc<BlobSidecar<P>>>(config.as_ref(), message);
+
+                // TODO: implement `MAXIMUM_GOSSIP_CLOCK_DISPARITY` checks
+                let expected = if case
+                    .case_path_relative_to_workspace_root
+                    .contains("valid_within_clock_disparity")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("valid_slot_within_clock_disparity")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("ignore_future_slot")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("ignore_parent_not_seen")
+                {
+                    // Blob sidecar is delayed
+                    None
+                } else {
+                    Some(expected)
+                };
+
+                context.on_blob_sidecar(
+                    blob_sidecar,
+                    subnet_id.expect("subnet_id must be present for blob sidecar"),
+                    expected,
+                    reason.as_deref(),
+                );
+            }
+            Topic::DataColumnSidecar => {
+                let data_column_sidecar =
+                    case.ssz::<_, Arc<DataColumnSidecar<P>>>(config.as_ref(), message);
+
+                // TODO: implement `MAXIMUM_GOSSIP_CLOCK_DISPARITY` checks
+                let expected = if case
+                    .case_path_relative_to_workspace_root
+                    .contains("valid_within_clock_disparity")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("valid_slot_within_clock_disparity")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("ignore_future_slot")
+                    || case
+                        .case_path_relative_to_workspace_root
+                        .contains("ignore_parent_not_seen")
+                {
+                    // Data Columns Sidecar is delayed
+                    None
+                } else {
+                    Some(expected)
+                };
+
+                context
+                    .on_data_column_sidecar(
+                        data_column_sidecar,
+                        subnet_id.expect("subnet_id must be present for data column sidecar"),
+                        expected,
+                        reason.as_deref(),
+                    )
+                    .await;
             }
             Topic::ProposerSlashing => {
                 let proposer_slashing = case.ssz::<_, ProposerSlashing>(config.as_ref(), message);
                 context.on_proposer_slashing(proposer_slashing, expected, reason.as_deref());
+            }
+            Topic::SyncCommittee => {
+                let sync_committee_message =
+                    case.ssz::<_, SyncCommitteeMessage>(config.as_ref(), message);
+
+                context.on_sync_committee_message(
+                    sync_committee_message,
+                    subnet_id.expect("subnet_id must be present for sync committee message"),
+                    expected,
+                    reason.as_deref(),
+                );
+            }
+            Topic::SyncCommitteeContributionAndProof => {
+                let signed_contribution_and_proof =
+                    case.ssz::<_, SignedContributionAndProof<P>>(config.as_ref(), message);
+
+                context.on_sync_contribution_and_proof(
+                    signed_contribution_and_proof,
+                    expected,
+                    reason.as_deref(),
+                );
             }
             Topic::VoluntaryExit => {
                 let voluntary_exit = case.ssz::<_, SignedVoluntaryExit>(config.as_ref(), message);

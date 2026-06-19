@@ -2513,6 +2513,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 // Handle it asynchronously to not block the event loop.
                 self.sync_committee_agg_pool
                     .handle_external_contribution_and_proof_detached(
+                        W::default(),
                         *proof,
                         Origin::Gossip(gossip_id),
                     )
@@ -2533,6 +2534,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 // Handle it asynchronously to not block the event loop.
                 self.sync_committee_agg_pool
                     .handle_external_message_detached(
+                        W::default(),
                         sync_committee_message,
                         subnet_id,
                         Origin::Gossip(gossip_id),

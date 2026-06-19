@@ -636,9 +636,11 @@ pub type DataAvailabilityTimelyThreshold<P> = Quot<<P as Preset>::PtcSize, U2>;
 // but it's still needed in our implementation.
 pub type SyncSubcommitteeSize<P> = Quot<<P as Preset>::SyncCommitteeSize, SyncCommitteeSubnetCount>;
 
-#[derive(Clone, Copy, Debug, Display, EnumString, DeserializeFromStr, SerializeDisplay)]
+#[derive(
+    Clone, Copy, Debug, Display, EnumString, DeserializeFromStr, SerializeDisplay, PartialEq, Eq,
+)]
 #[strum(serialize_all = "lowercase")]
-#[cfg_attr(test, derive(PartialEq, Eq, Sequence, VariantNames))]
+#[cfg_attr(test, derive(Sequence, VariantNames))]
 pub enum PresetName {
     Mainnet,
     Minimal,

@@ -121,6 +121,7 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
 }
 
 pub struct HandleExternalContributionTask<P: Preset, W: Wait> {
+    pub wait_group: W,
     pub controller: ApiController<P, W>,
     pub pool: Arc<Pool<P>>,
     pub signed_contribution_and_proof: SignedContributionAndProof<P>,
@@ -142,6 +143,7 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalContributionTask<P, W> {
         let result = self.handle_external_contribution().await;
 
         let Self {
+            wait_group,
             signed_contribution_and_proof,
             origin,
             ref pool_to_p2p_tx,
@@ -166,6 +168,8 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalContributionTask<P, W> {
 
             message.send(pool_to_p2p_tx);
         }
+
+        drop(wait_group);
 
         result
     }
@@ -229,6 +233,7 @@ impl<P: Preset, W: Wait> HandleExternalContributionTask<P, W> {
 
 pub struct HandleExternalMessageTask<P: Preset, W: Wait> {
     pub controller: ApiController<P, W>,
+    pub wait_group: W,
     pub pool: Arc<Pool<P>>,
     pub message: SyncCommitteeMessage,
     pub subnet_id: SubnetId,
@@ -251,6 +256,7 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalMessageTask<P, W> {
         let result = self.handle_external_message().await;
 
         let Self {
+            wait_group,
             message,
             subnet_id,
             origin,
@@ -284,6 +290,8 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalMessageTask<P, W> {
 
             message.send(pool_to_p2p_tx);
         }
+
+        drop(wait_group);
 
         result
     }

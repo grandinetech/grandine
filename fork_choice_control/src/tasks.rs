@@ -22,6 +22,7 @@ use helper_functions::{
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use spec_test_utils::BlsSetting;
 use ssz::SszHash as _;
 use tracing::{Span, instrument};
 use types::{
@@ -149,6 +150,24 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 NullExecutionEngine,
                 NullVerifier,
             ),
+            BlockOrigin::Test(_, bls_setting, _) => match bls_setting {
+                BlsSetting::Required => block_processor.validate_block(
+                    &store_snapshot,
+                    &block,
+                    origin.state_root_policy(),
+                    origin.data_availability_policy(),
+                    execution_engine,
+                    MultiVerifier::default(),
+                ),
+                BlsSetting::Ignored | BlsSetting::Optional => block_processor.validate_block(
+                    &store_snapshot,
+                    &block,
+                    origin.state_root_policy(),
+                    origin.data_availability_policy(),
+                    execution_engine,
+                    NullVerifier,
+                ),
+            },
         };
 
         if block.message().slot() == store_snapshot.slot() {

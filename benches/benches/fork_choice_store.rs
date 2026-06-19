@@ -17,8 +17,9 @@ use eth2_cache_utils::holesky::{self, CAPELLA_BEACON_STATE};
 use execution_engine::NullExecutionEngine;
 use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage};
 use fork_choice_store::{
-    ApplyBlockChanges, ApplyTickChanges, AttestationAction, AttestationItem, AttestationOrigin,
-    BlockAction, DataAvailabilityPolicy, Store, StoreConfig, ValidAttestation,
+    AnchorBlock, AnchorState, ApplyBlockChanges, ApplyTickChanges, AttestationAction,
+    AttestationItem, AttestationOrigin, BlockAction, DataAvailabilityPolicy, Store, StoreConfig,
+    ValidAttestation,
 };
 use helper_functions::{misc, verifier::NullVerifier};
 use itertools::Itertools as _;
@@ -81,8 +82,8 @@ impl Criterion {
                     config.clone_arc(),
                     pubkey_cache.clone_arc(),
                     StoreConfig::default(),
-                    anchor_block,
-                    anchor_state,
+                    AnchorBlock::Real(anchor_block),
+                    AnchorState::Real(anchor_state),
                     storage,
                     false,
                     false,

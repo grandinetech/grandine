@@ -5,6 +5,7 @@ use core::{
 use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result, bail};
+use clock::Tick;
 use derivative::Derivative;
 use derive_more::Debug;
 use eth2_libp2p::{GossipId, PeerId};
@@ -12,6 +13,7 @@ use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
 use serde::{Serialize, Serializer};
+use spec_test_utils::BlsSetting;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
@@ -34,11 +36,12 @@ use types::{
         ValidationOutcomeWithReason,
     },
     phase0::{
+        consts::GENESIS_SLOT,
         containers::{AttestationData, Checkpoint},
         primitives::{ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::SignedBeaconBlock as _,
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
 use crate::{segment::Position, store::Store};
@@ -46,6 +49,80 @@ use crate::{segment::Position, store::Store};
 const EMPTY: &str = "empty";
 const FULL: &str = "full";
 const PENDING: &str = "pending";
+
+/// Distinguishes a real anchor block from an empty one built for spec-test initialization.
+///
+/// For `Real`, `hash_tree_root` must match the anchor state's `latest_block_root`.
+/// For `Test`, the store derives `block_root` from the state's `latest_block_root` instead.
+pub enum AnchorBlock<P: Preset> {
+    Real(Arc<SignedBeaconBlock<P>>),
+    /// A block constructed from the state's `latest_block_header` for spec-test initialization.
+    /// Its `hash_tree_root` does not match the state's `latest_block_root`; the store derives
+    /// `block_root` from the state instead.
+    Test(Arc<SignedBeaconBlock<P>>),
+}
+
+impl<P: Preset> AnchorBlock<P> {
+    #[must_use]
+    pub const fn block(&self) -> &Arc<SignedBeaconBlock<P>> {
+        match self {
+            Self::Real(block) | Self::Test(block) => block,
+        }
+    }
+
+    #[must_use]
+    pub fn into_block(self) -> Arc<SignedBeaconBlock<P>> {
+        match self {
+            Self::Real(block) | Self::Test(block) => block,
+        }
+    }
+}
+
+/// Distinguishes a real anchor state from one used for spec-test initialization.
+///
+/// For `Real`, the store's initial tick is set to `state.slot()`.
+/// For `Test`, the store's initial tick is computed from `state.genesis_time()` so that a
+/// subsequent `apply_tick` call with the test's wall-clock time (which may be earlier than the
+/// state's slot) is not rejected as a backwards update.
+pub enum AnchorState<P: Preset> {
+    Real(Arc<BeaconState<P>>),
+    Test(Arc<BeaconState<P>>),
+}
+
+impl<P: Preset> AnchorState<P> {
+    #[must_use]
+    pub const fn state(&self) -> &Arc<BeaconState<P>> {
+        match self {
+            Self::Real(state) | Self::Test(state) => state,
+        }
+    }
+
+    #[must_use]
+    pub fn into_state(self) -> Arc<BeaconState<P>> {
+        match self {
+            Self::Real(state) | Self::Test(state) => state,
+        }
+    }
+
+    /// Returns the slot to use for the store's initial tick.
+    ///
+    /// `Real` uses the state's own slot so the store starts at the correct epoch.
+    /// `Test` computes the slot at `state.genesis_time()` allowing the test's
+    /// wall-clock tick to advance the store without being rejected as a backwards update.
+    #[must_use]
+    pub fn start_slot(&self, chain_config: &ChainConfig) -> Slot {
+        match self {
+            Self::Real(state) => state.slot(),
+            Self::Test(state) => {
+                let genesis_time = state.genesis_time();
+
+                Tick::at_time::<P>(chain_config, genesis_time, genesis_time)
+                    .map(|tick| tick.slot)
+                    .unwrap_or(GENESIS_SLOT)
+            }
+        }
+    }
+}
 
 #[derive(Clone, Derivative)]
 #[derivative(Debug(bound = ""))]
@@ -261,13 +338,14 @@ pub enum BlockOrigin {
     Own,
     Persisted,
     Api(Option<Sender<Result<ValidationOutcome>>>),
+    Test(GossipId, BlsSetting, StateRootPolicy),
 }
 
 impl BlockOrigin {
     #[must_use]
     pub fn split(self) -> (Option<GossipId>, Option<Sender<Result<ValidationOutcome>>>) {
         match self {
-            Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Gossip(gossip_id) | Self::Test(gossip_id, _, _) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
             Self::Requested(_) | Self::Own | Self::Persisted => (None, None),
         }
@@ -276,7 +354,7 @@ impl BlockOrigin {
     #[must_use]
     pub fn gossip_id(&self) -> Option<GossipId> {
         match self {
-            Self::Gossip(gossip_id) => Some(gossip_id.clone()),
+            Self::Gossip(gossip_id) | Self::Test(gossip_id, _, _) => Some(gossip_id.clone()),
             Self::Requested(_) | Self::Own | Self::Persisted | Self::Api(_) => None,
         }
     }
@@ -284,7 +362,7 @@ impl BlockOrigin {
     #[must_use]
     pub const fn peer_id(&self) -> Option<PeerId> {
         match self {
-            Self::Gossip(gossip_id) => Some(gossip_id.source),
+            Self::Gossip(gossip_id) | Self::Test(gossip_id, _, _) => Some(gossip_id.source),
             Self::Requested(peer_id) => *peer_id,
             Self::Own | Self::Persisted | Self::Api(_) => None,
         }
@@ -302,15 +380,18 @@ impl BlockOrigin {
                 }
             }
             Self::Persisted => StateRootPolicy::Trust,
+            Self::Test(_, _, state_root_policy) => *state_root_policy,
         }
     }
 
     #[must_use]
     pub const fn data_availability_policy(&self) -> DataAvailabilityPolicy {
         match self {
-            Self::Gossip(_) | Self::Requested(_) | Self::Api(_) | Self::Own => {
-                DataAvailabilityPolicy::Check
-            }
+            Self::Gossip(_)
+            | Self::Requested(_)
+            | Self::Api(_)
+            | Self::Own
+            | Self::Test(_, _, _) => DataAvailabilityPolicy::Check,
             Self::Persisted => DataAvailabilityPolicy::Trust,
         }
     }
@@ -319,7 +400,7 @@ impl BlockOrigin {
     pub const fn should_send_gossip_event(&self) -> bool {
         match self {
             Self::Gossip(_) | Self::Api(_) => true,
-            Self::Requested(_) | Self::Own | Self::Persisted => false,
+            Self::Requested(_) | Self::Own | Self::Persisted | Self::Test(_, _, _) => false,
         }
     }
 
@@ -332,6 +413,7 @@ impl BlockOrigin {
             Self::Own => "Own",
             Self::Persisted => "Persisted",
             Self::Api(_) => "Api",
+            Self::Test(_, _, _) => "Test",
         }
     }
 

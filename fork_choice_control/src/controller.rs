@@ -22,10 +22,10 @@ use clock::Tick;
 use eth2_libp2p::{GossipId, PeerId};
 use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
-    AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
-    BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
-    ProposerPreferencesOrigin, StateCacheProcessor, Store, StoreConfig,
+    AggregateAndProofOrigin, AnchorBlock, AnchorState, AttestationItem, AttestationOrigin,
+    AttesterSlashingOrigin, BlobSidecarOrigin, BlockOrigin, DataColumnSidecarOrigin,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem,
+    PayloadAttestationOrigin, ProposerPreferencesOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -33,12 +33,14 @@ use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
+use spec_test_utils::BlsSetting;
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::{Span, instrument};
+use transition_functions::unphased::StateRootPolicy;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
+        Attestation, AttesterSlashing, DataColumnSidecar, SignedAggregateAndProof,
         SignedBeaconBlock,
     },
     config::Config as ChainConfig,
@@ -118,8 +120,8 @@ where
         chain_config: Arc<ChainConfig>,
         pubkey_cache: Arc<PubkeyCache>,
         store_config: StoreConfig,
-        anchor_block: Arc<SignedBeaconBlock<P>>,
-        anchor_state: Arc<BeaconState<P>>,
+        anchor_block: AnchorBlock<P>,
+        anchor_state: AnchorState<P>,
         tick: Tick,
         event_channels: Arc<EventChannels<P>>,
         execution_engine: E,
@@ -136,7 +138,7 @@ where
         blacklisted_blocks: HashSet<H256>,
         sidecars_construction_started: Arc<SccHashMap<H256, Slot>>,
     ) -> Result<(Arc<Self>, MutatorHandle<P, W>)> {
-        let finished_initial_forward_sync = anchor_block.message().slot() >= tick.slot;
+        let finished_initial_forward_sync = anchor_block.block().message().slot() >= tick.slot;
 
         let mut store = Store::new(
             chain_config.clone_arc(),
@@ -312,6 +314,19 @@ where
     )]
     pub fn on_own_block(&self, wait_group: W, block: Arc<SignedBeaconBlock<P>>) {
         self.spawn_block_task_with_wait_group(wait_group, block, BlockOrigin::Own)
+    }
+
+    pub fn on_test_block(
+        &self,
+        block: Arc<SignedBeaconBlock<P>>,
+        gossip_id: GossipId,
+        bls_setting: BlsSetting,
+        state_root_policy: StateRootPolicy,
+    ) {
+        self.spawn_block_task(
+            block,
+            BlockOrigin::Test(gossip_id, bls_setting, state_root_policy),
+        )
     }
 
     pub fn on_own_blob_sidecar(&self, wait_group: W, blob_sidecar: Arc<BlobSidecar<P>>) {

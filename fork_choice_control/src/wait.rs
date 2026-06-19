@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use crossbeam_utils::sync::WaitGroup;
 
-pub trait Wait: Clone + Default + Send + 'static {
+pub trait Wait: Clone + Default + Send + Sync + 'static {
     type Swappable: Default + Send + Sync;
 
     fn load_and_clone(swappable: &Self::Swappable) -> Self;

@@ -2271,7 +2271,7 @@ pub async fn submit_pool_sync_committees<P: Preset, W: Wait>(
 
     for (index, message, subnet_id) in messages {
         match sync_committee_agg_pool
-            .handle_external_message(message, subnet_id, Origin::Api)
+            .handle_external_message(W::default(), message, subnet_id, Origin::Api)
             .await
         {
             Ok(ValidationOutcome::Accept) => {

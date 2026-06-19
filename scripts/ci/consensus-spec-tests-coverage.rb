@@ -23,7 +23,7 @@ IGNORED_GLOBS = %w[
   tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
   tests/general/fulu/kzg/compute_verify_cell_kzg_proof_batch_challenge/*/*/*.{ssz_snappy,yaml}
   tests/general/fulu/ssz_generic/progressive_containers/*/*/*.{ssz_snappy,yaml}
-  tests/*/*/networking/*/pyspec_tests/*/*.{ssz_snappy,yaml}
+  tests/*/*/networking/gossip_partial_data_column_sidecar/pyspec_tests/*/*.{ssz_snappy,yaml}
 ].map! { |glob| File.join(DIRECTORY, glob) }
 
 LS_FILES_COMMAND = ['find', DIRECTORY, '-type', 'f', '-print0']
