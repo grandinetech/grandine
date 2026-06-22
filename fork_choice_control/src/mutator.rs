@@ -1604,9 +1604,19 @@ where
             })
             .collect_vec();
 
-        self.store_mut().apply_payload_attestation_batch(accepted);
+        let old_head = self.store_mut().apply_payload_attestation_batch(accepted);
 
         self.update_store_snapshot();
+
+        if let Some(old_head) = old_head {
+            self.notify_about_reorganization(
+                wait_group.clone(),
+                &old_head,
+                ReorgSource::PayloadAttestation,
+            );
+
+            self.spawn_preprocess_head_state_for_next_slot_task();
+        }
     }
 
     fn handle_attester_slashing(
@@ -2447,10 +2457,21 @@ where
                     is_from_block,
                 };
 
-                self.store_mut()
+                let old_head = self
+                    .store_mut()
                     .apply_payload_attestation(valid_payload_attestation);
 
                 self.update_store_snapshot();
+
+                if let Some(old_head) = old_head {
+                    self.notify_about_reorganization(
+                        wait_group.clone(),
+                        &old_head,
+                        ReorgSource::PayloadAttestation,
+                    );
+
+                    self.spawn_preprocess_head_state_for_next_slot_task();
+                }
             }
             Ok(PayloadAttestationAction::Ignore(payload_attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {

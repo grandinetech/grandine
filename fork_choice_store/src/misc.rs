@@ -252,6 +252,38 @@ impl<P: Preset> UnfinalizedBlock<P> {
     pub const fn parent_payload_presence(&self) -> PayloadPresence {
         self.chain_link.parent_payload_presence
     }
+
+    #[must_use]
+    pub fn balances(&self) -> BlockBalances {
+        self.into()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BlockBalances {
+    pub block_root: H256,
+    pub slot: Slot,
+    pub attesting_balances: AttestingBalances,
+}
+
+impl<P: Preset> From<&UnfinalizedBlock<P>> for BlockBalances {
+    fn from(block: &UnfinalizedBlock<P>) -> Self {
+        Self {
+            block_root: block.block_root(),
+            slot: block.slot(),
+            attesting_balances: block.attesting_balances,
+        }
+    }
+}
+
+impl BlockBalances {
+    pub const fn empty(&self) -> Gwei {
+        self.attesting_balances.empty
+    }
+
+    pub const fn full(&self) -> Gwei {
+        self.attesting_balances.full
+    }
 }
 
 #[derive(Debug, Clone, AsRefStr)]
