@@ -88,14 +88,14 @@ use crate::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
         AttesterSlashingOrigin, AttestingBalances, BlobSidecarAction, BlobSidecarOrigin,
-        BlockAction, BlockTimeliness, BranchPoint, ChainLink, DataAvailabilityPolicy,
-        DataColumnSidecarAction, DataColumnSidecarOrigin, Difference, DifferenceAtLocation,
-        Differences, DissolvedDifference, ExecutionPayloadBidAction, ExecutionPayloadBidOrigin,
-        ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin, LatestMessage, Location,
-        PartialAttestationAction, PartialBlockAction, PayloadAction, PayloadAttestationAction,
-        PayloadAttestationItem, PayloadAttestationValidationError, PayloadPresence,
-        ProposerPreferencesAction, ProposerPreferencesOrigin, Score, SegmentId, Storage,
-        UnfinalizedBlock, ValidAttestation, ValidPayloadAttestation,
+        BlockAction, BlockBalances, BlockTimeliness, BranchPoint, ChainLink,
+        DataAvailabilityPolicy, DataColumnSidecarAction, DataColumnSidecarOrigin, Difference,
+        DifferenceAtLocation, Differences, DissolvedDifference, ExecutionPayloadBidAction,
+        ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
+        LatestMessage, Location, PartialAttestationAction, PartialBlockAction, PayloadAction,
+        PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationValidationError,
+        PayloadPresence, ProposerPreferencesAction, ProposerPreferencesOrigin, Score, SegmentId,
+        Storage, UnfinalizedBlock, ValidAttestation, ValidPayloadAttestation,
     },
     segment::{Position, Segment},
     state_cache_processor::StateCacheProcessor,
@@ -1049,69 +1049,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Some(last_block);
         }
 
-        let has_boosted_block = last_block.block_root() == self.proposer_boost_root;
-
-        let proposer_boost = if has_boosted_block && self.should_apply_proposer_boost() {
-            self.timely_proposer_score()
-        } else {
-            0
-        };
-
         let head_segment = self.head_segment()?;
 
-        let mut parent = head_segment.first_block();
-
-        if parent.is_invalid() {
-            return None;
-        }
-
-        for block in head_segment.into_iter().skip(1) {
-            if block.is_invalid() {
-                break;
-            }
-
-            let parent_payload_presence = block.parent_payload_presence();
-
-            if self.is_previous_slot_payload_decision(parent.slot(), parent_payload_presence) {
-                let should_extend_payload = self.should_extend_payload(parent.block_root());
-
-                match parent_payload_presence {
-                    PayloadPresence::Full if !should_extend_payload => break,
-                    PayloadPresence::Empty if should_extend_payload => break,
-                    _ => {}
-                }
-            } else {
-                let parent_empty = parent.attesting_balances.empty;
-                let parent_full = parent.attesting_balances.full;
-                let parent_payload_verified = self.payloads.contains(&parent.block_root());
-
-                // Only proceed selecting the child block if:
-                // - it's indicating that it is the child of parent with no payload
-                //   or the parent has more votes for its empty payload state;
-                // - it's indicating that is the child of parent with payload,
-                //   and parent does not have more votes for its empty payload state;
-                // - it's a child of parent with "pending" payload
-                //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
-                match parent_payload_presence {
-                    PayloadPresence::Empty
-                        if parent_payload_verified
-                            && parent_empty.saturating_add(proposer_boost) <= parent_full =>
-                    {
-                        break;
-                    }
-                    PayloadPresence::Full
-                        if parent_empty > parent_full.saturating_add(proposer_boost) =>
-                    {
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            parent = block;
-        }
-
-        Some(parent)
+        Some(head_segment.head())
     }
 
     fn head_segment(&self) -> Option<&Segment<P>> {
@@ -1135,7 +1075,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .into_iter()
             .flat_map(move |head_segment_id| {
                 let head_segment = &self.unfinalized[&head_segment_id];
-                self.segments_ending_with(head_segment, head_segment.last_position())
+                self.segments_ending_with(head_segment, head_segment.head_position())
             })
     }
 
@@ -1225,19 +1165,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let parent_root = first_block.chain_link.parent_root();
 
         if self.phase() >= Phase::Gloas && parent_root == self.last_finalized().block_root {
-            let parent_balances = self.last_finalized_attesting_balances();
-            let parent_payload_verified = self.is_payload_verified(parent_root);
+            let parent_payload_presence = first_block.parent_payload_presence();
+            let last_finalized = self.last_finalized();
 
-            match first_block.parent_payload_presence() {
-                PayloadPresence::Empty
-                    if parent_balances.empty < parent_balances.full && parent_payload_verified =>
-                {
-                    return false;
+            if self
+                .is_previous_slot_payload_decision(last_finalized.slot(), parent_payload_presence)
+            {
+                let should_extend = self.should_extend_payload(parent_root);
+
+                match parent_payload_presence {
+                    PayloadPresence::Full if !should_extend => return false,
+                    PayloadPresence::Empty if should_extend => return false,
+                    _ => {}
                 }
-                PayloadPresence::Full if parent_balances.empty > parent_balances.full => {
-                    return false;
-                }
-                _ => {}
             }
         }
 
@@ -1430,41 +1370,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         is_previous_slot && is_payload_decision
     }
 
-    /// Like [`get_weight`], but returns the full [`Score`] of a block including the tiebreaker.
-    ///
-    /// [`get_weight`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_weight
-    fn score(
-        &self,
-        unfinalized_block: &UnfinalizedBlock<P>,
-        parent: Option<&UnfinalizedBlock<P>>,
-        apply_proposer_boost: bool,
-    ) -> Score {
-        let parent_payload_presence = unfinalized_block.parent_payload_presence();
-
-        // Since Gloas, when comparing two competing blocks,
-        // first Score parameter is their parents' empty/full node score.
-        // I.e. if parent with an empty payload has highier score than with full,
-        // it does not matter if full node has a child with high score.
-        // Remember, this is only used to choose one of two competing segments
-        // by comparing two first blocks in those competing segments.
-        // In-segment best block is selected in `unfinalized_head` method.
-        let parent_attestation_score = if let Some(parent) = parent
-            && !self.is_previous_slot_payload_decision(parent.slot(), parent_payload_presence)
-        {
-            let parent_payload_verified = self.is_payload_verified(parent.block_root());
-
-            match parent_payload_presence {
-                PayloadPresence::Empty => parent.attesting_balances.empty,
-                PayloadPresence::Full if parent_payload_verified => parent.attesting_balances.full,
-                PayloadPresence::Full | PayloadPresence::Pending => 0,
-            }
-        } else {
-            0
-        };
-
-        let attesting_balances = unfinalized_block.attesting_balances;
-        let attestation_score = attesting_balances.pending;
-
+    fn is_ancestor_of_boosted_block(&self, block: &UnfinalizedBlock<P>) -> bool {
         // > Boost is applied if ``root`` is an ancestor of ``proposer_boost_root``
         //
         // The call to `Store::contains_unfinalized_block` is needed because `consensus-spec-tests`
@@ -1473,20 +1379,65 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // The "unfinalized block" in the `expect` message refers to the boosted block,
         // not the `unfinalized_block` parameter.
 
-        let ancestor_of_boosted_block = if self.contains_unfinalized_block(self.proposer_boost_root)
-        {
+        if self.contains_unfinalized_block(self.proposer_boost_root) {
             let ancestor = self
-                .ancestor(self.proposer_boost_root, unfinalized_block.slot())
+                .ancestor(self.proposer_boost_root, block.slot())
                 .expect("every unfinalized block has an ancestor at every unfinalized slot");
 
-            ancestor == unfinalized_block.block_root()
+            ancestor == block.block_root()
         } else {
             false
+        }
+    }
+
+    /// Like [`get_weight`], but returns the full [`Score`] of a block including the tiebreaker.
+    ///
+    /// [`get_weight`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_weight
+    fn score(
+        &self,
+        unfinalized_block: &UnfinalizedBlock<P>,
+        parent: Option<BlockBalances>,
+        proposer_boost: Gwei,
+    ) -> Score {
+        let parent_payload_presence = unfinalized_block.parent_payload_presence();
+
+        // Since Gloas, when comparing two competing blocks,
+        // first Score parameter is their parents' empty/full node score.
+        // I.e. if parent with an empty payload has higher score than with full,
+        // it does not matter if full node has a child with high score.
+        // Remember, this is only used to choose one of two competing segments
+        // by comparing two first blocks in those competing segments.
+        // In-segment best block is selected in `unfinalized_head` method.
+        let parent_attestation_score = if let Some(parent) = parent {
+            if self.is_previous_slot_payload_decision(parent.slot, parent_payload_presence) {
+                let should_extend = self.should_extend_payload(parent.block_root);
+
+                match parent_payload_presence {
+                    PayloadPresence::Full if should_extend => Gwei::MAX,
+                    PayloadPresence::Empty if !should_extend => Gwei::MAX,
+                    _ => 0,
+                }
+            } else {
+                let parent_payload_verified = self.is_payload_verified(parent.block_root);
+
+                match parent_payload_presence {
+                    PayloadPresence::Empty => parent.attesting_balances.empty,
+                    PayloadPresence::Full if parent_payload_verified => {
+                        parent.attesting_balances.full
+                    }
+                    PayloadPresence::Full | PayloadPresence::Pending => 0,
+                }
+            }
+        } else {
+            0
         };
 
-        let proposer_score = if ancestor_of_boosted_block && apply_proposer_boost {
-            // > Calculate proposer score if ``proposer_boost_root`` is set
-            self.timely_proposer_score()
+        let attesting_balances = unfinalized_block.attesting_balances;
+        let attestation_score = attesting_balances.pending;
+
+        let proposer_score = if self.is_ancestor_of_boosted_block(unfinalized_block) {
+            // > Boost proposer score if ``proposer_boost_root`` is set
+            proposer_boost
         } else {
             // > Return only attestation score if ``proposer_boost_root`` is not set
             0
@@ -4220,14 +4171,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn apply_payload_attestation(
         &mut self,
         valid_payload_attestation: ValidPayloadAttestation,
-    ) {
+    ) -> Option<ChainLink<P>> {
         self.apply_payload_attestation_batch(core::iter::once(valid_payload_attestation))
     }
 
     pub fn apply_payload_attestation_batch(
         &mut self,
         valid_payload_attestations: impl IntoIterator<Item = ValidPayloadAttestation>,
-    ) {
+    ) -> Option<ChainLink<P>> {
+        let old_head_segment_id = self.head_segment_id;
+        let old_head = self.head().clone();
+
         for ValidPayloadAttestation {
             data,
             attesting_indices_positions,
@@ -4266,6 +4220,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 availability_votes.set(pos, data.blob_data_available);
             }
         }
+
+        self.update_head_segment_id();
+
+        self.reorganized(old_head_segment_id).then_some(old_head)
     }
 
     /// [`on_attester_slashing`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_attester_slashing)
@@ -4851,10 +4809,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .prune_finalized(finalized_slot);
         self.block_timeliness
             .retain(|block_root, _| self.unfinalized_locations.contains_key(block_root));
-        self.payloads
-            .retain(|block_root| self.unfinalized_locations.contains_key(block_root));
-        self.timely_payloads
-            .retain(|block_root| self.unfinalized_locations.contains_key(block_root));
+        let last_finalized_root = self.last_finalized().block_root;
+        self.payloads.retain(|block_root| {
+            *block_root == last_finalized_root
+                || self.unfinalized_locations.contains_key(block_root)
+        });
+        self.timely_payloads.retain(|block_root| {
+            *block_root == last_finalized_root
+                || self.unfinalized_locations.contains_key(block_root)
+        });
         self.accepted_blob_sidecars
             .retain(|(slot, _, _), _| finalized_slot <= *slot);
         self.accepted_data_column_sidecars
@@ -5325,15 +5288,110 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         ))
     }
 
+    fn ignore_child(
+        &self,
+        block: &UnfinalizedBlock<P>,
+        parent_balances: BlockBalances,
+        proposer_boost: Gwei,
+    ) -> bool {
+        if block.is_invalid() {
+            return true;
+        }
+
+        let parent_payload_presence = block.parent_payload_presence();
+
+        if self.is_previous_slot_payload_decision(parent_balances.slot, parent_payload_presence) {
+            let should_extend_payload = self.should_extend_payload(parent_balances.block_root);
+
+            match parent_payload_presence {
+                PayloadPresence::Full if !should_extend_payload => true,
+                PayloadPresence::Empty if should_extend_payload => true,
+                _ => false,
+            }
+        } else {
+            let parent_empty = parent_balances.empty();
+            let parent_full = parent_balances.full();
+            let parent_payload_verified = self.payloads.contains(&parent_balances.block_root);
+
+            let proposer_boost = if self.proposer_boost_root != H256::zero()
+                && self.is_ancestor_of_boosted_block(block)
+            {
+                proposer_boost
+            } else {
+                0
+            };
+
+            // Only proceed selecting the child block if:
+            // - it's indicating that it is the child of parent with no payload
+            //   or the parent has more votes for its empty payload state;
+            // - it's indicating that is the child of parent with payload,
+            //   and parent does not have more votes for its empty payload state;
+            // - it's a child of parent with "pending" payload
+            //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
+            match parent_payload_presence {
+                PayloadPresence::Empty
+                    if parent_payload_verified
+                        && parent_empty.saturating_add(proposer_boost) <= parent_full =>
+                {
+                    true
+                }
+                PayloadPresence::Full
+                    if parent_empty > parent_full.saturating_add(proposer_boost) =>
+                {
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+
+    fn update_segment_head(&mut self, segment_id: SegmentId, proposer_boost: Gwei) {
+        let segment = self
+            .unfinalized
+            .get(&segment_id)
+            .expect("segment should exist");
+
+        let parent = segment.first_block();
+
+        if parent.is_invalid() {
+            return;
+        }
+
+        let mut parent_balances = parent.balances();
+        let mut head_index = 0;
+
+        for (index, block) in segment.into_iter().enumerate().skip(1) {
+            if self.ignore_child(block, parent_balances, proposer_boost) {
+                break;
+            }
+
+            parent_balances = block.balances();
+            head_index = index;
+        }
+
+        let segment = self
+            .unfinalized
+            .get_mut(&segment_id)
+            .expect("segment should exist");
+
+        segment.update_head_position(head_index);
+    }
+
     fn update_head_segment_id(&mut self) {
         let mut branch_points = BinaryHeap::<BranchPoint>::new();
         let mut best = None;
 
-        let apply_proposer_boost = if self.phase() >= Phase::Gloas {
-            self.should_apply_proposer_boost()
+        let proposer_boost = if self.phase() < Phase::Gloas
+            || (self.phase() >= Phase::Gloas && self.should_apply_proposer_boost())
+        {
+            self.timely_proposer_score()
         } else {
-            true
+            0
         };
+
+        for segment_id in self.unfinalized.keys().copied().collect_vec() {
+            self.update_segment_head(segment_id, proposer_boost);
+        }
 
         for (segment_id, segment) in self.unfinalized.iter().rev() {
             let viable = self.is_segment_viable(segment);
@@ -5346,28 +5404,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
 
                 let branch_point = PeekMut::pop(branch_point);
-
-                if best_descendant_of_segment.is_none() {
-                    best_descendant_of_segment = Some(branch_point.best_descendant);
-                    continue;
-                }
-
                 let parent_position = branch_point.parent.position;
 
                 let next_position_in_segment = parent_position
                     .next()
                     .expect("next position in segment must be valid because it is already filled");
 
-                let common_parent = &segment[parent_position];
+                let common_parent_balances = segment[parent_position].balances();
                 let sibling = &segment[next_position_in_segment];
                 let first_branch_block = self.unfinalized[&branch_point.segment_id].first_block();
 
+                if best_descendant_of_segment.is_none() || segment.head().slot() < sibling.slot() {
+                    if !self.ignore_child(
+                        first_branch_block,
+                        common_parent_balances,
+                        proposer_boost,
+                    ) {
+                        best_descendant_of_segment = Some(branch_point.best_descendant);
+                    }
+
+                    continue;
+                }
+
                 let branch_point_score = self.score(
                     first_branch_block,
-                    Some(common_parent),
-                    apply_proposer_boost,
+                    Some(common_parent_balances),
+                    proposer_boost,
                 );
-                let sibling_score = self.score(sibling, Some(common_parent), apply_proposer_boost);
+                let sibling_score =
+                    self.score(sibling, Some(common_parent_balances), proposer_boost);
 
                 if sibling_score < branch_point_score || sibling.is_invalid() {
                     best_descendant_of_segment = Some(branch_point.best_descendant);
@@ -5385,7 +5450,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
 
                 let best_root_segment_score = best.map(|(score, _)| score);
-                let score = self.score(segment.first_block(), None, apply_proposer_boost);
+                let finalized_parent = (self.phase() >= Phase::Gloas).then(|| BlockBalances {
+                    block_root: self.last_finalized().block_root,
+                    slot: self.last_finalized().slot(),
+                    attesting_balances: self.last_finalized_attesting_balances(),
+                });
+                let score = self.score(segment.first_block(), finalized_parent, proposer_boost);
 
                 if best_root_segment_score < Some(score) {
                     best = Some((score, best_descendant));
