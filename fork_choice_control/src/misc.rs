@@ -249,6 +249,7 @@ pub enum ReorgSource {
     AttesterSlashing,
     Block,
     BlockAttestation,
+    PayloadAttestation,
     PayloadResponse,
     Tick,
 }
