@@ -25,6 +25,7 @@ pub struct Segment<P: Preset> {
     // finalized and the finalized blocks have been removed from it. The number of finalized blocks
     // is equal to `Segment.first_position`.
     first_position: Position,
+    head_position: Position,
 }
 
 impl<P: Preset> From<Segment<P>> for Vector<UnfinalizedBlock<P>> {
@@ -78,7 +79,13 @@ impl<P: Preset> Segment<P> {
         Self {
             blocks: Vector::unit(UnfinalizedBlock::new(chain_link)),
             first_position: Position::default(),
+            head_position: Position::default(),
         }
+    }
+
+    #[must_use]
+    pub fn head(&self) -> &UnfinalizedBlock<P> {
+        &self.blocks[self.resolve_position(self.head_position)]
     }
 
     #[must_use]
@@ -119,6 +126,11 @@ impl<P: Preset> Segment<P> {
     #[must_use]
     pub const fn first_position(&self) -> Position {
         self.first_position
+    }
+
+    #[must_use]
+    pub const fn head_position(&self) -> Position {
+        self.head_position
     }
 
     #[must_use]
@@ -232,6 +244,10 @@ impl<P: Preset> Segment<P> {
         assert!(index < self.len().get());
 
         index
+    }
+
+    pub const fn update_head_position(&mut self, head_block_index: usize) {
+        self.head_position = Position(head_block_index.saturating_add(self.first_position.get()))
     }
 }
 
