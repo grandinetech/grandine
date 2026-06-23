@@ -61,6 +61,7 @@ pub const INTERVALS_PER_SLOT_GLOAS: NonZeroUsize = nonzero!(4_usize);
 pub const DOMAIN_BEACON_BUILDER: DomainType = H32(hex!("0B000000"));
 pub const DOMAIN_PTC_ATTESTER: DomainType = H32(hex!("0C000000"));
 pub const DOMAIN_PROPOSER_PREFERENCES: DomainType = H32(hex!("0D000000"));
+pub const DOMAIN_BUILDER_DEPOSIT: DomainType = H32(hex!("0E000000"));
 
 // Payload status
 pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 0u8;

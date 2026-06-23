@@ -22,16 +22,23 @@ use types::{
         containers::{ExecutionPayload as CapellaExecutionPayload, Withdrawal},
         primitives::WithdrawalIndex,
     },
-    combined::{ExecutionPayload, SignedBeaconBlock},
+    combined::{ExecutionPayload, ExecutionRequests, SignedBeaconBlock},
     deneb::{
         containers::{BlobIdentifier, ExecutionPayload as DenebExecutionPayload},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
+        ConsolidationRequest, DepositRequest, ExecutionRequests as ElectraExecutionRequests,
+        WithdrawalRequest,
     },
     fulu::containers::DataColumnIdentifier,
-    gloas::{containers::ExecutionPayload as GloasExecutionPayload, primitives::BlockAccessList},
+    gloas::{
+        containers::{
+            BuilderDepositRequest, BuilderExitRequest, ExecutionPayload as GloasExecutionPayload,
+            ExecutionRequests as GloasExecutionRequests,
+        },
+        primitives::BlockAccessList,
+    },
     nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot, UnixSeconds,
@@ -40,10 +47,12 @@ use types::{
     preset::Preset,
 };
 
-const SUPPORTED_REQUEST_TYPES: &[&str; 3] = &[
+const SUPPORTED_REQUEST_TYPES: &[&str; 5] = &[
     RequestType::Deposits.request_type(),
     RequestType::Withdrawals.request_type(),
     RequestType::Consolidations.request_type(),
+    RequestType::BuilderDeposits.request_type(),
+    RequestType::BuilderExits.request_type(),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -51,6 +60,8 @@ pub enum RequestType {
     Deposits,
     Withdrawals,
     Consolidations,
+    BuilderDeposits,
+    BuilderExits,
 }
 
 impl RequestType {
@@ -60,6 +71,8 @@ impl RequestType {
             Self::Deposits => "0x00",
             Self::Withdrawals => "0x01",
             Self::Consolidations => "0x02",
+            Self::BuilderDeposits => "0x03",
+            Self::BuilderExits => "0x04",
         }
     }
 
@@ -69,6 +82,8 @@ impl RequestType {
             Self::Deposits => 0x00,
             Self::Withdrawals => 0x01,
             Self::Consolidations => 0x02,
+            Self::BuilderDeposits => 0x03,
+            Self::BuilderExits => 0x04,
         }
     }
 
@@ -78,6 +93,8 @@ impl RequestType {
             Self::Deposits => "deposit",
             Self::Withdrawals => "withdrawal",
             Self::Consolidations => "consolidation",
+            Self::BuilderDeposits => "builder_deposit",
+            Self::BuilderExits => "builder_exit",
         }
     }
 }
@@ -90,6 +107,8 @@ impl TryFrom<u8> for RequestType {
             0x00 => Ok(Self::Deposits),
             0x01 => Ok(Self::Withdrawals),
             0x02 => Ok(Self::Consolidations),
+            0x03 => Ok(Self::BuilderDeposits),
+            0x04 => Ok(Self::BuilderExits),
             v => Err(v),
         }
     }
@@ -748,7 +767,7 @@ impl<P: Preset> From<EngineGetPayloadV4Response<P>> for WithBlobsAndMev<Executio
             Some(KzgProofs::Deneb(proofs)),
             Some(blobs),
             Some(block_value),
-            Some(execution_requests.into()),
+            Some(ExecutionRequests::Electra(execution_requests.into())),
         )
     }
 }
@@ -788,7 +807,7 @@ impl<P: Preset> From<EngineGetPayloadV5Response<P>> for WithBlobsAndMev<Executio
             Some(KzgProofs::Fulu(proofs)),
             Some(blobs),
             Some(block_value),
-            Some(execution_requests.into()),
+            Some(ExecutionRequests::Electra(execution_requests.into())),
         )
     }
 }
@@ -829,7 +848,7 @@ impl<P: Preset> From<EngineGetPayloadV6Response<P>> for WithBlobsAndMev<Executio
             Some(KzgProofs::Fulu(proofs)),
             Some(blobs),
             Some(block_value),
-            Some(execution_requests.into()),
+            Some(ExecutionRequests::Gloas(execution_requests.into())),
         )
     }
 }
@@ -1002,6 +1021,8 @@ pub struct RawExecutionRequests<P: Preset>(
     ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
     ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
     ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+    ContiguousList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
+    ContiguousList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
 );
 
 impl<P: Preset> Serialize for RawExecutionRequests<P> {
@@ -1009,7 +1030,13 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
     where
         S: serde::Serializer,
     {
-        let Self(deposit_requests, withdrawal_requests, consolidation_requests) = self;
+        let Self(
+            deposit_requests,
+            withdrawal_requests,
+            consolidation_requests,
+            builder_deposits,
+            builder_exits,
+        ) = self;
         let mut seq = serializer.serialize_seq(None)?;
 
         if !deposit_requests.is_empty() {
@@ -1040,11 +1067,32 @@ impl<P: Preset> Serialize for RawExecutionRequests<P> {
             ))?;
         }
 
+        if !builder_deposits.is_empty() {
+            let bytes = builder_deposits.to_ssz().map_err(S::Error::custom)?;
+
+            seq.serialize_element(&format_args!(
+                "{}{}",
+                RequestType::BuilderDeposits.request_type(),
+                const_hex::encode(bytes).as_str(),
+            ))?;
+        }
+
+        if !builder_exits.is_empty() {
+            let bytes = builder_exits.to_ssz().map_err(S::Error::custom)?;
+
+            seq.serialize_element(&format_args!(
+                "{}{}",
+                RequestType::BuilderExits.request_type(),
+                const_hex::encode(bytes).as_str(),
+            ))?;
+        }
+
         seq.end()
     }
 }
 
 impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
+    #[expect(clippy::too_many_lines)]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -1110,6 +1158,8 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                 let mut deposit_requests = ContiguousList::default();
                 let mut withdrawal_requests = ContiguousList::default();
                 let mut consolidation_requests = ContiguousList::default();
+                let mut builder_deposits = ContiguousList::default();
+                let mut builder_exits = ContiguousList::default();
 
                 while let Some(next_element) = seq.next_element::<String>()? {
                     if let Some(digits) =
@@ -1145,6 +1195,30 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                         continue;
                     }
 
+                    if let Some(digits) =
+                        next_element.strip_prefix(RequestType::BuilderDeposits.request_type())
+                    {
+                        builder_deposits = decode_requests(
+                            digits,
+                            RequestType::BuilderDeposits,
+                            &mut prev_request_type,
+                        )?;
+
+                        continue;
+                    }
+
+                    if let Some(digits) =
+                        next_element.strip_prefix(RequestType::BuilderExits.request_type())
+                    {
+                        builder_exits = decode_requests(
+                            digits,
+                            RequestType::BuilderExits,
+                            &mut prev_request_type,
+                        )?;
+
+                        continue;
+                    }
+
                     return Err(serde::de::Error::unknown_variant(
                         &next_element,
                         SUPPORTED_REQUEST_TYPES,
@@ -1155,6 +1229,8 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
                     deposit_requests,
                     withdrawal_requests,
                     consolidation_requests,
+                    builder_deposits,
+                    builder_exits,
                 ))
             }
         }
@@ -1167,26 +1243,82 @@ impl<'de, P: Preset> Deserialize<'de> for RawExecutionRequests<P> {
     }
 }
 
-impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
-    fn from(execution_requests: ExecutionRequests<P>) -> Self {
-        let ExecutionRequests {
+impl<P: Preset> From<ElectraExecutionRequests<P>> for RawExecutionRequests<P> {
+    fn from(execution_requests: ElectraExecutionRequests<P>) -> Self {
+        let ElectraExecutionRequests {
             deposits,
             withdrawals,
             consolidations,
         } = execution_requests;
 
-        Self(deposits, withdrawals, consolidations)
+        Self(
+            deposits,
+            withdrawals,
+            consolidations,
+            ContiguousList::default(),
+            ContiguousList::default(),
+        )
     }
 }
 
-impl<P: Preset> From<RawExecutionRequests<P>> for ExecutionRequests<P> {
+impl<P: Preset> From<RawExecutionRequests<P>> for ElectraExecutionRequests<P> {
     fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
-        let RawExecutionRequests(deposits, withdrawals, consolidations) = raw_execution_requests;
+        let RawExecutionRequests(deposits, withdrawals, consolidations, ..) =
+            raw_execution_requests;
 
         Self {
             deposits,
             withdrawals,
             consolidations,
+        }
+    }
+}
+
+impl<P: Preset> From<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
+    fn from(execution_requests: GloasExecutionRequests<P>) -> Self {
+        let GloasExecutionRequests {
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+        } = execution_requests;
+
+        Self(
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+        )
+    }
+}
+
+impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
+    fn from(raw_execution_requests: RawExecutionRequests<P>) -> Self {
+        let RawExecutionRequests(
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+        ) = raw_execution_requests;
+
+        Self {
+            deposits,
+            withdrawals,
+            consolidations,
+            builder_deposits,
+            builder_exits,
+        }
+    }
+}
+
+impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
+    fn from(execution_requests: ExecutionRequests<P>) -> Self {
+        match execution_requests {
+            ExecutionRequests::Electra(requests) => requests.into(),
+            ExecutionRequests::Gloas(requests) => requests.into(),
         }
     }
 }
@@ -1330,7 +1462,7 @@ mod tests {
 
     #[test]
     fn test_non_default_raw_execution_requests_roundtrip() -> Result<()> {
-        let execution_requests = ExecutionRequests::<Mainnet> {
+        let execution_requests = ElectraExecutionRequests::<Mainnet> {
             deposits: ContiguousList::try_from(vec![
                 DepositRequest {
                     pubkey: hex!("92f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb688").into(),
@@ -1384,7 +1516,7 @@ mod tests {
     #[test]
     fn test_invalid_prefix_raw_execution_requests_deserialization() {
         let payload = json!([
-            "0x0392f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68802000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b000000000000000090a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d602000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e00100000000000000",
+            "0x0592f9fe7570a6650d030bb2227d699c744303d08a887cd2e1592e30906cd8cedf9646c1a1afd902235bb36620180eb68802000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000a13741d65b47825c147201cfce3360438d4011fe81b455e86226c95a2669bfde14712ba36d1c2f44371a98bf28ff38370ce7d28c65872bf65ff88d6014468676029e298903c89c51c27ab5f07e178b8b14d3ca191e2ce3b24703629e3994e05b000000000000000090a58546229c585cef35f3afab904411530303d95c371e246a2e9a1ef6beb5db7a98c2fd79a388709a30ec782576a5d602000000000000000000000065d08a056c17ae13370565b04cf77d2afa1cb9fa0010a5d4e8000000b23e205d2fcfc3e9d3ae58c0f78b55b19f97f59eaf43d85113a1960ee2c38f6b4ef705302e46e0593fc41ba5632b047a14d76dc82bb2619d7c73e0d89da2eda2ea11fff9036c2d08f9d457c07f23b1411ecd13ff0e9c00eeb85d851bae2494e00100000000000000",
         ]);
 
         let error = serde_json::from_value::<RawExecutionRequests<Mainnet>>(payload)

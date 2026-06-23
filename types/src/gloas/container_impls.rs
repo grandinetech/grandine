@@ -2,18 +2,18 @@ use core::fmt;
 use std::sync::Arc;
 
 use ssz::{ByteList, ContiguousList, H256};
+use typenum::Unsigned as _;
 
 use crate::{
     capella::containers::Withdrawal,
     deneb::primitives::{KzgCommitment, KzgProof},
-    electra::containers::{
-        ConsolidationRequest, DepositRequest, ExecutionRequests, WithdrawalRequest,
-    },
+    electra::containers::{ConsolidationRequest, DepositRequest, WithdrawalRequest},
     gloas::{
         containers::{
-            CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload,
-            ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
-            PayloadEnvelopeIdentifier, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            BuilderDepositRequest, BuilderExitRequest, CombinedPayloadAttestation,
+            DataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope, ExecutionRequests,
+            PayloadAttestationData, PayloadAttestationMessage, PayloadEnvelopeIdentifier,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
         primitives::BuilderIndex,
     },
@@ -44,16 +44,22 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
                 payload: ExecutionPayload {
                     extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
                     transactions: Arc::new(ContiguousList::full(ByteList::from(
-                        ContiguousList::full(u8::MAX),
+                        ContiguousList::try_from(vec![u8::MAX; P::MaxBytesPerTransaction::USIZE])
+                            .expect("should fit in MaxBytesPerTransaction"),
                     ))),
                     withdrawals: ContiguousList::full(Withdrawal::default()),
-                    block_access_list: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
+                    block_access_list: Arc::new(ByteList::from(
+                        ContiguousList::try_from(vec![u8::MAX; P::MaxBytesPerTransaction::USIZE])
+                            .expect("should fit in MaxBytesPerTransaction"),
+                    )),
                     ..Default::default()
                 },
                 execution_requests: ExecutionRequests {
                     deposits: ContiguousList::full(DepositRequest::default()),
                     withdrawals: ContiguousList::full(WithdrawalRequest::default()),
                     consolidations: ContiguousList::full(ConsolidationRequest::default()),
+                    builder_deposits: ContiguousList::full(BuilderDepositRequest::default()),
+                    builder_exits: ContiguousList::full(BuilderExitRequest::default()),
                 },
                 ..Default::default()
             },

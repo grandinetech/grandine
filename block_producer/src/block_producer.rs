@@ -62,7 +62,7 @@ use types::{
     },
     combined::{
         AttesterSlashing, BeaconBlock, BeaconState, BlindedBeaconBlock, ExecutionPayload,
-        ExecutionPayloadHeader, SignedBlindedBeaconBlock,
+        ExecutionPayloadHeader, ExecutionRequests, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -75,7 +75,7 @@ use types::{
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
         BeaconBlock as ElectraBeaconBlock, BeaconBlockBody as ElectraBeaconBlockBody,
-        ExecutionRequests,
+        ExecutionRequests as ElectraExecutionRequests,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     gloas::{
@@ -83,7 +83,8 @@ use types::{
         containers::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
             ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
-            ExecutionPayloadEnvelope, PayloadAttestation, SignedExecutionPayloadBid,
+            ExecutionPayloadEnvelope, ExecutionRequests as GloasExecutionRequests,
+            PayloadAttestation, SignedExecutionPayloadBid,
         },
     },
     nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
@@ -488,7 +489,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 state,
                 exit,
             ),
-            BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
+            BeaconState::Gloas(state) => electra::validate_voluntary_exit(
                 &self.producer_context.chain_config,
                 &self.producer_context.pubkey_cache,
                 state,
@@ -975,7 +976,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             execution_payload: DenebExecutionPayload::default(),
                             bls_to_execution_changes,
                             blob_kzg_commitments: ContiguousList::default(),
-                            execution_requests: ExecutionRequests::default(),
+                            execution_requests: ElectraExecutionRequests::default(),
                         },
                     })),
                     Phase::Fulu => BeaconBlock::from(Hc::new(FuluBeaconBlock {
@@ -996,7 +997,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             execution_payload: DenebExecutionPayload::default(),
                             bls_to_execution_changes,
                             blob_kzg_commitments: ContiguousList::default(),
-                            execution_requests: ExecutionRequests::default(),
+                            execution_requests: ElectraExecutionRequests::default(),
                         },
                     })),
                     Phase::Gloas => {
@@ -1024,7 +1025,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 .map(|payload| payload.message.execution_requests.clone())
                                 .unwrap_or_default()
                         } else {
-                            ExecutionRequests::default()
+                            GloasExecutionRequests::default()
                         };
 
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
@@ -1105,7 +1106,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         beacon_block: BeaconBlock<P>,
         payload_header: ExecutionPayloadHeader<P>,
         blob_kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-        execution_requests: Option<ExecutionRequests<P>>,
+        execution_requests: Option<ElectraExecutionRequests<P>>,
     ) -> Option<(BlindedBeaconBlock<P>, Option<BlockRewards>)> {
         let without_state_root = match beacon_block.into_blinded(
             payload_header,
@@ -1535,7 +1536,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     state,
                     *voluntary_exit,
                 ),
-                BeaconState::Gloas(state) => gloas::validate_voluntary_exit(
+                BeaconState::Gloas(state) => electra::validate_voluntary_exit(
                     &self.producer_context.chain_config,
                     &self.producer_context.pubkey_cache,
                     state,
@@ -2231,7 +2232,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     /// Returns only the fields needed to build `ExecutionPayloadEnvelope`
     async fn get_gloas_envelope_data(
         &self,
-    ) -> Option<(GloasExecutionPayload<P>, ExecutionRequests<P>)> {
+    ) -> Option<(GloasExecutionPayload<P>, GloasExecutionRequests<P>)> {
         let payload_root = *self
             .producer_context
             .cached_payload_roots
@@ -2253,12 +2254,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             ..
         } = local_payload.result;
 
-        let ExecutionPayload::Gloas(payload) = execution_payload else {
+        let (ExecutionPayload::Gloas(payload), Some(ExecutionRequests::Gloas(requests))) =
+            (execution_payload, execution_requests)
+        else {
             warn_with_peers!("unexpected non-Gloas payload format in Gloas envelope data");
             return None;
         };
 
-        Some((payload, execution_requests.unwrap_or_default()))
+        Some((payload, requests))
     }
 
     async fn fee_recipient(&self) -> Result<ExecutionAddress> {

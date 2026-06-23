@@ -43,14 +43,14 @@ use types::{
     },
     electra::containers::{
         Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock,
-        BeaconBlockBody as ElectraBeaconBlockBody, ExecutionRequests,
+        BeaconBlockBody as ElectraBeaconBlockBody,
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayloadBid, SignedExecutionPayloadBid,
+            ExecutionPayloadBid, ExecutionRequests, SignedExecutionPayloadBid,
         },
     },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},

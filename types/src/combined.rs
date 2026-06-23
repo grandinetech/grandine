@@ -70,7 +70,8 @@ use crate::{
             AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
             AttesterSlashing as ElectraAttesterSlashing, BeaconBlock as ElectraBeaconBlock,
             BeaconBlockBody as ElectraBeaconBlockBody,
-            BlindedBeaconBlock as ElectraBlindedBeaconBlock, ExecutionRequests,
+            BlindedBeaconBlock as ElectraBlindedBeaconBlock,
+            ExecutionRequests as ElectraExecutionRequests,
             LightClientBootstrap as ElectraLightClientBootstrap,
             LightClientFinalityUpdate as ElectraLightClientFinalityUpdate,
             LightClientOptimisticUpdate as ElectraLightClientOptimisticUpdate,
@@ -99,6 +100,7 @@ use crate::{
         containers::{
             BeaconBlock as GloasBeaconBlock, DataColumnSidecar as GloasDataColumnSidecar,
             ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
+            ExecutionRequests as GloasExecutionRequests,
             LightClientBootstrap as GloasLightClientBootstrap,
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
@@ -968,7 +970,7 @@ impl<P: Preset> BeaconBlock<P> {
         mut self,
         execution_requests: Option<ExecutionRequests<P>>,
     ) -> Self {
-        let Some(execution_requests) = execution_requests else {
+        let Some(ExecutionRequests::Electra(execution_requests)) = execution_requests else {
             return self;
         };
 
@@ -1010,7 +1012,7 @@ impl<P: Preset> BeaconBlock<P> {
         self,
         execution_payload_header: ExecutionPayloadHeader<P>,
         kzg_commitments: Option<ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
-        execution_requests: Option<ExecutionRequests<P>>,
+        execution_requests: Option<ElectraExecutionRequests<P>>,
     ) -> Result<BlindedBeaconBlock<P>, BlockPhaseError> {
         match (self, execution_payload_header) {
             (Self::Bellatrix(block), ExecutionPayloadHeader::Bellatrix(header)) => Ok(block
@@ -1623,8 +1625,49 @@ pub enum ExecutionPayloadParams<P: Preset> {
     Electra {
         versioned_hashes: Vec<VersionedHash>,
         parent_beacon_block_root: H256,
-        execution_requests: ExecutionRequests<P>,
+        execution_requests: ElectraExecutionRequests<P>,
     },
+    Gloas {
+        versioned_hashes: Vec<VersionedHash>,
+        parent_beacon_block_root: H256,
+        execution_requests: GloasExecutionRequests<P>,
+    },
+}
+
+#[derive(Debug, Clone, From, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(bound = "", untagged)]
+pub enum ExecutionRequests<P: Preset> {
+    Electra(ElectraExecutionRequests<P>),
+    Gloas(GloasExecutionRequests<P>),
+}
+
+impl<P: Preset> SszSize for ExecutionRequests<P> {
+    // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
+    // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+        ElectraExecutionRequests::<P>::SIZE,
+        GloasExecutionRequests::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszWrite for ExecutionRequests<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Electra(execution_requests) => execution_requests.write_variable(bytes),
+            Self::Gloas(execution_requests) => execution_requests.write_variable(bytes),
+        }
+    }
+}
+
+impl<P: Preset> SszHash for ExecutionRequests<P> {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> H256 {
+        match self {
+            Self::Electra(execution_requests) => execution_requests.hash_tree_root(),
+            Self::Gloas(execution_requests) => execution_requests.hash_tree_root(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

@@ -223,7 +223,9 @@ pub mod fulu {
     pub use epoch_processing::process_proposer_lookahead;
 
     pub(crate) use blinded_block_processing::custom_process_blinded_block;
-    pub(crate) use block_processing::{process_block, process_block_for_gossip};
+    pub(crate) use block_processing::{
+        process_block, process_block_for_gossip, process_deposit_request,
+    };
     pub(crate) use epoch_processing::process_epoch;
     pub(crate) use slot_processing::process_slots;
     pub(crate) use state_transition::{state_transition, verify_signatures};
@@ -237,9 +239,7 @@ pub mod fulu {
 }
 
 pub mod gloas {
-    pub use block_processing::{
-        apply_parent_execution_payload, get_expected_withdrawals, validate_voluntary_exit,
-    };
+    pub use block_processing::{apply_parent_execution_payload, get_expected_withdrawals};
 
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
     pub(crate) use epoch_processing::process_epoch;
