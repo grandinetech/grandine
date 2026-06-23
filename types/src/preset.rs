@@ -41,7 +41,10 @@ use crate::{
         PendingPartialWithdrawal, WithdrawalRequest,
     },
     fulu::primitives::{Cell, ColumnIndex},
-    gloas::containers::{BuilderPendingPayment, BuilderPendingWithdrawal, PayloadAttestation},
+    gloas::containers::{
+        BuilderDepositRequest, BuilderExitRequest, BuilderPendingPayment, BuilderPendingWithdrawal,
+        PayloadAttestation,
+    },
     phase0::{
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
@@ -244,6 +247,16 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
+    type MaxBuilderDepositRequestsPerPayload: MerkleElements<BuilderDepositRequest>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
+    type MaxBuilderExitRequestsPerPayload: MerkleElements<BuilderExitRequest>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
 
     // Derived type-level variables
     type MaxAttestersPerSlot: MerkleElements<ValidatorIndex>
@@ -388,6 +401,8 @@ impl Preset for Mainnet {
     type MaxPayloadAttestation = U4;
     type BuilderRegistryLimit = U1099511627776;
     type BuilderPendingWithdrawalsLimit = U1048576;
+    type MaxBuilderDepositRequestsPerPayload = U256;
+    type MaxBuilderExitRequestsPerPayload = U16;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -470,6 +485,8 @@ impl Preset for Minimal {
         type MaxPayloadAttestation;
         type BuilderRegistryLimit;
         type BuilderPendingWithdrawalsLimit;
+        type MaxBuilderDepositRequestsPerPayload;
+        type MaxBuilderExitRequestsPerPayload;
     }
 
     // Phase 0
@@ -587,6 +604,8 @@ impl Preset for Medalla {
         type MaxPayloadAttestation;
         type BuilderRegistryLimit;
         type BuilderPendingWithdrawalsLimit;
+        type MaxBuilderDepositRequestsPerPayload;
+        type MaxBuilderExitRequestsPerPayload;
 
         // Derived type-level variables
         type MaxAttestersPerSlot;
@@ -1109,6 +1128,10 @@ pub struct GloasPreset {
     builder_pending_withdrawals_limit: u64,
     #[serde(with = "serde_utils::string_or_native")]
     max_builders_per_withdrawals_sweep: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_builder_deposit_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_builder_exit_requests_per_payload: u64,
 }
 
 impl GloasPreset {
@@ -1120,6 +1143,8 @@ impl GloasPreset {
             builder_registry_limit: P::BuilderRegistryLimit::non_zero(),
             builder_pending_withdrawals_limit: P::BuilderPendingWithdrawalsLimit::U64,
             max_builders_per_withdrawals_sweep: P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,
+            max_builder_deposit_requests_per_payload: P::MaxBuilderDepositRequestsPerPayload::U64,
+            max_builder_exit_requests_per_payload: P::MaxBuilderExitRequestsPerPayload::U64,
         }
     }
 }

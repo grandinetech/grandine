@@ -335,7 +335,7 @@ impl Eth1Api {
             }
             (
                 ExecutionPayload::Gloas(payload),
-                Some(ExecutionPayloadParams::Electra {
+                Some(ExecutionPayloadParams::Gloas {
                     versioned_hashes,
                     parent_beacon_block_root,
                     execution_requests,
@@ -1046,7 +1046,7 @@ mod tests {
         assert_eq!(payload.value.phase(), Phase::Deneb);
         assert_eq!(
             payload.execution_requests,
-            Some(ExecutionRequests::default())
+            Some(ExecutionRequests::default().into())
         );
 
         Ok(())
@@ -1148,7 +1148,7 @@ mod tests {
                     }
                 ])?,
                 ..Default::default()
-            })
+            }.into())
         );
 
         Ok(())

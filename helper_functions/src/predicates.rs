@@ -23,7 +23,9 @@ use types::{
     fulu::containers::DataColumnSidecar,
     gloas::{
         consts::BUILDER_WITHDRAWAL_PREFIX,
-        containers::{Builder, IndexedPayloadAttestation},
+        containers::{
+            Builder, BuilderDepositMessage, BuilderDepositRequest, IndexedPayloadAttestation,
+        },
         primitives::BuilderIndex,
     },
     phase0::{
@@ -596,6 +598,31 @@ pub fn is_valid_deposit_signature(
     } = *deposit;
 
     let deposit_message = DepositMessage {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+    };
+
+    pubkey_cache
+        .get_or_insert(pubkey)
+        .and_then(|decompressed| deposit_message.verify(config, signature, decompressed))
+        .is_ok()
+}
+
+#[must_use]
+pub fn is_valid_builder_deposit_signature(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    request: &BuilderDepositRequest,
+) -> bool {
+    let BuilderDepositRequest {
+        pubkey,
+        withdrawal_credentials,
+        amount,
+        signature,
+    } = *request;
+
+    let deposit_message = BuilderDepositMessage {
         pubkey,
         withdrawal_credentials,
         amount,
