@@ -78,8 +78,6 @@ pub enum Error<P: Preset> {
     },
     #[error("builder payment index ({index}) out of bounds (length: {length})")]
     BuilderPaymentIndexOutOfBounds { index: u64, length: u64 },
-    #[error("cannot exit builder because it has pending withdrawals in the queue")]
-    BuilderVoluntaryExitWithPendingWithdrawals,
     #[error("deposit count is incorrect (computed: {computed}, in_block: {in_block})")]
     DepositCountMismatch { computed: u64, in_block: u64 },
     #[error("deposit proof is invalid: {deposit:?}")]

@@ -19,9 +19,8 @@ mod tested_types {
         },
         electra::containers::{
             AggregateAndProof, Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest,
-            ExecutionRequests, IndexedAttestation, PendingConsolidation, PendingDeposit,
-            PendingPartialWithdrawal, SignedAggregateAndProof, SingleAttestation,
-            WithdrawalRequest,
+            IndexedAttestation, PendingConsolidation, PendingDeposit, PendingPartialWithdrawal,
+            SignedAggregateAndProof, SingleAttestation, WithdrawalRequest,
         },
         fulu::containers::{DataColumnsByRootIdentifier, MatrixEntry},
         gloas::{beacon_state::BeaconState, containers::*},
@@ -118,6 +117,18 @@ tests_for_type! {
     Builder,
     "consensus-spec-tests/tests/mainnet/gloas/ssz_static/Builder/*/*",
     "consensus-spec-tests/tests/minimal/gloas/ssz_static/Builder/*/*",
+}
+
+tests_for_type! {
+    BuilderDepositRequest,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BuilderDepositRequest/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/BuilderDepositRequest/*/*",
+}
+
+tests_for_type! {
+    BuilderExitRequest,
+    "consensus-spec-tests/tests/mainnet/gloas/ssz_static/BuilderExitRequest/*/*",
+    "consensus-spec-tests/tests/minimal/gloas/ssz_static/BuilderExitRequest/*/*",
 }
 
 tests_for_type! {

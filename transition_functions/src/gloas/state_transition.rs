@@ -216,17 +216,13 @@ pub fn verify_signatures<P: Preset>(
         // Voluntary exits
 
         for voluntary_exit in &block.message.body.voluntary_exits {
-            let validator_index = voluntary_exit.message.validator_index;
-            let pubkey = if let Some(builder_index) = misc::maybe_builder_index(validator_index) {
-                state.builders.get(builder_index)?.pubkey
-            } else {
-                *accessors::public_key(state, validator_index)?
-            };
-
             verifier.verify_singular(
                 voluntary_exit.message.signing_root(config, state),
                 voluntary_exit.signature,
-                pubkey_cache.get_or_insert(pubkey)?,
+                pubkey_cache.get_or_insert(*accessors::public_key(
+                    state,
+                    voluntary_exit.message.validator_index,
+                )?)?,
                 SignatureKind::VoluntaryExit,
             )?;
         }

@@ -30,10 +30,13 @@ use types::{
     },
     fulu::containers::BeaconBlock as FuluBeaconBlock,
     gloas::{
-        consts::{DOMAIN_BEACON_BUILDER, DOMAIN_PROPOSER_PREFERENCES, DOMAIN_PTC_ATTESTER},
+        consts::{
+            DOMAIN_BEACON_BUILDER, DOMAIN_BUILDER_DEPOSIT, DOMAIN_PROPOSER_PREFERENCES,
+            DOMAIN_PTC_ATTESTER,
+        },
         containers::{
-            BeaconBlock as GloasBeaconBlock, ExecutionPayloadBid, ExecutionPayloadEnvelope,
-            PayloadAttestationData, ProposerPreferences,
+            BeaconBlock as GloasBeaconBlock, BuilderDepositMessage, ExecutionPayloadBid,
+            ExecutionPayloadEnvelope, PayloadAttestationData, ProposerPreferences,
         },
     },
     phase0::{
@@ -504,4 +507,10 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
         );
         misc::compute_signing_root(self, domain)
     }
+}
+
+// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.11/specs/gloas/beacon-chain.md#new-is_valid_builder_deposit_signature>
+impl SignForAllForks for BuilderDepositMessage {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BUILDER_DEPOSIT;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::BuilderDeposit;
 }

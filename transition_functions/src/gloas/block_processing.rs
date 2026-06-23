@@ -8,12 +8,12 @@ use helper_functions::{
     accessors::{
         self, attestation_epoch, get_attestation_participation_flags, get_base_reward,
         get_base_reward_per_increment, get_beacon_proposer_index, get_current_epoch,
-        get_indexed_payload_attestation, get_pending_balance_to_withdraw_for_builder,
-        get_previous_epoch, get_randao_mix, initialize_shuffled_indices,
+        get_indexed_payload_attestation, get_previous_epoch, get_randao_mix,
+        initialize_shuffled_indices,
     },
     electra::{
-        get_attesting_indices, get_indexed_attestation, initiate_validator_exit,
-        is_fully_withdrawable_validator, is_partially_withdrawable_validator, slash_validator,
+        get_attesting_indices, get_indexed_attestation, is_fully_withdrawable_validator,
+        is_partially_withdrawable_validator, slash_validator,
     },
     error::SignatureKind,
     misc::{
@@ -21,9 +21,7 @@ use helper_functions::{
         compute_epoch_at_slot, convert_builder_index_to_validator_index, get_max_effective_balance,
         maybe_builder_index,
     },
-    mutators::{
-        balance, builder_balance, decrease_balance, increase_balance, initiate_builder_exit,
-    },
+    mutators::{balance, builder_balance, decrease_balance, increase_balance},
     predicates::{
         can_builder_cover_bid, is_active_builder, is_attestation_same_slot,
         validate_constructed_indexed_attestation, validate_constructed_indexed_payload_attestation,
@@ -43,20 +41,19 @@ use types::{
     altair::consts::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR},
     capella::{containers::Withdrawal, primitives::WithdrawalIndex},
     config::Config,
-    electra::containers::{Attestation, ExecutionRequests},
+    electra::containers::Attestation,
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_BUILDER_VERSION},
         containers::{
             BeaconBlock, BuilderPendingPayment, BuilderPendingWithdrawal, ExecutionPayloadBid,
-            PayloadAttestation, SignedBeaconBlock, SignedExecutionPayloadBid,
+            ExecutionRequests, PayloadAttestation, SignedBeaconBlock, SignedExecutionPayloadBid,
         },
-        primitives::BuilderIndex,
     },
     nonstandard::{AttestationEpoch, SlashingKind},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::{AttestationData, ProposerSlashing, SignedVoluntaryExit},
+        containers::{AttestationData, ProposerSlashing},
         primitives::{Epoch, ExecutionAddress, Gwei},
     },
     preset::{BuilderPendingPaymentsLength, Preset, SlotsPerHistoricalRoot},
@@ -919,7 +916,13 @@ where
     }
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {
-        process_voluntary_exit(config, pubkey_cache, state, voluntary_exit, &mut verifier)?;
+        electra::process_voluntary_exit(
+            config,
+            pubkey_cache,
+            state,
+            voluntary_exit,
+            &mut verifier,
+        )?;
     }
 
     for bls_to_execution_change in body.bls_to_execution_changes().iter().copied() {
@@ -1114,121 +1117,6 @@ pub fn validate_attestation_with_verifier<P: Preset>(
         &indexed_attestation,
         verifier,
     )
-}
-
-#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
-pub fn process_voluntary_exit<P: Preset>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &mut impl PostGloasBeaconState<P>,
-    signed_voluntary_exit: SignedVoluntaryExit,
-    verifier: impl Verifier,
-) -> Result<()> {
-    validate_voluntary_exit_with_verifier(
-        config,
-        pubkey_cache,
-        state,
-        signed_voluntary_exit,
-        verifier,
-    )?;
-
-    // > Initiate exit
-    let validator_index = signed_voluntary_exit.message.validator_index;
-    if let Some(builder_index) = maybe_builder_index(validator_index) {
-        initiate_builder_exit(config, state, builder_index)
-    } else {
-        initiate_validator_exit(config, state, validator_index)
-    }
-}
-
-pub fn validate_voluntary_exit<P: Preset>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &impl PostGloasBeaconState<P>,
-    signed_voluntary_exit: SignedVoluntaryExit,
-) -> Result<()> {
-    validate_voluntary_exit_with_verifier(
-        config,
-        pubkey_cache,
-        state,
-        signed_voluntary_exit,
-        SingleVerifier,
-    )
-}
-
-pub fn validate_voluntary_exit_with_verifier<P: Preset>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &impl PostGloasBeaconState<P>,
-    signed_voluntary_exit: SignedVoluntaryExit,
-    verifier: impl Verifier,
-) -> Result<()> {
-    if let Some(builder_index) = maybe_builder_index(signed_voluntary_exit.message.validator_index)
-    {
-        validate_builder_voluntary_exit_with_verifier(
-            config,
-            pubkey_cache,
-            state,
-            signed_voluntary_exit,
-            builder_index,
-            verifier,
-        )
-    } else {
-        electra::validate_voluntary_exit_with_verifier(
-            config,
-            pubkey_cache,
-            state,
-            signed_voluntary_exit,
-            verifier,
-        )
-    }
-}
-
-fn validate_builder_voluntary_exit_with_verifier<P: Preset>(
-    config: &Config,
-    pubkey_cache: &PubkeyCache,
-    state: &impl PostGloasBeaconState<P>,
-    signed_voluntary_exit: SignedVoluntaryExit,
-    builder_index: BuilderIndex,
-    mut verifier: impl Verifier,
-) -> Result<()> {
-    let voluntary_exit = signed_voluntary_exit.message;
-    let builder = state.builders().get(builder_index)?;
-    let current_epoch = get_current_epoch(state);
-
-    // > Exits must specify an epoch when they become valid; they are not valid before then
-    ensure!(
-        current_epoch >= voluntary_exit.epoch,
-        Error::<P>::VoluntaryExitIsExpired {
-            current_epoch,
-            epoch: voluntary_exit.epoch,
-        },
-    );
-
-    // > Verify the builder is active
-    ensure!(
-        is_active_builder(builder, state.finalized_checkpoint().epoch),
-        Error::<P>::BuilderNotActive {
-            index: builder_index,
-            current_epoch
-        }
-    );
-
-    // > Only exit builder if it has no pending withdrawals in the queue
-    ensure!(
-        get_pending_balance_to_withdraw_for_builder(state, builder_index)? == 0,
-        Error::<P>::BuilderVoluntaryExitWithPendingWithdrawals
-    );
-
-    // > Verify signature
-    verifier.verify_singular(
-        voluntary_exit.signing_root(config, state),
-        signed_voluntary_exit.signature,
-        pubkey_cache.get_or_insert(builder.pubkey)?,
-        SignatureKind::VoluntaryExit,
-    )?;
-
-    Ok(())
 }
 
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
@@ -1474,7 +1362,7 @@ mod spec_tests {
     processing_tests! {
         process_voluntary_exit,
         |config, pubkey_cache, state, voluntary_exit, _| {
-            process_voluntary_exit(
+            electra::process_voluntary_exit(
                 config,
                 pubkey_cache,
                 state,
@@ -1490,7 +1378,7 @@ mod spec_tests {
     processing_tests! {
         process_voluntary_exit_churn,
         |config, pubkey_cache, state, voluntary_exit, _| {
-            process_voluntary_exit(
+            electra::process_voluntary_exit(
                 config,
                 pubkey_cache,
                 state,
@@ -1582,7 +1470,7 @@ mod spec_tests {
     validation_tests! {
         validate_voluntary_exit,
         |config, pubkey_cache, state, voluntary_exit| {
-            validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
+            electra::validate_voluntary_exit_with_verifier(config, pubkey_cache, state, voluntary_exit, SingleVerifier)
         },
         "voluntary_exit",
         "consensus-spec-tests/tests/mainnet/gloas/operations/voluntary_exit/*/*",
