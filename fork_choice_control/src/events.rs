@@ -52,6 +52,7 @@ pub enum Topic {
     ChainReorg,
     ContributionAndProof,
     DataColumnSidecar,
+    ExecutionPayloadAvailable,
     ExecutionPayloadBid,
     FinalizedCheckpoint,
     Head,
@@ -72,6 +73,7 @@ pub enum Event<P: Preset> {
     ChainReorg(ChainReorgEvent),
     ContributionAndProof(Box<SignedContributionAndProof<P>>),
     DataColumnSidecar(DataColumnSidecarEvent<P>),
+    ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent),
     ExecutionPayloadBid(ExecutionPayloadBidEvent<P>),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
@@ -94,6 +96,7 @@ impl<P: Preset> Event<P> {
             Self::ChainReorg(_) => Topic::ChainReorg,
             Self::ContributionAndProof(_) => Topic::ContributionAndProof,
             Self::DataColumnSidecar(_) => Topic::DataColumnSidecar,
+            Self::ExecutionPayloadAvailable(_) => Topic::ExecutionPayloadAvailable,
             Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
@@ -117,6 +120,7 @@ pub struct EventChannels<P: Preset> {
     pub chain_reorgs: Sender<Event<P>>,
     pub contribution_and_proofs: Sender<Event<P>>,
     pub data_column_sidecars: Sender<Event<P>>,
+    pub execution_payload_available: Sender<Event<P>>,
     pub execution_payload_bids: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
@@ -147,6 +151,7 @@ impl<P: Preset> EventChannels<P> {
             chain_reorgs: broadcast::channel(max_events).0,
             contribution_and_proofs: broadcast::channel(max_events).0,
             data_column_sidecars: broadcast::channel(max_events).0,
+            execution_payload_available: broadcast::channel(max_events).0,
             execution_payload_bids: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
@@ -170,6 +175,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ChainReorg => &self.chain_reorgs,
             Topic::ContributionAndProof => &self.contribution_and_proofs,
             Topic::DataColumnSidecar => &self.data_column_sidecars,
+            Topic::ExecutionPayloadAvailable => &self.execution_payload_available,
             Topic::ExecutionPayloadBid => &self.execution_payload_bids,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
@@ -272,6 +278,12 @@ impl<P: Preset> EventChannels<P> {
     ) {
         if let Err(error) = self.send_execution_payload_bid_event_internal(phase, payload_bid) {
             warn_with_peers!("unable to send execution payload bid event: {error}");
+        }
+    }
+
+    pub fn send_execution_payload_available_event(&self, slot: Slot, block_root: H256) {
+        if let Err(error) = self.send_execution_payload_available_event_internal(slot, block_root) {
+            warn_with_peers!("unable to send execution payload available event: {error}");
         }
     }
 
@@ -499,6 +511,22 @@ impl<P: Preset> EventChannels<P> {
                 data: payload_bid,
             });
             self.execution_payload_bids.send(event)?;
+        }
+
+        Ok(())
+    }
+
+    fn send_execution_payload_available_event_internal(
+        &self,
+        slot: Slot,
+        block_root: H256,
+    ) -> Result<()> {
+        if self.execution_payload_available.receiver_count() > 0 {
+            let event = Event::ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent {
+                slot,
+                block_root,
+            });
+            self.execution_payload_available.send(event)?;
         }
 
         Ok(())
@@ -780,6 +808,13 @@ pub struct ExecutionPayloadBidEvent<P: Preset> {
     pub data: Arc<SignedExecutionPayloadBid<P>>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ExecutionPayloadAvailableEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    pub block_root: H256,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct PayloadAttributesEvent {
     pub version: Phase,
@@ -942,5 +977,45 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
                 Self::Gloas(payload_attributes_v3.into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use types::preset::Mainnet;
+
+    use super::*;
+
+    #[test]
+    fn execution_payload_available_topic_uses_beacon_api_name() {
+        assert_eq!(
+            Topic::ExecutionPayloadAvailable.as_ref(),
+            "execution_payload_available",
+        );
+        assert!(matches!(
+            "execution_payload_available".parse(),
+            Ok(Topic::ExecutionPayloadAvailable),
+        ));
+    }
+
+    #[tokio::test]
+    async fn sends_execution_payload_available_event() {
+        let event_channels = EventChannels::<Mainnet>::new(1);
+        let mut receiver = event_channels.receiver_for(Topic::ExecutionPayloadAvailable);
+        let slot = 10;
+        let block_root = H256::repeat_byte(0x42);
+
+        event_channels.send_execution_payload_available_event(slot, block_root);
+
+        let event = receiver.recv().await.expect("event should be sent");
+
+        assert!(matches!(event.topic(), Topic::ExecutionPayloadAvailable));
+
+        let Event::ExecutionPayloadAvailable(event) = event else {
+            panic!("unexpected event type");
+        };
+
+        assert_eq!(event.slot, slot);
+        assert_eq!(event.block_root, block_root);
     }
 }

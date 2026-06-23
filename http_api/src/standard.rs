@@ -2503,13 +2503,14 @@ pub async fn beacon_events<P: Preset>(
                 Event::ChainReorg(data) => ssevent.json_data(data),
                 Event::ContributionAndProof(data) => ssevent.json_data(data),
                 Event::DataColumnSidecar(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadAvailable(data) => ssevent.json_data(data),
+                Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
                 Event::FinalizedCheckpoint(data) => ssevent.json_data(data),
                 Event::Head(data) => ssevent.json_data(data),
                 Event::PayloadAttributes(data) => ssevent.json_data(data),
                 Event::ProposerSlashing(data) => ssevent.json_data(data),
                 Event::SingleAttestation(data) => ssevent.json_data(data),
                 Event::VoluntaryExit(data) => ssevent.json_data(data),
-                Event::ExecutionPayloadBid(data) => ssevent.json_data(data),
             }
             .map_err(Into::into)
         })
@@ -4885,6 +4886,27 @@ mod tests {
                 ],
             }
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_deserialize_for_events_query_accepts_execution_payload_available() -> Result<()> {
+        let EventsQuery { topics } =
+            extract_query::<EventsQuery>("topics=execution_payload_available").await?;
+
+        assert!(matches!(
+            topics.as_slice(),
+            [Topic::ExecutionPayloadAvailable],
+        ));
+
+        let EventsQuery { topics } =
+            extract_query::<EventsQuery>("topics=head,execution_payload_available").await?;
+
+        assert!(matches!(
+            topics.as_slice(),
+            [Topic::Head, Topic::ExecutionPayloadAvailable],
+        ));
 
         Ok(())
     }
