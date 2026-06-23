@@ -13,7 +13,9 @@ use crate::{
     deneb::primitives::{KzgCommitment, KzgProof},
     electra::{
         consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
-        containers::{Attestation, AttesterSlashing, ExecutionRequests},
+        containers::{
+            Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, WithdrawalRequest,
+        },
     },
     fulu::primitives::{Cell, ColumnIndex},
     gloas::consts::ExecutionBlockHashGindexGloas,
@@ -72,6 +74,32 @@ pub struct Builder {
     pub deposit_epoch: Epoch,
     #[serde(with = "serde_utils::string_or_native")]
     pub withdrawable_epoch: Epoch,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderDepositMessage {
+    pub pubkey: PublicKeyBytes,
+    pub withdrawal_credentials: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub amount: Gwei,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderDepositRequest {
+    pub pubkey: PublicKeyBytes,
+    pub withdrawal_credentials: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub amount: Gwei,
+    pub signature: SignatureBytes,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderExitRequest {
+    pub source_address: ExecutionAddress,
+    pub pubkey: PublicKeyBytes,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -172,6 +200,17 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     pub builder_index: BuilderIndex,
     pub beacon_block_root: H256,
     pub parent_beacon_block_root: H256,
+}
+
+#[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct ExecutionRequests<P: Preset> {
+    pub deposits: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
+    pub withdrawals: ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    pub consolidations: ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+    pub builder_deposits:
+        ContiguousList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
+    pub builder_exits: ContiguousList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]

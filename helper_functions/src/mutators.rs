@@ -114,22 +114,6 @@ pub fn initiate_validator_exit<P: Preset>(
     Ok(())
 }
 
-pub fn initiate_builder_exit<P: Preset>(
-    config: &Config,
-    state: &mut impl PostGloasBeaconState<P>,
-    builder_index: BuilderIndex,
-) -> Result<()> {
-    // > Set builder withdrawable epoch
-    let current_epoch = get_current_epoch(state);
-    let builder = state.builders_mut().get_mut(builder_index)?;
-
-    builder.withdrawable_epoch = current_epoch
-        .checked_add(config.min_builder_withdrawability_delay)
-        .ok_or(Error::EpochOverflow)?;
-
-    Ok(())
-}
-
 pub fn switch_to_compounding_validator<P: Preset>(
     state: &mut impl PostElectraBeaconState<P>,
     index: ValidatorIndex,

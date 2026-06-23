@@ -1,9 +1,10 @@
 use core::ops::BitOrAssign as _;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
 use arithmetic::U64Ext as _;
-use bls::{SignatureBytes, traits::SignatureBytes as _};
+use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use ssz::{BitVector, PersistentList, PersistentVector, SszHash};
@@ -28,22 +29,33 @@ use types::{
     },
     electra::{
         beacon_state::BeaconState as ElectraBeaconState,
-        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX,
-        containers::{ExecutionRequests, PendingDeposit},
+        consts::UNSET_DEPOSIT_REQUESTS_START_INDEX, containers::PendingDeposit,
     },
     fulu::beacon_state::BeaconState as FuluBeaconState,
-    gloas::{beacon_state::BeaconState as GloasBeaconState, containers::ExecutionPayloadBid},
+    gloas::{
+        beacon_state::BeaconState as GloasBeaconState,
+        consts::PAYLOAD_BUILDER_VERSION,
+        containers::{ExecutionPayloadBid, ExecutionRequests},
+        primitives::BuilderIndex,
+    },
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{Fork, PendingAttestation},
-        primitives::H256,
+        primitives::{ExecutionAddress, H256},
     },
     preset::Preset,
     traits::{BeaconState as _, PostElectraBeaconState as _},
 };
 
-use crate::{accessors, gloas::apply_deposit_for_builder, misc, mutators, phase0, predicates};
+use crate::{
+    accessors,
+    gloas::add_builder_to_registry,
+    misc,
+    mutators::{self, builder_balance, increase_balance},
+    phase0,
+    predicates::{self, is_valid_deposit_signature},
+};
 
 pub fn upgrade_to_altair<P: Preset>(
     config: &Config,
@@ -964,11 +976,14 @@ fn onboard_builders<P: Preset>(
     state: &mut GloasBeaconState<P>,
 ) -> Result<()> {
     let mut signature_cache = DepositSignatureCache::new();
-    let validator_pubkeys = accessors::get_or_init_validator_indices(state, true)
+
+    let validator_pubkeys: HashSet<_> = accessors::get_or_init_validator_indices(state, true)
         .keys()
         .copied()
-        .collect_vec();
-    let mut builder_pubkeys = vec![];
+        .collect();
+
+    let mut builder_indices: HashMap<PublicKeyBytes, BuilderIndex> = HashMap::new();
+
     let mut pending_deposits = vec![];
 
     for deposit in &state.pending_deposits().clone() {
@@ -976,45 +991,41 @@ fn onboard_builders<P: Preset>(
             pubkey,
             withdrawal_credentials,
             amount,
-            signature,
             slot,
+            ..
         } = *deposit;
 
-        if validator_pubkeys.contains(&pubkey) {
-            pending_deposits.push(*deposit);
-            continue;
-        }
+        if let Some(builder_index) = builder_indices.get(&pubkey) {
+            increase_balance(builder_balance(state, *builder_index)?, amount)?;
+        } else {
+            let is_not_builder = validator_pubkeys.contains(&pubkey)
+                || !predicates::is_builder_withdrawal_credential(withdrawal_credentials)
+                || predicates::is_pending_validator(
+                    config,
+                    &pending_deposits,
+                    pubkey,
+                    pubkey_cache,
+                    &mut signature_cache,
+                );
 
-        if !builder_pubkeys.contains(&pubkey) {
-            if !predicates::is_builder_withdrawal_credential(withdrawal_credentials) {
+            if is_not_builder {
                 pending_deposits.push(*deposit);
-                continue;
-            }
+            } else if is_valid_deposit_signature(config, pubkey_cache, deposit) {
+                let mut address = ExecutionAddress::zero();
+                address.assign_from_slice(&withdrawal_credentials[12..]);
 
-            if predicates::is_pending_validator(
-                config,
-                &pending_deposits,
-                pubkey,
-                pubkey_cache,
-                &mut signature_cache,
-            ) {
-                pending_deposits.push(*deposit);
-                continue;
+                add_builder_to_registry(
+                    state,
+                    pubkey,
+                    PAYLOAD_BUILDER_VERSION,
+                    address,
+                    amount,
+                    slot,
+                )?;
+
+                builder_indices.insert(pubkey, builder_indices.len().try_into()?);
             }
         }
-
-        builder_pubkeys.push(pubkey);
-
-        apply_deposit_for_builder(
-            config,
-            pubkey_cache,
-            state,
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            slot,
-        )?;
     }
 
     *state.pending_deposits_mut() = PersistentList::try_from_iter(pending_deposits)?;
