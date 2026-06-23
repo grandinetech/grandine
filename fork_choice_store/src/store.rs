@@ -1766,6 +1766,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[instrument(level = "debug", skip_all)]
+    #[expect(clippy::too_many_lines)]
     pub fn validate_block_with_custom_state_transition(
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
@@ -1792,6 +1793,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let Some(parent) = self.chain_link(parent_root) else {
             return Ok(BlockAction::DelayUntilParent(block.clone_arc()));
         };
+
+        let parent_payload_presence = Self::parent_payload_presence(block, &parent.block);
+
+        // > If this block builds on the parent's full payload, that payload must
+        // > have been verified by on_execution_payload_envelope
+        if parent_payload_presence.is_full() && !self.is_payload_verified(parent_root) {
+            bail!(Error::ParentExecutionPayloadNotVerified {
+                block: block.clone_arc(),
+            });
+        }
 
         if block.message().slot() == self.slot() {
             self.inc_current_slot_blocks_in_processing();
@@ -1889,7 +1900,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             unrealized_justified_checkpoint,
             unrealized_finalized_checkpoint,
             payload_status,
-            parent_payload_presence: Self::parent_payload_presence(block, &parent.block),
+            parent_payload_presence,
         };
 
         // Ensure that the new justified state is present in the store when
@@ -3661,7 +3672,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .map(misc::kzg_commitment_to_versioned_hash)
             .collect();
 
-        let params = Some(ExecutionPayloadParams::Electra {
+        let params = Some(ExecutionPayloadParams::Gloas {
             versioned_hashes,
             parent_beacon_block_root,
             execution_requests: envelope.message.execution_requests.clone(),

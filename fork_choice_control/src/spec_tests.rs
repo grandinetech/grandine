@@ -184,6 +184,8 @@ struct PtcVotes {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_block/*/*"]                       [gloas_mainnet_on_block]                       [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_mainnet_on_execution_payload_envelope]  [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_mainnet_on_payload_attestation_message] [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/payload_data_availability/*/*"]      [gloas_mainnet_payload_data_availability]      [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/payload_timeliness/*/*"]             [gloas_mainnet_payload_timeliness]             [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/deposit_with_reorg/*/*"]             [gloas_minimal_deposit_with_reorg]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]                       [gloas_minimal_get_head]                       [Minimal] [Gloas];
@@ -192,6 +194,8 @@ struct PtcVotes {
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_block/*/*"]                       [gloas_minimal_on_block]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_minimal_on_execution_payload_envelope]  [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_minimal_on_payload_attestation_message] [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/payload_data_availability/*/*"]      [gloas_minimal_payload_data_availability]      [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/payload_timeliness/*/*"]             [gloas_minimal_payload_timeliness]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/reorg/*/*"]                          [gloas_minimal_reorg]                          [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/withholding/*/*"]                    [gloas_minimal_withholding]                    [Minimal] [Gloas];
 )]

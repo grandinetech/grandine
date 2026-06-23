@@ -86,6 +86,8 @@ pub enum SignatureKind {
     BlsToExecutionChange,
     #[display("builder signature")]
     Builder,
+    #[display("builder deposit signature")]
+    BuilderDeposit,
     #[display("consolidation signature")]
     Consolidation,
     #[display("sync committee contribution and proof signature")]

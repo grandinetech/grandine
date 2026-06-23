@@ -528,7 +528,7 @@ where
 
                         self.execution_payload_envelope_by_root(head.block_root)?
                             .map(|envelope| {
-                                params = Some(ExecutionPayloadParams::Electra {
+                                params = Some(ExecutionPayloadParams::Gloas {
                                     versioned_hashes,
                                     parent_beacon_block_root: head.block.message().parent_root(),
                                     execution_requests: envelope.message.execution_requests.clone(),

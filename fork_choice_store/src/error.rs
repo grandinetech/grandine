@@ -286,6 +286,8 @@ pub enum Error<P: Preset> {
     LmdGhostInconsistentWithFfgTarget { attestation: Arc<Attestation<P>> },
     #[error("merge block proposed before activation epoch: {block:?}")]
     MergeBlockBeforeActivationEpoch { block: Arc<SignedBeaconBlock<P>> },
+    #[error("parent execution payload envelope is not verified (block: {block:?})")]
+    ParentExecutionPayloadNotVerified { block: Arc<SignedBeaconBlock<P>> },
     #[error("payload envelope's block is invalid: {payload_envelope:?}")]
     PayloadEnvelopeInvalidBlock {
         payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,

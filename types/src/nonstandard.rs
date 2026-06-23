@@ -19,13 +19,12 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, DataColumnSidecar, SignedBeaconBlock},
+    combined::{Attestation, BeaconState, DataColumnSidecar, ExecutionRequests, SignedBeaconBlock},
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{Blob, KzgCommitment, KzgProof},
     },
-    electra::containers::ExecutionRequests,
     fulu::containers::DataColumnIdentifier,
     phase0::{
         containers::SignedBeaconBlockHeader,
