@@ -72,10 +72,8 @@ pub enum P2pToSync<P: Preset> {
     DataColumnsByRangeRequestFinished(AppRequestId),
     RequestFailed(PeerId),
     FinalizedCheckpoint(Checkpoint),
-    GossipBlobSidecar(Arc<BlobSidecar<P>>, SubnetId, GossipId),
     GossipBlock(Arc<SignedBeaconBlock<P>>, PeerId, GossipId),
     GossipDataColumnSidecar(Arc<DataColumnSidecar<P>>, SubnetId, GossipId),
-    BlobSidecarRejected(BlobIdentifier),
     DataColumnSidecarRejected(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
@@ -94,7 +92,6 @@ impl<P: Preset> P2pToSync<P> {
 #[serde(bound = "")]
 pub enum ApiToP2p<P: Preset> {
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
-    PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
@@ -206,7 +203,6 @@ pub enum ValidatorToP2p<P: Preset> {
     Ignore(GossipId),
     Reject(GossipId, PoolRejectionReason),
     PublishBeaconBlock(Arc<SignedBeaconBlock<P>>),
-    PublishBlobSidecar(Arc<BlobSidecar<P>>),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),

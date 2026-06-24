@@ -364,25 +364,6 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::DataColumnsNeeded(data_columns_by_root, slot) => {
                             self.request_needed_data_columns(data_columns_by_root, slot).await?;
                         }
-                        P2pToSync::GossipBlobSidecar(blob_sidecar, subnet_id, gossip_id) => {
-                            self.data_dumper.dump_blob_sidecar(blob_sidecar.clone_arc());
-
-                            let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
-                            let blob_sidecar_slot = blob_sidecar.signed_block_header.message.slot;
-
-                            self.register_new_received_blob_sidecar(blob_identifier, blob_sidecar_slot).await;
-
-                            let block_seen = self
-                                .received_block_roots
-                                .contains_key(&blob_identifier.block_root);
-
-                            self.controller.on_gossip_blob_sidecar(
-                                blob_sidecar,
-                                subnet_id,
-                                gossip_id,
-                                block_seen,
-                            );
-                        }
                         P2pToSync::RequestedBlobSidecar(blob_sidecar, peer_id, request_id, request_type) => {
                             let blob_identifier = blob_sidecar.as_ref().into();
 
@@ -615,11 +596,6 @@ impl<P: Preset> BlockSyncService<P> {
                                     sidecars_pending_reconstruction.retain_sync(|_, value| value.0 >= availability_slot);
                                 });
                             }
-                        }
-                        P2pToSync::BlobSidecarRejected(blob_identifier) => {
-                            // In case blob sidecar is not valid (e.g. someone spams fake blob sidecars)
-                            // Grandine should not dismiss newer valid blob sidecars with the same blob identifier
-                            self.received_blob_sidecars.remove_async(&blob_identifier).await;
                         }
                         P2pToSync::DataColumnSidecarRejected(data_column_identifier) => {
                             self.received_data_column_sidecars.remove_async(&data_column_identifier).await;

@@ -56,7 +56,7 @@ use types::{
         SignedBeaconBlock,
     },
     config::Config,
-    deneb::containers::{BlobIdentifier, BlobSidecar},
+    deneb::containers::BlobIdentifier,
     fulu::{
         containers::{DataColumnIdentifier, DataColumnsByRootIdentifier},
         primitives::ColumnIndex,
@@ -369,10 +369,6 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             self.publish_beacon_block(beacon_block);
                             true
                         },
-                        ApiToP2p::PublishBlobSidecar(blob_sidecar) => {
-                            self.publish_blob_sidecar(blob_sidecar);
-                            true
-                        },
                         ApiToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
                             self.publish_data_column_sidecar(data_column_sidecar);
                             true
@@ -466,9 +462,6 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         P2pMessage::Ignore(gossip_id) => {
                             self.report_outcome(gossip_id, MessageAcceptance::Ignore);
                         }
-                        P2pMessage::PublishBlobSidecar(blob_sidecar) => {
-                            self.publish_blob_sidecar(blob_sidecar);
-                        },
                         P2pMessage::PublishDataColumnSidecar(data_column_sidecar) => {
                             self.publish_data_column_sidecar(data_column_sidecar);
                         }
@@ -481,16 +474,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             );
                         }
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
-                            match mutator_rejection_reason {
-                                MutatorRejectionReason::InvalidBlobSidecar { blob_identifier } => {
-                                    P2pToSync::BlobSidecarRejected(blob_identifier)
-                                        .send(&self.channels.p2p_to_sync_tx)
-                                }
-                                MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } => {
-                                    P2pToSync::DataColumnSidecarRejected(data_column_identifier)
-                                        .send(&self.channels.p2p_to_sync_tx)
-                                }
-                                _ => {}
+                            if let MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } = mutator_rejection_reason {
+                                P2pToSync::DataColumnSidecarRejected(data_column_identifier)
+                                    .send(&self.channels.p2p_to_sync_tx)
                             }
 
                             if let Some(gossip_id) = gossip_id {
@@ -545,9 +531,6 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         }
                         ValidatorToP2p::PublishBeaconBlock(beacon_block) => {
                             self.publish_beacon_block(beacon_block);
-                        }
-                        ValidatorToP2p::PublishBlobSidecar(blob_sidecar) => {
-                            self.publish_blob_sidecar(blob_sidecar);
                         }
                         ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar) => {
                             self.publish_data_column_sidecar(data_column_sidecar);
@@ -670,7 +653,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
         // Update `nfd` field in `eth2` in ENR.
         if chain_config.is_peerdas_scheduled() && self.last_nfd_update_epoch != Some(epoch) {
-            let next_fork_digest = self.fork_context.next_fork_digest().unwrap_or_default();
+            let next_fork_digest = self.fork_context.next_fork_digest();
 
             if fork_digest_by_state != fork_digest_by_epoch || self.last_nfd_update_epoch.is_none()
             {
@@ -765,20 +748,6 @@ impl<P: Preset, W: Wait> Network<P, W> {
         );
 
         self.publish(PubsubMessage::BeaconBlock(beacon_block));
-    }
-
-    fn publish_blob_sidecar(&self, blob_sidecar: Arc<BlobSidecar<P>>) {
-        let subnet_id =
-            misc::compute_subnet_for_blob_sidecar(self.controller.chain_config(), &blob_sidecar);
-
-        let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
-
-        debug_with_peers!("publishing blob sidecar: {blob_identifier:?}, subnet_id: {subnet_id}");
-
-        self.publish(PubsubMessage::BlobSidecar(Box::new((
-            subnet_id,
-            blob_sidecar,
-        ))));
     }
 
     fn publish_execution_payload_bid(&self, payload_bid: Arc<SignedExecutionPayloadBid<P>>) {
@@ -2057,26 +2026,6 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
                 P2pToSync::GossipBlock(beacon_block, source, GossipId { source, message_id })
                     .send(&self.channels.p2p_to_sync_tx);
-            }
-            PubsubMessage::BlobSidecar(data) => {
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.register_gossip_object(&["blob_sidecar"]);
-                }
-
-                let (subnet_id, blob_sidecar) = *data;
-                let blob_identifier: BlobIdentifier = blob_sidecar.as_ref().into();
-
-                debug_with_peers!(
-                    "received blob sidecar as gossip in subnet {subnet_id}: {blob_identifier:?} \
-                    from {source}",
-                );
-
-                P2pToSync::GossipBlobSidecar(
-                    blob_sidecar,
-                    subnet_id,
-                    GossipId { source, message_id },
-                )
-                .send(&self.channels.p2p_to_sync_tx);
             }
             PubsubMessage::DataColumnSidecar(data) => {
                 if let Some(metrics) = self.metrics.as_ref() {
