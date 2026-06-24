@@ -318,7 +318,7 @@ delay_map = '0.4'
 derivative = '2'
 derive_more = { version = '2', features = ['full'] }
 dirs = '6'
-discv5 = { version = '0.10', features = ['libp2p'] }
+discv5 = { version = '0.11', features = ['libp2p'] }
 duplicate = '2'
 easy-ext = '1'
 either = '1'
@@ -341,6 +341,7 @@ git-version = '0.3'
 glob = '0.3'
 good_lp = { version = '1', default-features = false, features = ['highs'] }
 hash_hasher = '2'
+hashlink = '0.11'
 hex = { version = '0.4', features = ['serde'] }
 hex-literal = '1'
 hmac = '0.12'
@@ -608,8 +609,9 @@ quick-protobuf = { git = 'https://github.com/sigp/quick-protobuf.git', rev = '87
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
 
 [patch.'https://github.com/libp2p/rust-libp2p.git']
-libp2p = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
-libp2p-mplex = { git = 'https://github.com/sigp/rust-libp2p.git', rev = 'defcaf1a78cf5b70a723b3fee0e0be051c1dbd88' }
+libp2p = { git = "https://github.com/sigp/rust-libp2p.git", rev = "3563de5ed20e509885592b391aa816992eef55d4" }
+libp2p-mplex = { git = "https://github.com/sigp/rust-libp2p.git", rev = "3563de5ed20e509885592b391aa816992eef55d4" }
+libp2p-quic = { git = "https://github.com/sigp/rust-libp2p.git", rev = "3563de5ed20e509885592b391aa816992eef55d4" }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }

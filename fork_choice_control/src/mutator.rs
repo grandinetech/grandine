@@ -1499,10 +1499,6 @@ where
     ) {
         match result {
             Ok(BlobSidecarAction::Accept(blob_sidecar)) => {
-                if origin.is_from_el() {
-                    self.send_to_p2p(P2pMessage::PublishBlobSidecar(blob_sidecar.clone_arc()));
-                }
-
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {

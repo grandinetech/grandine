@@ -1223,8 +1223,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.controller
                     .on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
-
-                ValidatorToP2p::PublishBlobSidecar(blob_sidecar).send(&self.p2p_tx);
             }
         }
 
