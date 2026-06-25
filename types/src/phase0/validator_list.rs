@@ -6,7 +6,7 @@ use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bls::PublicKeyBytes;
 use derivative::Derivative;
 #[cfg(not(target_os = "zkvm"))]
-use im::{Vector, vector::Iter as VectorIter};
+use im::{HashMap, Vector, vector::Iter as VectorIter};
 use once_cell::race::OnceBox;
 use serde::{
     Deserialize, Serialize,
@@ -17,14 +17,14 @@ use ssz::{
     SszSize, SszWrite, U1, hashing, mix_in_length, read_list, saturating_usize, write_list,
 };
 #[cfg(target_os = "zkvm")]
-use std::{slice::Iter as VectorIter, vec::Vec as Vector};
+use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};
 use std_ext::CopyExt;
 use try_from_iterator::TryFromIterator;
 use typenum::Unsigned;
 
 use crate::phase0::{
     containers::Validator,
-    primitives::{Epoch, Gwei},
+    primitives::{Epoch, Gwei, ValidatorIndex},
 };
 
 #[cfg(target_os = "zkvm")]
@@ -69,12 +69,164 @@ impl From<&Validator> for PartialValidator {
     }
 }
 
+/// Validator public keys together with a public key -> index map.
+#[derive(Clone, Debug, Default, Derivative)]
+#[derivative(PartialEq(bound = ""), Eq(bound = ""))]
+pub struct PubkeyList<N: Unsigned> {
+    keys: Vector<PublicKeyBytes>,
+
+    #[derivative(PartialEq = "ignore")]
+    index_map: HashMap<PublicKeyBytes, ValidatorIndex>,
+
+    phantom: PhantomData<N>,
+}
+
+impl<N: Unsigned> PubkeyList<N> {
+    #[must_use]
+    pub fn index_of(&self, pubkey: &PublicKeyBytes) -> Option<ValidatorIndex> {
+        let index = self.index_map.get(pubkey).copied()?;
+        let in_bounds = usize::try_from(index).is_ok_and(|index| index < self.keys.len());
+        in_bounds.then_some(index)
+    }
+
+    #[must_use]
+    pub fn contains(&self, pubkey: &PublicKeyBytes) -> bool {
+        self.index_of(pubkey).is_some()
+    }
+
+    fn get(&self, index: usize) -> Option<&PublicKeyBytes> {
+        self.keys.get(index)
+    }
+
+    fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> VectorIter<'_, PublicKeyBytes> {
+        self.keys.iter()
+    }
+
+    pub fn push(&mut self, pubkey: PublicKeyBytes) {
+        let index = ValidatorIndex::try_from(self.keys.len())
+            .expect("validator count never exceeds ValidatorIndex range");
+
+        self.keys.push_back(pubkey);
+        self.index_map.insert(pubkey, index);
+    }
+
+    fn prefix(&self, length: usize) -> Self {
+        let mut keys = self.keys.clone();
+        let keys = keys.slice(0..length);
+
+        Self {
+            keys,
+            index_map: self.index_map.clone(),
+            phantom: PhantomData,
+        }
+    }
+
+    fn clear_prefix(&mut self, count: usize) {
+        let length = self.keys.len();
+
+        let mut keys: Vector<PublicKeyBytes> =
+            iter::repeat_n(PublicKeyBytes::zero(), count).collect();
+
+        let mut tail = self.keys.clone();
+
+        #[cfg(not(target_os = "zkvm"))]
+        keys.append(tail.slice(count..length));
+        #[cfg(target_os = "zkvm")]
+        keys.append(&mut tail.slice(count..length));
+
+        self.keys = keys;
+    }
+}
+
+impl<N: Unsigned> Extend<PublicKeyBytes> for PubkeyList<N> {
+    fn extend<T: IntoIterator<Item = PublicKeyBytes>>(&mut self, iter: T) {
+        let Self {
+            keys, index_map, ..
+        } = self;
+
+        let start = ValidatorIndex::try_from(keys.len())
+            .expect("validator count never exceeds ValidatorIndex range");
+
+        for (pubkey, index) in iter.into_iter().zip(start..) {
+            keys.push_back(pubkey);
+            index_map.insert(pubkey, index);
+        }
+
+        assert!(
+            keys.len() <= saturating_usize::<N>(),
+            "pubkey list length {} exceeds maximum {}",
+            keys.len(),
+            saturating_usize::<N>(),
+        );
+    }
+}
+
+impl<N: Unsigned> TryFromIterator<PublicKeyBytes> for PubkeyList<N> {
+    type Error = ssz::ReadError;
+
+    fn try_from_iter(items: impl IntoIterator<Item = PublicKeyBytes>) -> Result<Self, Self::Error> {
+        let maximum = saturating_usize::<N>();
+        let mut iter = items.into_iter().fuse();
+
+        let (keys, index_map): (Vector<_>, HashMap<_, _>) = iter
+            .by_ref()
+            .take(maximum)
+            .zip(0u64..)
+            .map(|(pubkey, index)| (pubkey, (pubkey, index)))
+            .unzip();
+
+        if iter.next().is_some() {
+            return Err(ssz::ReadError::ListTooLong {
+                maximum,
+                actual: maximum.saturating_add(1).saturating_add(iter.count()),
+            });
+        }
+
+        Ok(Self {
+            keys,
+            index_map,
+            phantom: PhantomData,
+        })
+    }
+}
+
+impl<'list, N: Unsigned> IntoIterator for &'list PubkeyList<N> {
+    type Item = &'list PublicKeyBytes;
+    type IntoIter = VectorIter<'list, PublicKeyBytes>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.keys.iter()
+    }
+}
+
+impl<N: Unsigned> SszSize for PubkeyList<N> {
+    const SIZE: ssz::Size = ssz::Size::Variable { minimum_size: 0 };
+}
+
+impl<N: Unsigned> SszWrite for PubkeyList<N> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), ssz::WriteError> {
+        write_list(bytes, self)
+    }
+}
+
+impl<C, N: Unsigned> SszRead<C> for PubkeyList<N> {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ssz::ReadError> {
+        read_list(saturating_usize::<N>(), context, bytes)
+    }
+}
+
 #[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq)]
+#[derivative(PartialEq(bound = ""), Eq(bound = ""))]
 pub struct ValidatorList<N: Unsigned> {
     /// Validator public keys never change, so we keep them separately, to
-    /// structurally share keys even if any other field changes.
-    pubkeys: Vector<PublicKeyBytes>,
+    /// structurally share keys even if any other field changes. The
+    /// accompanying public key -> index map is shared along with them.
+    pubkeys: PubkeyList<N>,
 
     /// Validator effective balances change very frequently, comparing to other
     /// fields, so we keep them separately, so that we don't have to clone every
@@ -176,7 +328,7 @@ impl CacheNode {
 impl<N: Unsigned> Default for ValidatorList<N> {
     fn default() -> Self {
         Self {
-            pubkeys: Vector::new(),
+            pubkeys: PubkeyList::default(),
             effective_balances: Vector::new(),
             items: Vector::new(),
             cache: None,
@@ -218,19 +370,6 @@ impl<N: Unsigned> ValidatorList<N> {
         let index = self.validate_index(index)?;
 
         let pubkey = self.pubkeys.get(index).expect(
-            "validator list invariant violated: \
-                pubkey list is out of sync with current length",
-        );
-
-        Ok(pubkey)
-    }
-
-    pub fn pubkey_mut(&mut self, index: u64) -> Result<&mut PublicKeyBytes, IndexError> {
-        let index = self.validate_index(index)?;
-
-        self.invalidate_index(index);
-
-        let pubkey = self.pubkeys.get_mut(index).expect(
             "validator list invariant violated: \
                 pubkey list is out of sync with current length",
         );
@@ -323,11 +462,11 @@ impl<N: Unsigned> ValidatorList<N> {
     }
 
     #[must_use]
-    pub const fn pubkeys(&self) -> &Vector<PublicKeyBytes> {
+    pub const fn pubkeys(&self) -> &PubkeyList<N> {
         &self.pubkeys
     }
 
-    pub fn set_pubkeys(&mut self, pubkeys: &Vector<PublicKeyBytes>) -> Result<()> {
+    pub fn set_pubkeys(&mut self, pubkeys: &PubkeyList<N>) -> Result<()> {
         let length = self.len_usize();
 
         ensure!(
@@ -336,10 +475,7 @@ impl<N: Unsigned> ValidatorList<N> {
             pubkeys.len(),
         );
 
-        let mut pubkeys = pubkeys.clone();
-        let pubkeys = pubkeys.slice(0..length);
-
-        self.pubkeys = pubkeys;
+        self.pubkeys = pubkeys.prefix(length);
 
         self.cache = (length > 0).then(|| CacheNode::build_empty(length));
 
@@ -354,17 +490,7 @@ impl<N: Unsigned> ValidatorList<N> {
             return;
         }
 
-        let mut pubkeys: Vector<PublicKeyBytes> =
-            iter::repeat_n(PublicKeyBytes::zero(), count).collect();
-
-        let mut tail = self.pubkeys.clone();
-
-        #[cfg(not(target_os = "zkvm"))]
-        pubkeys.append(tail.slice(count..length));
-        #[cfg(target_os = "zkvm")]
-        pubkeys.append(&mut tail.slice(count..length));
-
-        self.pubkeys = pubkeys;
+        self.pubkeys.clear_prefix(count);
 
         self.cache = (length > 0).then(|| CacheNode::build_empty(length));
     }
@@ -435,7 +561,7 @@ impl<N: Unsigned> ValidatorList<N> {
             exit_epoch,
             withdrawable_epoch,
         });
-        self.pubkeys.push_back(pubkey);
+        self.pubkeys.push(pubkey);
         self.effective_balances.push_back(effective_balance);
 
         match &mut self.cache {
@@ -576,7 +702,7 @@ impl<N: Unsigned> TryFromIterator<Validator> for ValidatorList<N> {
             })
             .fuse();
 
-        let (items, (pubkeys, effective_balances)): (Vector<_>, (Vector<_>, Vector<_>)) =
+        let (items, (pubkeys, effective_balances)): (Vector<_>, (PubkeyList<N>, Vector<_>)) =
             iter.by_ref().take(saturating_usize::<N>()).unzip();
 
         if iter.next().is_some() {
@@ -589,7 +715,7 @@ impl<N: Unsigned> TryFromIterator<Validator> for ValidatorList<N> {
         }
 
         Ok(Self {
-            cache: (!pubkeys.is_empty()).then(|| CacheNode::build_empty(pubkeys.len())),
+            cache: (!items.is_empty()).then(|| CacheNode::build_empty(items.len())),
 
             pubkeys,
             effective_balances,

@@ -2,7 +2,6 @@ use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
-use bls::PublicKeyBytes;
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
@@ -13,12 +12,11 @@ use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
-use ssz::{ContiguousList, Ssz, SszRead, SszReadDefault, SszWrite};
+use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::info;
 use transition_functions::combined;
-use try_from_iterator::TryFromIterator;
 use typenum::Unsigned as _;
 use types::{
     Validators,
@@ -33,6 +31,7 @@ use types::{
     phase0::{
         consts::GENESIS_SLOT,
         primitives::{Epoch, H256, Slot},
+        validator_list::PubkeyList,
     },
     preset::Preset,
     redacting_url::RedactingUrl,
@@ -1030,22 +1029,18 @@ impl<P: Preset> Storage<P> {
             None => {
                 info_with_peers!("loading validators from disk");
 
-                let Some(pubkeys) = self
-                    .get::<ContiguousList<PublicKeyBytes, P::ValidatorRegistryLimit>>(
-                        FinalizedValidators,
-                    )?
+                let Some(pubkeys) =
+                    self.get::<PubkeyList<P::ValidatorRegistryLimit>>(FinalizedValidators)?
                 else {
                     bail!(
                         "unable to restore validators into state - no saved validators on disk found."
                     );
                 };
 
-                // TODO: this part can be optimized, by deserializing im::Vector<PublicKeyBytes> directly from stroage,
-                // instead of deserializing ContiguousList and setting keys one-by-one. However, that would require
-                // implementing SszRead/SszWrite for im::Vector, just for this single usecase.
-                for (index, pubkey) in (0..state.validators().len_u64()).zip(pubkeys) {
-                    *state.validators_mut().pubkey_mut(index)? = pubkey;
-                }
+                state
+                    .validators_mut()
+                    .set_pubkeys(&pubkeys)
+                    .context("invalid finalized validators list loaded from disk")?;
             }
         }
 
@@ -1063,15 +1058,9 @@ impl<P: Preset> Storage<P> {
             return Ok(());
         }
 
-        // TODO: the same as with deserialization, this part can be optimizing, by serializing im::Vector<_> directly,
-        // instead of first converting it to ContiguousList.
-        let validator_pubkeys = ContiguousList::<_, P::ValidatorRegistryLimit>::try_from_iter(
-            validators.pubkeys().iter().copied(),
-        )?;
-
         batch.extend_from_slice(&[
             serialize(FinalizedValidatorCount, validators.len_u64())?,
-            serialize(FinalizedValidators, validator_pubkeys)?,
+            serialize(FinalizedValidators, validators.pubkeys())?,
         ]);
 
         Ok(())

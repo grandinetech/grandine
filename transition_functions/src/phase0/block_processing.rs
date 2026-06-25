@@ -432,16 +432,6 @@ fn apply_deposits<P: Preset>(
                 state.validators.push(validator)?;
                 state.balances.push(total_amount)?;
 
-                state
-                    .cache
-                    .validator_indices
-                    .get_mut()
-                    .expect(
-                        "state.cache.validator_indices is initialized by \
-                         index_of_public_key, which is called before apply_deposits",
-                    )
-                    .insert(pubkey, validator_index);
-
                 for amount in amounts {
                     slot_report.add_deposit(validator_index, amount);
                 }

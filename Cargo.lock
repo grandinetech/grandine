@@ -5939,7 +5939,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
- "bls",
  "bytesize",
  "cached",
  "clock",
@@ -5987,7 +5986,6 @@ dependencies = [
  "tokio",
  "tracing",
  "transition_functions",
- "try_from_iterator",
  "tynm",
  "typenum",
  "types",
@@ -6734,7 +6732,6 @@ dependencies = [
  "enumset",
  "hashing",
  "hex-literal 1.1.0",
- "im",
  "itertools 0.14.0",
  "nonzero_ext",
  "num-integer",
