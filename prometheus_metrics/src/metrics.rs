@@ -161,7 +161,6 @@ pub struct Metrics {
     pub beacon_proposer_index_init_count: IntCounter,
     pub ptc_cache_init_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
-    pub validator_indices_init_count: IntCounter,
 
     // Transition function metrics
     pub blinded_block_transition_times: Histogram,
@@ -720,11 +719,6 @@ impl Metrics {
                 "Total active balance cache init count",
             )?,
 
-            validator_indices_init_count: IntCounter::new(
-                "VALIDATOR_INDICES_INIT_COUNT",
-                "Validator indices cache init count",
-            )?,
-
             // Transition function metrics
             blinded_block_transition_times: Histogram::with_opts(histogram_opts!(
                 "BLINDED_BLOCK_TRANSITION_TIMES",
@@ -1019,7 +1013,6 @@ impl Metrics {
         default_registry.register(Box::new(self.beacon_proposer_index_init_count.clone()))?;
         default_registry.register(Box::new(self.ptc_cache_init_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
-        default_registry.register(Box::new(self.validator_indices_init_count.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
         default_registry.register(Box::new(self.block_transition_times.clone()))?;
         default_registry.register(Box::new(self.epoch_processing_times.clone()))?;

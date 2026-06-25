@@ -899,8 +899,6 @@ pub fn add_validator_to_registry<P: Preset>(
     withdrawal_credentials: H256,
     amount: Gwei,
 ) -> Result<()> {
-    let validator_index = state.validators().len_u64();
-
     let mut validator = Validator {
         pubkey,
         withdrawal_credentials,
@@ -923,16 +921,6 @@ pub fn add_validator_to_registry<P: Preset>(
     state.previous_epoch_participation_mut().push(0)?;
     state.current_epoch_participation_mut().push(0)?;
     state.inactivity_scores_mut().push(0)?;
-
-    state
-        .cache_mut()
-        .validator_indices
-        .get_mut()
-        .expect(
-            "state.cache.validator_indices is initialized by \
-                index_of_public_key, which is called before apply_deposits",
-        )
-        .insert(pubkey, validator_index);
 
     Ok(())
 }

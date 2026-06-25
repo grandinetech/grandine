@@ -37,7 +37,6 @@ types = { workspace = true }
 unwrap_none = { workspace = true }
 
 [target.'cfg(not(target_os = "zkvm"))'.dependencies]
-im = { workspace = true }
 rayon = { workspace = true }
 
 [dev-dependencies]

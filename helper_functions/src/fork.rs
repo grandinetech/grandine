@@ -965,10 +965,7 @@ fn onboard_builders<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut GloasBeaconState<P>,
 ) -> Result<()> {
-    let mut validator_pubkeys = accessors::get_or_init_validator_indices(state, true)
-        .keys()
-        .copied()
-        .collect_vec();
+    let mut validator_pubkeys = state.validators.pubkeys().clone();
     let mut builder_pubkeys = vec![];
     let mut pending_deposits = vec![];
 

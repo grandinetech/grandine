@@ -772,7 +772,6 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Current, false)?;
     accessors::get_or_init_active_validator_indices_shuffled(state, RelativeEpoch::Next, false)?;
     accessors::get_or_init_total_active_balance(state, false);
-    accessors::get_or_init_validator_indices(state, false);
 
     Ok(())
 }

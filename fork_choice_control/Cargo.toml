@@ -9,7 +9,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
-bls = { workspace = true }
 cached = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
@@ -49,7 +48,6 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 transition_functions = { workspace = true }
-try_from_iterator = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }

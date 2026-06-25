@@ -5,16 +5,12 @@ use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use bit_field::BitField as _;
 use bls::{AggregatePublicKey, PublicKeyBytes, traits::PublicKey as _};
-#[cfg(not(target_os = "zkvm"))]
-use im::HashMap;
 use itertools::{EitherOrBoth, Itertools as _};
 use nonzero_ext::nonzero;
 use num_integer::Roots as _;
 use pubkey_cache::PubkeyCache;
 use rc_box::ArcBox;
 use ssz::{ContiguousList, ContiguousVector, FitsInU64, Hc, SszHash as _};
-#[cfg(target_os = "zkvm")]
-use std::collections::HashMap;
 use std_ext::CopyExt as _;
 use tap::{Pipe as _, TryConv as _};
 use try_from_iterator::TryFromIterator as _;
@@ -196,30 +192,7 @@ pub fn index_of_public_key<P: Preset>(
     state: &(impl BeaconState<P> + ?Sized),
     public_key: &PublicKeyBytes,
 ) -> Option<ValidatorIndex> {
-    get_or_init_validator_indices(state, true)
-        .get(public_key)
-        .copied()
-}
-
-pub fn get_or_init_validator_indices<P: Preset>(
-    state: &(impl BeaconState<P> + ?Sized),
-    report_cache_miss: bool,
-) -> &HashMap<PublicKeyBytes, ValidatorIndex> {
-    state.cache().validator_indices.get_or_init(|| {
-        if report_cache_miss {
-            #[cfg(feature = "metrics")]
-            if let Some(metrics) = METRICS.get() {
-                metrics.validator_indices_init_count.inc();
-            }
-        }
-
-        state
-            .validators()
-            .into_iter()
-            .map(|validator| validator.pubkey)
-            .zip(0..)
-            .collect()
-    })
+    state.validators().pubkeys().index_of(public_key)
 }
 
 pub fn get_active_validator_indices<P: Preset>(

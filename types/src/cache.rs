@@ -1,14 +1,9 @@
 use core::{iter::FusedIterator, ops::Range, slice::Iter};
 use std::sync::Arc;
 
-use bls::PublicKeyBytes;
 use duplicate::duplicate;
 use enum_map::EnumMap;
-#[cfg(not(target_os = "zkvm"))]
-use im::HashMap;
 use once_cell::sync::OnceCell;
-#[cfg(target_os = "zkvm")]
-use std::collections::HashMap;
 
 use crate::{
     altair::primitives::NonZeroGwei,
@@ -35,7 +30,6 @@ pub struct Cache {
     pub active_validator_indices_ordered: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub active_validator_indices_shuffled: EnumMap<RelativeEpoch, OnceCell<PackedIndices>>,
     pub total_active_balance: EnumMap<RelativeEpoch, OnceCell<NonZeroGwei>>,
-    pub validator_indices: OnceCell<HashMap<PublicKeyBytes, ValidatorIndex>>,
     /// PTC cache: previous, current, and next slot.
     /// Shifted in `advance_slot()`: Previous <- Current <- Next.
     pub ptc_cache: EnumMap<RelativeSlot, OnceCell<Vec<ValidatorIndex>>>,

@@ -474,7 +474,6 @@ pub fn apply_deposits<P: Preset>(
                 amounts,
                 ..
             } => {
-                let public_key_bytes = pubkey;
                 let withdrawal_credentials = withdrawal_credentials[0];
                 let first_amount = amounts[0];
                 let total_amount = amounts.iter().sum();
@@ -501,16 +500,6 @@ pub fn apply_deposits<P: Preset>(
                 state.previous_epoch_participation_mut().push(0)?;
                 state.current_epoch_participation_mut().push(0)?;
                 state.inactivity_scores_mut().push(0)?;
-
-                state
-                    .cache_mut()
-                    .validator_indices
-                    .get_mut()
-                    .expect(
-                        "state.cache.validator_indices is initialized by \
-                         index_of_public_key, which is called before apply_deposits",
-                    )
-                    .insert(public_key_bytes, validator_index);
 
                 for amount in amounts {
                     slot_report.add_deposit(validator_index, amount);
