@@ -792,7 +792,20 @@ impl<P: Preset> Context<P> {
         self.controller()
             .on_gossip_block(block.clone_arc(), GossipId::default());
         self.controller().wait_for_tasks();
-        self.next_p2p_message()
+
+        // Filter out payload envelope request by the block root message as it is a side effect of importing
+        // Gloas beacon block, not the validation outcome of the block itself.
+        loop {
+            let option = self.next_p2p_message();
+
+            if let Some(P2pMessage::PayloadEnvelopeNeeded(block_root, _)) = option
+                && block_root == block.message().hash_tree_root()
+            {
+                continue;
+            }
+
+            return option;
+        }
     }
 
     fn on_execution_payload(
