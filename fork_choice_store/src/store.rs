@@ -4582,6 +4582,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn move_to_finalized(&mut self, unfinalized_blocks: Vector<UnfinalizedBlock<P>>) {
         let Self {
             finalized,
+            finalized_attesting_balances,
             finalized_indices,
             unfinalized_locations,
             execution_payload_locations,
@@ -4605,6 +4606,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 if let Some(block_hash) = unfinalized_block.chain_link.execution_block_hash() {
                     execution_payload_locations.remove(&block_hash);
                 }
+
+                finalized_attesting_balances.insert(
+                    unfinalized_block.slot(),
+                    unfinalized_block.attesting_balances,
+                );
 
                 unfinalized_block.chain_link
             },
