@@ -2032,9 +2032,10 @@ where
                 let block_hash = envelope.message.payload.block_hash;
                 let should_send_gossip_event = origin.should_send_gossip_event();
                 let should_generate_event = origin.should_generate_event();
-                let is_before_deadline = self
-                    .store
-                    .is_before_due_bps_deadline(self.store.chain_config().payload_due_bps);
+                let is_before_deadline = self.store.slot() == slot
+                    && self
+                        .store
+                        .is_before_due_bps_deadline(self.store.chain_config().payload_due_bps);
 
                 debug_with_peers!(
                     "execution payload envelope accepted (\
