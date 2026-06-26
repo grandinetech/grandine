@@ -43,6 +43,7 @@ serde = { workspace = true }
 serde-aux = { workspace = true }
 serde_json = { workspace = true }
 serde_qs = { workspace = true }
+serde_repr = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
 ssz = { workspace = true }

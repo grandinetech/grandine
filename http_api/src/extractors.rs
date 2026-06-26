@@ -43,6 +43,7 @@ use types::{
 };
 
 use crate::{
+    builder_status::BuilderIdsAndStatusesBody,
     error::Error,
     validator_status::{ValidatorId, ValidatorIdsAndStatusesBody},
 };
@@ -277,6 +278,18 @@ impl<S: Sync> FromRequest<S, Body> for EthJson<Vec<ValidatorId>> {
 }
 
 impl<S: Sync> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
+    type Rejection = Error;
+
+    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
+        request
+            .extract()
+            .await
+            .map(|Json(ids_and_statuses)| Self(ids_and_statuses))
+            .map_err(Error::InvalidJsonBody)
+    }
+}
+
+impl<S: Sync> FromRequest<S, Body> for EthJson<BuilderIdsAndStatusesBody> {
     type Rejection = Error;
 
     async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
