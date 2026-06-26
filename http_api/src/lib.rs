@@ -4,6 +4,7 @@ pub use crate::{
 };
 
 mod block_id;
+mod builder_status;
 mod error;
 mod extractors;
 mod full_config;
