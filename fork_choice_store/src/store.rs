@@ -5574,6 +5574,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     // Return whether the current tick is before the deadline defined by `due_bps`
     // basis points into the slot.
+    //
+    // NOTE: only checks tick phase, not which slot the message belongs to. Callers must also
+    // verify `message.slot() == self.slot()` (see `Store::apply_block`'s `is_current_slot`).
     pub fn is_before_due_bps_deadline(&self, due_bps: u64) -> bool {
         let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(
             &self.chain_config,
