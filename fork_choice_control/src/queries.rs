@@ -952,13 +952,6 @@ where
     }
 
     #[must_use]
-    pub fn accepted_payload_bid_at_slot(&self, slot: Slot) -> Option<SignedExecutionPayloadBid<P>> {
-        self.store_snapshot()
-            .accepted_payload_bid_at_slot(slot)
-            .cloned()
-    }
-
-    #[must_use]
     pub fn get_payload_bid_from(
         &self,
         slot: Slot,
@@ -1424,6 +1417,22 @@ impl<P: Preset> Snapshot<'_, P> {
     ) -> Option<&Arc<SignedExecutionPayloadEnvelope<P>>> {
         self.store_snapshot
             .cached_execution_payload_envelope_by_root(block_root)
+    }
+
+    #[must_use]
+    pub fn accepted_payload_bids_at_slot(&self, slot: Slot) -> Vec<SignedExecutionPayloadBid<P>> {
+        self.store_snapshot.accepted_payload_bids_at_slot(slot)
+    }
+
+    #[must_use]
+    pub fn highest_payload_bid_at_slot(
+        &self,
+        slot: Slot,
+        parent_block_hash: ExecutionBlockHash,
+    ) -> Option<SignedExecutionPayloadBid<P>> {
+        self.store_snapshot
+            .highest_payload_bid_at_slot(slot, parent_block_hash)
+            .cloned()
     }
 }
 

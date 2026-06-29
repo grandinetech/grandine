@@ -454,13 +454,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn accepted_payload_bid_at_slot(
+    pub fn accepted_payload_bids_at_slot(&self, slot: Slot) -> Vec<SignedExecutionPayloadBid<P>> {
+        self.accepted_payload_bids
+            .get(&slot)
+            .map(|bids| bids.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn highest_payload_bid_at_slot(
         &self,
         slot: Slot,
+        parent_block_hash: ExecutionBlockHash,
     ) -> Option<&SignedExecutionPayloadBid<P>> {
         self.accepted_payload_bids
             .get(&slot)?
             .values()
+            .filter(|bid| bid.message.parent_block_hash == parent_block_hash)
             .max_by_key(|bid| bid.message.value)
     }
 

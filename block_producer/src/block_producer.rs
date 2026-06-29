@@ -1232,15 +1232,21 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut without_state_root_with_payload =
             if let Some(state) = self.beacon_state.post_gloas() {
+                let snapshot = self.producer_context.controller.snapshot();
+
                 let signed_payload_bid = if self.should_build_local_payload() {
                     self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
                         .await?
                 } else {
                     // TODO: (gloas): select from received bids based on proposer preference
-                    let selected_bid = self
-                        .producer_context
-                        .controller
-                        .accepted_payload_bid_at_slot(state.slot());
+                    let parent_block_hash = if snapshot.should_build_on_full() {
+                        state.latest_execution_payload_bid().block_hash
+                    } else {
+                        state.latest_execution_payload_bid().parent_block_hash
+                    };
+
+                    let selected_bid =
+                        snapshot.highest_payload_bid_at_slot(state.slot(), parent_block_hash);
 
                     if selected_bid.is_some() {
                         // Set block_mev value to the in-protocol builder bid value
