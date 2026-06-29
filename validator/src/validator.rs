@@ -1117,12 +1117,24 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 let beacon_block_root = beacon_block.message().hash_tree_root();
                 let parent_beacon_block_root = beacon_block.message().parent_root();
 
-                info_with_peers!(
-                    "validator {} proposing beacon block with root {:?} in slot {}",
-                    proposer_index,
-                    beacon_block_root,
-                    slot_head.slot(),
-                );
+                if let Some(payload_bid) = beacon_block.payload_bid()
+                    && payload_bid.builder_index != BUILDER_INDEX_SELF_BUILD
+                {
+                    info_with_peers!(
+                        "validator {} proposing beacon block with root {:?} in slot {} using builder {}",
+                        proposer_index,
+                        beacon_block_root,
+                        slot_head.slot(),
+                        payload_bid.builder_index
+                    );
+                } else {
+                    info_with_peers!(
+                        "validator {} proposing beacon block with root {:?} in slot {}",
+                        proposer_index,
+                        beacon_block_root,
+                        slot_head.slot(),
+                    );
+                }
 
                 debug_with_peers!("beacon block: {beacon_block:?}");
 
