@@ -4133,13 +4133,9 @@ async fn publish_beacon_block_with_data_column_sidecars_and_gossip_checks<P: Pre
 #[instrument(skip_all, level = "debug")]
 fn publish_block_to_network<P: Preset>(
     block: Arc<SignedBeaconBlock<P>>,
-    blob_sidecars: &[Arc<BlobSidecar<P>>],
+    _blob_sidecars: &[Arc<BlobSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
 ) {
-    for blob_sidecar in blob_sidecars {
-        ApiToP2p::PublishBlobSidecar(blob_sidecar.clone_arc()).send(api_to_p2p_tx);
-    }
-
     ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
 }
 
