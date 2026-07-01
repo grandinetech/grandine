@@ -1,5 +1,5 @@
 use core::ops::BitOrAssign as _;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;

@@ -38,10 +38,11 @@ use types::{
     nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
-        containers::{AttestationData, Validator},
+        containers::AttestationData,
         primitives::{
             CommitteeIndex, DomainType, Epoch, Gwei, H128, H256, Slot, SubnetId, ValidatorIndex,
         },
+        validator_list::PartialValidator,
     },
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
     traits::{
@@ -213,7 +214,7 @@ fn get_active_validator_indices_by_epoch<P: Preset>(
 fn get_filtered_active_validator_indices_by_epoch<'a, P: Preset>(
     state: &'a (impl BeaconState<P> + ?Sized),
     epoch: Epoch,
-    filter: impl Fn(&Validator) -> bool + 'a,
+    filter: impl Fn(&PartialValidator) -> bool + 'a,
 ) -> impl Iterator<Item = ValidatorIndex> + 'a {
     (0..)
         .zip(state.validators().partial_validators())
