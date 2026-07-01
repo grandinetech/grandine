@@ -12,6 +12,8 @@ public interface IGrandineEngineApi
 
     unsafe CResult_CPayloadStatusV1 EngineNewPayloadV4(CExecutionPayloadV3* payload, CVec_CH256* versionedHashes, CH256 parentBeaconBlockRoot, CExecutionRequests* executionRequests);
 
+    unsafe CResult_CPayloadStatusV1 EngineNewPayloadV5(CExecutionPayloadV4* payload, CVec_CH256* versionedHashes, CH256 parentBeaconBlockRoot, CExecutionRequests* executionRequests);
+
     unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV1(CForkChoiceStateV1 state, COption_CPayloadAttributesV1 payload);
 
     unsafe CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV2(CForkChoiceStateV1 state, COption_CPayloadAttributesV2* payload);
