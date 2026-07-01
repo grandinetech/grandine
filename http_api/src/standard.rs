@@ -3961,8 +3961,7 @@ fn state_builders<P: Preset, W: Wait>(
             if !statuses.is_empty() {
                 let builder_status = BuilderStatus::new(builder, &state);
 
-                let allowed_by_status =
-                    statuses.iter().any(|status| status == &builder_status);
+                let allowed_by_status = statuses.iter().any(|status| status == &builder_status);
 
                 if !allowed_by_status {
                     return false;
@@ -3982,7 +3981,6 @@ fn state_builders<P: Preset, W: Wait>(
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
-
 
 #[instrument(skip_all, level = "debug")]
 async fn publish_signed_block<P: Preset, W: Wait>(
