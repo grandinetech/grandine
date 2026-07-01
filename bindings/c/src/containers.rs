@@ -15,7 +15,8 @@ use ssz::{ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite
 use try_from_iterator::TryFromIterator;
 use types::{
     bellatrix::primitives::Transaction, deneb::primitives::Blob,
-    electra::containers::ExecutionRequests, preset::Mainnet,
+    electra::containers::ExecutionRequests as ElectraExecutionRequests,
+    gloas::containers::ExecutionRequests as GloasExecutionRequests, preset::Mainnet,
 };
 
 use crate::{
@@ -318,6 +319,36 @@ impl TryInto<ExecutionPayloadV4<Mainnet>> for CExecutionPayloadV4 {
     }
 }
 
+impl From<ExecutionPayloadV4<Mainnet>> for CExecutionPayloadV4 {
+    fn from(value: ExecutionPayloadV4<Mainnet>) -> Self {
+        CExecutionPayloadV4 {
+            parent_hash: value.parent_hash.into(),
+            fee_recipient: value.fee_recipient.into(),
+            state_root: value.state_root.into(),
+            receipts_root: value.receipts_root.into(),
+            logs_bloom: value.logs_bloom.into(),
+            prev_randao: value.prev_randao.into(),
+            block_number: value.block_number,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
+            timestamp: value.timestamp,
+            extra_data: value.extra_data.as_bytes().into(),
+            base_fee_per_gas: value.base_fee_per_gas.into(),
+            block_hash: value.block_hash.into(),
+            withdrawals: value.withdrawals.into_iter().map(Into::into).collect(),
+            blob_gas_used: value.blob_gas_used,
+            excess_blob_gas: value.excess_blob_gas,
+            transactions: value
+                .transactions
+                .iter()
+                .map(|transaction| transaction.clone().into())
+                .collect(),
+            block_access_list: value.block_access_list.as_bytes().into(),
+            slot_number: value.slot_number,
+        }
+    }
+}
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct CEngineGetPayloadV2Response {
@@ -601,10 +632,10 @@ impl Into<eth1_api::RawForkChoiceUpdatedResponse> for CForkChoiceUpdatedResponse
 #[repr(C)]
 pub struct CExecutionRequests(CVec<CVec<u8>>);
 
-impl TryFrom<ExecutionRequests<Mainnet>> for CExecutionRequests {
+impl TryFrom<ElectraExecutionRequests<Mainnet>> for CExecutionRequests {
     type Error = ssz::WriteError;
 
-    fn try_from(value: ExecutionRequests<Mainnet>) -> Result<Self, Self::Error> {
+    fn try_from(value: ElectraExecutionRequests<Mainnet>) -> Result<Self, Self::Error> {
         let mut execution_requests: Vec<CVec<u8>> = Vec::new();
 
         let mut deposits = value.deposits.to_ssz()?;
@@ -632,6 +663,51 @@ impl TryFrom<ExecutionRequests<Mainnet>> for CExecutionRequests {
     }
 }
 
+impl TryFrom<GloasExecutionRequests<Mainnet>> for CExecutionRequests {
+    type Error = ssz::WriteError;
+
+    fn try_from(value: GloasExecutionRequests<Mainnet>) -> Result<Self, Self::Error> {
+        let mut execution_requests: Vec<CVec<u8>> = Vec::new();
+
+        let mut deposits = value.deposits.to_ssz()?;
+        deposits.insert(0, RequestType::Deposits.request_type_byte());
+
+        let mut withdrawals = value.withdrawals.to_ssz()?;
+        withdrawals.insert(0, RequestType::Withdrawals.request_type_byte());
+
+        let mut consolidations = value.consolidations.to_ssz()?;
+        consolidations.insert(0, RequestType::Consolidations.request_type_byte());
+
+        let mut builder_deposits = value.builder_deposits.to_ssz()?;
+        builder_deposits.insert(0, RequestType::BuilderDeposits.request_type_byte());
+
+        let mut builder_exits = value.builder_exits.to_ssz()?;
+        builder_exits.insert(0, RequestType::BuilderExits.request_type_byte());
+
+        if !value.deposits.is_empty() {
+            execution_requests.push(deposits.into());
+        }
+
+        if !value.withdrawals.is_empty() {
+            execution_requests.push(withdrawals.into());
+        }
+
+        if !value.consolidations.is_empty() {
+            execution_requests.push(consolidations.into());
+        }
+
+        if !value.builder_deposits.is_empty() {
+            execution_requests.push(builder_deposits.into());
+        }
+
+        if !value.builder_exits.is_empty() {
+            execution_requests.push(builder_exits.into());
+        }
+
+        Ok(Self(execution_requests.into()))
+    }
+}
+
 impl TryInto<RawExecutionRequests<Mainnet>> for CExecutionRequests {
     type Error = anyhow::Error;
 
@@ -640,6 +716,8 @@ impl TryInto<RawExecutionRequests<Mainnet>> for CExecutionRequests {
         let mut deposit_requests = ContiguousList::default();
         let mut withdrawal_requests = ContiguousList::default();
         let mut consolidation_requests = ContiguousList::default();
+        let mut builder_deposit_requests = ContiguousList::default();
+        let mut builder_exit_requests = ContiguousList::default();
         for i in self.0 {
             let Some((ty, bytes)) = i.split_first() else {
                 anyhow::bail!("Invalid execution requests - request must have type byte");
@@ -674,15 +752,22 @@ impl TryInto<RawExecutionRequests<Mainnet>> for CExecutionRequests {
                 RequestType::Consolidations => {
                     consolidation_requests = ContiguousList::from_ssz_default(bytes)?;
                 }
+                RequestType::BuilderDeposits => {
+                    builder_deposit_requests = ContiguousList::from_ssz_default(bytes)?;
+                }
+                RequestType::BuilderExits => {
+                    builder_exit_requests = ContiguousList::from_ssz_default(bytes)?;
+                }
             }
         }
 
-        Ok(ExecutionRequests {
-            deposits: deposit_requests,
-            withdrawals: withdrawal_requests,
-            consolidations: consolidation_requests,
-        }
-        .into())
+        Ok(RawExecutionRequests::new(
+            deposit_requests,
+            withdrawal_requests,
+            consolidation_requests,
+            builder_deposit_requests,
+            builder_exit_requests,
+        ))
     }
 }
 
