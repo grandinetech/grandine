@@ -4,6 +4,7 @@ use core::{
 };
 use std::sync::Arc;
 
+use derive_more::Constructor;
 use ethereum_types::H64;
 use libp2p_identity::PeerId;
 use serde::{
@@ -1016,7 +1017,7 @@ impl From<PayloadStatus> for PayloadStatusV1 {
 }
 
 #[cfg_attr(test, derive(Default, Debug, Eq, PartialEq))]
-#[derive(Clone)]
+#[derive(Clone, Constructor)]
 pub struct RawExecutionRequests<P: Preset>(
     ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
     ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,

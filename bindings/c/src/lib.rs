@@ -11,14 +11,15 @@ use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3,
-    PayloadAttributesV4, PayloadStatusV1,
+    ExecutionPayloadV4, ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2,
+    PayloadAttributesV3, PayloadAttributesV4, PayloadStatusV1,
 };
 use runtime::{grandine_args::GrandineArgs, run, shutdown};
 use tracing::error;
 use types::{
-    electra::containers::ExecutionRequests, phase0::primitives::ExecutionBlockNumber,
-    preset::Mainnet,
+    electra::containers::ExecutionRequests as ElectraExecutionRequests,
+    gloas::containers::ExecutionRequests as GloasExecutionRequests,
+    phase0::primitives::ExecutionBlockNumber, preset::Mainnet,
 };
 use web3::types::{BlockNumber, H64, H256};
 
@@ -28,8 +29,9 @@ use crate::{
         CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CEngineGetPayloadV2Response,
         CEngineGetPayloadV3Response, CEngineGetPayloadV4Response, CEngineGetPayloadV5Response,
         CEngineGetPayloadV6Response, CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3,
-        CExecutionRequests, CForkChoiceStateV1, CForkChoiceUpdatedResponse, CPayloadAttributesV1,
-        CPayloadAttributesV2, CPayloadAttributesV3, CPayloadAttributesV4, CPayloadStatusV1,
+        CExecutionPayloadV4, CExecutionRequests, CForkChoiceStateV1, CForkChoiceUpdatedResponse,
+        CPayloadAttributesV1, CPayloadAttributesV2, CPayloadAttributesV3, CPayloadAttributesV4,
+        CPayloadStatusV1,
     },
     generic::{CGrandineString, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
     layout::CLayout,
@@ -53,6 +55,12 @@ pub struct CEmbedAdapter {
     ) -> CResult<CPayloadStatusV1>,
     engine_new_payload_v4: unsafe extern "C" fn(
         payload: *const CExecutionPayloadV3,
+        versioned_hashes: *const CVec<CH256>,
+        parent_beacon_block_root: CH256,
+        execution_requests: *const CExecutionRequests,
+    ) -> CResult<CPayloadStatusV1>,
+    engine_new_payload_v5: unsafe extern "C" fn(
+        payload: *const CExecutionPayloadV4,
         versioned_hashes: *const CVec<CH256>,
         parent_beacon_block_root: CH256,
         execution_requests: *const CExecutionRequests,
@@ -161,7 +169,7 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
         payload: ExecutionPayloadV3<types::preset::Mainnet>,
         versioned_hashes: Vec<web3::types::H256>,
         parent_beacon_block_root: web3::types::H256,
-        execution_requests: ExecutionRequests<types::preset::Mainnet>,
+        execution_requests: ElectraExecutionRequests<types::preset::Mainnet>,
     ) -> Result<PayloadStatusV1> {
         let payload = payload.into();
         let versioned_hashes = versioned_hashes
@@ -173,6 +181,33 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
 
         let result = unsafe {
             (self.engine_new_payload_v4)(
+                &payload,
+                &versioned_hashes,
+                parent_beacon_block_root,
+                &execution_requests,
+            )
+        };
+
+        Result::from(result).map(Into::into)
+    }
+
+    fn engine_new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV4<types::preset::Mainnet>,
+        versioned_hashes: Vec<web3::types::H256>,
+        parent_beacon_block_root: web3::types::H256,
+        execution_requests: GloasExecutionRequests<types::preset::Mainnet>,
+    ) -> Result<PayloadStatusV1> {
+        let payload = payload.into();
+        let versioned_hashes = versioned_hashes
+            .into_iter()
+            .map(Into::into)
+            .collect::<CVec<_>>();
+        let parent_beacon_block_root = parent_beacon_block_root.into();
+        let execution_requests = execution_requests.try_into()?;
+
+        let result = unsafe {
+            (self.engine_new_payload_v5)(
                 &payload,
                 &versioned_hashes,
                 parent_beacon_block_root,

@@ -197,6 +197,60 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
+    public unsafe CResult_CPayloadStatusV1 EngineNewPayloadV5(CExecutionPayloadV4* payloadPtr, CVec_CH256* versionedHashesPtr, CH256 parentBeaconBlockRoot, CExecutionRequests* executionRequestsPtr)
+    {
+        this.logger.Debug("Received engine_newPayloadV5 request from grandine");
+
+        try
+        {
+            var payload = *payloadPtr;
+            var withdrawals = GrandineUtils.WithdrawalsFromNative(payload.withdrawals);
+            var executionRequestsConverted = GrandineUtils.ConvertExecutionRequests(*executionRequestsPtr);
+            var parentBeaconBlockRootConverted = parentBeaconBlockRoot.ToHash256();
+
+            var payloadStatus = this.engineRpc.engine_newPayloadV5(
+                new ExecutionPayloadV4
+                {
+                    ParentHash = payload.parent_hash.ToHash256(),
+                    FeeRecipient = payload.fee_recipient.ToAddress(),
+                    StateRoot = payload.state_root.ToHash256(),
+                    ReceiptsRoot = payload.receipts_root.ToHash256(),
+                    LogsBloom = new Bloom(payload.logs_bloom.AsSpan()),
+                    PrevRandao = payload.prev_randao.ToHash256(),
+                    BlockNumber = (long)payload.block_number,
+                    GasLimit = (long)payload.gas_limit,
+                    GasUsed = (long)payload.gas_used,
+                    Timestamp = payload.timestamp,
+                    ExtraData = payload.extra_data.AsSpan().ToArray(),
+                    BaseFeePerGas = payload.base_fee_per_gas.ToUInt256(),
+                    BlockHash = payload.block_hash.ToHash256(),
+                    Transactions = GrandineUtils.TransactionsToBytes(payload.transactions),
+                    Withdrawals = withdrawals,
+                    BlobGasUsed = payload.blob_gas_used,
+                    ExcessBlobGas = payload.excess_blob_gas,
+                    ParentBeaconBlockRoot = parentBeaconBlockRootConverted,
+                    ExecutionRequests = executionRequestsConverted,
+                    BlockAccessList = payload.block_access_list.AsSpan().ToArray(),
+                    SlotNumber = (ulong)payload.slot_number,
+                },
+                GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr),
+                parentBeaconBlockRootConverted,
+                executionRequestsConverted)
+            .Result;
+
+            GrandineUtils.ReturnWithdrawals(withdrawals);
+
+            return payloadStatus.Result != Result.Success
+                ? CResult_CPayloadStatusV1.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, payloadStatus.Result.Error)
+                : CResult_CPayloadStatusV1.Success(new CPayloadStatusV1(payloadStatus.Data));
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_newPayloadV5 function invocation", e);
+            return CResult_CPayloadStatusV1.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
     public CResult_CForkChoiceUpdatedResponse EngineForkchoiceUpdatedV1(CForkChoiceStateV1 state, COption_CPayloadAttributesV1 payload)
     {
         this.logger.Debug("Received engine_forkchoiceUpdatedV1 request from grandine");
