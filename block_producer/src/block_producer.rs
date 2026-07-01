@@ -926,13 +926,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         }
                     })
                 {
-                    if let Some((_, indices, attestations)) =
-                        results.iter_mut().find(|(data, indices, _)| {
-                            *data == electra_attestation.data && !indices.contains(&committee_index)
-                        })
+                    if let Some((_, indices, attestations)) = results
+                        .iter_mut()
+                        .find(|(data, _, _)| *data == electra_attestation.data)
                     {
-                        indices.insert(committee_index);
-                        attestations.push(electra_attestation);
+                        if indices.insert(committee_index) {
+                            attestations.push(electra_attestation);
+                        }
                     } else {
                         results.push((
                             electra_attestation.data,
