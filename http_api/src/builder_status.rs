@@ -1,14 +1,12 @@
 use bls::PublicKeyBytes;
 use helper_functions::predicates::is_active_builder;
-use parse_display::FromStr;
+use parse_display::{Display, FromStr};
 use serde::Deserialize;
-use serde_repr::{Deserialize_repr, Serialize_repr};
-use serde_with::DeserializeFromStr;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use types::{
     combined::BeaconState, gloas::containers::Builder, gloas::primitives::BuilderIndex,
     phase0::consts::FAR_FUTURE_EPOCH, preset::Preset, traits::BeaconState as _,
 };
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash, FromStr, DeserializeFromStr)]
 #[cfg_attr(test, derive(Debug))]
 pub enum BuilderId {
@@ -18,7 +16,7 @@ pub enum BuilderId {
     PublicKey(PublicKeyBytes),
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct BuilderIdsAndStatusesBody {
     #[serde(default)]
     ids: Vec<BuilderId>,
@@ -36,13 +34,13 @@ impl BuilderIdsAndStatusesBody {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[derive(Clone, Copy, PartialEq, Display, Eq, FromStr, DeserializeFromStr, SerializeDisplay)]
+#[display(style = "snake_case")]
 #[cfg_attr(test, derive(Debug))]
-#[repr(u8)]
 pub enum BuilderStatus {
-    Pending = 0,
-    Active = 1,
-    Exited = 2,
+    Pending,
+    Active,
+    Exited,
 }
 
 impl BuilderStatus {
@@ -58,9 +56,5 @@ impl BuilderStatus {
         }
 
         Self::Pending
-    }
-
-    pub fn matches(self, other: Self) -> bool {
-        self == other
     }
 }

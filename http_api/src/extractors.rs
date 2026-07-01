@@ -289,15 +289,21 @@ impl<S: Sync> FromRequest<S, Body> for EthJson<ValidatorIdsAndStatusesBody> {
     }
 }
 
-impl<S: Sync> FromRequest<S, Body> for EthJson<BuilderIdsAndStatusesBody> {
+impl<S: Send + Sync> FromRequest<S, Body> for EthJson<BuilderIdsAndStatusesBody> {
     type Rejection = Error;
 
-    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
-        request
-            .extract()
+    async fn from_request(request: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        let bytes = Bytes::from_request(request, state)
             .await
-            .map(|Json(ids_and_statuses)| Self(ids_and_statuses))
-            .map_err(Error::InvalidJsonBody)
+            .map_err(Error::InvalidBytesBody)?;
+
+        if bytes.is_empty() {
+            return Ok(Self(BuilderIdsAndStatusesBody::default()));
+        }
+
+        let ids_and_statuses = serde_json::from_slice(&bytes).map_err(Error::InvalidJsonValue)?;
+
+        Ok(Self(ids_and_statuses))
     }
 }
 

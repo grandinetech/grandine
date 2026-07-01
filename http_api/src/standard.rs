@@ -3962,7 +3962,7 @@ fn state_builders<P: Preset, W: Wait>(
                 let builder_status = BuilderStatus::new(builder, &state);
 
                 let allowed_by_status =
-                    statuses.iter().any(|status| status.matches(builder_status));
+                    statuses.iter().any(|status| status == &builder_status);
 
                 if !allowed_by_status {
                     return false;

@@ -7111,7 +7111,6 @@ dependencies = [
  "serde-aux",
  "serde_json",
  "serde_qs",
- "serde_repr",
  "serde_utils",
  "serde_with",
  "signer",
