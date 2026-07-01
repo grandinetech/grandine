@@ -8,8 +8,9 @@ use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
     EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1,
-    PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1,
+    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes,
+    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId,
+    PayloadStatusV1,
 };
 use futures::channel::mpsc::UnboundedSender;
 use prometheus_metrics::Metrics;
@@ -27,7 +28,8 @@ use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
     deneb::primitives::VersionedHash,
-    electra::containers::ExecutionRequests,
+    electra::containers::ExecutionRequests as ElectraExecutionRequests,
+    gloas::containers::ExecutionRequests as GloasExecutionRequests,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::{Mainnet, Preset},
@@ -44,7 +46,7 @@ use crate::{
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
         ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
         ENGINE_GET_PAYLOAD_V5, ENGINE_GET_PAYLOAD_V6, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2,
-        ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4,
+        ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4, ENGINE_NEW_PAYLOAD_V5,
     },
     eth1_block::Eth1Block,
 };
@@ -81,7 +83,14 @@ pub trait EmbedAdapter: Send + Sync {
         payload: ExecutionPayloadV3<Mainnet>,
         versioned_hashes: Vec<H256>,
         parent_beacon_block_root: H256,
-        execution_requests: ExecutionRequests<Mainnet>,
+        execution_requests: ElectraExecutionRequests<Mainnet>,
+    ) -> Result<PayloadStatusV1>;
+    fn engine_new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV4<Mainnet>,
+        versioned_hashes: Vec<H256>,
+        parent_beacon_block_root: H256,
+        execution_requests: GloasExecutionRequests<Mainnet>,
     ) -> Result<PayloadStatusV1>;
 
     fn engine_forkchoice_updated_v1(
@@ -356,6 +365,7 @@ impl Eth1Api {
     /// [`engine_newPayloadV2`]: https://github.com/ethereum/execution-apis/blob/b7c5d3420e00648f456744d121ffbd929862924d/src/engine/shanghai.md#engine_newpayloadv2
     /// [`engine_newPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_newpayloadv3
     /// [`engine_newPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_newpayloadv4
+    /// [`engine_newPayloadV5`]: https://github.com/ethereum/execution-apis/blob/4db2ff91a1811f40aa7c23547eef9d2bc789d27e/src/engine/amsterdam.md#engine_newpayloadv5
     pub async fn new_payload<P: Preset>(
         &self,
         payload: ExecutionPayload<P>,
@@ -448,6 +458,33 @@ impl Eth1Api {
                 self.exec(move |adapter| {
                     adapter.engine_new_payload_v4(
                         payload_v3,
+                        versioned_hashes,
+                        parent_beacon_block_root,
+                        execution_requests,
+                    )
+                })
+                .await
+            }
+            (
+                ExecutionPayload::Gloas(payload),
+                Some(ExecutionPayloadParams::Gloas {
+                    versioned_hashes,
+                    parent_beacon_block_root,
+                    execution_requests,
+                }),
+            ) => {
+                let _timer = self.metrics.as_ref().map(|metrics| {
+                    prometheus_metrics::start_timer_vec(
+                        &metrics.eth1_api_request_times,
+                        ENGINE_NEW_PAYLOAD_V5,
+                    )
+                });
+
+                let payload_v4 = ExecutionPayloadV4::from(payload);
+
+                self.exec(move |adapter| {
+                    adapter.engine_new_payload_v5(
+                        payload_v4,
                         versioned_hashes,
                         parent_beacon_block_root,
                         execution_requests,
@@ -636,6 +673,7 @@ impl Eth1Api {
     /// [`engine_getPayloadV3`]: https://github.com/ethereum/execution-apis/blob/a0d03086564ab1838b462befbc083f873dcf0c0f/src/engine/cancun.md#engine_getpayloadv3
     /// [`engine_getPayloadV4`]: https://github.com/ethereum/execution-apis/blob/4140e528360fea53c34a766d86a000c6c039100e/src/engine/prague.md#engine_getpayloadv4
     /// [`engine_getPayloadV5`]: https://github.com/ethereum/execution-apis/blob/5d634063ccfd897a6974ea589c00e2c1d889abc9/src/engine/osaka.md#engine_getpayloadv5
+    /// [`engine_getPayloadV6`]: https://github.com/ethereum/execution-apis/blob/4db2ff91a1811f40aa7c23547eef9d2bc789d27e/src/engine/amsterdam.md#engine_getpayloadv6
     pub async fn get_payload<P: Preset>(
         &self,
         payload_id: PayloadId,

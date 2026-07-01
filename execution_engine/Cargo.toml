@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 const-hex = { workspace = true }
+derive_more = { workspace = true }
 either = { workspace = true }
 libp2p-identity = { workspace = true }
 ethereum-types = { workspace = true }
