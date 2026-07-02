@@ -996,6 +996,7 @@ pub enum BlockAction<P: Preset> {
     Ignore(Publishable),
     DelayUntilBlobs(Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>),
     DelayUntilParent(Arc<SignedBeaconBlock<P>>),
+    DelayUntilPayload(Arc<SignedBeaconBlock<P>>),
     DelayUntilSlot(Arc<SignedBeaconBlock<P>>),
     WaitForJustifiedState(ChainLink<P>, Vec<Result<Vec<ValidatorIndex>>>, Checkpoint),
 }
@@ -1007,6 +1008,7 @@ impl<P: Preset> FmtDebug for BlockAction<P> {
             Self::Ignore(_) => f.write_str("ignore"),
             Self::DelayUntilBlobs(_, _) => f.write_str("delay_until_blobs"),
             Self::DelayUntilParent(_) => f.write_str("delay_until_parent"),
+            Self::DelayUntilPayload(_) => f.write_str("delay_until_payload"),
             Self::DelayUntilSlot(_) => f.write_str("delay_until_slot"),
             Self::WaitForJustifiedState(_, _, _) => f.write_str("wait_for_justified_state"),
         }
