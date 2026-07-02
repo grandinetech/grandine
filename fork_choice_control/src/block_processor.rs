@@ -201,18 +201,21 @@ impl<P: Preset> BlockProcessor<P> {
     }
 
     #[instrument(ret(level = "debug"), level = "debug", skip_all)]
+    #[expect(clippy::too_many_arguments)]
     pub fn validate_block<E: ExecutionEngine<P> + Send>(
         &self,
         store: &Store<P, Storage<P>>,
         block: &Arc<SignedBeaconBlock<P>>,
         state_root_policy: StateRootPolicy,
         data_availability_policy: DataAvailabilityPolicy,
+        is_from_gossip: bool,
         execution_engine: E,
         verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
         store.validate_block_with_custom_state_transition(
             block,
             data_availability_policy,
+            is_from_gossip,
             |block_root, parent| {
                 // > Make a copy of the state to avoid mutability issues
                 let state = self
