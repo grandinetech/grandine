@@ -1629,10 +1629,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block: &Arc<SignedBeaconBlock<P>>,
         state_root_policy: StateRootPolicy,
         data_availability_policy: DataAvailabilityPolicy,
+        is_from_gossip: bool,
         execution_engine: impl ExecutionEngine<P> + Send,
         verifier: impl Verifier + Send,
     ) -> Result<BlockAction<P>> {
-        self.validate_block_with_custom_state_transition(block, data_availability_policy, |block_root, parent| {
+        self.validate_block_with_custom_state_transition(block, data_availability_policy, is_from_gossip, |block_root, parent| {
             // > Make a copy of the state to avoid mutability issues
             let mut state = self
                 .state_cache
@@ -1779,6 +1780,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         block: &Arc<SignedBeaconBlock<P>>,
         data_availability_policy: DataAvailabilityPolicy,
+        is_from_gossip: bool,
         state_transition: impl FnOnce(
             H256,
             &ChainLink<P>,
@@ -1806,7 +1808,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > If this block builds on the parent's full payload, that payload must
         // > have been verified by on_execution_payload_envelope
-        if parent_payload_presence.is_full() && !self.is_payload_verified(parent_root) {
+        if is_from_gossip
+            && parent_payload_presence.is_full()
+            && !self.is_payload_verified(parent_root)
+        {
             bail!(Error::ParentExecutionPayloadNotVerified {
                 block: block.clone_arc(),
             });

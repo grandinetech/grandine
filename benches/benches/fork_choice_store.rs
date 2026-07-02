@@ -179,6 +179,7 @@ fn process_block<P: Preset>(
         block,
         StateRootPolicy::Trust,
         DataAvailabilityPolicy::Check,
+        false,
         NullExecutionEngine,
         NullVerifier,
     )?;
