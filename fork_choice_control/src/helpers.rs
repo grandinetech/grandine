@@ -365,10 +365,17 @@ impl<P: Preset> Context<P> {
     }
 
     pub fn on_invalid_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
-        assert!(matches!(
-            self.on_block(block),
-            Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)) | None,
-        ));
+        match self.on_block(block) {
+            Some(P2pMessage::PayloadEnvelopeNeeded(actual_root, _)) => {
+                assert_eq!(actual_root, block.message().parent_root());
+            }
+            message => {
+                assert!(matches!(
+                    message,
+                    Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)) | None,
+                ));
+            }
+        }
     }
 
     pub fn on_block_with_missing_blobs(
