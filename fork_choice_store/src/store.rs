@@ -277,6 +277,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     data_column_cache: DataColumnCache<P>,
     execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache<P>,
     rejected_block_roots: HashSet<H256>,
+    rejected_payload_envelopes: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
     blacklisted_blocks: StdHashSet<H256>,
@@ -386,6 +387,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             data_column_cache: DataColumnCache::default(),
             execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache::default(),
             rejected_block_roots: HashSet::default(),
+            rejected_payload_envelopes: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
             blacklisted_blocks,
@@ -1807,9 +1809,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > If this block builds on the parent's full payload, that payload must
         // > have been verified by on_execution_payload_envelope
         if parent_payload_presence.is_full() && !self.is_payload_verified(parent_root) {
-            bail!(Error::ParentExecutionPayloadNotVerified {
-                block: block.clone_arc(),
-            });
+            if self.rejected_payload_envelopes.contains(&parent_root) {
+                bail!(Error::ParentExecutionPayloadNotVerified {
+                    block: block.clone_arc(),
+                });
+            }
+
+            return Ok(BlockAction::DelayUntilPayload(block.clone_arc()));
         }
 
         if block.message().slot() == self.slot() {
@@ -5972,6 +5978,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn register_rejected_block(&mut self, block_root: H256) {
         self.rejected_block_roots.insert(block_root);
+    }
+
+    pub fn register_rejected_payload_envelope(&mut self, block_root: H256) {
+        self.rejected_payload_envelopes.insert(block_root);
     }
 
     pub fn has_unpersisted_blob_sidecars(&self) -> bool {
