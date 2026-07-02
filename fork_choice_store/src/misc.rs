@@ -368,6 +368,11 @@ impl BlockOrigin {
     }
 
     #[must_use]
+    pub const fn is_gossip(&self) -> bool {
+        matches!(self, Self::Gossip(..))
+    }
+
+    #[must_use]
     pub const fn is_requested(&self) -> bool {
         matches!(self, Self::Requested(..))
     }
