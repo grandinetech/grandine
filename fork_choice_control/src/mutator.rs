@@ -1027,6 +1027,35 @@ where
                     self.delay_block_until_parent(pending_block);
                 }
             }
+            Ok(BlockAction::DelayUntilPayload(block)) => {
+                let processing_timings = processing_timings.delayed();
+                let parent_root = block.message().parent_root();
+
+                let pending_block = PendingBlock {
+                    block,
+                    origin,
+                    processing_timings,
+                    tracing_span,
+                };
+
+                if self.store.is_payload_verified(parent_root) {
+                    self.retry_block(wait_group, pending_block);
+                } else {
+                    let pending_block = reply_delayed_block_validation_result(
+                        pending_block,
+                        Ok(ValidationOutcome::Ignore(false)),
+                    );
+
+                    debug_with_peers!("block delayed until payload: {block_root:?}");
+                    trace_with_peers!("block delayed until payload: {pending_block:?}");
+
+                    let peer_id = pending_block.origin.peer_id();
+
+                    self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(parent_root, peer_id));
+
+                    self.delay_block_until_payload_envelope(parent_root, pending_block);
+                }
+            }
             Ok(BlockAction::DelayUntilSlot(block)) => {
                 let processing_timings = processing_timings.delayed();
                 let slot = block.message().slot();
@@ -2332,6 +2361,12 @@ where
                     ));
                 }
 
+                self.store_mut().register_rejected_payload_envelope(
+                    payload_envelope_identifier.beacon_block_root,
+                );
+
+                self.update_store_snapshot();
+
                 reply_payload_envelope_validation_result_to_http_api(sender, Err(anyhow!(source)));
             }
         }
@@ -3620,6 +3655,18 @@ where
             .push(pending_block);
     }
 
+    fn delay_block_until_payload_envelope(
+        &mut self,
+        parent_root: H256,
+        pending_block: PendingBlock<P>,
+    ) {
+        self.delayed_until_envelope
+            .entry(parent_root)
+            .or_default()
+            .blocks
+            .push(pending_block);
+    }
+
     fn delay_aggregate_and_proof_until_block(
         &mut self,
         wait_group: &W,
@@ -4435,6 +4482,7 @@ where
     }
 
     fn prune_delayed_until_envelope(&mut self) -> Vec<GossipId> {
+        let finalized_slot = self.store.finalized_slot();
         let previous_epoch = self.store.previous_epoch();
 
         let mut gossip_ids = vec![];
@@ -4443,6 +4491,7 @@ where
             let Delayed {
                 aggregates,
                 attestations,
+                blocks,
                 ..
             } = delayed;
 
@@ -4468,6 +4517,15 @@ where
                         let epoch = pending.data().target.epoch;
 
                         epoch < previous_epoch
+                    })
+                    .filter_map(|pending| pending.origin.gossip_id()),
+            );
+
+            gossip_ids.extend(
+                blocks
+                    .extract_if(.., |pending| {
+                        // The parent of a delayed block cannot be in a finalized slot.
+                        pending.block.message().slot().saturating_sub(1) <= finalized_slot
                     })
                     .filter_map(|pending| pending.origin.gossip_id()),
             );
