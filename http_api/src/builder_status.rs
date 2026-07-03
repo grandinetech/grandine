@@ -25,11 +25,11 @@ pub struct BuilderIdsAndStatusesBody {
 }
 
 impl BuilderIdsAndStatusesBody {
-    pub fn ids(&self) -> &[BuilderId] {
+    pub const fn ids(&self) -> &[BuilderId] {
         self.ids.as_slice()
     }
 
-    pub fn statuses(&self) -> &[BuilderStatus] {
+    pub const fn statuses(&self) -> &[BuilderStatus] {
         self.statuses.as_slice()
     }
 }
