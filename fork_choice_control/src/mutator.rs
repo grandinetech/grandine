@@ -453,7 +453,6 @@ where
                     &block,
                     origin.state_root_policy(),
                     origin.data_availability_policy(),
-                    origin.is_gossip(),
                     &self.execution_engine,
                     NullVerifier,
                 )

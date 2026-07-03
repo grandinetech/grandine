@@ -109,8 +109,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             prometheus_metrics::start_timer_vec(&metrics.fc_block_task_times, origin.as_ref())
         });
 
-        let is_from_gossip = origin.is_gossip();
-
         let result = match origin {
             BlockOrigin::Gossip(_) | BlockOrigin::Requested(_) | BlockOrigin::Api(_) => {
                 block_processor.validate_block(
@@ -118,7 +116,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                     &block,
                     origin.state_root_policy(),
                     origin.data_availability_policy(),
-                    is_from_gossip,
                     execution_engine,
                     MultiVerifier::default(),
                 )
@@ -130,7 +127,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                         &block,
                         origin.state_root_policy(),
                         origin.data_availability_policy(),
-                        is_from_gossip,
                         execution_engine,
                         NullVerifier,
                     )
@@ -140,7 +136,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                         &block,
                         origin.state_root_policy(),
                         origin.data_availability_policy(),
-                        is_from_gossip,
                         execution_engine,
                         MultiVerifier::default(),
                     )
@@ -151,7 +146,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 &block,
                 origin.state_root_policy(),
                 origin.data_availability_policy(),
-                is_from_gossip,
                 NullExecutionEngine,
                 NullVerifier,
             ),
