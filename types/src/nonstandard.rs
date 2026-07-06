@@ -421,6 +421,7 @@ impl<P: Preset> KzgProofs<P> {
 pub enum BlockOrDataColumnSidecar<P: Preset> {
     Block(Arc<SignedBeaconBlock<P>>),
     Sidecar(Arc<DataColumnSidecar<P>>),
+    BlockRoot((H256, Slot)),
 }
 
 impl<P: Preset> BlockOrDataColumnSidecar<P> {
@@ -429,6 +430,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().slot(),
             Self::Sidecar(sidecar) => sidecar.slot(),
+            Self::BlockRoot((_, slot)) => *slot,
         }
     }
 
@@ -437,6 +439,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         match self {
             Self::Block(block) => block.message().hash_tree_root(),
             Self::Sidecar(sidecar) => sidecar.beacon_block_root(),
+            Self::BlockRoot((block_root, _)) => *block_root,
         }
     }
 
@@ -447,6 +450,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Sidecar(sidecar) => sidecar
                 .pre_gloas()
                 .map(|sidecar| sidecar.signed_block_header),
+            Self::BlockRoot(_) => None,
         }
     }
 
@@ -460,6 +464,7 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
             Self::Sidecar(sidecar) => sidecar
                 .kzg_commitments()
                 .map(|kzg_commitments| -> &dyn SszList<KzgCommitment> { kzg_commitments }),
+            Self::BlockRoot(_) => None,
         }
     }
 }

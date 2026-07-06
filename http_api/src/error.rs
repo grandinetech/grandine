@@ -63,8 +63,18 @@ pub enum Error {
     EpochOutOfRangeForStateRandao,
     #[error("execution payload bid not available for slot and builder")]
     ExecutionPayloadBidNotFound,
+    #[error("eth-blob-data-included header expected")]
+    BlobDataIncludedHeaderMissing,
     #[error("execution payload envelope not found")]
     ExecutionPayloadEnvelopeNotFound,
+    #[error(
+        "execution payload envelope slot mismatch: \
+         requested slot {requested_slot}, envelope slot {envelope_slot}"
+    )]
+    ExecutionPayloadEnvelopeSlotMismatch {
+        requested_slot: Slot,
+        envelope_slot: Slot,
+    },
     #[error("execution payload not available")]
     ExecutionPayloadNotAvailable,
     #[error("no event topics specified")]
@@ -93,6 +103,8 @@ pub enum Error {
     InvalidBlockId(#[source] AnyhowError),
     #[error("invalid block")]
     InvalidBlock(#[source] AnyhowError),
+    #[error("invalid block root")]
+    InvalidBlockRoot(#[source] AnyhowError),
     #[error("builder index {0} does not correspond to a registered builder")]
     InvalidBuilderIndex(BuilderIndex),
     #[error("invalid bytes body")]
@@ -113,6 +125,8 @@ pub enum Error {
     InvalidJsonValue(#[source] serde_json::Error),
     #[error("invalid signed execution payload bid")]
     InvalidPayloadBid(#[source] AnyhowError),
+    #[error("invalid signed execution payload envelope")]
+    InvalidPayloadEnvelope(#[source] AnyhowError),
     #[error("invalid payload attestations")]
     InvalidPayloadAttestions(Vec<IndexedError>),
     #[error("invalid peer ID")]
@@ -144,8 +158,8 @@ pub enum Error {
     InvalidValidatorSignatures(Vec<IndexedError>),
     #[error("invalid BLS to execution changes")]
     InvalidSignedBlsToExecutionChanges(Vec<IndexedError>),
-    #[error("invalid slot: slot {0} is not the current slot or the next slot")]
-    InvalidSlot(Slot),
+    #[error("invalid slot")]
+    InvalidSlot(#[source] AnyhowError),
     #[error("liveness tracking not enabled")]
     LivenessTrackingNotEnabled,
     #[error("matching head block for attestation is not found")]
@@ -166,6 +180,8 @@ pub enum Error {
     StateNotFound,
     #[error("head is not available")]
     SlotHeadNotAvailable,
+    #[error("state is post-Gloas")]
+    StatePostGloas,
     #[error("state is pre-Capella")]
     StatePreCapella,
     #[error("state is pre-Electra")]
@@ -191,6 +207,8 @@ pub enum Error {
     UnableToProduceBeaconBlock,
     #[error("unable to produce blinded block")]
     UnableToProduceBlindedBlock,
+    #[error("invalid slot: slot {0} is not the current slot or the next slot")]
+    UnexpectedSlot(Slot),
     #[error("validator not found")]
     ValidatorNotFound,
     #[error("validator {validator_index} is not in payload timeliness committee")]
@@ -269,6 +287,7 @@ impl Error {
             | Self::EpochBeforePrevious { .. }
             | Self::EpochNotInSyncCommitteePeriod
             | Self::EpochOutOfRangeForStateRandao
+            | Self::BlobDataIncludedHeaderMissing
             | Self::EventTopicsEmpty
             | Self::InvalidAggregatesAndProofs(_)
             | Self::InvalidAttestations(_)
@@ -277,6 +296,7 @@ impl Error {
             | Self::InvalidBlock(_)
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
+            | Self::InvalidBlockRoot(_)
             | Self::InvalidBuilderIndex(_)
             | Self::InvalidColumnIndex(_)
             | Self::InvalidDataColumnSidecar(_)
@@ -286,6 +306,7 @@ impl Error {
             | Self::InvalidJsonValue(_)
             | Self::InvalidQuery(_)
             | Self::InvalidPayloadBid(_)
+            | Self::InvalidPayloadEnvelope(_)
             | Self::InvalidPayloadAttestions(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidPhase { .. }
@@ -300,15 +321,18 @@ impl Error {
             | Self::InvalidValidatorId(_)
             | Self::InvalidValidatorSignatures(_)
             | Self::InvalidSlot(_)
+            | Self::ExecutionPayloadEnvelopeSlotMismatch { .. }
             | Self::PayloadAttestationNotForCurrentSlot
             | Self::ProposalSlotNotLaterThanStateSlot
             | Self::SlotNotInEpoch
+            | Self::StatePostGloas
             | Self::StatePreCapella
             | Self::StatePreElectra
             | Self::StatePreFulu
             | Self::StatePreGloas
             | Self::SubcommitteeIndexNotInRange { .. }
             | Self::UnableToPublishBlock
+            | Self::UnexpectedSlot(_)
             | Self::ValidatorNotInPTC { .. }
             | Self::VersionedHashNotInBlock { .. } => StatusCode::BAD_REQUEST,
             // | Self::ValidatorNotInCommittee { .. }

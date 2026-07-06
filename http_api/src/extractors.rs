@@ -37,7 +37,7 @@ use types::{
         containers::{
             AttesterSlashing as Phase0AttesterSlashing, ProposerSlashing, SignedVoluntaryExit,
         },
-        primitives::{Epoch, ValidatorIndex},
+        primitives::{Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
 };
@@ -146,6 +146,29 @@ impl<S: Sync> FromRequestParts<S> for EthPath<(StateId, ValidatorId)> {
             .map_err(Error::InvalidValidatorId)?;
 
         Ok(Self((state_id, validator_id)))
+    }
+}
+
+impl<S: Sync> FromRequestParts<S> for EthPath<(Slot, H256)> {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let Path((slot, beacon_block_root)) = parts
+            .extract::<Path<(String, String)>>()
+            .await
+            .map_err(AnyhowError::new)?;
+
+        let slot = slot
+            .parse()
+            .map_err(AnyhowError::new)
+            .map_err(Error::InvalidSlot)?;
+
+        let beacon_block_root = beacon_block_root
+            .parse()
+            .map_err(AnyhowError::new)
+            .map_err(Error::InvalidBlockRoot)?;
+
+        Ok(Self((slot, beacon_block_root)))
     }
 }
 

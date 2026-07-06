@@ -2143,14 +2143,19 @@ where
                 }
 
                 let processing_timings = processing_timings.delayed();
-                self.delay_execution_payload_envelope_until_block(
-                    wait_group,
+                let pending_envelope = reply_delayed_payload_envelope_validation_result(
                     PendingExecutionPayloadEnvelope {
                         execution_payload_envelope,
                         origin,
                         processing_timings,
                         tracing_span,
                     },
+                    Ok(ValidationOutcome::Ignore(false)),
+                );
+
+                self.delay_execution_payload_envelope_until_block(
+                    wait_group,
+                    pending_envelope,
                     beacon_block_root,
                 );
             }
@@ -2180,6 +2185,11 @@ where
                     debug_with_peers!(
                         "execution payload envelope delayed until state at same slot is ready \
                          (block_root: {beacon_block_root:?}, slot: {slot})",
+                    );
+
+                    let pending_envelope = reply_delayed_payload_envelope_validation_result(
+                        pending_envelope,
+                        Ok(ValidationOutcome::Ignore(false)),
                     );
 
                     self.delayed_until_state
@@ -2228,6 +2238,12 @@ where
                         self.retry_execution_payload_envelope(wait_group, pending_payload_envelope);
                     }
                     BlockDataColumnAvailability::AnyPending => {
+                        let pending_payload_envelope =
+                            reply_delayed_payload_envelope_validation_result(
+                                pending_payload_envelope,
+                                Ok(ValidationOutcome::Ignore(false)),
+                            );
+
                         self.delay_execution_payload_envelope_until_data(
                             block_root,
                             pending_payload_envelope,
@@ -2294,6 +2310,12 @@ where
                                     pending_payload_envelope,
                                 );
                             } else {
+                                let pending_payload_envelope =
+                                    reply_delayed_payload_envelope_validation_result(
+                                        pending_payload_envelope,
+                                        Ok(ValidationOutcome::Ignore(false)),
+                                    );
+
                                 self.delay_execution_payload_envelope_until_data(
                                     block_root,
                                     pending_payload_envelope,

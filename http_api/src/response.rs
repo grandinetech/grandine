@@ -16,8 +16,10 @@ use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::
 use crate::error::Error;
 
 const ETH_CONSENSUS_BLOCK_VALUE: &str = "eth-consensus-block-value";
+pub const ETH_BLOB_DATA_INCLUDED: &str = "eth-blob-data-included";
 const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
 const ETH_EXECUTION_PAYLOAD_VALUE: &str = "eth-execution-payload-value";
+const ETH_EXECUTION_PAYLOAD_INCLUDED: &str = "eth-execution-payload-included";
 
 pub struct AlwaysJson;
 
@@ -39,6 +41,8 @@ pub struct EthResponse<T, M = (), F = AlwaysJson> {
     execution_payload_blinded: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     execution_payload_value: Option<Wei>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    execution_payload_included: Option<bool>,
 
     // These are returned only in JSON body fields.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,6 +97,7 @@ impl<T, M, F> EthResponse<T, M, F> {
             consensus_block_value: None,
             execution_payload_blinded: None,
             execution_payload_value: None,
+            execution_payload_included: None,
             meta: None,
             dependent_root: None,
             execution_optimistic: None,
@@ -118,6 +123,11 @@ impl<T, M, F> EthResponse<T, M, F> {
 
     pub const fn execution_payload_value(mut self, execution_payload_value: Wei) -> Self {
         self.execution_payload_value = Some(execution_payload_value);
+        self
+    }
+
+    pub const fn execution_payload_included(mut self, execution_payload_included: bool) -> Self {
+        self.execution_payload_included = Some(execution_payload_included);
         self
     }
 
@@ -159,6 +169,11 @@ impl<T, M, F> EthResponse<T, M, F> {
             response_headers.insert(ETH_EXECUTION_PAYLOAD_VALUE, header_value);
         }
 
+        if let Some(included) = self.execution_payload_included {
+            let header_value = HeaderValue::from_static(if included { "true" } else { "false" });
+            response_headers.insert(ETH_EXECUTION_PAYLOAD_INCLUDED, header_value);
+        }
+
         Ok(response_headers)
     }
 
@@ -169,6 +184,7 @@ impl<T, M, F> EthResponse<T, M, F> {
             consensus_block_value,
             execution_payload_blinded,
             execution_payload_value,
+            execution_payload_included,
             meta,
             dependent_root,
             execution_optimistic,
@@ -182,6 +198,7 @@ impl<T, M, F> EthResponse<T, M, F> {
             consensus_block_value,
             execution_payload_blinded,
             execution_payload_value,
+            execution_payload_included,
             meta,
             dependent_root,
             execution_optimistic,
@@ -201,6 +218,7 @@ impl<T, F> EthResponse<T, (), F> {
             consensus_block_value,
             execution_payload_blinded,
             execution_payload_value,
+            execution_payload_included,
             meta: _,
             dependent_root,
             execution_optimistic,
@@ -214,6 +232,7 @@ impl<T, F> EthResponse<T, (), F> {
             consensus_block_value,
             execution_payload_blinded,
             execution_payload_value,
+            execution_payload_included,
             meta: Some(meta),
             dependent_root,
             execution_optimistic,
