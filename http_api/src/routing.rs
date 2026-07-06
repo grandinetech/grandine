@@ -42,9 +42,10 @@ use crate::{
         pool_proposer_slashings, pool_voluntary_exits, post_log_level,
         post_state_validator_balances, post_state_validators, post_trace_level,
         publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        publish_execution_payload_bid, state_committees, state_finality_checkpoints, state_fork,
-        state_pending_consolidations, state_pending_deposits, state_pending_partial_withdrawals,
-        state_proposer_lookahead, state_randao, state_root, state_sync_committees, state_validator,
+        publish_execution_payload_bid, publish_execution_payload_envelope, state_committees,
+        state_finality_checkpoints, state_fork, state_pending_consolidations,
+        state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
+        state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_payload_attestation_messages, submit_pool_attestations,
         submit_pool_attestations_v2, submit_pool_attester_slashing,
         submit_pool_attester_slashing_v2, submit_pool_bls_to_execution_change,
@@ -52,7 +53,8 @@ use crate::{
         sync_committee_rewards, validator_aggregate_attestation,
         validator_aggregate_attestation_v2, validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
-        validator_block_v3, validator_execution_payload_bid, validator_liveness,
+        validator_block_v3, validator_block_v4, validator_execution_payload_bid,
+        validator_execution_payload_envelope, validator_liveness,
         validator_payload_attestation_data, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_proposer_duties_v2, validator_proposer_preferences,
         validator_ptc_duties, validator_publish_aggregate_and_proofs_v1,
@@ -253,6 +255,7 @@ pub fn normal_routes<P: Preset, W: Wait>(state: NormalState<P, W>) -> Router {
         .merge(eth_v1_validator_routes_no_sync_check())
         .merge(eth_v2_validator_routes(state.clone()))
         .merge(eth_v3_validator_routes_no_sync_check())
+        .merge(eth_v4_validator_routes_no_sync_check())
         .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
@@ -415,10 +418,15 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         )
         .route("/eth/v1/beacon/blocks", post(publish_block));
 
-    let execution_payload_routes = Router::new().route(
-        "/eth/v1/beacon/execution_payload_bids",
-        post(publish_execution_payload_bid),
-    );
+    let execution_payload_routes = Router::new()
+        .route(
+            "/eth/v1/beacon/execution_payload_bids",
+            post(publish_execution_payload_bid),
+        )
+        .route(
+            "/eth/v1/beacon/execution_payload_envelopes",
+            post(publish_execution_payload_envelope),
+        );
 
     let block_v2_routes = Router::new().route(
         "/eth/v2/beacon/blocks/{block_id}/attestations",
@@ -649,6 +657,10 @@ fn eth_v1_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalS
             "/eth/v1/validator/prepare_beacon_proposer",
             post(validator_prepare_beacon_proposer),
         )
+        .route(
+            "/eth/v1/validator/execution_payload_envelopes/{slot}/{beacon_block_root}",
+            get(validator_execution_payload_envelope),
+        )
 }
 
 fn eth_v2_validator_routes<P: Preset, W: Wait>(
@@ -676,6 +688,10 @@ fn eth_v2_validator_routes<P: Preset, W: Wait>(
 
 fn eth_v3_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
     Router::new().route("/eth/v3/validator/blocks/{slot}", get(validator_block_v3))
+}
+
+fn eth_v4_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
+    Router::new().route("/eth/v4/validator/blocks/{slot}", get(validator_block_v4))
 }
 
 #[cfg(test)]

@@ -1163,12 +1163,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 // Publish the execution payload envelope after the beacon block so PTC members
                 // have seen the block (and its SignedExecutionPayloadBid) before attesting
                 if self_built
-                    && let Some(envelope) = block_build_context
-                        .compute_execution_payload_envelope(
+                    && let Some((envelope, ..)) = self
+                        .block_producer
+                        .build_local_execution_payload_envelope_contents(
                             beacon_block_root,
                             parent_beacon_block_root,
                         )
-                        .await?
+                        .await
                 {
                     self.publish_execution_payload_envelope(
                         slot_head,

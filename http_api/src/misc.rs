@@ -46,7 +46,8 @@ use types::{
         SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
     },
     gloas::containers::{
-        PayloadAttestationMessage, SignedAggregateAndProof as GloasSignedAggregateAndProof,
+        ExecutionPayloadEnvelope, PayloadAttestationMessage,
+        SignedAggregateAndProof as GloasSignedAggregateAndProof,
         SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         SignedProposerPreferences,
     },
@@ -134,15 +135,29 @@ pub struct BlockWithBlobs<B: Serialize + SszWrite, P: Preset> {
     pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
+// Gloas stateless `produceBlockV4` response: the block bundled with the full execution payload
+// envelope and the blobs plus their cell proofs, so the validator client can publish everything
+// without the beacon node caching anything (beacon-APIs #580).
+#[derive(Serialize, Ssz)]
+#[serde(bound = "")]
+#[ssz(derive_read = false, derive_hash = false)]
+pub struct BlockContents<B: Serialize + SszWrite, P: Preset> {
+    pub block: B,
+    pub execution_payload_envelope: ExecutionPayloadEnvelope<P>,
+    pub kzg_proofs: KzgProofs<P>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
 #[derive(Serialize)]
 #[serde(bound = "", untagged)]
 pub enum APIBlock<B: Serialize + SszWrite, P: Preset> {
     Other(B),
     WithBlobs(BlockWithBlobs<B, P>),
+    WithContents(Box<BlockContents<B, P>>),
 }
 
 impl<B: Serialize + SszWrite, P: Preset> SszSize for APIBlock<B, P> {
-    const SIZE: Size = BlockWithBlobs::<B, P>::SIZE;
+    const SIZE: Size = BlockContents::<B, P>::SIZE;
 }
 
 impl<B: Serialize + SszWrite + SszHash, P: Preset> SszWrite for APIBlock<B, P> {
@@ -150,6 +165,7 @@ impl<B: Serialize + SszWrite + SszHash, P: Preset> SszWrite for APIBlock<B, P> {
         match self {
             Self::Other(block) => block.write_variable(bytes),
             Self::WithBlobs(block) => block.write_variable(bytes),
+            Self::WithContents(block) => block.write_variable(bytes),
         }
     }
 }

@@ -70,7 +70,7 @@ use types::{
             BeaconBlock as DenebBeaconBlock, BeaconBlockBody as DenebBeaconBlockBody,
             ExecutionPayload as DenebExecutionPayload,
         },
-        primitives::KzgCommitment,
+        primitives::{Blob, KzgCommitment},
     },
     electra::containers::{
         Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
@@ -82,13 +82,12 @@ use types::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             AttesterSlashing as GloasAttesterSlashing, BeaconBlock as GloasBeaconBlock,
-            BeaconBlockBody as GloasBeaconBlockBody, ExecutionPayload as GloasExecutionPayload,
-            ExecutionPayloadBid, ExecutionPayloadEnvelope,
+            BeaconBlockBody as GloasBeaconBlockBody, ExecutionPayloadBid, ExecutionPayloadEnvelope,
             ExecutionRequests as GloasExecutionRequests, PayloadAttestation,
             SignedExecutionPayloadBid,
         },
     },
-    nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
+    nonstandard::{BlockRewards, KzgProofs, Phase, WEI_IN_GWEI, WithBlobsAndMev},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
@@ -164,6 +163,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             payload_cache: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             payload_id_cache: Mutex::new(SizedCache::with_size(PAYLOAD_ID_CACHE_SIZE)),
             cached_payload_roots: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
+            self_built_block_parents: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             metrics,
             fake_execution_payloads,
         });
@@ -621,6 +621,87 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         Some(execution_payload)
     }
 
+    pub async fn cache_self_built_block_parent(
+        &self,
+        beacon_block_root: H256,
+        parent_beacon_block_root: H256,
+    ) {
+        self.producer_context
+            .self_built_block_parents
+            .lock()
+            .await
+            .cache_set(beacon_block_root, parent_beacon_block_root);
+    }
+
+    pub async fn cached_execution_payload_envelope_contents(
+        &self,
+        beacon_block_root: H256,
+    ) -> Option<ExecutionPayloadEnvelopeContents<P>> {
+        let parent_beacon_block_root = self
+            .producer_context
+            .self_built_block_parents
+            .lock()
+            .await
+            .cache_get(&beacon_block_root)
+            .copied()?;
+
+        self.build_local_execution_payload_envelope_contents(
+            beacon_block_root,
+            parent_beacon_block_root,
+        )
+        .await
+    }
+
+    pub async fn build_local_execution_payload_envelope_contents(
+        &self,
+        beacon_block_root: H256,
+        parent_beacon_block_root: H256,
+    ) -> Option<ExecutionPayloadEnvelopeContents<P>> {
+        let payload_root = self
+            .producer_context
+            .cached_payload_roots
+            .lock()
+            .await
+            .cache_get(&parent_beacon_block_root)
+            .copied()?;
+
+        let local_payload = self
+            .producer_context
+            .payload_cache
+            .lock()
+            .await
+            .cache_get(&payload_root)
+            .cloned()?;
+
+        let WithBlobsAndMev {
+            value: execution_payload,
+            execution_requests,
+            proofs,
+            blobs,
+            ..
+        } = local_payload.result;
+
+        let (ExecutionPayload::Gloas(payload), Some(ExecutionRequests::Gloas(execution_requests))) =
+            (execution_payload, execution_requests)
+        else {
+            warn_with_peers!("unexpected non-Gloas payload format in Gloas envelope data");
+            return None;
+        };
+
+        let blobs = blobs.unwrap_or_default();
+        let kzg_proofs = proofs.unwrap_or_else(KzgProofs::empty_fulu);
+
+        let envelope = ExecutionPayloadEnvelope {
+            payload,
+            execution_requests,
+            builder_index: BUILDER_INDEX_SELF_BUILD,
+            beacon_block_root,
+            parent_beacon_block_root,
+        };
+
+        Some((envelope, blobs, kzg_proofs))
+    }
+
     pub async fn track_collection_metrics(&self) {
         if let Some(metrics) = self.producer_context.metrics.as_ref() {
             let type_name = tynm::type_name::<Self>();
@@ -649,6 +730,12 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     }
 }
 
+type ExecutionPayloadEnvelopeContents<P> = (
+    ExecutionPayloadEnvelope<P>,
+    ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>,
+    KzgProofs<P>,
+);
+
 struct ProducerContext<P: Preset, W: Wait> {
     chain_config: Arc<ChainConfig>,
     pubkey_cache: Arc<PubkeyCache>,
@@ -670,6 +757,9 @@ struct ProducerContext<P: Preset, W: Wait> {
     // Cached payload root by `BlockBuildContext.head_block_root` for `payload_cache` retrieval
     // used to construct execution payload envelope
     cached_payload_roots: Mutex<SizedCache<H256, H256>>,
+    // Parent (head) block root by self-built `beacon_block_root`, used to locate the payload root
+    // in `cached_payload_roots` when rebuilding envelope contents for the envelope endpoints.
+    self_built_block_parents: Mutex<SizedCache<H256, H256>>,
     metrics: Option<Arc<Metrics>>,
     fake_execution_payloads: bool,
 }
@@ -1790,13 +1880,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let fee_recipient = self.fee_recipient().await?;
 
-        // TODO(Gloas): this is a quick fix due to time constraits.
-        //              It needs to be refactored so it doesn't build envelope only to obtain execution requests root
-        let (_, requests) = self
-            .get_gloas_envelope_data()
+        let execution_requests_root = self
+            .cached_execution_requests_root()
             .await
             .ok_or_else(|| anyhow!("no gloas envelope data"))?;
-        let execution_requests_root = requests.hash_tree_root();
 
         let parent_root = state.latest_block_header().hash_tree_root();
 
@@ -2311,59 +2398,32 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .flatten()
     }
 
-    pub async fn compute_execution_payload_envelope(
-        &self,
-        beacon_block_root: H256,
-        parent_beacon_block_root: H256,
-    ) -> Result<Option<ExecutionPayloadEnvelope<P>>> {
-        let Some((payload, execution_requests)) = self.get_gloas_envelope_data().await else {
-            return Ok(None);
-        };
-
-        Ok(Some(ExecutionPayloadEnvelope {
-            payload,
-            execution_requests,
-            builder_index: BUILDER_INDEX_SELF_BUILD,
-            beacon_block_root,
-            parent_beacon_block_root,
-        }))
-    }
-
-    /// Get cached Gloas envelope data from `payload_cache` (called by validator after signing block)
-    /// Returns None if not self-building (external builder publishes envelope)
-    /// Returns only the fields needed to build `ExecutionPayloadEnvelope`
-    async fn get_gloas_envelope_data(
-        &self,
-    ) -> Option<(GloasExecutionPayload<P>, GloasExecutionRequests<P>)> {
-        let payload_root = *self
-            .producer_context
+    /// The `payload_cache` key for the payload built against this context's head, used to locate the
+    /// self-built envelope contents for the stateless GET and to record where the envelope endpoints
+    /// can rebuild them.
+    pub async fn cached_payload_root(&self) -> Option<H256> {
+        self.producer_context
             .cached_payload_roots
             .lock()
             .await
-            .cache_get(&self.head_block_root)?;
+            .cache_get(&self.head_block_root)
+            .copied()
+    }
 
-        let local_payload = self
-            .producer_context
-            .payload_cache
-            .lock()
-            .await
-            .cache_get(&payload_root)
-            .cloned()?;
+    async fn cached_execution_requests_root(&self) -> Option<H256> {
+        let payload_root = self.cached_payload_root().await?;
 
-        let WithBlobsAndMev {
-            value: execution_payload,
-            execution_requests,
-            ..
-        } = local_payload.result;
-
-        let (ExecutionPayload::Gloas(payload), Some(ExecutionRequests::Gloas(requests))) =
-            (execution_payload, execution_requests)
-        else {
-            warn_with_peers!("unexpected non-Gloas payload format in Gloas envelope data");
-            return None;
-        };
-
-        Some((payload, requests))
+        Some(
+            self.producer_context
+                .payload_cache
+                .lock()
+                .await
+                .cache_get(&payload_root)?
+                .result
+                .execution_requests
+                .as_ref()?
+                .hash_tree_root(),
+        )
     }
 
     async fn fee_recipient(&self) -> Result<ExecutionAddress> {

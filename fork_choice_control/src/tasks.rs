@@ -11,8 +11,9 @@ use features::Feature;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockAction, BlockOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
-    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem,
-    PayloadAttestationOrigin, ProposerPreferencesOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
+    PayloadAttestationItem, PayloadAttestationOrigin, ProposerPreferencesOrigin,
+    StateCacheProcessor, Store,
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
@@ -204,6 +205,53 @@ impl<P: Preset, W> Run for BlockVerifyForGossipTask<P, W> {
             });
 
         if let Err(reply) = sender.try_send(validation_outcome) {
+            debug_with_peers!(
+                "reply to HTTP API failed because the receiver was dropped: {reply:?}"
+            );
+        }
+
+        drop(wait_group);
+    }
+}
+
+pub struct ExecutionPayloadEnvelopeVerifyForGossipTask<P: Preset, W> {
+    pub store_snapshot: Arc<Store<P, Storage<P>>>,
+    pub wait_group: W,
+    pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    pub sender: MultiSender<Result<ValidationOutcome>>,
+}
+
+impl<P: Preset, W> Run for ExecutionPayloadEnvelopeVerifyForGossipTask<P, W> {
+    #[instrument(
+        skip_all,
+        name = "ExecutionPayloadEnvelopeVerifyForGossipTask::run",
+        level = "debug",
+        fields(
+            slot = self.execution_payload_envelope.slot()
+        ),
+    )]
+    fn run(self) {
+        let Self {
+            store_snapshot,
+            wait_group,
+            execution_payload_envelope,
+            mut sender,
+        } = self;
+
+        let validation_outcome = store_snapshot
+            .validate_execution_payload_envelope_for_gossip_rules(
+                &execution_payload_envelope,
+                &ExecutionPayloadEnvelopeOrigin::Api(None),
+            )
+            .map(|action| match action {
+                ExecutionPayloadEnvelopeAction::Ignore(publishable) => {
+                    ValidationOutcome::Ignore(publishable)
+                }
+                _ => ValidationOutcome::Ignore(false),
+            })
+            .unwrap_or(ValidationOutcome::Accept);
+
+        if let Err(reply) = sender.try_send(Ok(validation_outcome)) {
             debug_with_peers!(
                 "reply to HTTP API failed because the receiver was dropped: {reply:?}"
             );
