@@ -1106,6 +1106,16 @@ pub trait BeaconBlock<P: Preset>: SszHash<PackingFactor = U1> {
     fn state_root(&self) -> H256;
     fn body(&self) -> &dyn BeaconBlockBody<P>;
 
+    fn payload_bid(&self) -> Option<&ExecutionPayloadBid<P>> {
+        Some(
+            &self
+                .body()
+                .with_payload_bid()?
+                .signed_execution_payload_bid()
+                .message,
+        )
+    }
+
     fn to_header(&self) -> BeaconBlockHeader {
         BeaconBlockHeader {
             slot: self.slot(),

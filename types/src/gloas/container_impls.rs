@@ -81,11 +81,15 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
                 payload: ExecutionPayload {
                     extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
                     transactions: Arc::new(ProgressiveList::full(ProgressiveByteList::from(
-                        ByteList::from(ContiguousList::full(u8::MAX)),
+                        ByteList::from(
+                            ContiguousList::try_from(vec![u8::MAX; 32])
+                                .expect("should fit in MaxBytesPerTransaction"),
+                        ),
                     ))),
                     withdrawals: ProgressiveList::full(Withdrawal::default()),
                     block_access_list: Arc::new(ProgressiveByteList::from(ByteList::from(
-                        ContiguousList::full(u8::MAX),
+                        ContiguousList::try_from(vec![u8::MAX; 32])
+                            .expect("should fit in MaxBytesPerTransaction"),
                     ))),
                     ..Default::default()
                 },

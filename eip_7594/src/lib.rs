@@ -481,6 +481,9 @@ pub async fn construct_data_column_sidecars_from_blobs<P: Preset>(
         BlockOrDataColumnSidecar::Sidecar(sidecar) => {
             construct_data_column_sidecars_from_sidecar(&sidecar, &cells_and_kzg_proofs)?
         }
+        BlockOrDataColumnSidecar::BlockRoot((beacon_block_root, slot)) => {
+            get_data_column_sidecars_post_gloas(beacon_block_root, slot, &cells_and_kzg_proofs)?
+        }
     };
 
     Ok(data_column_sidecars)

@@ -74,8 +74,9 @@ use crate::{
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
-        ExecutionPayloadEnvelopeTask, PayloadAttestationBatchTask, PayloadAttestationTask,
-        ProposerPreferencesTask, StateAtSlotCacheFlushTask,
+        ExecutionPayloadEnvelopeTask, ExecutionPayloadEnvelopeVerifyForGossipTask,
+        PayloadAttestationBatchTask, PayloadAttestationTask, ProposerPreferencesTask,
+        StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -412,6 +413,30 @@ where
         sender: OneshotSender<Result<ValidationOutcomeWithReason>>,
     ) {
         self.spawn_execution_payload_bid_task(payload_bid, ExecutionPayloadBidOrigin::Api(sender))
+    }
+
+    pub fn on_api_execution_payload_envelope(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        sender: MultiSender<Result<ValidationOutcome>>,
+    ) {
+        self.spawn_execution_payload_envelope_task(
+            execution_payload_envelope,
+            ExecutionPayloadEnvelopeOrigin::Api(Some(sender)),
+        );
+    }
+
+    pub fn on_api_execution_payload_envelope_for_gossip(
+        &self,
+        execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+        sender: MultiSender<Result<ValidationOutcome>>,
+    ) {
+        self.spawn(ExecutionPayloadEnvelopeVerifyForGossipTask {
+            store_snapshot: self.owned_store_snapshot(),
+            wait_group: self.owned_wait_group(),
+            execution_payload_envelope,
+            sender,
+        })
     }
 
     pub fn on_gossip_proposer_preferences(

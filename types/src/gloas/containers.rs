@@ -14,7 +14,7 @@ use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
     bellatrix::primitives::Gas,
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
-    deneb::primitives::{KzgCommitment, KzgProof},
+    deneb::primitives::{Blob, KzgCommitment, KzgProof},
     electra::containers::{ConsolidationRequest, DepositRequest, WithdrawalRequest},
     fulu::primitives::{Cell, ColumnIndex},
     gloas::consts::{
@@ -401,6 +401,14 @@ pub struct SignedExecutionPayloadBid<P: Preset> {
 pub struct SignedExecutionPayloadEnvelope<P: Preset> {
     pub message: ExecutionPayloadEnvelope<P>,
     pub signature: SignatureBytes,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct SignedExecutionPayloadEnvelopeContents<P: Preset> {
+    pub signed_execution_payload_envelope: SignedExecutionPayloadEnvelope<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]

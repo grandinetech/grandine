@@ -433,6 +433,33 @@ where
             )
     }
 
+    pub fn exhibits_equivocation_on_execution_payload_envelope(
+        &self,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) -> bool {
+        let store = self.store_snapshot();
+
+        let Some(block) = store
+            .chain_link(envelope.block_root())
+            .map(|chain_link| chain_link.block.clone_arc())
+        else {
+            return false;
+        };
+
+        let block_slot = block.message().slot();
+
+        if store.is_slot_finalized(block_slot) {
+            return false;
+        }
+
+        let proposer_index = block.message().proposer_index();
+        let block_root = block.message().hash_tree_root();
+
+        store.exhibits_equivocation_on_blobs(block_slot, proposer_index, block_root)
+            || store
+                .exhibits_equivocation_on_blocks(block_slot, proposer_index, block_root, |_| true)
+    }
+
     pub fn check_block_root(&self, block_root: H256) -> Result<Option<WithStatus<H256>>> {
         let store = self.store_snapshot();
 

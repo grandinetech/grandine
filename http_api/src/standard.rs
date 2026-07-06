@@ -11,8 +11,9 @@ use std::{
 use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
 use axum::{
     Json,
+    body::Bytes,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header::CONTENT_TYPE},
     response::{
         IntoResponse, Response, Sse,
         sse::{Event as ServerSentEvent, KeepAlive},
@@ -50,11 +51,12 @@ use p2p::{
     NodePeersQuery, SyncCommitteeSubscription, ToSubnetService,
 };
 use prometheus_metrics::Metrics;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszList as _,
+    SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -80,16 +82,18 @@ use types::{
     config::Config as ChainConfig,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
-        primitives::{Blob, BlobIndex, KzgCommitment, VersionedHash},
+        primitives::{Blob, BlobIndex, KzgCommitment, KzgProof, VersionedHash},
     },
     fulu::{
         containers::{DataColumnIdentifier, MatrixEntry},
         primitives::ColumnIndex,
     },
     gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            ExecutionPayloadBid, PayloadAttestation, PayloadAttestationData,
-            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            ExecutionPayloadBid, ExecutionPayloadEnvelope, PayloadAttestation,
+            PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelopeContents,
             SignedProposerPreferences,
         },
         primitives::BuilderIndex,
@@ -123,14 +127,14 @@ use crate::{
     extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{
-        APIBlock, BroadcastValidation, PayloadAttestationMessageListPhaseDeserializer,
-        SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
-        SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
-        SignedExecutionPayloadBidPhaseDeserializer,
+        APIBlock, BlockContents, BroadcastValidation,
+        PayloadAttestationMessageListPhaseDeserializer, SignedAPIBlock,
+        SignedAPIBlockPhaseDeserializer, SignedAggregateAndProofListFromPhaseDeserializer,
+        SignedBlindedBeaconPhaseDeserializer, SignedExecutionPayloadBidPhaseDeserializer,
         SignedProposerPreferencesListFromPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
-    response::{EthResponse, JsonOrSsz},
+    response::{ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
         ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
@@ -216,6 +220,20 @@ pub struct ValidatorBlockQueryV3 {
     graffiti: Option<H256>,
     #[serde(default, with = "serde_utils::bool_as_empty_string")]
     skip_randao_verification: bool,
+    builder_boost_factor: Option<u64>,
+}
+
+#[derive(Deserialize)]
+// Allow custom fields in `ValidatorBlockQueryV4`.
+// This is required for Lodestar interoperability.
+// #[serde(deny_unknown_fields)]
+pub struct ValidatorBlockQueryV4 {
+    randao_reveal: SignatureBytes,
+    graffiti: Option<H256>,
+    #[serde(default, with = "serde_utils::bool_as_empty_string")]
+    skip_randao_verification: bool,
+    #[serde(default = "serde_aux::field_attributes::bool_true")]
+    include_payload: bool,
     builder_boost_factor: Option<u64>,
 }
 
@@ -1464,9 +1482,6 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/execution_payload_envelopes/{block_id}`
-///
-/// Beacon API source:
-/// <https://github.com/ethereum/beacon-APIs/commit/e25942758161fe82009a20f2d3b1868e0ff611d8>
 #[instrument(
     skip_all,
     level = "debug",
@@ -1896,6 +1911,59 @@ pub async fn publish_execution_payload_bid<P: Preset, W: Wait>(
         Ok(ValidationOutcomeWithReason::Ignore(_)) => Ok(StatusCode::OK),
         Err(error) => Err(Error::InvalidPayloadBid(error)),
     }
+}
+
+/// `POST /eth/v1/beacon/execution_payload_envelopes`
+#[expect(clippy::too_many_arguments)]
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::publish_execution_payload_envelope"
+)]
+pub async fn publish_execution_payload_envelope<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
+    EthQuery(query): EthQuery<PublishBlockQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<StatusCode, Error> {
+    let SignedExecutionPayloadEnvelopeContents {
+        signed_execution_payload_envelope,
+        kzg_proofs,
+        blobs,
+    } = resolve_execution_payload_envelope_contents(&block_producer, &headers, body).await?;
+
+    let signed_envelope = Arc::new(signed_execution_payload_envelope);
+
+    if !blobs.is_empty() {
+        let beacon_block_root = signed_envelope.message.beacon_block_root;
+        let slot = signed_envelope.message.payload.slot_number;
+
+        publish_gloas_data_column_sidecars(
+            &controller,
+            &api_to_p2p_tx,
+            metrics,
+            dedicated_executor,
+            beacon_block_root,
+            slot,
+            blobs,
+            kzg_proofs.into_iter().collect_vec(),
+        )
+        .await?;
+    }
+
+    let broadcast_validation = query.broadcast_validation.unwrap_or_default();
+
+    publish_signed_execution_payload_envelope(
+        &controller,
+        &api_to_p2p_tx,
+        signed_envelope,
+        broadcast_validation,
+    )
+    .await
 }
 
 /// `GET /eth/v1/beacon/rewards/blocks/{block_id}`
@@ -3376,12 +3444,14 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         return Err(Error::InvalidRandaoReveal);
     }
 
-    // TODO: (gloas): no longer supported from gloas phase
-
     let block_root = controller.head().value.block_root;
     let beacon_state = controller
         .preprocessed_state_for_block_production(block_root, slot)
         .await?;
+
+    if beacon_state.is_post_gloas() {
+        return Err(Error::StatePostGloas);
+    }
 
     let Ok(proposer_index) = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)
     else {
@@ -3445,6 +3515,114 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         .consensus_block_value(consensus_block_value)
         .execution_payload_blinded(blinded)
         .execution_payload_value(mev.unwrap_or_default()))
+}
+
+/// `GET /eth/v4/validator/blocks/{slot}`
+#[expect(clippy::type_complexity)]
+#[instrument(skip_all, level = "debug", name = "http_api::validator_block_v4")]
+pub async fn validator_block_v4<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    State(controller): State<ApiController<P, W>>,
+    State(validator_config): State<Arc<ValidatorConfig>>,
+    EthPath(slot): EthPath<Slot>,
+    EthQuery(query): EthQuery<ValidatorBlockQueryV4>,
+    headers: HeaderMap,
+) -> Result<EthResponse<APIBlock<BeaconBlock<P>, P>, (), JsonOrSsz>, Error> {
+    let ValidatorBlockQueryV4 {
+        randao_reveal,
+        graffiti,
+        skip_randao_verification,
+        include_payload,
+        builder_boost_factor,
+    } = query;
+
+    if skip_randao_verification && !randao_reveal.is_empty() {
+        return Err(Error::InvalidRandaoReveal);
+    }
+
+    let head_block_root = controller.head().value.block_root;
+    let beacon_state = controller
+        .preprocessed_state_for_block_production(head_block_root, slot)
+        .await?;
+
+    if !beacon_state.is_post_gloas() {
+        return Err(Error::StatePreGloas);
+    }
+
+    let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
+
+    let builder_boost_factor = builder_boost_factor
+        .map(Uint256::from_u64)
+        .unwrap_or(validator_config.default_builder_boost_factor);
+
+    let block_build_context = block_producer.new_build_context(
+        beacon_state.clone_arc(),
+        head_block_root,
+        proposer_index,
+        BlockBuildOptions {
+            graffiti,
+            disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
+            skip_randao_verification,
+            builder_boost_factor,
+            enable_local_payload_building: false,
+        },
+    );
+
+    let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
+    let (validator_block, block_rewards) = block_build_context
+        .build_beacon_block(randao_reveal, local_execution_payload_handle)
+        .await?
+        .ok_or(Error::UnableToProduceBeaconBlock)?;
+
+    let beacon_block_root = validator_block.value.hash_tree_root();
+    let version = validator_block.value.phase();
+    let consensus_block_value = block_rewards
+        .map(|rewards| Uint256::from_u64(rewards.total).saturating_mul(WEI_IN_GWEI))
+        .or_else(|| {
+            warn_with_peers!(
+                "unable to calculate block rewards for validator block at slot {slot}",
+            );
+
+            None
+        });
+
+    let self_built = validator_block
+        .value
+        .payload_bid()
+        .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD);
+
+    let payload_included = include_payload && self_built;
+
+    let api_block = if payload_included {
+        let (execution_payload_envelope, blobs, kzg_proofs) = block_producer
+            .build_local_execution_payload_envelope_contents(beacon_block_root, head_block_root)
+            .await
+            .ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+        APIBlock::WithContents(Box::new(BlockContents {
+            block: validator_block.value,
+            execution_payload_envelope,
+            blobs,
+            kzg_proofs,
+        }))
+    } else {
+        // For an external-builder block the builder publishes its own envelope, so cache nothing.
+        // For a self-built block, record where the envelope endpoints can rebuild its contents.
+        if self_built {
+            block_producer
+                .cache_self_built_block_parent(beacon_block_root, head_block_root)
+                .await;
+        }
+
+        validator_block.into()
+    };
+
+    Ok(EthResponse::json_or_ssz(api_block, &headers)?
+        .version(version)
+        .consensus_block_value(consensus_block_value)
+        .execution_payload_included(payload_included))
 }
 
 /// `GET /eth/v1/validator/attestation_data`
@@ -3719,6 +3897,11 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/validator/execution_payload_bids/{slot}/{builder_index}`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_execution_payload_bid"
+)]
 pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     EthPath(slot): EthPath<Slot>,
@@ -3731,7 +3914,7 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     } else if slot == current_slot.saturating_add(1) {
         controller.preprocessed_state_at_next_slot().await?
     } else {
-        return Err(Error::InvalidSlot(slot));
+        return Err(Error::UnexpectedSlot(slot));
     };
 
     // TODO(gloas): check builder exist with `builder_indices` cache in beacon state
@@ -3748,6 +3931,38 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
         .ok_or(Error::ExecutionPayloadBidNotFound)?;
 
     Ok(EthResponse::json_or_ssz(signed_bid.message, &headers)?.version(version))
+}
+
+/// `GET /eth/v1/validator/execution_payload_envelopes/{slot}/{beacon_block_root}`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_execution_payload_envelope"
+)]
+pub async fn validator_execution_payload_envelope<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(block_producer): State<Arc<BlockProducer<P, W>>>,
+    EthPath((slot, beacon_block_root)): EthPath<(Slot, H256)>,
+    headers: HeaderMap,
+) -> Result<EthResponse<ExecutionPayloadEnvelope<P>, (), JsonOrSsz>, Error> {
+    let Some((envelope, ..)) = block_producer
+        .cached_execution_payload_envelope_contents(beacon_block_root)
+        .await
+    else {
+        return Err(Error::ExecutionPayloadEnvelopeNotFound);
+    };
+
+    let envelope_slot = envelope.payload.slot_number;
+    if envelope_slot != slot {
+        return Err(Error::ExecutionPayloadEnvelopeSlotMismatch {
+            requested_slot: slot,
+            envelope_slot,
+        });
+    }
+
+    let phase = chain_config.phase_at_slot::<P>(slot);
+
+    Ok(EthResponse::json_or_ssz(envelope, &headers)?.version(phase))
 }
 
 /// `GET /eth/v1/validator/payload_attestation_data/{slot}`
@@ -5312,6 +5527,173 @@ async fn construct_data_column_sidecars_from_blobs<P: Preset, W: Wait>(
         dedicated_executor,
     )
     .await
+}
+
+async fn resolve_execution_payload_envelope_contents<P: Preset, W: Wait>(
+    block_producer: &BlockProducer<P, W>,
+    headers: &HeaderMap,
+    body: Bytes,
+) -> Result<SignedExecutionPayloadEnvelopeContents<P>, Error> {
+    let blob_data_included = headers
+        .get(ETH_BLOB_DATA_INCLUDED)
+        .ok_or(Error::BlobDataIncludedHeaderMissing)?
+        .to_str()
+        .map(|value| value == "true")
+        .map_err(Into::into)
+        .map_err(Error::Internal)?;
+
+    if blob_data_included {
+        return deserialize_json_or_ssz::<SignedExecutionPayloadEnvelopeContents<P>>(headers, body);
+    }
+
+    let signed_execution_payload_envelope =
+        deserialize_json_or_ssz::<SignedExecutionPayloadEnvelope<P>>(headers, body)?;
+
+    let beacon_block_root = signed_execution_payload_envelope.message.beacon_block_root;
+    let (cached_envelope, blobs, kzg_proofs) = block_producer
+        .cached_execution_payload_envelope_contents(beacon_block_root)
+        .await
+        .ok_or_else(|| {
+            Error::InvalidPayloadEnvelope(anyhow!(
+                "no cached blobs and KZG proofs for block root {beacon_block_root:?}",
+            ))
+        })?;
+
+    if signed_execution_payload_envelope.message.hash_tree_root()
+        != cached_envelope.hash_tree_root()
+    {
+        return Err(Error::InvalidPayloadEnvelope(anyhow!(
+            "submitted execution payload envelope does not match the cached envelope",
+        )));
+    }
+
+    let KzgProofs::Fulu(kzg_proofs) = kzg_proofs else {
+        return Err(Error::InvalidPayloadEnvelope(anyhow!(
+            "cached KZG proofs are not in post-Fulu cell-proof form",
+        )));
+    };
+
+    Ok(SignedExecutionPayloadEnvelopeContents {
+        signed_execution_payload_envelope,
+        kzg_proofs,
+        blobs,
+    })
+}
+
+#[expect(clippy::too_many_arguments)]
+async fn publish_gloas_data_column_sidecars<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+    metrics: Option<Arc<Metrics>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
+    beacon_block_root: H256,
+    slot: Slot,
+    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    kzg_proofs: Vec<KzgProof>,
+) -> Result<(), Error> {
+    let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+        (beacon_block_root, slot).into(),
+        blobs.into_iter(),
+        kzg_proofs,
+        controller.store_config().kzg_backend,
+        metrics,
+        dedicated_executor,
+    )
+    .await
+    .map_err(Error::InvalidDataColumnSidecar)?;
+
+    submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars.clone()).await?;
+
+    for data_column_sidecar in data_column_sidecars {
+        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar).send(api_to_p2p_tx);
+    }
+
+    Ok(())
+}
+
+#[instrument(skip_all, level = "debug")]
+async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+    signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    broadcast_validation: BroadcastValidation,
+) -> Result<StatusCode, Error> {
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    if broadcast_validation == BroadcastValidation::Gossip {
+        controller
+            .on_api_execution_payload_envelope_for_gossip(signed_envelope.clone_arc(), sender);
+    } else {
+        controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
+    }
+
+    let status_code = match receiver.next().await.transpose() {
+        Ok(Some(ValidationOutcome::Accept)) => match broadcast_validation {
+            // The envelope was already published by the gossip-checks path above.
+            BroadcastValidation::Gossip => StatusCode::OK,
+            BroadcastValidation::Consensus => {
+                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+                StatusCode::OK
+            }
+            BroadcastValidation::ConsensusAndEquivocation => {
+                if controller.exhibits_equivocation_on_execution_payload_envelope(&signed_envelope)
+                {
+                    return Err(Error::InvalidPayloadEnvelope(anyhow!(
+                        "execution payload envelope exhibits equivocation"
+                    )));
+                }
+
+                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+                StatusCode::OK
+            }
+        },
+        Ok(Some(ValidationOutcome::Ignore(publishable))) => {
+            if broadcast_validation != BroadcastValidation::Gossip && publishable {
+                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+            }
+
+            StatusCode::ACCEPTED
+        }
+        Ok(None) => {
+            if broadcast_validation == BroadcastValidation::Gossip {
+                StatusCode::ACCEPTED
+            } else {
+                return Err(Error::InvalidPayloadEnvelope(anyhow!(
+                    "received no envelope validation response",
+                )));
+            }
+        }
+        Err(error) => {
+            if broadcast_validation == BroadcastValidation::Gossip {
+                StatusCode::ACCEPTED
+            } else {
+                return Err(Error::InvalidPayloadEnvelope(error));
+            }
+        }
+    };
+
+    Ok(status_code)
+}
+
+/// Deserialize a request body as SSZ (when `Content-Type: application/octet-stream`) or JSON.
+/// Used where the body type is chosen at runtime (e.g. by a header) so a typed extractor cannot.
+fn deserialize_json_or_ssz<T>(headers: &HeaderMap, body: Bytes) -> Result<T, Error>
+where
+    T: SszRead<Phase> + DeserializeOwned,
+{
+    let is_ssz = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/octet-stream"));
+
+    if is_ssz {
+        let phase = http_api_utils::extract_phase_from_headers(headers)
+            .map_err(Error::InvalidRequestConsensusHeader)?;
+
+        T::from_ssz(&phase, body).map_err(Error::InvalidSszBody)
+    } else {
+        serde_json::from_slice(&body).map_err(Error::InvalidJsonValue)
+    }
 }
 
 #[cfg(test)]

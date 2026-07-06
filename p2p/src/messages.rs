@@ -111,6 +111,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishProposerPreferences(Arc<SignedProposerPreferences>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
+    PublishExecutionPayloadEnvelope(Arc<SignedExecutionPayloadEnvelope<P>>),
     PublishProposerSlashing(Box<ProposerSlashing>),
     PublishAttesterSlashing(Box<AttesterSlashing<P>>),
     PublishVoluntaryExit(Box<SignedVoluntaryExit>),

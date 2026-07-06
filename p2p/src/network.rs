@@ -402,6 +402,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             self.publish_execution_payload_bid(payload_bid);
                             true
                         }
+                        ApiToP2p::PublishExecutionPayloadEnvelope(envelope) => {
+                            self.publish_execution_payload_envelope(envelope);
+                            true
+                        }
                         ApiToP2p::PublishProposerSlashing(proposer_slashing) => {
                             self.publish_proposer_slashing(proposer_slashing);
                             true
