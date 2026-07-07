@@ -38,7 +38,7 @@ pub enum PredefinedNetwork {
 }
 
 impl PredefinedNetwork {
-    /// [Mainnet bootnode ENRs](https://github.com/eth-clients/mainnet/blob/6c9a688d289697d44614c7dfaf9154cc6565cb06/metadata/bootstrap_nodes.yaml)
+    /// [Mainnet bootnode ENRs](https://github.com/eth-clients/mainnet/blob/b3fc01ff2bac624880f2e6dbafbf67532760f611/metadata/bootstrap_nodes.yaml)
     #[cfg(any(feature = "network-mainnet", test))]
     pub const MAINNET_BOOTNODES: &'static [&'static str] = &[
         // > Teku team's bootnodes
@@ -63,7 +63,7 @@ impl PredefinedNetwork {
         "enr:-LK4QKWrXTpV9T78hNG6s8AM6IO4XH9kFT91uZtFg1GcsJ6dKovDOr1jtAAFPnS2lvNltkOGA9k29BUN7lFh_sjuc9QBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhANAdd-Jc2VjcDI1NmsxoQLQa6ai7y9PMN5hpLe5HmiJSlYzMuzP7ZhwRiwHvqNXdoN0Y3CCI4yDdWRwgiOM",
         // > Lodestar team's bootnodes
         "enr:-IS4QPi-onjNsT5xAIAenhCGTDl4z-4UOR25Uq-3TmG4V3kwB9ljLTb_Kp1wdjHNj-H8VVLRBSSWVZo3GUe3z6k0E-IBgmlkgnY0gmlwhKB3_qGJc2VjcDI1NmsxoQMvAfgB4cJXvvXeM6WbCG86CstbSxbQBSGx31FAwVtOTYN1ZHCCIyg",
-        "enr:-KG4QCb8NC3gEM3I0okStV5BPX7Bg6ZXTYCzzbYyEXUPGcZtHmvQtiJH4C4F2jG7azTcb9pN3JlgpfxAnRVFzJ3-LykBgmlkgnY0gmlwhFPlR9KDaXA2kP6AAAAAAAAAAlBW__4my5iJc2VjcDI1NmsxoQLdUv9Eo9sxCt0tc_CheLOWnX59yHJtkBSOL7kpxdJ6GYN1ZHCCIyiEdWRwNoIjKA",
+        "enr:-KG4QPUf8-g_jU-KrwzG42AGt0wWM1BTnQxgZXlvCEIfTQ5hSmptkmgmMbRkpOqv6kzb33SlhPHJp7x4rLWWiVq5lSECgmlkgnY0gmlwhFPlR9KDaXA2kCoGxcAJAAAVAAAAAAAAABCJc2VjcDI1NmsxoQLdUv9Eo9sxCt0tc_CheLOWnX59yHJtkBSOL7kpxdJ6GYN1ZHCCIyiEdWRwNoIjKA",
     ];
 
     /// [Sepolia bootnode ENRs](https://github.com/eth-clients/sepolia/blob/2bae9336a2d13998faf4c9f5574ccb2d15718721/metadata/bootstrap_nodes.yaml)
@@ -100,7 +100,7 @@ impl PredefinedNetwork {
         "enr:-KG4QC9Wm32mtzB5Fbj2ri2TEKglHmIWgvwTQCvNHBopuwpNAi1X6qOsBg_Z1-Bee-kfSrhzUQZSgDUyfH5outUprtoBgmlkgnY0gmlwhHEel3eDaXA2kP6AAAAAAAAAAlBW__4Srr-Jc2VjcDI1NmsxoQO7KE63Z4eSI55S1Yn7q9_xFkJ1Wt-a3LgiXuKGs19s0YN1ZHCCIyiEdWRwNoIjKA",
     ];
 
-    /// [Hoodi bootnode ENRs](https://github.com/eth-clients/hoodi/blob/12da21411825d4c998dc71daf3b553c46e90a1a7/metadata/bootstrap_nodes.yaml)
+    /// [Hoodi bootnode ENRs](https://github.com/eth-clients/hoodi/blob/a130c03daa6dbb1ae9a1a722544570b6b8035aee/metadata/bootstrap_nodes.yaml)
     #[cfg(any(feature = "network-hoodi", test))]
     const HOODI_BOOTNODES: &'static [&'static str] = &[
         // EF
@@ -114,7 +114,7 @@ impl PredefinedNetwork {
         "enr:-LK4QDwhXMitMbC8xRiNL-XGMhRyMSOnxej-zGifjv9Nm5G8EF285phTU-CAsMHRRefZimNI7eNpAluijMQP7NDC8kEMh2F0dG5ldHOIAAAAAAAABgCEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhAOIT_SJc2VjcDI1NmsxoQMoHWNL4MAvh6YpQeM2SUjhUrLIPsAVPB8nyxbmckC6KIN0Y3CCIyiDdWRwgiMo",
         "enr:-LK4QPYl2HnMPQ7b1es6Nf_tFYkyya5bj9IqAKOEj2cmoqVkN8ANbJJJK40MX4kciL7pZszPHw6vLNyeC-O3HUrLQv8Mh2F0dG5ldHOIAAAAAAAAAMCEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhAMYRG-Jc2VjcDI1NmsxoQPQ35tjr6q1qUqwAnegQmYQyfqxC_6437CObkZneI9n34N0Y3CCIyiDdWRwgiMo",
         // Lodestar
-        "enr:-KG4QJk_4IQHQw3DAdKIuGcEauKU8-nmRPPMj_hIQPRHmsFGMPPeOj6_xX09aHCndOzLnOZimVRzNM56_EQWYVbEpJMBgmlkgnY0gmlwhLkvrBODaXA2kP6AAAAAAAAAAhY-__4PR6OJc2VjcDI1NmsxoQPU7g2jQGTz8BYbB2vLTb39S_PrcZAehwMM0b3bWsM5rIN1ZHCCIyiEdWRwNoIjKA",
+        "enr:-KG4QKRSUi4IOAIK_xt5ERrwW_J47wmNCLWFh7Jo0hFE69drZsiZ5Pb5CEcM_njFTTLlIR6SCf67HTcSV1g6hCXdhWkCgmlkgnY0gmlwhLkvrBODaXA2kCoGxcAWAAAYAAAAAAAAABCJc2VjcDI1NmsxoQPU7g2jQGTz8BYbB2vLTb39S_PrcZAehwMM0b3bWsM5rIN1ZHCCIyiEdWRwNoIjKA",
     ];
 
     #[must_use]
