@@ -491,8 +491,9 @@ struct BeaconNodeOptions {
 #[derive(Debug, Args)]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
-    #[clap(long, default_value_t = Ipv4Addr::UNSPECIFIED)]
-    listen_address: Ipv4Addr,
+    /// [default: 0.0.0.0, unless --disable-ipv4 is set]
+    #[clap(long)]
+    listen_address: Option<Ipv4Addr>,
 
     /// Listen IPv6 address
     /// [default: None]
@@ -528,6 +529,21 @@ struct NetworkConfigOptions {
     /// [default: enabled]
     #[clap(long)]
     disable_enr_auto_update: bool,
+
+    /// Disable listening on IPv4
+    /// [default: enabled]
+    #[clap(
+        long,
+        requires = "listen_address_ipv6",
+        conflicts_with_all = [
+            "listen_address",
+            "enr_address",
+            "enr_tcp_port",
+            "enr_udp_port",
+            "enr_quic_port",
+        ],
+    )]
+    disable_ipv4: bool,
 
     /// discv5 IPv4 port
     #[clap(long, default_value_t = DEFAULT_LIBP2P_IPV4_PORT)]
@@ -636,6 +652,7 @@ impl NetworkConfigOptions {
             libp2p_port,
             libp2p_port_ipv6,
             disable_enr_auto_update,
+            disable_ipv4,
             disable_quic,
             disable_peer_scoring,
             disable_rate_limiting,
@@ -683,24 +700,35 @@ impl NetworkConfigOptions {
                 Some(OutboundRateLimiterConfig::default());
         }
 
-        if let Some(listen_address_ipv6) = listen_address_ipv6 {
-            network_config.set_ipv4_ipv6_listening_addresses(
-                listen_address,
-                libp2p_port.into(),
-                discovery_port.into(),
-                quic_port.into(),
-                listen_address_ipv6,
-                libp2p_port_ipv6.into(),
-                discovery_port_ipv6.into(),
-                quic_port_ipv6.into(),
-            );
-        } else {
-            network_config.set_ipv4_listening_address(
-                listen_address,
-                libp2p_port.into(),
-                discovery_port.into(),
-                quic_port.into(),
-            );
+        match (listen_address, listen_address_ipv6) {
+            (_, Some(listen_address_ipv6)) if disable_ipv4 => {
+                network_config.set_ipv6_listening_address(
+                    listen_address_ipv6,
+                    libp2p_port_ipv6.into(),
+                    discovery_port_ipv6.into(),
+                    quic_port_ipv6.into(),
+                );
+            }
+            (listen_address, None) => {
+                network_config.set_ipv4_listening_address(
+                    listen_address.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                    libp2p_port.into(),
+                    discovery_port.into(),
+                    quic_port.into(),
+                );
+            }
+            (listen_address, Some(listen_address_ipv6)) => {
+                network_config.set_ipv4_ipv6_listening_addresses(
+                    listen_address.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                    libp2p_port.into(),
+                    discovery_port.into(),
+                    quic_port.into(),
+                    listen_address_ipv6,
+                    libp2p_port_ipv6.into(),
+                    discovery_port_ipv6.into(),
+                    quic_port_ipv6.into(),
+                );
+            }
         }
 
         network_config.enr_address = (enr_address, enr_address_ipv6);
@@ -708,7 +736,7 @@ impl NetworkConfigOptions {
         // Set ENR fields of `NetworkConfig` only if the value is specified.
         if let Some(enr_tcp_port) = enr_tcp_port {
             network_config.enr_tcp4_port = Some(enr_tcp_port);
-        } else {
+        } else if !disable_ipv4 {
             // Don't allow discv5 to overwrite ENR port
             // as it won't be open via Upnp
             network_config.enr_tcp4_port = Some(libp2p_port);
@@ -1692,7 +1720,7 @@ fn headers_to_allow_origin(allowed_origins: Vec<HeaderValue>) -> Option<AllowOri
 
 #[cfg(test)]
 mod tests {
-    use core::net::{Ipv4Addr, SocketAddr};
+    use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
     use ssz::Uint256;
     use tempfile::NamedTempFile;
@@ -1730,6 +1758,123 @@ mod tests {
                     .expect("home directory should be accessible")
                     .join(".grandine/mainnet/network"),
             ),
+        );
+    }
+
+    #[test]
+    fn listen_address_defaults_to_unspecified_ipv4() {
+        let config = config_from_args([]);
+        let listen_addrs = config.network_config.listen_addrs();
+
+        assert_eq!(
+            listen_addrs.v4().map(|addr| addr.addr),
+            Some(Ipv4Addr::UNSPECIFIED),
+        );
+
+        assert_eq!(listen_addrs.v6().map(|addr| addr.addr), None);
+    }
+
+    #[test]
+    fn listen_address_ipv4_only_uses_given_address() {
+        let config = config_from_args(["--listen-address", "127.0.0.1"]);
+        let listen_addrs = config.network_config.listen_addrs();
+
+        let v4 = listen_addrs
+            .v4()
+            .expect("IPv4 listen address should be set");
+
+        assert_eq!(v4.addr, Ipv4Addr::LOCALHOST);
+        assert_eq!(v4.tcp_port, DEFAULT_LIBP2P_IPV4_PORT.get());
+        assert_eq!(v4.disc_port, DEFAULT_LIBP2P_IPV4_PORT.get());
+        assert_eq!(v4.quic_port, DEFAULT_LIBP2P_QUIC_IPV4_PORT.get());
+        assert_eq!(listen_addrs.v6().map(|addr| addr.addr), None);
+    }
+
+    #[test]
+    fn listen_address_ipv6_defaults_to_dual_stack() {
+        let config = config_from_args(["--listen-address-ipv6", "::1"]);
+        let listen_addrs = config.network_config.listen_addrs();
+
+        assert_eq!(
+            listen_addrs.v4().map(|addr| addr.addr),
+            Some(Ipv4Addr::UNSPECIFIED),
+        );
+
+        assert_eq!(
+            listen_addrs.v6().map(|addr| addr.addr),
+            Some(Ipv6Addr::LOCALHOST),
+        );
+    }
+
+    #[test]
+    fn disable_ipv4_produces_ipv6_only() {
+        let config = config_from_args(["--disable-ipv4", "--listen-address-ipv6", "::1"]);
+        let listen_addrs = config.network_config.listen_addrs();
+
+        assert_eq!(listen_addrs.v4().map(|addr| addr.addr), None);
+
+        let v6 = listen_addrs
+            .v6()
+            .expect("IPv6 listen address should be set");
+
+        assert_eq!(v6.addr, Ipv6Addr::LOCALHOST);
+        assert_eq!(v6.tcp_port, DEFAULT_LIBP2P_IPV6_PORT.get());
+        assert_eq!(v6.disc_port, DEFAULT_LIBP2P_IPV6_PORT.get());
+        assert_eq!(v6.quic_port, DEFAULT_LIBP2P_QUIC_IPV6_PORT.get());
+
+        // The ENR must not advertise an IPv4 TCP port when IPv4 is disabled.
+        assert_eq!(config.network_config.enr_tcp4_port, None);
+    }
+
+    #[test]
+    fn disable_ipv4_requires_listen_address_ipv6() {
+        try_config_from_args(["--disable-ipv4"])
+            .expect_err("--disable-ipv4 requires --listen-address-ipv6");
+    }
+
+    #[test]
+    fn disable_ipv4_conflicts_with_listen_address() {
+        try_config_from_args([
+            "--disable-ipv4",
+            "--listen-address",
+            "127.0.0.1",
+            "--listen-address-ipv6",
+            "::1",
+        ])
+        .expect_err("--disable-ipv4 conflicts with --listen-address");
+    }
+
+    #[test]
+    fn disable_ipv4_conflicts_with_enr_tcp_port() {
+        try_config_from_args([
+            "--disable-ipv4",
+            "--listen-address-ipv6",
+            "::1",
+            "--enr-tcp-port",
+            "9000",
+        ])
+        .expect_err("--disable-ipv4 conflicts with --enr-tcp-port");
+    }
+
+    #[test]
+    fn listen_address_dual_stack_uses_both_addresses() {
+        let config = config_from_args([
+            "--listen-address",
+            "127.0.0.1",
+            "--listen-address-ipv6",
+            "::1",
+        ]);
+
+        let listen_addrs = config.network_config.listen_addrs();
+
+        assert_eq!(
+            listen_addrs.v4().map(|addr| addr.addr),
+            Some(Ipv4Addr::LOCALHOST),
+        );
+
+        assert_eq!(
+            listen_addrs.v6().map(|addr| addr.addr),
+            Some(Ipv6Addr::LOCALHOST),
         );
     }
 

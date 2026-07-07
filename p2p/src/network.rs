@@ -204,7 +204,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
         let mut port_mappings = None;
 
-        if network_config.upnp_enabled && !network_config.disable_discovery {
+        if network_config.upnp_enabled
+            && !network_config.disable_discovery
+            && network_config.listen_addrs().v4().is_some()
+        {
             match PortMappings::new(&network_config) {
                 Ok(mappings) => port_mappings = Some(mappings),
                 Err(error) => warn_with_peers!("error while initializing UPnP: {error}"),
