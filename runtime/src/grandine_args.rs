@@ -10,9 +10,9 @@ use core::{
     ops::Not as _,
     time::Duration,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use binary_utils::TelemetryConfig;
 use bls::PublicKeyBytes;
 use builder_api::{
@@ -20,7 +20,10 @@ use builder_api::{
     DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, PREFERRED_EXECUTION_GAS_LIMIT,
 };
 use bytesize::ByteSize;
-use clap::{Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind};
+use clap::{
+    Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind,
+    parser::ValueSource,
+};
 use derivative::Derivative;
 use derive_more::Display;
 use directories::Directories;
@@ -87,6 +90,10 @@ use crate::{
 #[derive(Debug, Parser)]
 #[clap(display_name = APPLICATION_NAME, verbatim_doc_comment, version = APPLICATION_VERSION)]
 pub struct GrandineArgs {
+    /// Load command-line options from a YAML file. Keys are long option names (e.g. `http-port`).
+    #[clap(long, value_name = "YAML_FILE")]
+    args_file: Option<PathBuf>,
+
     #[clap(flatten)]
     chain_options: ChainOptions,
 
@@ -1546,6 +1553,64 @@ impl GrandineArgs {
         Self::command().error(ErrorKind::ValueValidation, message)
     }
 
+    /// Parse `cli_args`; if `--args-file` was given, merge that YAML file's
+    /// options underneath the command line and re-parse.
+    ///
+    /// The command line always wins: any option it set is dropped from the file
+    /// (scalars and lists alike), and the remaining file-derived tokens are
+    /// spliced in right after the program name so subcommands are preserved.
+    /// `cli_args` must start with the program name, as `std::env::args_os` does.
+    pub fn parse_and_merge_args_file(cli_args: impl IntoIterator<Item = OsString>) -> Result<Self> {
+        let cli_args = cli_args.into_iter().collect::<Vec<_>>();
+
+        // Best-effort parse to discover `--args-file` and which options the
+        // command line set, without enforcing `requires`/`conflicts` yet — those
+        // run on the merged tokens in the strict parse below, so a constraint
+        // may be satisfied by the file. `ignore_errors` also skips unknown args
+        // and missing values; typos still surface in the final strict parse.
+        let command = Self::command();
+        let matches = command
+            .clone()
+            .ignore_errors(true)
+            .try_get_matches_from(cli_args.iter().cloned())?;
+
+        let Some(path) = matches.get_one::<PathBuf>("args_file").cloned() else {
+            // No file — hand off to the normal strict parse so errors and help
+            // are produced exactly as without `--args-file`.
+            return Self::try_parse_from(cli_args).map_err(Into::into);
+        };
+
+        let yaml = fs_err::read_to_string(&path).map_err(Self::clap_error)?;
+        let groups = yaml_to_arg_groups(&yaml).map_err(Self::clap_error)?;
+
+        // Long names of options the command line set. The args file may not
+        // override these, which gives lists the same override semantics as
+        // scalars (the file's value is dropped, not appended).
+        let cli_set_longs = command
+            .get_arguments()
+            .filter(|arg| {
+                matches.value_source(arg.get_id().as_str()) == Some(ValueSource::CommandLine)
+            })
+            .filter_map(Arg::get_long)
+            .map(str::to_owned)
+            .collect::<HashSet<_>>();
+
+        let file_tokens = groups
+            .into_iter()
+            .filter(|(long, _)| !cli_set_longs.contains(long))
+            .flat_map(|(_, tokens)| tokens)
+            .map(OsString::from);
+
+        let mut cli_args = cli_args.into_iter();
+        let program = cli_args
+            .next()
+            .unwrap_or_else(|| APPLICATION_NAME.to_owned().into());
+
+        let args = core::iter::once(program).chain(file_tokens).chain(cli_args);
+
+        Self::try_parse_from(args).map_err(Into::into)
+    }
+
     #[must_use]
     pub fn data_dir(&self) -> Option<PathBuf> {
         (!self.beacon_node_options.in_memory)
@@ -1718,9 +1783,74 @@ fn headers_to_allow_origin(allowed_origins: Vec<HeaderValue>) -> Option<AllowOri
     None
 }
 
+/// Turn a flat YAML mapping into clap-style tokens, grouped per option under
+/// its normalized long name (e.g. `http-port`).
+///
+/// Keys are long option names (`_` is accepted as an alias for `-`). Booleans
+/// become bare flags (`false` produces no tokens); scalars become
+/// `--key value`; sequences repeat the flag once per element. Grouping lets
+/// callers drop a whole option, for instance when the command line already set
+/// it. Unknown keys are passed through and left for the argument parser to
+/// reject.
+fn yaml_to_arg_groups(yaml: &str) -> Result<Vec<(String, Vec<String>)>> {
+    let mapping = serde_yaml::from_str::<serde_yaml::Mapping>(yaml)?;
+    let mut groups = Vec::new();
+
+    for (key, value) in &mapping {
+        let key = key
+            .as_str()
+            .ok_or_else(|| anyhow!("config option keys must be strings"))?;
+
+        let long = key.replace('_', "-");
+        let flag = format!("--{long}");
+        let mut tokens = Vec::new();
+
+        match value {
+            serde_yaml::Value::Bool(true) => tokens.push(flag),
+            serde_yaml::Value::Bool(false) => {}
+            serde_yaml::Value::Number(_) | serde_yaml::Value::String(_) => {
+                tokens.push(flag);
+                tokens.push(scalar_to_string(value, key)?);
+            }
+            // Repeat the flag once per element, e.g. `--boot-nodes a --boot-nodes b`.
+            serde_yaml::Value::Sequence(values) => {
+                for value in values {
+                    tokens.push(flag.clone());
+                    tokens.push(scalar_to_string(value, key)?);
+                }
+            }
+            serde_yaml::Value::Null
+            | serde_yaml::Value::Mapping(_)
+            | serde_yaml::Value::Tagged(_) => {
+                bail!("config option `{key}` has an unsupported value")
+            }
+        }
+
+        groups.push((long, tokens));
+    }
+
+    Ok(groups)
+}
+
+/// Render a scalar YAML value as a command-line option value.
+fn scalar_to_string(value: &serde_yaml::Value, key: &str) -> Result<String> {
+    match value {
+        serde_yaml::Value::Bool(bool) => Ok(bool.to_string()),
+        serde_yaml::Value::Number(number) => Ok(number.to_string()),
+        serde_yaml::Value::String(string) => Ok(string.clone()),
+        serde_yaml::Value::Null
+        | serde_yaml::Value::Sequence(_)
+        | serde_yaml::Value::Mapping(_)
+        | serde_yaml::Value::Tagged(_) => {
+            bail!("config option `{key}` has an unsupported value")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+    use std::io::Write as _;
 
     use ssz::Uint256;
     use tempfile::NamedTempFile;
@@ -2447,15 +2577,376 @@ mod tests {
         );
     }
 
+    #[test]
+    fn yaml_to_args_scalar_string_becomes_flag_and_value() {
+        assert_eq!(
+            yaml_to_args("http-port: \"5052\"").expect("valid YAML should parse"),
+            ["--http-port", "5052"],
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_number_becomes_flag_and_value() {
+        assert_eq!(
+            yaml_to_args("http-port: 5052").expect("valid YAML should parse"),
+            ["--http-port", "5052"],
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_true_becomes_bare_flag() {
+        assert_eq!(
+            yaml_to_args("back-sync: true").expect("valid YAML should parse"),
+            ["--back-sync"],
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_false_is_omitted() {
+        assert!(
+            yaml_to_args("back-sync: false")
+                .expect("valid YAML should parse")
+                .is_empty(),
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_underscore_key_becomes_dash() {
+        assert_eq!(
+            yaml_to_args("back_sync: true").expect("valid YAML should parse"),
+            ["--back-sync"],
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_sequence_repeats_flag() {
+        assert_eq!(
+            yaml_to_args(
+                "
+                eth1-rpc-urls:
+                  - http://localhost:8545
+                  - http://example.com:8545
+                "
+            )
+            .expect("valid YAML should parse"),
+            [
+                "--eth1-rpc-urls",
+                "http://localhost:8545",
+                "--eth1-rpc-urls",
+                "http://example.com:8545",
+            ],
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_empty_sequence_emits_nothing() {
+        assert!(
+            yaml_to_args("eth1-rpc-urls: []")
+                .expect("valid YAML should parse")
+                .is_empty(),
+        );
+    }
+
+    #[test]
+    fn yaml_to_args_rejects_null_value() {
+        yaml_to_args("http-port:").expect_err("a null value should be rejected");
+    }
+
+    #[test]
+    fn yaml_to_args_rejects_mapping_value() {
+        yaml_to_args(
+            "
+            nested:
+              key: value
+            ",
+        )
+        .expect_err("a mapping value should be rejected");
+    }
+
+    #[test]
+    fn yaml_to_args_rejects_non_string_key() {
+        yaml_to_args("123: value").expect_err("a non-string key should be rejected");
+    }
+
+    #[test]
+    fn merge_args_file_reads_options_from_yaml() {
+        let config = try_config_from_args_file(
+            "
+            discovery-port: 8888
+            back-sync: true
+            eth1-rpc-urls:
+              - http://localhost:8545
+              - http://example.com:8545
+            ",
+        )
+        .expect("config should be built from --args-file");
+
+        assert_eq!(
+            config
+                .network_config
+                .listen_addrs()
+                .v4()
+                .map(|addr| addr.disc_port),
+            Some(8888),
+        );
+
+        assert!(config.back_sync_enabled);
+
+        itertools::assert_equal(
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
+            ["http://localhost:8545/", "http://example.com:8545/"],
+        );
+    }
+
+    #[test]
+    fn args_file_enforces_conflicts() {
+        try_config_from_args_file(
+            "
+            archive-storage: true
+            prune-storage: true
+            ",
+        )
+        .expect_err("conflicting options in --args-file should be rejected");
+    }
+
+    #[test]
+    fn args_file_enforces_required_options() {
+        try_config_from_args_file("force-checkpoint-sync: true\n")
+            .expect_err("missing required option in --args-file should be rejected");
+    }
+
+    #[test]
+    fn requires_is_satisfied_across_cli_and_args_file() {
+        // `--force-checkpoint-sync` requires `--checkpoint-sync-url`; the
+        // requirement is enforced only on the merged tokens, so the command line
+        // may set the flag while the args file supplies its dependency.
+        let config = try_config_from_args_and_file(
+            ["--force-checkpoint-sync"],
+            "checkpoint-sync-url: https://checkpoint.example\n",
+        )
+        .expect("a requirement split across the command line and args file should be satisfied");
+
+        assert!(config.force_checkpoint_sync);
+
+        assert_eq!(
+            config.checkpoint_sync_url.map(|url| url.to_string()),
+            Some("https://checkpoint.example/".to_owned()),
+        );
+    }
+
+    #[test]
+    fn args_file_empty_sequence_keeps_default() {
+        let config = try_config_from_args_file("eth1-rpc-urls: []")
+            .expect("an empty sequence should be treated as unset");
+
+        assert!(config.eth1_rpc_urls.is_empty());
+    }
+
+    #[test]
+    fn args_file_scalar_splits_on_value_delimiter() {
+        let config = try_config_from_args_file(
+            "libp2p-nodes: /ip4/127.0.0.1/tcp/9000,/ip4/127.0.0.2/tcp/9001",
+        )
+        .expect("a comma-delimited scalar should split into multiple values");
+
+        itertools::assert_equal(
+            config
+                .network_config
+                .libp2p_nodes
+                .iter()
+                .map(ToString::to_string),
+            ["/ip4/127.0.0.1/tcp/9000", "/ip4/127.0.0.2/tcp/9001"],
+        );
+    }
+
+    #[test]
+    fn args_file_sanity_node_run() {
+        let config = try_config_from_args_file(
+            "
+            network: sepolia
+            checkpoint-sync-url: https://checkpoint.sepolia.example
+            force-checkpoint-sync: true
+            eth1-rpc-urls:
+              - http://localhost:8545
+              - http://localhost:8546
+            back-sync: true
+            graffiti:
+              - \"**grandine**\"
+            default-builder-boost-factor: 90
+            max-empty-slots: 5
+            discovery-port: 9010
+            http-port: 6000
+            metrics: true
+            metrics-port: 9000
+            track-liveness: true
+            detect-doppelgangers: true
+            ",
+        )
+        .expect("a full node configuration should be built from --args-file");
+
+        assert_eq!(config.predefined_network, Some(PredefinedNetwork::Sepolia));
+        assert_eq!(
+            config.checkpoint_sync_url.map(|url| url.to_string()),
+            Some("https://checkpoint.sepolia.example/".to_owned()),
+        );
+
+        assert!(config.force_checkpoint_sync);
+        assert!(config.back_sync_enabled);
+
+        itertools::assert_equal(
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
+            ["http://localhost:8545/", "http://localhost:8546/"],
+        );
+
+        assert_eq!(
+            config.graffiti,
+            [b"**grandine**\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".into()],
+        );
+
+        assert_eq!(config.default_builder_boost_factor, Uint256::from_u64(90));
+        assert_eq!(config.max_empty_slots, 5);
+        assert_eq!(
+            config
+                .network_config
+                .listen_addrs()
+                .v4()
+                .map(|addr| addr.disc_port),
+            Some(9010),
+        );
+
+        assert_eq!(
+            config.http_api_config.map(|config| config.address),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6000)),
+        );
+
+        assert_eq!(
+            config
+                .metrics_config
+                .metrics_server_config
+                .map(|config| config.metrics_port),
+            Some(9000),
+        );
+
+        assert!(config.track_liveness);
+        assert!(config.detect_doppelgangers);
+    }
+
+    #[test]
+    fn cli_scalar_overrides_args_file() {
+        let config =
+            try_config_from_args_and_file(["--discovery-port", "7000"], "discovery-port: 8888")
+                .expect("a command-line scalar should override the args file");
+
+        assert_eq!(
+            config
+                .network_config
+                .listen_addrs()
+                .v4()
+                .map(|addr| addr.disc_port),
+            Some(7000),
+        );
+    }
+
+    #[test]
+    fn cli_list_overrides_args_file_list() {
+        let config = try_config_from_args_and_file(
+            ["--eth1-rpc-urls", "http://cli:8545"],
+            "
+            eth1-rpc-urls:
+              - http://file:8545
+            ",
+        )
+        .expect("a command-line list should override the args file list");
+
+        itertools::assert_equal(
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
+            ["http://cli:8545/"],
+        );
+    }
+
+    #[test]
+    fn args_file_list_used_when_cli_absent() {
+        let config = try_config_from_args_and_file(
+            [],
+            "
+            eth1-rpc-urls:
+              - http://file:8545
+            ",
+        )
+        .expect("the args file list should be used when the command line omits it");
+
+        itertools::assert_equal(
+            config.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
+            ["http://file:8545/"],
+        );
+    }
+
+    #[test]
+    fn args_file_preserves_cli_subcommand() {
+        let config = try_config_from_args_and_file(
+            ["export", "--from", "0", "--to", "20"],
+            "back-sync: true",
+        )
+        .expect("a subcommand should survive args file merging");
+
+        assert_eq!(
+            config.command,
+            Some(GrandineCommand::Export {
+                from: 0,
+                to: 20,
+                output_dir: None,
+            }),
+        );
+
+        assert!(config.back_sync_enabled);
+    }
+
     fn config_from_args<'a>(arguments: impl IntoIterator<Item = &'a str>) -> GrandineConfig {
         try_config_from_args(arguments)
             .expect("GrandineArgs should be successfully parsed from arguments")
     }
 
+    fn try_config_from_args_file(yaml: &str) -> Result<GrandineConfig> {
+        try_config_from_args_and_file([], yaml)
+    }
+
+    /// Parse the given command-line `arguments` together with a `--args-file`
+    /// pointing at a temporary file containing `yaml`.
+    fn try_config_from_args_and_file<'a>(
+        arguments: impl IntoIterator<Item = &'a str>,
+        yaml: &str,
+    ) -> Result<GrandineConfig> {
+        let mut file = NamedTempFile::new().expect("temporary file should be created");
+        write!(file, "{yaml}").expect("writing YAML should succeed");
+
+        let path = file
+            .path()
+            .to_str()
+            .expect("temporary path should be UTF-8")
+            .to_owned();
+
+        let mut argv = vec!["--args-file".to_owned(), path];
+        argv.extend(arguments.into_iter().map(str::to_owned));
+
+        try_config_from_args(argv.iter().map(String::as_str))
+    }
+
     fn try_config_from_args<'a>(
         arguments: impl IntoIterator<Item = &'a str>,
     ) -> Result<GrandineConfig> {
-        GrandineArgs::try_parse_from(core::iter::once(APPLICATION_NAME).chain(arguments))?
-            .try_into_config()
+        let args = core::iter::once(APPLICATION_NAME)
+            .chain(arguments)
+            .map(OsString::from);
+
+        GrandineArgs::parse_and_merge_args_file(args)?.try_into_config()
+    }
+
+    /// Flatten [`yaml_to_arg_groups`] into a single token list, as it is spliced
+    /// into the command line.
+    fn yaml_to_args(yaml: &str) -> Result<Vec<String>> {
+        Ok(yaml_to_arg_groups(yaml)?
+            .into_iter()
+            .flat_map(|(_, tokens)| tokens)
+            .collect())
     }
 }

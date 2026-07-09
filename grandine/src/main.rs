@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use allocator as _;
 use anyhow::Result;
-use clap::{Error as ClapError, Parser as _};
+use clap::Error as ClapError;
 use logging::error_with_peers;
 use runtime::grandine_args::GrandineArgs;
 
@@ -29,7 +29,7 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> Result<()> {
-    let parsed_args = GrandineArgs::try_parse()?;
+    let parsed_args = GrandineArgs::parse_and_merge_args_file(std::env::args_os())?;
 
     runtime::run(parsed_args)
 }
