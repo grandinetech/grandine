@@ -922,7 +922,6 @@ where
             mutator_tx: self.owned_mutator_tx(),
             payload_bid,
             origin,
-            storage: self.owned_storage(),
         })
     }
 
