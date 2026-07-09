@@ -2,12 +2,17 @@ use anyhow::Result;
 use helper_functions::{
     accessors::{get_current_epoch, get_pending_balance_to_withdraw_for_builder},
     gloas::{add_builder_to_registry, initiate_builder_exit},
-    predicates::{is_active_builder, is_valid_builder_deposit_signature},
+    predicates::{
+        is_active_builder, is_builder_withdrawal_credential, is_valid_builder_deposit_signature,
+    },
 };
 use pubkey_cache::PubkeyCache;
 use types::{
     config::Config,
-    gloas::containers::{BuilderDepositRequest, BuilderExitRequest, ExecutionRequests},
+    gloas::{
+        consts::PAYLOAD_BUILDER_VERSION,
+        containers::{BuilderDepositRequest, BuilderExitRequest, ExecutionRequests},
+    },
     phase0::{consts::FAR_FUTURE_EPOCH, primitives::ExecutionAddress},
     preset::Preset,
     traits::PostGloasBeaconState,
@@ -58,6 +63,10 @@ pub fn process_builder_deposit_request<P: Preset>(
         ..
     } = deposit_request;
 
+    if !is_builder_withdrawal_credential(withdrawal_credentials) {
+        return Ok(());
+    }
+
     if let Some(builder_index) = state
         .builders()
         .into_iter()
@@ -70,14 +79,8 @@ pub fn process_builder_deposit_request<P: Preset>(
             .get_mut(builder_index)
             .expect("builder index is valid since its pubkey found in builder registry");
 
-        builder.balance = builder.balance.checked_add(amount).ok_or_else(|| {
-            anyhow::anyhow!(
-                "balance overflow when applying deposit for builder at index {builder_index}",
-            )
-        })?;
-
         // > If exited, reset the withdrawable epoch
-        if builder.withdrawable_epoch != FAR_FUTURE_EPOCH {
+        if builder.withdrawable_epoch != FAR_FUTURE_EPOCH && builder.balance == 0 {
             builder.withdrawable_epoch =
                 current_epoch.checked_add(config.min_builder_withdrawability_delay).ok_or_else(|| {
                     anyhow::anyhow!(
@@ -85,6 +88,12 @@ pub fn process_builder_deposit_request<P: Preset>(
                     )
                 })?;
         }
+
+        builder.balance = builder.balance.checked_add(amount).ok_or_else(|| {
+            anyhow::anyhow!(
+                "balance overflow when applying deposit for builder at index {builder_index}",
+            )
+        })?;
     } else if is_valid_builder_deposit_signature(config, pubkey_cache, &deposit_request) {
         let mut address = ExecutionAddress::zero();
         address.assign_from_slice(&withdrawal_credentials[12..]);
@@ -92,7 +101,7 @@ pub fn process_builder_deposit_request<P: Preset>(
         add_builder_to_registry(
             state,
             pubkey,
-            withdrawal_credentials[0],
+            PAYLOAD_BUILDER_VERSION,
             address,
             amount,
             state.slot(),

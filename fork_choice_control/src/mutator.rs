@@ -2062,13 +2062,22 @@ where
                         .store
                         .is_before_due_bps_deadline(self.store.chain_config().payload_due_bps);
 
-                debug_with_peers!(
-                    "execution payload envelope accepted (\
-                        block root: {beacon_block_root:?}, \
-                        slot: {slot}, \
-                        is before deadline: {is_before_deadline} \
-                    )",
-                );
+                if self.store.is_forward_synced() {
+                    debug_with_peers!(
+                        "execution payload envelope accepted (\
+                            block root: {beacon_block_root:?}, \
+                            slot: {slot}, \
+                            is before deadline: {is_before_deadline} \
+                        )",
+                    );
+                } else {
+                    debug_with_peers!(
+                        "execution payload envelope accepted (\
+                            block root: {beacon_block_root:?}, \
+                            slot: {slot} \
+                        )",
+                    );
+                }
 
                 if should_generate_event {
                     self.event_channels
