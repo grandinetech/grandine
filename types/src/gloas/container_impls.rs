@@ -1,16 +1,17 @@
 use core::fmt;
 use std::sync::Arc;
 
-use ssz::{ByteList, ContiguousList, H256};
-use typenum::Unsigned as _;
+use ssz::{ByteList, ContiguousList, H256, ProgressiveByteList, ProgressiveList};
 
 use crate::{
     capella::containers::Withdrawal,
     deneb::primitives::{KzgCommitment, KzgProof},
-    electra::containers::{ConsolidationRequest, DepositRequest, WithdrawalRequest},
+    electra::containers::{
+        Attestation as ElectraAttestation, ConsolidationRequest, DepositRequest, WithdrawalRequest,
+    },
     gloas::{
         containers::{
-            BuilderDepositRequest, BuilderExitRequest, CombinedPayloadAttestation,
+            Attestation, BuilderDepositRequest, BuilderExitRequest, CombinedPayloadAttestation,
             DataColumnSidecar, ExecutionPayload, ExecutionPayloadEnvelope, ExecutionRequests,
             PayloadAttestationData, PayloadAttestationMessage, PayloadEnvelopeIdentifier,
             SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
@@ -20,6 +21,42 @@ use crate::{
     phase0::primitives::Slot,
     preset::Preset,
 };
+
+impl<P: Preset> From<ElectraAttestation<P>> for Attestation<P> {
+    fn from(attestation: ElectraAttestation<P>) -> Self {
+        let ElectraAttestation {
+            aggregation_bits,
+            data,
+            signature,
+            committee_bits,
+        } = attestation;
+
+        Self {
+            aggregation_bits: aggregation_bits.into(),
+            data,
+            signature,
+            committee_bits,
+        }
+    }
+}
+
+impl<P: Preset> From<Attestation<P>> for ElectraAttestation<P> {
+    fn from(attestation: Attestation<P>) -> Self {
+        let Attestation {
+            aggregation_bits,
+            data,
+            signature,
+            committee_bits,
+        } = attestation;
+
+        Self {
+            aggregation_bits: aggregation_bits.into(),
+            data,
+            signature,
+            committee_bits,
+        }
+    }
+}
 
 impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
     #[must_use]
@@ -43,23 +80,21 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
             message: ExecutionPayloadEnvelope {
                 payload: ExecutionPayload {
                     extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
-                    transactions: Arc::new(ContiguousList::full(ByteList::from(
-                        ContiguousList::try_from(vec![u8::MAX; P::MaxBytesPerTransaction::USIZE])
-                            .expect("should fit in MaxBytesPerTransaction"),
+                    transactions: Arc::new(ProgressiveList::full(ProgressiveByteList::from(
+                        ByteList::from(ContiguousList::full(u8::MAX)),
                     ))),
-                    withdrawals: ContiguousList::full(Withdrawal::default()),
-                    block_access_list: Arc::new(ByteList::from(
-                        ContiguousList::try_from(vec![u8::MAX; P::MaxBytesPerTransaction::USIZE])
-                            .expect("should fit in MaxBytesPerTransaction"),
-                    )),
+                    withdrawals: ProgressiveList::full(Withdrawal::default()),
+                    block_access_list: Arc::new(ProgressiveByteList::from(ByteList::from(
+                        ContiguousList::full(u8::MAX),
+                    ))),
                     ..Default::default()
                 },
                 execution_requests: ExecutionRequests {
-                    deposits: ContiguousList::full(DepositRequest::default()),
-                    withdrawals: ContiguousList::full(WithdrawalRequest::default()),
-                    consolidations: ContiguousList::full(ConsolidationRequest::default()),
-                    builder_deposits: ContiguousList::full(BuilderDepositRequest::default()),
-                    builder_exits: ContiguousList::full(BuilderExitRequest::default()),
+                    deposits: ProgressiveList::full(DepositRequest::default()),
+                    withdrawals: ProgressiveList::full(WithdrawalRequest::default()),
+                    consolidations: ProgressiveList::full(ConsolidationRequest::default()),
+                    builder_deposits: ProgressiveList::full(BuilderDepositRequest::default()),
+                    builder_exits: ProgressiveList::full(BuilderExitRequest::default()),
                 },
                 ..Default::default()
             },
@@ -72,8 +107,8 @@ impl<P: Preset> DataColumnSidecar<P> {
     #[must_use]
     pub fn full() -> Self {
         Self {
-            column: ContiguousList::full(Box::default()),
-            kzg_proofs: ContiguousList::full(KzgProof::repeat_byte(u8::MAX)),
+            column: ProgressiveList::full(Box::default()),
+            kzg_proofs: ProgressiveList::full(KzgProof::repeat_byte(u8::MAX)),
             ..Default::default()
         }
     }
@@ -110,7 +145,7 @@ impl<P: Preset> SignedExecutionPayloadBid<P> {
     #[must_use]
     pub const fn blob_kzg_commitments(
         &self,
-    ) -> &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+    ) -> &ProgressiveList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
         &self.message.blob_kzg_commitments
     }
 }

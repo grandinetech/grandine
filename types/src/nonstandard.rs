@@ -9,7 +9,7 @@ use enum_map::Enum;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
+use ssz::{ContiguousList, Size, SszList, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
 use strum::{AsRefStr, Display, EnumString};
 
@@ -450,16 +450,16 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         }
     }
 
-    pub fn kzg_commitments(
-        &self,
-    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
+    pub fn kzg_commitments(&self) -> Option<&dyn SszList<KzgCommitment>> {
         match self {
             Self::Block(block) => block
                 .message()
                 .body()
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
-            Self::Sidecar(sidecar) => sidecar.kzg_commitments(),
+            Self::Sidecar(sidecar) => sidecar
+                .kzg_commitments()
+                .map(|kzg_commitments| kzg_commitments as &dyn SszList<KzgCommitment>),
         }
     }
 }

@@ -17,10 +17,17 @@ pub use crate::{
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
     incomplete_persistent_vector::IncompletePersistentVector,
-    merkle_tree::{MerkleTree, ProofWithLength, mix_in_length},
+    list::{SszBitList, SszList, SszListMut},
+    merkle_tree::{
+        MerkleTree, ProgressiveMerkleTree, ProofWithLength, mix_in_active_fields, mix_in_length,
+    },
     persistent_list::PersistentList,
+    persistent_progressive_list::PersistentProgressiveList,
     persistent_vector::PersistentVector,
     porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszWrite},
+    progressive_bit_list::ProgressiveBitList,
+    progressive_byte_list::ProgressiveByteList,
+    progressive_list::ProgressiveList,
     shared::{read_offset_unchecked, subslice, write_offset},
     size::Size,
     type_level::{
@@ -47,12 +54,17 @@ mod error;
 mod hc;
 mod incomplete_persistent_vector;
 mod iter;
+mod list;
 mod merkle_tree;
 mod negative;
 mod persistent_list;
+mod persistent_progressive_list;
 mod persistent_vector;
 mod pointers;
 mod porcelain;
+mod progressive_bit_list;
+mod progressive_byte_list;
+mod progressive_list;
 mod shared;
 mod size;
 mod type_level;

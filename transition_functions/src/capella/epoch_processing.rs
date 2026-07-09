@@ -2,7 +2,7 @@ use anyhow::Result;
 use arithmetic::NonZeroExt as _;
 use helper_functions::{accessors::get_next_epoch, misc::vec_of_default};
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszListMut as _};
 use types::{
     capella::{beacon_state::BeaconState, containers::HistoricalSummary},
     config::Config,

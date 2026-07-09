@@ -216,10 +216,14 @@ impl<S: Sync, P: Preset> FromRequest<S, Body> for EthJson<Box<AttesterSlashing<P
                     .await
                     .map(|Json(slashing)| Self(Box::new(AttesterSlashing::Phase0(slashing))))
             }
-            Phase::Electra | Phase::Fulu | Phase::Gloas => request
+            Phase::Electra | Phase::Fulu => request
                 .extract()
                 .await
                 .map(|Json(slashing)| Self(Box::new(AttesterSlashing::Electra(slashing)))),
+            Phase::Gloas => request
+                .extract()
+                .await
+                .map(|Json(slashing)| Self(Box::new(AttesterSlashing::Gloas(slashing)))),
         }
         .map_err(Error::InvalidJsonBody)
     }

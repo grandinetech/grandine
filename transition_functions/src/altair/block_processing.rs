@@ -19,7 +19,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::Hc;
+use ssz::{Hc, SszList as _};
 use std_ext::ArcExt as _;
 use typenum::Unsigned as _;
 use types::{

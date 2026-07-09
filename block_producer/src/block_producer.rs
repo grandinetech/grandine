@@ -33,7 +33,7 @@ use operation_pools::{
 };
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use ssz::{BitList, BitVector, ContiguousList, Hc, SszHash};
+use ssz::{BitList, BitVector, ContiguousList, Hc, ProgressiveList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
@@ -81,10 +81,11 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
-            ExecutionPayloadEnvelope, ExecutionRequests as GloasExecutionRequests,
-            PayloadAttestation, SignedExecutionPayloadBid,
+            AttesterSlashing as GloasAttesterSlashing, BeaconBlock as GloasBeaconBlock,
+            BeaconBlockBody as GloasBeaconBlockBody, ExecutionPayload as GloasExecutionPayload,
+            ExecutionPayloadBid, ExecutionPayloadEnvelope,
+            ExecutionRequests as GloasExecutionRequests, PayloadAttestation,
+            SignedExecutionPayloadBid,
         },
     },
     nonstandard::{BlockRewards, Phase, WEI_IN_GWEI, WithBlobsAndMev},
@@ -275,6 +276,21 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                         predicates::is_slashable_validator(attester, current_epoch)
                     })
                 }
+                AttesterSlashing::Gloas(attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).any(|attester_index| {
+                        let attester = match finalized_state.validators().get(attester_index) {
+                            Ok(attester) => attester,
+                            Err(error) => {
+                                log_with_feature(format_args!(
+                                    "attester slashing is too recent to discard: {error}"
+                                ));
+                                return true;
+                            }
+                        };
+
+                        predicates::is_slashable_validator(attester, current_epoch)
+                    })
+                }
             });
 
         self.producer_context
@@ -343,6 +359,9 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                 AttesterSlashing::Electra(attester_slashing) => {
                     accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
                 }
+                AttesterSlashing::Gloas(attester_slashing) => {
+                    accessors::slashable_indices(attester_slashing).collect::<HashSet<_>>()
+                }
             })
             .collect::<HashSet<_>>();
 
@@ -352,6 +371,10 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                     .all(|index| seen_indices.contains(&index))
             }
             AttesterSlashing::Electra(ref attester_slashing) => {
+                accessors::slashable_indices(attester_slashing)
+                    .all(|index| seen_indices.contains(&index))
+            }
+            AttesterSlashing::Gloas(ref attester_slashing) => {
                 accessors::slashable_indices(attester_slashing)
                     .all(|index| seen_indices.contains(&index))
             }
@@ -385,6 +408,12 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
                     attester_slashing,
                 )
             }
+            AttesterSlashing::Gloas(ref attester_slashing) => unphased::validate_attester_slashing(
+                &self.producer_context.chain_config,
+                &self.producer_context.pubkey_cache,
+                &state,
+                attester_slashing,
+            ),
         };
 
         let outcome = match result {
@@ -1009,9 +1038,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         let payload_attestations = if parent_block.value().to_header().message.slot
                             == misc::previous_slot(slot)
                         {
-                            self.prepare_payload_attestations().await?
+                            self.prepare_payload_attestations().await?.into()
                         } else {
-                            ContiguousList::default()
+                            ProgressiveList::default()
                         };
 
                         let parent_execution_requests = if snapshot.should_build_on_full() {
@@ -1037,13 +1066,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 randao_reveal,
                                 eth1_data,
                                 graffiti,
-                                proposer_slashings,
-                                attester_slashings: self.prepare_attester_slashings_electra().await,
-                                attestations,
-                                deposits,
-                                voluntary_exits,
+                                proposer_slashings: proposer_slashings.into(),
+                                attester_slashings: self.prepare_attester_slashings_gloas().await,
+                                attestations: attestations.map(Into::into).into(),
+                                deposits: deposits.into(),
+                                voluntary_exits: voluntary_exits.into(),
                                 sync_aggregate,
-                                bls_to_execution_changes,
+                                bls_to_execution_changes: bls_to_execution_changes.into(),
                                 signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
                                 payload_attestations,
                                 parent_execution_requests,
@@ -1404,6 +1433,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         attester_slashing,
                     )
                 }
+                AttesterSlashing::Gloas(attester_slashing) => unphased::validate_attester_slashing(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    &self.beacon_state,
+                    attester_slashing,
+                ),
             }
             .is_ok()
         });
@@ -1454,6 +1489,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         attester_slashing,
                     )
                 }
+                AttesterSlashing::Gloas(attester_slashing) => unphased::validate_attester_slashing(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    &self.beacon_state,
+                    attester_slashing,
+                ),
             }
             .is_ok()
         });
@@ -1462,6 +1503,62 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             slashings
                 .drain(0..split_index.min(P::MaxAttesterSlashingsElectra::USIZE))
                 .filter_map(AttesterSlashing::post_electra),
+        )
+        .expect(
+            "the call to Vec::drain above limits the \
+             iterator to P::MaxAttesterSlashingsElectra::USIZE elements",
+        );
+
+        log_with_feature(format_args!(
+            "attester slashings for proposal: {slashings:?}"
+        ));
+
+        slashings
+    }
+
+    async fn prepare_attester_slashings_gloas(
+        &self,
+    ) -> ProgressiveList<GloasAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+        let _timer = self
+            .producer_context
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.prepare_attester_slashings_times.start_timer());
+
+        let mut slashings = self.producer_context.attester_slashings.lock().await;
+
+        let split_index = itertools::partition(slashings.iter_mut(), |slashing| {
+            match slashing {
+                AttesterSlashing::Phase0(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.producer_context.pubkey_cache,
+                        &self.beacon_state,
+                        attester_slashing,
+                    )
+                }
+                AttesterSlashing::Electra(attester_slashing) => {
+                    unphased::validate_attester_slashing(
+                        &self.producer_context.chain_config,
+                        &self.producer_context.pubkey_cache,
+                        &self.beacon_state,
+                        attester_slashing,
+                    )
+                }
+                AttesterSlashing::Gloas(attester_slashing) => unphased::validate_attester_slashing(
+                    &self.producer_context.chain_config,
+                    &self.producer_context.pubkey_cache,
+                    &self.beacon_state,
+                    attester_slashing,
+                ),
+            }
+            .is_ok()
+        });
+
+        let slashings = ProgressiveList::try_from_iter(
+            slashings
+                .drain(0..split_index.min(P::MaxAttesterSlashingsElectra::USIZE))
+                .filter_map(AttesterSlashing::post_gloas),
         )
         .expect(
             "the call to Vec::drain above limits the \
@@ -1716,7 +1813,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments: blob_kzg_commitments_opt.unwrap_or_default(),
+            blob_kzg_commitments: blob_kzg_commitments_opt.unwrap_or_default().into(),
             execution_requests_root,
         };
 

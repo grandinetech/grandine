@@ -8,9 +8,8 @@ use helper_functions::{
     verifier::Verifier,
 };
 use pubkey_cache::PubkeyCache;
-use ssz::{ContiguousList, PersistentList, SszHash as _};
+use ssz::{ContiguousList, SszHash as _};
 use tap::TryConv as _;
-use try_from_iterator::TryFromIterator as _;
 use typenum::NonZero;
 use types::{
     capella::containers::Withdrawal,
@@ -159,13 +158,16 @@ where
     }
 
     // > Update pending partial withdrawals [New in Electra:EIP7251]
-    *state.pending_partial_withdrawals_mut() = PersistentList::try_from_iter(
-        state
-            .pending_partial_withdrawals()
-            .into_iter()
-            .copied()
-            .skip(processed_partial_withdrawals_count),
-    )?;
+    let pending_partial_withdrawals = state.pending_partial_withdrawals().clone_boxed();
+
+    state
+        .pending_partial_withdrawals_mut()
+        .try_assign_from_iter(
+            &mut pending_partial_withdrawals
+                .iter()
+                .copied()
+                .skip(processed_partial_withdrawals_count),
+        )?;
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {

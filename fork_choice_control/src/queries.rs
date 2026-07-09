@@ -404,7 +404,7 @@ where
 
         if let Some(state) = self
             .storage()
-            .stored_state_by_state_root(state_root, &store.finalized_validators())?
+            .stored_state_by_state_root(state_root, &*store.finalized_validators())?
         {
             let finalized = store.is_slot_finalized(state.slot());
             return Ok(Some(WithStatus::valid(state, finalized)));
@@ -802,7 +802,7 @@ where
 
         if let Some(state) = self
             .storage()
-            .state_post_block(block_root, &store.finalized_validators())?
+            .state_post_block(block_root, &*store.finalized_validators())?
         {
             return state_cache.process_slots(pubkey_cache, &store, state, block_root, slot);
         }
@@ -832,7 +832,7 @@ where
             }
 
             if let Some(state) =
-                storage.state_post_block(block_root, &store.finalized_validators())?
+                storage.state_post_block(block_root, &*store.finalized_validators())?
             {
                 return state_cache.process_slots(&pubkey_cache, &store, state, block_root, slot);
             }
@@ -1350,7 +1350,7 @@ impl<P: Preset> Snapshot<'_, P> {
 
         if let Some(state) = self
             .storage
-            .stored_state(slot, Some(&store.finalized_validators()))?
+            .stored_state(slot, Some(&*store.finalized_validators()))?
         {
             let finalized = store.is_slot_finalized(state.slot());
             return Ok(Some(WithStatus::valid(state, finalized)));

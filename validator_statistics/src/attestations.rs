@@ -256,6 +256,31 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
             }
         }
 
+        if let Some(post_gloas_block_body) = block_with_root
+            .block
+            .message()
+            .body()
+            .with_gloas_attestations()
+        {
+            for block_attestation in
+                post_gloas_block_body
+                    .attestations()
+                    .iter()
+                    .filter(|attestation| {
+                        misc::compute_epoch_at_slot::<P>(attestation.data().slot)
+                            == attestation_data_epoch
+                    })
+            {
+                slot_report.update_performance(
+                    &state,
+                    block_attestation.data(),
+                    helper_functions::electra::get_attesting_indices(&state, block_attestation)?
+                        .intersection(validators_indices)
+                        .copied(),
+                )?;
+            }
+        }
+
         slot_reports.insert(slot, slot_report);
     }
 
