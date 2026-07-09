@@ -11,7 +11,7 @@ use types::{
     gloas::containers::{
         SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
-    phase0::primitives::{Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, ValidatorIndex},
+    phase0::primitives::{Epoch, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -173,13 +173,6 @@ pub enum Error<P: Preset> {
         "execution payload bid's slot {bid_slot} is not greater than parent slot {parent_slot}"
     )]
     ExecutionPayloadBidSlotNotGreaterThanParent { bid_slot: Slot, parent_slot: Slot },
-    #[error(
-        "execution payload bid's fee recipient mismatch (in_bid: {in_bid:?}, in_preference: {in_preference:?})"
-    )]
-    ExecutionPayloadBidFeeRecipientMismatch {
-        in_preference: Box<ExecutionAddress>,
-        in_bid: Box<ExecutionAddress>,
-    },
     #[error("off-protocol payment is disallowed in gossip: {payload_bid:?}")]
     ExecutionPayloadBidOffProtocolPaymentDisallowed {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,

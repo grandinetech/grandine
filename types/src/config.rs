@@ -279,13 +279,13 @@ impl Default for Config {
             contribution_due_bps: 6667,
 
             // Gloas
-            min_builder_withdrawability_delay: 8192,
+            min_builder_withdrawability_delay: 64,
             attestation_due_bps_gloas: 2500,
             aggregate_due_bps_gloas: 5000,
             sync_message_due_bps_gloas: 2500,
             contribution_due_bps_gloas: 5000,
             payload_attestation_due_bps: 7500,
-            payload_due_bps: 7500,
+            payload_due_bps: 5000,
 
             // Validator cycle
             churn_limit_quotient: nonzero!(1_u64 << 16),

@@ -77,7 +77,7 @@ pub const BUILDER_PAYMENT_THRESHOLD_DENOMINATOR: u64 = 10;
 //
 // Bitwise flag which indicates that a `ValidatorIndex` should be treated as a `BuilderIndex`
 pub const BUILDER_INDEX_FLAG: u64 = 0x0100_0000_0000;
-pub const BUILDER_WITHDRAWAL_PREFIX: &[u8] = &hex!("03");
+pub const BUILDER_WITHDRAWAL_PREFIX: &[u8] = &hex!("B0");
 
 // Versioning
 pub const PAYLOAD_BUILDER_VERSION: u8 = 0;
