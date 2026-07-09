@@ -12,10 +12,11 @@ use helper_functions::{
         initialize_shuffled_indices,
     },
     electra::{
-        get_attesting_indices, get_indexed_attestation, is_fully_withdrawable_validator,
+        get_attesting_indices, is_fully_withdrawable_validator,
         is_partially_withdrawable_validator, slash_validator,
     },
     error::SignatureKind,
+    gloas::get_indexed_attestation,
     misc::{
         builder_payment_index_for_current_epoch, builder_payment_index_for_previous_epoch,
         compute_epoch_at_slot, convert_builder_index_to_validator_index, get_max_effective_balance,
@@ -33,7 +34,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::{Hc, PersistentList, SszHash as _};
+use ssz::{Hc, PersistentProgressiveList, SszHash as _, SszList as _, SszListMut as _};
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -41,13 +42,13 @@ use types::{
     altair::consts::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR},
     capella::{containers::Withdrawal, primitives::WithdrawalIndex},
     config::Config,
-    electra::containers::Attestation,
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_BUILDER_VERSION},
         containers::{
-            BeaconBlock, BuilderPendingPayment, BuilderPendingWithdrawal, ExecutionPayloadBid,
-            ExecutionRequests, PayloadAttestation, SignedBeaconBlock, SignedExecutionPayloadBid,
+            Attestation, BeaconBlock, BuilderPendingPayment, BuilderPendingWithdrawal,
+            ExecutionPayloadBid, ExecutionRequests, PayloadAttestation, SignedBeaconBlock,
+            SignedExecutionPayloadBid,
         },
     },
     nonstandard::{AttestationEpoch, SlashingKind},
@@ -58,8 +59,9 @@ use types::{
     },
     preset::{BuilderPendingPaymentsLength, Preset, SlotsPerHistoricalRoot},
     traits::{
-        BeaconState, BlockBodyWithBlsToExecutionChanges, BlockBodyWithElectraAttestations,
-        BlockBodyWithPayloadAttestations, PostGloasBeaconState,
+        BeaconState, BlockBodyWithBlsToExecutionChanges, BlockBodyWithGloasAttestations,
+        BlockBodyWithGloasAttesterSlashings, BlockBodyWithPayloadAttestations,
+        PostGloasBeaconState,
     },
 };
 
@@ -332,7 +334,7 @@ fn get_pending_partial_withdrawals_count<P: Preset>(
         .min(withdrawal_limit);
     let mut processed_count: usize = 0;
 
-    for withdrawal in &state.pending_partial_withdrawals().clone() {
+    for withdrawal in &*state.pending_partial_withdrawals().clone_boxed() {
         if withdrawal.withdrawable_epoch > current_epoch || withdrawals.len() >= bound {
             break;
         }
@@ -483,7 +485,7 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     }
 
     // > Update payload expected withdrawals
-    *state.payload_expected_withdrawals_mut() = PersistentList::try_from_iter(
+    *state.payload_expected_withdrawals_mut() = PersistentProgressiveList::try_from_iter(
         withdrawals
             .iter()
             .copied()
@@ -491,7 +493,7 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     )?;
 
     // > Update the pending builder withdrawals
-    *state.builder_pending_withdrawals_mut() = PersistentList::try_from_iter(
+    *state.builder_pending_withdrawals_mut() = PersistentProgressiveList::try_from_iter(
         state
             .builder_pending_withdrawals()
             .into_iter()
@@ -500,13 +502,16 @@ pub fn process_withdrawals<P: Preset>(state: &mut impl PostGloasBeaconState<P>) 
     )?;
 
     // > Update pending partial withdrawals
-    *state.pending_partial_withdrawals_mut() = PersistentList::try_from_iter(
-        state
-            .pending_partial_withdrawals()
-            .into_iter()
-            .copied()
-            .skip(processed_partial_withdrawals_count),
-    )?;
+    let pending_partial_withdrawals = state.pending_partial_withdrawals().clone_boxed();
+
+    state
+        .pending_partial_withdrawals_mut()
+        .try_assign_from_iter(
+            &mut pending_partial_withdrawals
+                .iter()
+                .copied()
+                .skip(processed_partial_withdrawals_count),
+        )?;
 
     // > Update next withdrawal builder index to start the next withdrawal sweep
     update_next_withdrawal_builder_index(state, processed_builders_sweep_count)?;
@@ -730,6 +735,30 @@ pub fn apply_parent_execution_payload<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
     execution_requests: &ExecutionRequests<P>,
 ) -> Result<()> {
+    // > [New in Gloas:EIP7688] Progressive lists are unbounded at the SSZ level.
+    // > Request counts are validated during processing instead.
+    // > Note that `deposits` intentionally has no limit in the spec.
+    ensure_operation_count::<P>(
+        "withdrawal requests",
+        execution_requests.withdrawals.len_usize(),
+        P::MaxWithdrawalRequestsPerPayload::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "consolidation requests",
+        execution_requests.consolidations.len_usize(),
+        P::MaxConsolidationRequestsPerPayload::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "builder deposit requests",
+        execution_requests.builder_deposits.len_usize(),
+        P::MaxBuilderDepositRequestsPerPayload::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "builder exit requests",
+        execution_requests.builder_exits.len_usize(),
+        P::MaxBuilderExitRequestsPerPayload::USIZE,
+    )?;
+
     process_execution_requests(config, pubkey_cache, state, execution_requests)?;
 
     let parent_bid = state.latest_execution_payload_bid().clone();
@@ -828,6 +857,23 @@ pub fn process_execution_payload_bid<P: Preset>(
     Ok(())
 }
 
+fn ensure_operation_count<P: Preset>(
+    kind: &'static str,
+    in_block: usize,
+    maximum: usize,
+) -> Result<()> {
+    ensure!(
+        in_block <= maximum,
+        Error::<P>::TooManyOperations {
+            kind,
+            maximum,
+            in_block,
+        },
+    );
+
+    Ok(())
+}
+
 pub fn process_operations<P: Preset, V: Verifier, B>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -837,18 +883,52 @@ pub fn process_operations<P: Preset, V: Verifier, B>(
     mut slot_report: impl SlotReport,
 ) -> Result<()>
 where
-    B: BlockBodyWithElectraAttestations<P>
+    B: BlockBodyWithGloasAttestations<P>
+        + BlockBodyWithGloasAttesterSlashings<P>
         + BlockBodyWithBlsToExecutionChanges<P>
         + BlockBodyWithPayloadAttestations<P>,
 {
     // > [Modified in Fulu:EIP6110]
     ensure!(
-        body.deposits().is_empty(),
+        body.deposits().len_usize() == 0,
         Error::<P>::DepositCountMismatch {
             computed: 0,
-            in_block: body.deposits().len().try_into()?,
+            in_block: body.deposits().len_usize().try_into()?,
         },
     );
+
+    // > [New in Gloas:EIP7688] Progressive lists are unbounded at the SSZ level.
+    // > Operation counts are validated during processing instead.
+    ensure_operation_count::<P>(
+        "proposer slashings",
+        body.proposer_slashings().len_usize(),
+        P::MaxProposerSlashings::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "attester slashings",
+        body.attester_slashings().len_usize(),
+        P::MaxAttesterSlashingsElectra::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "attestations",
+        body.attestations().len_usize(),
+        P::MaxAttestationsElectra::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "voluntary exits",
+        body.voluntary_exits().len_usize(),
+        P::MaxVoluntaryExits::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "BLS to execution changes",
+        body.bls_to_execution_changes().len_usize(),
+        P::MaxBlsToExecutionChanges::USIZE,
+    )?;
+    ensure_operation_count::<P>(
+        "payload attestations",
+        body.payload_attestations().len_usize(),
+        P::MaxPayloadAttestation::USIZE,
+    )?;
 
     for proposer_slashing in body.proposer_slashings().iter().copied() {
         process_proposer_slashing(
@@ -892,7 +972,8 @@ where
     } else {
         initialize_shuffled_indices(state, body.attestations().iter())?;
 
-        let triples = helper_functions::par_iter!(body.attestations())
+        let attestations = body.attestations().iter().collect::<Vec<_>>();
+        let triples = helper_functions::par_iter!(attestations)
             .map(|attestation| {
                 let mut triple = Triple::default();
 
@@ -1222,7 +1303,7 @@ mod spec_tests {
     use ssz::SszReadDefault;
     use test_generator::test_resources;
     use types::{
-        electra::containers::{Attestation, AttesterSlashing},
+        gloas::containers::AttesterSlashing,
         preset::{Mainnet, Minimal},
     };
 

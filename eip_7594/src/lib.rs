@@ -15,7 +15,7 @@ use kzg_utils::{
 use num_traits::One as _;
 use prometheus_metrics::Metrics;
 use sha2::{Digest as _, Sha256};
-use ssz::{ContiguousList, ContiguousVector, H256, SszHash as _, Uint256};
+use ssz::{ContiguousList, ContiguousVector, H256, ProgressiveList, SszHash as _, Uint256};
 use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -154,7 +154,7 @@ pub fn verify_data_column_sidecar<P: Preset>(
     }
 
     // A sidecar for zero blobs is invalid
-    if data_column_sidecar.column().is_empty() {
+    if data_column_sidecar.column().len_usize() == 0 {
         return false;
     }
 
@@ -168,8 +168,8 @@ pub fn verify_data_column_sidecar<P: Preset>(
     }
 
     // The column length must be equal to the number of commitments/proofs
-    if data_column_sidecar.column().len() != kzg_commitments.len()
-        || data_column_sidecar.column().len() != data_column_sidecar.kzg_proofs().len()
+    if data_column_sidecar.column().len_usize() != kzg_commitments.len()
+        || data_column_sidecar.column().len_usize() != data_column_sidecar.kzg_proofs().len_usize()
     {
         return false;
     }
@@ -198,7 +198,7 @@ pub fn verify_kzg_proofs<P: Preset>(
     });
 
     let cell_indices: Vec<u64> =
-        vec![data_column_sidecar.index(); data_column_sidecar.column().len()];
+        vec![data_column_sidecar.index(); data_column_sidecar.column().len_usize()];
 
     // KZG commitments, proofs, and column length is already enforced by `verify_data_column_sidecar`
     // which check prior to `verify_kzg_proofs`, so no additional check is needed.
@@ -325,11 +325,11 @@ fn get_data_column_sidecars_post_gloas<P: Preset>(
 
     let mut sidecars = vec![];
     for column_index in 0..P::NumberOfColumns::USIZE {
-        let column = ContiguousList::try_from_iter(
+        let column = ProgressiveList::try_from_iter(
             (0..blob_count)
                 .map(|row_index| cells_and_kzg_proofs[row_index].0[column_index].clone()),
         )?;
-        let kzg_proofs = ContiguousList::try_from_iter(
+        let kzg_proofs = ProgressiveList::try_from_iter(
             (0..blob_count).map(|row_index| cells_and_kzg_proofs[row_index].1[column_index]),
         )?;
 

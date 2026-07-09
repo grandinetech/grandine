@@ -162,6 +162,12 @@ pub enum Error<P: Preset> {
     StateRootMismatch { computed: H256, in_block: H256 },
     #[error("too many blob KZG commitments (maximum: {maximum}, in_block: {in_block})")]
     TooManyBlockKzgCommitments { maximum: usize, in_block: usize },
+    #[error("too many {kind} (maximum: {maximum}, in_block: {in_block})")]
+    TooManyOperations {
+        kind: &'static str,
+        maximum: usize,
+        in_block: usize,
+    },
     #[error("validator {index} exited in epoch {exit_epoch}")]
     ValidatorAlreadyExited {
         index: ValidatorIndex,

@@ -6,16 +6,15 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
-    nonstandard::SlashingKind,
+    nonstandard::{PartialValidator, SlashingKind},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         consts::FAR_FUTURE_EPOCH,
         containers::{Attestation, AttestationData, IndexedAttestation},
         primitives::{Gwei, ValidatorIndex},
-        validator_list::PartialValidator,
     },
     preset::Preset,
-    traits::BeaconState,
+    traits::{BeaconState, SszValidatorList as _, SszValidatorListMut as _},
 };
 
 use crate::{
@@ -134,6 +133,7 @@ mod tests {
         nonstandard::smallvec,
         phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator},
         preset::Mainnet,
+        traits::SszValidatorList as _,
     };
 
     use crate::slot_report::RealSlotReport;

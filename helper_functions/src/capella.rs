@@ -1,8 +1,6 @@
 use types::{
-    phase0::{
-        primitives::{Epoch, Gwei},
-        validator_list::PartialValidator,
-    },
+    nonstandard::PartialValidator,
+    phase0::primitives::{Epoch, Gwei},
     preset::Preset,
 };
 

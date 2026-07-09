@@ -22,7 +22,7 @@ use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszListMut as _};
 use typenum::Unsigned as _;
 use types::{
     config::Config,

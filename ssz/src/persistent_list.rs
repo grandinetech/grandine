@@ -32,11 +32,12 @@ use crate::{
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
     iter::ExactSize,
+    list::{SszList, SszListMut},
     merkle_tree::{self, MerkleTree},
     porcelain::{SszHash, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
-    type_level::{FitsInU64, MerkleElements, MinimumBundleSize},
+    type_level::{MerkleElements, MinimumBundleSize},
     zero_default::ZeroDefault,
 };
 
@@ -84,17 +85,12 @@ impl<'list, T, N, B: BundleSize<T>> IntoIterator for &'list PersistentList<T, N,
     type IntoIter = ExactSize<Flatten<Leaves<'list, T, B>>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut stack;
+        let leaves = match self.root.as_ref() {
+            Some(node) => Leaves::new(node.as_ref().as_ref()),
+            None => Leaves { stack: vec![] },
+        };
 
-        match self.root.as_ref() {
-            Some(node) => {
-                stack = Vec::with_capacity(self.depth().max(1).into());
-                stack.push(node.as_ref().as_ref());
-            }
-            None => stack = vec![],
-        }
-
-        ExactSize::new(Leaves { stack }.flatten(), self.length)
+        ExactSize::new(leaves.flatten(), self.length)
     }
 }
 
@@ -279,153 +275,14 @@ where
 
 impl<T, N, B> PersistentList<T, N, B> {
     #[must_use]
-    pub const fn len_usize(&self) -> usize {
-        self.length
-    }
-
-    #[must_use]
-    pub fn len_u64(&self) -> u64
+    pub fn repeat_zero_with_length_of<U, B2>(other: &PersistentList<U, N, B2>) -> Self
     where
-        N: FitsInU64,
-    {
-        self.length
-            .try_into()
-            .expect("the bound on N ensures that self.length fits in u64")
-    }
-
-    pub fn get(&self, index: u64) -> Result<&T, IndexError>
-    where
-        B: BundleSize<T>,
-    {
-        let index = shared::validate_index(self.length, index)?;
-
-        let mut height = self.depth();
-
-        let mut node = self
-            .root
-            .as_deref()
-            .expect("the length check in validate_index ensures that self.root is Some")
-            .as_ref();
-
-        let bundle = loop {
-            match node {
-                Node::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right;
-                    } else {
-                        height = *left_height;
-                        node = left;
-                    }
-                }
-                Node::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
-
-        Ok(&bundle[B::index_in_bundle(index)])
-    }
-
-    pub fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
-    where
-        T: Clone,
-        B: BundleSize<T>,
-    {
-        let index = shared::validate_index(self.length, index)?;
-
-        let mut height = self.depth();
-
-        let mut node = self
-            .root
-            .as_mut()
-            .expect("the length check in validate_index ensures that self.root is Some")
-            .make_mut()
-            .as_mut();
-
-        let bundle = loop {
-            match node {
-                Node::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right.make_mut();
-                    } else {
-                        height = *left_height;
-                        node = left.make_mut();
-                    }
-                }
-                Node::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
-
-        Ok(&mut bundle[B::index_in_bundle(index)])
-    }
-
-    // This clones the elements being visited and checks them for mutations to avoid rebuilding
-    // parts of the tree that have not been modified. An `Iterator` that behaves the same way would
-    // be more convenient, but items returned by an iterator cannot borrow from the iterator itself.
-    // The `streaming-iterator` crate attempts to solve that but falls short because it does not
-    // allow mutable borrows.
-    pub fn update(&mut self, mut updater: impl FnMut(&mut T))
-    where
-        T: Clone + PartialEq,
-        B: BundleSize<T>,
-    {
-        if let Some(node) = self.root.as_mut()
-            && let Some(new_node) = node.update(&mut updater)
-        {
-            *node = new_node;
-        }
-    }
-
-    pub fn push(&mut self, element: T) -> Result<(), PushError>
-    where
-        T: Clone,
+        T: ZeroDefault + SszHash + SszWrite + Clone,
         N: Unsigned,
-        B: BundleSize<T>,
+        B: BundleSize<T> + MerkleElements<T>,
+        B2: BundleSize<U>,
     {
-        // TODO(32-bit support): Review change.
-        let length_u64: u64 = self
-            .length
-            .try_into()
-            .expect("PersistentList length counter should fit to u64");
-
-        match length_u64.cmp(&N::U64) {
-            Ordering::Less => {}
-            Ordering::Equal => return Err(PushError::ListFull),
-            Ordering::Greater => unreachable!("case above prevents list from being overfilled"),
-        }
-
-        match self.root.as_mut() {
-            Some(node) => node.make_mut().push(element, self.length),
-            None => self.root = Some(Node::arc_single(element)),
-        }
-
-        self.length = self.length.saturating_add(1);
-
-        Ok(())
+        Self::repeat_zero(other.length).expect("lists have the same maximum length")
     }
 
     pub fn repeat_zero(length: usize) -> Result<Self, ReadError>
@@ -498,6 +355,179 @@ impl<T, N, B> PersistentList<T, N, B> {
     }
 }
 
+impl<T, N, B> SszList<T> for PersistentList<T, N, B>
+where
+    T: SszHash + SszWrite + Send + Sync + Debug,
+    N: Unsigned + Send + Sync,
+    B: BundleSize<T> + MerkleElements<T> + Send + Sync,
+{
+    fn len_usize(&self) -> usize {
+        self.length
+    }
+
+    fn len_u64(&self) -> u64 {
+        u64::try_from(self.length).expect("list length fits in u64")
+    }
+
+    fn get(&self, index: u64) -> Result<&T, IndexError> {
+        let index = shared::validate_index(self.length, index)?;
+
+        let mut height = self.depth();
+
+        let mut node = self
+            .root
+            .as_deref()
+            .expect("the length check in validate_index ensures that self.root is Some")
+            .as_ref();
+
+        let bundle = loop {
+            match node {
+                Node::Internal {
+                    left,
+                    right,
+                    left_height,
+                    right_height,
+                } => {
+                    assert_eq!(height, left_height.saturating_add(1));
+
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
+
+                    if index.get_bit(bit_index) {
+                        height = *right_height;
+                        node = right;
+                    } else {
+                        height = *left_height;
+                        node = left;
+                    }
+                }
+                Node::Leaf { bundle, .. } => {
+                    assert_eq!(height, 0);
+                    break bundle;
+                }
+            }
+        };
+
+        Ok(&bundle[B::index_in_bundle(index)])
+    }
+
+    fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a> {
+        Box::new(self.into_iter())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn SszList<T>>
+    where
+        T: Clone + 'static,
+    {
+        Box::new(self.clone())
+    }
+}
+
+impl<T, N, B> SszListMut<T> for PersistentList<T, N, B>
+where
+    T: SszHash + SszWrite + Send + Sync + Debug,
+    N: Unsigned + Send + Sync,
+    B: BundleSize<T> + MerkleElements<T> + Send + Sync,
+{
+    fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
+    where
+        T: Clone,
+    {
+        let index = shared::validate_index(self.length, index)?;
+
+        let mut height = self.depth();
+
+        let mut node = self
+            .root
+            .as_mut()
+            .expect("the length check in validate_index ensures that self.root is Some")
+            .make_mut()
+            .as_mut();
+
+        let bundle = loop {
+            match node {
+                Node::Internal {
+                    left,
+                    right,
+                    left_height,
+                    right_height,
+                } => {
+                    assert_eq!(height, left_height.saturating_add(1));
+
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
+
+                    if index.get_bit(bit_index) {
+                        height = *right_height;
+                        node = right.make_mut();
+                    } else {
+                        height = *left_height;
+                        node = left.make_mut();
+                    }
+                }
+                Node::Leaf { bundle, .. } => {
+                    assert_eq!(height, 0);
+                    break bundle;
+                }
+            }
+        };
+
+        Ok(&mut bundle[B::index_in_bundle(index)])
+    }
+
+    fn push(&mut self, element: T) -> Result<(), PushError>
+    where
+        T: Clone,
+    {
+        // TODO(32-bit support): Review change.
+        let length_u64: u64 = self
+            .length
+            .try_into()
+            .expect("PersistentList length counter should fit to u64");
+
+        match length_u64.cmp(&N::U64) {
+            Ordering::Less => {}
+            Ordering::Equal => return Err(PushError::ListFull),
+            Ordering::Greater => unreachable!("case above prevents list from being overfilled"),
+        }
+
+        match self.root.as_mut() {
+            Some(node) => node.make_mut().push(element, self.length),
+            None => self.root = Some(Node::arc_single(element)),
+        }
+
+        self.length = self.length.saturating_add(1);
+
+        Ok(())
+    }
+
+    // This clones the elements being visited and checks them for mutations to avoid rebuilding
+    // parts of the tree that have not been modified. An `Iterator` that behaves the same way would
+    // be more convenient, but items returned by an iterator cannot borrow from the iterator itself.
+    // The `streaming-iterator` crate attempts to solve that but falls short because it does not
+    // allow mutable borrows.
+    fn update(&mut self, updater: &mut dyn FnMut(&mut T))
+    where
+        T: Clone + PartialEq,
+    {
+        if let Some(node) = self.root.as_mut()
+            && let Some(new_node) = node.update(&mut |element| updater(element))
+        {
+            *node = new_node;
+        }
+    }
+
+    fn iter_mut<'a>(&'a mut self) -> Box<dyn ExactSizeIterator<Item = &'a mut T> + 'a>
+    where
+        T: Clone,
+    {
+        Box::new(self.into_iter())
+    }
+
+    fn try_assign_from_iter(&mut self, iter: &mut dyn Iterator<Item = T>) -> Result<(), ReadError> {
+        *self = Self::try_from_iter(iter)?;
+        Ok(())
+    }
+}
+
 type Height = u8;
 
 #[derive(Derivative)]
@@ -506,7 +536,7 @@ type Height = u8;
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq")
 )]
-enum Node<T, B> {
+pub(crate) enum Node<T, B> {
     Internal {
         left: Arc<Hc<Self>>,
         right: Arc<Hc<Self>>,
@@ -567,7 +597,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         Hc::arc(Self::leaf([element]))
     }
 
-    fn leaf(bundle: impl Into<Box<[T]>>) -> Self {
+    pub(crate) fn leaf(bundle: impl Into<Box<[T]>>) -> Self {
         let bundle = bundle.into();
         let phantom = PhantomData;
 
@@ -625,7 +655,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         }
     }
 
-    fn push(&mut self, element: T, current_length_and_new_index: usize)
+    pub(crate) fn push(&mut self, element: T, current_length_and_new_index: usize)
     where
         T: Clone,
     {
@@ -696,7 +726,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
 
     // Mutably borrowing an `FnMut` closure inside a recursive function causes infinite recursion
     // during monomorphization. Borrowing it outside and passing the reference prevents that.
-    fn update(&self, updater: &mut impl FnMut(&mut T)) -> Option<Arc<Hc<Self>>>
+    pub(crate) fn update(&self, updater: &mut impl FnMut(&mut T)) -> Option<Arc<Hc<Self>>>
     where
         T: Clone + PartialEq,
     {
@@ -741,6 +771,12 @@ pub struct Leaves<'list, T, B> {
     stack: Vec<&'list Node<T, B>>,
 }
 
+impl<'list, T, B> Leaves<'list, T, B> {
+    pub(crate) fn new(node: &'list Node<T, B>) -> Self {
+        Self { stack: vec![node] }
+    }
+}
+
 impl<'list, T, B> Iterator for Leaves<'list, T, B> {
     type Item = &'list [T];
 
@@ -769,6 +805,12 @@ pub struct LeavesMut<'list, T, B> {
     // a `GenericArray` of size `PersistentList::depth()` would require a huge number of trait
     // bounds which might not even be expressible because of the lifetime in the element type.
     stack: Vec<&'list mut Node<T, B>>,
+}
+
+impl<'list, T, B> LeavesMut<'list, T, B> {
+    pub(crate) fn new(node: &'list mut Node<T, B>) -> Self {
+        Self { stack: vec![node] }
+    }
 }
 
 impl<'list, T: Clone, B> Iterator for LeavesMut<'list, T, B> {

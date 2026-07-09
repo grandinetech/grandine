@@ -16,8 +16,7 @@ use helper_functions::{
     predicates::{is_active_validator, is_eligible_for_activation, is_valid_deposit_signature},
 };
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentList, SszHash as _};
-use try_from_iterator::TryFromIterator as _;
+use ssz::{SszHash as _, SszListMut as _};
 use typenum::Unsigned as _;
 use types::{
     capella::containers::HistoricalSummary,
@@ -25,7 +24,6 @@ use types::{
     electra::{beacon_state::BeaconState as ElectraBeaconState, containers::PendingDeposit},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
-        containers::{DepositMessage, Validator},
         primitives::Gwei,
     },
     preset::Preset,
@@ -252,7 +250,7 @@ pub fn process_pending_deposits<P: Preset>(
     let mut is_churn_limit_reached = false;
     let finalized_slot = compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
 
-    for deposit in &state.pending_deposits().clone() {
+    for deposit in &*state.pending_deposits().clone_boxed() {
         // > Do not process deposit requests if Eth1 bridge deposits are not yet applied.
         if deposit.slot > GENESIS_SLOT
             && state.eth1_deposit_index() < state.deposit_requests_start_index()
@@ -304,10 +302,11 @@ pub fn process_pending_deposits<P: Preset>(
         next_deposit_index = next_deposit_index.try_add(1)?;
     }
 
-    *state.pending_deposits_mut() = PersistentList::try_from_iter(
-        state
-            .pending_deposits()
-            .into_iter()
+    let pending_deposits = state.pending_deposits().clone_boxed();
+
+    state.pending_deposits_mut().try_assign_from_iter(
+        &mut pending_deposits
+            .iter()
             .copied()
             .skip(next_deposit_index.try_into()?)
             .chain(deposits_to_postpone),
@@ -356,7 +355,7 @@ pub fn process_pending_consolidations<P: Preset>(
     let next_epoch = get_current_epoch(state).try_add(1)?;
     let mut next_pending_consolidation: usize = 0;
 
-    for pending_consolidation in &state.pending_consolidations().clone() {
+    for pending_consolidation in &*state.pending_consolidations().clone_boxed() {
         let source_validator = state.validators().get(pending_consolidation.source_index)?;
 
         if source_validator.slashed {
@@ -390,10 +389,11 @@ pub fn process_pending_consolidations<P: Preset>(
         next_pending_consolidation = next_pending_consolidation.try_add(1)?;
     }
 
-    *state.pending_consolidations_mut() = PersistentList::try_from_iter(
-        state
-            .pending_consolidations()
-            .into_iter()
+    let pending_consolidations = state.pending_consolidations().clone_boxed();
+
+    state.pending_consolidations_mut().try_assign_from_iter(
+        &mut pending_consolidations
+            .iter()
             .copied()
             .skip(next_pending_consolidation),
     )?;
@@ -416,7 +416,7 @@ pub fn process_effective_balance_updates<P: Preset>(
     // packed into bundles of 8.
     let mut balances = balances.into_iter().copied();
 
-    validators.update_effective_balances(|validator, effective_balance| -> Result<Gwei> {
+    validators.update_effective_balances(&mut |validator, effective_balance| -> Result<Gwei> {
         let max_effective_balance = get_max_effective_balance::<P>(validator);
 
         let balance = balances
@@ -513,7 +513,7 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
         Ok(())
     };
 
-    balances.update(|balance| {
+    balances.update(&mut |balance| {
         if update_result.is_err() {
             return;
         }

@@ -177,7 +177,7 @@ impl PubkeyCache {
 
         let mut batch = vec![];
 
-        for validator in state.validators() {
+        for validator in state.validators().iter() {
             let decompressed = self.get_or_insert(validator.pubkey)?;
 
             if let Some(pubkey) = self.unpersisted.remove_sync(&validator.pubkey) {
@@ -208,7 +208,7 @@ impl PubkeyCache {
 
         // persist decompressed bytes to disk only for finalized validators,
         // avoiding storage of validator pubkeys from invalid deposits.
-        for validator in state.validators() {
+        for validator in state.validators().iter() {
             if let Some(pubkey) = self.unpersisted.remove_sync(&validator.pubkey)
                 && let Some(decompressed) = self.keys.get_sync(&pubkey)
             {

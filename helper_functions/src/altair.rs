@@ -10,6 +10,7 @@ use types::{
     nonstandard::SlashingKind,
     phase0::primitives::ValidatorIndex,
     preset::Preset,
+    traits::{SszValidatorList as _, SszValidatorListMut as _},
 };
 
 use crate::{
@@ -70,6 +71,7 @@ mod tests {
         nonstandard::smallvec,
         phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator},
         preset::Mainnet,
+        traits::SszValidatorList as _,
     };
 
     use crate::slot_report::RealSlotReport;

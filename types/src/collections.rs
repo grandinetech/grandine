@@ -11,15 +11,18 @@ use std::collections::HashMap;
 
 use bls::SignatureBytes;
 use ssz::{
-    ContiguousVector, IncompletePersistentVector, PersistentList, PersistentVector,
-    UnhashedBundleSize,
+    ContiguousVector, IncompletePersistentVector, PersistentList, PersistentProgressiveList,
+    PersistentVector, UnhashedBundleSize,
 };
 
 use crate::{
     altair::primitives::ParticipationFlags,
     capella::containers::{HistoricalSummary, Withdrawal},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
-    gloas::containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
+    gloas::{
+        containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
+        validator_list::ProgressiveValidatorList,
+    },
     phase0::{
         containers::{DepositMessage, Eth1Data, PendingAttestation},
         primitives::{Gwei, H256, ValidatorIndex},
@@ -41,8 +44,15 @@ pub type Eth1DataVotes<P> = PersistentList<Eth1Data, SlotsPerEth1VotingPeriod<P>
 
 pub type Validators<P> = ValidatorList<<P as Preset>::ValidatorRegistryLimit>;
 
+// Progressive counterparts of collections whose SSZ type changes to `ProgressiveList` in Gloas
+// (EIP-7688). Pre-Gloas forks keep the bounded `PersistentList` versions above.
+pub type ProgressiveValidators = ProgressiveValidatorList;
+
 pub type Balances<P> =
     PersistentList<Gwei, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<Gwei>>;
+
+pub type ProgressiveBalances<P> =
+    PersistentProgressiveList<Gwei, <P as Preset>::ValidatorRegistryLimit>;
 
 pub type RandaoMixes<P> =
     PersistentVector<H256, <P as Preset>::EpochsPerHistoricalVector, UnhashedBundleSize<H256>>;
@@ -58,19 +68,36 @@ pub type EpochParticipation<P> = PersistentList<
     UnhashedBundleSize<ParticipationFlags>,
 >;
 
+pub type ProgressiveEpochParticipation<P> =
+    PersistentProgressiveList<ParticipationFlags, <P as Preset>::ValidatorRegistryLimit>;
+
 pub type InactivityScores<P> =
     PersistentList<u64, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<u64>>;
+
+pub type ProgressiveInactivityScores<P> =
+    PersistentProgressiveList<u64, <P as Preset>::ValidatorRegistryLimit>;
 
 pub type HistoricalSummaries<P> =
     PersistentList<HistoricalSummary, <P as Preset>::HistoricalRootsLimit>;
 
 pub type PendingDeposits<P> = PersistentList<PendingDeposit, <P as Preset>::PendingDepositsLimit>;
 
+pub type ProgressivePendingDeposits<P> =
+    PersistentProgressiveList<PendingDeposit, <P as Preset>::PendingDepositsLimit>;
+
 pub type PendingPartialWithdrawals<P> =
     PersistentList<PendingPartialWithdrawal, <P as Preset>::PendingPartialWithdrawalsLimit>;
 
+pub type ProgressivePendingPartialWithdrawals<P> = PersistentProgressiveList<
+    PendingPartialWithdrawal,
+    <P as Preset>::PendingPartialWithdrawalsLimit,
+>;
+
 pub type PendingConsolidations<P> =
     PersistentList<PendingConsolidation, <P as Preset>::PendingConsolidationsLimit>;
+
+pub type ProgressivePendingConsolidations<P> =
+    PersistentProgressiveList<PendingConsolidation, <P as Preset>::PendingConsolidationsLimit>;
 
 pub type ProposerLookahead<P> = PersistentVector<
     ValidatorIndex,
@@ -78,7 +105,7 @@ pub type ProposerLookahead<P> = PersistentVector<
     UnhashedBundleSize<ValidatorIndex>,
 >;
 
-pub type Builders<P> = PersistentList<Builder, <P as Preset>::BuilderRegistryLimit>;
+pub type Builders<P> = PersistentProgressiveList<Builder, <P as Preset>::BuilderRegistryLimit>;
 
 pub type BuilderPendingPayments<P> = PersistentVector<
     BuilderPendingPayment,
@@ -86,13 +113,15 @@ pub type BuilderPendingPayments<P> = PersistentVector<
     UnhashedBundleSize<BuilderPendingPayment>,
 >;
 
-pub type BuilderPendingWithdrawals<P> =
-    PersistentList<BuilderPendingWithdrawal, <P as Preset>::BuilderPendingWithdrawalsLimit>;
+pub type BuilderPendingWithdrawals<P> = PersistentProgressiveList<
+    BuilderPendingWithdrawal,
+    <P as Preset>::BuilderPendingWithdrawalsLimit,
+>;
 
 pub type DepositSignatureCache = HashMap<(DepositMessage, SignatureBytes), bool>;
 
 pub type PayloadExpectedWithdrawals<P> =
-    PersistentList<Withdrawal, <P as Preset>::MaxWithdrawalsPerPayload>;
+    PersistentProgressiveList<Withdrawal, <P as Preset>::MaxWithdrawalsPerPayload>;
 
 pub type Ptc<P> = ContiguousVector<ValidatorIndex, <P as Preset>::PtcSize>;
 

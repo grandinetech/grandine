@@ -3,6 +3,7 @@ use core::cmp::Ordering;
 use anyhow::Result;
 use arithmetic::U64Ext;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
+use ssz::SszListMut as _;
 use types::{
     config::Config,
     electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},
@@ -86,7 +87,7 @@ pub fn initiate_validator_exit<P: Preset>(
     let mut exit_queue_epoch = compute_activation_exit_epoch::<P>(get_current_epoch(state))?;
     let mut exit_queue_churn: u64 = 0;
 
-    for validator in state.validators() {
+    for validator in state.validators().partial_validators() {
         let exit_epoch = validator.exit_epoch;
 
         if exit_epoch == FAR_FUTURE_EPOCH {
@@ -258,6 +259,7 @@ mod tests {
     use types::{
         phase0::{beacon_state::BeaconState as Phase0BeaconState, containers::Validator},
         preset::Minimal,
+        traits::SszValidatorList as _,
     };
 
     use super::*;

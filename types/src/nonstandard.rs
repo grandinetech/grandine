@@ -1,17 +1,27 @@
-use core::fmt::Debug;
+use core::{convert::Infallible, fmt::Debug, iter};
 use std::sync::Arc;
+#[cfg(target_os = "zkvm")]
+use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};
 
+use anyhow::{Result, ensure};
 use bit_field::BitField as _;
-use bls::Signature;
+use bls::{PublicKeyBytes, Signature};
+use derivative::Derivative;
 use derive_more::{Constructor, From};
 use enum_iterator::Sequence;
 use enum_map::Enum;
+use im::{HashMap, Vector, vector::Iter as VectorIter};
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
-use ssz::{ContiguousList, Size, SszSize, SszWrite, WriteError};
+use ssz::{
+    ContiguousList, H256, IndexError, ReadError, Size, SszList, SszRead, SszSize, SszWrite,
+    WriteError, read_list, write_list,
+};
 use static_assertions::assert_eq_size;
+use std_ext::CopyExt as _;
 use strum::{AsRefStr, Display, EnumString};
+use try_from_iterator::TryFromIterator;
 
 use crate::{
     altair::{
@@ -27,8 +37,8 @@ use crate::{
     },
     fulu::containers::DataColumnIdentifier,
     phase0::{
-        containers::SignedBeaconBlockHeader,
-        primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
+        containers::{SignedBeaconBlockHeader, Validator},
+        primitives::{Epoch, Gwei, Slot, Uint256, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
     traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
@@ -450,16 +460,17 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
         }
     }
 
-    pub fn kzg_commitments(
-        &self,
-    ) -> Option<&ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>> {
+    pub fn kzg_commitments(&self) -> Option<&dyn SszList<KzgCommitment>> {
         match self {
             Self::Block(block) => block
                 .message()
                 .body()
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
-            Self::Sidecar(sidecar) => sidecar.kzg_commitments(),
+            Self::Sidecar(sidecar) => sidecar.kzg_commitments().map(|kzg_commitments| {
+                let kzg_commitments: &dyn SszList<KzgCommitment> = kzg_commitments;
+                kzg_commitments
+            }),
         }
     }
 }
@@ -702,6 +713,500 @@ impl<T: Clone> WithOrigin<T> {
         match self.origin {
             Origin::CheckpointSync => None,
             Origin::Genesis => Some(self.value.clone()),
+        }
+    }
+}
+
+#[cfg(target_os = "zkvm")]
+trait VectorExt<T> {
+    fn push_back(&mut self, value: T);
+    fn slice(&mut self, range: core::ops::Range<usize>) -> Self;
+}
+
+#[cfg(target_os = "zkvm")]
+impl<T> VectorExt<T> for Vec<T> {
+    fn push_back(&mut self, value: T) {
+        self.push(value);
+    }
+
+    fn slice(&mut self, range: core::ops::Range<usize>) -> Self {
+        // Mirror `im::Vector::slice`: remove `range` from `self` and return it as a new vector,
+        // leaving the elements outside the range in `self`.
+        self.drain(range).collect()
+    }
+}
+
+/// Validator public keys together with a public key -> index map.
+#[derive(Clone, Debug, Default, Derivative)]
+#[derivative(PartialEq, Eq)]
+pub struct PubkeyList {
+    keys: Vector<PublicKeyBytes>,
+
+    #[derivative(PartialEq = "ignore")]
+    index_map: HashMap<PublicKeyBytes, ValidatorIndex>,
+}
+
+impl PubkeyList {
+    #[must_use]
+    pub fn index_of(&self, pubkey: &PublicKeyBytes) -> Option<ValidatorIndex> {
+        let index = self.index_map.get(pubkey).copied()?;
+        let in_bounds = usize::try_from(index).is_ok_and(|index| index < self.keys.len());
+        in_bounds.then_some(index)
+    }
+
+    #[must_use]
+    pub fn contains(&self, pubkey: &PublicKeyBytes) -> bool {
+        self.index_of(pubkey).is_some()
+    }
+
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&PublicKeyBytes> {
+        self.keys.get(index)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> VectorIter<'_, PublicKeyBytes> {
+        self.keys.iter()
+    }
+
+    pub fn push(&mut self, pubkey: PublicKeyBytes) {
+        let index = ValidatorIndex::try_from(self.keys.len())
+            .expect("validator count never exceeds ValidatorIndex range");
+
+        self.keys.push_back(pubkey);
+        self.index_map.insert(pubkey, index);
+    }
+
+    fn prefix(&self, length: usize) -> Self {
+        let mut keys = self.keys.clone();
+        let keys = keys.slice(0..length);
+
+        Self {
+            keys,
+            index_map: self.index_map.clone(),
+        }
+    }
+
+    fn clear_prefix(&mut self, count: usize) {
+        let length = self.keys.len();
+
+        let mut keys: Vector<PublicKeyBytes> =
+            iter::repeat_n(PublicKeyBytes::zero(), count).collect();
+
+        let mut tail = self.keys.clone();
+
+        #[cfg(not(target_os = "zkvm"))]
+        keys.append(tail.slice(count..length));
+        #[cfg(target_os = "zkvm")]
+        keys.append(&mut tail.slice(count..length));
+
+        self.keys = keys;
+    }
+}
+
+impl Extend<PublicKeyBytes> for PubkeyList {
+    fn extend<T: IntoIterator<Item = PublicKeyBytes>>(&mut self, iter: T) {
+        let Self {
+            keys, index_map, ..
+        } = self;
+
+        let start = ValidatorIndex::try_from(keys.len())
+            .expect("validator count never exceeds ValidatorIndex range");
+
+        for (pubkey, index) in iter.into_iter().zip(start..) {
+            keys.push_back(pubkey);
+            index_map.insert(pubkey, index);
+        }
+    }
+}
+
+impl FromIterator<PublicKeyBytes> for PubkeyList {
+    fn from_iter<T: IntoIterator<Item = PublicKeyBytes>>(iter: T) -> Self {
+        let (keys, index_map) = iter
+            .into_iter()
+            .zip(0u64..)
+            .map(|(pubkey, index)| (pubkey, (pubkey, index)))
+            .unzip();
+
+        Self { keys, index_map }
+    }
+}
+
+impl TryFromIterator<PublicKeyBytes> for PubkeyList {
+    type Error = Infallible;
+
+    fn try_from_iter(items: impl IntoIterator<Item = PublicKeyBytes>) -> Result<Self, Self::Error> {
+        Ok(Self::from_iter(items))
+    }
+}
+
+impl<'list> IntoIterator for &'list PubkeyList {
+    type Item = &'list PublicKeyBytes;
+    type IntoIter = VectorIter<'list, PublicKeyBytes>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.keys.iter()
+    }
+}
+
+impl SszSize for PubkeyList {
+    const SIZE: Size = Size::Variable { minimum_size: 0 };
+}
+
+impl SszWrite for PubkeyList {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        write_list(bytes, self)
+    }
+}
+
+impl<C> SszRead<C> for PubkeyList {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        read_list(usize::MAX, context, bytes)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartialValidator {
+    pub withdrawal_credentials: H256,
+    pub slashed: bool,
+    pub activation_eligibility_epoch: Epoch,
+    pub activation_epoch: Epoch,
+    pub exit_epoch: Epoch,
+    pub withdrawable_epoch: Epoch,
+}
+
+impl From<&Validator> for PartialValidator {
+    fn from(value: &Validator) -> Self {
+        Self {
+            withdrawal_credentials: value.withdrawal_credentials.copy(),
+            slashed: value.slashed.copy(),
+            activation_eligibility_epoch: value.activation_eligibility_epoch.copy(),
+            activation_epoch: value.activation_epoch.copy(),
+            exit_epoch: value.exit_epoch.copy(),
+            withdrawable_epoch: value.withdrawable_epoch.copy(),
+        }
+    }
+}
+
+/// Low-level validator list implementation, containing only in-memory list
+/// representation and methods for correctly operating on it. This allows
+/// consumer to implement their own serialization and hashing, without caring
+/// about list internals.
+#[derive(Clone, Debug, Default, Derivative)]
+#[derivative(PartialEq(bound = ""), Eq(bound = ""))]
+pub struct RawValidatorList {
+    /// Validator public keys never change, so we keep them separately, to
+    /// structurally share keys even if any other field changes. The
+    /// accompanying public key -> index map is shared along with them.
+    pubkeys: PubkeyList,
+
+    /// Validator effective balances change very frequently, comparing to other
+    /// fields, so we keep them separately, so that we don't have to clone every
+    /// other field when only balance changes.
+    effective_balances: Vector<Gwei>,
+
+    /// Rest validator fields. These change rarely, so kept separately.
+    items: Vector<PartialValidator>,
+}
+
+impl RawValidatorList {
+    pub fn get(&self, index: u64) -> Result<Validator, IndexError> {
+        let index = self.validate_index(index)?;
+
+        let pubkey = self.pubkeys.get(index).expect(
+            "validator list invariant violated: \
+                pubkey list is out of sync with current length",
+        );
+        let effective_balance = self.effective_balances.get(index).expect(
+            "validator list invariant violated: \
+                effective balance list is out of sync with current length",
+        );
+        let partial_validator = self.items.get(index).expect(
+            "validator list invariant violated: \
+                partial validator list is out of sync with current length",
+        );
+
+        Ok(Validator {
+            pubkey: pubkey.copy(),
+            withdrawal_credentials: partial_validator.withdrawal_credentials.copy(),
+            effective_balance: effective_balance.copy(),
+            slashed: partial_validator.slashed.copy(),
+            activation_eligibility_epoch: partial_validator.activation_eligibility_epoch.copy(),
+            activation_epoch: partial_validator.activation_epoch.copy(),
+            exit_epoch: partial_validator.exit_epoch.copy(),
+            withdrawable_epoch: partial_validator.withdrawable_epoch.copy(),
+        })
+    }
+
+    pub fn pubkey(&self, index: u64) -> Result<&PublicKeyBytes, IndexError> {
+        let index = self.validate_index(index)?;
+
+        let pubkey = self.pubkeys.get(index).expect(
+            "validator list invariant violated: \
+                pubkey list is out of sync with current length",
+        );
+
+        Ok(pubkey)
+    }
+
+    pub fn effective_balance(&self, index: u64) -> Result<u64, IndexError> {
+        let index = self.validate_index(index)?;
+
+        let effective_balance = self.effective_balances.get(index).expect(
+            "validator list invariant violated: \
+                effective balance list is out of sync with current length",
+        );
+
+        Ok(effective_balance.copy())
+    }
+
+    pub fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError> {
+        let index = self.validate_index(index)?;
+
+        let effective_balance = self.effective_balances.get_mut(index).expect(
+            "validator list invariant violated: \
+                effective balance list is out of sync with current length",
+        );
+
+        Ok(effective_balance)
+    }
+
+    pub fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError> {
+        let index = self.validate_index(index)?;
+
+        let partial_validator = self.items.get(index).expect(
+            "validator list invariant violated: \
+                partial validator list is out of sync with current length",
+        );
+
+        Ok(partial_validator)
+    }
+
+    pub fn partial_validator_mut(
+        &mut self,
+        index: u64,
+    ) -> Result<&mut PartialValidator, IndexError> {
+        let index = self.validate_index(index)?;
+
+        let partial_validator = self.items.get_mut(index).expect(
+            "validator list invariant violated: \
+                partial validator list is out of sync with current length",
+        );
+
+        Ok(partial_validator)
+    }
+
+    pub fn update_effective_balances<E>(
+        &mut self,
+        mut updater: impl FnMut(&PartialValidator, Gwei) -> Result<Gwei, E>,
+        mut invalidate: impl FnMut(usize, usize),
+    ) -> Result<(), E> {
+        let len = self.len_usize();
+
+        let Self {
+            effective_balances,
+            items,
+            ..
+        } = self;
+
+        for (index, (partial_validator, effective_balance)) in
+            items.iter().zip(effective_balances.iter_mut()).enumerate()
+        {
+            let old_effective_balance = *effective_balance;
+            let new_effective_balance = updater(partial_validator, old_effective_balance)?;
+
+            if new_effective_balance == old_effective_balance {
+                continue;
+            }
+
+            invalidate(index, len);
+
+            *effective_balance = new_effective_balance;
+        }
+
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn pubkeys(&self) -> &PubkeyList {
+        &self.pubkeys
+    }
+
+    pub fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
+        let length = self.len_usize();
+
+        ensure!(
+            pubkeys.len() >= length,
+            "pubkey list is shorter than validator count (expected at least {length}, got {})",
+            pubkeys.len(),
+        );
+
+        self.pubkeys = pubkeys.prefix(length);
+
+        Ok(())
+    }
+
+    pub fn clear_pubkeys(&mut self, count: usize) {
+        let length = self.len_usize();
+        let count = count.min(length);
+
+        if count == 0 {
+            return;
+        }
+
+        self.pubkeys.clear_prefix(count);
+    }
+
+    #[must_use]
+    pub fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
+        self.items.iter()
+    }
+
+    #[must_use]
+    pub fn effective_balances(&self) -> VectorIter<'_, Gwei> {
+        self.effective_balances.iter()
+    }
+
+    #[must_use]
+    pub fn len_usize(&self) -> usize {
+        self.pubkeys.len()
+    }
+
+    #[must_use]
+    pub fn len_u64(&self) -> u64 {
+        self.len_usize().try_into().expect("length must fit in u64")
+    }
+
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "takes the validator by value to mirror the conventional collection \
+                  push API, even though every field happens to be Copy"
+    )]
+    pub fn push(&mut self, validator: Validator) {
+        let Validator {
+            pubkey,
+            withdrawal_credentials,
+            effective_balance,
+            slashed,
+            activation_eligibility_epoch,
+            activation_epoch,
+            exit_epoch,
+            withdrawable_epoch,
+        } = validator;
+
+        self.items.push_back(PartialValidator {
+            withdrawal_credentials,
+            slashed,
+            activation_eligibility_epoch,
+            activation_epoch,
+            exit_epoch,
+            withdrawable_epoch,
+        });
+        self.pubkeys.push(pubkey);
+        self.effective_balances.push_back(effective_balance);
+    }
+
+    fn validate_index(&self, index: u64) -> Result<usize, IndexError> {
+        let index = index
+            .try_into()
+            .map_err(|_| IndexError::DoesNotFitInUsize { index })?;
+
+        if index >= self.len_usize() {
+            return Err(IndexError::OutOfBounds {
+                length: self.len_usize(),
+                index,
+            });
+        }
+
+        Ok(index)
+    }
+}
+
+impl FromIterator<Validator> for RawValidatorList {
+    fn from_iter<T: IntoIterator<Item = Validator>>(iter: T) -> Self {
+        let (items, (pubkeys, effective_balances)) = iter
+            .into_iter()
+            .map(|validator| {
+                (
+                    PartialValidator {
+                        withdrawal_credentials: validator.withdrawal_credentials,
+                        slashed: validator.slashed,
+                        activation_eligibility_epoch: validator.activation_eligibility_epoch,
+                        activation_epoch: validator.activation_epoch,
+                        exit_epoch: validator.exit_epoch,
+                        withdrawable_epoch: validator.withdrawable_epoch,
+                    },
+                    (validator.pubkey, validator.effective_balance),
+                )
+            })
+            .unzip();
+
+        Self {
+            items,
+            pubkeys,
+            effective_balances,
+        }
+    }
+}
+
+pub struct ValidatorListIter<'a> {
+    pubkeys: VectorIter<'a, PublicKeyBytes>,
+    effective_balances: VectorIter<'a, Gwei>,
+    items: VectorIter<'a, PartialValidator>,
+}
+
+impl Iterator for ValidatorListIter<'_> {
+    type Item = Validator;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let pubkey = self.pubkeys.next()?;
+        let effective_balance = self.effective_balances.next()?;
+        let PartialValidator {
+            withdrawal_credentials,
+            slashed,
+            activation_eligibility_epoch,
+            activation_epoch,
+            exit_epoch,
+            withdrawable_epoch,
+        } = self.items.next()?.copy();
+
+        Some(Validator {
+            pubkey: pubkey.copy(),
+            withdrawal_credentials,
+            effective_balance: effective_balance.copy(),
+            slashed,
+            activation_eligibility_epoch,
+            activation_epoch,
+            exit_epoch,
+            withdrawable_epoch,
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.pubkeys.size_hint()
+    }
+}
+
+impl ExactSizeIterator for ValidatorListIter<'_> {
+    fn len(&self) -> usize {
+        self.pubkeys.len()
+    }
+}
+
+impl<'list> IntoIterator for &'list RawValidatorList {
+    type Item = Validator;
+    type IntoIter = ValidatorListIter<'list>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ValidatorListIter {
+            pubkeys: self.pubkeys.iter(),
+            effective_balances: self.effective_balances.iter(),
+            items: self.items.iter(),
         }
     }
 }

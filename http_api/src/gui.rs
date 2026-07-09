@@ -33,12 +33,11 @@ use typenum::Unsigned as _;
 use types::{
     combined::BeaconState,
     config::Config,
-    nonstandard::{GweiVec, RelativeEpoch, SlotVec, WithStatus},
+    nonstandard::{GweiVec, PartialValidator, RelativeEpoch, SlotVec, WithStatus},
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         containers::Validator,
         primitives::{Epoch, Gwei, H256, Slot, ValidatorIndex},
-        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -520,7 +519,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     post_balance,
                 ) in izip!(
                     0..,
-                    state.validators(),
+                    state.validators().iter(),
                     summaries,
                     performance,
                     epoch_deltas,
@@ -593,7 +592,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
 
                 for (validator_index, validator, summary, epoch_deltas, post_balance) in izip!(
                     0..,
-                    state.validators(),
+                    state.validators().iter(),
                     summaries,
                     epoch_deltas,
                     post_balances,
@@ -736,7 +735,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
                     post_balance,
                 ) in izip!(
                     0..,
-                    state.validators(),
+                    state.validators().iter(),
                     summaries,
                     performance,
                     epoch_deltas,
@@ -809,7 +808,7 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
 
                 for (validator_index, validator, summary, epoch_deltas, post_balance) in izip!(
                     0..,
-                    state.validators(),
+                    state.validators().iter(),
                     summaries,
                     epoch_deltas,
                     post_balances,

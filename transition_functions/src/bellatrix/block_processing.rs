@@ -227,7 +227,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
             .deposit_count
             .try_sub(state.eth1_deposit_index())?,
     );
-    let in_block = body.deposits().len().try_into()?;
+    let in_block = body.deposits().len_usize().try_into()?;
 
     ensure!(
         computed == in_block,
@@ -275,7 +275,8 @@ pub fn process_operations<P: Preset, V: Verifier>(
     } else {
         initialize_shuffled_indices(state, body.attestations())?;
 
-        let triples = helper_functions::par_iter!(body.attestations())
+        let attestations = body.attestations().iter().collect::<Vec<_>>();
+        let triples = helper_functions::par_iter!(attestations)
             .map(|attestation| {
                 let mut triple = Triple::default();
 
@@ -300,7 +301,7 @@ pub fn process_operations<P: Preset, V: Verifier>(
 
     // The conditional is not needed for correctness.
     // It only serves to avoid overhead when processing blocks with no deposits.
-    if !body.deposits().is_empty() {
+    if body.deposits().len_usize() > 0 {
         let combined_deposits = unphased::validate_deposits(
             config,
             pubkey_cache,
@@ -308,7 +309,12 @@ pub fn process_operations<P: Preset, V: Verifier>(
             body.deposits().iter().copied(),
         )?;
 
-        altair::apply_deposits(state, body.deposits().len(), combined_deposits, slot_report)?;
+        altair::apply_deposits(
+            state,
+            body.deposits().len_usize(),
+            combined_deposits,
+            slot_report,
+        )?;
     }
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {

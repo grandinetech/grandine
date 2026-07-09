@@ -1,6 +1,8 @@
 use core::num::NonZeroUsize;
 
-use typenum::{U0, U2, U10, U12, U13, U832, assert_type_eq};
+use typenum::{
+    Prod, Sum, U0, U1, U2, U4, U46, U64, U357, U367, U735, U808, U897, U898, U2048, assert_type_eq,
+};
 
 use crate::{
     gloas::primitives::{BuilderIndex, PayloadStatus},
@@ -10,50 +12,71 @@ use crate::{
 use hex_literal::hex;
 use nonzero_ext::nonzero;
 
-/// [`EXECUTION_BLOCK_HASH_GINDEX_GLOAS`](https://github.com/ethereum/consensus-specs/blob/279b0ebe911ea02b626d632e372f78b59a53ba61/specs/gloas/light-client/sync-protocol.md#new-constants)
+/// Generalized indices in gloas `ProgressiveContainer`s (EIP-7495 + EIP-7916).
+///
+/// The root of a `ProgressiveContainer` is `hash(progressive_root, active_fields)`,
+/// which places the progressive Merkle tree at generalized index 2. The tree itself
+/// is a spine of binary subtrees with capacities 1, 4, 16, 64, …:
+/// `hash(merkleize(chunks[..k], k), merkleize_progressive(chunks[k..], 4 * k))`.
+///
+/// Fields of a progressive container therefore land at:
+///
+/// ```text
+/// field 0:        gindex 4
+/// fields 1..=4:   gindexes 40..=43   (10 * 4 + i - 1)
+/// fields 5..=20:  gindexes 352..=367 (22 * 16 + i - 5)
+/// fields 21..=84: gindexes 2944..=3007 (46 * 64 + i - 21)
+/// ```
+///
+/// `signed_execution_payload_bid` is field 10 of the gloas `BeaconBlockBody`
+/// (a `ProgressiveContainer` with 13 active fields): 352 + (10 - 5) = 357.
+type SignedExecutionPayloadBidGindex = U357;
+
+/// [`EXECUTION_BLOCK_HASH_GINDEX_GLOAS`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.12/specs/gloas/light-client/sync-protocol.md#constants)
 ///
 /// `get_generalized_index(BeaconBlockBody, 'signed_execution_payload_bid', 'message', 'parent_block_hash')`
 ///
-/// ```text
-///  1┬─2┬─4┬──8┬─16 BeaconBlockBody.randao_reveal
-///   │  │  │   └─17 BeaconBlockBody.eth1_data
-///   │  │  └──9┬─18 BeaconBlockBody.graffiti
-///   │  │      └─19 BeaconBlockBody.proposer_slashings
-///   │  └─5┬─10┬─20 BeaconBlockBody.attester_slashings
-///   │     │   └─21 BeaconBlockBody.attestations
-///   │     └─11┬─22 BeaconBlockBody.deposits
-///   │         └─23 BeaconBlockBody.voluntary_exits
-///   └─3┬─6┬─12┬─24 BeaconBlockBody.sync_aggregate
-///      │  │   └─25 BeaconBlockBody.bls_to_execution_changes
-///      │  └─13┬─26 BeaconBlockBody.signed_execution_payload_bid (see below)
-///      │      └─27 BeaconBlockBody.payload_attestations
-///      └─7──14┬─28 BeaconBlockBody.parent_execution_requests
-///
-///  26 SignedExecutionPayloadBid┬─52 .message (= ExecutionPayloadBid, see below)
-///                              └─53 .signature
-///
-///  52 ExecutionPayloadBid┬─104┬─208┬─416┬─832 ExecutionPayloadBid.parent_block_hash
-///                        │   │   │   └─833 ExecutionPayloadBid.parent_block_root
-///                        │   │   └─417┬─834 ExecutionPayloadBid.block_hash
-///                        │   │       └─835 ExecutionPayloadBid.prev_randao
-///                        │   └─209┬─418┬─836 ExecutionPayloadBid.fee_recipient
-///                        │       │   └─837 ExecutionPayloadBid.gas_limit
-///                        │       └─419┬─838 ExecutionPayloadBid.builder_index
-///                        │           └─839 ExecutionPayloadBid.slot
-///                        └─105┬─210┬─420┬─840 ExecutionPayloadBid.value
-///                             │   │   └─841 ExecutionPayloadBid.execution_payment
-///                             │   └─421┬─842 ExecutionPayloadBid.blob_kzg_commitments
-///                             │       └─843 ExecutionPayloadBid.execution_requests_root
-/// ```
+/// `SignedExecutionPayloadBid` is a plain container (`message` at gindex 2), while
+/// `ExecutionPayloadBid` is a `ProgressiveContainer` with 12 active fields
+/// (`parent_block_hash` is field 0, gindex 4): concat(357, 2, 4) = 2856.
 pub type ExecutionBlockHashGindexGloas = ConcatGeneralizedIndices<
-    ConcatGeneralizedIndices<
-        GeneralizedIndexInContainer<U10, U13>,
-        GeneralizedIndexInContainer<U0, U2>,
-    >,
-    GeneralizedIndexInContainer<U0, U12>,
+    ConcatGeneralizedIndices<SignedExecutionPayloadBidGindex, GeneralizedIndexInContainer<U0, U2>>,
+    U4,
 >;
 
-assert_type_eq!(ExecutionBlockHashGindexGloas, U832);
+assert_type_eq!(ExecutionBlockHashGindexGloas, Sum<U2048, U808>); // 2856
+
+/// [`FINALIZED_ROOT_GINDEX_GLOAS`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.12/specs/gloas/light-client/sync-protocol.md#constants)
+///
+/// `get_generalized_index(BeaconState, 'finalized_checkpoint', 'root')`
+///
+/// `finalized_checkpoint` is field 20 of the gloas `BeaconState` (a
+/// `ProgressiveContainer` with 46 active fields): 352 + (20 - 5) = 367.
+/// `root` is field 1 of the plain `Checkpoint` container: concat(367, 3) = 735.
+pub type FinalizedRootGindexGloas =
+    ConcatGeneralizedIndices<U367, GeneralizedIndexInContainer<U1, U2>>;
+
+assert_type_eq!(FinalizedRootGindexGloas, U735);
+
+/// [`CURRENT_SYNC_COMMITTEE_GINDEX_GLOAS`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.12/specs/gloas/light-client/sync-protocol.md#constants)
+///
+/// `get_generalized_index(BeaconState, 'current_sync_committee')`
+///
+/// `current_sync_committee` is field 22 of the gloas `BeaconState`:
+/// 46 * 64 + (22 - 21) = 2945.
+pub type CurrentSyncCommitteeGindexGloas = Sum<Prod<U46, U64>, U1>;
+
+assert_type_eq!(CurrentSyncCommitteeGindexGloas, Sum<U2048, U897>); // 2945
+
+/// [`NEXT_SYNC_COMMITTEE_GINDEX_GLOAS`](https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.12/specs/gloas/light-client/sync-protocol.md#constants)
+///
+/// `get_generalized_index(BeaconState, 'next_sync_committee')`
+///
+/// `next_sync_committee` is field 23 of the gloas `BeaconState`:
+/// 46 * 64 + (23 - 21) = 2946.
+pub type NextSyncCommitteeGindexGloas = Sum<Prod<U46, U64>, U2>;
+
+assert_type_eq!(NextSyncCommitteeGindexGloas, Sum<U2048, U898>); // 2946
 
 pub const INTERVALS_PER_SLOT_GLOAS: NonZeroUsize = nonzero!(4_usize);
 

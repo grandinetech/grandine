@@ -10,7 +10,7 @@ use helper_functions::{
     predicates::is_in_inactivity_leak,
 };
 use pubkey_cache::PubkeyCache;
-use ssz::PersistentList;
+use ssz::SszListMut as _;
 use typenum::Unsigned as _;
 use types::{
     altair::beacon_state::BeaconState as AltairBeaconState,
@@ -210,7 +210,7 @@ pub fn process_inactivity_updates<P: Preset>(
         Ok(())
     };
 
-    state.inactivity_scores_mut().update(|score| {
+    state.inactivity_scores_mut().update(&mut |score| {
         if update_result.is_err() {
             return;
         }
@@ -277,7 +277,7 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
         Ok(())
     };
 
-    state.balances.update(|balance| {
+    state.balances.update(&mut |balance| {
         if update_result.is_err() {
             return;
         }
@@ -292,11 +292,18 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
 
 pub fn process_participation_flag_updates<P: Preset>(state: &mut impl PostAltairBeaconState<P>) {
     // > Rotate current/previous epoch participation
-    let zero_participation = PersistentList::repeat_zero(state.validators().len_usize())
-        .expect("validator list and participation lists have the same maximum length");
+    let validator_count = state.validators().len_usize();
+    let current_participation = state.current_epoch_participation().clone_boxed();
 
-    *state.previous_epoch_participation_mut() =
-        core::mem::replace(state.current_epoch_participation_mut(), zero_participation);
+    state
+        .previous_epoch_participation_mut()
+        .try_assign_from_iter(&mut current_participation.iter().copied())
+        .expect("participation list has the same maximum length as the validator registry");
+
+    state
+        .current_epoch_participation_mut()
+        .try_assign_from_iter(&mut core::iter::repeat_n(0, validator_count))
+        .expect("participation list has the same maximum length as the validator registry");
 }
 
 pub fn process_sync_committee_updates<P: Preset>(

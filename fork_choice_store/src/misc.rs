@@ -18,7 +18,6 @@ use strum::AsRefStr;
 use thiserror::Error;
 use transition_functions::unphased::StateRootPolicy;
 use types::{
-    Validators,
     combined::{
         Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
         SignedBeaconBlock,
@@ -38,7 +37,7 @@ use types::{
         primitives::{ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::SignedBeaconBlock as _,
+    traits::{SignedBeaconBlock as _, SszValidatorList},
 };
 
 use crate::{segment::Position, store::Store};
@@ -1689,6 +1688,6 @@ pub trait Storage<P: Preset>: Sync + Sized {
     fn stored_state_by_block_root(
         &self,
         block_root: H256,
-        finalized_validators: Option<&Validators<P>>,
+        finalized_validators: Option<&dyn SszValidatorList>,
     ) -> Result<Option<Arc<BeaconState<P>>>>;
 }

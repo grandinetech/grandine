@@ -38,9 +38,8 @@ use itertools::izip;
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::{Hc, PersistentList, SszHash as _};
+use ssz::{Hc, SszHash as _, SszList as _};
 use tap::Pipe as _;
-use try_from_iterator::TryFromIterator as _;
 use typenum::{NonZero, Unsigned as _};
 use types::{
     altair::consts::{PARTICIPATION_FLAG_WEIGHTS, PROPOSER_WEIGHT, WEIGHT_DENOMINATOR},
@@ -57,7 +56,7 @@ use types::{
             WithdrawalRequest,
         },
     },
-    nonstandard::{AttestationEpoch, SlashingKind, smallvec},
+    nonstandard::{AttestationEpoch, PartialValidator, SlashingKind, smallvec},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{
@@ -65,12 +64,12 @@ use types::{
             Validator,
         },
         primitives::{DepositIndex, ExecutionAddress, Gwei, H256, ValidatorIndex},
-        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{
         AttesterSlashing, BeaconState, BlockBodyWithBlsToExecutionChanges,
-        BlockBodyWithElectraAttestations, PostCapellaExecutionPayload, PostElectraBeaconState,
+        BlockBodyWithElectraAttestations, BlockBodyWithElectraAttesterSlashings,
+        PostCapellaExecutionPayload, PostElectraBeaconState,
     },
 };
 
@@ -285,13 +284,16 @@ where
     }
 
     // > Update pending partial withdrawals [New in Electra:EIP7251]
-    *state.pending_partial_withdrawals_mut() = PersistentList::try_from_iter(
-        state
-            .pending_partial_withdrawals()
-            .into_iter()
-            .copied()
-            .skip(processed_partial_withdrawals_count),
-    )?;
+    let pending_partial_withdrawals = state.pending_partial_withdrawals().clone_boxed();
+
+    state
+        .pending_partial_withdrawals_mut()
+        .try_assign_from_iter(
+            &mut pending_partial_withdrawals
+                .iter()
+                .copied()
+                .skip(processed_partial_withdrawals_count),
+        )?;
 
     // > Update the next withdrawal index if this block contained withdrawals
     if let Some(latest_withdrawal) = expected_withdrawals.last() {
@@ -319,7 +321,7 @@ pub fn get_expected_withdrawals<P: Preset>(
     let mut processed_partial_withdrawals_count: usize = 0;
 
     // > [New in Electra:EIP7251] Consume pending partial withdrawals
-    for withdrawal in &state.pending_partial_withdrawals().clone() {
+    for withdrawal in &*state.pending_partial_withdrawals().clone_boxed() {
         if withdrawal.withdrawable_epoch > epoch
             || withdrawals.len() == max_pending_partials_per_withdrawals_sweep
         {
@@ -501,7 +503,9 @@ pub fn process_operations<P: Preset, V: Verifier, B>(
     mut slot_report: impl SlotReport,
 ) -> Result<()>
 where
-    B: BlockBodyWithElectraAttestations<P> + BlockBodyWithBlsToExecutionChanges<P>,
+    B: BlockBodyWithElectraAttestations<P>
+        + BlockBodyWithElectraAttesterSlashings<P>
+        + BlockBodyWithBlsToExecutionChanges<P>,
 {
     // > [Modified in Electra:EIP6110]
     // > Disable former deposit mechanism once all prior deposits are processed
@@ -510,7 +514,7 @@ where
         .deposit_count
         .min(state.deposit_requests_start_index());
 
-    let in_block = body.deposits().len().try_into()?;
+    let in_block = body.deposits().len_usize().try_into()?;
 
     if state.eth1_deposit_index() < eth1_deposit_index_limit {
         let computed =
@@ -572,7 +576,8 @@ where
     } else {
         initialize_shuffled_indices(state, body.attestations().iter())?;
 
-        let triples = helper_functions::par_iter!(body.attestations())
+        let attestations = body.attestations().iter().collect::<Vec<_>>();
+        let triples = helper_functions::par_iter!(attestations)
             .map(|attestation| {
                 let mut triple = Triple::default();
 
@@ -597,7 +602,7 @@ where
 
     // The conditional is not needed for correctness.
     // It only serves to avoid overhead when processing blocks with no deposits.
-    if !body.deposits().is_empty() {
+    if body.deposits().len_usize() > 0 {
         let combined_deposits = unphased::validate_deposits(
             config,
             pubkey_cache,
@@ -605,7 +610,7 @@ where
             body.deposits().iter().copied(),
         )?;
 
-        let deposit_count = body.deposits().len();
+        let deposit_count = body.deposits().len_usize();
 
         // > Deposits must be processed in order
         *state.eth1_deposit_index_mut() = state

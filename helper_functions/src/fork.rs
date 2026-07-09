@@ -7,7 +7,10 @@ use arithmetic::U64Ext as _;
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::{BitVector, PersistentList, PersistentVector, SszHash};
+use ssz::{
+    BitVector, PersistentList, PersistentProgressiveList, PersistentVector, SszHash,
+    SszListMut as _,
+};
 use std_ext::{ArcExt as _, CopyExt as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -45,7 +48,7 @@ use types::{
         primitives::{ExecutionAddress, H256},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostElectraBeaconState as _},
+    traits::{BeaconState as _, PostElectraBeaconState as _, SszValidatorList as _},
 };
 
 use crate::{
@@ -882,22 +885,22 @@ pub fn upgrade_to_gloas<P: Preset>(
         eth1_data_votes,
         eth1_deposit_index,
         // > Registry
-        validators,
-        balances,
+        validators: validators.into(),
+        balances: balances.into(),
         // > Randomness
         randao_mixes,
         // > Slashings
         slashings,
         // > Participation
-        previous_epoch_participation,
-        current_epoch_participation,
+        previous_epoch_participation: previous_epoch_participation.into(),
+        current_epoch_participation: current_epoch_participation.into(),
         // > Finality
         justification_bits,
         previous_justified_checkpoint,
         current_justified_checkpoint,
         finalized_checkpoint,
         // > Inactivity
-        inactivity_scores,
+        inactivity_scores: inactivity_scores.into(),
         // > Sync
         current_sync_committee,
         next_sync_committee,
@@ -914,18 +917,18 @@ pub fn upgrade_to_gloas<P: Preset>(
         earliest_exit_epoch,
         consolidation_balance_to_consume,
         earliest_consolidation_epoch,
-        pending_deposits,
-        pending_partial_withdrawals,
-        pending_consolidations,
+        pending_deposits: pending_deposits.into(),
+        pending_partial_withdrawals: pending_partial_withdrawals.into(),
+        pending_consolidations: pending_consolidations.into(),
         proposer_lookahead,
         // > ePBS states introduced in Gloas
-        builders: PersistentList::default(),
+        builders: PersistentProgressiveList::default(),
         next_withdrawal_builder_index: 0,
         execution_payload_availability: BitVector::new(true),
         builder_pending_payments: PersistentVector::default(),
-        builder_pending_withdrawals: PersistentList::default(),
+        builder_pending_withdrawals: PersistentProgressiveList::default(),
         latest_execution_payload_bid,
-        payload_expected_withdrawals: PersistentList::default(),
+        payload_expected_withdrawals: PersistentProgressiveList::default(),
         ptc_window,
         // Cache
         cache,
@@ -983,7 +986,7 @@ fn onboard_builders<P: Preset>(
     let mut builder_indices: HashMap<PublicKeyBytes, BuilderIndex> = HashMap::new();
     let mut pending_deposits = vec![];
 
-    for deposit in &state.pending_deposits().clone() {
+    for deposit in &*state.pending_deposits().clone_boxed() {
         let PendingDeposit {
             pubkey,
             withdrawal_credentials,
@@ -1025,7 +1028,9 @@ fn onboard_builders<P: Preset>(
         }
     }
 
-    *state.pending_deposits_mut() = PersistentList::try_from_iter(pending_deposits)?;
+    state
+        .pending_deposits_mut()
+        .try_assign_from_iter(&mut pending_deposits.into_iter())?;
 
     Ok(())
 }

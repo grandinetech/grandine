@@ -189,7 +189,7 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
         Ok(())
     };
 
-    balances.update(|balance| {
+    balances.update(&mut |balance| {
         if update_result.is_err() {
             return;
         }

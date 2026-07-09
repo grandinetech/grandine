@@ -35,7 +35,7 @@ use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_pee
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
-use ssz::{BitVector, ContiguousList, SszHash as _};
+use ssz::{BitVector, ContiguousList, SszHash as _, SszList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tracing::{debug_span, instrument};
@@ -45,7 +45,6 @@ use transition_functions::{
 };
 use typenum::Unsigned as _;
 use types::{
-    Validators,
     combined::{
         Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
         ExecutionPayloadParams, SignedAggregateAndProof, SignedBeaconBlock,
@@ -77,7 +76,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
     preset::{DataAvailabilityTimelyThreshold, PayloadTimelyThreshold, Preset},
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconState as _, SignedBeaconBlock as _, SszValidatorList},
 };
 use unwrap_none::UnwrapNone as _;
 
@@ -1618,8 +1617,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn finalized_validators(&self) -> Validators<P> {
-        self.last_finalized().state(self).validators().clone()
+    pub fn finalized_validators(&self) -> Box<dyn SszValidatorList> {
+        self.last_finalized().state(self).validators().clone_boxed()
     }
 
     pub fn validate_block(
@@ -2891,6 +2890,24 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     )
                 }
             }
+            AttesterSlashing::Gloas(attester_slashing) => {
+                if origin.verify_signatures() {
+                    unphased::validate_attester_slashing(
+                        &self.chain_config,
+                        &self.pubkey_cache,
+                        self.justified_state(),
+                        attester_slashing,
+                    )
+                } else {
+                    unphased::validate_attester_slashing_with_verifier(
+                        &self.chain_config,
+                        &self.pubkey_cache,
+                        self.justified_state(),
+                        attester_slashing,
+                        NullVerifier,
+                    )
+                }
+            }
         }
     }
 
@@ -4068,7 +4085,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 .with_blob_kzg_commitments()
                 && self.should_check_data_availability_at_slot(chain_link.slot())
             {
-                let blob_count = post_deneb_block_body.blob_kzg_commitments().len();
+                let blob_count = post_deneb_block_body.blob_kzg_commitments().len_usize();
 
                 info_with_peers!(
                     "imported beacon block with {blob_count} blobs (slot: {}, {block_root:?}",
@@ -5957,7 +5974,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return vec![];
         };
 
-        if body.blob_kzg_commitments().is_empty() {
+        if body.blob_kzg_commitments().len_usize() == 0 {
             return vec![];
         }
 
@@ -5975,7 +5992,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         .accepted_data_column_sidecars
                         .get(&(block.slot(), block.proposer_index(), **index))
                         .is_some_and(|kzg_commitments| {
-                            kzg_commitments.get(&block_root) == Some(body.blob_kzg_commitments())
+                            kzg_commitments.get(&block_root).is_some_and(|commitments| {
+                                itertools::equal(commitments, body.blob_kzg_commitments())
+                            })
                         })
                 }
             })

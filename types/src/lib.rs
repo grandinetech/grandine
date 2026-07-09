@@ -94,6 +94,7 @@ pub mod gloas {
     pub mod consts;
     pub mod containers;
     pub mod primitives;
+    pub mod validator_list;
 
     mod container_impls;
 

@@ -294,6 +294,94 @@ impl<D: ArrayLength<H256>> MerkleTree<D> {
     }
 }
 
+pub struct ProgressiveMerkleTree;
+
+impl ProgressiveMerkleTree {
+    pub fn merkleize_bytes(bytes: impl AsRef<[u8]>) -> H256 {
+        let chunks = bytes.as_ref().chunks(BYTES_PER_CHUNK).map(|partial_chunk| {
+            let mut chunk = H256::zero();
+            chunk[..partial_chunk.len()].copy_from_slice(partial_chunk);
+            chunk
+        });
+
+        Self::merkleize_progressive(chunks)
+    }
+
+    pub fn merkleize_packed<T: SszHash + SszWrite>(values: &[T]) -> H256 {
+        let size = T::SIZE.fixed_part();
+
+        let chunks = values.chunks(T::PackingFactor::USIZE).map(|pack| {
+            let mut hash = H256::zero();
+
+            hash.as_bytes_mut()
+                .chunks_exact_mut(size)
+                .zip(pack)
+                .for_each(|(destination, element)| element.write_fixed(destination));
+
+            hash
+        });
+
+        Self::merkleize_progressive(chunks)
+    }
+
+    pub fn merkleize_progressive(
+        chunks: impl IntoIterator<
+            IntoIter = impl DoubleEndedIterator<Item = H256> + ExactSizeIterator<Item = H256>,
+        >,
+    ) -> H256 {
+        let mut chunks = chunks.into_iter();
+
+        if chunks.len() == 0 {
+            return H256::zero();
+        }
+
+        let triple_len = chunks
+            .len()
+            .checked_mul(3)
+            .expect("progressive subtree capacity bound should not overflow usize");
+
+        // Depth of the deepest subtree: `2 * floor(log4(3 * len))`.
+        let max_depth = usize::try_from((triple_len.ilog2() >> 1) << 1)
+            .expect("progressive subtree depth should fit in usize");
+
+        let mut right_hashes = vec![H256::zero(); max_depth];
+
+        let mut root = H256::zero();
+
+        for depth in (0..=max_depth).rev().step_by(2) {
+            let capacity = 1_usize << depth;
+            let offset = capacity.saturating_sub(1).wrapping_div(3); // `(4.pow(k) - 1) / 3`
+            let count = chunks.len().saturating_sub(offset);
+
+            for (local, chunk) in (0..count).rev().zip(chunks.by_ref().rev()) {
+                let sibling_to_update = usize::try_from(local.trailing_zeros())
+                    .expect("number of bits in usize should fit in usize")
+                    .min(depth);
+
+                let mut hash = chunk;
+
+                for height in 0..sibling_to_update {
+                    let right = if local.saturating_add(1 << height) < count {
+                        right_hashes[height]
+                    } else {
+                        ZERO_HASHES[height]
+                    };
+
+                    hash = hashing::hash_256_256(hash, right);
+                }
+
+                if local == 0 {
+                    root = hashing::hash_256_256(hash, root);
+                } else {
+                    right_hashes[sibling_to_update] = hash;
+                }
+            }
+        }
+
+        root
+    }
+}
+
 pub type ProofWithLength<N> = ContiguousVector<H256, Add1<N>>;
 
 /// [`mix_in_length`](https://github.com/ethereum/consensus-specs/blob/4c54bddb6cd144ca8a0a01b7155f43b295c70458/ssz/simple-serialize.md#merkleization)
@@ -303,6 +391,11 @@ pub type ProofWithLength<N> = ContiguousVector<H256, Add1<N>>;
 #[must_use]
 pub fn mix_in_length(root: H256, length: usize) -> H256 {
     hashing::hash_256_256(root, hash_of_length(length))
+}
+
+#[must_use]
+pub fn mix_in_active_fields(root: H256, active_fields_root: H256) -> H256 {
+    hashing::hash_256_256(root, active_fields_root)
 }
 
 fn hash_of_length(length: usize) -> H256 {
@@ -477,5 +570,113 @@ mod tests {
     fn usize_fits_in_h256() {
         hash_of_length(usize::MIN);
         hash_of_length(usize::MAX);
+    }
+
+    #[test]
+    fn merkleize_to_depth_matches_fixed_depth_merkle_tree() {
+        type Depth = U3;
+        let depth = Depth::USIZE;
+
+        // Every chunk count from empty to a full `2.pow(depth)` tree.
+        for chunk_count in 0..=(1 << depth) {
+            let chunks = (0..chunk_count)
+                .map(|byte| H256::repeat_byte(byte as u8))
+                .collect_vec();
+
+            assert_eq!(
+                merkleize_to_depth(&chunks, depth),
+                MerkleTree::<Depth>::merkleize_chunks(chunks.iter().copied()),
+                "mismatch for {chunk_count} chunks",
+            );
+        }
+    }
+
+    fn merkleize_to_depth(chunks: &[H256], depth: usize) -> H256 {
+        let Some((&last_chunk, chunks)) = chunks.split_last() else {
+            return ZERO_HASHES[depth];
+        };
+
+        let last_index = chunks.len();
+
+        assert!(last_index < 1 << depth);
+
+        let mut sibling_hashes = vec![H256::zero(); depth];
+
+        for (index, &chunk) in chunks.iter().enumerate() {
+            let sibling_to_update = binary_carry_sequence(index);
+
+            let mut hash = chunk;
+
+            for &sibling in &sibling_hashes[..sibling_to_update] {
+                hash = hashing::hash_256_256(sibling, hash);
+            }
+
+            sibling_hashes[sibling_to_update] = hash;
+        }
+
+        let mut root = last_chunk;
+
+        for (height, &sibling) in sibling_hashes.iter().enumerate() {
+            root = if last_index.get_bit(height) {
+                hashing::hash_256_256(sibling, root)
+            } else {
+                hashing::hash_256_256(root, ZERO_HASHES[height])
+            };
+        }
+
+        root
+    }
+
+    // Reference implementation of EIP-7916 `merkleize_progressive`, used as a test oracle.
+    fn merkleize_progressive_reference(chunks: &[H256], num_leaves: usize) -> H256 {
+        if chunks.is_empty() {
+            return H256::zero();
+        }
+
+        let split = num_leaves.min(chunks.len());
+        let (subtree_chunks, rest) = chunks.split_at(split);
+        let depth = (num_leaves.trailing_zeros())
+            .try_into()
+            .expect("number of bits in usize should fit in usize");
+
+        let subtree_root = merkleize_to_depth(subtree_chunks, depth);
+        let rest_root = merkleize_progressive_reference(rest, num_leaves.saturating_mul(4));
+
+        hashing::hash_256_256(subtree_root, rest_root)
+    }
+
+    #[test]
+    fn merkleize_progressive_empty_is_zero() {
+        assert_eq!(
+            ProgressiveMerkleTree::merkleize_progressive(core::iter::empty()),
+            H256::zero()
+        );
+    }
+
+    #[test]
+    fn merkleize_progressive_single_chunk_mixes_in_zero_tail() {
+        // The spine always terminates with a zero tail, so even a lone chunk is hashed with zero:
+        // `merkleize_progressive([c], 1) = hash(merkleize([c], 1), merkleize_progressive([], 4))`.
+        let chunk = H256::repeat_byte(0xab);
+        assert_eq!(
+            ProgressiveMerkleTree::merkleize_progressive([chunk]),
+            hashing::hash_256_256(chunk, H256::zero()),
+        );
+    }
+
+    #[test]
+    fn merkleize_progressive_matches_reference() {
+        // Boundaries of the `1, 5, 21, 85` cumulative capacities and their neighbours.
+        for chunk_count in [0, 1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 64, 84, 85, 86, 200] {
+            let chunks = (0..chunk_count)
+                .map(|byte| H256::repeat_byte(byte as u8))
+                .collect_vec();
+
+            assert_eq!(
+                ProgressiveMerkleTree::merkleize_progressive(chunks.iter().copied()),
+                merkleize_progressive_reference(&chunks, 1),
+                "mismatch for {chunk_count} chunks",
+            );
+        }
     }
 }

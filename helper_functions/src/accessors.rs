@@ -35,14 +35,13 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, Participation, RelativeEpoch},
+    nonstandard::{AttestationEpoch, PartialValidator, Participation, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
         primitives::{
             CommitteeIndex, DomainType, Epoch, Gwei, H128, H256, Slot, SubnetId, ValidatorIndex,
         },
-        validator_list::PartialValidator,
     },
     preset::{Preset, SlotsPerHistoricalRoot, SyncSubcommitteeSize},
     traits::{

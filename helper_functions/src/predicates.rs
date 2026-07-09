@@ -9,7 +9,7 @@ use bit_field::BitField as _;
 use bls::{PublicKeyBytes, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszList as _};
 use tap::TryConv as _;
 use typenum::Unsigned as _;
 use types::{
@@ -28,11 +28,11 @@ use types::{
         },
         primitives::BuilderIndex,
     },
+    nonstandard::PartialValidator,
     phase0::{
         consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
-        containers::{AttestationData, DepositMessage, Validator},
+        containers::{AttestationData, DepositMessage},
         primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot},
-        validator_list::PartialValidator,
     },
     preset::Preset,
     traits::{
@@ -950,7 +950,7 @@ mod extra_tests {
         phase0::{
             beacon_state::BeaconState as Phase0BeaconState,
             consts::FAR_FUTURE_EPOCH,
-            containers::{Checkpoint, IndexedAttestation},
+            containers::{Checkpoint, IndexedAttestation, Validator},
         },
         preset::Mainnet,
     };

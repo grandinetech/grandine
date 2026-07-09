@@ -342,7 +342,7 @@ impl Eth1Api {
                 }),
             ) => {
                 let payload_v4 = ExecutionPayloadV4::from(payload);
-                let raw_execution_requests = RawExecutionRequests::from(execution_requests);
+                let raw_execution_requests = RawExecutionRequests::try_from(execution_requests)?;
 
                 let params = vec![
                     serde_json::to_value(payload_v4)?,

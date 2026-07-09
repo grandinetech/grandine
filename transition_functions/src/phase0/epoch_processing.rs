@@ -6,6 +6,7 @@ use arithmetic::U64Ext as _;
 use helper_functions::{
     accessors::get_current_epoch, misc::vec_of_default, mutators::decrease_balance,
 };
+use ssz::SszListMut as _;
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -196,7 +197,7 @@ fn process_slashings<P: Preset, S: SlashingPenalties>(
         Ok(())
     };
 
-    state.balances.update(|balance| {
+    state.balances.update(&mut |balance| {
         if update_result.is_err() {
             return;
         }

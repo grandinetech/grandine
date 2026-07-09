@@ -53,7 +53,9 @@ use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
-use ssz::{ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _};
+use ssz::{
+    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszList as _,
+};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::time::timeout;
@@ -687,7 +689,7 @@ pub async fn state_validator_identities<P: Preset, W: Wait>(
     let ids = ids.into_iter().collect::<HashSet<_>>();
 
     let validators = (0..)
-        .zip(state.validators())
+        .zip(state.validators().iter())
         .filter_map(|(index, validator)| {
             if !ids.is_empty() {
                 let validator_index = ValidatorId::ValidatorIndex(index);
@@ -840,7 +842,7 @@ fn state_validator_balances<P: Preset, W: Wait>(
     let balances = ContiguousList::try_from_iter(
         izip!(
             0..,
-            state.validators(),
+            state.validators().iter(),
             state.balances().into_iter().copied(),
         )
         .filter(|(index, validator, _)| {
@@ -1037,13 +1039,19 @@ pub async fn state_pending_consolidations<P: Preset, W: Wait>(
     let version = state.phase();
     let state = state.post_electra().ok_or(Error::StatePreElectra)?;
 
-    Ok(
-        EthResponse::json_or_ssz(state.pending_consolidations(), &headers)?
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .version(version)
-            .into_response(),
+    // TODO(gloas): this probably needs to be modified a bit, so that
+    // json_or_ssz accepts dyn implementations too (anything, that can be
+    // serialized to json or ssz).
+    let pending_consolidations = ContiguousList::<_, P::PendingConsolidationsLimit>::try_from_iter(
+        state.pending_consolidations().iter().copied(),
     )
+    .map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(pending_consolidations, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(version)
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_deposits`
@@ -1063,13 +1071,16 @@ pub async fn state_pending_deposits<P: Preset, W: Wait>(
     let version = state.phase();
     let state = state.post_electra().ok_or(Error::StatePreElectra)?;
 
-    Ok(
-        EthResponse::json_or_ssz(state.pending_deposits(), &headers)?
-            .execution_optimistic(status.is_optimistic())
-            .finalized(finalized)
-            .version(version)
-            .into_response(),
+    let pending_deposits = ContiguousList::<_, P::PendingDepositsLimit>::try_from_iter(
+        state.pending_deposits().iter().copied(),
     )
+    .map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(pending_deposits, &headers)?
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized)
+        .version(version)
+        .into_response())
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_partial_withdrawals`
@@ -1093,8 +1104,14 @@ pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
     let version = state.phase();
     let state = state.post_electra().ok_or(Error::StatePreElectra)?;
 
+    let pending_partial_withdrawals =
+        ContiguousList::<_, P::PendingPartialWithdrawalsLimit>::try_from_iter(
+            state.pending_partial_withdrawals().iter().copied(),
+        )
+        .map_err(AnyhowError::new)?;
+
     Ok(
-        EthResponse::json_or_ssz(state.pending_partial_withdrawals(), &headers)?
+        EthResponse::json_or_ssz(pending_partial_withdrawals, &headers)?
             .execution_optimistic(status.is_optimistic())
             .finalized(finalized)
             .version(version)
@@ -4165,7 +4182,7 @@ fn state_validators<P: Preset, W: Wait>(
 
     let validators = izip!(
         0..,
-        state.validators(),
+        state.validators().iter(),
         state.balances().into_iter().copied(),
     )
     .filter(|(index, validator, _)| {

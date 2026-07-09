@@ -26,6 +26,7 @@ use types::{
         primitives::{Epoch, Gwei, H256, ValidatorIndex},
     },
     preset::Preset,
+    traits::SszValidatorList as _,
 };
 
 use crate::unphased::{self, EpochDeltas, ValidatorSummary};
