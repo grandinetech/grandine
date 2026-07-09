@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
-use ssz::{BitList, ContiguousList};
+use ssz::{BitList, ContiguousList, SszListMut as _};
 use tap::Pipe as _;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
@@ -126,6 +126,7 @@ mod tests {
     use std::collections::HashMap;
 
     use enum_map::enum_map;
+    use ssz::SszList as _;
     use types::{
         nonstandard::smallvec,
         phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator},

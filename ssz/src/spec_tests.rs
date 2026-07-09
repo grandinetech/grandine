@@ -7,8 +7,8 @@ use ssz_derive::Ssz;
 use static_assertions::assert_not_impl_any;
 use test_generator::test_resources;
 use typenum::{
-    U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U15, U16, U17, U31, U32, U33, U128, U256, U511, U512,
-    U513, U1024,
+    U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U15, U16, U17, U31, U32, U33, U123, U128, U256,
+    U511, U512, U513, U1024, U2048,
 };
 
 use crate::{
@@ -18,8 +18,11 @@ use crate::{
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
     incomplete_persistent_vector::IncompletePersistentVector,
+    persistent_progressive_list::PersistentProgressiveList,
     persistent_vector::PersistentVector,
     porcelain::{SszHash, SszReadDefault, SszSize, SszWrite},
+    progressive_bit_list::ProgressiveBitList,
+    progressive_list::ProgressiveList,
     uint256::Uint256,
 };
 
@@ -94,6 +97,51 @@ struct BitsStruct {
     c: BitVector<U1>,
     d: BitList<U6>,
     e: BitVector<U8>,
+}
+
+// The following types mirror the `ProgressiveContainer` test structs defined by the
+// `ssz_generic/progressive_containers` suite (EIP-7495 / EIP-7688). Their `active_fields`
+// arrays include inactive (`0`) slots that do not correspond to any Rust field; the number
+// of active (`1`) slots must equal the field count. `ProgressiveList`/`ProgressiveBitList`
+// are unbounded in the spec, so the type-level limits below are chosen large enough to hold
+// the biggest generated case (`max_list_length = 1500`) and do not affect the hash tree root.
+#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[ssz(internal, stable(active = [1]))]
+struct ProgressiveSingleFieldContainerTestStruct {
+    a: u8,
+}
+
+#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[ssz(internal, stable(active = [0, 0, 0, 0, 1]))]
+struct ProgressiveSingleListContainerTestStruct {
+    c: ProgressiveBitList<U2048>,
+}
+
+#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[ssz(internal, stable(active = [1, 0, 1, 0, 1]))]
+struct ProgressiveVarTestStruct {
+    a: u8,
+    b: ContiguousList<u16, U123>,
+    c: ProgressiveBitList<U2048>,
+}
+
+#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[ssz(internal, stable(active = [
+    1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1,
+]))]
+struct ProgressiveComplexTestStruct {
+    a: u8,
+    b: ContiguousList<u16, U123>,
+    c: ProgressiveBitList<U2048>,
+    d: ProgressiveList<u64, U2048>,
+    e: ProgressiveList<SmallTestStruct, U2048>,
+    f: ProgressiveList<ProgressiveList<VarTestStruct, U2048>, U2048>,
+    g: ContiguousList<ProgressiveSingleFieldContainerTestStruct, U10>,
+    h: ProgressiveList<ProgressiveVarTestStruct, U2048>,
 }
 
 mod valid {
@@ -232,6 +280,23 @@ mod valid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_512_*"]       [basic_incomplete_persistent_vector_uint256_512] [IncompletePersistentVector<Uint256, U512>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_513_*"]       [basic_vector_uint256_513] [ContiguousVector<Uint256, U513>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_513_*"]       [basic_persistent_vector_uint256_513] [IncompletePersistentVector<Uint256, U513>];
+        // Progressive lists are unbounded in the spec. The type-level limits below are chosen
+        // large enough to hold the biggest generated case (1366 elements) and do not affect
+        // the hash tree root.
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_bool_*"]    [basic_progressive_list_bool]    [ProgressiveList<bool, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_bool_*"]    [basic_persistent_progressive_list_bool]    [PersistentProgressiveList<bool, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint8_*"]   [basic_progressive_list_uint8]   [ProgressiveList<u8, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint8_*"]   [basic_persistent_progressive_list_uint8]   [PersistentProgressiveList<u8, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint16_*"]  [basic_progressive_list_uint16]  [ProgressiveList<u16, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint16_*"]  [basic_persistent_progressive_list_uint16]  [PersistentProgressiveList<u16, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint32_*"]  [basic_progressive_list_uint32]  [ProgressiveList<u32, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint32_*"]  [basic_persistent_progressive_list_uint32]  [PersistentProgressiveList<u32, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint64_*"]  [basic_progressive_list_uint64]  [ProgressiveList<u64, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint64_*"]  [basic_persistent_progressive_list_uint64]  [PersistentProgressiveList<u64, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint128_*"] [basic_progressive_list_uint128] [ProgressiveList<StringyU128, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint128_*"] [basic_persistent_progressive_list_uint128] [PersistentProgressiveList<StringyU128, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint256_*"] [basic_progressive_list_uint256] [ProgressiveList<Uint256, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint256_*"] [basic_persistent_progressive_list_uint256] [PersistentProgressiveList<Uint256, U2048>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_1_*"]                      [bitlist_1]                [BitList<U1>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_2_*"]                      [bitlist_2]                [BitList<U2>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_3_*"]                      [bitlist_3]                [BitList<U3>];
@@ -275,6 +340,11 @@ mod valid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/SingleFieldTestStruct_*"] [single_field_test_struct] [SingleFieldTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/SmallTestStruct_*"]       [small_test_struct]        [SmallTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/VarTestStruct_*"]         [var_test_struct]          [VarTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_bitlist/valid/progbitlist_*"]  [progressive_bitlist]      [ProgressiveBitList<U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveSingleFieldContainerTestStruct_*"] [progressive_single_field_container_test_struct] [ProgressiveSingleFieldContainerTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveSingleListContainerTestStruct_*"]  [progressive_single_list_container_test_struct]  [ProgressiveSingleListContainerTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveVarTestStruct_*"]                  [progressive_var_test_struct]                    [ProgressiveVarTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveComplexTestStruct_*"]              [progressive_complex_test_struct]                [ProgressiveComplexTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_8_*"]                        [uints_8]                  [u8];
         ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_16_*"]                       [uints_16]                 [u16];
         ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_32_*"]                       [uints_32]                 [u32];
@@ -424,6 +494,18 @@ mod invalid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_512_*"]       [basic_incomplete_persistent_vector_uint256_512] [IncompletePersistentVector<Uint256, U512>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_513_*"]       [basic_vector_uint256_513] [ContiguousVector<Uint256, U513>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_513_*"]       [basic_persistent_vector_uint256_513] [IncompletePersistentVector<Uint256, U513>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_bool_*"]    [basic_progressive_list_bool]    [ProgressiveList<bool, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_bool_*"]    [basic_persistent_progressive_list_bool]    [PersistentProgressiveList<bool, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint16_*"]  [basic_progressive_list_uint16]  [ProgressiveList<u16, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint16_*"]  [basic_persistent_progressive_list_uint16]  [PersistentProgressiveList<u16, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint32_*"]  [basic_progressive_list_uint32]  [ProgressiveList<u32, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint32_*"]  [basic_persistent_progressive_list_uint32]  [PersistentProgressiveList<u32, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint64_*"]  [basic_progressive_list_uint64]  [ProgressiveList<u64, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint64_*"]  [basic_persistent_progressive_list_uint64]  [PersistentProgressiveList<u64, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint128_*"] [basic_progressive_list_uint128] [ProgressiveList<StringyU128, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint128_*"] [basic_persistent_progressive_list_uint128] [PersistentProgressiveList<StringyU128, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint256_*"] [basic_progressive_list_uint256] [ProgressiveList<Uint256, U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint256_*"] [basic_persistent_progressive_list_uint256] [PersistentProgressiveList<Uint256, U2048>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_1_*"]                      [bitlist_1]                [BitList<U1>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_2_*"]                      [bitlist_2]                [BitList<U2>];
         ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_3_*"]                      [bitlist_3]                [BitList<U3>];
@@ -454,6 +536,11 @@ mod invalid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/SingleFieldTestStruct_*"] [single_field_test_struct] [SingleFieldTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/SmallTestStruct_*"]       [small_test_struct]        [SmallTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/VarTestStruct_*"]         [var_test_struct]          [VarTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_bitlist/invalid/progbitlist_*"] [progressive_bitlist]     [ProgressiveBitList<U2048>];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveSingleFieldContainerTestStruct_*"] [progressive_single_field_container_test_struct] [ProgressiveSingleFieldContainerTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveSingleListContainerTestStruct_*"]  [progressive_single_list_container_test_struct]  [ProgressiveSingleListContainerTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveVarTestStruct_*"]                  [progressive_var_test_struct]                    [ProgressiveVarTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveComplexTestStruct_*"]              [progressive_complex_test_struct]                [ProgressiveComplexTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_8_*"]                        [uints_8]                  [u8];
         ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_16_*"]                       [uints_16]                 [u16];
         ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_32_*"]                       [uints_32]                 [u32];

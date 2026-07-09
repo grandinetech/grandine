@@ -18,6 +18,7 @@ use typenum::{U1, U2048, Unsigned};
 use crate::{
     consts::BITS_PER_BYTE,
     error::{ReadError, WriteError},
+    list::SszBitList,
     merkle_tree::{self, MerkleTree},
     porcelain::{SszHash, SszRead, SszSize, SszWrite},
     size::Size,
@@ -173,6 +174,28 @@ impl<N: MerkleBits> SszHash for BitList<N> {
     fn hash_tree_root(&self) -> H256 {
         let root = MerkleTree::<N::MerkleTreeDepth>::merkleize_bytes(self.as_raw_slice());
         merkle_tree::mix_in_length(root, self.len())
+    }
+}
+
+impl<N: MerkleBits + Send + Sync> SszBitList for BitList<N> {
+    fn len_usize(&self) -> usize {
+        self.len()
+    }
+
+    fn len_u64(&self) -> u64 {
+        u64::try_from(self.len()).expect("bit list length fits in u64")
+    }
+
+    fn get_bit(&self, index: usize) -> Option<bool> {
+        self.get(index).as_deref().copied()
+    }
+
+    fn count_ones(&self) -> usize {
+        self.bits.count_ones()
+    }
+
+    fn iter_bits<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = bool> + 'a> {
+        Box::new(self.iter().by_vals())
     }
 }
 

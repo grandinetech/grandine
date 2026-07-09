@@ -1209,6 +1209,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "const-hex",
+ "derive_more",
  "either",
  "ethereum-types",
  "futures",
@@ -3488,6 +3489,7 @@ dependencies = [
 name = "ssz_derive"
 version = "0.0.0"
 dependencies = [
+ "bitvec",
  "darling 0.23.0",
  "easy-ext",
  "itertools 0.14.0",

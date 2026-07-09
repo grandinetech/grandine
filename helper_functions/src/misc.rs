@@ -551,7 +551,7 @@ where
         .iter()
         .map(SszHash::hash_tree_root);
 
-    let commitment_indices = 0..body.blob_kzg_commitments().len();
+    let commitment_indices = 0..body.blob_kzg_commitments().len_usize();
     let proof_indices = commitment_index.try_into()?..commitment_index.try_add(1)?.try_into()?;
 
     let subproof = merkle_tree
@@ -615,7 +615,7 @@ where
         .iter()
         .map(SszHash::hash_tree_root);
 
-    let commitment_indices = 0..body.blob_kzg_commitments().len();
+    let commitment_indices = 0..body.blob_kzg_commitments().len_usize();
     let proof_indices = commitment_index.try_into()?..commitment_index.try_add(1)?.try_into()?;
 
     let subproof = merkle_tree
@@ -882,7 +882,7 @@ pub fn compute_matrix_for_data_column_sidecar<P: Preset>(
 ) -> Vec<MatrixEntry<P>> {
     let column = data_column_sidecar.column();
     let column_index = data_column_sidecar.index();
-    let blob_count = column.len() as u64;
+    let blob_count = column.len_u64();
 
     izip!(0..blob_count, column, data_column_sidecar.kzg_proofs())
         .map(|(row_index, cell, kzg_proof)| MatrixEntry {

@@ -12,7 +12,10 @@ use serde::{
     de::Visitor,
     ser::{Error as _, SerializeSeq as _},
 };
-use ssz::{ByteList, ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite as _};
+use ssz::{
+    ByteList, ByteVector, ContiguousList, ContiguousVector, ProgressiveList, ReadError,
+    SszReadDefault, SszWrite as _,
+};
 use typenum::Unsigned;
 use types::{
     bellatrix::{
@@ -38,7 +41,7 @@ use types::{
             BuilderDepositRequest, BuilderExitRequest, ExecutionPayload as GloasExecutionPayload,
             ExecutionRequests as GloasExecutionRequests,
         },
-        primitives::BlockAccessList,
+        primitives::{BlockAccessList, Transaction as GloasTransaction},
     },
     nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
     phase0::primitives::{
@@ -470,7 +473,7 @@ pub struct ExecutionPayloadV4<P: Preset> {
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub base_fee_per_gas: Wei,
     pub block_hash: ExecutionBlockHash,
-    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    pub transactions: Arc<ContiguousList<GloasTransaction<P>, P::MaxTransactionsPerPayload>>,
     pub withdrawals: ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>,
     #[serde(with = "serde_utils::prefixed_hex_quantity")]
     pub blob_gas_used: Gas,
@@ -505,6 +508,11 @@ impl<P: Preset> From<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
             slot_number,
         } = payload;
 
+        let transactions = Arc::try_unwrap(transactions)
+            .unwrap_or_else(|arc| (*arc).clone())
+            .into();
+        let withdrawals = ContiguousList::from(withdrawals).map(Into::into);
+
         Self {
             parent_hash,
             fee_recipient,
@@ -519,8 +527,8 @@ impl<P: Preset> From<GloasExecutionPayload<P>> for ExecutionPayloadV4<P> {
             extra_data,
             base_fee_per_gas,
             block_hash,
-            transactions,
-            withdrawals: withdrawals.map(Into::into),
+            transactions: Arc::new(transactions),
+            withdrawals,
             blob_gas_used,
             excess_blob_gas,
             block_access_list,
@@ -553,6 +561,11 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for GloasExecutionPayload<P> {
             slot_number,
         } = payload;
 
+        let transactions = Arc::try_unwrap(transactions)
+            .unwrap_or_else(|arc| (*arc).clone())
+            .into();
+        let withdrawals = ProgressiveList::from(withdrawals.map(Into::into));
+
         Self {
             parent_hash,
             fee_recipient,
@@ -567,8 +580,8 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for GloasExecutionPayload<P> {
             extra_data,
             base_fee_per_gas,
             block_hash,
-            transactions,
-            withdrawals: withdrawals.map(Into::into),
+            transactions: Arc::new(transactions),
+            withdrawals,
             blob_gas_used,
             excess_blob_gas,
             block_access_list,
@@ -1275,8 +1288,13 @@ impl<P: Preset> From<RawExecutionRequests<P>> for ElectraExecutionRequests<P> {
     }
 }
 
-impl<P: Preset> From<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
-    fn from(execution_requests: GloasExecutionRequests<P>) -> Self {
+// The gloas `ExecutionRequests.deposits` list has a relaxed SSZ bound
+// (see `Preset::GloasDepositRequestsBound`), while the engine API type keeps
+// `MaxDepositRequestsPerPayload`, so this conversion is checked.
+impl<P: Preset> TryFrom<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
+    type Error = ReadError;
+
+    fn try_from(execution_requests: GloasExecutionRequests<P>) -> Result<Self, Self::Error> {
         let GloasExecutionRequests {
             deposits,
             withdrawals,
@@ -1285,13 +1303,13 @@ impl<P: Preset> From<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
             builder_exits,
         } = execution_requests;
 
-        Self(
-            deposits,
-            withdrawals,
-            consolidations,
-            builder_deposits,
-            builder_exits,
-        )
+        Ok(Self(
+            narrow_list(deposits)?,
+            withdrawals.into(),
+            consolidations.into(),
+            builder_deposits.into(),
+            builder_exits.into(),
+        ))
     }
 }
 
@@ -1306,20 +1324,41 @@ impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
         ) = raw_execution_requests;
 
         Self {
-            deposits,
-            withdrawals,
-            consolidations,
-            builder_deposits,
-            builder_exits,
+            deposits: widen_list(deposits),
+            withdrawals: withdrawals.into(),
+            consolidations: consolidations.into(),
+            builder_deposits: builder_deposits.into(),
+            builder_exits: builder_exits.into(),
         }
     }
 }
 
-impl<P: Preset> From<ExecutionRequests<P>> for RawExecutionRequests<P> {
-    fn from(execution_requests: ExecutionRequests<P>) -> Self {
+/// Converts a list to one with a smaller length bound, failing if the length exceeds it.
+fn narrow_list<T, L, N: Unsigned>(list: L) -> Result<ContiguousList<T, N>, ReadError>
+where
+    L: IntoIterator<Item = T>,
+{
+    ContiguousList::try_from(list.into_iter().collect::<Vec<_>>())
+}
+
+/// Converts a list to one with a larger length bound. Infallible in practice.
+fn widen_list<T, L, U>(list: L) -> U
+where
+    L: IntoIterator<Item = T>,
+    U: TryFrom<Vec<T>>,
+    U::Error: core::fmt::Debug,
+{
+    U::try_from(list.into_iter().collect::<Vec<_>>())
+        .expect("target length bound should not be smaller than source bound")
+}
+
+impl<P: Preset> TryFrom<ExecutionRequests<P>> for RawExecutionRequests<P> {
+    type Error = ReadError;
+
+    fn try_from(execution_requests: ExecutionRequests<P>) -> Result<Self, Self::Error> {
         match execution_requests {
-            ExecutionRequests::Electra(requests) => requests.into(),
-            ExecutionRequests::Gloas(requests) => requests.into(),
+            ExecutionRequests::Electra(requests) => Ok(requests.into()),
+            ExecutionRequests::Gloas(requests) => requests.try_into(),
         }
     }
 }

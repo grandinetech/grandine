@@ -3,9 +3,9 @@ use core::ops::Not as _;
 use anyhow::Result;
 use arithmetic::UsizeExt as _;
 use helper_functions::{
-    accessors, electra,
+    accessors,
     error::SignatureKind,
-    misc, par_utils, predicates,
+    gloas, misc, par_utils, predicates,
     signing::{RandaoEpoch, SignForAllForksWithGenesis as _, SignForSingleFork as _},
     slot_report::SlotReport,
     verifier::{NullVerifier, Triple, Verifier, VerifierOption},
@@ -170,7 +170,7 @@ pub fn verify_signatures<P: Preset>(
 
         let triples = helper_functions::par_iter!(attestations)
             .map(|attestation| {
-                let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+                let indexed_attestation = gloas::get_indexed_attestation(state, attestation)?;
 
                 let mut triple = Triple::default();
 

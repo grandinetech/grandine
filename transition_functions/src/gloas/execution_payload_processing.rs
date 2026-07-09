@@ -7,6 +7,7 @@ use helper_functions::{
     },
 };
 use pubkey_cache::PubkeyCache;
+use ssz::{SszList as _, SszListMut as _};
 use types::{
     config::Config,
     gloas::{

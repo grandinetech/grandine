@@ -4,8 +4,8 @@ use duplicate::duplicate_item;
 use enum_iterator::Sequence as _;
 use serde::{Deserialize, Serialize};
 use ssz::{
-    BitVector, ContiguousList, H256, Hc, Offset, ReadError, Size, SszHash, SszRead, SszReadDefault,
-    SszSize, SszWrite, WriteError,
+    BitVector, ContiguousList, H256, Hc, Offset, ReadError, Size, SszHash, SszList, SszRead,
+    SszReadDefault, SszSize, SszWrite, WriteError,
 };
 use static_assertions::{assert_not_impl_any, const_assert_eq};
 use thiserror::Error;
@@ -98,6 +98,7 @@ use crate::{
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         containers::{
+            Attestation as GloasAttestation, AttesterSlashing as GloasAttesterSlashing,
             BeaconBlock as GloasBeaconBlock, DataColumnSidecar as GloasDataColumnSidecar,
             ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
             ExecutionRequests as GloasExecutionRequests,
@@ -125,10 +126,10 @@ use crate::{
     },
     preset::{Mainnet, Preset},
     traits::{
-        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
-        BlockBodyWithExecutionRequests, ExecutionPayload as ExecutionPayloadTrait,
-        PostAltairBeaconState, PostBellatrixBeaconState, PostCapellaBeaconState,
-        PostElectraBeaconState, PostFuluBeaconState, PostGloasBeaconState, SignedBeaconBlock as _,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithExecutionRequests,
+        ExecutionPayload as ExecutionPayloadTrait, PostAltairBeaconState, PostBellatrixBeaconState,
+        PostCapellaBeaconState, PostElectraBeaconState, PostFuluBeaconState, PostGloasBeaconState,
+        SignedBeaconBlock as _,
     },
 };
 
@@ -1103,11 +1104,15 @@ impl<P: Preset> TryFrom<BeaconBlock<P>> for BlindedBeaconBlock<P> {
             return Err(TryBlindedFromBlockError(block.phase()));
         };
 
-        let kzg_commitments = block
-            .body()
-            .with_blob_kzg_commitments()
-            .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
-            .cloned();
+        let kzg_commitments = block.body().with_blob_kzg_commitments().map(|body| {
+            let commitments = body
+                .blob_kzg_commitments()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>();
+            ContiguousList::try_from(commitments)
+                .expect("commitment count is bounded by MaxBlobCommitmentsPerBlock")
+        });
 
         let execution_requests = block
             .body()
@@ -2115,8 +2120,8 @@ impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            AttestingIndices::Phase0(list) => list.iter(),
-            AttestingIndices::Electra(list) => list.iter(),
+            AttestingIndices::Phase0(list) => list.as_ref().iter(),
+            AttestingIndices::Electra(list) => list.as_ref().iter(),
         }
     }
 }
@@ -2136,6 +2141,14 @@ impl<P: Preset> SszSize for Attestation<P> {
         Phase0Attestation::<P>::SIZE,
         ElectraAttestation::<P>::SIZE,
     ]);
+}
+
+// TODO(gloas): make `Attestation::Gloas` a first-class variant instead of
+// converting to the identically laid out Electra attestation.
+impl<P: Preset> From<GloasAttestation<P>> for Attestation<P> {
+    fn from(attestation: GloasAttestation<P>) -> Self {
+        Self::Electra(attestation.into())
+    }
 }
 
 impl<P: Preset> SszRead<Config> for Attestation<P> {
@@ -2232,6 +2245,7 @@ impl<P: Preset> Attestation<P> {
 pub enum AttesterSlashing<P: Preset> {
     Phase0(Phase0AttesterSlashing<P>),
     Electra(ElectraAttesterSlashing<P>),
+    Gloas(GloasAttesterSlashing<P>),
 }
 
 // It appears to be impossible to implement `SszRead` for the combined `AttesterSlashing`.
@@ -2242,9 +2256,10 @@ assert_not_impl_any!(AttesterSlashing<Mainnet>: SszRead<Config>);
 impl<P: Preset> SszSize for AttesterSlashing<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0AttesterSlashing::<P>::SIZE,
         ElectraAttesterSlashing::<P>::SIZE,
+        GloasAttesterSlashing::<P>::SIZE,
     ]);
 }
 
@@ -2253,6 +2268,7 @@ impl<P: Preset> SszWrite for AttesterSlashing<P> {
         match self {
             Self::Phase0(attester_slashing) => attester_slashing.write_variable(bytes),
             Self::Electra(attester_slashing) => attester_slashing.write_variable(bytes),
+            Self::Gloas(attester_slashing) => attester_slashing.write_variable(bytes),
         }
     }
 }
@@ -2262,15 +2278,23 @@ impl<P: Preset> AttesterSlashing<P> {
     pub fn pre_electra(self) -> Option<Phase0AttesterSlashing<P>> {
         match self {
             Self::Phase0(attester_slashing) => Some(attester_slashing),
-            Self::Electra(_) => None,
+            Self::Electra(_) | Self::Gloas(_) => None,
         }
     }
 
     #[must_use]
     pub fn post_electra(self) -> Option<ElectraAttesterSlashing<P>> {
         match self {
-            Self::Phase0(_) => None,
+            Self::Phase0(_) | Self::Gloas(_) => None,
             Self::Electra(attester_slashing) => Some(attester_slashing),
+        }
+    }
+
+    #[must_use]
+    pub fn post_gloas(self) -> Option<GloasAttesterSlashing<P>> {
+        match self {
+            Self::Phase0(_) | Self::Electra(_) => None,
+            Self::Gloas(attester_slashing) => Some(attester_slashing),
         }
     }
 }
@@ -2335,7 +2359,7 @@ impl<P: Preset> DataColumnSidecar<P> {
         }
     }
 
-    pub const fn column(&self) -> &ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock> {
+    pub fn column(&self) -> &dyn SszList<Cell<P>> {
         match self {
             Self::Fulu(sidecar) => &sidecar.column,
             Self::Gloas(sidecar) => &sidecar.column,
@@ -2351,7 +2375,7 @@ impl<P: Preset> DataColumnSidecar<P> {
         }
     }
 
-    pub const fn kzg_proofs(&self) -> &ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock> {
+    pub fn kzg_proofs(&self) -> &dyn SszList<KzgProof> {
         match self {
             Self::Fulu(sidecar) => &sidecar.kzg_proofs,
             Self::Gloas(sidecar) => &sidecar.kzg_proofs,

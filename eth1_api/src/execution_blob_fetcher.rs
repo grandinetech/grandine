@@ -274,7 +274,7 @@ impl<P: Preset, W: Wait> ExecutionBlobFetcher<P, W> {
                 metrics.engine_get_blobs_v2_requests_count.inc();
             }
 
-            let expected_blobs_count = kzg_commitments.len();
+            let expected_blobs_count = kzg_commitments.len_usize();
             let versioned_hashes = kzg_commitments
                 .iter()
                 .copied()
