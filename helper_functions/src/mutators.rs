@@ -3,6 +3,7 @@ use core::cmp::Ordering;
 use anyhow::Result;
 use arithmetic::U64Ext;
 use bls::{SignatureBytes, traits::SignatureBytes as _};
+use ssz::SszListMut as _;
 use types::{
     config::Config,
     electra::{consts::COMPOUNDING_WITHDRAWAL_PREFIX, containers::PendingDeposit},
@@ -247,6 +248,7 @@ pub fn compute_consolidation_epoch_and_update_churn<P: Preset>(
 
 #[cfg(test)]
 mod tests {
+    use ssz::SszList as _;
     use types::{
         phase0::{beacon_state::BeaconState as Phase0BeaconState, containers::Validator},
         preset::Minimal,

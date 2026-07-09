@@ -417,7 +417,7 @@ impl<P: Preset> Batch<P> {
             return Ok(vec![]);
         };
 
-        if body.blob_kzg_commitments().is_empty() {
+        if body.blob_kzg_commitments().len_usize() == 0 {
             return Ok(vec![]);
         }
 
@@ -720,7 +720,7 @@ impl<P: Preset> Batch<P> {
                     // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
                     if let Some(body) = parent.message().body().with_blob_kzg_commitments()
                         && parent.message().slot() >= low_slot
-                        && body.blob_kzg_commitments().is_empty()
+                        && body.blob_kzg_commitments().len_usize() == 0
                     {
                         // Set earliest block without blobs as earliest block
                         earliest_block = parent;

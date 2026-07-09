@@ -42,9 +42,11 @@ use crate::{
     },
     fulu::primitives::{Cell, ColumnIndex},
     gloas::containers::{
+        Attestation as GloasAttestation, AttesterSlashing as GloasAttesterSlashing,
         BuilderDepositRequest, BuilderExitRequest, BuilderPendingPayment, BuilderPendingWithdrawal,
         PayloadAttestation,
     },
+    gloas::primitives::Transaction as GloasTransaction,
     phase0::{
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
@@ -157,7 +159,12 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     type BytesPerLogsBloom: ByteVectorBytes + MerkleElements<u8> + Eq + Debug;
     type MaxBytesPerTransaction: MerkleElements<u8> + Send + Sync;
     type MaxExtraDataBytes: MerkleElements<u8> + Eq + Debug + Send + Sync;
-    type MaxTransactionsPerPayload: MerkleElements<Transaction<Self>> + Eq + Debug + Send + Sync;
+    type MaxTransactionsPerPayload: MerkleElements<Transaction<Self>>
+        + MerkleElements<GloasTransaction<Self>>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
 
     // Capella
     type MaxBlsToExecutionChanges: MerkleElements<SignedBlsToExecutionChange>
@@ -189,8 +196,14 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Sync;
 
     // Electra
-    type MaxAttestationsElectra: MerkleElements<ElectraAttestation<Self>> + Eq + Debug + Send + Sync;
+    type MaxAttestationsElectra: MerkleElements<ElectraAttestation<Self>>
+        + MerkleElements<GloasAttestation<Self>>
+        + Eq
+        + Debug
+        + Send
+        + Sync;
     type MaxAttesterSlashingsElectra: MerkleElements<ElectraAttesterSlashing<Self>>
+        + MerkleElements<GloasAttesterSlashing<Self>>
         + Eq
         + Debug
         + Send
@@ -257,6 +270,14 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
+
+    // In gloas, `ExecutionRequests.deposits` is an EIP-7916 `ProgressiveList` with
+    // NO length limit at all — the other request lists have their limits enforced
+    // during processing (`apply_parent_execution_payload`), but deposits are
+    // intentionally unbounded. Grandine's `ssz::ProgressiveList` keeps a type-level
+    // bound for decoding, so the deposits list uses this relaxed bound that is
+    // unreachable in practice (a list this long does not fit in a gossip message).
+    type GloasDepositRequestsBound: MerkleElements<DepositRequest> + Eq + Debug + Send + Sync;
 
     // Derived type-level variables
     type MaxAttestersPerSlot: MerkleElements<ValidatorIndex>
@@ -403,6 +424,7 @@ impl Preset for Mainnet {
     type BuilderPendingWithdrawalsLimit = U1048576;
     type MaxBuilderDepositRequestsPerPayload = U64;
     type MaxBuilderExitRequestsPerPayload = U16;
+    type GloasDepositRequestsBound = U65536;
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
@@ -487,6 +509,7 @@ impl Preset for Minimal {
         type BuilderPendingWithdrawalsLimit;
         type MaxBuilderDepositRequestsPerPayload;
         type MaxBuilderExitRequestsPerPayload;
+        type GloasDepositRequestsBound;
     }
 
     // Phase 0
@@ -606,6 +629,7 @@ impl Preset for Medalla {
         type BuilderPendingWithdrawalsLimit;
         type MaxBuilderDepositRequestsPerPayload;
         type MaxBuilderExitRequestsPerPayload;
+        type GloasDepositRequestsBound;
 
         // Derived type-level variables
         type MaxAttestersPerSlot;

@@ -9,7 +9,7 @@ use helper_functions::{
 };
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszListMut as _};
 use types::{
     capella::containers::HistoricalSummary, config::Config, deneb::beacon_state::BeaconState,
     preset::Preset, traits::BeaconState as _,

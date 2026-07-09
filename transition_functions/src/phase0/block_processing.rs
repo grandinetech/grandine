@@ -15,7 +15,7 @@ use helper_functions::{
 use pubkey_cache::PubkeyCache;
 #[cfg(not(target_os = "zkvm"))]
 use rayon::iter::ParallelIterator as _;
-use ssz::Hc;
+use ssz::{Hc, SszList as _, SszListMut as _};
 use typenum::Unsigned as _;
 use types::{
     config::Config,
@@ -125,10 +125,10 @@ pub fn count_required_signatures<P: Preset>(block: &impl BeaconBlock<P>) -> Resu
     let body = block.body();
 
     1_usize
-        .try_add(2_usize.try_mul(body.proposer_slashings().len())?)?
+        .try_add(2_usize.try_mul(body.proposer_slashings().len_usize())?)?
         .try_add(2_usize.try_mul(body.attester_slashings_len())?)?
         .try_add(body.attestations_len())?
-        .try_add(body.voluntary_exits().len())
+        .try_add(body.voluntary_exits().len_usize())
         .map_err(Into::into)
 }
 

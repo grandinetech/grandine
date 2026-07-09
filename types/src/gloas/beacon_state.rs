@@ -9,11 +9,12 @@ use crate::{
     cache::Cache,
     capella::primitives::WithdrawalIndex,
     collections::{
-        Balances, BuilderPendingPayments, BuilderPendingWithdrawals, Builders, EpochParticipation,
-        Eth1DataVotes, HistoricalRoots, HistoricalSummaries, InactivityScores,
-        PayloadExpectedWithdrawals, PendingConsolidations, PendingDeposits,
-        PendingPartialWithdrawals, ProposerLookahead, PtcWindow, RandaoMixes, RecentRoots,
-        Slashings, Validators,
+        BuilderPendingPayments, BuilderPendingWithdrawals, Builders, Eth1DataVotes,
+        HistoricalRoots, HistoricalSummaries, PayloadExpectedWithdrawals, ProgressiveBalances,
+        ProgressiveEpochParticipation, ProgressiveInactivityScores,
+        ProgressivePendingConsolidations, ProgressivePendingDeposits,
+        ProgressivePendingPartialWithdrawals, ProgressiveValidators, ProposerLookahead, PtcWindow,
+        RandaoMixes, RecentRoots, Slashings,
     },
     gloas::{containers::ExecutionPayloadBid, primitives::BuilderIndex},
     phase0::{
@@ -29,6 +30,7 @@ use crate::{
 #[derive(Clone, Debug, Default, Derivative, Deserialize, Serialize, Ssz)]
 #[derivative(PartialEq, Eq)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 46]))]
 pub struct BeaconState<P: Preset> {
     // > Versioning
     #[serde(with = "serde_utils::string_or_native")]
@@ -51,9 +53,9 @@ pub struct BeaconState<P: Preset> {
     pub eth1_deposit_index: DepositIndex,
 
     // > Registry
-    pub validators: Validators<P>,
+    pub validators: ProgressiveValidators<P>,
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub balances: Balances<P>,
+    pub balances: ProgressiveBalances<P>,
 
     // > Randomness
     pub randao_mixes: RandaoMixes<P>,
@@ -64,9 +66,9 @@ pub struct BeaconState<P: Preset> {
 
     // > Participation
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub previous_epoch_participation: EpochParticipation<P>,
+    pub previous_epoch_participation: ProgressiveEpochParticipation<P>,
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub current_epoch_participation: EpochParticipation<P>,
+    pub current_epoch_participation: ProgressiveEpochParticipation<P>,
 
     // > Finality
     pub justification_bits: BitVector<JustificationBitsLength>,
@@ -76,7 +78,7 @@ pub struct BeaconState<P: Preset> {
 
     // > Inactivity
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub inactivity_scores: InactivityScores<P>,
+    pub inactivity_scores: ProgressiveInactivityScores<P>,
 
     // > Sync
     pub current_sync_committee: Arc<Hc<SyncCommittee<P>>>,
@@ -105,9 +107,9 @@ pub struct BeaconState<P: Preset> {
     pub consolidation_balance_to_consume: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub earliest_consolidation_epoch: Epoch,
-    pub pending_deposits: PendingDeposits<P>,
-    pub pending_partial_withdrawals: PendingPartialWithdrawals<P>,
-    pub pending_consolidations: PendingConsolidations<P>,
+    pub pending_deposits: ProgressivePendingDeposits<P>,
+    pub pending_partial_withdrawals: ProgressivePendingPartialWithdrawals<P>,
+    pub pending_consolidations: ProgressivePendingConsolidations<P>,
 
     // > Next proposers
     #[serde(with = "serde_utils::string_or_native_sequence")]

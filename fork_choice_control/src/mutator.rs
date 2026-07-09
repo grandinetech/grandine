@@ -433,7 +433,7 @@ where
 
         let head_slot = self
             .storage
-            .checkpoint_state_slot(&self.store.finalized_validators())?
+            .checkpoint_state_slot(&*self.store.finalized_validators())?
             .unwrap_or_else(|| last_block.message().slot());
 
         self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
@@ -3089,7 +3089,7 @@ where
                         .iter()
                         .map(|chain_link| (chain_link.state(&store), chain_link.block_root));
 
-                    match storage.append_states(states_with_block_roots, &finalized_validators) {
+                    match storage.append_states(states_with_block_roots, &*finalized_validators) {
                         Ok(slots) => {
                             debug_with_peers!(
                                 "unloaded old beacon states persisted \
@@ -5284,7 +5284,9 @@ where
             missing_indices.contains(&data_column_sidecar.index())
                 && data_column_sidecar
                     .kzg_commitments()
-                    .is_none_or(|kzg_commiments| kzg_commiments == body.blob_kzg_commitments())
+                    .is_none_or(|kzg_commiments| {
+                        itertools::equal(kzg_commiments, body.blob_kzg_commitments())
+                    })
         });
 
         if any_pending_columns {

@@ -10,6 +10,7 @@ proc-macro = true
 workspace = true
 
 [dependencies]
+bitvec = { workspace = true }
 darling = { workspace = true }
 easy-ext = { workspace = true }
 itertools = { workspace = true }

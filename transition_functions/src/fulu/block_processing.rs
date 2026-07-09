@@ -26,7 +26,7 @@ use types::{
     preset::Preset,
     traits::{
         BlockBodyWithBlsToExecutionChanges, BlockBodyWithElectraAttestations,
-        PostElectraBeaconState,
+        BlockBodyWithElectraAttesterSlashings, PostElectraBeaconState,
     },
 };
 
@@ -184,14 +184,16 @@ pub fn process_operations<P: Preset, V: Verifier, B>(
     mut slot_report: impl SlotReport,
 ) -> Result<()>
 where
-    B: BlockBodyWithElectraAttestations<P> + BlockBodyWithBlsToExecutionChanges<P>,
+    B: BlockBodyWithElectraAttestations<P>
+        + BlockBodyWithElectraAttesterSlashings<P>
+        + BlockBodyWithBlsToExecutionChanges<P>,
 {
     // > [Modified in Fulu:EIP6110]
     ensure!(
-        body.deposits().is_empty(),
+        body.deposits().len_usize() == 0,
         Error::<P>::DepositCountMismatch {
             computed: 0,
-            in_block: body.deposits().len().try_into()?,
+            in_block: body.deposits().len_usize().try_into()?,
         },
     );
 

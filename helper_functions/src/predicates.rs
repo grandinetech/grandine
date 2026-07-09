@@ -9,7 +9,7 @@ use bit_field::BitField as _;
 use bls::{PublicKeyBytes, SignatureBytes};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszList as _};
 use tap::TryConv as _;
 use typenum::Unsigned as _;
 use types::{

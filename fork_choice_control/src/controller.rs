@@ -816,7 +816,7 @@ where
             end_slot,
             anchor_checkpoint_provider,
             is_exiting,
-            &store.finalized_validators(),
+            &*store.finalized_validators(),
         )
     }
 

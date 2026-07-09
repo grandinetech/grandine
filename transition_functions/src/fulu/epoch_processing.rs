@@ -8,7 +8,7 @@ use helper_functions::{
     misc::compute_start_slot_at_epoch,
 };
 use pubkey_cache::PubkeyCache;
-use ssz::{PersistentList, PersistentVector, SszHash as _};
+use ssz::{PersistentVector, SszHash as _, SszListMut as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -109,7 +109,7 @@ pub fn process_pending_deposits<P: Preset>(
     let mut is_churn_limit_reached = false;
     let finalized_slot = compute_start_slot_at_epoch::<P>(state.finalized_checkpoint().epoch);
 
-    for deposit in &state.pending_deposits().clone() {
+    for deposit in &*state.pending_deposits().clone_boxed() {
         // > Check if deposit has been finalized, otherwise, stop processing.
         if deposit.slot > finalized_slot {
             break;
@@ -155,10 +155,11 @@ pub fn process_pending_deposits<P: Preset>(
         next_deposit_index = next_deposit_index.try_add(1)?;
     }
 
-    *state.pending_deposits_mut() = PersistentList::try_from_iter(
-        state
-            .pending_deposits()
-            .into_iter()
+    let pending_deposits = state.pending_deposits().clone_boxed();
+
+    state.pending_deposits_mut().try_assign_from_iter(
+        &mut pending_deposits
+            .iter()
             .copied()
             .skip(next_deposit_index.try_into()?)
             .chain(deposits_to_postpone),
