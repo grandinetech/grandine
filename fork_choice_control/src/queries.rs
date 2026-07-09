@@ -891,8 +891,10 @@ where
             .dependent_root(self.store_snapshot().as_ref(), state, epoch)
     }
 
-    pub fn proposer_dependent_root(&self, state: &BeaconState<P>, epoch: Epoch) -> Result<H256> {
-        self.dependent_root(state, epoch.saturating_sub(P::MinSeedLookahead::U64))
+    #[must_use]
+    pub fn shuffling_dependent_root(&self, head_root: H256, epoch: Epoch) -> Option<H256> {
+        self.store_snapshot()
+            .shuffling_dependent_root(head_root, epoch)
     }
 
     #[instrument(skip_all, level = "debug", fields(slot = slot))]

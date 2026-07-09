@@ -401,7 +401,7 @@ impl Preset for Mainnet {
     type MaxPayloadAttestation = U4;
     type BuilderRegistryLimit = U1099511627776;
     type BuilderPendingWithdrawalsLimit = U1048576;
-    type MaxBuilderDepositRequestsPerPayload = U256;
+    type MaxBuilderDepositRequestsPerPayload = U64;
     type MaxBuilderExitRequestsPerPayload = U16;
 
     // Derived type-level variables

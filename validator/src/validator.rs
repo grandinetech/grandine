@@ -2736,6 +2736,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let signer = self.signer.clone_arc();
         let p2p_tx = self.p2p_tx.clone();
         let beacon_state = slot_head.beacon_state.clone_arc();
+        let beacon_block_root = slot_head.beacon_block_root;
         let controller = self.controller.clone_arc();
 
         tokio::spawn(async move {
@@ -2755,14 +2756,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                     let fee_recipient = proposer_configs.fee_recipient(pubkey).ok()?;
                     let target_gas_limit = proposer_configs.gas_limit(pubkey).ok()?;
-                    let beacon_state = beacon_state.clone_arc();
                     let controller = controller.clone_arc();
 
                     Some(upcoming_slots.into_iter().filter_map(move |proposal_slot| {
                         let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
 
-                        match controller.proposer_dependent_root(&beacon_state, proposal_epoch) {
-                            Ok(dependent_root) => Some((
+                        match controller.shuffling_dependent_root(beacon_block_root, proposal_epoch)
+                        {
+                            Some(dependent_root) => Some((
                                 pubkey,
                                 ProposerPreferences {
                                     dependent_root,
@@ -2772,10 +2773,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     target_gas_limit,
                                 },
                             )),
-                            Err(error) => {
+                            None => {
                                 warn_with_peers!(
-                                    "failed to compute dependent root for proposer preferences \
-                                    (slot {proposal_slot}, epoch {proposal_epoch}): {error}"
+                                    "failed to compute shuffling dependent root for proposer \
+                                    preferences (slot {proposal_slot}, epoch {proposal_epoch})"
                                 );
 
                                 None

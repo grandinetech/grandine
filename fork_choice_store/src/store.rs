@@ -1503,19 +1503,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .map(|chain_link| chain_link.block_root)
     }
 
-    /// Roughly corresponds to [`get_dependent_root`] from the Fork Choice specification.
+    /// Roughly corresponds to [`get_shuffling_dependent_root`] from the Fork Choice specification.
     ///
-    /// Computes the proposer dependent root from the block tree (not from a post-state),
-    /// using the current store epoch. Used to decide whether to apply the proposer score
-    /// boost: the boost is only applied when the candidate block and the canonical chain
-    /// head share the same dependent root.
+    /// Computes the shuffling dependent root for `epoch` from the block tree (not from a
+    /// post-state). Used to decide whether to apply the proposer score boost and to look up
+    /// the accepted `SignedProposerPreferences` during execution payload bid validation.
     ///
-    /// [`get_dependent_root`]: https://github.com/ethereum/consensus-specs/pull/5306
-    fn proposer_boost_dependent_root(&self, root: H256) -> Option<H256> {
-        let epoch = self.current_epoch();
-
-        // Genesis block parent: both candidate and head collapse to the same value,
-        // so the boost still applies near genesis.
+    /// [`get_shuffling_dependent_root`]: https://github.com/ethereum/consensus-specs/pull/5374
+    pub fn shuffling_dependent_root(&self, root: H256, epoch: Epoch) -> Option<H256> {
+        // Genesis block parent.
         if epoch <= P::MinSeedLookahead::U64 {
             return Some(H256::zero());
         }
@@ -1950,7 +1946,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
         origin: &ExecutionPayloadBidOrigin,
-        proposer_dependent_root: impl Fn(&BeaconState<P>, Epoch) -> Result<H256>,
     ) -> Result<ExecutionPayloadBidAction<P>> {
         let bid = &payload_bid.message;
         let builder_index = bid.builder_index;
@@ -2014,7 +2009,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > the `SignedProposerPreferences` where `preferences.proposal_slot` is equal to `bid.slot` has been seen.
-        let dependent_root = proposer_dependent_root(&state, bid_epoch)?;
+        let Some(dependent_root) = self.shuffling_dependent_root(bid.parent_block_root, bid_epoch)
+        else {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "shuffling dependent root unavailable for bid validation",
+            ));
+        };
         let proposer_index =
             accessors::get_beacon_proposer_index_at_slot(&self.chain_config, &state, bid.slot)?;
 
@@ -2028,13 +2028,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > `bid.fee_recipient` matches the `fee_recipient` from the proposer's `SignedProposerPreferences` associated with `bid.slot`.
-        ensure!(
-            bid.fee_recipient == proposer_preference.message.fee_recipient,
-            Error::<P>::ExecutionPayloadBidFeeRecipientMismatch {
-                in_preference: Box::new(proposer_preference.message.fee_recipient),
-                in_bid: Box::new(bid.fee_recipient),
-            }
-        );
+        if bid.fee_recipient != proposer_preference.message.fee_recipient {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "`bid.fee_recipient` does not match the `fee_recipient` from the proposer's `SignedProposerPreferences` associated with `bid.slot`",
+            ));
+        }
 
         let Some(post_gloas_state) = state.post_gloas() else {
             return Ok(ExecutionPayloadBidAction::Ignore("state pre-gloas"));
@@ -4027,8 +4025,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // > Add proposer score boost only if the block shares the same dependent root
             // > as the canonical chain head.
             // See <https://github.com/ethereum/consensus-specs/pull/5306>.
-            let block_dependent_root = self.proposer_boost_dependent_root(chain_link.parent_root());
-            let head_dependent_root = self.proposer_boost_dependent_root(old_head.block_root);
+            let epoch = self.current_epoch();
+            let block_dependent_root =
+                self.shuffling_dependent_root(chain_link.parent_root(), epoch);
+            let head_dependent_root = self.shuffling_dependent_root(old_head.block_root, epoch);
 
             if block_dependent_root == head_dependent_root {
                 self.proposer_boost_root = block_root;
