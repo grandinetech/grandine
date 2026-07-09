@@ -414,11 +414,6 @@ pub fn is_builder_withdrawal_credential(withdrawal_credentials: H256) -> bool {
         .starts_with(BUILDER_WITHDRAWAL_PREFIX)
 }
 
-#[must_use]
-pub fn has_builder_withdrawal_credential(validator: &Validator) -> bool {
-    is_builder_withdrawal_credential(validator.withdrawal_credentials)
-}
-
 // >  Check if the builder is active.
 #[inline]
 #[must_use]
