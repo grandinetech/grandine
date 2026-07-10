@@ -51,7 +51,8 @@ use crate::{
         validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
         validator_block_v3, validator_execution_payload_bid, validator_liveness,
-        validator_prepare_beacon_proposer, validator_proposer_duties, validator_proposer_duties_v2,
+        validator_payload_attestation_data, validator_prepare_beacon_proposer,
+        validator_proposer_duties, validator_proposer_duties_v2,
         validator_publish_aggregate_and_proofs_v1, validator_publish_aggregate_and_proofs_v2,
         validator_publish_contributions_and_proofs, validator_register_validator,
         validator_subscribe_to_beacon_committee, validator_subscribe_to_sync_committees,
@@ -558,6 +559,10 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
         .route(
             "/eth/v1/validator/attestation_data",
             get(validator_attestation_data),
+        )
+        .route(
+            "/eth/v1/validator/payload_attestation_data",
+            get(validator_payload_attestation_data),
         )
         .route(
             "/eth/v1/validator/aggregate_attestation",

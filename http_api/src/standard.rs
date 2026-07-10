@@ -12,7 +12,7 @@ use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{
         IntoResponse, Response, Sse,
         sse::{Event as ServerSentEvent, KeepAlive},
@@ -34,7 +34,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use http_api_utils::{BlockId, StateId};
+use http_api_utils::{BlockId, ETH_CONSENSUS_VERSION, StateId};
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
@@ -83,7 +83,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::{
-        containers::{ExecutionPayloadBid, SignedExecutionPayloadBid},
+        containers::{ExecutionPayloadBid, PayloadAttestationData, SignedExecutionPayloadBid},
         primitives::BuilderIndex,
     },
     nonstandard::{
@@ -230,6 +230,12 @@ pub struct AggregateAttestationV2Query {
 #[serde(deny_unknown_fields)]
 pub struct AttestationDataQuery {
     committee_index: CommitteeIndex,
+    slot: Slot,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadAttestationDataQuery {
     slot: Slot,
 }
 
@@ -3384,6 +3390,46 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     };
 
     EthResponse::json_or_ssz(attestation_data, &headers)
+}
+
+/// `GET /eth/v1/validator/payload_attestation_data`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_payload_attestation_data"
+)]
+pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    EthQuery(query): EthQuery<PayloadAttestationDataQuery>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let slot = query.slot;
+
+    if controller.chain_config().phase_at_slot::<P>(slot) < Phase::Gloas {
+        return Err(Error::StatePreGloas);
+    }
+
+    let Some(block) = controller.block_by_slot(slot)? else {
+        let mut response_headers = HeaderMap::new();
+        response_headers.insert(
+            ETH_CONSENSUS_VERSION,
+            HeaderValue::from_static(Phase::Gloas.as_ref()),
+        );
+        return Ok((StatusCode::NO_CONTENT, response_headers).into_response());
+    };
+
+    let data = PayloadAttestationData {
+        beacon_block_root: block.value.root,
+        slot,
+        // TODO(gloas): envelope arrival cache + get_payload_due_ms()
+        payload_present: false,
+        // TODO(gloas): is_data_available(beacon_block_root)
+        blob_data_available: false,
+    };
+
+    Ok(EthResponse::json_or_ssz(data, &headers)?
+        .version(Phase::Gloas)
+        .into_response())
 }
 
 /// `POST /eth/v1/validator/beacon_committee_subscriptions`
