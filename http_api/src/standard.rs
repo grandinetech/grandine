@@ -353,7 +353,7 @@ struct StateSyncCommitteeResponse<'indices> {
     validator_aggregates: Vec<&'indices [ValidatorIndex]>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Ssz)]
 pub struct StateValidatorBalanceResponse {
     #[serde(with = "serde_utils::string_or_native")]
     index: ValidatorIndex,
@@ -745,16 +745,26 @@ pub async fn get_state_validator_balances<P: Preset, W: Wait>(
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
     EthQuery(query): EthQuery<ValidatorIdQuery>,
-) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
+    headers: HeaderMap,
+) -> Result<
+    EthResponse<
+        ContiguousList<StateValidatorBalanceResponse, P::ValidatorRegistryLimit>,
+        (),
+        JsonOrSsz,
+    >,
+    Error,
+> {
     state_validator_balances(
         &controller,
         &anchor_checkpoint_provider,
         state_id,
         &query.id,
+        &headers,
     )
 }
 
 /// `POST /eth/v1/beacon/states/{state_id}/validator_balances`
+#[expect(clippy::type_complexity)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -764,13 +774,22 @@ pub async fn post_state_validator_balances<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
     EthJson(validator_ids): EthJson<Vec<ValidatorId>>,
-) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
+) -> Result<
+    EthResponse<
+        ContiguousList<StateValidatorBalanceResponse, P::ValidatorRegistryLimit>,
+        (),
+        JsonOrSsz,
+    >,
+    Error,
+> {
     state_validator_balances(
         &controller,
         &anchor_checkpoint_provider,
         state_id,
         &validator_ids,
+        &headers,
     )
 }
 
@@ -780,29 +799,39 @@ fn state_validator_balances<P: Preset, W: Wait>(
     anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
     state_id: StateId,
     validator_ids: &[ValidatorId],
-) -> Result<EthResponse<Vec<StateValidatorBalanceResponse>>, Error> {
+    headers: &HeaderMap,
+) -> Result<
+    EthResponse<
+        ContiguousList<StateValidatorBalanceResponse, P::ValidatorRegistryLimit>,
+        (),
+        JsonOrSsz,
+    >,
+    Error,
+> {
     let WithStatus {
         value: state,
         status,
         finalized,
     } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
 
-    let balances = izip!(
-        0..,
-        state.validators(),
-        state.balances().into_iter().copied(),
+    let balances = ContiguousList::try_from_iter(
+        izip!(
+            0..,
+            state.validators(),
+            state.balances().into_iter().copied(),
+        )
+        .filter(|(index, validator, _)| {
+            validator_ids.is_empty()
+                || validator_ids.iter().any(|validator_id| match validator_id {
+                    ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
+                    ValidatorId::PublicKey(pubkey) => &validator.pubkey == pubkey,
+                })
+        })
+        .map(|(index, _, balance)| StateValidatorBalanceResponse { index, balance }),
     )
-    .filter(|(index, validator, _)| {
-        validator_ids.is_empty()
-            || validator_ids.iter().any(|validator_id| match validator_id {
-                ValidatorId::ValidatorIndex(validator_index) => index == validator_index,
-                ValidatorId::PublicKey(pubkey) => &validator.pubkey == pubkey,
-            })
-    })
-    .map(|(index, _, balance)| StateValidatorBalanceResponse { index, balance })
-    .collect();
+    .map_err(AnyhowError::new)?;
 
-    Ok(EthResponse::json(balances)
+    Ok(EthResponse::json_or_ssz(balances, headers)?
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }
