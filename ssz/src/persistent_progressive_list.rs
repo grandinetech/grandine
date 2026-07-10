@@ -408,10 +408,7 @@ where
                     if spine.right.is_none() {
                         assert_eq!(index, 0, "all subtrees before the last are full");
 
-                        spine.right = Some(Node::single(
-                            element,
-                            spine.height.saturating_add(2),
-                        ));
+                        spine.right = Some(Node::single(element, spine.height.saturating_add(2)));
 
                         break;
                     }
@@ -647,8 +644,7 @@ where
                 itertools::process_results(
                     core::iter::from_fn(|| seq.next_element().transpose()),
                     |elements| {
-                        PersistentProgressiveList::try_from_iter(elements)
-                            .map_err(S::Error::custom)
+                        PersistentProgressiveList::try_from_iter(elements).map_err(S::Error::custom)
                     },
                 )?
             }
@@ -726,10 +722,10 @@ mod tests {
     #[test]
     fn try_from_iter_matches_progressive_list_root() {
         for length in LENGTHS {
-            let persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
-            let reference = ReferenceList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
+            let reference =
+                ReferenceList::try_from_iter(0..length).expect("length is below the maximum");
 
             assert_eq!(persistent.len_u64(), length);
 
@@ -744,15 +740,16 @@ mod tests {
     #[test]
     fn get_returns_every_element() {
         for length in LENGTHS {
-            let persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
 
             for index in 0..length {
-                let element = persistent
-                    .get(index)
-                    .expect("index is within bounds");
+                let element = persistent.get(index).expect("index is within bounds");
 
-                assert_eq!(*element, index, "get mismatch at length {length}, index {index}");
+                assert_eq!(
+                    *element, index,
+                    "get mismatch at length {length}, index {index}"
+                );
             }
 
             assert!(persistent.get(length).is_err());
@@ -763,17 +760,15 @@ mod tests {
     #[test]
     fn get_mut_updates_hash_tree_root() {
         for length in LENGTHS.skip(1) {
-            let mut persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let mut persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
 
             // Share all nodes with a clone to exercise copy-on-write.
             let original = persistent.clone();
 
             let index = length / 2;
 
-            *persistent
-                .get_mut(index)
-                .expect("index is within bounds") = u64::MAX;
+            *persistent.get_mut(index).expect("index is within bounds") = u64::MAX;
 
             let reference = ReferenceList::try_from_iter(
                 (0..length).map(|element| if element == index { u64::MAX } else { element }),
@@ -799,10 +794,10 @@ mod tests {
             .flat_map(|boundary| [boundary - 1, boundary, boundary + 1]);
 
         for length in lengths {
-            let persistent = BigList::try_from_iter(0..length)
-                .expect("length is below the maximum");
-            let reference = BigReferenceList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let persistent =
+                BigList::try_from_iter(0..length).expect("length is below the maximum");
+            let reference =
+                BigReferenceList::try_from_iter(0..length).expect("length is below the maximum");
 
             assert_eq!(
                 persistent.hash_tree_root(),
@@ -814,7 +809,10 @@ mod tests {
                 if index < length {
                     let element = persistent.get(index).expect("index is within bounds");
 
-                    assert_eq!(*element, index, "get mismatch at length {length}, index {index}");
+                    assert_eq!(
+                        *element, index,
+                        "get mismatch at length {length}, index {index}"
+                    );
                 }
             }
         }
@@ -853,8 +851,8 @@ mod tests {
     #[test]
     fn get_mut_invalidates_cached_roots() {
         for length in [1_u64, 5, 20, 100, 300] {
-            let mut persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let mut persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
 
             let original = persistent.clone();
             let original_root = original.hash_tree_root();
@@ -895,28 +893,34 @@ mod tests {
     #[test]
     fn get_mut_round_trips_every_element() {
         for length in [1_u64, 4, 17, 64, 100] {
-            let mut persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let mut persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
 
             for index in 0..length {
-                let element = persistent
-                    .get_mut(index)
-                    .expect("index is within bounds");
+                let element = persistent.get_mut(index).expect("index is within bounds");
 
-                assert_eq!(*element, index, "get_mut mismatch at length {length}, index {index}");
+                assert_eq!(
+                    *element, index,
+                    "get_mut mismatch at length {length}, index {index}"
+                );
 
                 *element = index.saturating_add(1000);
             }
 
-            assert!(persistent.iter().copied().eq(1000..length.saturating_add(1000)));
+            assert!(
+                persistent
+                    .iter()
+                    .copied()
+                    .eq(1000..length.saturating_add(1000))
+            );
         }
     }
 
     #[test]
     fn iter_mut_visits_and_updates_every_element() {
         for length in [0_u64, 1, 4, 17, 64, 100, 300] {
-            let mut persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let mut persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
 
             // Share all nodes with a clone to exercise copy-on-write.
             let original = persistent.clone();
@@ -938,9 +942,8 @@ mod tests {
 
             drop(iterator);
 
-            let reference =
-                ReferenceList::try_from_iter((0..length).map(|element| element + 1000))
-                    .expect("length is below the maximum");
+            let reference = ReferenceList::try_from_iter((0..length).map(|element| element + 1000))
+                .expect("length is below the maximum");
 
             assert_eq!(
                 persistent.hash_tree_root(),
@@ -959,8 +962,8 @@ mod tests {
     #[test]
     fn update_modifies_matching_elements() {
         for length in [0_u64, 1, 4, 17, 64, 100, 300] {
-            let mut persistent = TestList::try_from_iter(0..length)
-                .expect("length is below the maximum");
+            let mut persistent =
+                TestList::try_from_iter(0..length).expect("length is below the maximum");
 
             // Share all nodes with a clone to exercise copy-on-write.
             let original = persistent.clone();
@@ -999,10 +1002,7 @@ mod tests {
     fn update_without_changes_keeps_the_tree() {
         let mut persistent = TestList::try_from_iter(0..100).expect("length is below the maximum");
 
-        let root_before = persistent
-            .root
-            .clone()
-            .expect("list is not empty");
+        let root_before = persistent.root.clone().expect("list is not empty");
 
         persistent.update(&mut |_| {});
 

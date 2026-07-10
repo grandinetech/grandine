@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use bls::{AggregateSignatureBytes, SignatureBytes};
 use duplicate::duplicate_item;
-use ssz::{BitVector, ContiguousList, Hc, ProgressiveList, SszBitList, SszHash, SszList, SszListMut};
+use ssz::{
+    BitVector, ContiguousList, Hc, ProgressiveList, SszBitList, SszHash, SszList, SszListMut,
+};
 use std_ext::{ArcExt as _, DefaultExt as _};
 use typenum::U1;
 

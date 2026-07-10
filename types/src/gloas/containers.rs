@@ -259,8 +259,10 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
 pub struct ExecutionRequests<P: Preset> {
     pub deposits: ProgressiveList<DepositRequest, P::GloasDepositRequestsBound>,
     pub withdrawals: ProgressiveList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    pub consolidations: ProgressiveList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
-    pub builder_deposits: ProgressiveList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
+    pub consolidations:
+        ProgressiveList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+    pub builder_deposits:
+        ProgressiveList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
     pub builder_exits: ProgressiveList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
 }
 
