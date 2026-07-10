@@ -1,7 +1,8 @@
 use core::num::NonZeroUsize;
 
-use typenum::{Prod, Sum, U0, U1, U2, U4, U46, U64, U357, U367, U735, U808, U897, U898, U2048,
-    assert_type_eq};
+use typenum::{
+    Prod, Sum, U0, U1, U2, U4, U46, U64, U357, U367, U735, U808, U897, U898, U2048, assert_type_eq,
+};
 
 use crate::{
     gloas::primitives::{BuilderIndex, PayloadStatus},
