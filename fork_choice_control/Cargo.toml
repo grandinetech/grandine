@@ -56,6 +56,7 @@ types = { workspace = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }
+serde_json = { workspace = true }
 duplicate = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }

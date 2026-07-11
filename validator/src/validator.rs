@@ -88,7 +88,9 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
+    traits::{
+        BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _,
+    },
 };
 use validator_statistics::ValidatorStatistics;
 
@@ -564,16 +566,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             };
 
             if let Some(state) = slot_head.beacon_state.post_bellatrix() {
-                let payload = state.latest_execution_payload_header();
+                let proposal_phase = self.chain_config.phase_at_slot::<P>(slot);
+                let latest_execution_payload = state.latest_execution_payload_header();
+
+                let parent_block_hash = slot_head
+                    .beacon_state
+                    .post_gloas()
+                    .map(|state| state.latest_block_hash())
+                    .unwrap_or_else(|| latest_execution_payload.block_hash());
 
                 self.event_channels.send_payload_attributes_event(
-                    slot_head.beacon_state.phase(),
+                    proposal_phase,
                     slot,
                     proposer_index,
                     slot_head.beacon_block_root,
                     &payload_attributes,
-                    payload.block_number(),
-                    payload.block_hash(),
+                    latest_execution_payload.block_number(),
+                    parent_block_hash,
                 );
             }
 

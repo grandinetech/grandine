@@ -560,7 +560,7 @@ impl<P: Preset> EventChannels<P> {
                     proposer_index,
                     parent_block_root,
                     payload_attributes: payload_attributes.clone().into(),
-                    parent_block_number,
+                    parent_block_number: (phase < Phase::Gloas).then_some(parent_block_number),
                     parent_block_hash,
                 },
             };
@@ -791,9 +791,9 @@ pub struct PayloadAttributesEventData {
     #[serde(with = "serde_utils::string_or_native")]
     pub proposal_slot: Slot,
     pub parent_block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub parent_block_number: ExecutionBlockNumber,
     pub parent_block_hash: ExecutionBlockHash,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_block_number: Option<ExecutionBlockNumber>,
     #[serde(with = "serde_utils::string_or_native")]
     pub proposer_index: ValidatorIndex,
     pub payload_attributes: CombinedPayloadAttributesEventData,
@@ -942,5 +942,73 @@ impl<P: Preset> From<PayloadAttributes<P>> for CombinedPayloadAttributesEventDat
                 Self::Gloas(payload_attributes_v3.into())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+
+    use super::*;
+
+    fn sample_payload_attributes_event(
+        phase: Phase,
+        parent_block_number: Option<ExecutionBlockNumber>,
+    ) -> PayloadAttributesEvent {
+        PayloadAttributesEvent {
+            version: phase,
+            data: PayloadAttributesEventData {
+                proposal_slot: 10,
+                parent_block_root: H256::zero(),
+                parent_block_hash: ExecutionBlockHash::zero(),
+                parent_block_number,
+                proposer_index: 123,
+                payload_attributes: CombinedPayloadAttributesEventData::Bellatrix(
+                    PayloadAttributesEventDataV1 {
+                        timestamp: 123_456,
+                        prev_randao: H256::zero(),
+                        suggested_fee_recipient: ExecutionAddress::zero(),
+                    },
+                ),
+            },
+        }
+    }
+
+    fn payload_attributes_event_data_has_parent_block_number(event: &PayloadAttributesEvent) -> bool {
+        let json = serde_json::to_value(event).expect("payload attributes event should serialize");
+        json.get("data")
+            .and_then(|data| data.as_object())
+            .is_some_and(|data| data.contains_key("parent_block_number"))
+    }
+
+    #[test]
+    fn payload_attributes_event_includes_parent_block_number_pre_gloas() {
+        let event = sample_payload_attributes_event(Phase::Fulu, Some(42));
+
+        assert!(payload_attributes_event_data_has_parent_block_number(&event));
+
+        let parent_block_number = serde_json::to_value(&event)
+            .expect("payload attributes event should serialize")
+            .get("data")
+            .and_then(|data| data.get("parent_block_number"))
+            .cloned()
+            .expect("parent_block_number should be present pre-gloas");
+
+        assert_eq!(parent_block_number, Value::Number(42.into()));
+    }
+
+    #[test]
+    fn payload_attributes_event_omits_parent_block_number_post_gloas() {
+        let event = sample_payload_attributes_event(Phase::Gloas, None);
+
+        assert!(!payload_attributes_event_data_has_parent_block_number(&event));
+    }
+
+    #[test]
+    fn payload_attributes_event_gates_parent_block_number_by_proposal_phase() {
+        let parent_block_number = (Phase::Gloas < Phase::Gloas).then_some(123);
+        let event = sample_payload_attributes_event(Phase::Gloas, parent_block_number);
+
+        assert!(!payload_attributes_event_data_has_parent_block_number(&event));
     }
 }
