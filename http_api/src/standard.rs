@@ -12,7 +12,7 @@ use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{
         IntoResponse, Response, Sse,
         sse::{Event as ServerSentEvent, KeepAlive},
@@ -36,7 +36,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use http_api_utils::{BlockId, StateId};
+use http_api_utils::{BlockId, ETH_CONSENSUS_VERSION, StateId};
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
@@ -242,6 +242,12 @@ pub struct AggregateAttestationV2Query {
 #[serde(deny_unknown_fields)]
 pub struct AttestationDataQuery {
     committee_index: CommitteeIndex,
+    slot: Slot,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadAttestationDataQuery {
     slot: Slot,
 }
 
@@ -3692,25 +3698,29 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     Ok(EthResponse::json_or_ssz(signed_bid.message, &headers)?.version(version))
 }
 
-/// `GET /eth/v1/validator/payload_attestation_data/{slot}`
+fn payload_attestation_data_no_content_response() -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ETH_CONSENSUS_VERSION,
+        HeaderValue::from_static(Phase::Gloas.as_ref()),
+    );
+    (StatusCode::NO_CONTENT, headers).into_response()
+}
+
+/// `GET /eth/v1/validator/payload_attestation_data`
 #[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        slot = %slot,
-    ),
-    name = "http_api",
     skip_all,
+    level = "debug",
+    name = "http_api::validator_payload_attestation_data"
 )]
 pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(validator_config): State<Arc<ValidatorConfig>>,
-    EthPath(slot): EthPath<Slot>,
+    EthQuery(query): EthQuery<PayloadAttestationDataQuery>,
     headers: HeaderMap,
-) -> Result<EthResponse<PayloadAttestationData, (), JsonOrSsz>, Error> {
+) -> Result<Response, Error> {
     const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
     let _timer = metrics.map(|metrics| {
@@ -3719,11 +3729,9 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
             .start_timer()
     });
 
-    let WithStatus {
-        value: head,
-        status,
-        ..
-    } = controller.head();
+    let slot = query.slot;
+
+    let WithStatus { value: head, .. } = controller.head();
 
     let head_slot = head.slot();
     let max_empty_slots = validator_config.max_empty_slots;
@@ -3744,32 +3752,20 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         return Err(Error::EpochBeforePrevious);
     }
 
-    let block_root;
-    let mut state;
-    let blob_data_available;
+    let block = controller.block_by_slot(slot)?;
 
-    let is_optimistic = if slot < head_slot {
-        // Search for the latest canonical block before or at slot.
-        let block = controller
-            .block_by_slot(slot)?
-            .ok_or(Error::BlockNotFound)?;
-
-        block_root = block.value.root;
-        state = controller
-            .state_before_or_at_slot(block_root, slot)
-            .ok_or(Error::StateNotFound)?;
-        blob_data_available = controller
-            .indices_of_missing_data_columns(&block.value.block)
-            .is_empty();
-        block.status.is_optimistic()
-    } else {
-        block_root = head.block_root;
-        state = controller.state_by_chain_link(&head);
-        blob_data_available = controller
-            .indices_of_missing_data_columns(&head.block)
-            .is_empty();
-        status.is_optimistic()
+    let Some(block) = block else {
+        return Ok(payload_attestation_data_no_content_response());
     };
+
+    let block_root = block.value.root;
+    let mut state = controller
+        .state_before_or_at_slot(block_root, slot)
+        .ok_or(Error::StateNotFound)?;
+    let blob_data_available = controller
+        .indices_of_missing_data_columns(&block.value.block)
+        .is_empty();
+    let is_optimistic = block.status.is_optimistic();
 
     if is_optimistic
         && let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
@@ -3814,7 +3810,11 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         blob_data_available,
     };
 
-    Ok(EthResponse::json_or_ssz(payload_attestation_data, &headers)?.version(version))
+    Ok(
+        EthResponse::json_or_ssz(payload_attestation_data, &headers)?
+            .version(version)
+            .into_response(),
+    )
 }
 
 /// `POST /eth/v1/validator/aggregate_and_proofs`
