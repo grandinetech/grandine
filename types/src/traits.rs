@@ -1804,7 +1804,7 @@ impl<P: Preset> BlockBodyWithPayloadAttestations<P> for GloasBeaconBlockBody<P> 
 
 pub trait ExecutionPayload<P: Preset>: SszHash<PackingFactor = U1> {
     fn block_hash(&self) -> ExecutionBlockHash;
-    fn block_number(&self) -> ExecutionBlockNumber;
+    fn block_number(&self) -> Option<ExecutionBlockNumber>;
     fn parent_hash(&self) -> ExecutionBlockHash;
 
     fn is_default_payload(&self) -> bool;
@@ -1816,8 +1816,8 @@ impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayload<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        self.block_number
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        Some(self.block_number)
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1838,8 +1838,8 @@ impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayloadHeader<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        self.block_number
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        Some(self.block_number)
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1860,8 +1860,8 @@ impl<P: Preset> ExecutionPayload<P> for CapellaExecutionPayload<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        self.block_number
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        Some(self.block_number)
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1882,8 +1882,8 @@ impl<P: Preset> ExecutionPayload<P> for CapellaExecutionPayloadHeader<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        self.block_number
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        Some(self.block_number)
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1904,8 +1904,8 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayload<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        self.block_number
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        Some(self.block_number)
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1926,8 +1926,8 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayloadHeader<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        self.block_number
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        Some(self.block_number)
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
@@ -1948,9 +1948,8 @@ impl<P: Preset> ExecutionPayload<P> for ExecutionPayloadBid<P> {
         self.block_hash
     }
 
-    fn block_number(&self) -> ExecutionBlockNumber {
-        // TODO: (gloas): there is no `block_number` field in payload bid
-        ExecutionBlockNumber::default()
+    fn block_number(&self) -> Option<ExecutionBlockNumber> {
+        None
     }
 
     fn parent_hash(&self) -> ExecutionBlockHash {
