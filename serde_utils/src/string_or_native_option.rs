@@ -20,6 +20,7 @@ where
     Ok(wrapper.map(|Wrapper(value)| value))
 }
 
+#[expect(clippy::ref_option)]
 pub fn serialize<S: Serializer>(
     value: &Option<impl Serialize + Display>,
     serializer: S,

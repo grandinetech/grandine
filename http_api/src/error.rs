@@ -34,6 +34,8 @@ pub enum Error {
     BlockNotValidatedForAggregation { block_root: H256 },
     #[error("block not found")]
     BlockNotFound,
+    #[error("no block seen at slot")]
+    BlockNotSeen,
     #[error("pre-fulu block has no data column sidecars")]
     BlockPreFulu,
     #[error("pre-gloas block has no execution payload envelope")]
@@ -229,6 +231,13 @@ impl IntoResponse for Error {
     #[instrument(skip_all, level = "debug")]
     fn into_response(self) -> Response {
         let status_code = self.status_code();
+
+        // A 204 response must not carry a body.
+        if status_code == StatusCode::NO_CONTENT {
+            let extension = Extension(Arc::new(self));
+            return (status_code, extension).into_response();
+        }
+
         let body = Json(self.body()).into_response();
         let extension = Extension(Arc::new(self));
         (status_code, extension, body).into_response()
@@ -251,6 +260,7 @@ impl Error {
             | Self::StateNotFound
             | Self::TargetStateNotFound
             | Self::ValidatorNotFound => StatusCode::NOT_FOUND,
+            Self::BlockNotSeen => StatusCode::NO_CONTENT,
             Self::BlockPreFulu
             | Self::BlockPreGloas
             | Self::CommitteesAtSlotMismatch { .. }
