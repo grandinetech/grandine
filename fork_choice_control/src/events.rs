@@ -402,7 +402,7 @@ impl<P: Preset> EventChannels<P> {
         proposer_index: ValidatorIndex,
         parent_block_root: H256,
         payload_attributes: &PayloadAttributes<P>,
-        parent_block_number: ExecutionBlockNumber,
+        parent_block_number: Option<ExecutionBlockNumber>,
         parent_block_hash: ExecutionBlockHash,
     ) {
         if let Err(error) = self.send_payload_attributes_event_internal(
@@ -704,7 +704,7 @@ impl<P: Preset> EventChannels<P> {
         proposer_index: ValidatorIndex,
         parent_block_root: H256,
         payload_attributes: &PayloadAttributes<P>,
-        parent_block_number: ExecutionBlockNumber,
+        parent_block_number: Option<ExecutionBlockNumber>,
         parent_block_hash: ExecutionBlockHash,
     ) -> Result<()> {
         if self.payload_attributes.receiver_count() > 0 {
@@ -993,8 +993,12 @@ pub struct PayloadAttributesEventData {
     #[serde(with = "serde_utils::string_or_native")]
     pub proposal_slot: Slot,
     pub parent_block_root: H256,
-    #[serde(with = "serde_utils::string_or_native")]
-    pub parent_block_number: ExecutionBlockNumber,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_utils::string_or_native_option"
+    )]
+    pub parent_block_number: Option<ExecutionBlockNumber>,
     pub parent_block_hash: ExecutionBlockHash,
     #[serde(with = "serde_utils::string_or_native")]
     pub proposer_index: ValidatorIndex,
