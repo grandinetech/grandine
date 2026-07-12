@@ -248,6 +248,12 @@ pub struct AttestationDataQuery {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PayloadAttestationDataQuery {
+    slot: Slot,
+}
+
+#[derive(Deserialize)]
 pub struct EventsQuery {
     #[serde(
         default,
@@ -3719,21 +3725,16 @@ pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
 
 /// `GET /eth/v1/validator/payload_attestation_data/{slot}`
 #[instrument(
-    parent = None,
-    level = "trace",
-    fields(
-        service = "http_api",
-        slot = %slot,
-    ),
-    name = "http_api",
-    skip_all,
+    level = "debug",
+    name = "http_api::validator_payload_attestation_data",
+    skip_all
 )]
 pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(validator_config): State<Arc<ValidatorConfig>>,
-    EthPath(slot): EthPath<Slot>,
+    EthQuery(query): EthQuery<PayloadAttestationDataQuery>,
     headers: HeaderMap,
 ) -> Result<EthResponse<PayloadAttestationData, (), JsonOrSsz>, Error> {
     const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -3743,6 +3744,8 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
             .validator_api_payload_attestation_data_times
             .start_timer()
     });
+
+    let PayloadAttestationDataQuery { slot } = query;
 
     let WithStatus {
         value: head,
@@ -3775,9 +3778,7 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
 
     let is_optimistic = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
-        let block = controller
-            .block_by_slot(slot)?
-            .ok_or(Error::BlockNotFound)?;
+        let block = controller.block_by_slot(slot)?.ok_or(Error::BlockNotSeen)?;
 
         block_root = block.value.root;
         state = controller

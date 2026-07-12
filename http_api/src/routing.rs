@@ -626,7 +626,7 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             get(validator_execution_payload_bid),
         )
         .route(
-            "/eth/v1/validator/payload_attestation_data/{slot}",
+            "/eth/v1/validator/payload_attestation_data",
             get(validator_payload_attestation_data),
         )
         .layer(axum::middleware::map_request_with_state(
