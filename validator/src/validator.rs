@@ -2751,115 +2751,99 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     /// Broadcasts proposer preferences for the next epoch's slots where we are proposing.
     #[instrument(level = "debug", skip_all)]
     async fn broadcast_proposer_preferences(&self, slot_head: &SlotHead<P>) {
-        let chain_config = self.chain_config.clone_arc();
-        let proposer_configs = self.proposer_configs.clone_arc();
-        let signer = self.signer.clone_arc();
-        let p2p_tx = self.p2p_tx.clone();
-        let beacon_state = slot_head.beacon_state.clone_arc();
+        let beacon_state = slot_head.beacon_state.as_ref();
         let beacon_block_root = slot_head.beacon_block_root;
-        let controller = self.controller.clone_arc();
+        let signer_snapshot = self.signer.load();
 
-        tokio::spawn(async move {
-            let signer_snapshot = signer.load();
-            let pubkeys = signer_snapshot.keys().copied().collect_vec();
+        let mut preferences = signer_snapshot
+            .keys()
+            .filter_map(|&pubkey| {
+                let validator_index = accessors::index_of_public_key(beacon_state, &pubkey)?;
+                let upcoming_slots =
+                    accessors::get_upcoming_proposal_slots(beacon_state, validator_index);
 
-            let mut preferences: Vec<_> = pubkeys
-                .into_iter()
-                .filter_map(|pubkey| {
-                    let validator_index = accessors::index_of_public_key(&beacon_state, &pubkey)?;
-                    let upcoming_slots =
-                        accessors::get_upcoming_proposal_slots(&beacon_state, validator_index);
+                if upcoming_slots.is_empty() {
+                    return None;
+                }
 
-                    if upcoming_slots.is_empty() {
-                        return None;
-                    }
+                let fee_recipient = self.proposer_configs.fee_recipient(pubkey).ok()?;
+                let target_gas_limit = self.proposer_configs.gas_limit(pubkey).ok()?;
 
-                    let fee_recipient = proposer_configs.fee_recipient(pubkey).ok()?;
-                    let target_gas_limit = proposer_configs.gas_limit(pubkey).ok()?;
-                    let controller = controller.clone_arc();
+                Some(upcoming_slots.into_iter().filter_map(move |proposal_slot| {
+                    let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
+                    let dependent_root = self
+                        .controller
+                        .shuffling_dependent_root(beacon_block_root, proposal_epoch)
+                        .or_else(|| {
+                            warn_with_peers!(
+                                "failed to compute shuffling dependent root for proposer \
+                                 preferences (slot {proposal_slot}, epoch {proposal_epoch})"
+                            );
+                            None
+                        })?;
 
-                    Some(upcoming_slots.into_iter().filter_map(move |proposal_slot| {
-                        let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
+                    Some((
+                        pubkey,
+                        ProposerPreferences {
+                            dependent_root,
+                            proposal_slot,
+                            validator_index,
+                            fee_recipient,
+                            target_gas_limit,
+                        },
+                    ))
+                }))
+            })
+            .flatten()
+            .collect::<Vec<_>>();
 
-                        match controller.shuffling_dependent_root(beacon_block_root, proposal_epoch)
-                        {
-                            Some(dependent_root) => Some((
-                                pubkey,
-                                ProposerPreferences {
-                                    dependent_root,
-                                    proposal_slot,
-                                    validator_index,
-                                    fee_recipient,
-                                    target_gas_limit,
-                                },
-                            )),
-                            None => {
-                                warn_with_peers!(
-                                    "failed to compute shuffling dependent root for proposer \
-                                    preferences (slot {proposal_slot}, epoch {proposal_epoch})"
-                                );
+        if preferences.is_empty() {
+            return;
+        }
 
-                                None
-                            }
-                        }
-                    }))
-                })
-                .flatten()
-                .collect();
+        // `Signer::keys()` iterates a `HashMap` in random order. Sort so the broadcast
+        // publishes deterministically, keeping the validator_to_p2p rx drain assertion comparable.
+        preferences.sort_unstable_by_key(|(_, pref)| (pref.proposal_slot, pref.validator_index));
 
-            if preferences.is_empty() {
+        let triples = preferences
+            .iter()
+            .map(|(pubkey, pref)| SigningTriple {
+                message: SigningMessage::ProposerPreferences(*pref),
+                signing_root: pref.signing_root(&self.chain_config, beacon_state),
+                public_key: *pubkey,
+            })
+            .collect_vec();
+
+        let signatures = match signer_snapshot
+            .sign_triples_without_slashing_protection(triples, Some(beacon_state.into()))
+            .await
+        {
+            Ok(signatures) => signatures,
+            Err(error) => {
+                warn_with_peers!("failed to sign proposer preferences: {error}");
                 return;
             }
+        };
 
-            // `Signer::keys()` iterates a `HashMap` (random order per process).
-            // Sort here so the broadcast publishes in deterministic order. not necessary
-            // from a gossip perspective but sorting on the other side of assert for validator_to_p2p rx drain is harder.
-            // (more reasonable in comparision to involving all variants of validator_to_p2p messages in the assert order)
-            // So this sort just ensures thats the response generated is actually comparable.
-            preferences.sort_by_key(|(_, pref)| (pref.proposal_slot, pref.validator_index));
+        for ((_, pref), signature) in preferences.into_iter().zip(signatures) {
+            debug_with_peers!(
+                "broadcasting proposer preferences for validator {} slot {}",
+                pref.validator_index,
+                pref.proposal_slot
+            );
 
-            let triples = preferences
-                .iter()
-                .map(|(pubkey, pref)| SigningTriple {
-                    message: SigningMessage::ProposerPreferences(*pref),
-                    signing_root: pref.signing_root(&chain_config, beacon_state.as_ref()),
-                    public_key: *pubkey,
-                })
-                .collect_vec();
+            let signed_preferences = Arc::new(SignedProposerPreferences {
+                message: pref,
+                signature: signature.into(),
+            });
 
-            let fork_info = Some(beacon_state.as_ref().into());
+            // Pass into own fork-choice store so bids for this slot pass the
+            // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
+            self.controller
+                .on_own_proposer_preferences(signed_preferences.clone_arc());
 
-            let signatures = match signer_snapshot
-                .sign_triples_without_slashing_protection(triples, fork_info)
-                .await
-            {
-                Ok(signatures) => signatures,
-                Err(error) => {
-                    warn_with_peers!("failed to sign proposer preferences: {error}");
-                    return;
-                }
-            };
-
-            // Publish each signed preference
-            for ((_, pref), signature) in preferences.into_iter().zip(signatures) {
-                debug_with_peers!(
-                    "broadcasting proposer preferences for validator {} slot {}",
-                    pref.validator_index,
-                    pref.proposal_slot
-                );
-
-                let signed_preferences = Arc::new(SignedProposerPreferences {
-                    message: pref,
-                    signature: signature.into(),
-                });
-
-                // Pass into own fork-choice store so bids for this slot pass the
-                // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
-                controller.on_own_proposer_preferences(signed_preferences.clone_arc());
-
-                ValidatorToP2p::PublishProposerPreferences(signed_preferences).send(&p2p_tx);
-            }
-        });
+            ValidatorToP2p::PublishProposerPreferences(signed_preferences).send(&self.p2p_tx);
+        }
     }
 
     async fn track_collection_metrics(&self) {
