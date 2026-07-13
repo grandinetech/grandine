@@ -735,6 +735,7 @@ pub async fn state_validator<P: Preset, W: Wait>(
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/validator_balances`
+#[expect(clippy::type_complexity)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -793,6 +794,7 @@ pub async fn post_state_validator_balances<P: Preset, W: Wait>(
     )
 }
 
+#[expect(clippy::type_complexity)]
 #[instrument(skip_all, level = "debug")]
 fn state_validator_balances<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
