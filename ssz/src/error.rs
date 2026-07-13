@@ -79,6 +79,8 @@ pub enum IndexError {
 
 #[derive(Debug, Error)]
 pub enum PushError {
+    #[error("index out of bounds")]
+    IndexOutOfBounds,
     #[error("list is full")]
     ListFull,
 }
