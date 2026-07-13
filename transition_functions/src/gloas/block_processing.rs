@@ -869,6 +869,7 @@ fn ensure_operation_count<P: Preset>(
     Ok(())
 }
 
+#[expect(clippy::too_many_lines)]
 pub fn process_operations<P: Preset, V: Verifier, B>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

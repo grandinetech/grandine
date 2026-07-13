@@ -8,7 +8,6 @@ use helper_functions::{
     mutators::decrease_balance,
 };
 use pubkey_cache::PubkeyCache;
-use ssz::SszListMut as _;
 use typenum::Unsigned as _;
 use types::{
     bellatrix::beacon_state::BeaconState as BellatrixBeaconState, config::Config,

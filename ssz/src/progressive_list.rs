@@ -1,5 +1,4 @@
-use core::hash::Hash;
-use std::fmt::Debug;
+use core::{fmt::Debug, hash::Hash};
 
 use derivative::Derivative;
 use derive_more::{Deref, DerefMut};
@@ -146,7 +145,7 @@ where
 
     fn hash_tree_root(&self) -> H256 {
         let root = if T::PackingFactor::USIZE == 1 {
-            let chunks = self.0.as_ref().into_iter().map(SszHash::hash_tree_root);
+            let chunks = self.0.as_ref().iter().map(SszHash::hash_tree_root);
             ProgressiveMerkleTree::merkleize_progressive(chunks)
         } else {
             ProgressiveMerkleTree::merkleize_packed(&self.0)

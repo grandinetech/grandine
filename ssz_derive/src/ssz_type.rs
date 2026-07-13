@@ -601,7 +601,7 @@ impl SszType {
 
                     nodes = nodes
                         .into_iter()
-                        .chain(core::iter::once(zero_hash_expr))
+                        .chain(iter::once(zero_hash_expr))
                         .tuples()
                         .map(|(left, right)| quote! { #ssz::hashing::hash_256_256(#left, #right) })
                         .collect();

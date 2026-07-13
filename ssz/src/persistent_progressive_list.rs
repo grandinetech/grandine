@@ -1,12 +1,13 @@
+#![allow(clippy::type_complexity)]
+#![allow(clippy::assertions_on_result_states)]
 use core::{
     cmp::Ordering,
+    convert::AsRef,
     fmt::{Debug, Formatter, Result as FmtResult},
-};
-use std::{
     iter::{Flatten, FusedIterator},
     marker::PhantomData,
-    sync::Arc,
 };
+use std::sync::Arc;
 
 use arithmetic::NonZeroExt as _;
 use bit_field::BitField as _;
@@ -403,7 +404,9 @@ where
                         break;
                     }
 
-                    index -= capacity;
+                    index = index
+                        .checked_sub(capacity)
+                        .ok_or(PushError::IndexOutOfBounds)?;
 
                     if spine.right.is_none() {
                         assert_eq!(index, 0, "all subtrees before the last are full");
@@ -459,7 +462,7 @@ impl<'list, T: SszHash, N> IntoIterator for &'list PersistentProgressiveList<T, 
 
     fn into_iter(self) -> Self::IntoIter {
         let nodes = Nodes {
-            node: self.root.as_deref().map(|node| node.as_ref()),
+            node: self.root.as_deref().map(AsRef::as_ref),
         };
 
         ExactSize::new(nodes.flatten(), self.length)
@@ -559,7 +562,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                             .ok()
                             .expect("Arcs returned by MerkleTreeNode::update are uniquely owned"),
                     ),
-                    None => self.left.clone(),
+                    None => self.left.clone_arc(),
                 };
 
                 let right = match new_right {
@@ -588,7 +591,7 @@ impl<'list, T, B> Iterator for Nodes<'list, T, B> {
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node.take()?;
 
-        self.node = node.right.as_deref().map(|node| node.as_ref());
+        self.node = node.right.as_deref().map(AsRef::as_ref);
 
         Some(Leaves::new(node.left.as_ref().as_ref()).flatten())
     }
@@ -928,7 +931,7 @@ mod tests {
 
             let mut iterator = persistent.iter_mut();
 
-            assert_eq!(iterator.len(), usize::try_from(length).unwrap());
+            assert_eq!(Ok(iterator.len()), usize::try_from(length));
 
             for expected in 0..length {
                 let element = iterator.next().expect("iterator yields length elements");
@@ -1089,6 +1092,7 @@ mod tests {
             }),
         ));
 
-        assert!(PersistentProgressiveList::<u64, U4>::try_from_iter(0..4).is_ok());
+        PersistentProgressiveList::<u64, U4>::try_from_iter(0..4)
+            .expect("should create persistent list from iterator");
     }
 }

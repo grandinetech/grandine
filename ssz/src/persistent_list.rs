@@ -536,7 +536,7 @@ type Height = u8;
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq")
 )]
-pub(crate) enum Node<T, B> {
+pub enum Node<T, B> {
     Internal {
         left: Arc<Hc<Self>>,
         right: Arc<Hc<Self>>,
