@@ -467,10 +467,9 @@ impl<P: Preset> BlockOrDataColumnSidecar<P> {
                 .body()
                 .with_blob_kzg_commitments()
                 .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments),
-            Self::Sidecar(sidecar) => sidecar.kzg_commitments().map(|kzg_commitments| {
-                let kzg_commitments: &dyn SszList<KzgCommitment> = kzg_commitments;
-                kzg_commitments
-            }),
+            Self::Sidecar(sidecar) => sidecar
+                .kzg_commitments()
+                .map(|kzg_commitments| -> &dyn SszList<KzgCommitment> { kzg_commitments }),
         }
     }
 }

@@ -7,7 +7,7 @@ use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use serde::Deserialize;
 use spec_test_utils::Case;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, SszList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use test_generator::test_resources;
@@ -298,7 +298,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     .body()
                     .with_blob_kzg_commitments()
                     .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
-                    .map(|kzg_commitments| kzg_commitments.len_usize())
+                    .map(SszList::len_usize)
                     .unwrap_or_default();
 
                 let beacon_block_root = block.message().hash_tree_root();

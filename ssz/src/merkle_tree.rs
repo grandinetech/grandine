@@ -579,9 +579,7 @@ mod tests {
 
         // Every chunk count from empty to a full `2.pow(depth)` tree.
         for chunk_count in 0..=(1 << depth) {
-            let chunks = (0..chunk_count)
-                .map(|byte| H256::repeat_byte(byte as u8))
-                .collect_vec();
+            let chunks = (0..chunk_count).map(H256::repeat_byte).collect_vec();
 
             assert_eq!(
                 merkleize_to_depth(&chunks, depth),
@@ -668,9 +666,7 @@ mod tests {
     fn merkleize_progressive_matches_reference() {
         // Boundaries of the `1, 5, 21, 85` cumulative capacities and their neighbours.
         for chunk_count in [0, 1, 2, 3, 4, 5, 6, 7, 20, 21, 22, 64, 84, 85, 86, 200] {
-            let chunks = (0..chunk_count)
-                .map(|byte| H256::repeat_byte(byte as u8))
-                .collect_vec();
+            let chunks = (0..chunk_count).map(H256::repeat_byte).collect_vec();
 
             assert_eq!(
                 ProgressiveMerkleTree::merkleize_progressive(chunks.iter().copied()),
