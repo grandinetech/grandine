@@ -55,7 +55,7 @@ pub struct BeaconState<P: Preset> {
     // > Registry
     pub validators: ProgressiveValidators,
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub balances: ProgressiveBalances<P>,
+    pub balances: ProgressiveBalances,
 
     // > Randomness
     pub randao_mixes: RandaoMixes<P>,
@@ -66,9 +66,9 @@ pub struct BeaconState<P: Preset> {
 
     // > Participation
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub previous_epoch_participation: ProgressiveEpochParticipation<P>,
+    pub previous_epoch_participation: ProgressiveEpochParticipation,
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub current_epoch_participation: ProgressiveEpochParticipation<P>,
+    pub current_epoch_participation: ProgressiveEpochParticipation,
 
     // > Finality
     pub justification_bits: BitVector<JustificationBitsLength>,
@@ -78,7 +78,7 @@ pub struct BeaconState<P: Preset> {
 
     // > Inactivity
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub inactivity_scores: ProgressiveInactivityScores<P>,
+    pub inactivity_scores: ProgressiveInactivityScores,
 
     // > Sync
     pub current_sync_committee: Arc<Hc<SyncCommittee<P>>>,
@@ -107,16 +107,16 @@ pub struct BeaconState<P: Preset> {
     pub consolidation_balance_to_consume: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub earliest_consolidation_epoch: Epoch,
-    pub pending_deposits: ProgressivePendingDeposits<P>,
-    pub pending_partial_withdrawals: ProgressivePendingPartialWithdrawals<P>,
-    pub pending_consolidations: ProgressivePendingConsolidations<P>,
+    pub pending_deposits: ProgressivePendingDeposits,
+    pub pending_partial_withdrawals: ProgressivePendingPartialWithdrawals,
+    pub pending_consolidations: ProgressivePendingConsolidations,
 
     // > Next proposers
     #[serde(with = "serde_utils::string_or_native_sequence")]
     pub proposer_lookahead: ProposerLookahead<P>,
 
     // > Builders
-    pub builders: Builders<P>,
+    pub builders: Builders,
     #[serde(with = "serde_utils::string_or_native")]
     pub next_withdrawal_builder_index: BuilderIndex,
 
@@ -125,9 +125,9 @@ pub struct BeaconState<P: Preset> {
 
     // > Builder payments
     pub builder_pending_payments: BuilderPendingPayments<P>,
-    pub builder_pending_withdrawals: BuilderPendingWithdrawals<P>,
+    pub builder_pending_withdrawals: BuilderPendingWithdrawals,
     pub latest_execution_payload_bid: ExecutionPayloadBid<P>,
-    pub payload_expected_withdrawals: PayloadExpectedWithdrawals<P>,
+    pub payload_expected_withdrawals: PayloadExpectedWithdrawals,
 
     // > Payload timeliness
     #[serde(with = "serde_utils::string_or_native_nested_sequence")]

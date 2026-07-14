@@ -30,6 +30,8 @@ use crate::{
     shared,
 };
 
+type PrettyBigU = typenum::U1048576;
+
 // Unlike `PersistentList`, this does not support bundle sizes other than the minimum.
 // EIP-7916 partitions the chunk sequence at absolute positions (1, 4, 16, ... chunks),
 // so a bundle spanning more than one chunk would straddle a subtree boundary.
@@ -40,18 +42,14 @@ use crate::{
     Eq(bound = "T: Eq"),
     Default(bound = "")
 )]
-pub struct PersistentProgressiveList<T: SszHash, N> {
+pub struct PersistentProgressiveList<T: SszHash> {
     root: Option<Arc<Hc<Node<T, MinimumBundleSize<T>>>>>,
     length: usize,
-    phantom: PhantomData<N>,
 }
 
-impl<T: SszHash, N> PersistentProgressiveList<T, N> {
-    const fn validate_length(actual: usize) -> Result<(), ReadError>
-    where
-        N: Unsigned,
-    {
-        let maximum = shared::saturating_usize::<N>();
+impl<T: SszHash> PersistentProgressiveList<T> {
+    const fn validate_length(actual: usize) -> Result<(), ReadError> {
+        let maximum = shared::saturating_usize::<PrettyBigU>();
 
         if actual > maximum {
             return Err(ReadError::ListTooLong { maximum, actual });
@@ -61,10 +59,9 @@ impl<T: SszHash, N> PersistentProgressiveList<T, N> {
     }
 }
 
-impl<T, N> TryFromIterator<T> for PersistentProgressiveList<T, N>
+impl<T> TryFromIterator<T> for PersistentProgressiveList<T>
 where
     T: SszHash,
-    N: Unsigned,
     MinimumBundleSize<T>: BundleSize<T>,
 {
     type Error = ReadError;
@@ -109,17 +106,13 @@ where
             })));
         }
 
-        Ok(Self {
-            root,
-            length,
-            phantom: PhantomData,
-        })
+        Ok(Self { root, length })
     }
 }
 
 // The trees have different shapes (and possibly different bundle sizes),
 // so no structural sharing is possible and the elements have to be cloned.
-impl<T, N, B> From<&PersistentList<T, N, B>> for PersistentProgressiveList<T, N>
+impl<T, N, B> From<&PersistentList<T, N, B>> for PersistentProgressiveList<T>
 where
     T: SszHash + Clone,
     N: Unsigned,
@@ -132,7 +125,7 @@ where
     }
 }
 
-impl<T, N, B> From<PersistentList<T, N, B>> for PersistentProgressiveList<T, N>
+impl<T, N, B> From<PersistentList<T, N, B>> for PersistentProgressiveList<T>
 where
     T: SszHash + Clone,
     N: Unsigned,
@@ -207,10 +200,9 @@ fn build_subtree<T, B: BundleSize<T>>(
     Some((Arc::new(Hc::new(node)), count))
 }
 
-impl<T, N> SszList<T> for PersistentProgressiveList<T, N>
+impl<T> SszList<T> for PersistentProgressiveList<T>
 where
     T: SszHash + SszWrite + Send + Sync + Debug,
-    N: Unsigned + Send + Sync,
     MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T> + Send + Sync,
 {
     fn len_usize(&self) -> usize {
@@ -298,10 +290,9 @@ where
     }
 }
 
-impl<T, N> SszListMut<T> for PersistentProgressiveList<T, N>
+impl<T> SszListMut<T> for PersistentProgressiveList<T>
 where
     T: SszHash + SszWrite + Send + Sync + Debug,
-    N: Unsigned + Send + Sync,
     MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T> + Send + Sync,
 {
     fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
@@ -383,7 +374,7 @@ where
             .try_into()
             .expect("PersistentProgressiveList length counter should fit in u64");
 
-        match length_u64.cmp(&N::U64) {
+        match length_u64.cmp(&PrettyBigU::U64) {
             Ordering::Less => {}
             Ordering::Equal => return Err(PushError::ListFull),
             Ordering::Greater => unreachable!("case above prevents list from being overfilled"),
@@ -456,7 +447,7 @@ where
     }
 }
 
-impl<'list, T: SszHash, N> IntoIterator for &'list PersistentProgressiveList<T, N> {
+impl<'list, T: SszHash> IntoIterator for &'list PersistentProgressiveList<T> {
     type Item = &'list T;
     type IntoIter = ExactSize<Flatten<Nodes<'list, T, MinimumBundleSize<T>>>>;
 
@@ -469,7 +460,7 @@ impl<'list, T: SszHash, N> IntoIterator for &'list PersistentProgressiveList<T, 
     }
 }
 
-impl<'list, T, N> IntoIterator for &'list mut PersistentProgressiveList<T, N>
+impl<'list, T> IntoIterator for &'list mut PersistentProgressiveList<T>
 where
     T: SszHash + Clone,
 {
@@ -485,7 +476,7 @@ where
     }
 }
 
-impl<T: Debug + SszHash, N> Debug for PersistentProgressiveList<T, N> {
+impl<T: Debug + SszHash> Debug for PersistentProgressiveList<T> {
     fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
         formatter.debug_list().entries(self).finish()
     }
@@ -618,28 +609,26 @@ impl<'list, T: Clone, B> Iterator for NodesMut<'list, T, B> {
 
 impl<T: Clone, B> FusedIterator for NodesMut<'_, T, B> {}
 
-impl<'de, T, N> Deserialize<'de> for PersistentProgressiveList<T, N>
+impl<'de, T> Deserialize<'de> for PersistentProgressiveList<T>
 where
     T: Deserialize<'de> + SszHash,
-    N: Unsigned,
     MinimumBundleSize<T>: BundleSize<T>,
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct PersistentProgressiveListVisitor<T, N>(PhantomData<(T, N)>);
+        struct PersistentProgressiveListVisitor<T>(PhantomData<(T, PrettyBigU)>);
 
-        impl<'de, T, N> Visitor<'de> for PersistentProgressiveListVisitor<T, N>
+        impl<'de, T> Visitor<'de> for PersistentProgressiveListVisitor<T>
         where
             T: Deserialize<'de> + SszHash,
-            N: Unsigned,
             MinimumBundleSize<T>: BundleSize<T>,
         {
-            type Value = PersistentProgressiveList<T, N>;
+            type Value = PersistentProgressiveList<T>;
 
             fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
                 write!(
                     formatter,
                     "a list of length up to {}",
-                    shared::saturating_usize::<N>(),
+                    shared::saturating_usize::<PrettyBigU>(),
                 )
             }
 
@@ -657,17 +646,17 @@ where
     }
 }
 
-impl<T: Serialize + SszHash, N> Serialize for PersistentProgressiveList<T, N> {
+impl<T: Serialize + SszHash> Serialize for PersistentProgressiveList<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self)
     }
 }
 
-impl<T: SszSize + SszHash, N> SszSize for PersistentProgressiveList<T, N> {
+impl<T: SszSize + SszHash> SszSize for PersistentProgressiveList<T> {
     const SIZE: Size = Size::Variable { minimum_size: 0 };
 }
 
-impl<T, N> SszHash for PersistentProgressiveList<T, N>
+impl<T> SszHash for PersistentProgressiveList<T>
 where
     T: SszHash + SszWrite,
     MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T>,
@@ -684,39 +673,36 @@ where
     }
 }
 
-impl<T: SszWrite + SszHash, N> SszWrite for PersistentProgressiveList<T, N> {
+impl<T: SszWrite + SszHash> SszWrite for PersistentProgressiveList<T> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         shared::write_list(bytes, self)
     }
 }
 
-impl<C, T, N> SszRead<C> for PersistentProgressiveList<T, N>
+impl<C, T> SszRead<C> for PersistentProgressiveList<T>
 where
     T: SszRead<C> + SszHash,
-    N: Unsigned,
     MinimumBundleSize<T>: BundleSize<T>,
 {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
-        shared::read_list(shared::saturating_usize::<N>(), context, bytes)
+        shared::read_list(shared::saturating_usize::<PrettyBigU>(), context, bytes)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use typenum::{U4, U1024, U8192};
-
     use crate::ProgressiveList;
 
     use super::*;
 
-    type TestList = PersistentProgressiveList<u64, U1024>;
-    type ReferenceList = ProgressiveList<u64, U1024>;
+    type TestList = PersistentProgressiveList<u64>;
+    type ReferenceList = ProgressiveList<u64>;
 
-    type BigList = PersistentProgressiveList<u64, U8192>;
-    type BigReferenceList = ProgressiveList<u64, U8192>;
+    type BigList = PersistentProgressiveList<u64>;
+    type BigReferenceList = ProgressiveList<u64>;
 
-    type UnpackedList = PersistentProgressiveList<H256, U1024>;
-    type UnpackedReferenceList = ProgressiveList<H256, U1024>;
+    type UnpackedList = PersistentProgressiveList<H256>;
+    type UnpackedReferenceList = ProgressiveList<H256>;
 
     // Lengths up to 300 cover the boundaries of the first several subtrees,
     // whose capacities in elements are 4, 16, 64 and 256 for `u64`.
@@ -1052,15 +1038,6 @@ mod tests {
     }
 
     #[test]
-    fn push_rejects_full_list() {
-        let mut persistent =
-            PersistentProgressiveList::<u64, U4>::try_from_iter(0..4).expect("list is full");
-
-        assert!(matches!(persistent.push(4), Err(PushError::ListFull)));
-        assert!(persistent.iter().copied().eq(0..4));
-    }
-
-    #[test]
     fn get_and_get_mut_reject_out_of_bounds_indices() {
         let mut persistent = TestList::try_from_iter(0..10).expect("length is below the maximum");
 
@@ -1080,19 +1057,5 @@ mod tests {
             TestList::default().hash_tree_root(),
             ReferenceList::default().hash_tree_root(),
         );
-    }
-
-    #[test]
-    fn try_from_iter_rejects_overlong_input() {
-        assert!(matches!(
-            PersistentProgressiveList::<u64, U4>::try_from_iter(0..5),
-            Err(ReadError::ListTooLong {
-                maximum: 4,
-                actual: 5,
-            }),
-        ));
-
-        PersistentProgressiveList::<u64, U4>::try_from_iter(0..4)
-            .expect("should create persistent list from iterator");
     }
 }

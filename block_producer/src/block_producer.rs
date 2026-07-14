@@ -1,4 +1,4 @@
-use core::{fmt::Display, future::Future, ops::Div as _};
+use core::{fmt::Display, future::Future, marker::PhantomData, ops::Div as _};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -1531,9 +1531,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         slashings
     }
 
-    async fn prepare_attester_slashings_gloas(
-        &self,
-    ) -> ProgressiveList<GloasAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+    async fn prepare_attester_slashings_gloas(&self) -> ProgressiveList<GloasAttesterSlashing<P>> {
         let _timer = self
             .producer_context
             .metrics
@@ -1830,6 +1828,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             execution_payment: 0,
             blob_kzg_commitments: blob_kzg_commitments_opt.unwrap_or_default().into(),
             execution_requests_root,
+            phantom: PhantomData,
         };
 
         Ok(Some(SignedExecutionPayloadBid {

@@ -70,6 +70,13 @@ pub enum Error {
     SlotOutOfRange,
     #[error("subnet ID overflowed")]
     SubnetIdOverflow,
+    #[error(
+        "too many attesting indices (got: {attesting_indices_count}, max: {max_attesting_indices_count})"
+    )]
+    TooManyAttestingIndices {
+        attesting_indices_count: usize,
+        max_attesting_indices_count: usize,
+    },
 }
 
 #[derive(Debug, Display)]

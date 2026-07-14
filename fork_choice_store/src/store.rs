@@ -3163,7 +3163,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        let kzg_commitments = if let Some(sidecar) = data_column_sidecar.pre_gloas() {
+        let kzg_commitments: &[_] = if let Some(sidecar) = data_column_sidecar.pre_gloas() {
             &sidecar.kzg_commitments
         } else {
             // [IGNORE] A valid block for the sidecar's `slot` has been seen (via gossip or non-gossip sources).

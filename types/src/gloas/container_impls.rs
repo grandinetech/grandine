@@ -95,6 +95,7 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
                     consolidations: ProgressiveList::full(ConsolidationRequest::default()),
                     builder_deposits: ProgressiveList::full(BuilderDepositRequest::default()),
                     builder_exits: ProgressiveList::full(BuilderExitRequest::default()),
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -143,9 +144,7 @@ impl<P: Preset> CombinedPayloadAttestation<P> {
 
 impl<P: Preset> SignedExecutionPayloadBid<P> {
     #[must_use]
-    pub const fn blob_kzg_commitments(
-        &self,
-    ) -> &ProgressiveList<KzgCommitment, P::MaxBlobCommitmentsPerBlock> {
+    pub const fn blob_kzg_commitments(&self) -> &ProgressiveList<KzgCommitment> {
         &self.message.blob_kzg_commitments
     }
 }
