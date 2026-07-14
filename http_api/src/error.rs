@@ -126,6 +126,8 @@ pub enum Error {
     InvalidStateId(#[source] AnyhowError),
     #[error("invalid validator ID")]
     InvalidValidatorId(#[source] AnyhowError),
+    #[error("invalid proposer preferences")]
+    InvalidProposerPreferences(Vec<IndexedError>),
     #[error("invalid proposer slashing, it will never pass validation so it's rejected")]
     InvalidProposerSlashing(#[source] AnyhowError),
     #[error("invalid query string")]
@@ -277,6 +279,7 @@ impl Error {
             | Self::InvalidPayloadAttestions(_)
             | Self::InvalidPeerId(_)
             | Self::InvalidPhase { .. }
+            | Self::InvalidProposerPreferences(_)
             | Self::InvalidProposerSlashing(_)
             | Self::InvalidSignedVoluntaryExit(_)
             | Self::InvalidStateId(_)
@@ -329,6 +332,7 @@ impl Error {
             Self::InvalidAggregatesAndProofs(failures)
             | Self::InvalidAttestations(failures)
             | Self::InvalidContributionAndProofs(failures)
+            | Self::InvalidProposerPreferences(failures)
             | Self::InvalidSyncCommitteeMessages(failures)
             | Self::InvalidValidatorSignatures(failures)
             | Self::InvalidSignedBlsToExecutionChanges(failures) => failures,
