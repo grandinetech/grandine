@@ -1227,11 +1227,10 @@ impl ExecutionPayloadEnvelopeOrigin {
     }
 }
 
-// TODO: add `Api(OneshotSender<Result<ValidationOutcome>>)` variant once
-// https://github.com/ethereum/beacon-APIs/pull/593 merges.
 #[derive(Debug)]
 pub enum ProposerPreferencesOrigin {
     Gossip(GossipId),
+    Api(OneshotSender<Result<ValidationOutcome>>),
     Own,
 }
 
@@ -1245,6 +1244,7 @@ impl ProposerPreferencesOrigin {
     ) {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
+            Self::Api(sender) => (None, Some(sender)),
             Self::Own => (None, None),
         }
     }
@@ -1252,7 +1252,7 @@ impl ProposerPreferencesOrigin {
     #[must_use]
     pub const fn verify_signatures(&self) -> bool {
         match self {
-            Self::Gossip(_) => true,
+            Self::Gossip(_) | Self::Api(_) => true,
             Self::Own => false,
         }
     }
@@ -1261,7 +1261,7 @@ impl ProposerPreferencesOrigin {
     pub fn gossip_id(self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::Own => None,
+            Self::Api(_) | Self::Own => None,
         }
     }
 
@@ -1269,7 +1269,7 @@ impl ProposerPreferencesOrigin {
     pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::Own => None,
+            Self::Api(_) | Self::Own => None,
         }
     }
 }

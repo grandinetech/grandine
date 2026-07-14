@@ -108,6 +108,7 @@ pub enum ApiToP2p<P: Preset> {
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PublishSingularAttestation(Arc<Attestation<P>>, SubnetId),
     PublishAggregateAndProof(Arc<SignedAggregateAndProof<P>>),
+    PublishProposerPreferences(Arc<SignedProposerPreferences>),
     PublishSyncCommitteeMessage(Box<(SubnetId, SyncCommitteeMessage)>),
     PublishPayloadBid(Arc<SignedExecutionPayloadBid<P>>),
     PublishProposerSlashing(Box<ProposerSlashing>),

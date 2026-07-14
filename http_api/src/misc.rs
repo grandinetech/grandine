@@ -48,6 +48,7 @@ use types::{
     gloas::containers::{
         PayloadAttestationMessage, SignedAggregateAndProof as GloasSignedAggregateAndProof,
         SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
+        SignedProposerPreferences,
     },
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
@@ -59,7 +60,7 @@ use types::{
         },
         primitives::Slot,
     },
-    preset::Preset,
+    preset::{Preset, ProposerLookaheadLength},
 };
 
 #[cfg(test)]
@@ -287,6 +288,37 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPha
             };
 
         Ok(result)
+    }
+}
+
+pub struct SignedProposerPreferencesListFromPhaseDeserializer<P: Preset> {
+    phase: Phase,
+    phantom: PhantomData<P>,
+}
+
+impl<P: Preset> From<Phase> for SignedProposerPreferencesListFromPhaseDeserializer<P> {
+    fn from(phase: Phase) -> Self {
+        Self {
+            phase,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<'de, P: Preset> DeserializeSeed<'de>
+    for SignedProposerPreferencesListFromPhaseDeserializer<P>
+{
+    type Value = ContiguousList<Arc<SignedProposerPreferences>, ProposerLookaheadLength<P>>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // it's required to make the endpoint forward compatible with future phases,
+        // but the value is not used as of now
+        let _ = self.phase;
+
+        Ok(ContiguousList::deserialize(deserializer)?.map(Arc::new))
     }
 }
 

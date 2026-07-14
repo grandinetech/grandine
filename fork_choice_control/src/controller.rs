@@ -438,6 +438,20 @@ where
         })
     }
 
+    pub fn on_api_proposer_preferences(
+        &self,
+        signed_preferences: Arc<SignedProposerPreferences>,
+        sender: OneshotSender<Result<ValidationOutcome>>,
+    ) {
+        self.spawn(ProposerPreferencesTask {
+            store_snapshot: self.owned_store_snapshot(),
+            mutator_tx: self.owned_mutator_tx(),
+            wait_group: self.owned_wait_group(),
+            signed_preferences,
+            origin: ProposerPreferencesOrigin::Api(sender),
+        })
+    }
+
     pub fn on_notified_fork_choice_update(&self, payload_status: PayloadStatusV1) {
         MutatorMessage::NotifiedForkChoiceUpdate {
             wait_group: self.owned_wait_group(),
