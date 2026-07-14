@@ -704,7 +704,6 @@ where
     Ok(proof)
 }
 
-#[must_use]
 pub fn blob_serve_range_slot<P: Preset>(
     config: &Config,
     current_slot: Slot,
@@ -848,7 +847,6 @@ pub fn parse_graffiti(string: &str) -> Result<H256> {
     Ok(graffiti)
 }
 
-#[must_use]
 pub fn data_column_serve_range_slot<P: Preset>(
     config: &Config,
     current_slot: Slot,
@@ -862,6 +860,20 @@ pub fn data_column_serve_range_slot<P: Preset>(
     );
 
     compute_start_slot_at_epoch::<P>(epoch)
+}
+
+#[must_use]
+pub fn data_availability_serve_range_slot<P: Preset>(
+    config: &Config,
+    slot: Slot,
+    current_slot: Slot,
+    storage_mode: StorageMode,
+) -> Slot {
+    if config.phase_at_slot::<P>(slot).is_peerdas_activated() {
+        data_column_serve_range_slot::<P>(config, current_slot, storage_mode)
+    } else {
+        blob_serve_range_slot::<P>(config, current_slot, storage_mode)
+    }
 }
 
 pub fn compute_matrix_for_data_column_sidecar<P: Preset>(

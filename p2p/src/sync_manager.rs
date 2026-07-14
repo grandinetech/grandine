@@ -699,12 +699,6 @@ impl<P: Preset> SyncManager<P> {
         let slot_distance = remote_head_slot.saturating_sub(sync_start_slot);
         let batches_in_front = (slot_distance / slots_per_request).saturating_add(1);
 
-        let blob_serve_range_slot =
-            misc::blob_serve_range_slot::<P>(config, current_slot, self.storage_mode);
-
-        let data_column_serve_range_slot =
-            misc::data_column_serve_range_slot::<P>(config, current_slot, self.storage_mode);
-
         let mut max_slot = local_head_slot;
         let mut sync_batches = vec![];
         let mut batch_index: u64 = 0;
@@ -776,83 +770,91 @@ impl<P: Preset> SyncManager<P> {
                     });
                 }
 
-                if config.phase_at_slot::<P>(start_slot).is_peerdas_activated()
-                    && data_column_serve_range_slot < max_slot
-                {
-                    let missing_column_indices = self
-                        .missing_column_indices_by_range(sampling_columns, start_slot, count)
-                        .await;
-
-                    if missing_column_indices.is_empty() {
-                        self.log(
-                            Level::Debug,
-                            format_args!(
-                                "all columns for this batch {batch_index} have been received: \
-                                {sampling_columns:?}: {start_slot} + {count}",
-                            ),
-                        );
-
-                        sync_batches.push(block_batch);
-                        batch_index = batch_index.saturating_add(1);
-                        continue;
-                    }
-
-                    let peer_custody_columns_mapping = match self.map_peer_custody_columns(
-                        missing_column_indices,
+                let data_availability_serve_range_slot =
+                    misc::data_availability_serve_range_slot::<P>(
+                        config,
                         start_slot,
-                        &mut peers_to_sync,
-                    ) {
-                        Ok(mapping) => mapping,
-                        Err(error) => {
+                        current_slot,
+                        self.storage_mode,
+                    );
+
+                if data_availability_serve_range_slot < max_slot {
+                    if config.phase_at_slot::<P>(start_slot).is_peerdas_activated() {
+                        let missing_column_indices = self
+                            .missing_column_indices_by_range(sampling_columns, start_slot, count)
+                            .await;
+
+                        if missing_column_indices.is_empty() {
                             self.log(
                                 Level::Debug,
-                                format_args!("build_forward_sync_batches: {error:?}"),
+                                format_args!(
+                                    "all columns for this batch {batch_index} have been received: \
+                                {sampling_columns:?}: {start_slot} + {count}",
+                                ),
                             );
 
-                            // if no available peers to request for this batch, rollback the
-                            // `max_slot` to set the actual sync range.
-                            max_slot = start_slot.saturating_sub(1);
-
-                            break 'outer;
+                            sync_batches.push(block_batch);
+                            batch_index = batch_index.saturating_add(1);
+                            continue;
                         }
-                    };
 
-                    for (peer_id, columns) in peer_custody_columns_mapping {
-                        match ContiguousList::try_from_iter(columns) {
-                            Ok(columns) => {
-                                sync_batches.push(SyncBatch {
-                                    target: SyncTarget::DataColumnSidecar,
-                                    direction: SyncDirection::Forward,
-                                    peer_id,
-                                    start_slot,
-                                    count,
-                                    response_received: false,
-                                    retry_count: 0,
-                                    data_columns: Some(columns.into()),
-                                    is_delayed: false,
-                                });
+                        let peer_custody_columns_mapping = match self.map_peer_custody_columns(
+                            missing_column_indices,
+                            start_slot,
+                            &mut peers_to_sync,
+                        ) {
+                            Ok(mapping) => mapping,
+                            Err(error) => {
+                                self.log(
+                                    Level::Debug,
+                                    format_args!("build_forward_sync_batches: {error:?}"),
+                                );
+
+                                // if no available peers to request for this batch, rollback the
+                                // `max_slot` to set the actual sync range.
+                                max_slot = start_slot.saturating_sub(1);
+
+                                break 'outer;
                             }
-                            Err(error) => self.log(
-                                Level::Error,
-                                format_args!(
-                                    "failed to parse data_columns in SyncBatch, \
+                        };
+
+                        for (peer_id, columns) in peer_custody_columns_mapping {
+                            match ContiguousList::try_from_iter(columns) {
+                                Ok(columns) => {
+                                    sync_batches.push(SyncBatch {
+                                        target: SyncTarget::DataColumnSidecar,
+                                        direction: SyncDirection::Forward,
+                                        peer_id,
+                                        start_slot,
+                                        count,
+                                        response_received: false,
+                                        retry_count: 0,
+                                        data_columns: Some(columns.into()),
+                                        is_delayed: false,
+                                    });
+                                }
+                                Err(error) => self.log(
+                                    Level::Error,
+                                    format_args!(
+                                        "failed to parse data_columns in SyncBatch, \
                                     this should not happen {error:?}",
+                                    ),
                                 ),
-                            ),
+                            }
                         }
+                    } else {
+                        sync_batches.push(SyncBatch {
+                            target: SyncTarget::BlobSidecar,
+                            direction: SyncDirection::Forward,
+                            peer_id: block_peer_id,
+                            start_slot,
+                            count,
+                            response_received: false,
+                            retry_count: 0,
+                            data_columns: None,
+                            is_delayed: false,
+                        });
                     }
-                } else if blob_serve_range_slot < max_slot {
-                    sync_batches.push(SyncBatch {
-                        target: SyncTarget::BlobSidecar,
-                        direction: SyncDirection::Forward,
-                        peer_id: block_peer_id,
-                        start_slot,
-                        count,
-                        response_received: false,
-                        retry_count: 0,
-                        data_columns: None,
-                        is_delayed: false,
-                    });
                 }
 
                 sync_batches.push(block_batch);
