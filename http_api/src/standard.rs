@@ -90,6 +90,7 @@ use types::{
         containers::{
             ExecutionPayloadBid, PayloadAttestation, PayloadAttestationData,
             PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            SignedProposerPreferences,
         },
         primitives::BuilderIndex,
     },
@@ -108,7 +109,7 @@ use types::{
             UnixSeconds, ValidatorIndex, Version,
         },
     },
-    preset::{Preset, SyncSubcommitteeSize},
+    preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
         BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
         SignedBeaconBlock as _,
@@ -125,7 +126,8 @@ use crate::{
         APIBlock, BroadcastValidation, PayloadAttestationMessageListPhaseDeserializer,
         SignedAPIBlock, SignedAPIBlockPhaseDeserializer,
         SignedAggregateAndProofListFromPhaseDeserializer, SignedBlindedBeaconPhaseDeserializer,
-        SignedExecutionPayloadBidPhaseDeserializer, SingleApiAttestation,
+        SignedExecutionPayloadBidPhaseDeserializer,
+        SignedProposerPreferencesListFromPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
     response::{EthResponse, JsonOrSsz},
@@ -4056,6 +4058,56 @@ pub async fn validator_register_validator<P: Preset>(
                 .collect_vec(),
         ))
     }
+}
+
+/// `POST /eth/v1/validator/proposer_preferences`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_proposer_preferences"
+)]
+pub async fn validator_proposer_preferences<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    EthJsonOrSsz(preferences, _): EthJsonOrSsz<
+        ContiguousList<Arc<SignedProposerPreferences>, ProposerLookaheadLength<P>>,
+        SignedProposerPreferencesListFromPhaseDeserializer<P>,
+    >,
+) -> Result<(), Error> {
+    let (successes, failures): (Vec<_>, Vec<_>) = preferences
+        .into_iter()
+        .enumerate()
+        .map(|(index, signed_preferences)| {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+
+            controller.on_api_proposer_preferences(signed_preferences.clone_arc(), sender);
+
+            async move {
+                let run = async {
+                    let validation_outcome = receiver.await??;
+                    Ok((signed_preferences, validation_outcome))
+                };
+
+                run.await.map_err(|error| IndexedError { index, error })
+            }
+        })
+        .collect::<FuturesOrdered<_>>()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .partition_result();
+
+    for (signed_preferences, validation_outcome) in successes {
+        if validation_outcome == ValidationOutcome::Accept {
+            ApiToP2p::PublishProposerPreferences(signed_preferences).send(&api_to_p2p_tx);
+        }
+    }
+
+    if !failures.is_empty() {
+        return Err(Error::InvalidProposerPreferences(failures));
+    }
+
+    Ok(())
 }
 
 /// `POST /eth/v1/validator/liveness/{epoch}`

@@ -386,6 +386,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             self.publish_aggregate_and_proof(aggregate_and_proof);
                             true
                         }
+                        ApiToP2p::PublishProposerPreferences(signed_preferences) => {
+                            self.publish_proposer_preferences(signed_preferences);
+                            true
+                        }
                         ApiToP2p::PublishSingularAttestation(attestation, subnet_id) => {
                             self.publish_singular_attestation(attestation, subnet_id);
                             true
