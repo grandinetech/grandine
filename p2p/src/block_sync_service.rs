@@ -1150,19 +1150,13 @@ impl<P: Preset> BlockSyncService<P> {
                     return Ok(());
                 }
 
-                let data_availability_serve_range_slot = if is_peerdas_activated {
-                    misc::data_column_serve_range_slot::<P>(
+                let data_availability_serve_range_slot =
+                    misc::data_availability_serve_range_slot::<P>(
                         self.controller.chain_config(),
                         self.slot,
-                        self.storage_mode,
-                    )
-                } else {
-                    misc::blob_serve_range_slot::<P>(
-                        self.controller.chain_config(),
                         self.slot,
                         self.storage_mode,
-                    )
-                };
+                    );
 
                 if let Some(back_sync) = self
                     .back_sync
