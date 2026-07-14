@@ -946,20 +946,20 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn latest_execution_payload_bid(&self) -> &ExecutionPayloadBid<P>;
     fn execution_payload_availability(&self) -> BitVector<SlotsPerHistoricalRoot<P>>;
     fn builder_pending_payments(&self) -> &BuilderPendingPayments<P>;
-    fn builder_pending_withdrawals(&self) -> &BuilderPendingWithdrawals<P>;
+    fn builder_pending_withdrawals(&self) -> &BuilderPendingWithdrawals;
     fn latest_block_hash(&self) -> ExecutionBlockHash;
-    fn payload_expected_withdrawals(&self) -> &PayloadExpectedWithdrawals<P>;
-    fn builders(&self) -> &Builders<P>;
+    fn payload_expected_withdrawals(&self) -> &PayloadExpectedWithdrawals;
+    fn builders(&self) -> &Builders;
     fn next_withdrawal_builder_index(&self) -> BuilderIndex;
     fn ptc_window(&self) -> &PtcWindow<P>;
 
     fn latest_execution_payload_bid_mut(&mut self) -> &mut ExecutionPayloadBid<P>;
     fn execution_payload_availability_mut(&mut self) -> &mut BitVector<SlotsPerHistoricalRoot<P>>;
     fn builder_pending_payments_mut(&mut self) -> &mut BuilderPendingPayments<P>;
-    fn builder_pending_withdrawals_mut(&mut self) -> &mut BuilderPendingWithdrawals<P>;
+    fn builder_pending_withdrawals_mut(&mut self) -> &mut BuilderPendingWithdrawals;
     fn latest_block_hash_mut(&mut self) -> &mut ExecutionBlockHash;
-    fn payload_expected_withdrawals_mut(&mut self) -> &mut PayloadExpectedWithdrawals<P>;
-    fn builders_mut(&mut self) -> &mut Builders<P>;
+    fn payload_expected_withdrawals_mut(&mut self) -> &mut PayloadExpectedWithdrawals;
+    fn builders_mut(&mut self) -> &mut Builders;
     fn next_withdrawal_builder_index_mut(&mut self) -> &mut BuilderIndex;
     fn ptc_window_mut(&mut self) -> &mut PtcWindow<P>;
 }
@@ -998,9 +998,9 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         field                               return_type;
         [latest_execution_payload_bid]      [ExecutionPayloadBid<P>];
         [builder_pending_payments]          [BuilderPendingPayments<P>];
-        [builder_pending_withdrawals]       [BuilderPendingWithdrawals<P>];
-        [payload_expected_withdrawals]      [PayloadExpectedWithdrawals<P>];
-        [builders]                          [Builders<P>];
+        [builder_pending_withdrawals]       [BuilderPendingWithdrawals];
+        [payload_expected_withdrawals]      [PayloadExpectedWithdrawals];
+        [builders]                          [Builders];
         [ptc_window]                        [PtcWindow<P>];
     )]
     fn field(&self) -> &return_type {
@@ -1012,10 +1012,10 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
         [latest_execution_payload_bid]     [latest_execution_payload_bid_mut]     [ExecutionPayloadBid<P>];
         [execution_payload_availability]   [execution_payload_availability_mut]   [BitVector<SlotsPerHistoricalRoot<P>>];
         [builder_pending_payments]         [builder_pending_payments_mut]         [BuilderPendingPayments<P>];
-        [builder_pending_withdrawals]      [builder_pending_withdrawals_mut]      [BuilderPendingWithdrawals<P>];
+        [builder_pending_withdrawals]      [builder_pending_withdrawals_mut]      [BuilderPendingWithdrawals];
         [latest_block_hash]                [latest_block_hash_mut]                [ExecutionBlockHash];
-        [payload_expected_withdrawals]     [payload_expected_withdrawals_mut]     [PayloadExpectedWithdrawals<P>];
-        [builders]                         [builders_mut]                         [Builders<P>];
+        [payload_expected_withdrawals]     [payload_expected_withdrawals_mut]     [PayloadExpectedWithdrawals];
+        [builders]                         [builders_mut]                         [Builders];
         [next_withdrawal_builder_index]    [next_withdrawal_builder_index_mut]    [BuilderIndex];
         [ptc_window]                       [ptc_window_mut]                       [PtcWindow<P>];
     )]
@@ -1711,11 +1711,11 @@ impl<P: Preset> BlockBodyWithElectraAttestations<P> for implementor {
 }
 
 pub trait BlockBodyWithGloasAttestations<P: Preset>: BeaconBlockBody<P> {
-    fn attestations(&self) -> &ProgressiveList<GloasAttestation<P>, P::MaxAttestationsElectra>;
+    fn attestations(&self) -> &ProgressiveList<GloasAttestation<P>>;
 }
 
 impl<P: Preset> BlockBodyWithGloasAttestations<P> for GloasBeaconBlockBody<P> {
-    fn attestations(&self) -> &ProgressiveList<GloasAttestation<P>, P::MaxAttestationsElectra> {
+    fn attestations(&self) -> &ProgressiveList<GloasAttestation<P>> {
         &self.attestations
     }
 }
@@ -1742,15 +1742,11 @@ impl<P: Preset> BlockBodyWithElectraAttesterSlashings<P> for implementor {
 }
 
 pub trait BlockBodyWithGloasAttesterSlashings<P: Preset>: BeaconBlockBody<P> {
-    fn attester_slashings(
-        &self,
-    ) -> &ProgressiveList<GloasAttesterSlashing<P>, P::MaxAttesterSlashingsElectra>;
+    fn attester_slashings(&self) -> &ProgressiveList<GloasAttesterSlashing<P>>;
 }
 
 impl<P: Preset> BlockBodyWithGloasAttesterSlashings<P> for GloasBeaconBlockBody<P> {
-    fn attester_slashings(
-        &self,
-    ) -> &ProgressiveList<GloasAttesterSlashing<P>, P::MaxAttesterSlashingsElectra> {
+    fn attester_slashings(&self) -> &ProgressiveList<GloasAttesterSlashing<P>> {
         &self.attester_slashings
     }
 }
@@ -1795,15 +1791,11 @@ impl<P: Preset> BlockBodyWithPayloadBid<P> for GloasBeaconBlockBody<P> {
 }
 
 pub trait BlockBodyWithPayloadAttestations<P: Preset>: BeaconBlockBody<P> {
-    fn payload_attestations(
-        &self,
-    ) -> &ProgressiveList<PayloadAttestation<P>, P::MaxPayloadAttestation>;
+    fn payload_attestations(&self) -> &ProgressiveList<PayloadAttestation<P>>;
 }
 
 impl<P: Preset> BlockBodyWithPayloadAttestations<P> for GloasBeaconBlockBody<P> {
-    fn payload_attestations(
-        &self,
-    ) -> &ProgressiveList<PayloadAttestation<P>, P::MaxPayloadAttestation> {
+    fn payload_attestations(&self) -> &ProgressiveList<PayloadAttestation<P>> {
         &self.payload_attestations
     }
 }

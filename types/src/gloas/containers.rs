@@ -1,3 +1,4 @@
+use core::marker::PhantomData;
 use std::sync::Arc;
 
 use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
@@ -68,13 +69,16 @@ pub struct AttesterSlashing<P: Preset> {
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
-#[serde(deny_unknown_fields)]
+#[serde(bound = "", deny_unknown_fields)]
 #[ssz(stable(active = [1; 3]))]
 pub struct IndexedAttestation<P: Preset> {
     #[serde(with = "serde_utils::string_or_native_sequence")]
-    pub attesting_indices: ProgressiveList<ValidatorIndex, P::MaxAttestersPerSlot>,
+    pub attesting_indices: ProgressiveList<ValidatorIndex>,
     pub data: AttestationData,
     pub signature: AggregateSignatureBytes,
+    #[ssz(skip)]
+    #[serde(skip)]
+    pub phantom: PhantomData<P>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -96,16 +100,15 @@ pub struct BeaconBlockBody<P: Preset> {
     pub randao_reveal: SignatureBytes,
     pub eth1_data: Eth1Data,
     pub graffiti: H256,
-    pub proposer_slashings: ProgressiveList<ProposerSlashing, P::MaxProposerSlashings>,
-    pub attester_slashings: ProgressiveList<AttesterSlashing<P>, P::MaxAttesterSlashingsElectra>,
-    pub attestations: ProgressiveList<Attestation<P>, P::MaxAttestationsElectra>,
-    pub deposits: ProgressiveList<Deposit, P::MaxDeposits>,
-    pub voluntary_exits: ProgressiveList<SignedVoluntaryExit, P::MaxVoluntaryExits>,
+    pub proposer_slashings: ProgressiveList<ProposerSlashing>,
+    pub attester_slashings: ProgressiveList<AttesterSlashing<P>>,
+    pub attestations: ProgressiveList<Attestation<P>>,
+    pub deposits: ProgressiveList<Deposit>,
+    pub voluntary_exits: ProgressiveList<SignedVoluntaryExit>,
     pub sync_aggregate: SyncAggregate<P>,
-    pub bls_to_execution_changes:
-        ProgressiveList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
+    pub bls_to_execution_changes: ProgressiveList<SignedBlsToExecutionChange>,
     pub signed_execution_payload_bid: SignedExecutionPayloadBid<P>,
-    pub payload_attestations: ProgressiveList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
+    pub payload_attestations: ProgressiveList<PayloadAttestation<P>>,
     pub parent_execution_requests: ExecutionRequests<P>,
 }
 
@@ -175,8 +178,8 @@ pub struct BuilderPendingWithdrawal {
 pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub index: ColumnIndex,
-    pub column: ProgressiveList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
-    pub kzg_proofs: ProgressiveList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub column: ProgressiveList<Cell<P>>,
+    pub kzg_proofs: ProgressiveList<KzgProof>,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
     pub beacon_block_root: H256,
@@ -207,8 +210,8 @@ pub struct ExecutionPayload<P: Preset> {
     pub block_hash: ExecutionBlockHash,
     // TODO(Grandine Team): Consider removing the `Arc`. It can be removed with no loss of performance
     //                      at the cost of making `ExecutionPayloadV1` more complicated.
-    pub transactions: Arc<ProgressiveList<Transaction<P>, P::MaxTransactionsPerPayload>>,
-    pub withdrawals: ProgressiveList<Withdrawal, P::MaxWithdrawalsPerPayload>,
+    pub transactions: Arc<ProgressiveList<Transaction<P>>>,
+    pub withdrawals: ProgressiveList<Withdrawal>,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_gas_used: Gas,
     #[serde(with = "serde_utils::string_or_native")]
@@ -237,8 +240,11 @@ pub struct ExecutionPayloadBid<P: Preset> {
     pub value: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub execution_payment: Gwei,
-    pub blob_kzg_commitments: ProgressiveList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub blob_kzg_commitments: ProgressiveList<KzgCommitment>,
     pub execution_requests_root: H256,
+    #[ssz(skip)]
+    #[serde(skip)]
+    pub phantom: PhantomData<P>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
@@ -257,13 +263,14 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
 #[serde(bound = "", deny_unknown_fields)]
 #[ssz(stable(active = [1; 5]))]
 pub struct ExecutionRequests<P: Preset> {
-    pub deposits: ProgressiveList<DepositRequest, P::GloasDepositRequestsBound>,
-    pub withdrawals: ProgressiveList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    pub consolidations:
-        ProgressiveList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
-    pub builder_deposits:
-        ProgressiveList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
-    pub builder_exits: ProgressiveList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
+    pub deposits: ProgressiveList<DepositRequest>,
+    pub withdrawals: ProgressiveList<WithdrawalRequest>,
+    pub consolidations: ProgressiveList<ConsolidationRequest>,
+    pub builder_deposits: ProgressiveList<BuilderDepositRequest>,
+    pub builder_exits: ProgressiveList<BuilderExitRequest>,
+    #[ssz(skip)]
+    #[serde(skip)]
+    pub phantom: PhantomData<P>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]

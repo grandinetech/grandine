@@ -18,11 +18,10 @@ IGNORED_GLOBS = %w[
   tests/*/*/ssz_static/PartialDataColumnSidecar/*/*/*.{ssz_snappy,yaml}
   tests/*/heze/*/*/*/*/*.{ssz_snappy,yaml}
   tests/*/*/fast_confirmation/*/*/*/*.{ssz_snappy,yaml}
-  tests/general/phase0/ssz_generic/{compatible_unions,progressive_bitlist,progressive_containers,basic_progressive_list}/*/*/*.{ssz_snappy,yaml}
+  tests/general/phase0/ssz_generic/compatible_unions/*/*/*.{ssz_snappy,yaml}
   tests/general/phase0/ssz_generic/containers/{valid,invalid}/{ProgressiveBitsStruct,ProgressiveTestStruct}_*/*.{ssz_snappy,yaml}
   tests/general/deneb/kzg/compute_challenge/*/*/*.{ssz_snappy,yaml}
   tests/general/fulu/kzg/compute_verify_cell_kzg_proof_batch_challenge/*/*/*.{ssz_snappy,yaml}
-  tests/general/fulu/ssz_generic/progressive_containers/*/*/*.{ssz_snappy,yaml}
   tests/*/*/networking/*/pyspec_tests/*/*.{ssz_snappy,yaml}
 ].map! { |glob| File.join(DIRECTORY, glob) }
 

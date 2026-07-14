@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use ssz::{ProgressiveList, SszList as _, SszListMut as _};
@@ -39,6 +41,7 @@ pub fn get_indexed_attestation<P: Preset>(
         attesting_indices,
         data: attestation.data,
         signature: attestation.signature,
+        phantom: PhantomData,
     })
 }
 
