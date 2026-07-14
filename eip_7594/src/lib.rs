@@ -146,7 +146,7 @@ pub fn compute_subnets_for_node<P: Preset>(
 pub fn verify_data_column_sidecar<P: Preset>(
     config: &Config,
     data_column_sidecar: &Arc<DataColumnSidecar<P>>,
-    kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    kzg_commitments: &[KzgCommitment],
 ) -> bool {
     // The sidecar index must be within the valid range
     if data_column_sidecar.index() >= P::NumberOfColumns::U64 {
@@ -181,7 +181,7 @@ pub fn verify_data_column_sidecar<P: Preset>(
 #[instrument(level = "debug", skip_all)]
 pub fn verify_kzg_proofs<P: Preset>(
     data_column_sidecar: &Arc<DataColumnSidecar<P>>,
-    kzg_commitments: &ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    kzg_commitments: &[KzgCommitment],
     backend: KzgBackend,
     metrics: Option<&Arc<Metrics>>,
 ) -> Result<bool> {

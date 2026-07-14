@@ -138,6 +138,17 @@ fn validate_indexed_attestation<P: Preset>(
         Error::AttestationHasNoAttestingIndices
     );
 
+    let attesting_indices_count = indexed_attestation.attesting_indices().count();
+    let max_attesting_indices_count = P::MaxAttestersPerSlot::USIZE;
+
+    ensure!(
+        attesting_indices_count <= max_attesting_indices_count,
+        Error::TooManyAttestingIndices {
+            attesting_indices_count,
+            max_attesting_indices_count,
+        }
+    );
+
     if validate_indices_sorted_and_unique {
         // > Verify indices are sorted and unique
         ensure!(

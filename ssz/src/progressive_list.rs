@@ -8,10 +8,11 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
 use crate::{
-    ContiguousList, MerkleElements, ReadError, Size, SszHash, SszList, SszRead, SszSize, SszWrite,
-    WriteError,
+    ContiguousList, ReadError, Size, SszHash, SszList, SszRead, SszSize, SszWrite, WriteError,
     merkle_tree::{self, ProgressiveMerkleTree},
 };
+
+type PrettyBigU = typenum::U1048576;
 
 // TODO(gloas): in spec, ProgressiveList is unbounded container, and its limits
 // are enforced in user-site. This would require careful refactoring, so for
@@ -25,48 +26,47 @@ use crate::{
     Default(bound = ""),
     Debug(bound = "T: Debug", transparent = "true")
 )]
-pub struct ProgressiveList<T, N>(ContiguousList<T, N>);
+pub struct ProgressiveList<T>(ContiguousList<T, PrettyBigU>);
 
-impl<T, N> ProgressiveList<T, N> {
+impl<T> ProgressiveList<T> {
     #[must_use]
     pub fn full(element: T) -> Self
     where
         T: Clone,
-        N: Unsigned,
     {
         Self(ContiguousList::full(element))
     }
 
     #[must_use]
-    pub fn map<U>(self, function: impl FnMut(T) -> U) -> ProgressiveList<U, N> {
+    pub fn map<U>(self, function: impl FnMut(T) -> U) -> ProgressiveList<U> {
         ProgressiveList(self.0.map(function))
     }
 
     #[must_use]
-    pub fn into_inner(self) -> ContiguousList<T, N> {
+    pub fn into_inner(self) -> ContiguousList<T, PrettyBigU> {
         self.0
     }
 }
 
-impl<T, N> From<ContiguousList<T, N>> for ProgressiveList<T, N> {
+impl<T, N: Unsigned> From<ContiguousList<T, N>> for ProgressiveList<T> {
     fn from(list: ContiguousList<T, N>) -> Self {
-        Self(list)
+        Self(ContiguousList::try_from_iter(list).expect("list should fit in ProgressiveList"))
     }
 }
 
-impl<T, N> From<ProgressiveList<T, N>> for ContiguousList<T, N> {
-    fn from(list: ProgressiveList<T, N>) -> Self {
-        list.0
+impl<T, N: Unsigned> From<ProgressiveList<T>> for ContiguousList<T, N> {
+    fn from(list: ProgressiveList<T>) -> Self {
+        Self::try_from_iter(list).expect("list should fit in target ContiguousList")
     }
 }
 
-impl<T, N> AsRef<[T]> for ProgressiveList<T, N> {
+impl<T> AsRef<[T]> for ProgressiveList<T> {
     fn as_ref(&self) -> &[T] {
         self.0.as_ref()
     }
 }
 
-impl<T, N: Unsigned> TryFrom<Vec<T>> for ProgressiveList<T, N> {
+impl<T> TryFrom<Vec<T>> for ProgressiveList<T> {
     type Error = ReadError;
 
     fn try_from(vec: Vec<T>) -> Result<Self, Self::Error> {
@@ -74,7 +74,7 @@ impl<T, N: Unsigned> TryFrom<Vec<T>> for ProgressiveList<T, N> {
     }
 }
 
-impl<T, N: Unsigned, const SIZE: usize> TryFrom<[T; SIZE]> for ProgressiveList<T, N> {
+impl<T, const SIZE: usize> TryFrom<[T; SIZE]> for ProgressiveList<T> {
     type Error = ReadError;
 
     fn try_from(array: [T; SIZE]) -> Result<Self, Self::Error> {
@@ -82,25 +82,25 @@ impl<T, N: Unsigned, const SIZE: usize> TryFrom<[T; SIZE]> for ProgressiveList<T
     }
 }
 
-impl<T, N> IntoIterator for ProgressiveList<T, N> {
+impl<T> IntoIterator for ProgressiveList<T> {
     type Item = T;
-    type IntoIter = <ContiguousList<T, N> as IntoIterator>::IntoIter;
+    type IntoIter = <ContiguousList<T, PrettyBigU> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl<'list, T, N> IntoIterator for &'list ProgressiveList<T, N> {
+impl<'list, T> IntoIterator for &'list ProgressiveList<T> {
     type Item = &'list T;
-    type IntoIter = <&'list ContiguousList<T, N> as IntoIterator>::IntoIter;
+    type IntoIter = <&'list ContiguousList<T, PrettyBigU> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         (&self.0).into_iter()
     }
 }
 
-impl<T, N: Unsigned> TryFromIterator<T> for ProgressiveList<T, N> {
+impl<T> TryFromIterator<T> for ProgressiveList<T> {
     type Error = ReadError;
 
     fn try_from_iter(elements: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
@@ -108,38 +108,37 @@ impl<T, N: Unsigned> TryFromIterator<T> for ProgressiveList<T, N> {
     }
 }
 
-impl<T: Serialize, N> Serialize for ProgressiveList<T, N> {
+impl<T: Serialize> Serialize for ProgressiveList<T> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.0.serialize(serializer)
     }
 }
 
-impl<'de, T: Deserialize<'de>, N: Unsigned> Deserialize<'de> for ProgressiveList<T, N> {
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ProgressiveList<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         ContiguousList::deserialize(deserializer).map(Self)
     }
 }
 
-impl<T: SszSize, N> SszSize for ProgressiveList<T, N> {
+impl<T: SszSize> SszSize for ProgressiveList<T> {
     const SIZE: Size = Size::Variable { minimum_size: 0 };
 }
 
-impl<C, T: SszRead<C>, N: Unsigned> SszRead<C> for ProgressiveList<T, N> {
+impl<C, T: SszRead<C>> SszRead<C> for ProgressiveList<T> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         ContiguousList::from_ssz_unchecked(context, bytes).map(Self)
     }
 }
 
-impl<T: SszWrite, N> SszWrite for ProgressiveList<T, N> {
+impl<T: SszWrite> SszWrite for ProgressiveList<T> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         self.0.write_variable(bytes)
     }
 }
 
-impl<T, N> SszHash for ProgressiveList<T, N>
+impl<T> SszHash for ProgressiveList<T>
 where
     T: SszHash + SszWrite + Send + Sync + Debug,
-    N: MerkleElements<T> + Send + Sync,
 {
     type PackingFactor = U1;
 
@@ -154,25 +153,31 @@ where
     }
 }
 
-impl<T, N> SszList<T> for ProgressiveList<T, N>
+impl<T> SszList<T> for ProgressiveList<T>
 where
     T: SszHash + SszWrite + Send + Sync + Debug,
-    N: MerkleElements<T> + Send + Sync,
 {
     fn len_usize(&self) -> usize {
-        self.0.len_usize()
+        self.0.as_ref().len()
     }
 
     fn len_u64(&self) -> u64 {
-        self.0.len_u64()
+        u64::try_from(self.0.as_ref().len()).expect("list length fits in u64")
     }
 
     fn get(&self, index: u64) -> Result<&T, crate::IndexError> {
-        self.0.get(index)
+        let index =
+            usize::try_from(index).map_err(|_| crate::IndexError::DoesNotFitInUsize { index })?;
+        let length = self.0.as_ref().len();
+
+        self.0
+            .as_ref()
+            .get(index)
+            .ok_or(crate::IndexError::OutOfBounds { length, index })
     }
 
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a> {
-        self.0.iter()
+        Box::new(self.0.as_ref().iter())
     }
 
     fn clone_boxed(&self) -> Box<dyn SszList<T>>

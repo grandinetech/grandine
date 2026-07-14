@@ -258,7 +258,7 @@ pub enum Error<P: Preset> {
     )]
     ExecutionPayloadWithdrawalsHashMismatch {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
-        expected: Box<PayloadExpectedWithdrawals<P>>,
+        expected: Box<PayloadExpectedWithdrawals>,
     },
     #[error("proposer preferences has invalid proposal slot: {signed_preferences:?}")]
     InvalidProposerPreferencesProposalSlot {

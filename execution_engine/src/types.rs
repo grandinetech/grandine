@@ -1301,6 +1301,7 @@ impl<P: Preset> TryFrom<GloasExecutionRequests<P>> for RawExecutionRequests<P> {
             consolidations,
             builder_deposits,
             builder_exits,
+            phantom: _,
         } = execution_requests;
 
         Ok(Self(
@@ -1329,6 +1330,7 @@ impl<P: Preset> From<RawExecutionRequests<P>> for GloasExecutionRequests<P> {
             consolidations: consolidations.into(),
             builder_deposits: builder_deposits.into(),
             builder_exits: builder_exits.into(),
+            phantom: PhantomData,
         }
     }
 }
