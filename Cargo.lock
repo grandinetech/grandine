@@ -5702,7 +5702,6 @@ dependencies = [
  "deposit_tree",
  "helper_functions",
  "interop",
- "itertools 0.14.0",
  "pubkey_cache",
  "ssz",
  "std_ext",

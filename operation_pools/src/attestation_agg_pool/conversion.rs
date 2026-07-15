@@ -69,6 +69,29 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
                 signature,
             }
         }
+        Attestation::Gloas(attestation) => {
+            let ElectraAttestation {
+                aggregation_bits,
+                data,
+                committee_bits,
+                signature,
+            } = ElectraAttestation::from(attestation);
+
+            let aggregation_bits: Vec<u8> = aggregation_bits.into();
+
+            let index = misc::get_committee_indices::<P>(committee_bits)
+                .next()
+                .ok_or(AttestationConversionError::InvalidCommitteeIndex)?;
+
+            PoolAttestation {
+                aggregation_bits: aggregation_bits
+                    .try_into()
+                    .map_err(AttestationConversionError::InvalidAggregationBits)?,
+                data,
+                committee_index: index,
+                signature,
+            }
+        }
         Attestation::Single(attestation) => {
             let committee_index = attestation.committee_index;
             let data = attestation.data;

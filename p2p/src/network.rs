@@ -894,6 +894,34 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     })
                     .detach();
             }
+            Attestation::Gloas(gloas_attestation) => {
+                let network_to_service_tx = self.network_to_service_tx.clone();
+                let controller = self.controller.clone_arc();
+
+                self.dedicated_executor
+                    .spawn(async move {
+                        let single_attestation = match operation_pools::try_convert_to_single_attestation(
+                            &controller,
+                            gloas_attestation.into(),
+                        ) {
+                            Ok(single_attestation) => single_attestation,
+                            Err(error) => {
+                                warn_with_peers!(
+                                    "cannot convert gloas attestation to single attestation: {error:?}",
+                                );
+                                return;
+                            }
+                        };
+
+                        let message = PubsubMessage::SingleAttestation(
+                            subnet_id,
+                            single_attestation,
+                        );
+
+                        ServiceInboundMessage::Publish(message).send(&network_to_service_tx);
+                    })
+                    .detach();
+            }
             Attestation::Single(single_attestation) => {
                 self.publish(PubsubMessage::SingleAttestation(
                     subnet_id,

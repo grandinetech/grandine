@@ -151,7 +151,9 @@ impl<P: Preset> Slasher<P> {
         let attestation = match attestation {
             Attestation::Phase0(attestation) => attestation,
             // TODO:
-            Attestation::Electra(_) | Attestation::Single(_) => return Ok(()),
+            Attestation::Electra(_) | Attestation::Gloas(_) | Attestation::Single(_) => {
+                return Ok(());
+            }
         };
 
         let target = attestation.data.target;

@@ -35,8 +35,9 @@ use types::{
             DOMAIN_PTC_ATTESTER,
         },
         containers::{
-            BeaconBlock as GloasBeaconBlock, BuilderDepositMessage, ExecutionPayloadBid,
-            ExecutionPayloadEnvelope, PayloadAttestationData, ProposerPreferences,
+            AggregateAndProof as GloasAggregateAndProof, BeaconBlock as GloasBeaconBlock,
+            BuilderDepositMessage, ExecutionPayloadBid, ExecutionPayloadEnvelope,
+            PayloadAttestationData, ProposerPreferences,
         },
     },
     phase0::{
@@ -238,6 +239,15 @@ impl<P: Preset> SignForSingleFork<P> for Phase0AggregateAndProof<P> {
 
 /// <https://github.com/ethereum/consensus-specs/blob/99934ee16c7e990c8c39bc66e1aa58845057faa01/specs/phase0/validator.md#broadcast-aggregate>
 impl<P: Preset> SignForSingleFork<P> for ElectraAggregateAndProof<P> {
+    const DOMAIN_TYPE: DomainType = DOMAIN_AGGREGATE_AND_PROOF;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::AggregateAndProof;
+
+    fn epoch(&self) -> Epoch {
+        misc::compute_epoch_at_slot::<P>(self.aggregate.data.slot)
+    }
+}
+
+impl<P: Preset> SignForSingleFork<P> for GloasAggregateAndProof<P> {
     const DOMAIN_TYPE: DomainType = DOMAIN_AGGREGATE_AND_PROOF;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::AggregateAndProof;
 

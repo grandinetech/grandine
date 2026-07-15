@@ -12,7 +12,6 @@ bls = { workspace = true }
 deposit_tree = { workspace = true }
 helper_functions = { workspace = true }
 interop = { workspace = true }
-itertools = { workspace = true }
 pubkey_cache = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
