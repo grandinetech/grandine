@@ -3161,8 +3161,11 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
 
     let attestation = if phase < Phase::Electra {
         Attestation::Phase0(attestation.into_phase0_attestation())
-    } else {
+    } else if phase < Phase::Gloas {
         operation_pools::convert_to_electra_attestation(attestation).map(Attestation::Electra)?
+    } else {
+        operation_pools::convert_to_electra_attestation(attestation)
+            .map(|electra| Attestation::Gloas(electra.into()))?
     };
 
     Ok(EthResponse::json(attestation))
@@ -3210,8 +3213,11 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
 
     let attestation = if phase < Phase::Electra {
         Attestation::Phase0(attestation.into_phase0_attestation())
-    } else {
+    } else if phase < Phase::Gloas {
         operation_pools::convert_to_electra_attestation(attestation).map(Attestation::Electra)?
+    } else {
+        operation_pools::convert_to_electra_attestation(attestation)
+            .map(|electra| Attestation::Gloas(electra.into()))?
     };
 
     Ok(EthResponse::json_or_ssz(attestation, &headers)?.version(phase))
@@ -4676,9 +4682,13 @@ async fn get_pool_attestations<P: Preset, W: Wait>(
         .filter_map(|attestation| {
             if phase < Phase::Electra {
                 Some(Attestation::Phase0(attestation.into_phase0_attestation()))
-            } else {
+            } else if phase < Phase::Gloas {
                 operation_pools::convert_to_electra_attestation(attestation)
                     .map(Attestation::Electra)
+                    .ok()
+            } else {
+                operation_pools::convert_to_electra_attestation(attestation)
+                    .map(|electra| Attestation::Gloas(electra.into()))
                     .ok()
             }
         })

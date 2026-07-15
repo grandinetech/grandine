@@ -20,7 +20,7 @@ use futures::{
 use helper_functions::{
     accessors, electra,
     error::SignatureKind,
-    phase0, predicates,
+    gloas, phase0, predicates,
     signing::SignForSingleFork,
     verifier::{MultiVerifier, Triple, Verifier},
 };
@@ -631,6 +631,21 @@ fn attestation_batch_triples<'a, P: Preset>(
                 }
                 Attestation::Electra(attestation) => {
                     let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    let mut triple = Triple::default();
+
+                    predicates::validate_constructed_indexed_attestation(
+                        config,
+                        pubkey_cache,
+                        state,
+                        &indexed_attestation,
+                        &mut triple,
+                    )?;
+
+                    triple
+                }
+                Attestation::Gloas(attestation) => {
+                    let indexed_attestation = gloas::get_indexed_attestation(state, attestation)?;
 
                     let mut triple = Triple::default();
 

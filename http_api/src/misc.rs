@@ -46,8 +46,8 @@ use types::{
         SignedBlindedBeaconBlock as FuluSignedBlindedBeaconBlock,
     },
     gloas::containers::{
-        PayloadAttestationMessage, SignedBeaconBlock as GloasSignedBeaconBlock,
-        SignedExecutionPayloadBid,
+        PayloadAttestationMessage, SignedAggregateAndProof as GloasSignedAggregateAndProof,
+        SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
     },
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
@@ -272,14 +272,18 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPha
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
-                Phase::Electra | Phase::Fulu | Phase::Gloas => {
-                    ContiguousList::<
-                        ElectraSignedAggregateAndProof<P>,
-                        TargetAggregatorsPerCommittee,
-                    >::deserialize(deserializer)?
-                    .map(Into::into)
-                    .map(Arc::new)
-                }
+                Phase::Electra | Phase::Fulu => ContiguousList::<
+                    ElectraSignedAggregateAndProof<P>,
+                    TargetAggregatorsPerCommittee,
+                >::deserialize(deserializer)?
+                .map(Into::into)
+                .map(Arc::new),
+                Phase::Gloas => ContiguousList::<
+                    GloasSignedAggregateAndProof<P>,
+                    TargetAggregatorsPerCommittee,
+                >::deserialize(deserializer)?
+                .map(Into::into)
+                .map(Arc::new),
             };
 
         Ok(result)

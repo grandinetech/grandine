@@ -83,8 +83,10 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
-            ProposerPreferences, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+            AggregateAndProof as GloasAggregateAndProof, ExecutionPayloadEnvelope,
+            PayloadAttestationData, PayloadAttestationMessage, ProposerPreferences,
+            SignedAggregateAndProof as GloasSignedAggregateAndProof,
+            SignedExecutionPayloadEnvelope, SignedProposerPreferences,
         },
     },
     nonstandard::{
@@ -1584,13 +1586,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     aggregate: aggregate.clone().into_phase0_attestation(),
                                     selection_proof,
                                 })
-                            } else {
+                            } else if phase < Phase::Gloas {
                                 let aggregate = operation_pools::convert_to_electra_attestation(
                                     aggregate.clone(),
                                 )
                                 .ok()?;
 
                                 AggregateAndProof::from(ElectraAggregateAndProof {
+                                    aggregator_index,
+                                    aggregate,
+                                    selection_proof,
+                                })
+                            } else {
+                                let aggregate = operation_pools::convert_to_electra_attestation(
+                                    aggregate.clone(),
+                                )
+                                .ok()?
+                                .into();
+
+                                AggregateAndProof::from(GloasAggregateAndProof {
                                     aggregator_index,
                                     aggregate,
                                     selection_proof,
@@ -1647,6 +1661,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     AggregateAndProof::Electra(message) => {
                         SignedAggregateAndProof::from(ElectraSignedAggregateAndProof {
+                            message,
+                            signature: signature.into(),
+                        })
+                    }
+                    AggregateAndProof::Gloas(message) => {
+                        SignedAggregateAndProof::from(GloasSignedAggregateAndProof {
                             message,
                             signature: signature.into(),
                         })

@@ -24,7 +24,7 @@ use hash_hasher::HashedMap;
 use helper_functions::{
     accessors, electra,
     error::SignatureKind,
-    misc, phase0, predicates,
+    gloas, misc, phase0, predicates,
     signing::SignForSingleFork as _,
     slot_report::NullSlotReport,
     verifier::{NullVerifier, SingleVerifier, Verifier},
@@ -35,7 +35,7 @@ use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_pee
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
-use ssz::{BitVector, ContiguousList, SszHash as _, SszList};
+use ssz::{BitVector, ContiguousList, ProgressiveList, SszHash as _, SszList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tracing::{debug_span, instrument};
@@ -46,8 +46,8 @@ use transition_functions::{
 use typenum::Unsigned as _;
 use types::{
     combined::{
-        Attestation, AttesterSlashing, AttestingIndices, BeaconState, DataColumnSidecar,
-        ExecutionPayloadParams, SignedAggregateAndProof, SignedBeaconBlock,
+        Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, ExecutionPayloadParams,
+        SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -256,7 +256,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     //
     // Attestations cannot affect fork choice until their slots have passed.
     // This field is used to store them in the meantime.
-    current_slot_attestations: Vector<ValidAttestation<P>>,
+    current_slot_attestations: Vector<ValidAttestation>,
     execution_payload_locations: HashMap<ExecutionBlockHash, Location>,
     aggregate_and_proof_supersets: Arc<AggregateAndProofSupersets<P>>,
     accepted_blob_sidecars:
@@ -2585,7 +2585,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if attestation.origin.must_be_singular()
             && let Attestation::Phase0(_) = attestation.item.as_ref()
-            && let Some(&validator_index) = attesting_indices.into_iter().next()
+            && let Some(&validator_index) = attesting_indices.iter().next()
             && self.is_gossip_attester_known(validator_index, target.epoch)
         {
             return Ok(AttestationAction::Ignore(attestation));
@@ -2789,7 +2789,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         target_state: &BeaconState<P>,
         attestation: &Attestation<P>,
         validate_indexed: bool,
-    ) -> Result<AttestingIndices<P>> {
+    ) -> Result<ProgressiveList<ValidatorIndex>> {
         match attestation {
             Attestation::Phase0(attestation) => {
                 let indexed_attestation =
@@ -2805,9 +2805,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     )?;
                 }
 
-                Ok(AttestingIndices::Phase0(
-                    indexed_attestation.attesting_indices,
-                ))
+                Ok(indexed_attestation.attesting_indices.into())
             }
             Attestation::Electra(attestation) => {
                 let indexed_attestation =
@@ -2823,9 +2821,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     )?;
                 }
 
-                Ok(AttestingIndices::Electra(
-                    indexed_attestation.attesting_indices,
-                ))
+                Ok(indexed_attestation.attesting_indices.into())
+            }
+            Attestation::Gloas(attestation) => {
+                let indexed_attestation =
+                    gloas::get_indexed_attestation(target_state, attestation)?;
+
+                if validate_indexed {
+                    predicates::validate_constructed_indexed_attestation(
+                        &self.chain_config,
+                        &self.pubkey_cache,
+                        target_state,
+                        &indexed_attestation,
+                        SingleVerifier,
+                    )?;
+                }
+
+                Ok(indexed_attestation.attesting_indices)
             }
             Attestation::Single(attestation) => {
                 let indexed_attestation: ElectraIndexedAttestation<P> =
@@ -2841,9 +2853,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     )?;
                 }
 
-                Ok(AttestingIndices::Electra(
-                    indexed_attestation.attesting_indices,
-                ))
+                Ok(indexed_attestation.attesting_indices.into())
             }
         }
     }
@@ -4196,7 +4206,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// [`on_attestation`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#on_attestation
     pub fn apply_attestation(
         &mut self,
-        valid_attestation: ValidAttestation<P>,
+        valid_attestation: ValidAttestation,
     ) -> Result<Option<ChainLink<P>>> {
         self.apply_attestation_batch(core::iter::once(valid_attestation))
     }
@@ -4206,7 +4216,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // forks non-viable.
     pub fn apply_attestation_batch(
         &mut self,
-        valid_attestations: impl IntoIterator<Item = ValidAttestation<P>>,
+        valid_attestations: impl IntoIterator<Item = ValidAttestation>,
     ) -> Result<Option<ChainLink<P>>> {
         let differences = self.attestation_balance_differences(valid_attestations)?;
 
@@ -4971,7 +4981,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// [`update_latest_messages`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#update_latest_messages
     fn attestation_balance_differences(
         &mut self,
-        valid_attestations: impl IntoIterator<Item = ValidAttestation<P>>,
+        valid_attestations: impl IntoIterator<Item = ValidAttestation>,
     ) -> Result<HashedMap<H256, Differences>> {
         let mut differences = Self::difference_map();
 

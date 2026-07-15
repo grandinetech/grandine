@@ -17,7 +17,6 @@ use helper_functions::{
     signing::{RandaoEpoch, SignForSingleFork as _, SignForSingleForkAtSlot as _},
     slot_report::NullSlotReport,
 };
-use itertools::{Either, Itertools as _};
 use pubkey_cache::PubkeyCache;
 use ssz::{BitList, BitVector, ContiguousList, Hc, ProgressiveList, SszHash as _};
 use std_ext::ArcExt as _;
@@ -49,9 +48,8 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            Attestation as GloasAttestation, BeaconBlock as GloasBeaconBlock,
-            BeaconBlockBody as GloasBeaconBlockBody, ExecutionPayloadBid, ExecutionRequests,
-            SignedExecutionPayloadBid,
+            BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
+            ExecutionPayloadBid, ExecutionRequests, SignedExecutionPayloadBid,
         },
     },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
@@ -477,15 +475,20 @@ fn block<P: Preset>(
         .sign(config, &advanced_state, &secret_key)
         .into();
 
-    let (phase0_attestations, electra_attestations): (Vec<_>, Vec<_>) = attestations
-        .into_iter()
-        .partition_map(|attestation| match attestation {
-            Attestation::Phase0(attestation) => Either::Left(attestation),
-            Attestation::Electra(attestation) => Either::Right(attestation),
+    let mut phase0_attestations = vec![];
+    let mut electra_attestations = vec![];
+    let mut gloas_attestations = vec![];
+
+    for attestation in attestations {
+        match attestation {
+            Attestation::Phase0(attestation) => phase0_attestations.push(attestation),
+            Attestation::Electra(attestation) => electra_attestations.push(attestation),
+            Attestation::Gloas(attestation) => gloas_attestations.push(attestation),
             Attestation::Single(_) => {
                 unreachable!("block should not contain SingleAttestation type attestations")
             }
-        });
+        }
+    }
 
     ensure!(
         phase0_attestations.is_empty() || advanced_state.phase() < Phase::Electra,
@@ -494,6 +497,10 @@ fn block<P: Preset>(
     ensure!(
         electra_attestations.is_empty() || advanced_state.phase() >= Phase::Electra,
         "pre-Electra block cannot contain Electra attestations",
+    );
+    ensure!(
+        gloas_attestations.is_empty() || advanced_state.phase() >= Phase::Gloas,
+        "pre-Gloas block cannot contain Gloas attestations",
     );
 
     // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
@@ -628,11 +635,7 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations: electra_attestations
-                    .into_iter()
-                    .map(GloasAttestation::from)
-                    .collect::<Vec<_>>()
-                    .try_into()?,
+                attestations: gloas_attestations.try_into()?,
                 deposits: deposits.into(),
                 sync_aggregate,
                 ..GloasBeaconBlockBody::default()

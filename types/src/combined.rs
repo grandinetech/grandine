@@ -98,14 +98,15 @@ use crate::{
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
         containers::{
-            Attestation as GloasAttestation, AttesterSlashing as GloasAttesterSlashing,
-            BeaconBlock as GloasBeaconBlock, DataColumnSidecar as GloasDataColumnSidecar,
-            ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
-            ExecutionRequests as GloasExecutionRequests,
+            AggregateAndProof as GloasAggregateAndProof, Attestation as GloasAttestation,
+            AttesterSlashing as GloasAttesterSlashing, BeaconBlock as GloasBeaconBlock,
+            DataColumnSidecar as GloasDataColumnSidecar, ExecutionPayload as GloasExecutionPayload,
+            ExecutionPayloadBid, ExecutionRequests as GloasExecutionRequests,
             LightClientBootstrap as GloasLightClientBootstrap,
             LightClientFinalityUpdate as GloasLightClientFinalityUpdate,
             LightClientOptimisticUpdate as GloasLightClientOptimisticUpdate,
             LightClientUpdate as GloasLightClientUpdate,
+            SignedAggregateAndProof as GloasSignedAggregateAndProof,
             SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         },
     },
@@ -1973,6 +1974,7 @@ impl<P: Preset> LightClientUpdate<P> {
 pub enum AggregateAndProof<P: Preset> {
     Phase0(Phase0AggregateAndProof<P>),
     Electra(ElectraAggregateAndProof<P>),
+    Gloas(GloasAggregateAndProof<P>),
 }
 
 impl<P: Preset> AggregateAndProof<P> {
@@ -1980,6 +1982,7 @@ impl<P: Preset> AggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.aggregator_index,
         }
     }
 
@@ -1987,6 +1990,7 @@ impl<P: Preset> AggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.selection_proof,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.selection_proof,
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.selection_proof,
         }
     }
 
@@ -1994,6 +1998,7 @@ impl<P: Preset> AggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.aggregate.data.slot,
         }
     }
 
@@ -2002,6 +2007,7 @@ impl<P: Preset> AggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.aggregate.clone().into(),
         }
     }
 }
@@ -2013,6 +2019,7 @@ impl<P: Preset> SszHash for AggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.hash_tree_root(),
         }
     }
 }
@@ -2022,14 +2029,16 @@ impl<P: Preset> SszHash for AggregateAndProof<P> {
 pub enum SignedAggregateAndProof<P: Preset> {
     Phase0(Phase0SignedAggregateAndProof<P>),
     Electra(ElectraSignedAggregateAndProof<P>),
+    Gloas(GloasSignedAggregateAndProof<P>),
 }
 
 impl<P: Preset> SszSize for SignedAggregateAndProof<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0SignedAggregateAndProof::<P>::SIZE,
         ElectraSignedAggregateAndProof::<P>::SIZE,
+        GloasSignedAggregateAndProof::<P>::SIZE,
     ]);
 }
 
@@ -2039,9 +2048,8 @@ impl<P: Preset> SszRead<Phase> for SignedAggregateAndProof<P> {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
             }
-            Phase::Electra | Phase::Fulu | Phase::Gloas => {
-                Self::Electra(SszReadDefault::from_ssz_default(bytes)?)
-            }
+            Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         Ok(signed_aggregate_and_proof)
@@ -2057,6 +2065,9 @@ impl<P: Preset> SszWrite for SignedAggregateAndProof<P> {
             Self::Electra(signed_aggregate_and_proof) => {
                 signed_aggregate_and_proof.write_variable(bytes)
             }
+            Self::Gloas(signed_aggregate_and_proof) => {
+                signed_aggregate_and_proof.write_variable(bytes)
+            }
         }
     }
 }
@@ -2066,6 +2077,7 @@ impl<P: Preset> SignedAggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.message.aggregator_index,
         }
     }
 
@@ -2073,6 +2085,7 @@ impl<P: Preset> SignedAggregateAndProof<P> {
         match self {
             Self::Phase0(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
             Self::Electra(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
+            Self::Gloas(signed_aggregate_and_proof) => signed_aggregate_and_proof.signature,
         }
     }
 
@@ -2080,6 +2093,7 @@ impl<P: Preset> SignedAggregateAndProof<P> {
         match self {
             Self::Phase0(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
             Self::Electra(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
+            Self::Gloas(aggregate_and_proof) => aggregate_and_proof.message.aggregate.data.slot,
         }
     }
 
@@ -2089,6 +2103,9 @@ impl<P: Preset> SignedAggregateAndProof<P> {
                 Attestation::from(aggregate_and_proof.message.aggregate.clone())
             }
             Self::Electra(aggregate_and_proof) => {
+                Attestation::from(aggregate_and_proof.message.aggregate.clone())
+            }
+            Self::Gloas(aggregate_and_proof) => {
                 Attestation::from(aggregate_and_proof.message.aggregate.clone())
             }
         }
@@ -2103,25 +2120,9 @@ impl<P: Preset> SignedAggregateAndProof<P> {
             Self::Electra(signed_aggregate_and_proof) => {
                 AggregateAndProof::Electra(signed_aggregate_and_proof.message.clone())
             }
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
-#[serde(bound = "", untagged)]
-pub enum AttestingIndices<P: Preset> {
-    Phase0(ContiguousList<ValidatorIndex, P::MaxValidatorsPerCommittee>),
-    Electra(ContiguousList<ValidatorIndex, P::MaxAttestersPerSlot>),
-}
-
-impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {
-    type Item = &'list ValidatorIndex;
-    type IntoIter = <&'list [ValidatorIndex] as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            AttestingIndices::Phase0(list) => list.as_ref().iter(),
-            AttestingIndices::Electra(list) => list.as_ref().iter(),
+            Self::Gloas(signed_aggregate_and_proof) => {
+                AggregateAndProof::Gloas(signed_aggregate_and_proof.message.clone())
+            }
         }
     }
 }
@@ -2131,24 +2132,18 @@ impl<'list, P: Preset> IntoIterator for &'list AttestingIndices<P> {
 pub enum Attestation<P: Preset> {
     Phase0(Phase0Attestation<P>),
     Electra(ElectraAttestation<P>),
+    Gloas(GloasAttestation<P>),
     Single(SingleAttestation),
 }
 
 impl<P: Preset> SszSize for Attestation<P> {
     // The const parameter should be `Self::VARIANT_COUNT`, but `Self` refers to a generic type.
     // Type parameters cannot be used in `const` contexts until `generic_const_exprs` is stable.
-    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 6 }>([
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY - 5 }>([
         Phase0Attestation::<P>::SIZE,
         ElectraAttestation::<P>::SIZE,
+        GloasAttestation::<P>::SIZE,
     ]);
-}
-
-// TODO(gloas): make `Attestation::Gloas` a first-class variant instead of
-// converting to the identically laid out Electra attestation.
-impl<P: Preset> From<GloasAttestation<P>> for Attestation<P> {
-    fn from(attestation: GloasAttestation<P>) -> Self {
-        Self::Electra(attestation.into())
-    }
 }
 
 impl<P: Preset> SszRead<Config> for Attestation<P> {
@@ -2165,9 +2160,8 @@ impl<P: Preset> SszRead<Config> for Attestation<P> {
             Phase::Phase0 | Phase::Altair | Phase::Bellatrix | Phase::Capella | Phase::Deneb => {
                 Self::Phase0(SszReadDefault::from_ssz_default(bytes)?)
             }
-            Phase::Electra | Phase::Fulu | Phase::Gloas => {
-                Self::Electra(SszReadDefault::from_ssz_default(bytes)?)
-            }
+            Phase::Electra | Phase::Fulu => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Gloas => Self::Gloas(SszReadDefault::from_ssz_default(bytes)?),
         };
 
         assert_eq!(slot, attestation.data().slot);
@@ -2181,6 +2175,7 @@ impl<P: Preset> SszWrite for Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.write_variable(bytes),
             Self::Electra(attestation) => attestation.write_variable(bytes),
+            Self::Gloas(attestation) => attestation.write_variable(bytes),
             Self::Single(attestation) => attestation.write_variable(bytes),
         }
     }
@@ -2193,6 +2188,7 @@ impl<P: Preset> SszHash for Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.hash_tree_root(),
             Self::Electra(attestation) => attestation.hash_tree_root(),
+            Self::Gloas(attestation) => attestation.hash_tree_root(),
             Self::Single(attestation) => attestation.hash_tree_root(),
         }
     }
@@ -2203,6 +2199,7 @@ impl<P: Preset> Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.data,
             Self::Electra(attestation) => attestation.data,
+            Self::Gloas(attestation) => attestation.data,
             Self::Single(attestation) => attestation.data,
         }
     }
@@ -2211,6 +2208,7 @@ impl<P: Preset> Attestation<P> {
         match self {
             Self::Phase0(_) => None,
             Self::Electra(attestation) => Some(attestation.committee_bits),
+            Self::Gloas(attestation) => Some(attestation.committee_bits),
             Self::Single(attestation) => {
                 let committee_index: usize = attestation
                     .committee_index
@@ -2227,6 +2225,7 @@ impl<P: Preset> Attestation<P> {
         match self {
             Self::Phase0(attestation) => attestation.aggregation_bits.count_ones(),
             Self::Electra(attestation) => attestation.aggregation_bits.count_ones(),
+            Self::Gloas(attestation) => attestation.aggregation_bits.count_ones(),
             Self::Single(_) => 1,
         }
     }
@@ -2236,6 +2235,7 @@ impl<P: Preset> Attestation<P> {
         match self {
             Self::Phase0(_) => Phase::Phase0,
             Self::Electra(_) | Self::Single(_) => Phase::Electra,
+            Self::Gloas(_) => Phase::Gloas,
         }
     }
 }
@@ -2505,8 +2505,8 @@ mod spec_tests {
         ["consensus-spec-tests/tests/minimal/gloas/ssz_static/BeaconState/*/*"]           [gloas_minimal_beacon_state]            [BeaconState]       [Minimal] [Gloas];
         ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/SignedBeaconBlock/*/*"]     [gloas_mainnet_signed_beacon_block]     [SignedBeaconBlock] [Mainnet] [Gloas];
         ["consensus-spec-tests/tests/minimal/gloas/ssz_static/SignedBeaconBlock/*/*"]     [gloas_minimal_signed_beacon_block]     [SignedBeaconBlock] [Minimal] [Gloas];
-        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/Attestation/*/*"]           [gloas_mainnet_attestation]             [Attestation]       [Mainnet] [Electra];
-        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/Attestation/*/*"]           [gloas_minimal_attestation]             [Attestation]       [Minimal] [Electra];
+        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/Attestation/*/*"]           [gloas_mainnet_attestation]             [Attestation]       [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/Attestation/*/*"]           [gloas_minimal_attestation]             [Attestation]       [Minimal] [Gloas];
     )]
     #[test_resources(glob)]
     fn function_name(case: Case) {
