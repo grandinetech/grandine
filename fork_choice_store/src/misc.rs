@@ -12,7 +12,7 @@ use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
 use serde::{Serialize, Serializer};
-use ssz::SszList;
+use ssz::{ProgressiveList, SszList};
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
@@ -20,8 +20,7 @@ use thiserror::Error;
 use transition_functions::unphased::StateRootPolicy;
 use types::{
     combined::{
-        Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
-        SignedBeaconBlock,
+        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::containers::BlobSidecar,
@@ -1018,7 +1017,7 @@ impl<P: Preset> FmtDebug for BlockAction<P> {
 pub enum AggregateAndProofAction<P: Preset> {
     Accept {
         aggregate_and_proof: Arc<SignedAggregateAndProof<P>>,
-        attesting_indices: AttestingIndices<P>,
+        attesting_indices: ProgressiveList<ValidatorIndex>,
         is_subset_aggregate: bool,
     },
     Ignore,
@@ -1031,7 +1030,7 @@ pub enum AggregateAndProofAction<P: Preset> {
 pub enum AttestationAction<P: Preset, I> {
     Accept {
         attestation: AttestationItem<P, I>,
-        attesting_indices: AttestingIndices<P>,
+        attesting_indices: ProgressiveList<ValidatorIndex>,
     },
     Ignore(AttestationItem<P, I>),
     DelayUntilBlock(AttestationItem<P, I>, H256),
@@ -1295,9 +1294,9 @@ impl<P: Preset> ExecutionPayloadEnvelopeAction<P> {
 }
 
 #[derive(Clone)]
-pub struct ValidAttestation<P: Preset> {
+pub struct ValidAttestation {
     pub data: AttestationData,
-    pub attesting_indices: AttestingIndices<P>,
+    pub attesting_indices: ProgressiveList<ValidatorIndex>,
     pub is_from_block: bool,
 }
 

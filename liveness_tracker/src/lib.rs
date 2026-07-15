@@ -7,7 +7,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
 use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, select};
-use helper_functions::{electra, misc, phase0};
+use helper_functions::{electra, gloas, misc, phase0};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, warn_with_peers};
 use operation_pools::PoolToLivenessMessage;
@@ -169,6 +169,13 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                 }
                 Attestation::Electra(attestation) => {
                     let indexed_attestation = electra::get_indexed_attestation(state, attestation)?;
+
+                    for validator_index in indexed_attestation.attesting_indices {
+                        self.set(epoch, validator_index)?;
+                    }
+                }
+                Attestation::Gloas(attestation) => {
+                    let indexed_attestation = gloas::get_indexed_attestation(state, attestation)?;
 
                     for validator_index in indexed_attestation.attesting_indices {
                         self.set(epoch, validator_index)?;
