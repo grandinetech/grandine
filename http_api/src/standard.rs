@@ -3213,7 +3213,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
     let builder_boost_factor = builder_boost_factor
         .map(Uint256::from_u64)
-        .unwrap_or(validator_config.default_builder_boost_factor);
+        .unwrap_or_else(|| validator_config.builder_boost_factor(*public_key));
 
     let block_build_context = block_producer.new_build_context(
         beacon_state.clone_arc(),

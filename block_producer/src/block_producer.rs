@@ -1976,9 +1976,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let proposer_pubkey =
                     accessors::public_key(&self.beacon_state, self.proposer_index)?;
 
-                self.producer_context
+                Ok(self
+                    .producer_context
                     .proposer_configs
-                    .fee_recipient(*proposer_pubkey)
+                    .fee_recipient(*proposer_pubkey))
             })
     }
 

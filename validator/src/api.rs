@@ -32,10 +32,11 @@ use constant_time_eq::constant_time_eq;
 use directories::Directories;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
-use helper_functions::{accessors, signing::SignForSingleFork};
+use helper_functions::{accessors, error::Error as HelperError, signing::SignForSingleFork};
 use http_api_utils::{ApiError, ApiMetrics};
 use keymanager::{
-    KeyManager, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey, ValidatingPubkey,
+    KeyManager, KeymanagerError, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey,
+    ValidatingPubkey,
 };
 use logging::{debug_with_peers, info_with_peers};
 use prometheus_metrics::Metrics;
@@ -97,6 +98,8 @@ enum Error {
     Internal(#[from] AnyhowError),
     #[error("invalid JSON body")]
     InvalidJsonBody(#[source] JsonRejection),
+    #[error("invalid graffiti")]
+    InvalidGraffiti(#[source] AnyhowError),
     #[error("invalid public key")]
     InvalidPublicKey(#[source] AnyhowError),
     #[error("invalid query string")]
@@ -146,7 +149,9 @@ impl Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Self::InvalidJsonBody(json_rejection) => json_rejection.status(),
-            Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => StatusCode::BAD_REQUEST,
+            Self::InvalidGraffiti(_) | Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => {
+                StatusCode::BAD_REQUEST
+            }
             Self::ValidatorNotFound { pubkey: _ } | Self::ValidatorNotOwned { pubkey: _ } => {
                 StatusCode::NOT_FOUND
             }
@@ -417,12 +422,32 @@ struct CreateVoluntaryExitQuery {
     epoch: Option<Epoch>,
 }
 
+/// Surface a proposer-config mutation failure: a missing entry means the validator is not managed
+/// here, which the Keymanager API reports as 404 rather than an internal error.
+fn proposer_config_error(pubkey: PublicKeyBytes, error: AnyhowError) -> Error {
+    if matches!(
+        error.downcast_ref::<KeymanagerError>(),
+        Some(KeymanagerError::NotFound)
+    ) {
+        return Error::ValidatorNotFound { pubkey };
+    }
+
+    if matches!(
+        error.downcast_ref::<HelperError>(),
+        Some(HelperError::GraffitiTooLong)
+    ) {
+        return Error::InvalidGraffiti(error);
+    }
+
+    Error::Internal(error)
+}
+
 /// `GET /eth/v1/validator/{pubkey}/feerecipient`
 async fn keymanager_list_fee_recipient(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let fee_recipient = keymanager.proposer_configs().fee_recipient(pubkey)?;
+    let fee_recipient = keymanager.proposer_configs().fee_recipient(pubkey);
 
     let response = ProposerConfigResponse {
         pubkey,
@@ -444,7 +469,8 @@ async fn keymanager_set_fee_recipient(
 
     keymanager
         .proposer_configs()
-        .set_fee_recipient(pubkey, ethaddress)?;
+        .set_fee_recipient(pubkey, ethaddress)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::ACCEPTED)
 }
@@ -454,7 +480,10 @@ async fn keymanager_delete_fee_recipient(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<StatusCode, Error> {
-    keymanager.proposer_configs().delete_fee_recipient(pubkey)?;
+    keymanager
+        .proposer_configs()
+        .delete_fee_recipient(pubkey)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -464,7 +493,7 @@ async fn keymanager_get_gas_limit(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let gas_limit = keymanager.proposer_configs().gas_limit(pubkey)?;
+    let gas_limit = keymanager.proposer_configs().gas_limit(pubkey);
 
     let response = ProposerConfigResponse {
         pubkey,
@@ -486,7 +515,8 @@ async fn keymanager_set_gas_limit(
 
     keymanager
         .proposer_configs()
-        .set_gas_limit(pubkey, gas_limit)?;
+        .set_gas_limit(pubkey, gas_limit)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::ACCEPTED)
 }
@@ -496,7 +526,10 @@ async fn keymanager_delete_gas_limit(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<StatusCode, Error> {
-    keymanager.proposer_configs().delete_gas_limit(pubkey)?;
+    keymanager
+        .proposer_configs()
+        .delete_gas_limit(pubkey)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -528,7 +561,8 @@ async fn keymanager_set_graffiti(
 
     keymanager
         .proposer_configs()
-        .set_graffiti(pubkey, &graffiti)?;
+        .set_graffiti(pubkey, &graffiti)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::ACCEPTED)
 }
@@ -538,7 +572,10 @@ async fn keymanager_delete_graffiti(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<StatusCode, Error> {
-    keymanager.proposer_configs().delete_graffiti(pubkey)?;
+    keymanager
+        .proposer_configs()
+        .delete_graffiti(pubkey)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -611,7 +648,7 @@ async fn keymanager_delete_remote_keys(
 ) -> Result<EthResponse<Vec<KeymanagerOperationStatus>>, Error> {
     let RemoteKeysDeleteQuery { pubkeys } = query;
 
-    let delete_statuses = keymanager.remote_keys().delete(&pubkeys);
+    let delete_statuses = keymanager.remote_keys().delete(&pubkeys)?;
 
     Ok(EthResponse::json(delete_statuses))
 }

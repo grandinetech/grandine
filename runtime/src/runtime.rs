@@ -9,11 +9,11 @@ use std::{
     io::ErrorKind,
     net::{TcpListener, UdpSocket},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 use allocator as _;
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
@@ -47,7 +47,10 @@ use grandine_version::{
 };
 use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
-use keymanager::KeyManager;
+use keymanager::{
+    DefinitionsStorage, KeyManager, LegacyMigration, ValidatorDefinitions,
+    ValidatorDefinitionsWithStorage,
+};
 use liveness_tracker::LivenessTracker;
 use logging::{
     PEER_LOG_METRICS, debug_with_peers, error_with_peers, info_with_peers, warn_with_peers,
@@ -64,7 +67,7 @@ use p2p::{
 use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder};
 use scc::HashMap as SccHashMap;
-use signer::{KeyOrigin, Signer};
+use signer::{KeyOrigin, Signer, Web3SignerClientOptions, build_web3signer_client};
 use slasher::{Databases, Slasher, SlasherConfig};
 use slashing_protection::{SlashingProtector, interchange_format::InterchangeData};
 use ssz::SszRead as _;
@@ -98,6 +101,7 @@ use crate::{
     initialize_schema,
     misc::{MetricsConfig, StorageConfig},
     predefined_network::PredefinedNetwork,
+    validators::normalize_definitions,
 };
 
 #[cfg(any(feature = "preset-mainnet", test))]
@@ -553,6 +557,7 @@ pub async fn run_after_genesis<P: Preset>(
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             graffiti,
+            validator_config.validator_definitions.clone_arc(),
         ))
     } else {
         Arc::new(KeyManager::new_persistent(
@@ -560,10 +565,12 @@ pub async fn run_after_genesis<P: Preset>(
             slashing_protector.clone_arc(),
             anchor_state.genesis_validators_root(),
             directories.validator_dir.clone().unwrap_or_default(),
+            directories.secrets_dir.clone().unwrap_or_default(),
             validator_config.keystore_storage_password_file.as_deref(),
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             graffiti,
+            validator_config.validator_definitions.clone_arc(),
         )?)
     };
 
@@ -1281,7 +1288,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         state_slot,
         auth_options,
         builder_config,
-        web3signer_config,
+        mut web3signer_config,
         http_api_config,
         max_events,
         metrics_config,
@@ -1326,6 +1333,96 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         initialize_schema(data_dir)?;
     }
 
+    // Build the validator definitions: discover keystores, migrate the legacy database, and persist.
+    let validators_config_path = (!in_memory)
+        .then(|| storage_config.directories.validator_dir.clone())
+        .flatten()
+        .map(|validator_dir| ValidatorDefinitions::file_path(&validator_dir));
+
+    let mut validator_definitions = match &validators_config_path {
+        Some(path) => ValidatorDefinitions::load_or_default(path)?,
+        None => ValidatorDefinitions::default(),
+    };
+
+    if let Some(validators) = validators.as_ref() {
+        validators
+            .discover(&mut validator_definitions)
+            .context("unable to discover validator keystores")?;
+    }
+
+    let keystore_storage = match &keystore_storage_password_file {
+        Some(password_path) => {
+            let password = keymanager::load_key_storage_password(password_path)?;
+
+            keymanager::load_key_storage(
+                &password,
+                storage_config
+                    .directories
+                    .validator_dir
+                    .clone()
+                    .unwrap_or_default(),
+            )?
+        }
+        None => ValidatorKeyCache::default(),
+    };
+
+    validator_definitions
+        .add_storage_keystores(keystore_storage.keypairs().map(|(pubkey, _)| pubkey));
+
+    let legacy_database_dir = (!in_memory)
+        .then(|| storage_config.directories.validator_dir.as_deref())
+        .flatten();
+
+    let legacy_migration = legacy_database_dir
+        .map(|validator_dir| {
+            keymanager::migrate_legacy_database(&mut validator_definitions, validator_dir)
+        })
+        .transpose()?
+        .flatten();
+
+    if let Some(migration) = &legacy_migration {
+        debug_with_peers!("migrated legacy proposer-configs database: {migration:?}");
+    }
+
+    if let Some(path) = &validators_config_path {
+        validator_definitions.save(path)?;
+    }
+
+    // Prune only after the save, so an earlier failure retries the migration instead of losing settings.
+    if let Some(LegacyMigration { migrated, skipped }) = legacy_migration
+        && let Some(validator_dir) = legacy_database_dir
+    {
+        match keymanager::prune_legacy_database(validator_dir, &migrated) {
+            Ok(true) => {
+                info!("successfully migrated legacy proposer configs database");
+            }
+            Ok(false) => warn!(
+                "keeping the legacy proposer configs database: it still holds settings for \
+                 validators with no entry in validators.yml ({skipped:?})",
+            ),
+            Err(error) => warn!("unable to prune legacy proposer configs database: {error}"),
+        }
+    }
+
+    // Fold the `web3signer` entries into the per-URL key policy: each requires its key from its URL.
+    for (url, pubkey) in validator_definitions.web3signer_definitions() {
+        web3signer_config.require_key(url.parse::<RedactingUrl>()?, pubkey);
+    }
+
+    for pubkey in validator_definitions.disabled_pubkeys() {
+        info_with_peers!(
+            "validator {pubkey:?} is disabled in validators.yml and will not be loaded"
+        );
+    }
+
+    let validator_definitions = Arc::new(ValidatorDefinitionsWithStorage::new(
+        Arc::new(RwLock::new(validator_definitions)),
+        match validators_config_path {
+            Some(path) => DefinitionsStorage::Persistent(path),
+            None => DefinitionsStorage::InMemory,
+        },
+    ));
+
     let validator_config = Arc::new(ValidatorConfig {
         disable_blockprint_graffiti,
         graffiti,
@@ -1337,6 +1434,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         backfill_custody_groups,
         custody_mode,
         disable_wait_for_late_blocks,
+        validator_definitions: validator_definitions.clone_arc(),
     });
 
     let store_config = StoreConfig {
@@ -1359,7 +1457,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         .connection_verbose(true)
         .build()?;
 
-    let mut cache = use_validator_key_cache.then(|| {
+    let mut validator_key_cache = use_validator_key_cache.then(|| {
         ValidatorKeyCache::new(
             storage_config
                 .directories
@@ -1369,54 +1467,67 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         )
     });
 
-    let keystore_storage = match &validator_config.keystore_storage_password_file {
-        Some(password_path) => {
-            let password = keymanager::load_key_storage_password(password_path)?;
-
-            keymanager::load_key_storage(
-                &password,
-                storage_config
-                    .directories
-                    .validator_dir
-                    .clone()
-                    .unwrap_or_default(),
-            )?
-        }
-        None => ValidatorKeyCache::default(),
-    };
-
     let validator_enabled = validator_api_config.is_some()
-        || cache.is_some()
+        || validator_key_cache.is_some()
         || !web3signer_config.is_empty()
-        || validators.is_some()
+        || !validator_definitions.read().is_empty()
         || validator_config.keystore_storage_password_file.is_some();
 
     if validator_enabled {
         info_with_peers!("started loading validator keys");
     }
 
-    let mut validator_keys = validators
-        .map(|validators| {
-            validators
-                .normalize(cache.as_mut())
-                .expect("unable to load local validator keys")
-        })
-        .unwrap_or_default();
+    let mut validator_keys = normalize_definitions(
+        &validator_definitions.read(),
+        storage_config.directories.validator_dir.as_deref(),
+        validator_key_cache.as_mut(),
+    )
+    .context("unable to load validator keys")?;
 
-    validator_keys.extend(
-        keystore_storage
-            .keypairs()
-            .map(|(public_key, secret_key)| (public_key, secret_key, KeyOrigin::KeymanagerAPI)),
-    );
+    {
+        // Take only the blob keys still declared as `keystore_storage`; anything else is stale.
+        let definitions = validator_definitions.read();
+
+        validator_keys.extend(
+            keystore_storage
+                .keypairs()
+                .filter(|(public_key, _)| definitions.loads_from_storage(*public_key))
+                .map(|(public_key, secret_key)| (public_key, secret_key, KeyOrigin::Internal)),
+        );
+    }
+
+    // A single Web3Signer client, separate from `client` so its TLS material never reaches other
+    // requests. `web3signer_options` hard-errors on conflicting definitions in `validators.yml`.
+    let web3signer_options = validator_definitions.read().web3signer_options()?;
+
+    let web3signer_client = match web3signer_options {
+        Some(options) => build_web3signer_client(
+            ClientBuilder::new()
+                .timeout(request_timeout)
+                .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
+                .connection_verbose(true),
+            &Web3SignerClientOptions {
+                root_certificate_path: options.root_certificate_path,
+                request_timeout: options.request_timeout_ms.map(Duration::from_millis),
+                client_identity_path: options.client_identity_path,
+                client_identity_password: options
+                    .client_identity_password
+                    .as_ref()
+                    .map(|password| password.as_str().to_owned()),
+            },
+        )?,
+        None => client.clone(),
+    };
 
     let signer = Arc::new(Signer::new(
         validator_keys,
         client,
+        web3signer_client,
         web3signer_config,
         metrics.clone(),
     ));
 
-    if let Some(cache) = cache
+    if let Some(cache) = validator_key_cache
         && let Err(error) = cache.save()
     {
         warn_with_peers!("Unable to save validator key cache: {error:?}");

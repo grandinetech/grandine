@@ -201,7 +201,7 @@ impl GrandineConfig {
         if !web3signer_config.urls.is_empty() {
             info!(
                 "using Web3Signer API to sign validator messages (API URLs: [{}])",
-                web3signer_config.urls.iter().join(", "),
+                web3signer_config.urls.keys().join(", "),
             );
         }
 

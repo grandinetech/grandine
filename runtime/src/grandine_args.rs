@@ -48,7 +48,7 @@ use prometheus_metrics::{METRICS, Metrics};
 use reqwest::header::HeaderValue;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use signer::Web3SignerConfig;
+use signer::{Web3SignerConfig, Web3SignerUrlPolicy};
 use slasher::SlasherConfig;
 use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
 use ssz::Uint256;
@@ -912,7 +912,7 @@ struct ValidatorOptions {
     #[clap(long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
 
-    /// Refetches keys from Web3Signer once every epoch. This overwrites changes done via Keymanager API
+    /// Refetches keys from Web3Signer once every epoch. This overwrites changes done via Keymanager API for remote keys
     #[clap(long)]
     web3signer_refresh_keys_every_epoch: bool,
 
@@ -1320,6 +1320,7 @@ impl GrandineArgs {
                 store_directory,
                 network_dir,
                 validator_dir: None,
+                secrets_dir: None,
             }
             .set_defaults(&chain_config),
         );
@@ -1454,10 +1455,24 @@ impl GrandineArgs {
             web3signer_urls
         };
 
+        // Each CLI URL loads every key it serves; `--web3signer-public-keys` is a global allow-list
+        // narrowing that. `validators.yml` entries add their own per-URL keys on top (see
+        // `runtime`), and only those entries — not the global list — warn if a key is not served.
         let web3signer_config = Web3SignerConfig {
-            public_keys: web3signer_public_keys.into_iter().collect(),
             allow_to_reload_keys: web3signer_refresh_keys_every_epoch,
-            urls: web3signer_urls,
+            public_keys: web3signer_public_keys.into_iter().collect(),
+            urls: web3signer_urls
+                .into_iter()
+                .map(|url| {
+                    (
+                        url,
+                        Web3SignerUrlPolicy {
+                            load_all: true,
+                            required: HashSet::new(),
+                        },
+                    )
+                })
+                .collect(),
         };
 
         let custody_mode = if supernode {

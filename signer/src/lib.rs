@@ -1,13 +1,19 @@
 pub use crate::{
     signer::{KeyOrigin, Signer},
     types::{ForkInfo, SigningMessage, SigningTriple},
-    web3signer::Config as Web3SignerConfig,
+    web3signer::{
+        Config as Web3SignerConfig, UrlPolicy as Web3SignerUrlPolicy, Web3SignerClientOptions,
+        build_web3signer_client,
+    },
 };
 
 mod signer;
 mod types;
 mod web3signer {
-    pub use api::{Config, FetchedKeys, Web3Signer};
+    pub use api::{
+        ClientOptions as Web3SignerClientOptions, Config, FetchedKeys, UrlPolicy, Web3Signer,
+        build_client as build_web3signer_client,
+    };
 
     mod api;
     mod types;

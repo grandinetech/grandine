@@ -924,7 +924,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             BlockBuildOptions {
                 graffiti,
                 disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
-                builder_boost_factor: self.validator_config.default_builder_boost_factor,
+                builder_boost_factor: self.validator_config.builder_boost_factor(*public_key),
                 ..BlockBuildOptions::default()
             },
         );
@@ -2306,8 +2306,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .into_iter()
                 .map(|pubkey| {
                     Ok(ValidatorRegistrationV1 {
-                        fee_recipient: proposer_configs.fee_recipient(pubkey)?,
-                        gas_limit: proposer_configs.gas_limit(pubkey)?,
+                        fee_recipient: proposer_configs.fee_recipient(pubkey),
+                        gas_limit: proposer_configs.gas_limit(pubkey),
                         timestamp: SystemTime::now()
                             .duration_since(SystemTime::UNIX_EPOCH)?
                             .as_secs(),
