@@ -1,5 +1,5 @@
 use core::{fmt::Debug, ops::Range};
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Result, bail, ensure};
 use arc_swap::Guard;
@@ -1264,6 +1264,16 @@ impl<P: Preset> Snapshot<'_, P> {
     #[must_use]
     pub fn head_slot(&self) -> Slot {
         self.store_snapshot.head().slot()
+    }
+
+    #[must_use]
+    pub fn earliest_data_unavailable_slot(&self) -> Option<Slot> {
+        self.store_snapshot.earliest_data_unavailable_slot()
+    }
+
+    #[must_use]
+    pub fn sampling_columns(&self) -> &HashSet<ColumnIndex> {
+        self.store_snapshot.sampling_columns()
     }
 
     #[must_use]

@@ -1553,10 +1553,15 @@ impl<P: Preset> BlockSyncService<P> {
     async fn batch_request_missing_data_columns(&mut self) -> Result<()> {
         let snapshot = self.controller.snapshot();
         let head_slot = snapshot.head_slot();
+        let earliest_data_unavailable_slot = snapshot.earliest_data_unavailable_slot();
 
         let Some(missing_column_indices_by_root) = self
             .sync_manager
-            .missing_column_indices_by_root(&self.controller, head_slot)
+            .missing_column_indices_by_root(
+                snapshot.sampling_columns(),
+                head_slot,
+                earliest_data_unavailable_slot,
+            )
             .await
         else {
             return Ok(());
