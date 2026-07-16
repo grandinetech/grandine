@@ -38,9 +38,9 @@ use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, BlockAction, BlockOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, Error, ExecutionPayloadBidAction,
     ExecutionPayloadBidOrigin, ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
-    PayloadAction, PayloadAttestationAction, PayloadAttestationItem, PayloadAttestationOrigin,
-    ProposerPreferencesAction, ProposerPreferencesOrigin, StateCacheProcessor, Store,
-    ValidAttestation, ValidPayloadAttestation,
+    PayloadAction, PayloadAttestationAction, PayloadAttestationItem, ProposerPreferencesAction,
+    ProposerPreferencesOrigin, StateCacheProcessor, Store, ValidAttestation,
+    ValidPayloadAttestation,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use helper_functions::{accessors, misc, predicates, verifier::NullVerifier};
@@ -2361,14 +2361,12 @@ where
 
                 let (gossip_id, sender) = origin.split();
 
-                if gossip_id.is_some() {
-                    self.send_to_p2p(P2pMessage::Reject(
-                        gossip_id,
-                        MutatorRejectionReason::InvalidExecutionPayloadEnvelope {
-                            payload_envelope_identifier,
-                        },
-                    ));
-                }
+                self.send_to_p2p(P2pMessage::Reject(
+                    gossip_id,
+                    MutatorRejectionReason::InvalidExecutionPayloadEnvelope {
+                        payload_envelope_identifier,
+                    },
+                ));
 
                 self.store_mut().register_rejected_payload_envelope(
                     payload_envelope_identifier.beacon_block_root,
@@ -3452,8 +3450,10 @@ where
             .store
             .is_reconstruction_or_early_import_available_for(&block_root, accepted_data_columns);
 
-        let should_retry_block = reconstruction_or_early_import_available
-            || accepted_data_columns >= self.store.sampling_columns_count();
+        let all_sampling_columns_available =
+            accepted_data_columns >= self.store.sampling_columns_count();
+        let should_retry_block =
+            reconstruction_or_early_import_available || all_sampling_columns_available;
 
         debug_with_peers!(
             "accepted data column sidecar: {block_root:?}, index: {}, slot: {}, \
@@ -3488,8 +3488,8 @@ where
             )
         }
 
-        // Once all sampling columns are available, retry pending payload envelope
-        if accepted_data_columns == self.store.sampling_columns_count()
+        // Once all sampling columns are available, retry pending payload envelope.
+        if all_sampling_columns_available
             && let Some(pending_payload_envelope) = self.take_delayed_until_data(block_root)
         {
             self.retry_execution_payload_envelope(wait_group.clone(), pending_payload_envelope);
@@ -3784,14 +3784,11 @@ where
                  (beacon_block_root: {beacon_block_root:?})",
             );
 
-            if !pending_execution_payload_envelope.origin.is_own() {
-                let peer_id = pending_execution_payload_envelope
-                    .origin
-                    .gossip_id_ref()
-                    .map(|gossip_id| gossip_id.source);
-
-                self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
-            }
+            let peer_id = pending_execution_payload_envelope
+                .origin
+                .gossip_id_ref()
+                .map(|gossip_id| gossip_id.source);
+            self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
 
             self.delayed_until_block
                 .entry(beacon_block_root)
@@ -3870,12 +3867,6 @@ where
                 .map(|gossid_id| gossid_id.source);
 
             self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
-
-            // Payload attestations produced by the application itself should never be delayed.
-            assert!(!matches!(
-                pending_payload_attestation.origin,
-                PayloadAttestationOrigin::Own,
-            ));
 
             self.delayed_until_block
                 .entry(block_root)
