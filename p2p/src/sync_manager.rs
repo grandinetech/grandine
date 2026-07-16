@@ -1400,17 +1400,22 @@ impl<P: Preset> SyncManager<P> {
 
     pub async fn missing_column_indices_by_root(
         &self,
-        controller: &RealController<P>,
+        sampling_columns: &HashSet<ColumnIndex>,
         local_head_slot: Slot,
+        earliest_data_unavailable_slot: Option<Slot>,
     ) -> Option<HashMap<H256, HashSet<ColumnIndex>>> {
-        let sampling_count = controller.sampling_columns_count();
+        let sampling_count = sampling_columns.len();
         let max_slot_ahead = MAX_COLUMNS_BY_ROOT.checked_div(sampling_count as u64)?;
         let mut received = HashMap::new();
 
+        // The head itself may still be missing columns post-Gloas, so the window has to reach back
+        // to it rather than start above it.
+        let start_slot =
+            earliest_data_unavailable_slot.unwrap_or_else(|| local_head_slot.saturating_add(1));
+
         self.received_data_column_sidecars
             .iter_async(|identifier, slot| {
-                if *slot > local_head_slot && *slot < local_head_slot.saturating_add(max_slot_ahead)
-                {
+                if *slot >= start_slot && *slot < local_head_slot.saturating_add(max_slot_ahead) {
                     let DataColumnIdentifier { block_root, index } = *identifier;
 
                     received
@@ -1427,11 +1432,7 @@ impl<P: Preset> SyncManager<P> {
             .into_iter()
             .filter_map(|(block_root, indices)| {
                 (indices.len() != sampling_count).then(|| {
-                    let missing = controller
-                        .sampling_columns()
-                        .difference(&indices)
-                        .copied()
-                        .collect();
+                    let missing = sampling_columns.difference(&indices).copied().collect();
 
                     (block_root, missing)
                 })

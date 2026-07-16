@@ -610,6 +610,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .is_empty()
     }
 
+    // Post-Gloas a block is imported before its data is available, so the head can advance past a
+    // slot that is still missing data columns. Sync must not treat such a slot as done.
+    #[must_use]
+    pub fn earliest_data_unavailable_slot(&self) -> Option<Slot> {
+        self.unfinalized_canonical_chain()
+            .filter(|chain_link| !self.contains_block_and_data_available(chain_link.block_root))
+            .map(ChainLink::slot)
+            .min()
+    }
+
     fn contains_unfinalized_block(&self, block_root: H256) -> bool {
         self.unfinalized_locations.contains_key(&block_root)
     }
