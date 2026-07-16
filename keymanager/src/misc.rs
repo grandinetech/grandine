@@ -8,10 +8,12 @@ pub enum Error {
     CannotDecryptPassword { error: AnyhowError },
     #[error("cannot load keystores storage password from file: {error}")]
     CannotLoadPassword { error: AnyhowError },
-    #[error("key already exists")]
-    Duplicate,
+    #[error("key already exists in a local keystore")]
+    LocalKeyPresent,
     #[error("key not found")]
     NotFound,
+    #[error("key already exists as a remote signer validator")]
+    RemoteKeyPresent,
     #[error("number of passwords does not match number of keystores")]
     PasswordCountMismatch,
     #[error("key is read-only")]
@@ -29,6 +31,8 @@ pub enum Status {
     Duplicate,
     Error,
     Imported,
+    NotFound,
+    NotActive,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]

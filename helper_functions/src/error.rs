@@ -4,7 +4,7 @@ use thiserror::Error;
 use types::phase0::primitives::{CommitteeIndex, Slot};
 
 #[derive(Debug, Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("attestation has no attesting indices")]
     AttestationHasNoAttestingIndices,
     #[error("attestation source does not match justified checkpoint")]

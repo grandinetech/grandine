@@ -22,6 +22,8 @@ In this example, the same secret is used to secure all the keystores, this secre
 
 For any sensitive keys it's a must to use a remote signer.
 
+Discovered validators are recorded in [`validators.yml`](./validator_definitions.md), which also holds per-validator settings such as fee recipients and graffiti. Keystores from `--keystore-dir` are treated as read-only: the Keymanager API cannot delete them — remove the keystore file and its entry, or set `enabled: false` in `validators.yml`, instead.
+
 ### Relevant command line options:
 
 * `--keystore-dir` - a directory containing validator keystore files; 

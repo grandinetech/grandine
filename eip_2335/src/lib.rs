@@ -48,12 +48,20 @@ pub struct Keystore {
     path: Eip2334Path,
     uuid: Uuid,
     version: Version,
+    // Not part of EIP-2335, but `ethdo`, Prysm and Lighthouse emit it, so accept and ignore it.
+    name: Option<String>,
 }
 
 impl Keystore {
     #[must_use]
     pub const fn uuid(&self) -> Uuid {
         self.uuid
+    }
+
+    /// The public key declared in the keystore, if present. Read without decrypting, for discovery.
+    #[must_use]
+    pub const fn pubkey(&self) -> Option<PublicKeyBytes> {
+        self.pubkey
     }
 
     pub fn decrypt(self, normalized_password: &str) -> Result<SecretKeyBytes> {

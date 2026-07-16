@@ -99,6 +99,7 @@ pub fn initialize_tracing_logger(
         .add_directive("fork_choice_control=info".parse()?)
         .add_directive("fork_choice_store=info".parse()?)
         .add_directive("genesis=info".parse()?)
+        .add_directive("grandine=info".parse()?)
         .add_directive("http_api=info".parse()?)
         .add_directive("http_api_utils=info".parse()?)
         .add_directive("keymanager=info".parse()?)

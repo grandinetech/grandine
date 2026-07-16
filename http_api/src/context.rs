@@ -215,6 +215,7 @@ impl<P: Preset> Context<P> {
 
         let signer = Arc::new(Signer::new(
             validator_keys,
+            client.clone(),
             client,
             Web3SignerConfig::default(),
             None,
@@ -243,6 +244,7 @@ impl<P: Preset> Context<P> {
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             H256::default(),
+            validator_config.validator_definitions.clone_arc(),
         ));
 
         let attestation_verifier = AttestationVerifier::new(
@@ -421,7 +423,7 @@ impl<P: Preset> Context<P> {
             .map(|secret_key| {
                 let secret_key = Arc::new(secret_key);
                 let public_key = secret_key.to_public_key().into();
-                (public_key, secret_key, KeyOrigin::LocalFileSystem)
+                (public_key, secret_key, KeyOrigin::External)
             })
             .collect()
     }

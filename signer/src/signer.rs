@@ -44,8 +44,12 @@ enum Error {
 
 #[derive(Clone, Copy)]
 pub enum KeyOrigin {
-    KeymanagerAPI,
-    LocalFileSystem,
+    /// A key Grandine manages itself: the `keystores.json` blob or a keystore under the validator
+    /// directory. Deletable via the API.
+    Internal,
+    /// A key from outside the validator directory (`--keystore-dir`, interop/CLI). Read-only to the API.
+    External,
+    /// A remote Web3Signer key, managed via the remotekeys API.
     Web3Signer,
 }
 
@@ -63,6 +67,7 @@ impl Signer {
     pub fn new(
         validator_keys: impl IntoIterator<Item = (PublicKeyBytes, Arc<SecretKey>, KeyOrigin)>,
         client: Client,
+        web3signer_client: Client,
         web3signer_config: Web3SignerConfig,
         metrics: Option<Arc<Metrics>>,
     ) -> Self {
@@ -75,7 +80,8 @@ impl Signer {
 
         let snapshot = ArcSwap::from_pointee(Snapshot {
             sign_methods,
-            web3signer: Web3Signer::new(client, web3signer_config, metrics),
+            client,
+            web3signer: Web3Signer::new(web3signer_client, web3signer_config, metrics),
             doppelganger_protection: None,
         });
 
@@ -154,6 +160,7 @@ impl Signer {
 #[derive(Clone)]
 pub struct Snapshot {
     sign_methods: HashMap<PublicKeyBytes, SignMethod>,
+    client: Client,
     web3signer: Web3Signer,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
 }
@@ -169,6 +176,14 @@ impl Snapshot {
     #[must_use]
     pub fn has_key(&self, public_key: PublicKeyBytes) -> bool {
         self.sign_methods.contains_key(&public_key)
+    }
+
+    #[must_use]
+    pub fn is_web3signer_key(&self, public_key: PublicKeyBytes) -> bool {
+        matches!(
+            self.sign_methods.get(&public_key),
+            Some(SignMethod::Web3Signer(_)),
+        )
     }
 
     #[must_use]
@@ -200,7 +215,7 @@ impl Snapshot {
 
     #[must_use]
     pub const fn client(&self) -> &Client {
-        self.web3signer.client()
+        &self.client
     }
 
     pub fn append_keys(
@@ -210,7 +225,7 @@ impl Snapshot {
         for (public_key, secret_key) in keys {
             self.sign_methods
                 .entry(public_key)
-                .or_insert(SignMethod::SecretKey(secret_key, KeyOrigin::KeymanagerAPI));
+                .or_insert(SignMethod::SecretKey(secret_key, KeyOrigin::Internal));
         }
     }
 

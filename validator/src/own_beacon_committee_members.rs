@@ -266,10 +266,11 @@ mod tests {
 
         let signer = Arc::new(Signer::new(
             [
-                (public_key_1, secret_key_1, KeyOrigin::LocalFileSystem),
-                (public_key_2, secret_key_2, KeyOrigin::LocalFileSystem),
-                (public_key_3, secret_key_3, KeyOrigin::LocalFileSystem),
+                (public_key_1, secret_key_1, KeyOrigin::External),
+                (public_key_2, secret_key_2, KeyOrigin::External),
+                (public_key_3, secret_key_3, KeyOrigin::External),
             ],
+            Client::new(),
             Client::new(),
             Web3SignerConfig::default(),
             None,

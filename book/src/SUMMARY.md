@@ -10,5 +10,6 @@
 - [Storage](./storage.md)
 - [Subcommands](./subcommands.md)
 - [Validator Client](./validator_client.md)
+- [Validator Definitions](./validator_definitions.md)
 - [Web3Signer](./web3signer.md)
 - [Support](./support.md)
