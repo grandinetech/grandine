@@ -211,6 +211,9 @@ pub struct Metrics {
     pub builder_register_validator_times: Histogram,
     pub builder_post_blinded_block_times: Histogram,
     pub builder_get_execution_payload_header_times: Histogram,
+    pub builder_get_execution_payload_bid_times: Histogram,
+    pub builder_submit_builder_preferences_times: Histogram,
+    pub builder_submit_signed_beacon_block_times: Histogram,
 
     // WebSigner
     pub web3signer_load_keys_times: Histogram,
@@ -930,6 +933,21 @@ impl Metrics {
                 "Builder get execution payload header times",
             ))?,
 
+            builder_get_execution_payload_bid_times: Histogram::with_opts(histogram_opts!(
+                "BUILDER_GET_EXECUTION_PAYLOAD_BID_TIMES",
+                "Builder get execution payload bid times",
+            ))?,
+
+            builder_submit_builder_preferences_times: Histogram::with_opts(histogram_opts!(
+                "BUILDER_SUBMIT_BUILDER_PREFERENCES_TIMES",
+                "Builder submit builder preferences times",
+            ))?,
+
+            builder_submit_signed_beacon_block_times: Histogram::with_opts(histogram_opts!(
+                "BUILDER_SUBMIT_SIGNED_BEACON_BLOCK_TIMES",
+                "Builder submit signed beacon block times",
+            ))?,
+
             // WebSigner
             web3signer_load_keys_times: Histogram::with_opts(histogram_opts!(
                 "WEB3SIGNER_LOAD_KEYS_TIMES",
@@ -1201,6 +1219,15 @@ impl Metrics {
         default_registry.register(Box::new(self.builder_post_blinded_block_times.clone()))?;
         default_registry.register(Box::new(
             self.builder_get_execution_payload_header_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.builder_get_execution_payload_bid_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.builder_submit_builder_preferences_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.builder_submit_signed_beacon_block_times.clone(),
         ))?;
         default_registry.register(Box::new(self.web3signer_load_keys_times.clone()))?;
         default_registry.register(Box::new(self.web3signer_sign_times.clone()))?;
