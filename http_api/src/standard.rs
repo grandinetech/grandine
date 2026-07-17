@@ -3908,8 +3908,7 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 )]
 pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    EthPath(slot): EthPath<Slot>,
-    EthPath(builder_index): EthPath<BuilderIndex>,
+    EthPath((slot, builder_index)): EthPath<(Slot, BuilderIndex)>,
     headers: HeaderMap,
 ) -> Result<EthResponse<ExecutionPayloadBid<P>, (), JsonOrSsz>, Error> {
     let current_slot = controller.slot();
