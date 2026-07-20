@@ -6416,16 +6416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "good_lp"
-version = "1.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf53d2a05420f562c917615b80018647ca03766aa58376de077034627da0fb10"
-dependencies = [
- "fnv",
- "highs",
-]
-
-[[package]]
 name = "grandine"
 version = "0.0.0"
 dependencies = [
@@ -6913,26 +6903,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "highs"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9f739d4b9d063219b2dfa00705d8f2127fcead4d053867a5557c953dc3a4b99"
-dependencies = [
- "highs-sys",
- "log",
-]
-
-[[package]]
-name = "highs-sys"
-version = "1.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11a9fa9dea5b5f277075460b695db30ad7e5ce28554f2dd27c312c640acd101f"
-dependencies = [
- "bindgen 0.72.1",
- "cmake",
 ]
 
 [[package]]
@@ -9837,13 +9807,11 @@ dependencies = [
  "fork_choice_control",
  "fork_choice_store",
  "futures",
- "good_lp",
  "helper_functions",
  "itertools 0.14.0",
  "logging",
  "prometheus_metrics",
  "pubkey_cache",
- "rayon",
  "serde",
  "ssz",
  "std_ext",

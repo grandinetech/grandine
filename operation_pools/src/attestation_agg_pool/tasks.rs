@@ -1,8 +1,6 @@
-use core::time::Duration;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
-    time::Instant,
 };
 
 use anyhow::Result;
@@ -73,7 +71,6 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
 
         let attestation_packer = AttestationPacker::new(
             controller.chain_config().clone_arc(),
-            controller.head_block_root().value,
             beacon_state.clone_arc(),
             true,
         )?;
@@ -110,86 +107,38 @@ impl<P: Preset> PoolTask for ComputeProposerIndicesTask<P> {
 pub struct PackProposableAttestationsTask<P: Preset, W: Wait> {
     pub pool: Arc<Pool<P>>,
     pub controller: ApiController<P, W>,
-    pub metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
     type Output = ();
 
     async fn run(self) -> Result<Self::Output> {
-        let Self {
-            pool,
-            controller,
-            metrics,
-        } = self;
+        let Self { pool, controller } = self;
 
         let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
         let slot = controller.slot().saturating_add(1);
 
-        let mut attestation_packer = AttestationPacker::new(
+        // Greedy packing is a single deterministic pass, so — unlike the removed solver path —
+        // there is nothing to gain from an anytime loop; pre-compute once and store the result.
+        let attestation_packer = AttestationPacker::new(
             controller.chain_config().clone_arc(),
-            controller.head_block_root().value,
             beacon_state.clone_arc(),
             false,
         )?;
 
-        let mut is_empty = true;
-        let mut iteration: u32 = 0;
-
-        loop {
-            let PackOutcome {
-                attestations,
-                deadline_reached,
-            } = {
-                let timer = Instant::now();
-
-                let outcome = pack_attestations_optimally(
-                    &controller,
-                    &attestation_packer,
-                    &pool,
-                    &beacon_state,
-                )
+        let outcome =
+            pack_attestations_greedily(&controller, &attestation_packer, &pool, &beacon_state)
                 .await?;
 
-                features::log!(
-                    DebugAttestationPacker,
-                    "pack outcome for slot: {slot}, attestations: {}, iteration: {iteration}, deadline_reached: {}, time: {:?}",
-                    outcome.attestations.len(),
-                    outcome.deadline_reached,
-                    timer.elapsed()
-                );
+        features::log!(
+            DebugAttestationPacker,
+            "pack outcome for slot: {slot}, attestations: {}, deadline_reached: {}",
+            outcome.attestations.len(),
+            outcome.deadline_reached,
+        );
 
-                iteration = iteration.saturating_add(1);
-                outcome
-            };
-
-            if is_empty || !deadline_reached {
-                pool.set_best_proposable_attestations(attestations, beacon_state.slot())
-                    .await;
-                is_empty = false;
-            }
-
-            if deadline_reached {
-                if let Some(metrics) = metrics.as_ref() {
-                    metrics
-                        .att_pool_pack_iterations
-                        .inc_by(iteration.saturating_sub(1).into());
-                }
-
-                break;
-            }
-
-            tokio::time::sleep(Duration::from_millis(50)).await;
-
-            let head_block_root = controller.head_block_root().value;
-
-            if attestation_packer.should_update_current_participation(head_block_root) {
-                attestation_packer.update_current_participation(
-                    head_block_root,
-                    controller.preprocessed_state_at_next_slot_blocking()?,
-                )?;
-            }
-        }
+        pool.set_best_proposable_attestations(outcome.attestations, beacon_state.slot())
+            .await;
 
         Ok(())
     }
@@ -413,44 +362,6 @@ fn aggregate_attestation<P: Preset>(
     }
 
     Ok(())
-}
-
-async fn pack_attestations_optimally<P: Preset, W: Wait>(
-    controller: &ApiController<P, W>,
-    attestation_packer: &AttestationPacker<P>,
-    pool: &Pool<P>,
-    state: &BeaconState<P>,
-) -> Result<PackOutcome<P>> {
-    let previous_epoch = accessors::get_previous_epoch(state);
-    let current_epoch = accessors::get_current_epoch(state);
-    let dependent_root = controller.dependent_root(state, previous_epoch)?;
-
-    let previous_epoch_attestations = pool.aggregate_attestations_by_epoch(previous_epoch).await;
-    let current_epoch_attestations = pool.aggregate_attestations_by_epoch(current_epoch).await;
-
-    let acceptable_targets = acceptable_attestation_targets_for_packing(
-        controller,
-        dependent_root,
-        previous_epoch,
-        previous_epoch_attestations
-            .iter()
-            .chain(&current_epoch_attestations),
-    );
-
-    let previous_epoch_attestations = previous_epoch_attestations
-        .iter()
-        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
-
-    let current_epoch_attestations = current_epoch_attestations
-        .iter()
-        .filter(|attestation| acceptable_targets.contains(&attestation.data.target.root));
-
-    attestation_packer
-        .pack_proposable_attestations_optimally(
-            previous_epoch_attestations,
-            current_epoch_attestations,
-        )
-        .pipe(Ok)
 }
 
 async fn pack_attestations_greedily<P: Preset, W: Wait>(
