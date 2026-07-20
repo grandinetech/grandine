@@ -231,6 +231,7 @@ impl<P: Preset> Context<P> {
             sync_committee_agg_pool.clone_arc(),
             payload_attestation_agg_pool.clone_arc(),
             None,
+            None,
             Some(BlockProducerOptions {
                 fake_execution_payloads: true,
             }),

@@ -16,7 +16,7 @@ use reqwest::{
     header::{ACCEPT, CONTENT_TYPE, HeaderValue},
 };
 use serde::de::DeserializeOwned;
-use ssz::{ContiguousList, SszHash as _, SszRead, SszWrite as _};
+use ssz::{ByteList, ContiguousList, SszHash as _, SszRead, SszWrite as _};
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
@@ -38,7 +38,8 @@ use crate::{
     combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
     consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
     gloas::containers::{
-        BuilderPreferencesRequestV1, GetExecutionPayloadBidResponse, SignedRequestAuthV1,
+        BuilderPreferencesRequestV1, GetExecutionPayloadBidResponse, MaxDataSize, RequestAuthV1,
+        SignedRequestAuthV1,
     },
     unphased::containers::SignedValidatorRegistrationV1,
 };
@@ -151,6 +152,23 @@ impl Api {
         }
 
         Ok(())
+    }
+
+    pub fn request_auth_message(&self, slot: Slot) -> Result<RequestAuthV1> {
+        let data = ByteList::<MaxDataSize>::try_from(
+            self.config
+                .builder_api_url
+                .clone()
+                .into_url()
+                .as_str()
+                .as_bytes()
+                .to_vec(),
+        )
+        .map_err(|_| {
+            anyhow::anyhow!("builder API URL exceeds MAX_DATA_SIZE for RequestAuth signing")
+        })?;
+
+        Ok(RequestAuthV1 { data, slot })
     }
 
     pub async fn register_validators<P: Preset>(
@@ -899,6 +917,23 @@ mod tests {
         assert_ne!(root, other_data.signing_root(&config));
         assert_ne!(root, other_slot.signing_root(&config));
         assert_eq!(DOMAIN_REQUEST_AUTH.0, [0x0b, 0x00, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn request_auth_message_uses_builder_api_url_bytes() -> Result<()> {
+        let builder_url = "http://builder.example.com";
+        let api = test_api(builder_url);
+        let message = api.request_auth_message(7)?;
+        let url = builder_url
+            .parse::<types::redacting_url::RedactingUrl>()
+            .expect("test builder URL should be valid")
+            .into_url();
+        let expected = url.as_str().as_bytes();
+
+        assert_eq!(message.slot, 7);
+        assert_eq!(message.data.as_bytes(), expected);
+
+        Ok(())
     }
 
     #[tokio::test]

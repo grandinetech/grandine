@@ -9,7 +9,11 @@ use bls::{
     AggregateSignature, PublicKeyBytes, SignatureBytes,
     traits::{Signature as _, SignatureBytes as _},
 };
-use builder_api::{BuilderApi, combined::SignedBuilderBid};
+use builder_api::{
+    BuilderApi,
+    combined::SignedBuilderBid,
+    gloas::containers::SignedRequestAuthV1,
+};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
 use eth1_api::{ApiController, ClientVersions, Eth1ExecutionEngine, WithClientVersions};
@@ -20,9 +24,11 @@ use execution_engine::{
 use features::Feature;
 use fork_choice_control::Wait;
 use futures::{
+    channel::{mpsc::UnboundedSender, oneshot},
     lock::Mutex,
     stream::{FuturesOrdered, StreamExt as _},
 };
+use p2p::ApiToP2p;
 use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
 use keymanager::ProposerConfigs;
@@ -87,7 +93,7 @@ use types::{
             SignedExecutionPayloadBid,
         },
     },
-    nonstandard::{BlockRewards, KzgProofs, Phase, WEI_IN_GWEI, WithBlobsAndMev},
+    nonstandard::{BlockRewards, KzgProofs, Phase, ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev},
     phase0::{
         consts::FAR_FUTURE_EPOCH,
         containers::{
@@ -110,6 +116,8 @@ const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
 pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
+pub type ExecutionPayloadBidJoinHandle<P> =
+    JoinHandle<Result<Option<SignedExecutionPayloadBid<P>>>>;
 pub type LocalExecutionPayloadJoinHandle<P> =
     JoinHandle<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
 
@@ -138,6 +146,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
         metrics: Option<Arc<Metrics>>,
+        api_to_p2p_tx: Option<UnboundedSender<ApiToP2p<P>>>,
         options: Option<Options>,
     ) -> Self {
         let Options {
@@ -165,6 +174,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             cached_payload_roots: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             self_built_block_parents: Mutex::new(SizedCache::with_size(PAYLOAD_CACHE_SIZE)),
             metrics,
+            api_to_p2p_tx,
             fake_execution_payloads,
         });
 
@@ -761,6 +771,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     // in `cached_payload_roots` when rebuilding envelope contents for the envelope endpoints.
     self_built_block_parents: Mutex<SizedCache<H256, H256>>,
     metrics: Option<Arc<Metrics>>,
+    api_to_p2p_tx: Option<UnboundedSender<ApiToP2p<P>>>,
     fake_execution_payloads: bool,
 }
 
@@ -804,7 +815,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
             build_context
-                .produce_beacon_block(block_without_state_root, local_execution_payload_handle)
+                .produce_beacon_block(
+                    block_without_state_root,
+                    local_execution_payload_handle,
+                    None,
+                )
                 .await
         });
 
@@ -820,6 +835,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         randao_reveal: SignatureBytes,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+        execution_payload_bid_handle: Option<ExecutionPayloadBidJoinHandle<P>>,
     ) -> Result<
         Option<(
             WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
@@ -838,7 +854,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
             build_context
-                .produce_beacon_block(block, local_execution_payload_handle)
+                .produce_beacon_block(
+                    block,
+                    local_execution_payload_handle,
+                    execution_payload_bid_handle,
+                )
                 .await
         });
 
@@ -1312,6 +1332,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+        execution_payload_bid_handle: Option<ExecutionPayloadBidJoinHandle<P>>,
     ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
         let mut payload_with_data = None;
         if let Some(handle) = local_execution_payload_handle {
@@ -1352,13 +1373,45 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut without_state_root_with_payload =
             if let Some(state) = self.beacon_state.post_gloas() {
+                if !self.should_build_local_payload() {
+                    if let Some(handle) = execution_payload_bid_handle {
+                        match handle.await {
+                            Ok(Ok(Some(bid))) => {
+                                if let Err(error) =
+                                    self.apply_http_execution_payload_bid(bid).await
+                                {
+                                    warn_with_peers!(
+                                        "failed to validate HTTP execution payload bid: {error}"
+                                    );
+                                }
+                            }
+                            Ok(Ok(None)) => {
+                                debug_with_peers!(
+                                    "builder has no execution payload bid available via HTTP"
+                                );
+                            }
+                            Ok(Err(error)) => {
+                                warn_with_peers!(
+                                    "failed to get execution payload bid from builder: {error}"
+                                );
+                            }
+                            Err(error) => {
+                                warn_with_peers!(
+                                    "execution payload bid fetch task failed: {error}"
+                                );
+                            }
+                        }
+                    }
+                }
+
                 let snapshot = self.producer_context.controller.snapshot();
 
                 let signed_payload_bid = if self.should_build_local_payload() {
                     self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
                         .await?
                 } else {
-                    // TODO: (gloas): select from received bids based on proposer preference
+                    // Select highest valid bid by value from gossip and accepted HTTP bids.
+                    // Preference-ordered ranking beyond validation gates is deferred to PR3.
                     let parent_block_hash = if snapshot.should_build_on_full() {
                         state.latest_execution_payload_bid().block_hash
                     } else {
@@ -2230,6 +2283,113 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         }
 
         None
+    }
+
+    pub fn would_fetch_execution_payload_bid(&self, _public_key: PublicKeyBytes) -> bool {
+        if self.beacon_state.post_gloas().is_none() {
+            return false;
+        }
+
+        if self.producer_context.builder_api.is_none() || self.should_build_local_payload() {
+            return false;
+        }
+
+        let slot = self.beacon_state.slot();
+        let Some(builder_api) = self.producer_context.builder_api.as_ref() else {
+            return false;
+        };
+
+        builder_api
+            .can_use_builder_api::<P>(
+                slot,
+                self.producer_context
+                    .controller
+                    .snapshot()
+                    .nonempty_slots(self.head_block_root),
+            )
+            .is_ok()
+    }
+
+    pub fn get_execution_payload_bid(
+        &self,
+        public_key: PublicKeyBytes,
+        signed_request_auth: Option<SignedRequestAuthV1>,
+    ) -> Option<ExecutionPayloadBidJoinHandle<P>> {
+        if !self.would_fetch_execution_payload_bid(public_key) {
+            if self.beacon_state.post_gloas().is_some()
+                && self.producer_context.builder_api.is_some()
+                && !self.should_build_local_payload()
+                && let Some(builder_api) = self.producer_context.builder_api.as_ref()
+            {
+                let slot = self.beacon_state.slot();
+
+                if let Err(error) = builder_api.can_use_builder_api::<P>(
+                    slot,
+                    self.producer_context
+                        .controller
+                        .snapshot()
+                        .nonempty_slots(self.head_block_root),
+                ) {
+                    warn_with_peers!("cannot use Builder API for execution payload bid: {error}");
+                }
+            }
+
+            return None;
+        }
+
+        let state = self.beacon_state.post_gloas()?;
+        let builder_api = self.producer_context.builder_api.clone()?;
+        let slot = self.beacon_state.slot();
+
+        let snapshot = self.producer_context.controller.snapshot();
+        let parent_hash = if snapshot.should_build_on_full() {
+            state.latest_execution_payload_bid().block_hash
+        } else {
+            state.latest_execution_payload_bid().parent_block_hash
+        };
+        let parent_root = self.head_block_root;
+        let chain_config = self.producer_context.chain_config.clone_arc();
+
+        let handle = tokio::spawn(async move {
+            builder_api
+                .get_execution_payload_bid::<P>(
+                    &chain_config,
+                    slot,
+                    parent_hash,
+                    parent_root,
+                    public_key,
+                    signed_request_auth.as_ref(),
+                )
+                .await
+        });
+
+        Some(handle)
+    }
+
+    async fn apply_http_execution_payload_bid(
+        &self,
+        bid: SignedExecutionPayloadBid<P>,
+    ) -> Result<()> {
+        let payload_bid = Arc::new(bid);
+        let (sender, receiver) = oneshot::channel();
+
+        self.producer_context
+            .controller
+            .on_api_execution_payload_bid(payload_bid.clone_arc(), sender);
+
+        match receiver.await?? {
+            ValidationOutcomeWithReason::Accept => {
+                if let Some(api_to_p2p_tx) = &self.producer_context.api_to_p2p_tx {
+                    ApiToP2p::PublishPayloadBid(payload_bid).send(api_to_p2p_tx);
+                }
+
+                Ok(())
+            }
+            ValidationOutcomeWithReason::Ignore(reason) => {
+                debug_with_peers!("HTTP execution payload bid ignored: {reason}");
+                Ok(())
+            }
+        }
     }
 
     fn should_build_local_payload(&self) -> bool {

@@ -625,6 +625,7 @@ pub async fn run_after_genesis<P: Preset>(
         sync_committee_agg_pool.clone_arc(),
         payload_attestation_agg_pool.clone_arc(),
         metrics.clone(),
+        Some(api_to_p2p_tx.clone()),
         None,
     ));
 

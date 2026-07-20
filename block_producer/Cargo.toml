@@ -26,6 +26,7 @@ itertools = { workspace = true }
 keymanager = { workspace = true }
 logging ={ workspace = true }
 operation_pools = { workspace = true }
+p2p = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true }

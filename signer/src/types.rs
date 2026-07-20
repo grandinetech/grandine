@@ -1,7 +1,9 @@
 use core::marker::PhantomData;
 
 use bls::PublicKeyBytes;
-use builder_api::unphased::containers::ValidatorRegistrationV1;
+use builder_api::{
+    gloas::containers::RequestAuthV1, unphased::containers::ValidatorRegistrationV1,
+};
 use serde::Serialize;
 use ssz::Hc;
 use types::{
@@ -86,6 +88,7 @@ pub enum SigningMessage<'block, P: Preset> {
     },
     SyncAggregatorSelectionData(SyncAggregatorSelectionData),
     ContributionAndProof(ContributionAndProof<P>),
+    RequestAuth(RequestAuthV1),
     ValidatorRegistration(ValidatorRegistrationV1),
     VoluntaryExit(VoluntaryExit),
     ProposerPreferences(ProposerPreferences),
@@ -319,5 +322,27 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn request_auth_signing_message_uses_sign_for_all_forks() {
+        use helper_functions::signing::SignForAllForks as _;
+        use ssz::ByteList;
+        use types::config::Config;
+
+        use builder_api::gloas::containers::{MaxDataSize, RequestAuthV1};
+
+        let config = Config::mainnet();
+        let message = RequestAuthV1 {
+            data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
+                .expect("builder URL fits MAX_DATA_SIZE"),
+            slot: 1,
+        };
+
+        let signing_root = message.signing_root(&config);
+        let wrapped = SigningMessage::<Minimal>::RequestAuth(message);
+
+        assert!(matches!(wrapped, SigningMessage::RequestAuth(_)));
+        assert_ne!(signing_root, H256::zero());
     }
 }
