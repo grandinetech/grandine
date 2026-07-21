@@ -128,7 +128,7 @@ public class GrandineEngineApi : IGrandineEngineApi
                     ExcessBlobGas = payload.excess_blob_gas,
                     ParentBeaconBlockRoot = parentBeaconBlockRootConverted,
                 },
-                GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr),
+                GrandineUtils.ConvertVersionedHashesToHash256(*versionedHashesPtr),
                 parentBeaconBlockRootConverted)
             .Result;
 
@@ -179,7 +179,7 @@ public class GrandineEngineApi : IGrandineEngineApi
                     ParentBeaconBlockRoot = parentBeaconBlockRootConverted,
                     ExecutionRequests = executionRequestsConverted,
                 },
-                GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr),
+                GrandineUtils.ConvertVersionedHashesToHash256(*versionedHashesPtr),
                 parentBeaconBlockRootConverted,
                 executionRequestsConverted)
             .Result;

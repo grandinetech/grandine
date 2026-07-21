@@ -110,7 +110,7 @@ aarch64-apple-darwin: ./target/aarch64-apple-darwin/compact/grandine ./target/aa
 
 # ------ GRANDINE-NETHERMIND INTEGRATION ------
 
-NETHERMIND_VERSION ?= 1.38.0
+NETHERMIND_VERSION ?= 1.39.1
 # If empty, public authentication will happen. Public auth rate limits by ip address, so may fail unexpectedly.
 GITHUB_TOKEN ?=
 
