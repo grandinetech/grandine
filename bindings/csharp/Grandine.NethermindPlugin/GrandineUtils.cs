@@ -10,6 +10,7 @@ using System.Text.Json.Nodes;
 using Grandine.Native;
 using Nethermind.Consensus.Producers;
 using Nethermind.Core;
+using Nethermind.Core.Crypto;
 using Nethermind.Logging;
 using Nethermind.Merge.Plugin.Data;
 
@@ -160,6 +161,30 @@ public static class GrandineUtils
         for (int i = 0; i < span.Length; ++i)
         {
             result[i] = span[i].ToArray();
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Starting from Nethermind 1.39.0, some methods (like engine_newPayloadV3)
+    /// accept not `byte[][]` as converted hashes, but `Hash256?[]`.
+    /// </summary>
+    /// <param name="versionedHashes">Raw argument, received through ffi engine API.</param>
+    /// <returns>Hashes, converted into Nethermind-recognized format.</returns>
+    public static Hash256?[] ConvertVersionedHashesToHash256(in CVec_CH256 versionedHashes)
+    {
+        var span = versionedHashes.AsSpan();
+        if (span.Length == 0)
+        {
+            return Array.Empty<Hash256?>();
+        }
+
+        var result = new Hash256[span.Length];
+
+        for (int i = 0; i < span.Length; ++i)
+        {
+            result[i] = new Hash256(span[i].ToArray());
         }
 
         return result;

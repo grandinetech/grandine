@@ -33,9 +33,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Autofac" Version="9.1.0" />
+    <PackageReference Include="Autofac" Version="9.3.1" />
     <PackageReference Include="Nethermind.Numerics.Int256" Version="1.4.0" />
-    <PackageReference Include="Nethermind.ReferenceAssemblies" Version="1.38.0" />
+    <PackageReference Include="Nethermind.ReferenceAssemblies" Version="1.39.1" />
     <PackageReference Include="StyleCop.Analyzers" Version="1.1.118">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
