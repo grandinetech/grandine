@@ -2881,6 +2881,7 @@ where
             .store
             .unfinalized_chain_link_by_execution_block_hash(execution_block_hash)
             && chain_link.is_valid()
+            && !chain_link.is_post_gloas()
         {
             self.event_channels
                 .send_block_event(chain_link.slot(), chain_link.block_root, false);
@@ -2900,7 +2901,7 @@ where
 
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
-        if !head_changed && head_was_optimistic && head.is_valid() {
+        if !head_changed && head_was_optimistic && head.is_valid() && !head.is_post_gloas() {
             self.event_channels
                 .send_head_event(head, |head| self.calculate_dependent_roots(head));
 
@@ -3040,6 +3041,7 @@ where
         }
 
         let block = block.clone_arc();
+        let is_post_gloas = chain_link.is_post_gloas();
         let is_valid = chain_link.is_valid();
         let changes = self.store_mut().apply_block(chain_link)?;
         let insertion_time = Instant::now();
@@ -3134,7 +3136,7 @@ where
 
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
-        if is_valid {
+        if is_valid || is_post_gloas {
             self.event_channels
                 .send_block_event(block_slot, block_root, false);
         }
@@ -3287,7 +3289,7 @@ where
 
                 self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
-                if new_head.is_valid() {
+                if new_head.is_valid() || new_head.is_post_gloas() {
                     self.event_channels
                         .send_head_event(&new_head, |head| self.calculate_dependent_roots(head));
 
@@ -3555,7 +3557,7 @@ where
 
         self.send_to_p2p(P2pMessage::HeadChanged(new_head.block_root));
 
-        if new_head.is_valid() {
+        if new_head.is_valid() || new_head.is_post_gloas() {
             // Do not send API events about optimistic blocks.
             // Vouch treats all head events as non-optimistic.
             self.event_channels
