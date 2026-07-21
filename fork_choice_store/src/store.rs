@@ -601,7 +601,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
-        if chain_link.block.phase() < Phase::Gloas {
+        if !chain_link.is_post_gloas() {
             return true;
         }
 
@@ -5883,7 +5883,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         for hash in self
             .unfinalized_chain_ending_with(ending_segment, last_included)
-            .filter(|chain_link| chain_link.block.phase() < Phase::Gloas)
+            .filter(|chain_link| !chain_link.is_post_gloas())
             .map_while(ChainLink::execution_block_hash)
         {
             if hash == ancestor {
