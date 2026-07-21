@@ -98,6 +98,11 @@ impl<P: Preset> ChainLink<P> {
     }
 
     #[must_use]
+    pub fn is_post_gloas(&self) -> bool {
+        self.block.phase() >= Phase::Gloas
+    }
+
+    #[must_use]
     pub fn parent_root(&self) -> H256 {
         self.block.message().parent_root()
     }
