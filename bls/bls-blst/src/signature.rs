@@ -117,7 +117,7 @@ impl SignatureTrait for Signature {
             public_keys.as_slice(),
             false,
             signatures.as_slice(),
-            false,
+            true,
             randoms.as_slice(),
             MULTI_VERIFY_RANDOM_BITS,
         );
