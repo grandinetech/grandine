@@ -4,4 +4,6 @@ Grandine has a built-in validator that supports [Web3Signer](https://github.com/
 
 ### Relevant command line options
 
-* `--web3signer-api-urls` - comma separated list of Web3Signer urls. Web3Signer is not used if this option is not set.
+* `--web3signer-urls` - list of Web3Signer URLs. Web3Signer is not used if this option is not set;
+* `--web3signer-public-keys` - list of public keys to use from Web3Signer;
+* `--web3signer-refresh-keys-every-epoch` - refetches keys from Web3Signer once every epoch (this overwrites changes done via Keymanager API).

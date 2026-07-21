@@ -10,13 +10,22 @@ Grandine stores finalized part of the chain in the disk using an embedded key-va
 
 Grandine allows starting the Beacon Node from an earlier stored checkpoint by using `--state-slot` option. In this case, Grandine will try to find and load from the disk the closest stored checkpoint before the specified `--state-slot`.
 
+### Standard Mode
+
+By default, Grandine runs in standard mode, which stores only as much historical data as the specification requires rather than the full chain. It retains finalized blocks back to the `MIN_EPOCHS_FOR_BLOCK_REQUESTS` epoch, along with blob and data column sidecars for the data availability window (see `--data-availability-window`), so the node can serve them to peers. This satisfies the network's data availability requirements while avoiding the full disk usage of archival mode.
+
 ### Prune Mode
 
 Grandine provides `--prune-storage` option for prune mode that only stores a single checkpoint state with the corresponding block. This mode also stores unfinalized blocks on Grandine shutdown. This mode is sufficient for staking.
 
+### Archive Mode
+
+Grandine provides `--archive-storage` option for archival mode, where all blocks, states (every `--archival-epoch-interval` epochs) and blobs are stored in the database. This mode is intended for serving historical data via the Beacon Node API.
+
 ### Relevant command line options
 
 * `--archival-epoch-interval` - sets the number of epochs between stored states (default: `32`);
+* `--archive-storage` - enables archival mode that stores all blocks, states and blobs in the database (default: disabled);
 * `--prune-storage` - enables pruning mode that doesn't store historical states and blocks (default: disabled);
 * `--state-slot` - sets the slot at which Grandine Beacon Node should start (default: latest finalized slot);
-* `--unfinalized-states-in-memory` - the number of the latest slots that will store states in the memory (default: all unfinalized states stored in the memory).
+* `--unfinalized-states-in-memory` - the number of the latest slots that will store states in the memory (default: `128`).
