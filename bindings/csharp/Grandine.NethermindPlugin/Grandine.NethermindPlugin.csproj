@@ -43,7 +43,7 @@
   </ItemGroup>
 
   <Target Name="GenerateBindings" BeforeTargets="BeforeBuild;BeforeRebuild">
-    <Exec Command="cargo build" Outputs="../generated/*.cs">
+    <Exec Command="cargo build" EnvironmentVariables="MAKEFLAGS=" Outputs="../generated/*.cs">
       <Output ItemName="Generated" TaskParameter="Outputs" />
     </Exec>
     <ItemGroup>
