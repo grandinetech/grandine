@@ -1075,9 +1075,10 @@ mod tests {
             .await
             .expect_err("400 should fail");
         mock.assert();
-        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
-            matches!(e, BuilderApiError::BadRequest { .. })
-        }));
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
         Ok(())
     }
 
@@ -1110,9 +1111,10 @@ mod tests {
             .await
             .expect_err("500 should fail");
         mock.assert();
-        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
-            matches!(e, BuilderApiError::BuilderNodeInternalError { .. })
-        }));
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BuilderNodeInternalError { .. }) })
+        );
         Ok(())
     }
 
@@ -1131,9 +1133,7 @@ mod tests {
 
         let bid = SignedExecutionPayloadBid::<Mainnet>::default();
         let mock = server.mock(|when, then| {
-            when.method(Method::POST)
-                .path(&path)
-                .json_body_obj(&auth);
+            when.method(Method::POST).path(&path).json_body_obj(&auth);
             then.status(200).json_body(json!({
                 "version": "gloas",
                 "data": bid,
@@ -1206,9 +1206,10 @@ mod tests {
             .await
             .expect_err("400 should fail");
         mock.assert();
-        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
-            matches!(e, BuilderApiError::BadRequest { .. })
-        }));
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
         Ok(())
     }
 
