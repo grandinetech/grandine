@@ -4,7 +4,8 @@ Grandine supports [Builder API](https://github.com/ethereum/builder-specs) for s
 
 ### Relevant command line options:
 
-* `--builder-api-url` - external block builder URL (default: does not use any external builder);
+* `--builder-url` - external block builder URL (default: does not use any external builder);
 * `--builder-disable-checks` - always specified external block builder without checking for circuit breaker conditions (default: disabled);
 * `--builder-max-skipped-slots` - number of consecutive missing blocks to trigger circuit breaker condition and switch to a local execution engine for payload construction (default: `3`);
-* `--builder-max-skipped-slots-per-epoch` - number of missing blocks in the last rolling epoch to trigger circuit breaker condition and switch to a local execution engine for payload construction (default: `5`).
+* `--builder-max-skipped-slots-per-epoch` - number of missing blocks in the last rolling epoch to trigger circuit breaker condition and switch to a local execution engine for payload construction (default: `8`);
+* `--default-builder-boost-factor` - percentage multiplier to apply to the builder's payload value when choosing between a builder payload header and payload from the paired execution node (default: `100`).

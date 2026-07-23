@@ -6,7 +6,7 @@ Grandine provides a set of Beacon Node metrics that are suitable to be consumed 
 
 ### Remote Metrics 
 
-Grandine can to push metrics to a remote endpoint every 60 seconds. This option is useful for services such as [beaconcha.in](https://kb.beaconcha.in/beaconcha.in-explorer/mobile-app-less-than-greater-than-beacon-node).
+Grandine can push metrics to a remote endpoint every 60 seconds. This option is useful for services such as [beaconcha.in](https://kb.beaconcha.in/beaconcha.in-explorer/mobile-app-less-than-greater-than-beacon-node).
 
 ### Relevant command line options:
 
