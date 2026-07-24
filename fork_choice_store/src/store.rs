@@ -1837,8 +1837,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.inc_current_slot_blocks_in_processing();
         }
 
+        let started_at = std::time::Instant::now();
+
         // > Check the block is valid and compute the post-state
         let (state, block_action) = state_transition(block_root, parent)?;
+
+        features::log!(
+            LogBlockProcessingTime,
+            "block {block_root:?} state transition performed in {:?} ms",
+            started_at.elapsed().as_millis(),
+        );
 
         if let Some(action) = block_action {
             return Ok(action);

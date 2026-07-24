@@ -1180,6 +1180,8 @@ impl Context {
             }
         };
 
+        Feature::LogBlockProcessingTime.enable();
+
         run_after_genesis(
             chain_config,
             pubkey_cache,

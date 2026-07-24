@@ -243,12 +243,22 @@ impl<P: Preset> EventChannels<P> {
     }
 
     pub fn send_block_event(&self, slot: Slot, block_root: H256, execution_optimistic: bool) {
+        features::log!(
+            LogBlockProcessingTime,
+            "send block event (slot: {slot}, block_root: {block_root:?}, optimistic: {execution_optimistic})"
+        );
+
         if let Err(error) = self.send_block_event_internal(slot, block_root, execution_optimistic) {
             warn_with_peers!("unable to send block event: {error}");
         }
     }
 
     pub fn send_block_gossip_event(&self, slot: Slot, block_root: H256) {
+        features::log!(
+            LogBlockProcessingTime,
+            "send block gossip event (slot: {slot}, block_root: {block_root:?})"
+        );
+
         if let Err(error) = self.send_block_gossip_event_internal(slot, block_root) {
             warn_with_peers!("unable to send block gossip event: {error}");
         }
