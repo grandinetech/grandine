@@ -110,6 +110,8 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             prometheus_metrics::start_timer_vec(&metrics.fc_block_task_times, origin.as_ref())
         });
 
+        let started_at = Instant::now();
+
         let result = match origin {
             BlockOrigin::Gossip(_) | BlockOrigin::Requested(_) | BlockOrigin::Api(_) => {
                 block_processor.validate_block(
@@ -151,6 +153,13 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
                 NullVerifier,
             ),
         };
+
+        features::log!(
+            LogBlockProcessingTime,
+            "block {:?} validated in {:?} ms",
+            block.hash_tree_root(),
+            started_at.elapsed().as_millis(),
+        );
 
         if block.message().slot() == store_snapshot.slot() {
             store_snapshot.dec_current_slot_blocks_in_processing();
