@@ -402,7 +402,13 @@ impl<P: Preset> Context<P> {
         block: &Arc<SignedBeaconBlock<P>>,
         bls_setting: BlsSetting,
     ) {
-        let result = self.on_test_block(block, bls_setting);
+        let result = match self.on_test_block(block, bls_setting) {
+            Some(P2pMessage::PayloadEnvelopeNeeded(block_root, _)) => {
+                assert_eq!(block_root, block.message().hash_tree_root());
+                self.next_p2p_message()
+            }
+            message => message,
+        };
 
         assert!(matches!(
             result,
