@@ -33,7 +33,7 @@ use crate::{
         attestation_packer::{AttestationPacker, PackOutcome},
         conversion::convert_attestation_for_pool,
         pool::Pool,
-        types::Aggregate,
+        types::{Aggregate, PoolKey},
     },
     misc::PoolTask,
 };
@@ -227,22 +227,23 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             attester_index = Some(single_attestation.attester_index);
         }
 
-        let attestation = match convert_attestation_for_pool(&controller, attestation) {
-            Ok(attestation) => attestation,
-            Err(error) => {
-                match error.downcast_ref::<AttestationConversionError>() {
-                    Some(AttestationConversionError::Irrelevant) => {}
-                    Some(AttestationConversionError::AttesterNotInCommittee { .. }) => {
-                        exception!("failed to convert attestation for pool: {error:?}");
+        let (attestation, committee_index) =
+            match convert_attestation_for_pool(&controller, attestation) {
+                Ok(attestation_with_committee) => attestation_with_committee,
+                Err(error) => {
+                    match error.downcast_ref::<AttestationConversionError>() {
+                        Some(AttestationConversionError::Irrelevant) => {}
+                        Some(AttestationConversionError::AttesterNotInCommittee { .. }) => {
+                            exception!("failed to convert attestation for pool: {error:?}");
+                        }
+                        _ => {
+                            warn_with_peers!("failed to convert attestation for pool: {error:?}");
+                        }
                     }
-                    _ => {
-                        warn_with_peers!("failed to convert attestation for pool: {error:?}");
-                    }
-                }
 
-                return Ok(());
-            }
-        };
+                    return Ok(());
+                }
+            };
 
         let Attestation {
             aggregation_bits,
@@ -265,13 +266,19 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
                 }
             }
 
-            if !pool.aggregate_in_committee(data.index, data.slot).await {
+            if !pool.aggregate_in_committee(committee_index, data.slot).await {
                 return Ok(());
             }
         }
 
-        let singular_attestations = pool.singular_attestations(data).await;
-        let aggregates = pool.aggregates(data).await;
+        // `data` is pristine (byte-for-byte as signed); the committee index is stored separately.
+        let key = PoolKey {
+            data,
+            committee_index,
+        };
+
+        let singular_attestations = pool.singular_attestations(key).await;
+        let aggregates = pool.aggregates(key).await;
         let mut aggregates = aggregates.lock().await;
 
         if !is_singular || aggregates.is_empty() {
@@ -304,7 +311,11 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
             }
         }
 
-        pool.add_data_root_to_data_entry(data).await;
+        // `data_root_to_data_map` is a boundary lookup index for the aggregate-attestation HTTP
+        // API, which addresses aggregates by the scratch-representation root. Keep storing the
+        // scratch representation here so that contract stays byte-identical. TEMPORARY, TODO(#780).
+        pool.add_data_root_to_data_entry(key.rehydrate_phase0_scratch_repr())
+            .await;
 
         drop(wait_group);
 

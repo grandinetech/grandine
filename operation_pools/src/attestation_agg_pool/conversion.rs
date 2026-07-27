@@ -12,14 +12,26 @@ use types::{
         containers::{Attestation as ElectraAttestation, SingleAttestation},
         error::AttestationConversionError,
     },
-    phase0::containers::{Attestation as Phase0Attestation, AttestationData, Checkpoint},
+    phase0::{
+        containers::{Attestation as Phase0Attestation, Checkpoint},
+        primitives::CommitteeIndex,
+    },
     preset::Preset,
 };
 
+/// Convert an incoming attestation into the pool's per-committee representation.
+///
+/// Returns the attestation with **pristine** `data` (byte-for-byte as signed) together with the
+/// committee index tracked separately. The committee index is deliberately NOT folded back into
+/// `data.index`: under Gloas that field is the payload-presence vote, so overwriting it would
+/// corrupt the signed root. The caller stores both in a [`PoolKey`]. See
+/// TODO(grandinetech/grandine#780).
+///
+/// [`PoolKey`]: crate::attestation_agg_pool::types::PoolKey
 pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     attestation: Arc<Attestation<P>>,
-) -> Result<Phase0Attestation<P>> {
+) -> Result<(Phase0Attestation<P>, CommitteeIndex)> {
     if attestation
         .data()
         .slot
@@ -29,8 +41,12 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
         bail!(AttestationConversionError::Irrelevant);
     }
 
-    let attestation = match Arc::unwrap_or_clone(attestation) {
-        Attestation::Phase0(attestation) => attestation,
+    let attestation_with_committee = match Arc::unwrap_or_clone(attestation) {
+        // Pre-Electra: `data.index` is genuinely the committee index (as signed); already pristine.
+        Attestation::Phase0(attestation) => {
+            let committee_index = attestation.data.index;
+            (attestation, committee_index)
+        }
         Attestation::Electra(attestation) => {
             let ElectraAttestation {
                 aggregation_bits,
@@ -41,28 +57,36 @@ pub fn convert_attestation_for_pool<P: Preset, W: Wait>(
 
             let aggregation_bits: Vec<u8> = aggregation_bits.into();
 
-            let index = misc::get_committee_indices::<P>(committee_bits)
+            let committee_index = misc::get_committee_indices::<P>(committee_bits)
                 .next()
                 .ok_or(AttestationConversionError::InvalidCommitteeIndex)?;
 
-            Phase0Attestation {
+            // Keep `data` pristine (the signed Electra `data.index` is 0). The committee index is
+            // returned separately, never written into `data.index`. See TODO(#780).
+            let attestation = Phase0Attestation {
                 aggregation_bits: aggregation_bits
                     .try_into()
                     .map_err(AttestationConversionError::InvalidAggregationBits)?,
-                data: AttestationData { index, ..data },
+                data,
                 signature,
-            }
+            };
+
+            (attestation, committee_index)
         }
         Attestation::Single(attestation) => {
             let slot = attestation.data.slot;
+            let committee_index = attestation.committee_index;
             let state = current_state(controller, attestation.data.target);
-            let committee = accessors::beacon_committee(&state, slot, attestation.committee_index)?;
+            let committee = accessors::beacon_committee(&state, slot, committee_index)?;
 
-            attestation.try_into_phase0_attestation(committee)?
+            (
+                attestation.try_into_phase0_attestation(committee)?,
+                committee_index,
+            )
         }
     };
 
-    Ok(attestation)
+    Ok(attestation_with_committee)
 }
 
 pub fn convert_to_electra_attestation<P: Preset>(
@@ -130,5 +154,86 @@ fn current_state<P: Preset, W: Wait>(
 
             controller.head_state().value
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // These tests exercise the single-attestation inflow conversion directly (no controller / no
+    // `eth2-cache` data). They are deliberately written against `try_into_phase0_attestation`,
+    // which exists on both the pre-fix and post-fix code with the same signature, so they double as
+    // portable regression tests: on the pre-fix code (which overwrote `data.index` with the
+    // committee index) `single_conversion_keeps_gloas_votes_distinct` fails.
+    use bls::SignatureBytes;
+    use types::{
+        cache::IndexSlice,
+        electra::containers::SingleAttestation,
+        phase0::{
+            containers::{AttestationData, Checkpoint},
+            primitives::H256,
+        },
+        preset::Minimal,
+    };
+
+    // A Gloas single attestation: `data.index` is the payload-presence vote (0 or 1), and the
+    // committee index is carried in its own field.
+    fn gloas_single(committee_index: u64, payload_vote: u64) -> SingleAttestation {
+        SingleAttestation {
+            committee_index,
+            attester_index: 11,
+            data: AttestationData {
+                slot: 7,
+                index: payload_vote,
+                beacon_block_root: H256::repeat_byte(0xff),
+                source: Checkpoint {
+                    epoch: 1,
+                    root: H256::repeat_byte(1),
+                },
+                target: Checkpoint {
+                    epoch: 2,
+                    root: H256::repeat_byte(2),
+                },
+            },
+            signature: SignatureBytes::default(),
+        }
+    }
+
+    // Test 4 — the single-attestation inflow keeps `data` pristine: the committee index is tracked
+    // separately, never written into `data.index`.
+    #[test]
+    fn single_conversion_keeps_data_index_pristine() -> anyhow::Result<()> {
+        let committee: Vec<u64> = vec![10, 11, 12, 13];
+        let single = gloas_single(2, 0);
+
+        let phase0 = single.try_into_phase0_attestation::<Minimal>(IndexSlice::U64(&committee))?;
+
+        assert_eq!(
+            phase0.data.index, single.data.index,
+            "data.index must stay pristine, not be overwritten with committee_index"
+        );
+
+        Ok(())
+    }
+
+    // Test 3 (portable regression) — two single attestations that differ ONLY in the payload vote
+    // must convert to distinct `data`, so the pool cannot merge them. The pre-fix code overwrote
+    // `data.index` with the committee index, collapsing both onto the same `data` (the ★A bug):
+    // this assertion fails there and passes here.
+    #[test]
+    fn single_conversion_keeps_gloas_votes_distinct() -> anyhow::Result<()> {
+        let committee: Vec<u64> = vec![10, 11, 12, 13];
+
+        let vote_empty = gloas_single(2, 0);
+        let vote_full = gloas_single(2, 1);
+
+        let a = vote_empty.try_into_phase0_attestation::<Minimal>(IndexSlice::U64(&committee))?;
+        let b = vote_full.try_into_phase0_attestation::<Minimal>(IndexSlice::U64(&committee))?;
+
+        assert_ne!(
+            a.data, b.data,
+            "payload votes must remain distinct after conversion"
+        );
+
+        Ok(())
     }
 }

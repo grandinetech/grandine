@@ -151,6 +151,12 @@ impl<P: Preset> TryFrom<Phase0Attestation<P>> for Attestation<P> {
 
         let aggregation_bits: Vec<u8> = aggregation_bits.into();
         let mut committee_bits = BitVector::default();
+        // This reads the committee index out of `data.index` and resets `data.index` to 0. That is
+        // correct for Electra/Fulu (where the signed `data.index` is 0 and the pool feeds this a
+        // scratch representation with the committee index in `data.index`). It is NOT valid under
+        // Gloas, where `data.index` is the payload-presence vote: hardcoding 0 here would discard
+        // that vote. Left intact for this PR; to be removed once the packer stops relying on the
+        // scratch representation. See TODO(grandinetech/grandine#780).
         committee_bits.set(data.index.try_into()?, true);
 
         Ok(Self {
@@ -200,10 +206,10 @@ impl SingleAttestation {
             signature,
         } = self;
 
-        let data = AttestationData {
-            index: committee_index,
-            ..data
-        };
+        // Keep `data` pristine: a single attestation's signed `data.index` is 0 post-Electra, and
+        // the committee index is tracked separately by the pool (via `PoolKey`). Folding it into
+        // `data.index` here would corrupt the signed root under Gloas, where that field is the
+        // payload-presence vote. See TODO(grandinetech/grandine#780).
 
         ensure!(
             committee_index < P::MaxCommitteesPerSlot::U64,

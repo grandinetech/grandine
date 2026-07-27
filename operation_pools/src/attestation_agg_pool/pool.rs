@@ -22,7 +22,9 @@ use types::{
     traits::BeaconState,
 };
 
-use crate::attestation_agg_pool::types::{Aggregate, AggregateMap, AttestationMap, AttestationSet};
+use crate::attestation_agg_pool::types::{
+    Aggregate, AggregateMap, AttestationMap, AttestationSet, PoolKey,
+};
 
 #[expect(type_alias_bounds)]
 type AttestationsWithSlot<P: Preset> = (ContiguousList<Attestation<P>, P::MaxAttestations>, Slot);
@@ -84,15 +86,15 @@ impl<P: Preset> Pool<P> {
             .insert(root, data);
     }
 
-    pub async fn aggregates(&self, data: AttestationData) -> Arc<Mutex<Vec<Aggregate<P>>>> {
-        let epoch = data.target.epoch;
+    pub async fn aggregates(&self, key: PoolKey) -> Arc<Mutex<Vec<Aggregate<P>>>> {
+        let epoch = key.data.target.epoch;
 
         if let Some(aggregates) = self
             .aggregates
             .read()
             .await
             .get(&epoch)
-            .and_then(|epoch_aggregates| epoch_aggregates.get(&data))
+            .and_then(|epoch_aggregates| epoch_aggregates.get(&key))
         {
             return aggregates.clone_arc();
         }
@@ -102,7 +104,7 @@ impl<P: Preset> Pool<P> {
             .await
             .entry(epoch)
             .or_default()
-            .entry(data)
+            .entry(key)
             .or_default()
             .clone_arc()
     }
@@ -114,7 +116,12 @@ impl<P: Preset> Pool<P> {
             .get(&epoch)
             .into_iter()
             .flatten()
-            .map(|(data, aggregates)| async {
+            .map(|(key, aggregates)| async {
+                // Boundary emission: rebuild the scratch representation the packer / block
+                // production / HTTP-API paths still expect (`data.index` = committee index).
+                // Storage stays pristine; this is temporary. See TODO(#780).
+                let data = key.rehydrate_phase0_scratch_repr();
+
                 aggregates
                     .lock()
                     .await
@@ -128,7 +135,7 @@ impl<P: Preset> Pool<P> {
 
                         Attestation {
                             aggregation_bits,
-                            data: *data,
+                            data,
                             signature: signature.into(),
                         }
                     })
@@ -173,12 +180,17 @@ impl<P: Preset> Pool<P> {
     ) -> Option<Attestation<P>> {
         let epoch = data.target.epoch;
 
+        // Callers pass a scratch representation (`data.index` = committee index). Recover the
+        // pristine storage key. TEMPORARY, see TODO(#780).
+        let is_post_electra = epoch >= self.chain_config.electra_fork_epoch;
+        let key = PoolKey::from_scratch_repr(data, is_post_electra);
+
         if let Some(aggregates) = self
             .aggregates
             .read()
             .await
             .get(&epoch)
-            .and_then(|epoch_aggregates| epoch_aggregates.get(&data))
+            .and_then(|epoch_aggregates| epoch_aggregates.get(&key))
         {
             return aggregates
                 .lock()
@@ -204,29 +216,46 @@ impl<P: Preset> Pool<P> {
     }
 
     // Handler for the `/eth/v2/validator/aggregate_attestation` API call.
-    // Expects `attestation_data_root` computed from the post-Electra `AttestationData`,
-    // with `committee_index` explicitly set to 0 and provided separately.
+    // `attestation_data_root` is the *spec* root (computed from the post-Electra `AttestationData`
+    // with `index == 0`), and `committee_index` is supplied separately. Both are matched directly
+    // against the pristine `PoolKey`, so there is no scratch-representation `data.index`
+    // manipulation here: the committee index comes from `key.committee_index` and the spec root
+    // from `key.data`.
     pub async fn best_aggregate_attestation_by_data_root_and_committee_index(
         &self,
         attestation_data_root: H256,
         epoch: Epoch,
         committee_index: CommitteeIndex,
     ) -> Option<Attestation<P>> {
-        self.aggregate_attestations_by_epoch(epoch)
+        let epoch_aggregates = self.aggregates.read().await;
+
+        let (key, aggregates) = epoch_aggregates.get(&epoch)?.iter().find(|(key, _)| {
+            key.committee_index == committee_index
+                && key.data.hash_tree_root() == attestation_data_root
+        })?;
+
+        // Boundary emission: rebuild the scratch representation callers expect. TEMPORARY,
+        // see TODO(#780).
+        let data = key.rehydrate_phase0_scratch_repr();
+
+        aggregates
+            .lock()
             .await
-            .into_iter()
-            .filter(|attestation| {
-                let mut data = attestation.data;
-                let data_committee_index = data.index;
+            .iter()
+            .max_by_key(|aggregate| aggregate.aggregation_bits.count_ones())
+            .cloned()
+            .map(|aggregate| {
+                let Aggregate {
+                    aggregation_bits,
+                    signature,
+                } = aggregate;
 
-                if epoch >= self.chain_config.electra_fork_epoch {
-                    data.index = 0;
+                Attestation {
+                    aggregation_bits,
+                    data,
+                    signature: signature.into(),
                 }
-
-                data_committee_index == committee_index
-                    && data.hash_tree_root() == attestation_data_root
             })
-            .max_by_key(|attestation| attestation.aggregation_bits.count_ones())
     }
 
     pub async fn best_aggregate_attestation_by_data_root(
@@ -350,16 +379,16 @@ impl<P: Preset> Pool<P> {
 
     pub async fn singular_attestations(
         &self,
-        data: AttestationData,
+        key: PoolKey,
     ) -> Arc<RwLock<AttestationSet<P>>> {
-        let epoch = data.target.epoch;
+        let epoch = key.data.target.epoch;
 
         if let Some(attestations) = self
             .singular_attestations
             .read()
             .await
             .get(&epoch)
-            .and_then(|epoch_attestations| epoch_attestations.get(&data))
+            .and_then(|epoch_attestations| epoch_attestations.get(&key))
         {
             return attestations.clone_arc();
         }
@@ -369,7 +398,7 @@ impl<P: Preset> Pool<P> {
             .await
             .entry(epoch)
             .or_default()
-            .entry(data)
+            .entry(key)
             .or_default()
             .clone_arc()
     }
@@ -381,7 +410,22 @@ impl<P: Preset> Pool<P> {
             .get(&epoch)
             .into_iter()
             .flatten()
-            .map(|(_, attestations)| async { attestations.read().await.clone() })
+            .map(|(key, attestations)| async move {
+                // Storage is pristine; rebuild the scratch representation callers expect
+                // (`data.index` = committee index). TEMPORARY, see TODO(#780).
+                let data = key.rehydrate_phase0_scratch_repr();
+
+                attestations
+                    .read()
+                    .await
+                    .iter()
+                    .map(|attestation| {
+                        let mut rehydrated = (**attestation).clone();
+                        rehydrated.data = data;
+                        Arc::new(rehydrated)
+                    })
+                    .collect_vec()
+            })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await
