@@ -4347,18 +4347,23 @@ async fn get_pool_attestations<P: Preset, W: Wait>(
     aggregates
         .iter()
         .chain(singular_attestations.iter().map(Arc::as_ref))
-        .filter(|attestation| {
-            attestation.data.index == committee_index && attestation.data.slot == slot
-        })
         .cloned()
         .filter_map(|attestation| {
-            if phase < Phase::Electra {
-                Some(Attestation::Phase0(attestation))
+            // The pool emits a temporary scratch representation with the committee index in
+            // `data.index`. Classify the combined attestation via the canonical
+            // `misc::committee_index` accessor instead of reading `data.index` directly.
+            // See TODO(grandinetech/grandine#780).
+            let attestation = if phase < Phase::Electra {
+                Attestation::Phase0(attestation)
             } else {
                 convert_to_electra_attestation(attestation)
                     .map(Attestation::Electra)
-                    .ok()
-            }
+                    .ok()?
+            };
+
+            (misc::committee_index(&attestation) == committee_index
+                && attestation.data().slot == slot)
+                .then_some(attestation)
         })
         .collect()
 }

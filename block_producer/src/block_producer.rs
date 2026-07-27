@@ -892,12 +892,10 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     Vec<ElectraAttestation<P>>,
                 )> = Vec::new();
 
-                for (electra_attestation, committee_index) in
+                for electra_attestation in
                     attestations.into_iter().filter_map(|attestation| {
-                        let committee_index = attestation.data.index;
-
                         match operation_pools::convert_to_electra_attestation(attestation) {
-                            Ok(electra_attestation) => Some((electra_attestation, committee_index)),
+                            Ok(electra_attestation) => Some(electra_attestation),
                             Err(error) => {
                                 warn_with_peers!(
                                     "unable to convert to electra attestation: {error:?}"
@@ -907,6 +905,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         }
                     })
                 {
+                    // The pool emits a temporary scratch representation with the committee index in
+                    // `data.index`; read the committee canonically from the converted attestation's
+                    // `committee_bits` instead of `data.index`. See TODO(grandinetech/grandine#780).
+                    let committee_index =
+                        misc::get_committee_indices::<P>(electra_attestation.committee_bits)
+                            .next()
+                            .unwrap_or_default();
+
                     if let Some((_, indices, attestations)) =
                         results.iter_mut().find(|(data, indices, _)| {
                             *data == electra_attestation.data && !indices.contains(&committee_index)
