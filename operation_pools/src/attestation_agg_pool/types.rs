@@ -62,7 +62,7 @@ impl PoolKey {
     /// post-Electra the signed `data.index` is 0, so it is reset here to keep the stored `data`
     /// pristine; pre-Electra `data.index` is genuinely the committee index and is left untouched.
     #[must_use]
-    pub fn from_scratch_repr(scratch: AttestationData, is_post_electra: bool) -> Self {
+    pub const fn from_scratch_repr(scratch: AttestationData, is_post_electra: bool) -> Self {
         let committee_index = scratch.index;
         let data = if is_post_electra {
             AttestationData {
@@ -157,7 +157,10 @@ mod tests {
         let key = PoolKey::from_scratch_repr(scratch, true);
 
         assert_eq!(key.committee_index, 7);
-        assert_eq!(key.data.index, 0, "post-Electra stored data.index must be pristine (0)");
+        assert_eq!(
+            key.data.index, 0,
+            "post-Electra stored data.index must be pristine (0)"
+        );
 
         assert_eq!(key.rehydrate_phase0_scratch_repr(), scratch);
     }
@@ -208,7 +211,10 @@ mod tests {
 
         // Same committee, but the signed data differs → different keys → different buckets.
         assert_eq!(key_empty.committee_index, key_full.committee_index);
-        assert_ne!(key_empty, key_full, "payload votes must not collide into one bucket");
+        assert_ne!(
+            key_empty, key_full,
+            "payload votes must not collide into one bucket"
+        );
 
         // Characterise the pre-fix behaviour this fixes: the old pool folded the committee index
         // into `data.index`, collapsing both votes onto a single AttestationData map key.

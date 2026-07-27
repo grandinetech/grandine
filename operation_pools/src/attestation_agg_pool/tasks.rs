@@ -215,7 +215,10 @@ impl<P: Preset, W: Wait> PoolTask for InsertAttestationTask<P, W> {
                 }
             }
 
-            if !pool.aggregate_in_committee(committee_index, data.slot).await {
+            if !pool
+                .aggregate_in_committee(committee_index, data.slot)
+                .await
+            {
                 return Ok(());
             }
         }

@@ -377,10 +377,7 @@ impl<P: Preset> Pool<P> {
         *self.registered_validator_indices.write().await = validator_indices;
     }
 
-    pub async fn singular_attestations(
-        &self,
-        key: PoolKey,
-    ) -> Arc<RwLock<AttestationSet<P>>> {
+    pub async fn singular_attestations(&self, key: PoolKey) -> Arc<RwLock<AttestationSet<P>>> {
         let epoch = key.data.target.epoch;
 
         if let Some(attestations) = self
