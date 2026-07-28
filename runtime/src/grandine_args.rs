@@ -325,6 +325,11 @@ struct BeaconNodeOptions {
     #[clap(long)]
     store_directory: Option<PathBuf>,
 
+    /// Directory to store beacon blobs
+    /// [default: {data_dir}/blobs]
+    #[clap(long)]
+    blobs_dir: Option<PathBuf>,
+
     /// Directory to store application network files
     /// [default: {data_dir}/network]
     #[clap(long)]
@@ -1085,6 +1090,7 @@ impl GrandineArgs {
             force_reset_beacon_db,
             data_dir,
             store_directory,
+            blobs_dir,
             network_dir,
             database_size,
             eth1_database_size,
@@ -1318,6 +1324,7 @@ impl GrandineArgs {
             Directories {
                 data_dir,
                 store_directory,
+                blobs_dir,
                 network_dir,
                 validator_dir: None,
             }
@@ -2121,6 +2128,20 @@ mod tests {
                 dirs::home_dir()
                     .expect("home directory should be accessible")
                     .join(".grandine/mainnet/beacon")
+            ),
+        );
+    }
+
+    #[test]
+    fn default_blobs_dir() {
+        let config = config_from_args([]);
+
+        assert_eq!(
+            config.storage_config.directories.blobs_dir,
+            Some(
+                dirs::home_dir()
+                    .expect("home directory should be accessible")
+                    .join(".grandine/mainnet/blobs")
             ),
         );
     }

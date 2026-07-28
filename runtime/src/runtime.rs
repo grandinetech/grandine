@@ -255,14 +255,21 @@ pub async fn run_after_genesis<P: Preset>(
         storage_config.beacon_fork_choice_database(
             None,
             DatabaseMode::ReadWrite,
-            Some(restart_tx),
+            Some(restart_tx.clone()),
         )?
+    };
+
+    let blobs_database = if in_memory {
+        Database::in_memory()
+    } else {
+        storage_config.blobs_database(None, DatabaseMode::ReadWrite, Some(restart_tx))?
     };
 
     let storage = Arc::new(Storage::new(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
         storage_database,
+        blobs_database,
         archival_epoch_interval,
         storage_mode,
     ));
@@ -1069,6 +1076,11 @@ impl Context {
                 Err(error) => warn!("failed to remove beacon_fork_choice database: {error:?}"),
             }
 
+            match remove_database_dir(storage_config.blobs_database_path().as_path()) {
+                Ok(()) => info!("successfully removed blobs database"),
+                Err(error) => warn!("failed to remove blobs database: {error:?}"),
+            }
+
             match remove_database_dir(storage_config.pubkey_cache_database_path().as_path()) {
                 Ok(()) => info!("successfully removed pubkey_cache database"),
                 Err(error) => warn!("failed to remove pubkey_cache database: {error:?}"),
@@ -1609,10 +1621,14 @@ fn handle_command<P: Preset>(
             let storage_database =
                 storage_config.beacon_fork_choice_database(None, DatabaseMode::ReadOnly, None)?;
 
+            let blobs_database =
+                storage_config.blobs_database(None, DatabaseMode::ReadOnly, None)?;
+
             let storage = Storage::new(
                 chain_config,
                 pubkey_cache.clone_arc(),
                 storage_database,
+                blobs_database,
                 *archival_epoch_interval,
                 *storage_mode,
             );
