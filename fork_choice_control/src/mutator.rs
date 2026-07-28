@@ -2498,12 +2498,6 @@ where
                     },
                 ));
 
-                self.store_mut().register_rejected_payload_envelope(
-                    payload_envelope_identifier.beacon_block_root,
-                );
-
-                self.update_store_snapshot();
-
                 reply_payload_envelope_validation_result_to_http_api(sender, Err(anyhow!(source)));
             }
         }
