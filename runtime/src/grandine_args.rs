@@ -45,7 +45,7 @@ use prometheus_metrics::{METRICS, Metrics};
 use reqwest::header::HeaderValue;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use signer::Web3SignerConfig;
+use signer::{Keystores, Web3SignerConfig};
 use slasher::SlasherConfig;
 use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
 use ssz::Uint256;
@@ -79,7 +79,6 @@ use crate::{
     defaults::DEFAULT_RECONSTRUCTION_DELAY_MS,
     grandine_config::GrandineConfig,
     predefined_network::PredefinedNetwork,
-    validators::Validators,
 };
 
 /// Grandine Team <info@grandine.io>
@@ -1365,7 +1364,7 @@ impl GrandineArgs {
 
         let validators = keystore_dir
             .zip(keystore_password_file.or(keystore_password_dir))
-            .map(|(keystore_dir, keystore_password_file)| Validators {
+            .map(|(keystore_dir, keystore_password_file)| Keystores {
                 keystore_dir,
                 keystore_password_file,
             });
@@ -2089,7 +2088,7 @@ mod tests {
 
         assert_eq!(
             config.validators,
-            Some(Validators {
+            Some(Keystores {
                 keystore_dir: PathBuf::from("dir_value"),
                 keystore_password_file: PathBuf::from("pass_file"),
             }),
@@ -2107,7 +2106,7 @@ mod tests {
 
         assert_eq!(
             config.validators,
-            Some(Validators {
+            Some(Keystores {
                 keystore_dir: PathBuf::from("dir_value"),
                 keystore_password_file: PathBuf::from("pass_dir"),
             }),

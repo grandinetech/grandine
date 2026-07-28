@@ -13,7 +13,10 @@ bls = { workspace = true }
 builder_api = { workspace = true }
 derive_more = { workspace = true }
 doppelganger_protection = { workspace = true }
+eip_2335 = { workspace = true }
+fs-err = { workspace = true }
 futures = { workspace = true }
+glob = { workspace = true }
 helper_functions = { workspace = true }
 itertools = { workspace = true }
 logging = { workspace = true }
@@ -21,14 +24,18 @@ prometheus_metrics = { workspace = true }
 rayon = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_utils = { workspace = true }
 slashing_protection = { workspace = true }
 ssz = { workspace = true }
 std_ext = { workspace = true }
+tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 types = { workspace = true }
+validator_key_cache = { workspace = true }
+zeroize = { workspace = true }
 
 [dev-dependencies]
 helper_functions = { workspace = true }

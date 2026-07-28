@@ -344,6 +344,7 @@ impl Snapshot {
                 }
                 SigningMessage::AggregationSlot { .. }
                 | SigningMessage::AggregateAndProof(_)
+                | SigningMessage::ExecutionPayloadBid(_)
                 | SigningMessage::ExecutionPayloadEnvelope(_)
                 | SigningMessage::RandaoReveal { .. }
                 | SigningMessage::SyncCommitteeMessage { .. }

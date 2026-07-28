@@ -1,9 +1,11 @@
 pub use crate::{
+    keystores::Keystores,
     signer::{KeyOrigin, Signer, Snapshot},
     types::{ForkInfo, SigningMessage, SigningTriple},
     web3signer::Config as Web3SignerConfig,
 };
 
+mod keystores;
 mod signer;
 mod types;
 mod web3signer {

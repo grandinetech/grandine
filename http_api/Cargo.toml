@@ -11,6 +11,7 @@ anyhow = { workspace = true }
 arithmetic = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
+beacon_api_types = { workspace = true }
 binary_utils ={ workspace = true }
 block_producer = { workspace = true }
 bls = { workspace = true }
@@ -45,6 +46,7 @@ serde_json = { workspace = true }
 serde_qs = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
+sse = { workspace = true }
 ssz = { workspace = true }
 static_assertions = { workspace = true }
 std_ext = { workspace = true }

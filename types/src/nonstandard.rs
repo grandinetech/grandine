@@ -6,7 +6,7 @@ use bls::Signature;
 use derive_more::{Constructor, From};
 use enum_iterator::Sequence;
 use enum_map::Enum;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
 use ssz::{ContiguousList, Size, SszList, SszSize, SszWrite, WriteError};
@@ -26,6 +26,10 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     fulu::containers::DataColumnIdentifier,
+    gloas::{
+        consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
+        primitives::PayloadStatus as RawPayloadPresence,
+    },
     phase0::{
         containers::SignedBeaconBlockHeader,
         primitives::{Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -355,6 +359,34 @@ impl PayloadStatus {
     #[must_use]
     pub const fn is_optimistic(self) -> bool {
         matches!(self, Self::Optimistic)
+    }
+}
+
+// It's too cumbersome to rename `PayloadStatus` and all the related fields and methods to something else.
+// So what is called `PayloadStatus` in the Gloas consensus specs, is called `PayloadPresence` in Grandine.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PayloadPresence {
+    Empty,
+    Full,
+    #[default]
+    Pending,
+}
+
+impl From<RawPayloadPresence> for PayloadPresence {
+    fn from(payload_status: RawPayloadPresence) -> Self {
+        match payload_status {
+            PAYLOAD_STATUS_EMPTY => Self::Empty,
+            PAYLOAD_STATUS_FULL => Self::Full,
+            _ => Self::Pending,
+        }
+    }
+}
+
+impl PayloadPresence {
+    #[must_use]
+    pub const fn is_full(self) -> bool {
+        matches!(self, Self::Full)
     }
 }
 

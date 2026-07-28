@@ -68,7 +68,7 @@ use types::{
     config::Config,
     nonstandard::Phase,
     phase0::{
-        consts::GENESIS_SLOT,
+        consts::{BASIS_POINTS, GENESIS_SLOT},
         primitives::{Epoch, Slot, UnixSeconds},
     },
     preset::Preset,
@@ -194,6 +194,19 @@ impl Tick {
         } else {
             matches!(self.kind, TickKind::Aggregate)
         }
+    }
+
+    /// Whether this tick ends no later than `due_bps` basis points into its slot.
+    /// Mirrors `Store::is_before_due_bps_deadline`.
+    #[must_use]
+    pub fn is_before_due_bps_deadline<P: Preset>(self, config: &Config, due_bps: u64) -> bool {
+        let ticks_per_slot = u64::try_from(TickKind::ticks_per_slot::<P>(config, self.slot))
+            .expect("number of ticks per slot should fit in u64");
+
+        (self.kind as u64)
+            .saturating_add(1)
+            .saturating_mul(BASIS_POINTS)
+            <= due_bps.saturating_mul(ticks_per_slot)
     }
 
     #[must_use]

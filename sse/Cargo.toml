@@ -1,0 +1,21 @@
+[package]
+name = 'sse'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+duplicate = { workspace = true }
+execution_engine = { workspace = true }
+helper_functions = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+ssz = { workspace = true }
+strum = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -1,0 +1,45 @@
+[package]
+name = 'builder'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "grandine-builder"
+path = "src/main.rs"
+
+[dependencies]
+allocator = { workspace = true }
+anyhow = { workspace = true }
+beacon_api_types = { workspace = true }
+bls = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+clock = { workspace = true }
+either = { workspace = true }
+eth1_api = { workspace = true }
+eventsource-stream = { workspace = true }
+execution_engine = { workspace = true }
+futures = { workspace = true }
+helper_functions = { workspace = true }
+http_api_utils = { workspace = true }
+kzg_utils = { workspace = true }
+mime = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+signer = { workspace = true }
+sse = { workspace = true }
+ssz = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+try_from_iterator = { workspace = true }
+tracing = { workspace = true }
+types = { workspace = true }
+url = { workspace = true }
+
+[features]
+default = ["bls/blst", "kzg_utils/blst"]

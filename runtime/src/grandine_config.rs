@@ -8,6 +8,7 @@ use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
 use p2p::NetworkConfig;
+use signer::Keystores;
 use signer::Web3SignerConfig;
 use ssz::Uint256;
 use tracing::info;
@@ -22,7 +23,6 @@ use validator::ValidatorApiConfig;
 
 use crate::{
     MetricsConfig, StorageConfig, commands::GrandineCommand, predefined_network::PredefinedNetwork,
-    validators::Validators,
 };
 
 #[expect(
@@ -41,7 +41,7 @@ pub struct GrandineConfig {
     pub back_sync_enabled: bool,
     pub eth1_rpc_urls: Vec<RedactingUrl>,
     pub data_dir: PathBuf,
-    pub validators: Option<Validators>,
+    pub validators: Option<Keystores>,
     pub keystore_storage_password_file: Option<PathBuf>,
     pub disable_blockprint_graffiti: bool,
     pub graffiti: Vec<H256>,

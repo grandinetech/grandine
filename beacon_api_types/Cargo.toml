@@ -1,0 +1,15 @@
+[package]
+name = 'beacon_api_types'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+bls = { workspace = true }
+parse-display = { workspace = true }
+serde = { workspace = true }
+serde_utils = { workspace = true }
+serde_with = { workspace = true }
+types = { workspace = true }

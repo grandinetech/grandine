@@ -2337,6 +2337,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "beacon_api_types"
+version = "0.0.0"
+dependencies = [
+ "bls",
+ "parse-display",
+ "serde",
+ "serde_utils",
+ "serde_with",
+ "types",
+]
+
+[[package]]
 name = "bech32"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2911,6 +2923,41 @@ dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "builder"
+version = "0.0.0"
+dependencies = [
+ "allocator",
+ "anyhow",
+ "beacon_api_types",
+ "bls",
+ "bytes",
+ "clap",
+ "clock",
+ "either",
+ "eth1_api",
+ "eventsource-stream",
+ "execution_engine",
+ "futures",
+ "helper_functions",
+ "http_api_utils",
+ "kzg_utils",
+ "mime",
+ "parking_lot",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "signer",
+ "sse",
+ "ssz",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "try_from_iterator",
+ "types",
+ "url",
 ]
 
 [[package]]
@@ -5974,8 +6021,8 @@ dependencies = [
  "serde",
  "serde-aux",
  "serde_utils",
- "serde_with",
  "spec_test_utils",
+ "sse",
  "ssz",
  "state_cache",
  "std_ext",
@@ -7064,6 +7111,7 @@ dependencies = [
  "attestation_verifier",
  "axum 0.8.9",
  "axum-extra",
+ "beacon_api_types",
  "binary_utils",
  "block_producer",
  "bls",
@@ -7118,6 +7166,7 @@ dependencies = [
  "signer",
  "slashing_protection",
  "snapshot_test_utils",
+ "sse",
  "ssz",
  "static_assertions",
  "std_ext",
@@ -13182,7 +13231,6 @@ dependencies = [
  "directories",
  "dirs 6.0.0",
  "doppelganger_protection",
- "eip_2335",
  "enum-iterator",
  "eth1",
  "eth1_api",
@@ -13239,7 +13287,6 @@ dependencies = [
  "validator",
  "validator_key_cache",
  "validator_statistics",
- "zeroize",
 ]
 
 [[package]]
@@ -14267,7 +14314,10 @@ dependencies = [
  "builder_api",
  "derive_more 2.1.1",
  "doppelganger_protection",
+ "eip_2335",
+ "fs-err",
  "futures",
+ "glob",
  "helper_functions",
  "hex-literal 1.1.0",
  "httpmock",
@@ -14283,10 +14333,13 @@ dependencies = [
  "slashing_protection",
  "ssz",
  "std_ext",
+ "tap",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "types",
+ "validator_key_cache",
+ "zeroize",
 ]
 
 [[package]]
@@ -15602,6 +15655,22 @@ dependencies = [
  "js-sys",
  "rsqlite-vfs",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "sse"
+version = "0.0.0"
+dependencies = [
+ "duplicate",
+ "execution_engine",
+ "helper_functions",
+ "serde",
+ "serde_json",
+ "serde_utils",
+ "serde_with",
+ "ssz",
+ "strum 0.28.0",
+ "types",
 ]
 
 [[package]]
@@ -17408,6 +17477,7 @@ dependencies = [
  "signer",
  "slasher",
  "slashing_protection",
+ "sse",
  "ssz",
  "static_assertions",
  "std_ext",

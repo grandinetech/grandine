@@ -19,6 +19,9 @@ use axum::{
         sse::{Event as ServerSentEvent, KeepAlive},
     },
 };
+use beacon_api_types::{
+    GetGenesisResponse, StateFinalityCheckpointsResponse, ValidatorProposerDutyResponse,
+};
 use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
@@ -27,7 +30,7 @@ use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
-use fork_choice_control::{Event, EventChannels, ForkChoiceContext, ForkTip, Topic, Wait};
+use fork_choice_control::{EventChannels, ForkChoiceContext, ForkTip, Wait};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
 };
@@ -54,6 +57,7 @@ use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
+use sse::{Event, Topic};
 use ssz::{
     ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszList as _,
     SszRead,
@@ -110,7 +114,7 @@ use types::{
         },
         primitives::{
             ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, Uint256,
-            UnixSeconds, ValidatorIndex, Version,
+            ValidatorIndex,
         },
     },
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
@@ -306,15 +310,6 @@ pub struct TraceLevelRequest {
     level: String,
 }
 
-#[expect(clippy::struct_field_names)]
-#[derive(Serialize)]
-pub struct GetGenesisResponse {
-    #[serde(with = "serde_utils::string_or_native")]
-    genesis_time: UnixSeconds,
-    genesis_validators_root: H256,
-    genesis_fork_version: Version,
-}
-
 #[derive(Serialize)]
 pub struct RootResponse {
     root: H256,
@@ -342,13 +337,6 @@ pub struct SyncCommitteeRewardsResponse {
     validator_index: ValidatorIndex,
     #[serde(with = "serde_utils::string_or_native")]
     reward: i64,
-}
-
-#[derive(Serialize)]
-pub struct StateFinalityCheckpointsResponse {
-    previous_justified: Checkpoint,
-    current_justified: Checkpoint,
-    finalized: Checkpoint,
 }
 
 #[derive(Serialize)]
@@ -494,15 +482,6 @@ pub struct ValidatorAttesterDutyResponse {
 
 #[derive(Serialize)]
 pub struct ValidatorPTCDutyResponse {
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorProposerDutyResponse {
     pubkey: PublicKeyBytes,
     #[serde(with = "serde_utils::string_or_native")]
     validator_index: ValidatorIndex,
