@@ -1225,6 +1225,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // If the anchor is a non-genesis block, no blocks will be viable for at least 2/3 of an epoch.
     // The anchor feature is underdeveloped and poorly specified, so this might not be intended.
     fn is_block_viable(&self, unfinalized_block: &UnfinalizedBlock<P>) -> bool {
+        let block_root = unfinalized_block.block_root();
         let voting_source = self.voting_source(unfinalized_block);
 
         // > The voting source should be at the same height as the store's justified checkpoint or
@@ -1248,16 +1249,28 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 break 'block true;
             }
 
-            let ancestor_at_finalized_slot = self
-                .ancestor(unfinalized_block.block_root(), self.finalized_slot())
-                .expect(
+            let ancestor_at_finalized_slot =
+                self.ancestor(block_root, self.finalized_slot()).expect(
                     "every block in the store should have an ancestor at the last finalized slot",
                 );
 
             ancestor_at_finalized_slot == self.finalized_checkpoint.root
         };
 
-        correct_justified && correct_finalized
+        let descends_from_justified = 'block: {
+            if self.justified_epoch() == GENESIS_EPOCH {
+                break 'block true;
+            }
+
+            let Some(justified_chain_link) = self.justified_chain_link() else {
+                break 'block true;
+            };
+
+            self.ancestor(block_root, justified_chain_link.slot())
+                == Some(self.justified_checkpoint.root)
+        };
+
+        correct_justified && correct_finalized && descends_from_justified
     }
 
     /// [`get_voting_source`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#get_voting_source)
@@ -5620,6 +5633,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             let viable = self.is_segment_viable(segment);
 
             let mut best_descendant_of_segment = viable.then_some(*segment_id);
+            let mut best_branch_score: Option<Score> = None;
 
             while let Some(branch_point) = branch_points.peek_mut() {
                 if branch_point.parent.segment_id != *segment_id {
@@ -5657,7 +5671,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let sibling_score =
                     self.score(sibling, Some(common_parent_balances), proposer_boost);
 
-                if sibling_score < branch_point_score || sibling.is_invalid() {
+                if (sibling_score < branch_point_score || sibling.is_invalid())
+                    && best_branch_score.is_none_or(|score| score < branch_point_score)
+                {
+                    best_branch_score = Some(branch_point_score);
                     best_descendant_of_segment = Some(branch_point.best_descendant);
                 }
             }
