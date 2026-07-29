@@ -27,8 +27,8 @@ jobs:
             default_kzg_backend: arkworks
             test_kzg_backends: |
               set KZG_BACKEND=constantine
-              cargo test --release --no-default-features --features arkworks,constantine,zkcrypto --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- kzg
-              cargo test --release --no-default-features --features zkcrypto --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 -- kzg
+              cargo test --release --no-default-features --features default-networks,arkworks,constantine,zkcrypto --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine -- kzg
+              cargo test --release --no-default-features --features default-networks,zkcrypto --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine -- kzg
           - os: macos-latest
             backend: arkworks,blst,mcl
 
