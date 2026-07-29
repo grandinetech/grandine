@@ -8,6 +8,10 @@ DIRECTORY = 'consensus-spec-tests'
 
 IGNORED_GLOBS = %w[
   .version
+  **/*.md
+  **/*.py
+  **/*.typed
+  tests/generators/**/*
   tests/*/*/fork_choice_compliance/*/*/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/single_merkle_proof/*/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
