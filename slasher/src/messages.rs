@@ -1,10 +1,8 @@
 use futures::channel::mpsc::UnboundedSender;
 use logging::warn_with_peers;
 use types::{
-    phase0::{
-        containers::{AttesterSlashing, ProposerSlashing},
-        primitives::Epoch,
-    },
+    electra::containers::AttesterSlashing,
+    phase0::{containers::ProposerSlashing, primitives::Epoch},
     preset::Preset,
 };
 

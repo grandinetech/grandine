@@ -4,10 +4,8 @@ use anyhow::Result;
 use database::Database;
 use ssz::{SszHash as _, SszReadDefault as _, SszWrite as _};
 use types::{
-    phase0::{
-        containers::IndexedAttestation,
-        primitives::{Epoch, H256},
-    },
+    electra::containers::IndexedAttestation,
+    phase0::primitives::{Epoch, H256},
     preset::Preset,
 };
 

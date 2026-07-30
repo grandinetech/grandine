@@ -14346,6 +14346,7 @@ dependencies = [
  "ssz",
  "thiserror 2.0.18",
  "tracing",
+ "try_from_iterator",
  "types",
  "unwrap_none",
  "wincode",

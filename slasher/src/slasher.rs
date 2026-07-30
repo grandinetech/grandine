@@ -10,14 +10,17 @@ use futures::{
     select,
     stream::StreamExt,
 };
-use helper_functions::{misc, phase0};
+use helper_functions::{electra, misc, phase0};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::P2pToSlasher;
+use ssz::ContiguousList;
 use thiserror::Error;
+use try_from_iterator::TryFromIterator as _;
 use types::{
     combined::{Attestation, AttesterSlashing as CombinedAttesterSlashing, SignedBeaconBlock},
+    electra::containers::{AttesterSlashing, IndexedAttestation, SingleAttestation},
     phase0::{
-        containers::{AttesterSlashing, IndexedAttestation, ProposerSlashing},
+        containers::{IndexedAttestation as Phase0IndexedAttestation, ProposerSlashing},
         primitives::{Epoch, Version},
     },
     preset::Preset,
@@ -148,47 +151,74 @@ impl<P: Preset> Slasher<P> {
     }
 
     fn process_attestation(&self, attestation: &Attestation<P>) -> Result<()> {
-        let attestation = match attestation {
-            Attestation::Phase0(attestation) => attestation,
-            // TODO:
-            Attestation::Electra(_) | Attestation::Single(_) => return Ok(()),
+        let Some(indexed_attestation) = self.indexed_attestation(attestation)? else {
+            return Ok(());
         };
 
-        let target = attestation.data.target;
+        let current_epoch = self.controller.finalized_epoch();
+
+        debug_with_peers!(
+            "processing attestation record \
+             (attesters: {:?}, slot: {}, source: {}, target: {}, fork_version: {:?})",
+            indexed_attestation.attesting_indices,
+            indexed_attestation.data.slot,
+            indexed_attestation.data.source.epoch,
+            indexed_attestation.data.target.epoch,
+            self.fork_version,
+        );
+
+        for explained_attester_slashing in
+            self.check_attestation(&indexed_attestation, current_epoch)?
+        {
+            info_with_peers!("attester slashing constructed: {explained_attester_slashing:?}");
+
+            self.process_attester_slashing(explained_attester_slashing.slashing);
+        }
+
+        Ok(())
+    }
+
+    // Convert an attestation of any variant into an Electra `IndexedAttestation`, which the slasher
+    // uses uniformly for slashing detection and reporting. Electra's `attesting_indices` bound is a
+    // superset of Phase 0's, so Phase 0 attestations widen losslessly. A `SingleAttestation` carries
+    // its attester index explicitly, so it needs no committee lookup and no target state.
+    //
+    // Returns `None` when the target state needed to resolve aggregated attesting indices is
+    // unavailable.
+    fn indexed_attestation(
+        &self,
+        attestation: &Attestation<P>,
+    ) -> Result<Option<IndexedAttestation<P>>> {
+        // `SingleAttestation` carries its attester index explicitly, so no target state is needed.
+        if let Attestation::Single(attestation) = attestation {
+            return Ok(Some(single_attestation_to_indexed(attestation)));
+        }
+
+        let target = attestation.data().target;
         let slot = misc::compute_start_slot_at_epoch::<P>(target.epoch);
 
         let target_state = if Feature::CacheTargetStates.is_enabled() {
-            self.controller
-                .checkpoint_state_blocking(attestation.data.target)?
+            self.controller.checkpoint_state_blocking(target)?
         } else {
             self.controller.state_before_or_at_slot(target.root, slot)
         };
 
-        if let Some(target_state) = target_state {
-            let current_epoch = self.controller.finalized_epoch();
-            // TODO(feature/electra): use electra::get_indexed_attestation for electra attestations
-            let indexed_attestation = phase0::get_indexed_attestation(&target_state, attestation)?;
+        let Some(target_state) = target_state else {
+            return Ok(None);
+        };
 
-            debug_with_peers!(
-                "processing attestation record \
-                 (attesters: {:?}, slot: {}, source: {}, target: {}, fork_version: {:?})",
-                indexed_attestation.attesting_indices,
-                indexed_attestation.data.slot,
-                indexed_attestation.data.source.epoch,
-                indexed_attestation.data.target.epoch,
-                self.fork_version,
-            );
-
-            for explained_attester_slashing in
-                self.check_attestation(&indexed_attestation, current_epoch)?
-            {
-                info_with_peers!("attester slashing constructed: {explained_attester_slashing:?}");
-
-                self.process_attester_slashing(explained_attester_slashing.slashing);
+        let indexed_attestation = match attestation {
+            Attestation::Phase0(attestation) => {
+                let attestation = phase0::get_indexed_attestation(&target_state, attestation)?;
+                widen_indexed_attestation(attestation)
             }
-        }
+            Attestation::Electra(attestation) => {
+                electra::get_indexed_attestation(&target_state, attestation)?
+            }
+            Attestation::Single(_) => unreachable!("Single attestations are handled above"),
+        };
 
-        Ok(())
+        Ok(Some(indexed_attestation))
     }
 
     fn check_block(
@@ -240,10 +270,101 @@ impl<P: Preset> Slasher<P> {
 
     fn process_attester_slashing(&self, attester_slashing: AttesterSlashing<P>) {
         self.controller
-            .on_own_attester_slashing(Box::new(CombinedAttesterSlashing::Phase0(
+            .on_own_attester_slashing(Box::new(CombinedAttesterSlashing::Electra(
                 attester_slashing.clone(),
             )));
 
         SlasherToValidator::AttesterSlashing(attester_slashing).send(&self.slasher_to_validator_tx);
+    }
+}
+
+// `SingleAttestation` already identifies its single attester, so its `IndexedAttestation` can be
+// built directly without resolving a committee against the target state.
+fn single_attestation_to_indexed<P: Preset>(
+    attestation: &SingleAttestation,
+) -> IndexedAttestation<P> {
+    let attesting_indices =
+        ContiguousList::try_from_iter(core::iter::once(attestation.attester_index))
+            .expect("a single index always fits in IndexedAttestation.attesting_indices");
+
+    IndexedAttestation {
+        attesting_indices,
+        data: attestation.data,
+        signature: attestation.signature,
+    }
+}
+
+// Phase 0 `IndexedAttestation`s have a smaller `attesting_indices` bound than Electra ones, so they
+// always widen losslessly into the Electra representation the slasher uses internally.
+fn widen_indexed_attestation<P: Preset>(
+    attestation: Phase0IndexedAttestation<P>,
+) -> IndexedAttestation<P> {
+    IndexedAttestation {
+        attesting_indices: ContiguousList::try_from_iter(attestation.attesting_indices).expect(
+            "Phase 0 attesting indices always fit in Electra IndexedAttestation.attesting_indices",
+        ),
+        data: attestation.data,
+        signature: attestation.signature,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bls::SignatureBytes;
+    use types::{
+        phase0::{containers::AttestationData, primitives::ValidatorIndex},
+        preset::Mainnet,
+    };
+
+    use super::*;
+
+    #[test]
+    fn single_attestation_converts_to_single_index_indexed_attestation() {
+        let attester_index: ValidatorIndex = 42;
+        let data = AttestationData::default();
+        let signature = SignatureBytes::default();
+
+        let single = SingleAttestation {
+            committee_index: 3,
+            attester_index,
+            data,
+            signature,
+        };
+
+        let indexed = single_attestation_to_indexed::<Mainnet>(&single);
+
+        assert_eq!(
+            indexed
+                .attesting_indices
+                .into_iter()
+                .collect::<Vec<ValidatorIndex>>(),
+            vec![attester_index],
+        );
+        assert_eq!(indexed.data, data);
+        assert_eq!(indexed.signature, signature);
+    }
+
+    #[test]
+    fn phase0_indexed_attestation_widens_preserving_indices_data_and_signature() {
+        let attesting_indices = ContiguousList::try_from_iter([7, 9, 11])
+            .expect("three indices fit within the Phase 0 bound");
+
+        let phase0_attestation = Phase0IndexedAttestation::<Mainnet> {
+            attesting_indices,
+            data: AttestationData::default(),
+            signature: SignatureBytes::default(),
+        };
+
+        let widened = widen_indexed_attestation(phase0_attestation.clone());
+
+        assert_eq!(
+            widened
+                .attesting_indices
+                .into_iter()
+                .collect::<Vec<ValidatorIndex>>(),
+            vec![7, 9, 11],
+        );
+        assert_eq!(widened.data, phase0_attestation.data);
+        assert_eq!(widened.signature, phase0_attestation.signature);
     }
 }

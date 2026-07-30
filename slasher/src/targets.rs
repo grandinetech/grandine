@@ -3,8 +3,9 @@ use core::marker::PhantomData;
 use anyhow::Result;
 use database::Database;
 use types::{
+    electra::containers::IndexedAttestation,
     phase0::{
-        containers::{AttestationData, IndexedAttestation},
+        containers::AttestationData,
         primitives::{Epoch, ValidatorIndex},
     },
     preset::Preset,

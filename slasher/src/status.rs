@@ -12,8 +12,7 @@
     reason = "Explained*Slashing.reason is used for logging through the `Debug` impl."
 )]
 use types::{
-    phase0::containers::{AttesterSlashing, ProposerSlashing},
-    preset::Preset,
+    electra::containers::AttesterSlashing, phase0::containers::ProposerSlashing, preset::Preset,
 };
 
 #[derive(Debug)]
