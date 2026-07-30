@@ -63,6 +63,7 @@ pub enum Topic {
     ExecutionPayloadBid,
     ExecutionPayloadAvailable,
     ExecutionPayloadGossip,
+    FastConfirmation,
     FinalizedCheckpoint,
     Head,
     HeadV2,
@@ -89,6 +90,7 @@ pub enum Event<P: Preset> {
     ExecutionPayloadAvailable(ExecutionPayloadAvailableEvent),
     ExecutionPayloadBid(ExecutionPayloadBidEvent<P>),
     ExecutionPayloadGossip(ExecutionPayloadGossipEvent),
+    FastConfirmation(FastConfirmationEvent),
     FinalizedCheckpoint(FinalizedCheckpointEvent),
     Head(HeadEvent),
     HeadV2(HeadV2Event),
@@ -117,6 +119,7 @@ impl<P: Preset> Event<P> {
             Self::ExecutionPayloadAvailable(_) => Topic::ExecutionPayloadAvailable,
             Self::ExecutionPayloadBid(_) => Topic::ExecutionPayloadBid,
             Self::ExecutionPayloadGossip(_) => Topic::ExecutionPayloadGossip,
+            Self::FastConfirmation(_) => Topic::FastConfirmation,
             Self::FinalizedCheckpoint(_) => Topic::FinalizedCheckpoint,
             Self::Head(_) => Topic::Head,
             Self::HeadV2(_) => Topic::HeadV2,
@@ -146,6 +149,7 @@ pub struct EventChannels<P: Preset> {
     pub execution_payload_available: Sender<Event<P>>,
     pub execution_payload_bids: Sender<Event<P>>,
     pub execution_payloads_gossip: Sender<Event<P>>,
+    pub fast_confirmations: Sender<Event<P>>,
     pub finalized_checkpoints: Sender<Event<P>>,
     pub heads: Sender<Event<P>>,
     pub heads_v2: Sender<Event<P>>,
@@ -182,6 +186,7 @@ impl<P: Preset> EventChannels<P> {
             execution_payload_available: broadcast::channel(max_events).0,
             execution_payload_bids: broadcast::channel(max_events).0,
             execution_payloads_gossip: broadcast::channel(max_events).0,
+            fast_confirmations: broadcast::channel(max_events).0,
             finalized_checkpoints: broadcast::channel(max_events).0,
             heads: broadcast::channel(max_events).0,
             heads_v2: broadcast::channel(max_events).0,
@@ -211,6 +216,7 @@ impl<P: Preset> EventChannels<P> {
             Topic::ExecutionPayloadAvailable => &self.execution_payload_available,
             Topic::ExecutionPayloadBid => &self.execution_payload_bids,
             Topic::ExecutionPayloadGossip => &self.execution_payloads_gossip,
+            Topic::FastConfirmation => &self.fast_confirmations,
             Topic::FinalizedCheckpoint => &self.finalized_checkpoints,
             Topic::Head => &self.heads,
             Topic::HeadV2 => &self.heads_v2,
@@ -367,6 +373,12 @@ impl<P: Preset> EventChannels<P> {
     ) {
         if let Err(error) = self.send_execution_payload_bid_event_internal(phase, payload_bid) {
             warn_with_peers!("unable to send execution payload bid event: {error}");
+        }
+    }
+
+    pub fn send_fast_confirmation_event(&self, block: H256, slot: Slot, current_slot: Slot) {
+        if let Err(error) = self.send_fast_confirmation_event_internal(block, slot, current_slot) {
+            warn_with_peers!("unable to send fast confirmation event: {error}");
         }
     }
 
@@ -703,6 +715,24 @@ impl<P: Preset> EventChannels<P> {
         Ok(())
     }
 
+    fn send_fast_confirmation_event_internal(
+        &self,
+        block: H256,
+        slot: Slot,
+        current_slot: Slot,
+    ) -> Result<()> {
+        if self.fast_confirmations.receiver_count() > 0 {
+            let event = Event::FastConfirmation(FastConfirmationEvent {
+                block,
+                slot,
+                current_slot,
+            });
+            self.fast_confirmations.send(event)?;
+        }
+
+        Ok(())
+    }
+
     fn send_finalized_checkpoint_event_internal(
         &self,
         block_root: H256,
@@ -882,6 +912,27 @@ pub struct BlockGossipEvent {
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
     pub block: H256,
+}
+
+/// SSE event payload for the `fast_confirmation` topic ([beacon-APIs PR #598], extended by
+/// [beacon-APIs PR #616]).
+///
+/// Emitted from `mutator.rs` once per slot, after `FastConfirmationStore::on_fast_confirmation`
+/// runs — regardless of whether the most recent confirmed block changed since the previous run.
+/// `current_slot` lets consumers distinguish a fresh re-confirmation of the same root from a
+/// stale stream.
+///
+/// JSON wire form: `{"block": "0x...", "slot": "N", "current_slot": "M"}`.
+///
+/// [beacon-APIs PR #598]: https://github.com/ethereum/beacon-APIs/pull/598
+/// [beacon-APIs PR #616]: https://github.com/ethereum/beacon-APIs/pull/616
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct FastConfirmationEvent {
+    pub block: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub current_slot: Slot,
 }
 
 #[derive(Clone, Debug, Serialize)]

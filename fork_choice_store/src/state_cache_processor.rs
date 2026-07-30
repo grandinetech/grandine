@@ -302,8 +302,13 @@ fn process_slots<P: Preset, S: Storage<P>>(
     }
 
     let started_at = std::time::Instant::now();
-    let process_slots_result =
-        combined::process_slots(store.chain_config(), pubkey_cache, state.make_mut(), slot);
+    let process_slots_result = combined::process_slots_with_trust(
+        store.chain_config(),
+        pubkey_cache,
+        state.make_mut(),
+        slot,
+        store.store_config().trust_all_signatures,
+    );
 
     currently_processing.fetch_sub(1, Ordering::SeqCst);
 

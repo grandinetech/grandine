@@ -20,6 +20,7 @@ execution_engine = { workspace = true }
 features = { workspace = true }
 futures = { workspace = true }
 hash_hasher = { workspace = true }
+hashing = { workspace = true }
 helper_functions = { workspace = true }
 im = { workspace = true }
 itertools = { workspace = true }
@@ -29,6 +30,7 @@ prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true }
+shuffling = { workspace = true }
 spec_test_utils = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }

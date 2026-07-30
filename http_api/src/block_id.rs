@@ -26,6 +26,15 @@ pub fn block<P: Preset, W: Wait>(
             .map(|checkpoint| checkpoint.block)
             .map(WithStatus::valid_and_finalized),
         BlockId::Finalized => Some(controller.last_finalized_block()),
+        BlockId::Safe => {
+            // Per the Fast Confirmation Rule: when FCR is enabled, `safe` is the FCR-confirmed
+            // block. When FCR is disabled there is no "confirmed" block, so we fall back to
+            // the finalized block (the only other block the node can guarantee is safe).
+            match controller.confirmed_root() {
+                Some(root) => controller.block_by_root(root)?,
+                None => Some(controller.last_finalized_block()),
+            }
+        }
         BlockId::Slot(slot) => controller
             .block_by_slot(slot)?
             .map(|with_status| with_status.map(|block_with_root| block_with_root.block)),
@@ -48,6 +57,11 @@ pub fn block_root<P: Preset, W: Wait>(
             .map(|checkpoint| checkpoint.block.message().hash_tree_root())
             .map(WithStatus::valid_and_finalized),
         BlockId::Finalized => Some(controller.last_finalized_block_root()),
+        BlockId::Safe => match controller.confirmed_root() {
+            Some(root) => controller.check_block_root(root)?,
+            // FCR disabled: safe block falls back to finalized (see `block` above).
+            None => Some(controller.last_finalized_block_root()),
+        },
         BlockId::Slot(slot) => controller
             .block_by_slot(slot)?
             .map(|with_status| with_status.map(|with_status| with_status.root)),

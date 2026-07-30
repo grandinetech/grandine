@@ -10,6 +10,12 @@
 
 #![expect(clippy::similar_names)]
 #![expect(clippy::too_many_lines)]
+#![expect(
+    clippy::doc_markdown,
+    reason = "Test docstrings narrate scenarios in prose using block/field identifiers like \
+              block_1, fcr_curr_obs_justified, justified_checkpoint; backticking each one in \
+              paragraph-style explanations hurts readability."
+)]
 
 #[cfg(feature = "eth2-cache")]
 use std::sync::Arc;
@@ -2521,4 +2527,227 @@ fn reorganizing_due_to_invalidation_sends_notifications_if_common_ancestor_is_un
         unfinalized_block_count_in_fork: 1,
         unfinalized_block_count_total: 1,
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fast Confirmation Rule (FCR) tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// When FCR is disabled, `confirmed_root()` returns `None`. There is no "confirmed root"
+/// concept outside the Fast Confirmation Rule context; the previous alias to the justified
+/// checkpoint was too weak an assumption.
+#[test]
+fn fcr_disabled_returns_no_confirmed_root() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, start_of_epoch(1), H256::default());
+    let (block_2, _) = context.block_justifying_current_epoch(&state_1, 1, H256::repeat_byte(1));
+
+    // Advance to epoch 3 so block_2's justification is fully committed.
+    context.on_slot(start_of_epoch(3));
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    assert_eq!(context.confirmed_root(), None);
+}
+
+/// When FCR is enabled and no attestations have been cast, the confirmed root must
+/// stay at the finalized checkpoint root — FCR must not advance without votes.
+#[test]
+fn fcr_enabled_stays_at_finalized_without_attestation_support() {
+    let mut context = Context::minimal_with_fcr();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, _) = context.empty_block(&state_0, 1, H256::repeat_byte(1));
+    let (block_2, _) = context.empty_block(&state_0, 2, H256::repeat_byte(2));
+
+    // Advance to epoch 2 — FCR variables rotate but no validator has voted.
+    context.on_slot(start_of_epoch(2));
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    let finalized = context.finalized_root();
+    let confirmed = context
+        .confirmed_root()
+        .expect("FCR is enabled — confirmed_root() must return Some");
+
+    assert_eq!(confirmed, finalized);
+}
+
+/// When FCR is enabled, `confirmed_root()` is more conservative than `justified_checkpoint().root`.
+///
+/// Blocks are applied AFTER the epoch-3 tick has already run. When the tick fired:
+/// - The slot-23 GU snapshot had captured genesis (no blocks in store yet).
+/// - The epoch-3 rotation therefore set `fcr_curr_obs_justified = genesis`.
+///
+/// After applying the blocks, `head.unrealized_justified_checkpoint.epoch = 2` (block_2 is an
+/// epoch-2 block, so justification runs). But `obs = genesis ≠ head.unrealized_justified`, so
+/// the FCR restart condition is false and `confirmed` stays at finalized.
+///
+/// Meanwhile, `apply_block` promotes `justified_checkpoint` directly when the block is from a
+/// prior epoch: block_2 (epoch 2) at tick slot 24 (epoch 3) qualifies, so
+/// `justified_checkpoint.root` becomes the epoch-2 checkpoint root (block_1.root ≠ genesis).
+#[test]
+fn fcr_enabled_confirmed_is_more_conservative_than_justified() {
+    let mut context = Context::minimal_with_fcr();
+
+    let (_, state_0) = context.genesis();
+    let (block_0b, state_0b) = context.empty_block(&state_0, 7, H256::repeat_byte(0));
+    // block_1 at slot 15: becomes the epoch-2 checkpoint root (state.block_roots[16] = block_1.root).
+    let (block_1, state_1) = context.empty_block(&state_0b, 15, H256::repeat_byte(1));
+    // block_2 at slot 22 with 6 epoch-2 attestation slots (75 % ≥ ⅔) — justifies epoch 2.
+    // block_2.unrealized_justified_checkpoint = { epoch: 2, root: block_1.root }
+    let (block_2, _) =
+        context.block_with_attestations_for_slots(&state_1, 22, 16..22, H256::repeat_byte(2));
+
+    // Advance to epoch 3 FIRST (obs = genesis), then apply blocks.
+    // The epoch-3 tick sets fcr_curr_obs_justified from the slot-23 GU snapshot = genesis.
+    context.on_slot(start_of_epoch(3));
+    context.on_acceptable_block(&block_0b);
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    let justified_root = context.justified_checkpoint().root;
+    let finalized_root = context.finalized_root();
+    let confirmed = context
+        .confirmed_root()
+        .expect("FCR is enabled — confirmed_root() must return Some");
+
+    assert_ne!(
+        justified_root, finalized_root,
+        "justification should have advanced the justified checkpoint",
+    );
+
+    assert_eq!(
+        confirmed, finalized_root,
+        "FCR confirmed root should remain at finalized when balance source is not yet rotated",
+    );
+}
+
+/// FCR advances `confirmed_root` beyond the finalized checkpoint when ≥ ⅔ of validators
+/// have voted for the chain via attestations included in a block.
+///
+/// **Why epoch-2 blocks are required:**
+/// `process_justification_and_finalization` has an early return for epochs 0 and 1
+/// (`GENESIS_EPOCH + 1 < current_epoch` is false). Any block at epoch 0-1 therefore always
+/// has `unrealized_justified_checkpoint = genesis`, which the FCR GU snapshot would capture.
+/// With `fcr_curr_obs_justified.epoch = 0`, the restart condition
+/// `obs.epoch + 1 == current_epoch` would be `1 == 2`, which is false. Advancing into epoch 2
+/// allows justification to be computed, the GU snapshot at slot 23 captures it, and the
+/// epoch-3 restart fires successfully.
+///
+/// **Epoch-2 checkpoint root:**
+/// `state.block_roots[16]` is set by `process_slot` at the START of slot 16 to
+/// `hash_tree_root(state.latest_block_header)` = block_1.root. So the FCR restart at epoch 3
+/// sets `confirmed_root = block_1.root` (the epoch-2 checkpoint block).
+///
+/// Sequence:
+///  1. `on_slot(22)` — blocks applied here so that the slot-23 GU snapshot sees epoch-2 justification.
+///  2. Apply block_0b (slot 7), block_1 (slot 16), block_2 (slot 22, 6 epoch-2 attestation slots).
+///     block_2's `unrealized_justified_checkpoint = { epoch: 2, root: block_1.root }`.
+///  3. `on_slot(23)` — last of epoch 2; GU snapshot captures `{ epoch: 2, root: block_1.root }`.
+///  4. `on_slot(24)` — epoch-3 start; rotation sets `fcr_curr_obs = { epoch: 2, root: block_1.root }`;
+///     restart condition (`compute_epoch_at_slot(16) + 1 == 3`) fires; `confirmed_root` jumps to block_1.
+///
+/// Per spec PR #34, the restart condition now uses the epoch of the block that the justified
+/// checkpoint points to (not the checkpoint's epoch field). block_1 must therefore be at a slot
+/// in epoch 2 so that `compute_epoch_at_slot(block_1.slot) + 1 == current_epoch (3)`.
+#[test]
+fn fcr_advances_beyond_finalized_with_supermajority() {
+    let mut context = Context::minimal_with_fcr();
+
+    let (_, state_0) = context.genesis();
+
+    // block_0b at slot 7: a non-genesis block so that subsequent checkpoint roots differ
+    // from genesis.
+    let (block_0b, state_0b) = context.empty_block(&state_0, 7, H256::repeat_byte(1));
+
+    // block_1 at slot 16: the first block of epoch 2 and thus the epoch-2 checkpoint root.
+    // Per spec, the restart condition checks compute_epoch_at_slot(block_1.slot) = 2,
+    // which satisfies `2 + 1 == current_epoch (3)`.
+    let (block_1, state_1) = context.empty_block(&state_0b, 16, H256::repeat_byte(2));
+
+    // block_2 at slot 22 with attestations for slots 16..22 (6 of 8 epoch-2 slots = 75 % ≥ ⅔).
+    // process_justification_and_finalization at epoch 2 (current_epoch > 1, so no early return)
+    // sees 75% epoch-2 participation and justifies epoch 2.
+    // → block_2.unrealized_justified_checkpoint = { epoch: 2, root: block_1.root }
+    let (block_2, _) =
+        context.block_with_attestations_for_slots(&state_1, 22, 16..22, H256::repeat_byte(3));
+
+    // Advance to slot 22 and apply all three blocks so that store.unrealized_justified reflects
+    // epoch-2 justification before the slot-23 GU snapshot fires.
+    context.on_slot(22);
+    context.on_acceptable_block(&block_0b);
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    // Slot 23: last slot of epoch 2 — GU snapshot captures epoch-2 justification.
+    context.on_slot(23);
+
+    // Slot 24: epoch-3 start — rotation and FCR restart advance confirmed_root to block_1.
+    context.on_slot(start_of_epoch(3));
+
+    let finalized_root = context.finalized_root();
+    let confirmed = context
+        .confirmed_root()
+        .expect("FCR is enabled — confirmed_root() must return Some");
+
+    assert_ne!(
+        confirmed, finalized_root,
+        "FCR confirmed root should advance beyond finalized with 75% epoch-2 attestation support",
+    );
+    assert_eq!(
+        confirmed,
+        block_1.message().hash_tree_root(),
+        "FCR confirmed root should be block_1 — the epoch-2 checkpoint block",
+    );
+}
+
+/// FCR reverts `confirmed_root` to the finalized checkpoint when the confirmed block is
+/// more than one epoch old (`confirmed_epoch + 1 < current_epoch`).
+///
+/// Uses the same three-block setup as `fcr_advances_beyond_finalized_with_supermajority`
+/// to establish FCR advancement to block_1 (epoch-2 block, epoch-2 checkpoint) at epoch 3,
+/// then verifies that advancing to epoch 4 triggers the age-revert condition:
+/// confirmed_epoch (2) + 1 = 3 < current_epoch (4).
+#[test]
+fn fcr_reverts_to_finalized_when_confirmed_becomes_stale() {
+    let mut context = Context::minimal_with_fcr();
+
+    let (_, state_0) = context.genesis();
+    let (block_0b, state_0b) = context.empty_block(&state_0, 7, H256::repeat_byte(1));
+    let (block_1, state_1) = context.empty_block(&state_0b, 16, H256::repeat_byte(2));
+    let (block_2, _) =
+        context.block_with_attestations_for_slots(&state_1, 22, 16..22, H256::repeat_byte(3));
+
+    // Replicate the advancement setup from fcr_advances_beyond_finalized_with_supermajority.
+    context.on_slot(22);
+    context.on_acceptable_block(&block_0b);
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+    context.on_slot(23);
+    context.on_slot(start_of_epoch(3));
+
+    let finalized_root = context.finalized_root();
+    let confirmed_at_epoch_3 = context
+        .confirmed_root()
+        .expect("FCR is enabled — confirmed_root() must return Some");
+
+    assert_ne!(
+        confirmed_at_epoch_3, finalized_root,
+        "FCR should have advanced to block_1 at epoch-3 boundary (precondition for revert test)",
+    );
+
+    // Advance to epoch 4. The confirmed block (block_1) is at slot 16, epoch 2.
+    // The age-revert condition fires: confirmed_epoch (2) + 1 = 3 < current_epoch (4).
+    context.on_slot(start_of_epoch(4));
+
+    let confirmed_at_epoch_4 = context
+        .confirmed_root()
+        .expect("FCR is enabled — confirmed_root() must return Some");
+    assert_eq!(
+        confirmed_at_epoch_4, finalized_root,
+        "FCR confirmed root should revert to finalized when confirmed is more than one epoch old",
+    );
 }

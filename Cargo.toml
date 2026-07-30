@@ -100,7 +100,7 @@ unsafe_code = 'forbid'
 absolute_paths_not_starting_with_crate = 'warn'
 anonymous_parameters                   = 'warn'
 deprecated_in_future                   = 'warn'
-deprecated_safe                        = 'warn'
+deprecated_safe                        = { level = 'warn', priority = -1 }
 let_underscore_drop                    = 'warn'
 macro_use_extern_crate                 = 'warn'
 meta_variable_misuse                   = 'warn'

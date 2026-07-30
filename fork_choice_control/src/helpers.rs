@@ -82,7 +82,27 @@ impl<P: Preset> Context<P> {
             genesis_block,
             genesis_state,
             true,
-            None,
+            false,
+            false,
+            false,
+        ))
+    }
+
+    fn with_config_fcr(config: Config) -> Result<Self> {
+        let config = Arc::new(config);
+        let pubkey_cache = Arc::new(PubkeyCache::default());
+        let (genesis_state, _) = factory::min_genesis_state(&config, &pubkey_cache)?;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+
+        Ok(Self::new(
+            config,
+            pubkey_cache,
+            genesis_block,
+            genesis_state,
+            true,
+            true,
+            false,
+            false,
         ))
     }
 
@@ -93,7 +113,9 @@ impl<P: Preset> Context<P> {
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
         optimistic_merge_block_validation: bool,
-        thread_pool_size: Option<usize>,
+        fast_confirmation_rule: bool,
+        trust_all_signatures: bool,
+        fcr_spec_test_mode: bool,
     ) -> Self {
         let (service_tx, service_rx) = futures::channel::mpsc::unbounded();
 
@@ -114,7 +136,9 @@ impl<P: Preset> Context<P> {
             anchor_state,
             execution_engine.clone_arc(),
             p2p_tx,
-            thread_pool_size,
+            fast_confirmation_rule,
+            trust_all_signatures,
+            fcr_spec_test_mode,
         );
 
         if phase.is_peerdas_activated() {
@@ -171,6 +195,21 @@ impl<P: Preset> Context<P> {
     #[must_use]
     pub fn last_finalized_state(&self) -> Arc<BeaconState<P>> {
         self.controller().last_finalized_state().value
+    }
+
+    #[must_use]
+    pub fn confirmed_root(&self) -> Option<H256> {
+        self.controller().confirmed_root()
+    }
+
+    #[must_use]
+    pub fn finalized_root(&self) -> H256 {
+        self.controller().finalized_root()
+    }
+
+    #[must_use]
+    pub fn justified_checkpoint(&self) -> Checkpoint {
+        self.controller().justified_checkpoint()
     }
 
     // The `graffiti` parameters are needed for two reasons:
@@ -283,6 +322,38 @@ impl<P: Preset> Context<P> {
             Some(execution_payload),
         )
         .expect("block should be constructed successfully")
+    }
+
+    /// Creates a block at `block_slot` containing attestations for `attestation_slots`.
+    ///
+    /// Unlike [`Self::block_justifying_current_epoch`], the block slot and attestation range are
+    /// independent. This allows placing a justifying block at a slot earlier than the last slot of
+    /// the epoch so that the FCR GU snapshot (taken at the last slot's tick) can capture the
+    /// updated `unrealized_justified_checkpoint`.
+    #[must_use]
+    pub fn block_with_attestations_for_slots(
+        &self,
+        pre_state: &Arc<BeaconState<P>>,
+        block_slot: Slot,
+        attestation_slots: Range<Slot>,
+        graffiti: H256,
+    ) -> (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>) {
+        factory::block_with_attestations_for_slots(
+            self.config(),
+            &self.pubkey_cache,
+            pre_state.clone_arc(),
+            block_slot,
+            attestation_slots,
+            graffiti,
+        )
+        .expect("block should be constructed successfully")
+    }
+
+    /// Explicitly runs one FCR cycle and waits for it to complete.
+    /// Only meaningful when `fcr_spec_test_mode` is active (FCR spec tests).
+    pub fn run_fast_confirmation(&mut self) {
+        self.controller().run_fast_confirmation();
+        self.controller().wait_for_tasks();
     }
 
     pub fn on_tick(&mut self, tick: Tick) {
@@ -694,6 +765,22 @@ impl<P: Preset> Context<P> {
         assert!(matches!(next_message, Some(P2pMessage::Accept(_))));
     }
 
+    pub fn on_fcr_test_attestation(
+        &mut self,
+        attestation: Attestation<P>,
+        bls_setting: BlsSetting,
+    ) {
+        self.controller()
+            .on_test_attestation(Arc::new(attestation), bls_setting);
+
+        self.controller().wait_for_tasks();
+
+        // FCR tests verify fork-choice state at checks: steps, not gossip outcomes.
+        // Attestations may be deferred (slot timing, unknown block) before the
+        // referenced block is imported, so Accept is not guaranteed here.
+        self.drain_p2p_messages();
+    }
+
     pub fn on_invalid_test_attestation(
         &mut self,
         attestation: Attestation<P>,
@@ -926,6 +1013,42 @@ impl<P: Preset> Context<P> {
             store.payload_data_availability_vote(block_root),
         );
         assert_eq!(actual, expected_votes);
+    }
+
+    pub fn assert_fcr_previous_epoch_observed_justified_checkpoint(&self, expected: Checkpoint) {
+        assert_eq!(
+            self.controller()
+                .fcr_previous_epoch_observed_justified_checkpoint(),
+            Some(expected),
+        );
+    }
+
+    pub fn assert_fcr_current_epoch_observed_justified_checkpoint(&self, expected: Checkpoint) {
+        assert_eq!(
+            self.controller()
+                .fcr_current_epoch_observed_justified_checkpoint(),
+            Some(expected),
+        );
+    }
+
+    pub fn assert_fcr_previous_epoch_greatest_unrealized_checkpoint(&self, expected: Checkpoint) {
+        assert_eq!(
+            self.controller()
+                .fcr_previous_epoch_greatest_unrealized_checkpoint(),
+            Some(expected),
+        );
+    }
+
+    pub fn assert_fcr_previous_slot_head(&self, expected: H256) {
+        assert_eq!(self.controller().fcr_previous_slot_head(), Some(expected));
+    }
+
+    pub fn assert_fcr_current_slot_head(&self, expected: H256) {
+        assert_eq!(self.controller().fcr_current_slot_head(), Some(expected));
+    }
+
+    pub fn assert_fcr_confirmed_root(&self, expected: H256) {
+        assert_eq!(self.controller().confirmed_root(), Some(expected));
     }
 
     pub fn assert_head(&self, expected_head_slot: Slot, expected_head_root: H256) {
@@ -1178,6 +1301,10 @@ fn decode_ptc_votes<P: Preset>(
 impl Context<Minimal> {
     pub fn minimal() -> Self {
         Self::with_config(Config::minimal()).expect("minimal configuration is valid")
+    }
+
+    pub fn minimal_with_fcr() -> Self {
+        Self::with_config_fcr(Config::minimal()).expect("minimal configuration is valid")
     }
 
     pub fn bellatrix_minimal() -> Self {

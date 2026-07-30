@@ -44,7 +44,7 @@ pub fn state_transition<P: Preset, V: Verifier + Send>(
 
     // > Process slots (including those with no blocks) since block
     if process_slots.should_process(state, block) {
-        slot_processing::process_slots(config, pubkey_cache, state, block.slot)?;
+        slot_processing::process_slots(config, pubkey_cache, state, block.slot, V::IS_NULL)?;
     }
 
     let verify_signatures = V::IS_NULL.not().then(|| {

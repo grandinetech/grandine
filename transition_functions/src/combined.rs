@@ -128,7 +128,13 @@ pub fn custom_state_transition<P: Preset>(
 ) -> Result<()> {
     // > Process slots (including those with no blocks) since block
     if process_slots.should_process(state, block.message()) {
-        self::process_slots(config, pubkey_cache, state, block.message().slot())?;
+        process_slots_with_trust(
+            config,
+            pubkey_cache,
+            state,
+            block.message().slot(),
+            verifier.trust_all_signatures(),
+        )?;
     }
 
     let process_slots = ProcessSlots::Never;
@@ -317,13 +323,23 @@ pub fn verify_signatures<P: Preset>(
     }
 }
 
-#[expect(clippy::too_many_lines)]
-#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
 pub fn process_slots<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<P>,
     slot: Slot,
+) -> Result<()> {
+    process_slots_with_trust(config, pubkey_cache, state, slot, false)
+}
+
+#[expect(clippy::too_many_lines)]
+#[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
+pub fn process_slots_with_trust<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    slot: Slot,
+    trust_all_signatures: bool,
 ) -> Result<()> {
     // This validation is not required to pass `consensus-spec-tests`.
     // `process_block_header` already prevents multiple blocks from being applied in the same slot
@@ -478,6 +494,7 @@ pub fn process_slots<P: Preset>(
                         pubkey_cache,
                         electra_state,
                         last_slot_in_phase,
+                        trust_all_signatures,
                     )?;
 
                     made_progress = true;
@@ -497,7 +514,13 @@ pub fn process_slots<P: Preset>(
                     .expect("result of min should always be Some because slot is always Some");
 
                 if fulu_state.slot < last_slot_in_phase {
-                    fulu::process_slots(config, pubkey_cache, fulu_state, last_slot_in_phase)?;
+                    fulu::process_slots(
+                        config,
+                        pubkey_cache,
+                        fulu_state,
+                        last_slot_in_phase,
+                        trust_all_signatures,
+                    )?;
 
                     made_progress = true;
                 }
@@ -513,7 +536,13 @@ pub fn process_slots<P: Preset>(
             BeaconState::Gloas(gloas_state) => {
                 // When adding a new phase, please make sure that last processed slot here
                 // is not farther ahead than the last slot in the phase
-                gloas::process_slots(config, pubkey_cache, gloas_state, slot)?;
+                gloas::process_slots(
+                    config,
+                    pubkey_cache,
+                    gloas_state,
+                    slot,
+                    trust_all_signatures,
+                )?;
 
                 made_progress = true;
             }
@@ -578,9 +607,9 @@ pub fn process_epoch(
         BeaconState::Bellatrix(state) => bellatrix::process_epoch(config, pubkey_cache, state),
         BeaconState::Capella(state) => capella::process_epoch(config, pubkey_cache, state),
         BeaconState::Deneb(state) => deneb::process_epoch(config, pubkey_cache, state),
-        BeaconState::Electra(state) => electra::process_epoch(config, pubkey_cache, state),
-        BeaconState::Fulu(state) => fulu::process_epoch(config, pubkey_cache, state),
-        BeaconState::Gloas(state) => gloas::process_epoch(config, pubkey_cache, state),
+        BeaconState::Electra(state) => electra::process_epoch(config, pubkey_cache, state, false),
+        BeaconState::Fulu(state) => fulu::process_epoch(config, pubkey_cache, state, false),
+        BeaconState::Gloas(state) => gloas::process_epoch(config, pubkey_cache, state, false),
     }
 }
 

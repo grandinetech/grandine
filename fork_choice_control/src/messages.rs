@@ -224,6 +224,12 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         checkpoint: Checkpoint,
     },
+    /// Explicitly run one FCR cycle (`on_fast_confirmation`) without an associated tick.
+    /// Used in FCR spec tests when `fcr_spec_test_mode` is `true` so that FCR is triggered
+    /// exactly once per `checks:` step rather than automatically on every slot tick.
+    RunFastConfirmation {
+        wait_group: W,
+    },
 }
 
 impl<P: Preset, W> MutatorMessage<P, W> {

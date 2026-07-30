@@ -484,6 +484,10 @@ struct BeaconNodeOptions {
     /// [default: disabled]
     #[clap(long)]
     sync_without_reconstruction: bool,
+
+    /// Enable the Fast Confirmation Rule for single-slot block confirmation
+    #[clap(long)]
+    fast_confirmation_rule: bool,
 }
 
 #[expect(
@@ -1084,6 +1088,7 @@ impl GrandineArgs {
             kzg_backend,
             blacklisted_blocks,
             sync_without_reconstruction,
+            fast_confirmation_rule,
             ..
         } = beacon_node_options;
 
@@ -1517,6 +1522,7 @@ impl GrandineArgs {
             report_validator_performance,
             backfill_custody_groups: !no_custody_groups_backfill,
             sync_without_reconstruction,
+            fast_confirmation_rule,
             custody_mode,
             disable_wait_for_late_blocks,
         })

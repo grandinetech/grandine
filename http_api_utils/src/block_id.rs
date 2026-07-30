@@ -8,6 +8,7 @@ pub enum BlockId {
     Head,
     Genesis,
     Finalized,
+    Safe,
     #[display("{0}")]
     Slot(Slot),
     #[display("{0:?}")]
