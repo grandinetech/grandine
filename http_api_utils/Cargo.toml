@@ -15,9 +15,13 @@ http-body-util = { workspace = true }
 itertools = { workspace = true }
 tracing = { workspace = true }
 logging = { workspace = true }
+mediatype = { workspace = true }
 mime = { workspace = true }
 parse-display = { workspace = true }
 prometheus_metrics = { workspace = true }
+serde = { workspace = true }
+ssz = { workspace = true }
+tap = { workspace = true }
 thiserror = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
