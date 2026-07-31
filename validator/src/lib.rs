@@ -6,11 +6,17 @@ pub use crate::{
 };
 
 mod api;
+mod beacon_node_api;
+mod beacon_nodes;
+mod health;
+mod local_beacon_node;
 mod messages;
 mod misc;
 mod own_beacon_committee_members;
 mod own_ptc_members;
 mod own_sync_committee_subscriptions;
+mod remote_beacon_node;
+mod remote_beacon_nodes;
 mod slot_head;
 mod tasks;
 mod validator;

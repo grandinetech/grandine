@@ -15,7 +15,7 @@ use tracing::info;
 use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
-    nonstandard::CustodyMode,
+    nonstandard::{CustodyMode, PublishedDuty},
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, H256, Slot},
     redacting_url::RedactingUrl,
 };
@@ -82,6 +82,9 @@ pub struct GrandineConfig {
     pub sync_without_reconstruction: bool,
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
+    pub beacon_node_urls: Vec<RedactingUrl>,
+    pub disable_local_beacon_node: bool,
+    pub publish_to_every_node: Vec<PublishedDuty>,
 }
 
 impl GrandineConfig {
@@ -113,6 +116,9 @@ impl GrandineConfig {
             validator_api_config,
             sync_without_reconstruction,
             custody_mode,
+            beacon_node_urls,
+            disable_local_beacon_node,
+            publish_to_every_node,
             ..
         } = self;
 
@@ -198,6 +204,24 @@ impl GrandineConfig {
 
         if let Some(checkpoint_sync_url) = checkpoint_sync_url {
             info!("checkpoint sync url: {checkpoint_sync_url}");
+        }
+
+        if !beacon_node_urls.is_empty() {
+            info!(
+                "performing validator duties against remote beacon nodes: [{}]",
+                beacon_node_urls.iter().join(", "),
+            );
+
+            if *disable_local_beacon_node {
+                info!("built-in beacon node will not be used for validator duties");
+            }
+
+            if !publish_to_every_node.is_empty() {
+                info!(
+                    "publishing to every remote beacon node: [{}]",
+                    publish_to_every_node.iter().join(", "),
+                );
+            }
         }
 
         if !web3signer_config.urls.is_empty() {

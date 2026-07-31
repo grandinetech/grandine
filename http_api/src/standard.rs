@@ -37,7 +37,7 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use http_api_utils::{BlockId, StateId};
+use http_api_utils::{BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId};
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
@@ -134,7 +134,6 @@ use crate::{
         SignedProposerPreferencesListFromPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
-    response::{ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
         ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
@@ -3780,7 +3779,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         target,
     };
 
-    EthResponse::json_or_ssz(attestation_data, &headers)
+    EthResponse::json_or_ssz(attestation_data, &headers).map_err(Into::into)
 }
 
 /// `POST /eth/v1/validator/beacon_committee_subscriptions`

@@ -6,7 +6,7 @@ use keymanager::{BuilderOptions, ValidatorDefinitionsWithStorage};
 use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
-    nonstandard::CustodyMode,
+    nonstandard::{CustodyMode, PublishedDuty},
     phase0::primitives::{ExecutionAddress, H256},
 };
 
@@ -29,6 +29,7 @@ pub struct ValidatorConfig {
     /// The `validators.yml` definitions, shared with the Keymanager API so runtime settings changes
     /// are reflected in both the running node and the file.
     pub validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
+    pub publish_to_every_node: Vec<PublishedDuty>,
 }
 
 impl ValidatorConfig {

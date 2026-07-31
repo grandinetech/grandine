@@ -29,6 +29,7 @@ use types::{
     traits::BeaconState as _,
 };
 
+#[derive(Clone)]
 pub struct SlotHead<P: Preset> {
     pub config: Arc<Config>,
     pub beacon_block_root: H256,

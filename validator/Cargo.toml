@@ -55,6 +55,7 @@ std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 try_from_iterator = { workspace = true }
