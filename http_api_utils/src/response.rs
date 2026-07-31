@@ -4,16 +4,15 @@ use axum::{
     http::{HeaderMap, HeaderValue, header::ACCEPT},
     response::{IntoResponse, Response},
 };
-use http_api_utils::ETH_CONSENSUS_VERSION;
 use mediatype::{MediaType, MediaTypeList};
 use mime::APPLICATION_OCTET_STREAM;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ssz::SszWrite;
 use tap::Pipe as _;
 use tracing::instrument;
 use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::H256};
 
-use crate::error::Error;
+use crate::{error::Error, misc::ETH_CONSENSUS_VERSION};
 
 const ETH_CONSENSUS_BLOCK_VALUE: &str = "eth-consensus-block-value";
 pub const ETH_BLOB_DATA_INCLUDED: &str = "eth-blob-data-included";
@@ -21,14 +20,17 @@ const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
 const ETH_EXECUTION_PAYLOAD_VALUE: &str = "eth-execution-payload-value";
 const ETH_EXECUTION_PAYLOAD_INCLUDED: &str = "eth-execution-payload-included";
 
+#[derive(Default)]
 pub struct AlwaysJson;
 
+#[derive(Default)]
 pub enum JsonOrSsz {
+    #[default]
     Json,
     Ssz,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct EthResponse<T, M = (), F = AlwaysJson> {
     data: T,
 
@@ -106,41 +108,54 @@ impl<T, M, F> EthResponse<T, M, F> {
         }
     }
 
+    #[must_use]
+    pub fn into_data(self) -> T {
+        self.data
+    }
+
+    #[must_use]
     pub const fn version(mut self, phase: Phase) -> Self {
         self.version = Some(phase);
         self
     }
 
+    #[must_use]
     pub const fn consensus_block_value(mut self, consensus_block_value: Option<Wei>) -> Self {
         self.consensus_block_value = consensus_block_value;
         self
     }
 
+    #[must_use]
     pub const fn execution_payload_blinded(mut self, execution_payload_blinded: bool) -> Self {
         self.execution_payload_blinded = Some(execution_payload_blinded);
         self
     }
 
+    #[must_use]
     pub const fn execution_payload_value(mut self, execution_payload_value: Wei) -> Self {
         self.execution_payload_value = Some(execution_payload_value);
         self
     }
 
+    #[must_use]
     pub const fn execution_payload_included(mut self, execution_payload_included: bool) -> Self {
         self.execution_payload_included = Some(execution_payload_included);
         self
     }
 
+    #[must_use]
     pub const fn dependent_root(mut self, dependent_root: H256) -> Self {
         self.dependent_root = Some(dependent_root);
         self
     }
 
+    #[must_use]
     pub const fn execution_optimistic(mut self, execution_optimistic: bool) -> Self {
         self.execution_optimistic = Some(execution_optimistic);
         self
     }
 
+    #[must_use]
     pub const fn finalized(mut self, finalized: bool) -> Self {
         self.finalized = Some(finalized);
         self
@@ -211,6 +226,7 @@ impl<T, M, F> EthResponse<T, M, F> {
 }
 
 impl<T, F> EthResponse<T, (), F> {
+    #[must_use]
     pub fn meta<M>(self, meta: M) -> EthResponse<T, M, F> {
         let Self {
             data,
@@ -252,14 +268,9 @@ impl<T> EthResponse<T, (), JsonOrSsz> {
     // `axum` recommends using `axum::TypedHeader` instead of extracting all headers,
     // but the `headers` crate does not provide a type for the `Accept` header.
     // See <https://github.com/hyperium/headers/issues/53>.
-    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self, Error> {
+    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self> {
         if let Some(accept_header) = request_headers.get(ACCEPT) {
-            let accepted_types = accept_content_type_list(
-                accept_header
-                    .to_str()
-                    .map_err(Into::into)
-                    .map_err(Error::Internal)?,
-            )?;
+            let accepted_types = accept_content_type_list(accept_header.to_str()?)?;
 
             for accept in &accepted_types {
                 if accept == APPLICATION_OCTET_STREAM.as_ref() {

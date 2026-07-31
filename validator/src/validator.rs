@@ -8,7 +8,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, ensure};
 use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
@@ -26,15 +26,14 @@ use eth2_libp2p::GossipId;
 use features::Feature;
 use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{
-    AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
-    PayloadAttestationOrigin, StateCacheError,
+    ChainLink, PayloadAttestationItem, PayloadAttestationOrigin, StateCacheError,
 };
 use futures::{
     channel::{
         mpsc::{UnboundedReceiver, UnboundedSender},
         oneshot::Sender,
     },
-    future::{Either as EitherFuture, OptionFuture},
+    future::{Either as EitherFuture, OptionFuture, join_all},
     lock::Mutex,
     select,
     stream::{FuturesOrdered, StreamExt as _},
@@ -97,22 +96,28 @@ use types::{
         consts::GENESIS_SLOT,
         containers::{
             AggregateAndProof as Phase0AggregateAndProof, Attestation as Phase0Attestation,
-            AttestationData, Checkpoint, ProposerSlashing,
-            SignedAggregateAndProof as Phase0SignedAggregateAndProof, SignedVoluntaryExit,
+            ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
+            SignedVoluntaryExit,
         },
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
+    redacting_url::RedactingUrl,
     traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
 };
 use validator_statistics::ValidatorStatistics;
 
 use crate::{
+    beacon_node_api::BeaconNodeApi as _,
+    beacon_nodes::BeaconNodes,
+    local_beacon_node::LocalBeaconNode,
     messages::{ApiToValidator, InternalMessage},
     misc::{Aggregator, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
+    remote_beacon_node::RemoteBeaconNode,
+    remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
     tasks::{UpdateBeaconCommitteeSubscriptionsTask, update_beacon_committee_subscriptions},
     validator_config::ValidatorConfig,
@@ -195,6 +200,8 @@ pub struct Validator<P: Preset, W: Wait> {
     dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
     dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     last_proposer_preferences_epoch: Option<Epoch>,
+    remote_beacon_nodes: Arc<RemoteBeaconNodes>,
+    disable_local_beacon_node: bool,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -219,7 +226,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         _network_dir: Option<&Path>,
         dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
         dedicated_executor_low_priority: Arc<DedicatedExecutor>,
+        beacon_node_urls: Vec<RedactingUrl>,
+        disable_local_beacon_node: bool,
     ) -> Self {
+        let chain_config = controller.chain_config().clone_arc();
+
+        let remote_beacon_nodes = beacon_node_urls
+            .into_iter()
+            .map(|url| {
+                Arc::new(RemoteBeaconNode::new(
+                    chain_config.clone_arc(),
+                    signer.load().client().clone(),
+                    url,
+                ))
+            })
+            .collect::<Vec<_>>();
+
         let Channels {
             api_to_validator_rx,
             fork_choice_rx,
@@ -282,10 +304,36 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             dedicated_executor_normal_priority,
             dedicated_executor_low_priority,
             last_proposer_preferences_epoch: None,
+            remote_beacon_nodes: Arc::new(RemoteBeaconNodes::new(
+                chain_config.clone_arc(),
+                remote_beacon_nodes,
+            )),
+            disable_local_beacon_node,
         }
     }
 
+    /// The beacon nodes to perform this tick's duties against: any nodes given with
+    /// `--beacon-node-urls`, plus the built-in one unless `--disable-local-beacon-node` was passed.
+    fn beacon_nodes(&self, slot_head: &SlotHead<P>, wait_group: &W) -> BeaconNodes<P, W> {
+        let local = (!self.disable_local_beacon_node).then(|| {
+            LocalBeaconNode::new(
+                slot_head.clone(),
+                self.controller.clone_arc(),
+                self.attestation_agg_pool.clone_arc(),
+                self.p2p_tx.clone(),
+                wait_group.clone(),
+            )
+        });
+
+        BeaconNodes::new(
+            local,
+            &self.remote_beacon_nodes,
+            self.validator_config.publish_to_every_node.clone(),
+        )
+    }
+
     pub async fn run(self) -> Result<()> {
+        self.remote_beacon_nodes.check_on_startup().await?;
         self.run_internal().await;
 
         Ok(())
@@ -293,6 +341,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     async fn run_internal(mut self) {
         let mut health_check = HealthCheck::new("validator");
+        let mut beacon_node_health = self.remote_beacon_nodes.poll_interval();
 
         loop {
             let mut slasher_to_validator_rx = self
@@ -304,6 +353,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             select! {
                 _ = health_check.interval.select_next_some() => {
                     health_check.check();
+                },
+
+                _ = beacon_node_health.select_next_some() => {
+                    let remote_beacon_nodes = self.remote_beacon_nodes.clone_arc();
+                    tokio::spawn(async move { remote_beacon_nodes.check_status().await });
                 },
 
                 message = self.internal_rx.select_next_some() => match message {
@@ -1439,8 +1493,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .await;
         }
 
+        let beacon_nodes = self.beacon_nodes(slot_head, wait_group);
+
         let own_singular_attestations = self
-            .own_singular_attestations(slot_head, &own_members)
+            .own_singular_attestations(slot_head, &own_members, &beacon_nodes)
             .await?;
 
         if own_singular_attestations.is_empty() {
@@ -1476,26 +1532,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 slot_head.slot(),
                 attestation,
             );
+        }
 
-            let attestation = Arc::new(attestation.clone());
-            let subnet_id = slot_head.subnet_id(attestation.data().slot, committee_index)?;
-
-            self.controller.on_singular_attestation(
-                wait_group.clone(),
-                AttestationItem::unverified(
-                    attestation.clone_arc(),
-                    AttestationOrigin::Own(subnet_id),
-                ),
-            );
-
-            ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
-                .send(&self.p2p_tx);
-
-            self.attestation_agg_pool.insert_attestation(
-                wait_group.clone(),
-                attestation,
-                Some(*validator_index),
-            );
+        if let Err(error) = beacon_nodes
+            .publish_singular_attestations(own_singular_attestations)
+            .await
+        {
+            warn_with_peers!("failed to publish attestations: {error:?}");
         }
 
         prometheus_metrics::stop_and_record(timer);
@@ -1986,32 +2029,58 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &self,
         slot_head: &SlotHead<P>,
         own_members: &[BeaconCommitteeMember],
+        beacon_nodes: &BeaconNodes<P, W>,
     ) -> Result<&[OwnAttestation<P>]> {
         if let Some(own_attestations) = self.own_singular_attestations.get() {
             return Ok(own_attestations);
         }
 
         let phase = slot_head.phase();
+        let slot = slot_head.slot();
 
-        // See: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.5/specs/gloas/validator.md#attestation
-        let gloas_index = (phase >= Phase::Gloas).then(|| {
-            u64::from(
-                slot_head.beacon_state.latest_block_header().slot != slot_head.slot()
-                    && self
-                        .controller
-                        .is_payload_verified(slot_head.beacon_block_root),
-            )
-        });
+        // From Electra on the committee index is not part of the produced data,
+        // so a single request covers every member.
+        let committee_indices = if phase >= Phase::Electra {
+            vec![0]
+        } else {
+            own_members
+                .iter()
+                .map(|member| member.committee_index)
+                .unique()
+                .collect()
+        };
+
+        // Fetched concurrently, and each committee stands on its own: one that cannot be served
+        // only costs its own members their attestation, rather than the whole slot's.
+        let attestation_data = committee_indices
+            .into_iter()
+            .map(|committee_index| async move {
+                let data = beacon_nodes.attestation_data(slot, committee_index).await?;
+                let produced_for = data.slot;
+
+                ensure!(
+                    produced_for == slot,
+                    "beacon node produced attestation data for slot {produced_for}, \
+                     expected {slot}",
+                );
+
+                Ok::<_, AnyhowError>((committee_index, data))
+            })
+            .pipe(join_all)
+            .await
+            .into_iter()
+            .filter_map(|result| {
+                result
+                    .inspect_err(|error| {
+                        warn_with_peers!(
+                            "unable to produce attestation data in slot {slot}: {error:?}",
+                        );
+                    })
+                    .ok()
+            })
+            .collect::<HashMap<_, _>>();
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
-            let target = Checkpoint {
-                epoch: slot_head.current_epoch(),
-                root: accessors::epoch_boundary_block_root(
-                    &slot_head.beacon_state,
-                    slot_head.beacon_block_root,
-                ),
-            };
-
             let doppelganger_protection = self
                 .doppelganger_protection
                 .as_deref()
@@ -2035,19 +2104,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         return None;
                     }
 
-                    let mut data = AttestationData {
-                        slot: slot_head.slot(),
-                        index: member.committee_index,
-                        beacon_block_root: slot_head.beacon_block_root,
-                        source: slot_head.beacon_state.current_justified_checkpoint(),
-                        target,
+                    let committee_index = if phase >= Phase::Electra {
+                        0
+                    } else {
+                        member.committee_index
                     };
 
-                    if let Some(idx) = gloas_index {
-                        data.index = idx;
-                    } else if phase >= Phase::Electra {
-                        data.index = 0;
-                    }
+                    let data = *attestation_data.get(&committee_index)?;
 
                     let triple = SigningTriple {
                         message: SigningMessage::<P>::Attestation(data),

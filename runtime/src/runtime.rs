@@ -117,6 +117,8 @@ pub struct RuntimeConfig {
     pub slashing_protection_history_limit: u64,
     pub track_liveness: bool,
     pub validator_enabled: bool,
+    pub beacon_node_urls: Vec<RedactingUrl>,
+    pub disable_local_beacon_node: bool,
 }
 
 #[expect(clippy::too_many_arguments)]
@@ -154,6 +156,8 @@ pub async fn run_after_genesis<P: Preset>(
         slashing_protection_history_limit,
         track_liveness,
         validator_enabled,
+        beacon_node_urls,
+        disable_local_beacon_node,
     } = runtime_config;
 
     let MetricsConfig {
@@ -659,6 +663,8 @@ pub async fn run_after_genesis<P: Preset>(
         network_config.network_dir.as_deref(),
         dedicated_executor_normal_priority.clone_arc(),
         dedicated_executor_low_priority.clone_arc(),
+        beacon_node_urls,
+        disable_local_beacon_node,
     );
 
     let p2p_channels = Channels {
@@ -978,6 +984,8 @@ struct Context {
     blacklisted_blocks: HashSet<H256>,
     reconstruction_delay: Duration,
     report_validator_performance: bool,
+    beacon_node_urls: Vec<RedactingUrl>,
+    disable_local_beacon_node: bool,
 }
 
 impl Context {
@@ -1067,6 +1075,8 @@ impl Context {
             blacklisted_blocks,
             reconstruction_delay,
             report_validator_performance,
+            beacon_node_urls,
+            disable_local_beacon_node,
         } = self;
 
         if storage_config.reset_databases {
@@ -1194,6 +1204,8 @@ impl Context {
                 slashing_protection_history_limit,
                 track_liveness,
                 validator_enabled,
+                beacon_node_urls,
+                disable_local_beacon_node,
             },
             store_config,
             validator_api_config,
@@ -1312,6 +1324,9 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         custody_mode,
         disable_wait_for_late_blocks,
         enable_local_payload_building,
+        beacon_node_urls,
+        disable_local_beacon_node,
+        publish_to_every_node,
         ..
     } = config;
 
@@ -1352,6 +1367,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         custody_mode,
         disable_wait_for_late_blocks,
         enable_local_payload_building,
+        publish_to_every_node,
     });
 
     let store_config = StoreConfig {
@@ -1473,6 +1489,8 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         blacklisted_blocks,
         reconstruction_delay,
         report_validator_performance,
+        beacon_node_urls,
+        disable_local_beacon_node,
     };
 
     match context.chain_config.preset_base {

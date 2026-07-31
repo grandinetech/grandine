@@ -343,6 +343,8 @@ impl<P: Preset> Context<P> {
             network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
+            Vec::new(),
+            false,
         );
 
         let subnet_service = SubnetService::new(

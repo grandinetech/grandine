@@ -4,7 +4,7 @@ use derivative::Derivative;
 use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
-    nonstandard::CustodyMode,
+    nonstandard::{CustodyMode, PublishedDuty},
     phase0::primitives::{ExecutionAddress, H256},
 };
 
@@ -26,4 +26,5 @@ pub struct ValidatorConfig {
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
     pub enable_local_payload_building: bool,
+    pub publish_to_every_node: Vec<PublishedDuty>,
 }

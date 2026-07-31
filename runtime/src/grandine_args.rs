@@ -56,7 +56,7 @@ use tracing::Level;
 use types::{
     bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
-    nonstandard::{CustodyMode, Phase, StorageMode},
+    nonstandard::{CustodyMode, Phase, PublishedDuty, StorageMode},
     phase0::primitives::{
         Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot,
     },
@@ -108,6 +108,9 @@ pub struct GrandineArgs {
 
     #[clap(flatten)]
     validator_options: ValidatorOptions,
+
+    #[clap(flatten)]
+    remote_validator_options: RemoteValidatorOptions,
 
     #[clap(flatten)]
     validator_api_options: ValidatorApiOptions,
@@ -915,6 +918,21 @@ struct ValidatorOptions {
 }
 
 #[derive(Debug, Args)]
+struct RemoteValidatorOptions {
+    /// List of beacon node API URLs to perform validator duties against
+    #[clap(long, num_args = 1..)]
+    beacon_node_urls: Vec<RedactingUrl>,
+
+    /// Perform validator duties against `--beacon-node-urls` only, ignoring the built-in beacon node
+    #[clap(long, requires = "beacon_node_urls")]
+    disable_local_beacon_node: bool,
+
+    /// List of duties to publish to every beacon node rather than the first one
+    #[clap(long, value_delimiter = ',', requires = "beacon_node_urls")]
+    publish_to_every_node: Vec<PublishedDuty>,
+}
+
+#[derive(Debug, Args)]
 struct ValidatorApiOptions {
     /// Enable validator API
     #[clap(long)]
@@ -1014,6 +1032,7 @@ impl GrandineArgs {
             http_api_options,
             mut network_config_options,
             validator_options,
+            remote_validator_options,
             validator_api_options,
             graffiti,
             disable_blockprint_graffiti,
@@ -1121,6 +1140,12 @@ impl GrandineArgs {
             disable_wait_for_late_blocks,
             enable_local_payload_building,
         } = validator_options;
+
+        let RemoteValidatorOptions {
+            beacon_node_urls,
+            disable_local_beacon_node,
+            publish_to_every_node,
+        } = remote_validator_options;
 
         if in_memory {
             warn_with_peers!(
@@ -1516,6 +1541,9 @@ impl GrandineArgs {
             custody_mode,
             disable_wait_for_late_blocks,
             enable_local_payload_building,
+            beacon_node_urls,
+            disable_local_beacon_node,
+            publish_to_every_node,
         })
     }
 

@@ -243,6 +243,12 @@ pub struct BlockRewards {
     pub attester_slashings: Gwei,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString)]
+#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
+pub enum PublishedDuty {
+    Attestations,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum CustodyMode {
     #[default]
