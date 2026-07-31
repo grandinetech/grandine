@@ -1805,9 +1805,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         state_for_signature: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<Either<BlockItem<P>, BlockAction<P>>> {
         // Skip blocks that are already known.
-        //
-        // This is a slight deviation from `consensus-specs`, but it appears to be compatible with
-        // both the fork choice rule and the Networking specification.
         if self.contains_block(block_root) {
             return Ok(Either::Right(BlockAction::Ignore(true)));
         }

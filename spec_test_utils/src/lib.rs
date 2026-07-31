@@ -41,6 +41,9 @@ pub struct Meta {
     pub fork_epoch: u64,
     pub fork_block: Option<usize>,
 
+    // Used in the `attestation` operation tests in Gloas and later.
+    pub parent_slot: Option<u64>,
+
     // Present in some metadata files but not used in our test runners.
     pub description: IgnoredAny,
     pub reveal_deadlines_setting: IgnoredAny,

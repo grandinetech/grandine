@@ -1311,7 +1311,7 @@ mod spec_tests {
     use core::fmt::Debug;
 
     use helper_functions::{slot_report::NullSlotReport, verifier::NullVerifier};
-    use spec_test_utils::{BlsSetting, Case};
+    use spec_test_utils::{BlsSetting, Case, Meta};
     use ssz::SszReadDefault;
     use test_generator::test_resources;
     use types::{
@@ -1422,13 +1422,13 @@ mod spec_tests {
 
     processing_tests! {
         process_attestation,
-        |config, pubkey_cache, state, attestation, bls_setting| {
+        |config, pubkey_cache, state, attestation, meta| {
             process_attestation(
                 config,
                 pubkey_cache,
                 state,
                 &attestation,
-                bls_setting,
+                meta,
             )
         },
         "attestation",
@@ -1600,21 +1600,21 @@ mod spec_tests {
             &PubkeyCache,
             &mut GloasBeaconState<P>,
             O,
-            BlsSetting,
+            &Meta,
         ) -> Result<()>,
     ) {
         let pubkey_cache = PubkeyCache::default();
         let mut state = case.ssz_default("pre");
         let operation = case.ssz_default(operation_name);
         let post_option = case.try_ssz_default("post");
-        let bls_setting = case.meta().bls_setting;
+        let meta = case.meta();
 
         let result = processing_function(
             &P::default_config(),
             &pubkey_cache,
             &mut state,
             operation,
-            bls_setting,
+            &meta,
         )
         .map(|()| state);
 
@@ -1670,9 +1670,9 @@ mod spec_tests {
         pubkey_cache: &PubkeyCache,
         state: &mut GloasBeaconState<P>,
         attestation: &Attestation<P>,
-        bls_setting: BlsSetting,
+        meta: &Meta,
     ) -> Result<()> {
-        match bls_setting {
+        match meta.bls_setting {
             BlsSetting::Optional | BlsSetting::Required => validate_attestation_with_verifier(
                 config,
                 pubkey_cache,
@@ -1689,9 +1689,11 @@ mod spec_tests {
             )?,
         }
 
-        // The bid is not processed here, so the bid in the state is still the parent block's bid
-        // and its slot is the parent block's slot.
-        let parent_slot = state.latest_execution_payload_bid.slot;
+        // The bid is not processed here, so the bid in the state
+        // is still the parent block's bid and its slot is the parent block's slot.
+        let parent_slot = meta
+            .parent_slot
+            .unwrap_or(state.latest_execution_payload_bid.slot);
 
         apply_attestation(config, state, attestation, parent_slot, NullSlotReport)
     }
