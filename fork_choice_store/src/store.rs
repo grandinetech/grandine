@@ -63,8 +63,8 @@ use types::{
             PAYLOAD_STATUS_FULL,
         },
         containers::{
-            CombinedPayloadAttestation, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
-            SignedProposerPreferences,
+            CombinedPayloadAttestation, ExecutionPayloadBid, SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope, SignedProposerPreferences,
         },
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
@@ -270,7 +270,10 @@ pub struct Store<P: Preset, S: Storage<P>> {
         HashMap<H256, ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>>,
     >,
     accepted_gloas_data_column_sidecars: HashMap<(H256, ColumnIndex), Slot>,
-    accepted_payload_bids: HashMap<Slot, HashMap<BuilderIndex, SignedExecutionPayloadBid<P>>>,
+    accepted_payload_bids: HashMap<
+        Slot,
+        HashMap<(BuilderIndex, ExecutionBlockHash, H256), SignedExecutionPayloadBid<P>>,
+    >,
     accepted_execution_payload_envelopes: HashSet<(Slot, H256, BuilderIndex)>,
     accepted_proposer_preferences:
         HashMap<(H256, Slot, ValidatorIndex), Arc<SignedProposerPreferences>>,
@@ -484,7 +487,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         slot: Slot,
         builder_index: BuilderIndex,
     ) -> Option<&SignedExecutionPayloadBid<P>> {
-        self.accepted_payload_bids.get(&slot)?.get(&builder_index)
+        // A builder may have bid on more than one branch for the same slot.
+        self.accepted_payload_bids
+            .get(&slot)?
+            .values()
+            .filter(|bid| bid.message.builder_index == builder_index)
+            .max_by_key(|bid| bid.message.value)
     }
 
     #[must_use]
@@ -921,15 +929,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // > Return whether the proposer should build on the parent's full payload (as
     // > opposed to its empty variant). The relevant ``head`` is ``get_head(store)``,
     // > i.e. the parent block the proposer is building on, so we resolve it here.
-    #[must_use]
-    pub fn should_build_on_full(&self) -> bool {
+    pub fn should_build_on_full(&self, slot: Slot) -> bool {
         let (head, payload_status) = self.head_with_payload_status();
 
         // For a head from an earlier slot the empty/full node was already resolved
         // by weight in `get_head`; only the previous-slot head still consults the
         // (possibly stale) PTC data-availability view.
         // See <https://github.com/ethereum/consensus-specs/pull/5309>.
-        if head.slot().saturating_add(1) != self.slot() {
+        if head.slot().saturating_add(1) != slot {
             return payload_status == PAYLOAD_STATUS_FULL;
         }
 
@@ -943,6 +950,34 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // See <https://github.com/ethereum/consensus-specs/pull/5210>.
         !self.payload_timeliness(head.block_root, false)
             && !self.payload_data_availability(head.block_root, false)
+    }
+
+    pub fn is_bid_compatible_with_head(&self, bid: &ExecutionPayloadBid<P>) -> bool {
+        let head = self.head();
+        let head_block = head.block.message();
+
+        // The head is the last pre-Gloas block, so there is no empty/full variant to
+        // pick between. Fall back to only requiring that the parent block is known.
+        let Some(head_bid) = head_block.payload_bid() else {
+            return self.contains_block(bid.parent_block_root);
+        };
+
+        let builds_on_parent_block = bid.parent_block_root == head_block.parent_root();
+        let builds_on_parent_payload = bid.parent_block_hash == head_bid.parent_block_hash;
+
+        if builds_on_parent_block && builds_on_parent_payload {
+            return true;
+        }
+
+        if bid.parent_block_root != head.block_root {
+            return false;
+        }
+
+        if self.should_build_on_full(bid.slot) {
+            return bid.parent_block_hash == head_bid.block_hash;
+        }
+
+        builds_on_parent_payload
     }
 
     pub fn should_extend_payload(&self, block_root: H256) -> bool {
@@ -2103,10 +2138,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         if let Some(payload_bids) = self.accepted_payload_bids.get(&bid.slot) {
-            // > this is the first signed bid seen from the given builder for this slot
-            if payload_bids.contains_key(&builder_index) {
+            // > this is the first signed bid seen with a valid signature from the given builder for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
+            if payload_bids.contains_key(&(
+                builder_index,
+                bid.parent_block_hash,
+                bid.parent_block_root,
+            )) {
                 return Ok(ExecutionPayloadBidAction::Ignore(
-                    "this is the first signed bid seen from the given builder for this slot",
+                    "this is the first signed bid seen from the given builder for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)",
                 ));
             }
 
@@ -2187,7 +2226,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         }
 
-        // > the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice
+        // > The bid is compatible with the current head branch, i.e. `is_bid_compatible_with_head(store, bid)` returns `True`.
+        if !self.is_bid_compatible_with_head(bid) {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the bid is not compatible with the current head branch",
+            ));
+        }
+
         let Some(parent) = self.chain_link(bid.parent_block_root) else {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `bid.parent_block_root` is the hash tree root of a known beacon block in fork choice",
@@ -4555,10 +4600,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .entry(payload_bid.message.slot)
             .or_default();
 
-        accepted_bids.insert(
+        let key = (
             payload_bid.message.builder_index,
-            Arc::unwrap_or_clone(payload_bid),
+            payload_bid.message.parent_block_hash,
+            payload_bid.message.parent_block_root,
         );
+
+        accepted_bids.insert(key, Arc::unwrap_or_clone(payload_bid));
     }
 
     pub fn apply_proposer_preferences(
