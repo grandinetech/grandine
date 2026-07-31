@@ -1133,7 +1133,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             ProgressiveList::default()
                         };
 
-                        let parent_execution_requests = if snapshot.should_build_on_full() {
+                        let parent_execution_requests = if snapshot.should_build_on_full(slot) {
                             // TODO(gloas): the block root needs to be checked if it is gloas or not.
                             // the current behavior erronously returns empty execution requests when
                             // payload envelope is not found, though block may be from gloas phase and
@@ -1359,7 +1359,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         .await?
                 } else {
                     // TODO: (gloas): select from received bids based on proposer preference
-                    let parent_block_hash = if snapshot.should_build_on_full() {
+                    let parent_block_hash = if snapshot.should_build_on_full(state.slot()) {
                         state.latest_execution_payload_bid().block_hash
                     } else {
                         state.latest_execution_payload_bid().parent_block_hash
@@ -2007,7 +2007,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let target_gas_limit = self.gas_limit()?;
                 let snapshot = self.producer_context.controller.snapshot();
 
-                let withdrawals = if snapshot.should_build_on_full()
+                let withdrawals = if snapshot.should_build_on_full(state.slot())
                     && let Some(envelope) =
                         snapshot.cached_execution_payload_envelope_by_root(head_root)
                 {
@@ -2139,7 +2139,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             let parent_slot = state.latest_block_header().slot;
             let snapshot = self.producer_context.controller.snapshot();
 
-            if snapshot.should_build_on_full()
+            if snapshot.should_build_on_full(state.slot())
                 || chain_config.phase_at_slot::<P>(parent_slot) < Phase::Gloas
             {
                 parent_bid.block_hash

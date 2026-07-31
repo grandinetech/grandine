@@ -1234,8 +1234,8 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 
     #[must_use]
-    pub fn should_build_on_full(&self) -> bool {
-        self.store_snapshot.should_build_on_full()
+    pub fn should_build_on_full(&self, slot: Slot) -> bool {
+        self.store_snapshot.should_build_on_full(slot)
     }
 
     #[must_use]
