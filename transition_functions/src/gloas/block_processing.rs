@@ -55,7 +55,7 @@ use types::{
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, ProposerSlashing},
-        primitives::{Epoch, ExecutionAddress, Gwei},
+        primitives::{Epoch, ExecutionAddress, Gwei, Slot},
     },
     preset::{BuilderPendingPaymentsLength, Preset, SlotsPerHistoricalRoot},
     traits::{
@@ -163,7 +163,7 @@ pub fn custom_process_block<P: Preset>(
 
     // > [New in Gloas:EIP7732]
     // This function must be called after `process_withdrawals`
-    process_execution_payload_bid(
+    let parent_slot = process_execution_payload_bid(
         config,
         pubkey_cache,
         state,
@@ -179,6 +179,7 @@ pub fn custom_process_block<P: Preset>(
         pubkey_cache,
         state,
         &block.body,
+        parent_slot,
         &mut verifier,
         &mut slot_report,
     )?;
@@ -819,7 +820,7 @@ pub fn process_execution_payload_bid<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
     signed_bid: &SignedExecutionPayloadBid<P>,
-) -> Result<()> {
+) -> Result<Slot> {
     let ExecutionPayloadBid {
         value: amount,
         builder_index,
@@ -846,10 +847,13 @@ pub fn process_execution_payload_bid<P: Preset>(
             .mod_index_mut(builder_payment_index_for_current_epoch::<P>(slot)?) = pending_payment;
     }
 
+    // > Cache the parent block's slot before overwriting the bid
+    let parent_slot = state.latest_execution_payload_bid().slot;
+
     // > Cache the signed execution payload bid
     *state.latest_execution_payload_bid_mut() = signed_bid.message.clone();
 
-    Ok(())
+    Ok(parent_slot)
 }
 
 fn ensure_operation_count<P: Preset>(
@@ -875,6 +879,7 @@ pub fn process_operations<P: Preset, V: Verifier, B>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
     body: &B,
+    parent_slot: Slot,
     mut verifier: V,
     mut slot_report: impl SlotReport,
 ) -> Result<()>
@@ -989,7 +994,7 @@ where
     }
 
     for attestation in body.attestations() {
-        apply_attestation(config, state, attestation, &mut slot_report)?;
+        apply_attestation(config, state, attestation, parent_slot, &mut slot_report)?;
     }
 
     for voluntary_exit in body.voluntary_exits().iter().copied() {
@@ -1029,12 +1034,18 @@ pub fn apply_attestation<P: Preset>(
     config: &Config,
     state: &mut impl PostGloasBeaconState<P>,
     attestation: &Attestation<P>,
+    parent_slot: Slot,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
     // > Participation flag indices
+    // > [Modified in Gloas:EIP7732]
     let inclusion_delay = state.slot().try_sub(attestation.data.slot)?;
-    let participation_flags =
-        get_attestation_participation_flags(state, attestation.data, inclusion_delay)?;
+    let participation_flags = get_attestation_participation_flags(
+        state,
+        attestation.data,
+        inclusion_delay,
+        Some(parent_slot),
+    )?;
 
     // > Update epoch participation flags
     let base_reward_per_increment = get_base_reward_per_increment(state)?;
@@ -1494,6 +1505,7 @@ mod spec_tests {
                 state,
                 &execution_payload_bid,
             )
+            .map(|_parent_slot| ())
         },
         "execution_payload_bid",
         "consensus-spec-tests/tests/mainnet/gloas/operations/execution_payload_bid/*/*",
@@ -1672,6 +1684,10 @@ mod spec_tests {
             )?,
         }
 
-        apply_attestation(config, state, attestation, NullSlotReport)
+        // The bid is not processed here, so the bid in the state is still the parent block's bid
+        // and its slot is the parent block's slot.
+        let parent_slot = state.latest_execution_payload_bid.slot;
+
+        apply_attestation(config, state, attestation, parent_slot, NullSlotReport)
     }
 }

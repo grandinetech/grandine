@@ -170,7 +170,7 @@ fn translate_participation<'attestations, P: Preset>(
 
         // > Translate attestation inclusion info to flag indices
         let participation_flags =
-            accessors::get_attestation_participation_flags(state, data, inclusion_delay)?;
+            accessors::get_attestation_participation_flags(state, data, inclusion_delay, None)?;
 
         // > Apply flags to all attesting validators
         for attesting_index in attesting_indices {

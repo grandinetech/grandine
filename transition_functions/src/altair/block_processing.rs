@@ -336,7 +336,8 @@ pub fn apply_attestation<P: Preset>(
 
     // > Participation flag indices
     let inclusion_delay = state.slot().try_sub(data.slot)?;
-    let participation_flags = get_attestation_participation_flags(state, data, inclusion_delay)?;
+    let participation_flags =
+        get_attestation_participation_flags(state, data, inclusion_delay, None)?;
 
     // > Update epoch participation flags
     let base_reward_per_increment = get_base_reward_per_increment(state)?;
