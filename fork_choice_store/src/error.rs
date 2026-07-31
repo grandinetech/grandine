@@ -272,6 +272,10 @@ pub enum Error<P: Preset> {
     InvalidProposerPreferencesProposalSlot {
         signed_preferences: Arc<SignedProposerPreferences>,
     },
+    #[error("proposer preferences has invalid dependent root: {signed_preferences:?}")]
+    InvalidProposerPreferencesDependentRoot {
+        signed_preferences: Arc<SignedProposerPreferences>,
+    },
     #[error("proposer preferences has invalid signature: {signed_preferences:?}")]
     InvalidProposerPreferencesSignature {
         signed_preferences: Arc<SignedProposerPreferences>,

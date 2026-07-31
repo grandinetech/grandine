@@ -1387,6 +1387,22 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         )
     }
 
+    fn is_valid_dependent_root(&self, chain_link: &ChainLink<P>, start_slot: Slot) -> bool {
+        let root = chain_link.block_root;
+
+        if chain_link.slot() >= start_slot {
+            return false;
+        }
+
+        let has_child_in_epoch = self
+            .unfinalized
+            .values()
+            .flatten()
+            .any(|block| block.slot() >= start_slot && block.chain_link.parent_root() == root);
+
+        has_child_in_epoch || root == self.head().block_root
+    }
+
     fn should_wait_for_justified_state(&self, checkpoint: Checkpoint) -> bool {
         // The comparison with `self.anchor_epoch()` is needed for two reasons:
         // - All checkpoints in a genesis state have their `root` set to 0x00…00. In contrast, the
@@ -2287,10 +2303,26 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [IGNORE] The block with root preferences.dependent_root has been seen
-        if !self.contains_block(dependent_root) {
+        let Some(dependent_chain_link) = self.chain_link(dependent_root) else {
             return Ok(ProposerPreferencesAction::DelayUntilBlock(
                 signed_preferences,
             ));
+        };
+
+        let lookahead_epoch = proposal_epoch.saturating_sub(P::MinSeedLookahead::U64);
+        let lookahead_start_slot = misc::compute_start_slot_at_epoch::<P>(lookahead_epoch);
+
+        // _[REJECT]_ The slot of the block with root `preferences.dependent_root` is strictly less
+        // than `compute_start_slot_at_epoch(compute_epoch_at_slot(preferences.proposal_slot) - MIN_SEED_LOOKAHEAD)`.
+        ensure!(
+            dependent_chain_link.slot() < lookahead_start_slot,
+            Error::<P>::InvalidProposerPreferencesDependentRoot { signed_preferences },
+        );
+
+        // _[IGNORE]_ `is_valid_dependent_root(store, preferences.dependent_root, epoch)` returns
+        // `True`, where `epoch` is `compute_epoch_at_slot(preferences.proposal_slot) - MIN_SEED_LOOKAHEAD`.
+        if !self.is_valid_dependent_root(dependent_chain_link, lookahead_start_slot) {
+            return Ok(ProposerPreferencesAction::Ignore(false));
         }
 
         // _[REJECT]_ `is_valid_proposal_slot(state, preferences)` returns `True`, where
@@ -2301,9 +2333,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             &self.pubkey_cache,
             self,
             dependent_root,
-            misc::compute_start_slot_at_epoch::<P>(
-                proposal_epoch.saturating_sub(P::MinSeedLookahead::U64),
-            ),
+            lookahead_start_slot,
         ) else {
             return Ok(ProposerPreferencesAction::Ignore(false));
         };
