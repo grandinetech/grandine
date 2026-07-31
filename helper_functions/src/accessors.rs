@@ -806,6 +806,7 @@ pub fn get_attestation_participation_flags<P: Preset>(
     state: &impl BeaconState<P>,
     data: AttestationData,
     inclusion_delay: u64,
+    parent_slot: Option<Slot>,
 ) -> Result<ParticipationFlags> {
     let attestation_epoch = attestation_epoch(state, data.target.epoch)?;
 
@@ -834,10 +835,13 @@ pub fn get_attestation_participation_flags<P: Preset>(
 
             true
         } else {
+            // > The availability bit of the attested block lives at the parent block's slot.
+            let parent_slot = parent_slot.ok_or(Error::ParentSlotMissing)?;
+
             let payload_status = u64::from(
                 post_gloas
                     .execution_payload_availability()
-                    .get((data.slot % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?)
+                    .get((parent_slot % SlotsPerHistoricalRoot::<P>::non_zero()).try_into()?)
                     .ok_or(Error::PayloadAvailabilityOutOfRange)?,
             );
 

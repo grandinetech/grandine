@@ -265,10 +265,18 @@ impl<P: Preset> AttestationPacker<P> {
     }
 
     fn participation_flags(&self, attestation: &PoolAttestation<P>) -> Result<ParticipationFlags> {
+        // The bid in the state is still the parent block's bid, because the block being packed has
+        // not been processed yet, so its slot is the parent block's slot.
+        let parent_slot = self
+            .state
+            .post_gloas()
+            .map(|state| state.latest_execution_payload_bid().slot);
+
         accessors::get_attestation_participation_flags(
             &self.state,
             attestation.data,
             self.state.slot().saturating_sub(attestation.data.slot),
+            parent_slot,
         )
     }
 
@@ -331,7 +339,7 @@ fn translate_participation<'attestations, P: Preset>(
 
         // > Translate attestation inclusion info to flag indices
         let participation_flags =
-            accessors::get_attestation_participation_flags(state, data, inclusion_delay)?;
+            accessors::get_attestation_participation_flags(state, data, inclusion_delay, None)?;
 
         // > Apply flags to all attesting validators
         for attesting_index in attesting_indices {

@@ -55,6 +55,8 @@ pub enum Error {
     InvalidPhase { error: AnyhowError },
     #[error("execution payload availability is out of range")]
     PayloadAvailabilityOutOfRange,
+    #[error("parent slot is missing for a post-Gloas attestation")]
+    ParentSlotMissing,
     #[error(
         "aggregation bitlist length {aggregation_bitlist_length} does not match participants count {participants_count}"
     )]
