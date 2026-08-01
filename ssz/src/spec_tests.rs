@@ -7,8 +7,8 @@ use ssz_derive::Ssz;
 use static_assertions::assert_not_impl_any;
 use test_generator::test_resources;
 use typenum::{
-    U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U15, U16, U17, U31, U32, U33, U123, U128, U256,
-    U511, U512, U513, U1024, U2048,
+    Sum, U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U15, U16, U17, U31, U32, U33, U123, U128,
+    U256, U257, U511, U512, U513, U1024, U2048,
 };
 
 use crate::{
@@ -22,9 +22,14 @@ use crate::{
     persistent_vector::PersistentVector,
     porcelain::{SszHash, SszReadDefault, SszSize, SszWrite},
     progressive_bit_list::ProgressiveBitList,
+    progressive_byte_list::ProgressiveByteList,
     progressive_list::ProgressiveList,
     uint256::Uint256,
 };
+
+// `typenum` only defines constants up to `U1024` individually.
+type U1280 = Sum<U1024, U256>;
+type U1281 = Sum<U1280, U1>;
 
 // `u128` values are stored in `value.yaml` files as [single-quoted scalars].
 // [`serde_yaml::Deserializer::deserialize_u*`] methods expect a [plain scalar].
@@ -97,6 +102,37 @@ struct BitsStruct {
     c: BitVector<U1>,
     d: BitList<U6>,
     e: BitVector<U8>,
+}
+
+// `ProgressiveList` and `ProgressiveBitList` are unbounded in the spec. The type level limits
+// below are chosen large enough to hold the biggest generated case (`max_bytes_length = 2000`,
+// `max_list_length = 1500`) and do not affect the hash tree root.
+#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[ssz(internal)]
+struct ProgressiveTestStruct {
+    a: ProgressiveByteList<U2048>,
+    b: ProgressiveList<u64>,
+    c: ProgressiveList<SmallTestStruct>,
+    d: ProgressiveList<ProgressiveList<VarTestStruct>>,
+}
+
+#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[ssz(internal)]
+struct ProgressiveBitsStruct {
+    a: BitVector<U256>,
+    b: BitList<U256>,
+    c: ProgressiveBitList<U2048>,
+    d: BitVector<U257>,
+    e: BitList<U257>,
+    f: ProgressiveBitList<U2048>,
+    g: BitVector<U1280>,
+    h: BitList<U1280>,
+    i: ProgressiveBitList<U2048>,
+    j: BitVector<U1281>,
+    k: BitList<U1281>,
+    l: ProgressiveBitList<U2048>,
 }
 
 // The following types mirror the `ProgressiveContainer` test structs defined by the
@@ -337,6 +373,8 @@ mod valid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/BitsStruct_*"]            [bits_struct]              [BitsStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/ComplexTestStruct_*"]     [complex_test_struct]      [ComplexTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/FixedTestStruct_*"]       [fixed_test_struct]        [FixedTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/ProgressiveBitsStruct_*"] [progressive_bits_struct]  [ProgressiveBitsStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/ProgressiveTestStruct_*"] [progressive_test_struct]  [ProgressiveTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/SingleFieldTestStruct_*"] [single_field_test_struct] [SingleFieldTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/SmallTestStruct_*"]       [small_test_struct]        [SmallTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/VarTestStruct_*"]         [var_test_struct]          [VarTestStruct];
@@ -533,6 +571,8 @@ mod invalid {
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/BitsStruct_*"]            [bits_struct]              [BitsStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/ComplexTestStruct_*"]     [complex_test_struct]      [ComplexTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/FixedTestStruct_*"]       [fixed_test_struct]        [FixedTestStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/ProgressiveBitsStruct_*"] [progressive_bits_struct]  [ProgressiveBitsStruct];
+        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/ProgressiveTestStruct_*"] [progressive_test_struct]  [ProgressiveTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/SingleFieldTestStruct_*"] [single_field_test_struct] [SingleFieldTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/SmallTestStruct_*"]       [small_test_struct]        [SmallTestStruct];
         ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/VarTestStruct_*"]         [var_test_struct]          [VarTestStruct];

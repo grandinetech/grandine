@@ -38,6 +38,7 @@ struct FastAggregateVerifyData {
 }
 
 #[test_resources("consensus-spec-tests/tests/general/altair/bls/eth_aggregate_pubkeys/*/*")]
+#[test_resources("cryptography-spec-tests/tests/bls/eth_aggregate_pubkeys/*")]
 fn eth_aggregate_pubkeys(case: Case) {
     let EthAggregatePubkeysData { input, output } = case.yaml("data");
 
@@ -62,6 +63,7 @@ fn eth_aggregate_pubkeys(case: Case) {
 }
 
 #[test_resources("consensus-spec-tests/tests/general/*/bls/eth_fast_aggregate_verify/*/*")]
+#[test_resources("cryptography-spec-tests/tests/bls/eth_fast_aggregate_verify/*")]
 fn eth_fast_aggregate_verify(case: Case) {
     let FastAggregateVerifyData { input, output } = case.yaml("data");
 

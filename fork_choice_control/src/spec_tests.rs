@@ -75,6 +75,7 @@ enum Step {
     },
 }
 
+#[expect(dead_code)]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Checks {
@@ -86,6 +87,8 @@ struct Checks {
     proposer_boost_root: Option<H256>,
     payload_timeliness_vote: Option<PtcVotes>,
     payload_data_availability_vote: Option<PtcVotes>,
+    // TODO: assert viable_for_head_roots_and_weights
+    viable_for_head_roots_and_weights: Option<Vec<ViableHeadRootAndWeight>>,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +104,15 @@ struct HeadCheck {
 struct PtcVotes {
     block_root: H256,
     votes: Vec<Option<bool>>,
+}
+
+#[expect(dead_code)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ViableHeadRootAndWeight {
+    root: H256,
+    payload_status: Option<PayloadStatus>,
+    weight: u64,
 }
 
 // Starting with `consensus-specs` version 1.3.0-rc.4,
@@ -194,6 +206,7 @@ struct PtcVotes {
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_block/*/*"]                       [gloas_minimal_on_block]                       [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_execution_payload_envelope/*/*"]  [gloas_minimal_on_execution_payload_envelope]  [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_minimal_on_payload_attestation_message] [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/should_apply_proposer_boost/*/*"]    [gloas_minimal_should_apply_proposer_boost]    [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/payload_data_availability/*/*"]      [gloas_minimal_payload_data_availability]      [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/payload_timeliness/*/*"]             [gloas_minimal_payload_timeliness]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/reorg/*/*"]                          [gloas_minimal_reorg]                          [Minimal] [Gloas];
@@ -410,6 +423,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     proposer_boost_root,
                     payload_timeliness_vote,
                     payload_data_availability_vote,
+                    viable_for_head_roots_and_weights: _,
                 } = *checks;
 
                 if let Some(HeadCheck {
