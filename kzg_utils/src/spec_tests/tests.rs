@@ -63,7 +63,7 @@ macro_rules! unwrap_test_input {
     };
 }
 
-#[test_resources("consensus-spec-tests/tests/general/deneb/kzg/blob_to_kzg_commitment/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/blob_to_kzg_commitment/*")]
 fn test_blob_to_kzg_commitment(case: Case) {
     let test: containers::blob_to_kzg_commitment::Test = case.yaml("data");
 
@@ -89,7 +89,7 @@ fn test_blob_to_kzg_commitment(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/deneb/kzg/compute_blob_kzg_proof/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/compute_blob_kzg_proof/*")]
 fn test_compute_blob_kzg_proof(case: Case) {
     let test: containers::compute_blob_kzg_proof::Test = case.yaml("data");
 
@@ -123,7 +123,7 @@ fn test_compute_blob_kzg_proof(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/deneb/kzg/compute_kzg_proof/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/compute_kzg_proof/*")]
 fn test_compute_kzg_proof(case: Case) {
     let test: containers::compute_kzg_proof::Test = case.yaml("data");
 
@@ -151,7 +151,7 @@ fn test_compute_kzg_proof(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/deneb/kzg/verify_blob_kzg_proof/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/verify_blob_kzg_proof/*")]
 fn test_verify_blob_kzg_proof(case: Case) {
     let test: containers::verify_blob_kzg_proof::Test = case.yaml("data");
 
@@ -188,7 +188,7 @@ fn test_verify_blob_kzg_proof(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/deneb/kzg/verify_blob_kzg_proof_batch/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/verify_blob_kzg_proof_batch/*")]
 fn test_verify_blob_kzg_proof_batch(case: Case) {
     let test: containers::verify_blob_kzg_proof_batch::Test = case.yaml("data");
 
@@ -244,7 +244,7 @@ fn test_verify_blob_kzg_proof_batch(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/deneb/kzg/verify_kzg_proof/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/verify_kzg_proof/*")]
 fn test_verify_kzg_proof(case: Case) {
     let test: containers::verify_kzg_proof::Test = case.yaml("data");
 
@@ -275,7 +275,7 @@ fn test_verify_kzg_proof(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/fulu/kzg/compute_cells/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/compute_cells/*")]
 fn test_compute_cells(case: Case) {
     let test: containers::compute_cells::Test = case.yaml("data");
 
@@ -314,7 +314,7 @@ fn test_compute_cells(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/fulu/kzg/compute_cells_and_kzg_proofs/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/compute_cells_and_kzg_proofs/*")]
 fn test_compute_cells_and_kzg_proofs(case: Case) {
     let test: containers::compute_cells_and_kzg_proofs::Test = case.yaml("data");
 
@@ -358,7 +358,7 @@ fn test_compute_cells_and_kzg_proofs(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/fulu/kzg/recover_cells_and_kzg_proofs/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/recover_cells_and_kzg_proofs/*")]
 fn test_recover_cells_and_kzg_proofs(case: Case) {
     let test: containers::recover_cells_and_kzg_proofs::Test = case.yaml("data");
     let containers::recover_cells_and_kzg_proofs::Input {
@@ -412,7 +412,7 @@ fn test_recover_cells_and_kzg_proofs(case: Case) {
     }
 }
 
-#[test_resources("consensus-spec-tests/tests/general/fulu/kzg/verify_cell_kzg_proof_batch/*/*")]
+#[test_resources("cryptography-spec-tests/tests/kzg/verify_cell_kzg_proof_batch/*")]
 fn test_verify_cell_kzg_proof_batch(case: Case) {
     let test: containers::verify_cell_kzg_proof_batch::Test = case.yaml("data");
     let containers::verify_cell_kzg_proof_batch::Input {
