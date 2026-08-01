@@ -20,6 +20,11 @@ CRYPTO_URL="https://github.com/ethereum/cryptography-specs/releases/download/${C
 # that are now part of the consensus-spec release (run by compliance_tests.rs).
 TARBALLS=("general" "minimal" "mainnet" "comptests")
 
+# "comptests" is not published in every release, so it is versioned separately.
+# v1.7.0-alpha.12 is the latest release that has it.
+COMPTESTS_VERSION="${COMPTESTS_VERSION:-v1.7.0-alpha.12}"
+COMPTESTS_URL="https://github.com/ethereum/consensus-specs/releases/download/${COMPTESTS_VERSION}/comptests.tar.gz"
+
 # Normalize paths on Windows Git Bash
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
     TESTS_DIR=$(cygpath -m "$TESTS_DIR")
@@ -40,6 +45,14 @@ fetch_url() {
         echo "Error: No download tool found. Please install curl or wget."
         exit 1
     fi
+}
+
+# Map a tarball name to the URL it is downloaded from.
+tarball_url() {
+    case "$1" in
+        comptests) echo "$COMPTESTS_URL" ;;
+        *)         echo "${BASE_URL}/$1.tar.gz" ;;
+    esac
 }
 
 # Map a tarball name to the relative directory used to verify its extraction.
@@ -69,7 +82,8 @@ verify_extraction() {
 # Function to download and extract a tarball
 download_tarball() {
     local tarball_name="$1"
-    local download_url="${BASE_URL}/${tarball_name}.tar.gz"
+    local download_url
+    download_url="$(tarball_url "$tarball_name")"
     local attempt=1
     local temp_file="${TESTS_DIR}/.${tarball_name}.tar.gz.tmp"
 
@@ -143,8 +157,8 @@ download_consensus_tests() {
 
     # Check if we can parallelize downloads
     if command -v xargs >/dev/null 2>&1; then
-        export -f download_tarball verify_extraction verify_subdir fetch_url
-        export TESTS_DIR BASE_URL MAX_RETRIES
+        export -f download_tarball verify_extraction verify_subdir tarball_url fetch_url
+        export TESTS_DIR BASE_URL COMPTESTS_URL MAX_RETRIES
 
         # Parallel downloads using xargs
         if printf "%s\n" "${TARBALLS[@]}" | xargs -P 3 -I {} bash -c 'download_tarball "$@"' _ {}; then
