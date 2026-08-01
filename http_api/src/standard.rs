@@ -3580,6 +3580,9 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
 
     let beacon_block_root = validator_block.value.hash_tree_root();
     let version = validator_block.value.phase();
+
+    // Local payload value when self-building, bid value when committing to a builder bid.
+    let mev = validator_block.mev;
     let consensus_block_value = block_rewards
         .map(|rewards| Uint256::from_u64(rewards.total).saturating_mul(WEI_IN_GWEI))
         .or_else(|| {
@@ -3624,6 +3627,7 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
     Ok(EthResponse::json_or_ssz(api_block, &headers)?
         .version(version)
         .consensus_block_value(consensus_block_value)
+        .execution_payload_value(mev.unwrap_or_default())
         .execution_payload_included(payload_included))
 }
 
