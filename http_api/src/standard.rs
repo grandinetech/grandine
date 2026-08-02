@@ -83,7 +83,7 @@ use types::{
         primitives::ColumnIndex,
     },
     gloas::{
-        containers::{ExecutionPayloadBid, SignedExecutionPayloadBid},
+        containers::{Builder, ExecutionPayloadBid, SignedExecutionPayloadBid},
         primitives::BuilderIndex,
     },
     nonstandard::{
@@ -111,6 +111,7 @@ use validator::{ApiToValidator, ValidatorConfig};
 
 use crate::{
     block_id,
+    builder_status::{BuilderId, BuilderIdsAndStatusesBody, BuilderStatus},
     error::{Error, IndexedError},
     extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
@@ -343,6 +344,14 @@ pub struct StateCommitteeResponse {
     slot: Slot,
     #[serde(with = "As::<Vec<DisplayFromStr>>")]
     validators: Vec<ValidatorIndex>,
+}
+
+#[derive(Serialize)]
+pub struct StateBuilderResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    index: BuilderIndex,
+    status: BuilderStatus,
+    builder: Builder,
 }
 
 #[derive(Default, Serialize)]
@@ -629,6 +638,22 @@ pub async fn post_state_validators<P: Preset, W: Wait>(
     EthJson(ids_and_statuses): EthJson<ValidatorIdsAndStatusesBody>,
 ) -> Result<EthResponse<Vec<StateValidatorResponse>>, Error> {
     state_validators(
+        &controller,
+        &anchor_checkpoint_provider,
+        state_id,
+        &ids_and_statuses,
+    )
+}
+
+/// `POST /eth/v1/beacon/states/{state_id}/builders`
+#[instrument(skip_all, level = "debug", name = "http_api::post_state_builders")]
+pub async fn post_state_builders<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    EthJson(ids_and_statuses): EthJson<BuilderIdsAndStatusesBody>,
+) -> Result<EthResponse<Vec<StateBuilderResponse>>, Error> {
+    state_builders(
         &controller,
         &anchor_checkpoint_provider,
         state_id,
@@ -3925,6 +3950,65 @@ fn state_validators<P: Preset, W: Wait>(
     .collect();
 
     Ok(EthResponse::json(validators)
+        .execution_optimistic(status.is_optimistic())
+        .finalized(finalized))
+}
+
+fn state_builders<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
+    state_id: StateId,
+    ids_and_statuses: &BuilderIdsAndStatusesBody,
+) -> Result<EthResponse<Vec<StateBuilderResponse>>, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, controller, anchor_checkpoint_provider)?;
+
+    let post_gloas_state = state.post_gloas().ok_or(Error::StatePreGloas)?;
+
+    let ids = ids_and_statuses
+        .ids()
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+
+    let statuses = ids_and_statuses.statuses();
+
+    let builders = izip!(0.., post_gloas_state.builders())
+        .filter(|(index, builder)| {
+            if !ids.is_empty() {
+                let builder_index = BuilderId::BuilderIndex(*index);
+                let builder_pubkey = BuilderId::PublicKey(builder.pubkey);
+
+                let allowed_by_id = ids.contains(&builder_index) || ids.contains(&builder_pubkey);
+
+                if !allowed_by_id {
+                    return false;
+                }
+            }
+
+            if !statuses.is_empty() {
+                let builder_status = BuilderStatus::new(builder, &state);
+
+                let allowed_by_status = statuses.iter().any(|status| status == &builder_status);
+
+                if !allowed_by_status {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .map(|(index, builder)| StateBuilderResponse {
+            index,
+            status: BuilderStatus::new(builder, &state),
+            builder: builder.clone(),
+        })
+        .collect();
+
+    Ok(EthResponse::json(builders)
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
 }

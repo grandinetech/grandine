@@ -37,9 +37,9 @@ use crate::{
         node_peer_count, node_peers, node_syncing_status, node_version, node_version_v2,
         pool_attestations, pool_attestations_v2, pool_attester_slashings,
         pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_proposer_slashings,
-        pool_voluntary_exits, post_log_level, post_state_validator_balances, post_state_validators,
-        post_trace_level, publish_blinded_block, publish_blinded_block_v2, publish_block,
-        publish_block_v2, publish_execution_payload_bid, state_committees,
+        pool_voluntary_exits, post_log_level, post_state_builders, post_state_validator_balances,
+        post_state_validators, post_trace_level, publish_blinded_block, publish_blinded_block_v2,
+        publish_block, publish_block_v2, publish_execution_payload_bid, state_committees,
         state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
         state_randao, state_root, state_sync_committees, state_validator,
@@ -354,6 +354,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route(
             "/eth/v1/beacon/states/{state_id}/validators",
             post(post_state_validators),
+        )
+        .route(
+            "/eth/v1/beacon/states/{state_id}/builders",
+            post(post_state_builders),
         )
         .route(
             "/eth/v1/beacon/states/{state_id}/validator_identities",
