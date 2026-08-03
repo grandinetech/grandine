@@ -464,17 +464,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .unwrap_or_default()
     }
 
-    #[must_use]
-    pub fn highest_payload_bid_at_slot(
+    pub fn selectable_payload_bids(
         &self,
         slot: Slot,
         parent_block_hash: ExecutionBlockHash,
-    ) -> Option<&SignedExecutionPayloadBid<P>> {
+        parent_block_root: H256,
+    ) -> impl Iterator<Item = &SignedExecutionPayloadBid<P>> {
         self.accepted_payload_bids
-            .get(&slot)?
-            .values()
-            .filter(|bid| bid.message.parent_block_hash == parent_block_hash)
-            .max_by_key(|bid| bid.message.value)
+            .get(&slot)
+            .into_iter()
+            .flat_map(HashMap::values)
+            .filter(move |bid| {
+                bid.message.parent_block_hash == parent_block_hash
+                    && bid.message.parent_block_root == parent_block_root
+            })
     }
 
     #[must_use]
@@ -2102,12 +2105,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             // > this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
-            if let Some(highest_bid) = payload_bids
-                .values()
-                .filter(|b| {
-                    b.message.parent_block_hash == bid.parent_block_hash
-                        && b.message.parent_block_root == bid.parent_block_root
-                })
+            if let Some(highest_bid) = self
+                .selectable_payload_bids(bid.slot, bid.parent_block_hash, bid.parent_block_root)
                 .max_by_key(|b| b.message.value)
                 && bid.value <= highest_bid.message.value
             {
