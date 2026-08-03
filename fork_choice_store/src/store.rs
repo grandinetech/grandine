@@ -16,7 +16,6 @@ use bitvec::vec::BitVec;
 
 use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::NonZeroExt as _;
-use bls::traits::SignatureBytes as _;
 use clock::{Tick, TickKind};
 use eip_7594::{verify_data_column_sidecar, verify_kzg_proofs, verify_sidecar_inclusion_proof};
 use execution_engine::ExecutionEngine;
@@ -2061,6 +2060,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let bid = &payload_bid.message;
         let builder_index = bid.builder_index;
 
+        // Deviation from the spec: a self-build bid is included in a block by the proposer that
+        // built the payload and is never broadcast, so one arriving here is unsigned, forgeable and
+        // of no use to anyone.
+        ensure!(
+            builder_index != BUILDER_INDEX_SELF_BUILD,
+            Error::<P>::ExecutionPayloadBidSelfBuild { payload_bid }
+        );
+
         // > off-protocol payment is disallowed to gossip via p2p and API, the `bid.execution_payment` MUST be zero
         ensure!(
             bid.execution_payment == 0,
@@ -2202,59 +2209,45 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         );
 
-        if builder_index == BUILDER_INDEX_SELF_BUILD {
-            ensure!(
-                payload_bid.signature.is_empty(),
-                Error::<P>::ExecutionPayloadBidSignatureNotEmpty
-            );
+        let builder = post_gloas_state.builders().get(builder_index)?;
 
-            ensure!(
-                bid.value == 0,
-                Error::<P>::ExecutionPayloadBidValueNonZero { value: bid.value }
-            );
-        } else {
-            let builder = post_gloas_state.builders().get(builder_index)?;
-
-            // > the `bid.builder_index` is a valid/active builder index
-            let current_epoch = accessors::get_current_epoch(&state);
-            ensure!(
-                predicates::is_active_builder(builder, state.finalized_checkpoint().epoch),
-                Error::ExecutionPayloadBidBuilderInactive {
-                    payload_bid,
-                    epoch: current_epoch
-                }
-            );
-
-            // > The builder version is `PAYLOAD_BUILDER_VERSION`
-            ensure!(
-                builder.version == PAYLOAD_BUILDER_VERSION,
-                Error::ExecutionPayloadBidBuilderVersionMismatch {
-                    payload_bid,
-                    builder_version: builder.version,
-                    expected: PAYLOAD_BUILDER_VERSION,
-                }
-            );
-
-            // > the `bid.value` is less or equal than the builder's excess balance
-            if !predicates::can_builder_cover_bid(post_gloas_state, builder_index, bid.value)? {
-                return Ok(ExecutionPayloadBidAction::Ignore(
-                    "the `bid.value` is less or equal than the builder's excess balance",
-                ));
+        // > the `bid.builder_index` is a valid/active builder index
+        let current_epoch = accessors::get_current_epoch(&state);
+        ensure!(
+            predicates::is_active_builder(builder, state.finalized_checkpoint().epoch),
+            Error::ExecutionPayloadBidBuilderInactive {
+                payload_bid,
+                epoch: current_epoch
             }
+        );
 
-            if origin.verify_signatures() {
-                let pubkey = self.pubkey_cache.get_or_insert(builder.pubkey)?;
+        // > The builder version is `PAYLOAD_BUILDER_VERSION`
+        ensure!(
+            builder.version == PAYLOAD_BUILDER_VERSION,
+            Error::ExecutionPayloadBidBuilderVersionMismatch {
+                payload_bid,
+                builder_version: builder.version,
+                expected: PAYLOAD_BUILDER_VERSION,
+            }
+        );
 
-                // > `signed_execution_payload_bid.signature` is valid builder's signature
-                if let Err(error) =
-                    bid.verify(&self.chain_config, &state, payload_bid.signature, pubkey)
-                {
-                    bail!(
-                        error.context(Error::<P>::InvalidExecutionPayloadBidSignature {
-                            payload_bid
-                        })
-                    );
-                }
+        // > the `bid.value` is less or equal than the builder's excess balance
+        if !predicates::can_builder_cover_bid(post_gloas_state, builder_index, bid.value)? {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.value` is less or equal than the builder's excess balance",
+            ));
+        }
+
+        if origin.verify_signatures() {
+            let pubkey = self.pubkey_cache.get_or_insert(builder.pubkey)?;
+
+            // > `signed_execution_payload_bid.signature` is valid builder's signature
+            if let Err(error) =
+                bid.verify(&self.chain_config, &state, payload_bid.signature, pubkey)
+            {
+                bail!(
+                    error.context(Error::<P>::InvalidExecutionPayloadBidSignature { payload_bid })
+                );
             }
         }
 
