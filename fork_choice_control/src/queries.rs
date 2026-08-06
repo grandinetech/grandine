@@ -1463,7 +1463,6 @@ impl<P: Preset> Snapshot<'_, P> {
         self.store_snapshot.accepted_payload_bids_at_slot(slot)
     }
 
-    #[must_use]
     pub fn selectable_payload_bids(
         &self,
         slot: Slot,

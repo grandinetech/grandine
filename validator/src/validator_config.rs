@@ -8,7 +8,6 @@ use types::{
     phase0::primitives::{ExecutionAddress, H256},
 };
 
-#[expect(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Derivative)]
 #[derivative(Default)]
 pub struct ValidatorConfig {
