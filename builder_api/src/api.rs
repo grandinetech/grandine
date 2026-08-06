@@ -44,11 +44,16 @@ use crate::{
 };
 
 const DATE_MS_HEADER: &str = "Date-Milliseconds";
+const X_TIMEOUT_MS_HEADER: &str = "X-Timeout-Ms";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum BuilderApiError {
+    #[error(
+        "request auth slot ({auth_slot}) does not match execution payload bid path slot ({path_slot})"
+    )]
+    AuthSlotMismatch { auth_slot: Slot, path_slot: Slot },
     #[error("bad request to Builder API (builder node response: {message})")]
     BadRequest { message: String },
     #[error("builder node internal error (builder node response: {message})")]
@@ -476,7 +481,7 @@ impl Api {
         parent_hash: ExecutionBlockHash,
         parent_root: H256,
         pubkey: PublicKeyBytes,
-        signed_request_auth: Option<&SignedRequestAuthV1>,
+        signed_request_auth: &SignedRequestAuthV1,
     ) -> Result<Option<SignedExecutionPayloadBid<P>>> {
         let _timer = self.metrics.as_ref().map(|metrics| {
             metrics
@@ -495,44 +500,50 @@ impl Api {
             },
         );
 
+        ensure!(
+            signed_request_auth.message.slot == slot,
+            BuilderApiError::AuthSlotMismatch {
+                auth_slot: signed_request_auth.message.slot,
+                path_slot: slot,
+            },
+        );
+
         let url = self.url(&format!(
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         ))?;
 
         let use_json = self.config.builder_api_format == BuilderApiFormat::Json;
 
-        debug_with_peers!(
-            "getting execution payload bid from {url}, use_json: {use_json}, \
-             has_auth: {}",
-            signed_request_auth.is_some()
-        );
+        debug_with_peers!("getting execution payload bid from {url}, use_json: {use_json}");
 
-        let request = self.client.post(url.into_url()).timeout(REQUEST_TIMEOUT);
+        let date_ms = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|timestamp| timestamp.as_millis())
+            .map_err(|error| anyhow::anyhow!("unable to calculate Date-Milliseconds: {error:?}"))?;
+
+        let request = self
+            .client
+            .post(url.into_url())
+            .timeout(REQUEST_TIMEOUT)
+            .header(DATE_MS_HEADER, format!("{date_ms}"))
+            .header(
+                X_TIMEOUT_MS_HEADER,
+                format!("{}", REQUEST_TIMEOUT.as_millis()),
+            )
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
 
         let request = if use_json {
-            request.header(ACCEPT, APPLICATION_JSON.as_ref())
+            request
+                .header(ACCEPT, APPLICATION_JSON.as_ref())
+                .json(signed_request_auth)
         } else {
-            request.header(
-                ACCEPT,
-                format!("{APPLICATION_OCTET_STREAM};q=1,{APPLICATION_JSON};q=0.9"),
-            )
-        };
-
-        let request = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(timestamp) => request.header(DATE_MS_HEADER, format!("{}", timestamp.as_millis())),
-            Err(error) => {
-                debug_with_peers!("unable to calculate timestamp: {error:?}");
-                request
-            }
-        };
-
-        let request = match signed_request_auth {
-            Some(auth) if use_json => request.json(auth),
-            Some(auth) => request
+            request
+                .header(
+                    ACCEPT,
+                    format!("{APPLICATION_OCTET_STREAM};q=1,{APPLICATION_JSON};q=0.9"),
+                )
                 .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
-                .header(ETH_CONSENSUS_VERSION, Phase::Gloas.as_ref())
-                .body(auth.to_ssz()?),
-            None => request,
+                .body(signed_request_auth.to_ssz()?)
         };
 
         let response = request.send().await?;
@@ -910,6 +921,7 @@ mod tests {
         let parent_hash = ExecutionBlockHash::zero();
         let parent_root = H256::zero();
         let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
 
         let path = format!(
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
@@ -917,7 +929,11 @@ mod tests {
 
         let bid = SignedExecutionPayloadBid::<Mainnet>::default();
         let mock = server.mock(|when, then| {
-            when.method(Method::POST).path(&path);
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas")
+                .header("X-Timeout-Ms", "1000")
+                .header_exists("Date-Milliseconds");
             then.status(200).json_body(json!({
                 "version": "gloas",
                 "data": bid,
@@ -932,7 +948,7 @@ mod tests {
                 parent_hash,
                 parent_root,
                 pubkey,
-                None,
+                &auth,
             )
             .await?;
 
@@ -948,13 +964,18 @@ mod tests {
         let parent_hash = ExecutionBlockHash::zero();
         let parent_root = H256::zero();
         let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
 
         let path = format!(
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
 
         let mock = server.mock(|when, then| {
-            when.method(Method::POST).path(&path);
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas")
+                .header("X-Timeout-Ms", "1000")
+                .header_exists("Date-Milliseconds");
             then.status(204);
         });
 
@@ -966,7 +987,7 @@ mod tests {
                 parent_hash,
                 parent_root,
                 pubkey,
-                None,
+                &auth,
             )
             .await?;
 
@@ -982,6 +1003,7 @@ mod tests {
         let parent_hash = ExecutionBlockHash::zero();
         let parent_root = H256::zero();
         let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
         let path = format!(
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
@@ -999,7 +1021,7 @@ mod tests {
                 parent_hash,
                 parent_root,
                 pubkey,
-                None,
+                &auth,
             )
             .await
             .expect_err("202 should not be accepted as a bid");
@@ -1021,6 +1043,7 @@ mod tests {
         let server = MockServer::start();
         let chain_config = Config::mainnet();
         let api = test_api(&server.url("/"));
+        let auth = sample_auth();
 
         let err = api
             .get_execution_payload_bid::<Mainnet>(
@@ -1029,7 +1052,7 @@ mod tests {
                 ExecutionBlockHash::zero(),
                 H256::zero(),
                 PublicKeyBytes::default(),
-                None,
+                &auth,
             )
             .await
             .expect_err("pre-Gloas slot should fail before HTTP");
@@ -1047,12 +1070,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_execution_payload_bid_rejects_auth_slot_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let api = test_api(&server.url("/"));
+        let auth = sample_auth();
+
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                2,
+                ExecutionBlockHash::zero(),
+                H256::zero(),
+                PublicKeyBytes::default(),
+                &auth,
+            )
+            .await
+            .expect_err("auth.slot != path slot should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::AuthSlotMismatch {
+                    auth_slot: 1,
+                    path_slot: 2,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn get_execution_payload_bid_maps_400() -> Result<()> {
         let server = MockServer::start();
         let slot = 1_u64;
         let parent_hash = ExecutionBlockHash::zero();
         let parent_root = H256::zero();
         let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
         let path = format!(
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
@@ -1070,7 +1124,7 @@ mod tests {
                 parent_hash,
                 parent_root,
                 pubkey,
-                None,
+                &auth,
             )
             .await
             .expect_err("400 should fail");
@@ -1089,6 +1143,7 @@ mod tests {
         let parent_hash = ExecutionBlockHash::zero();
         let parent_root = H256::zero();
         let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
         let path = format!(
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
@@ -1106,7 +1161,7 @@ mod tests {
                 parent_hash,
                 parent_root,
                 pubkey,
-                None,
+                &auth,
             )
             .await
             .expect_err("500 should fail");
@@ -1133,7 +1188,12 @@ mod tests {
 
         let bid = SignedExecutionPayloadBid::<Mainnet>::default();
         let mock = server.mock(|when, then| {
-            when.method(Method::POST).path(&path).json_body_obj(&auth);
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas")
+                .header("X-Timeout-Ms", "1000")
+                .header_exists("Date-Milliseconds")
+                .json_body_obj(&auth);
             then.status(200).json_body(json!({
                 "version": "gloas",
                 "data": bid,
@@ -1148,7 +1208,7 @@ mod tests {
                 parent_hash,
                 parent_root,
                 pubkey,
-                Some(&auth),
+                &auth,
             )
             .await?;
 
@@ -1163,10 +1223,10 @@ mod tests {
         let pubkey = PublicKeyBytes::default();
         let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
         let request_body = BuilderPreferencesRequestV1 {
+            auth: sample_auth(),
             preferences: BuilderPreferencesV1 {
                 max_execution_payment: 0,
             },
-            auth: sample_auth(),
         };
 
         let mock = server.mock(|when, then| {
@@ -1189,10 +1249,10 @@ mod tests {
         let pubkey = PublicKeyBytes::default();
         let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
         let request_body = BuilderPreferencesRequestV1 {
+            auth: sample_auth(),
             preferences: BuilderPreferencesV1 {
                 max_execution_payment: 0,
             },
-            auth: sample_auth(),
         };
 
         let mock = server.mock(|when, then| {
