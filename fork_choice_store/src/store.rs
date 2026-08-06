@@ -464,6 +464,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .unwrap_or_default()
     }
 
+    #[must_use]
     pub fn selectable_payload_bids(
         &self,
         slot: Slot,
