@@ -1364,33 +1364,36 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }
         };
 
-        let mut without_state_root_with_payload =
-            if let Some(state) = self.beacon_state.post_gloas() {
-                let signed_payload_bid =
-                    if let Some(bid) = self.select_best_builder_bid(state, block_mev) {
-                        // Set block_mev value to the in-protocol builder bid value
-                        block_mev =
-                            Some(Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI));
+        let has_local_payload = execution_payload.is_some();
 
-                        Some(bid)
-                    } else {
-                        // No builder bid selected — self-build using the local payload that was
-                        // already prepared via engine_forkchoiceUpdated
-                        self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
-                            .await?
-                    };
+        let mut without_state_root_with_payload = if let Some(state) =
+            self.beacon_state.post_gloas()
+        {
+            let builder_bid = self.select_best_builder_bid(state, block_mev, has_local_payload);
 
-                let Some(signed_payload_bid) = signed_payload_bid else {
-                    return Ok(None);
-                };
+            let signed_payload_bid = if let Some(bid) = builder_bid {
+                // Set block_mev value to the in-protocol builder bid value
+                block_mev = Some(Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI));
 
-                block_without_state_root.with_signed_execution_payload_bid(Some(signed_payload_bid))
+                Some(bid)
             } else {
-                block_without_state_root
-                    .with_execution_payload(execution_payload)?
-                    .with_blob_kzg_commitments(commitments)
-                    .with_execution_requests(execution_requests)
+                // No builder bid selected — self-build using the local payload that was
+                // already prepared via engine_forkchoiceUpdated
+                self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
+                    .await?
             };
+
+            let Some(signed_payload_bid) = signed_payload_bid else {
+                return Ok(None);
+            };
+
+            block_without_state_root.with_signed_execution_payload_bid(Some(signed_payload_bid))
+        } else {
+            block_without_state_root
+                .with_execution_payload(execution_payload)?
+                .with_blob_kzg_commitments(commitments)
+                .with_execution_requests(execution_requests)
+        };
 
         if !self.options.disable_blockprint_graffiti {
             let graffiti = build_graffiti(self.options.graffiti, client_versions);
@@ -2232,14 +2235,21 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     /// Returns the most valuable bid that the node is willing to propose on top of the head block.
     ///
     /// [`None`] means the node should build the payload itself, either because there is no bid
-    /// worth taking or because the local payload is worth more.
+    /// worth taking, the local payload is worth more, or the circuit breaker tripped.
     // TODO: allow to configure bid selection, e.g. builders preference over highest bid
     fn select_best_builder_bid(
         &self,
         state: &(impl PostGloasBeaconState<P> + ?Sized),
         local_mev: Option<Uint256>,
+        local_payload_available: bool,
     ) -> Option<SignedExecutionPayloadBid<P>> {
         let snapshot = self.producer_context.controller.snapshot();
+
+        if local_payload_available && snapshot.builder_circuit_breaker_tripped() {
+            warn_with_peers!("builders are withholding payloads, building the payload locally");
+
+            return None;
+        }
 
         let parent_block_hash = if snapshot.should_build_on_full(state.slot()) {
             state.latest_execution_payload_bid().block_hash

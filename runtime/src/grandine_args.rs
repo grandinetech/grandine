@@ -15,10 +15,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use anyhow::{Result, anyhow, bail, ensure};
 use binary_utils::TelemetryConfig;
 use bls::PublicKeyBytes;
-use builder_api::{
-    BuilderApiFormat, BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
-    DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, PREFERRED_EXECUTION_GAS_LIMIT,
-};
+use builder_api::{BuilderApiFormat, BuilderConfig, PREFERRED_EXECUTION_GAS_LIMIT};
 use bytesize::ByteSize;
 use clap::{
     Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind,
@@ -35,7 +32,9 @@ use eth2_libp2p::{
 };
 use features::Feature;
 use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS};
-use fork_choice_store::{DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig};
+use fork_choice_store::{
+    BuilderCircuitBreakerConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig,
+};
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
 use http_api::HttpApiConfig;
@@ -59,7 +58,10 @@ use tracing::Level;
 use types::{
     bellatrix::primitives::{Difficulty, Gas},
     config::Config as ChainConfig,
-    nonstandard::{CustodyMode, Phase, StorageMode},
+    nonstandard::{
+        CustodyMode, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
+        DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, Phase, StorageMode,
+    },
     phase0::primitives::{
         Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot,
     },
@@ -892,11 +894,11 @@ struct ValidatorOptions {
     #[clap(long)]
     builder_disable_checks: bool,
 
-    /// Max allowed consecutive missing blocks to trigger circuit breaker condition and switch to local execution engine for payload construction
+    /// Max allowed consecutive missing blocks (missing payloads post-Gloas) to trigger circuit breaker condition and switch to local execution engine for payload construction
     #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS)]
     builder_max_skipped_slots: u64,
 
-    /// Max allowed missing blocks in the last rolling epoch to trigger circuit breaker condition and switch to local execution engine for payload construction
+    /// Max allowed missing blocks (missing payloads post-Gloas) in the last rolling epoch to trigger circuit breaker condition and switch to local execution engine for payload construction
     #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
     builder_max_skipped_slots_per_epoch: u64,
 
@@ -1446,6 +1448,12 @@ impl GrandineArgs {
             builder_max_skipped_slots_per_epoch,
         });
 
+        let builder_circuit_breaker = BuilderCircuitBreakerConfig {
+            disabled: builder_disable_checks,
+            max_skipped_slots: builder_max_skipped_slots,
+            max_skipped_slots_per_epoch: builder_max_skipped_slots_per_epoch,
+        };
+
         let web3signer_urls = if web3signer_urls.is_empty() && !web3signer_api_urls.is_empty() {
             warn_with_peers!(
                 "--web3signer-api-urls option is deprecated. Use --web3signer-urls instead."
@@ -1542,6 +1550,7 @@ impl GrandineArgs {
             state_slot,
             auth_options,
             builder_config,
+            builder_circuit_breaker,
             web3signer_config,
             http_api_config,
             max_events,
@@ -2027,6 +2036,39 @@ mod tests {
     fn back_sync_disabled_by_default() {
         let config = config_from_args([]);
         assert!(!config.back_sync_enabled);
+    }
+
+    #[test]
+    fn default_builder_circuit_breaker_settings() {
+        let config = config_from_args([]);
+
+        assert_eq!(
+            config.builder_circuit_breaker,
+            BuilderCircuitBreakerConfig::default(),
+        );
+    }
+
+    #[test]
+    fn builder_disable_checks_disables_the_gloas_circuit_breaker() {
+        let config = config_from_args(["--builder-disable-checks"]);
+
+        assert!(config.builder_circuit_breaker.disabled);
+    }
+
+    #[test]
+    fn skipped_slot_thresholds_are_shared_with_the_gloas_circuit_breaker() {
+        let config = config_from_args([
+            "--builder-max-skipped-slots",
+            "5",
+            "--builder-max-skipped-slots-per-epoch",
+            "9",
+        ]);
+
+        assert_eq!(config.builder_circuit_breaker.max_skipped_slots, 5);
+        assert_eq!(
+            config.builder_circuit_breaker.max_skipped_slots_per_epoch,
+            9,
+        );
     }
 
     #[test]

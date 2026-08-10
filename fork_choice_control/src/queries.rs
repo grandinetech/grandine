@@ -1472,6 +1472,11 @@ impl<P: Preset> Snapshot<'_, P> {
         self.store_snapshot
             .selectable_payload_bids(slot, parent_block_hash, parent_block_root)
     }
+
+    #[must_use]
+    pub fn builder_circuit_breaker_tripped(&self) -> bool {
+        self.store_snapshot.builder_circuit_breaker_tripped()
+    }
 }
 
 #[derive(Debug, Error)]

@@ -1301,6 +1301,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         state_slot,
         auth_options,
         builder_config,
+        builder_circuit_breaker,
         mut web3signer_config,
         http_api_config,
         max_events,
@@ -1457,6 +1458,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         unfinalized_states_in_memory,
         kzg_backend,
         sync_without_reconstruction,
+        builder_circuit_breaker,
     };
 
     let eth1_auth = Arc::new(Auth::new(auth_options)?);
