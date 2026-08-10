@@ -4,6 +4,7 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 use binary_utils::TelemetryConfig;
 use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
+use fork_choice_store::BuilderCircuitBreakerConfig;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
@@ -62,6 +63,7 @@ pub struct GrandineConfig {
     pub state_slot: Option<Slot>,
     pub auth_options: AuthOptions,
     pub builder_config: Option<BuilderConfig>,
+    pub builder_circuit_breaker: BuilderCircuitBreakerConfig,
     pub web3signer_config: Web3SignerConfig,
     pub http_api_config: Option<HttpApiConfig>,
     pub max_events: usize,

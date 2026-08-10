@@ -1,9 +1,6 @@
 use derive_more::{Debug, Display, FromStr};
 use types::redacting_url::RedactingUrl;
 
-pub const DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH: u64 = 8;
-pub const DEFAULT_BUILDER_MAX_SKIPPED_SLOTS: u64 = 3;
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Display, FromStr)]
 pub enum BuilderApiFormat {
     Json,
