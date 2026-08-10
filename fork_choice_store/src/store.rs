@@ -5722,7 +5722,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     fn justified_active_balance(&self, index: usize) -> Difference {
-        self.justified_active_balances[index]
+        self.justified_active_balances
+            .get(index)
+            .copied()
+            .unwrap_or_default()
             .try_into()
             .expect("the effective balance of a single validator should fit in i64")
     }
