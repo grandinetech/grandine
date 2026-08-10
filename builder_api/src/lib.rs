@@ -1,9 +1,6 @@
 pub use crate::{
     api::Api as BuilderApi,
-    config::{
-        BuilderApiFormat, Config as BuilderConfig, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
-        DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
-    },
+    config::{BuilderApiFormat, Config as BuilderConfig},
     consts::PREFERRED_EXECUTION_GAS_LIMIT,
 };
 

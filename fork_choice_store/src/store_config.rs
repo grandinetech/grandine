@@ -4,6 +4,8 @@ use derivative::Derivative;
 use kzg_utils::{DEFAULT_KZG_BACKEND, KzgBackend};
 use types::config::Config as ChainConfig;
 
+use crate::builder_circuit_breaker::BuilderCircuitBreakerConfig;
+
 pub const DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS: u64 = 1500;
 
 #[derive(Clone, Copy, Derivative)]
@@ -21,6 +23,8 @@ pub struct StoreConfig {
     pub kzg_backend: KzgBackend,
     #[derivative(Default(value = "false"))]
     pub sync_without_reconstruction: bool,
+    // No `derivative` attribute: `BuilderCircuitBreakerConfig` supplies its own defaults.
+    pub builder_circuit_breaker: BuilderCircuitBreakerConfig,
 }
 
 impl StoreConfig {
