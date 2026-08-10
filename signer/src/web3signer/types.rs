@@ -39,6 +39,8 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             SigningMessage::ContributionAndProof(_) => {
                 MessageType::SyncCommitteeContributionAndProof
             }
+            // RequestAuth is signed locally only; see `Signer::sign_without_slashing_protection`.
+            SigningMessage::RequestAuth(_) => MessageType::ValidatorRegistration,
             SigningMessage::ValidatorRegistration(_) => MessageType::ValidatorRegistration,
             SigningMessage::VoluntaryExit(_) => MessageType::VoluntaryExit,
             SigningMessage::ProposerPreferences(_) => MessageType::ProposerPreferences,

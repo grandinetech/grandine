@@ -304,6 +304,7 @@ impl<P: Preset> Context<P> {
             sync_committee_agg_pool.clone_arc(),
             payload_attestation_agg_pool.clone_arc(),
             None,
+            Some(api_to_p2p_tx.clone()),
             Some(BlockProducerOptions {
                 fake_execution_payloads: true,
             }),

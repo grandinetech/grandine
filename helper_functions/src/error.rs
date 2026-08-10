@@ -113,6 +113,8 @@ pub enum SignatureKind {
     ProposerPreferences,
     #[display("RANDAO reveal")]
     Randao,
+    #[display("request auth signature")]
+    RequestAuth,
     #[display("selection proof")]
     SelectionProof,
     #[display("sync aggregate signature")]

@@ -14,6 +14,7 @@ use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     BuilderApi,
     consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
+    gloas::containers::SignedRequestAuthV1,
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},
 };
 use clock::{Tick, TickKind};
@@ -55,7 +56,7 @@ use operation_pools::{
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
-use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
+use signer::{KeyOrigin, Signer, SigningMessage, SigningTriple, Snapshot};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
 use ssz::{BitList, ContiguousList, ReadError};
@@ -1001,6 +1002,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let execution_payload_header_handle =
             block_build_context.get_execution_payload_header(*public_key);
 
+        let signed_request_auth = if slot_head.phase() >= Phase::Gloas
+            && block_build_context.would_fetch_execution_payload_bid(*public_key)
+        {
+            self.sign_request_auth(slot_head.slot(), *public_key).await
+        } else {
+            None
+        };
+
+        let execution_payload_bid_handle = block_build_context
+            .get_execution_payload_bid(*public_key, signed_request_auth);
+
         let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
         let epoch = slot_head.current_epoch();
@@ -1031,6 +1043,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 randao_reveal,
                 execution_payload_header_handle,
                 local_execution_payload_handle,
+                execution_payload_bid_handle,
             )
             .await
         {
@@ -1157,7 +1170,29 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.controller
                     .on_own_block(wait_group.clone(), block.clone_arc());
 
-                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
+                ValidatorToP2p::PublishBeaconBlock(block.clone()).send(&self.p2p_tx);
+
+                if slot_head.phase() >= Phase::Gloas
+                    && block
+                        .payload_bid()
+                        .is_some_and(|bid| bid.builder_index != BUILDER_INDEX_SELF_BUILD)
+                    && let Some(builder_api) = self.builder_api.clone()
+                {
+                    let chain_config = self.chain_config.clone_arc();
+                    let genesis_time = self.controller.genesis_time();
+                    let block = block.clone_arc();
+
+                    tokio::spawn(async move {
+                        if let Err(error) = builder_api
+                            .submit_signed_beacon_block::<P>(&chain_config, genesis_time, &block)
+                            .await
+                        {
+                            warn_with_peers!(
+                                "failed to notify builder of signed beacon block: {error:?}"
+                            );
+                        }
+                    });
+                }
 
                 // If self-building:
                 // Publish the execution payload envelope after the beacon block so PTC members
@@ -2649,6 +2684,57 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             signer.load_keys_from_web3signer().await;
             signer.update_doppelganger_protection_pubkeys(&head_state, current_slot);
         });
+    }
+
+    async fn sign_request_auth(
+        &self,
+        slot: Slot,
+        public_key: PublicKeyBytes,
+    ) -> Option<SignedRequestAuthV1> {
+        let builder_api = self.builder_api.as_ref()?;
+
+        if self.signer.load().keys_with_origin().any(|(pk, origin)| {
+            pk == public_key && matches!(origin, KeyOrigin::Web3Signer)
+        }) {
+            info_with_peers!(
+                "skipping RequestAuth signing for {public_key:?}: \
+                 Web3Signer does not support RequestAuth yet",
+            );
+            return None;
+        }
+
+        let message = match builder_api.request_auth_message(slot) {
+            Ok(message) => message,
+            Err(error) => {
+                debug_with_peers!("skipping RequestAuth signing: {error:?}");
+                return None;
+            }
+        };
+
+        let signing_root = message.signing_root(&self.chain_config);
+
+        let signature = match self
+            .signer
+            .load()
+            .sign_without_slashing_protection(
+                SigningMessage::<P>::RequestAuth(message.clone()),
+                signing_root,
+                None,
+                public_key,
+            )
+            .await
+        {
+            Ok(signature) => signature.into(),
+            Err(error) => {
+                debug_with_peers!(
+                    "skipping RequestAuth signing (public_key: {public_key}, slot: {slot}): \
+                     {error:?}",
+                );
+                return None;
+            }
+        };
+
+        Some(SignedRequestAuthV1 { message, signature })
     }
 
     #[instrument(level = "debug", skip_all)]

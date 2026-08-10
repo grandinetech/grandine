@@ -3334,6 +3334,7 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
             randao_reveal,
             execution_payload_header_handle,
             local_execution_payload_handle,
+            None,
         )
         .await?
         .ok_or(Error::UnableToProduceBlindedBlock)?
@@ -3468,6 +3469,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             randao_reveal,
             execution_payload_header_handle,
             local_execution_payload_handle,
+            None,
         )
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;

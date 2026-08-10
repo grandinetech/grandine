@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, bail};
 use arc_swap::{ArcSwap, Guard};
 use bls::{PublicKeyBytes, SecretKey, Signature, traits::SecretKey as _};
 use doppelganger_protection::DoppelgangerProtection;
@@ -261,11 +261,16 @@ impl Snapshot {
     ) -> Result<Signature> {
         let signature = match self.sign_method(public_key)? {
             SignMethod::SecretKey(secret_key, _) => secret_key.sign(signing_root),
-            SignMethod::Web3Signer(url) => self
-                .web3signer
-                .sign(url, message, signing_root, fork_info, public_key)
-                .await?
-                .try_into()?,
+            SignMethod::Web3Signer(url) => {
+                if matches!(message, SigningMessage::RequestAuth(_)) {
+                    bail!("Web3Signer does not support RequestAuth signing yet");
+                }
+
+                self.web3signer
+                    .sign(url, message, signing_root, fork_info, public_key)
+                    .await?
+                    .try_into()?
+            }
         };
 
         Ok(signature)
@@ -349,6 +354,7 @@ impl Snapshot {
                 | SigningMessage::SyncCommitteeMessage { .. }
                 | SigningMessage::SyncAggregatorSelectionData(_)
                 | SigningMessage::ContributionAndProof(_)
+                | SigningMessage::RequestAuth(_)
                 | SigningMessage::ValidatorRegistration(_)
                 | SigningMessage::VoluntaryExit(_)
                 | SigningMessage::ProposerPreferences(_)

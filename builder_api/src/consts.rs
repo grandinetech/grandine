@@ -14,6 +14,11 @@ pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
 /// [`DOMAIN_APPLICATION_MASK`]:    https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/phase0/beacon-chain.md#domain-types
 pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
 
+/// [`DOMAIN_REQUEST_AUTH`] from `builder-specs` (Gloas Staked Builder API).
+///
+/// [`DOMAIN_REQUEST_AUTH`]: https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants
+pub const DOMAIN_REQUEST_AUTH: DomainType = H32(hex!("0b000001"));
+
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
 
 pub const PREFERRED_EXECUTION_GAS_LIMIT: Gas = 60_000_000;

@@ -6,6 +6,11 @@ authors = ["Grandine <info@grandine.io>"]
 [lints]
 workspace = true
 
+[features]
+# Enable when testing this crate in isolation (`cargo test -p builder_api --features blst`).
+# Workspace CI enables `bls/blst` via the `grandine` package feature unification.
+blst = ["bls/blst"]
+
 [dependencies]
 arc-swap = { workspace = true }
 anyhow = { workspace = true }
@@ -31,5 +36,8 @@ typenum = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
+hex-literal = { workspace = true }
+httpmock = { workspace = true }
 serde_json = { workspace = true }
 test-case = { workspace = true }
+tokio = { workspace = true }
