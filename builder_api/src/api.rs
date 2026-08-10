@@ -529,12 +529,14 @@ fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
 mod tests {
     use reqwest::Client;
     use test_case::test_case;
-    use types::preset::Mainnet;
-
-    use crate::{
-        BuilderApi, BuilderConfig,
-        config::{DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH},
+    use types::{
+        nonstandard::{
+            DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
+        },
+        preset::Mainnet,
     };
+
+    use crate::{BuilderApi, BuilderConfig};
 
     use super::*;
 

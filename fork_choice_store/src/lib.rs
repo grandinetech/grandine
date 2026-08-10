@@ -76,6 +76,7 @@
 //! [`proto_array`]:            https://github.com/protolambda/lmd-ghost/tree/242f0dced3b34feed0d4e9d2fd0e5e66e448c359#array-based-stateful-dag-proto_array
 
 pub use crate::{
+    builder_circuit_breaker::{BuilderCircuitBreaker, BuilderCircuitBreakerConfig},
     error::Error,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
@@ -96,6 +97,7 @@ pub use crate::{
 };
 
 mod blob_cache;
+mod builder_circuit_breaker;
 mod data_column_cache;
 mod error;
 mod execution_payload_envelope_cache;

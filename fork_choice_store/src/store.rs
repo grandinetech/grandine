@@ -1,6 +1,6 @@
 use core::{
     cell::OnceCell,
-    ops::Bound,
+    ops::{Bound, RangeInclusive},
     sync::atomic::{AtomicUsize, Ordering},
 };
 use std::{
@@ -86,6 +86,7 @@ use unwrap_none::UnwrapNone as _;
 use crate::{
     BlockItem, PayloadAttestationOrigin,
     blob_cache::BlobCache,
+    builder_circuit_breaker::{ATTESTED_PERCENT, BuilderCircuitBreaker, PayloadOutcome, Trip},
     data_column_cache::DataColumnCache,
     error::Error,
     execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
@@ -273,6 +274,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     accepted_execution_payload_envelopes: HashSet<(Slot, H256, BuilderIndex)>,
     accepted_proposer_preferences:
         HashMap<(H256, Slot, ValidatorIndex), Arc<SignedProposerPreferences>>,
+    builder_circuit_breaker: BuilderCircuitBreaker,
     blob_cache: BlobCache<P>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<S>,
@@ -334,6 +336,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             parent_payload_presence: PayloadPresence::default(),
         };
 
+        let anchor_slot = anchor_state.slot();
         let validator_count = anchor_state.validators().len_usize();
         let latest_messages = core::iter::repeat_n(None, validator_count).collect();
 
@@ -380,6 +383,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             accepted_payload_bids: HashMap::default(),
             accepted_execution_payload_envelopes: HashSet::default(),
             accepted_proposer_preferences: HashMap::default(),
+            builder_circuit_breaker: BuilderCircuitBreaker::new(
+                store_config.builder_circuit_breaker,
+                anchor_slot,
+            ),
             blob_cache: BlobCache::default(),
             state_cache: Arc::new(StateCacheProcessor::new(
                 store_config.state_cache_lock_timeout,
@@ -478,6 +485,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 bid.message.parent_block_hash == parent_block_hash
                     && bid.message.parent_block_root == parent_block_root
             })
+    }
+
+    #[must_use]
+    pub const fn builder_circuit_breaker_tripped(&self) -> bool {
+        self.builder_circuit_breaker.is_tripped(self.slot())
     }
 
     #[must_use]
@@ -742,13 +754,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     fn unfinalized_before_or_at(&self, slot: Slot) -> Option<&ChainLink<P>> {
+        self.unfinalized_block_before_or_at(slot)
+            .map(|unfinalized_block| &unfinalized_block.chain_link)
+    }
+
+    fn unfinalized_block_before_or_at(&self, slot: Slot) -> Option<&UnfinalizedBlock<P>> {
         self.canonical_chain_segments()
             .find_map(|(segment, position)| {
                 segment
                     .block_before_or_at(slot, position)
                     .filter(|block| block.non_invalid())
             })
-            .map(|unfinalized_block| &unfinalized_block.chain_link)
     }
 
     #[must_use]
@@ -1348,6 +1364,107 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         Ok(head_weight < reorg_threshold)
+    }
+
+    fn update_builder_circuit_breaker(&mut self) {
+        let current_slot = self.slot();
+
+        let config = self.builder_circuit_breaker.config();
+
+        if config.disabled || self.chain_config.phase_at_slot::<P>(current_slot) < Phase::Gloas {
+            return;
+        }
+
+        if !self.is_forward_synced() {
+            self.builder_circuit_breaker.skip_to(current_slot);
+            return;
+        }
+
+        // Payload delivery can be decided in the next slot after its block was proposed
+        let Some(last_slot) = current_slot.checked_sub(1) else {
+            return;
+        };
+
+        let earliest_slot = last_slot.saturating_sub(P::SlotsPerEpoch::U64);
+
+        if self.builder_circuit_breaker.evaluated_slot() < earliest_slot {
+            self.builder_circuit_breaker.skip_to(earliest_slot);
+        }
+
+        let first_slot = self
+            .builder_circuit_breaker
+            .evaluated_slot()
+            .saturating_add(1);
+
+        if first_slot <= last_slot {
+            self.evaluate_canonical_payloads_in(first_slot..=last_slot);
+            self.builder_circuit_breaker.set_evaluated_slot(last_slot);
+        }
+    }
+
+    /// Judges the canonical block of every slot in `slots`.
+    ///
+    /// A run of failures is only meaningful along a single chain, so blocks that lost the head race
+    /// are not counted.
+    fn evaluate_canonical_payloads_in(&mut self, slots: RangeInclusive<Slot>) {
+        let attested_threshold = self.calculate_committee_fraction(ATTESTED_PERCENT);
+        let current_slot = self.slot();
+
+        for slot in slots {
+            let outcome = self.canonical_payload_outcome(slot, attested_threshold);
+
+            match self.builder_circuit_breaker.record_canonical_outcome::<P>(
+                slot,
+                outcome,
+                current_slot,
+            ) {
+                Some(Trip::ConsecutiveWithheld(withheld_payloads)) => warn_with_peers!(
+                    "builders withheld {withheld_payloads} payloads in a row, \
+                     building payloads locally"
+                ),
+                Some(Trip::WithheldInEpoch(withheld_payloads)) => warn_with_peers!(
+                    "builders withheld {withheld_payloads} payloads in the last epoch, \
+                     building payloads locally"
+                ),
+                None => {}
+            }
+        }
+    }
+
+    /// Whether the builder that won the auction for the canonical block of `slot` revealed its
+    /// payload in time.
+    fn canonical_payload_outcome(&self, slot: Slot, attested_threshold: Gwei) -> PayloadOutcome {
+        let Some(unfinalized_block) = self
+            .unfinalized_block_before_or_at(slot)
+            .filter(|unfinalized_block| unfinalized_block.slot() == slot)
+        else {
+            return PayloadOutcome::Unknown;
+        };
+
+        let chain_link = &unfinalized_block.chain_link;
+
+        let Some(payload_bid) = chain_link.block.message().payload_bid() else {
+            return PayloadOutcome::Unknown;
+        };
+
+        if payload_bid.builder_index == BUILDER_INDEX_SELF_BUILD {
+            return PayloadOutcome::Unknown;
+        }
+
+        // A PTC majority voting the payload timely stands in for this node's own view: the reveal
+        // was on time and this node was slow to see it.
+        if self.is_payload_present_timely(chain_link.block_root)
+            || self.payload_timeliness(chain_link.block_root, true)
+        {
+            return PayloadOutcome::Delivered;
+        }
+
+        // The network has attested the block, so we can blame the builder for not revealing it in time.
+        if unfinalized_block.attesting_balances.pending >= attested_threshold {
+            return PayloadOutcome::Withheld;
+        }
+
+        PayloadOutcome::Unknown
     }
 
     fn should_apply_proposer_boost(&self) -> bool {
@@ -4101,6 +4218,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.apply_balance_differences(differences)?;
         self.update_head_segment_id();
+
+        // The circuit breaker compares attesting balances against the canonical chain, both of
+        // which are only up to date after `update_head_segment_id`.
+        self.update_builder_circuit_breaker();
 
         // Pruning the state cache requires the head slot, which depends on head_segment_id
         // pointing to the correct head. Therefore, prune state cache after the head_segment_id

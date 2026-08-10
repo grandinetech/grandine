@@ -38,6 +38,14 @@ pub use smallvec::smallvec;
 
 pub const WEI_IN_GWEI: Uint256 = Uint256::from_u64(1_000_000_000);
 
+/// Defaults for the builder circuit breaker thresholds.
+///
+/// Defined here because they are shared by the pre-Gloas checks in `builder_api`, which count
+/// missing blocks, and the Gloas circuit breaker in `fork_choice_store`, which counts withheld
+/// payloads.
+pub const DEFAULT_BUILDER_MAX_SKIPPED_SLOTS: u64 = 3;
+pub const DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH: u64 = 8;
+
 pub type Publishable = bool;
 
 #[derive(
