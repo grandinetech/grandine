@@ -19,7 +19,7 @@ use helper_functions::{
 };
 use itertools::{Either, Itertools as _};
 use pubkey_cache::PubkeyCache;
-use ssz::{BitList, BitVector, ContiguousList, Hc, SszHash as _};
+use ssz::{BitList, BitVector, ContiguousList, Hc, ProgressiveList, SszHash as _};
 use std_ext::ArcExt as _;
 use transition_functions::{capella, combined};
 use typenum::Unsigned as _;
@@ -49,8 +49,9 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayloadBid, ExecutionRequests, SignedExecutionPayloadBid,
+            Attestation as GloasAttestation, BeaconBlock as GloasBeaconBlock,
+            BeaconBlockBody as GloasBeaconBlockBody, ExecutionPayloadBid, ExecutionRequests,
+            SignedExecutionPayloadBid,
         },
     },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
@@ -389,7 +390,7 @@ fn signed_execution_payload_bid<P: Preset>(
             slot: state.slot(),
             value: 0,
             execution_payment: 0,
-            blob_kzg_commitments: ContiguousList::default(),
+            blob_kzg_commitments: ProgressiveList::default(),
             execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
             ..Default::default()
         },
@@ -627,8 +628,12 @@ fn block<P: Preset>(
                 randao_reveal,
                 eth1_data,
                 graffiti,
-                attestations: electra_attestations.try_into()?,
-                deposits,
+                attestations: electra_attestations
+                    .into_iter()
+                    .map(GloasAttestation::from)
+                    .collect::<Vec<_>>()
+                    .try_into()?,
+                deposits: deposits.into(),
                 sync_aggregate,
                 ..GloasBeaconBlockBody::default()
             },

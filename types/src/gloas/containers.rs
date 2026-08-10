@@ -1,27 +1,31 @@
 use std::sync::Arc;
 
-use bls::{PublicKeyBytes, SignatureBytes};
+use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use ssz::{BitVector, ByteList, ByteVector, ContiguousList, ContiguousVector, Hc, Ssz};
+use ssz::{
+    BitVector, ByteList, ByteVector, ContiguousList, ContiguousVector, Hc, ProgressiveBitList,
+    ProgressiveList, Ssz,
+};
 use typenum::Log2;
 
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
-    bellatrix::primitives::{Gas, Transaction},
+    bellatrix::primitives::Gas,
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     deneb::primitives::{KzgCommitment, KzgProof},
-    electra::{
-        consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
-        containers::{
-            Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest, WithdrawalRequest,
-        },
-    },
+    electra::containers::{ConsolidationRequest, DepositRequest, WithdrawalRequest},
     fulu::primitives::{Cell, ColumnIndex},
-    gloas::consts::ExecutionBlockHashGindexGloas,
-    gloas::primitives::{BlockAccessList, BuilderIndex, PayloadStatus},
+    gloas::consts::{
+        CurrentSyncCommitteeGindexGloas, ExecutionBlockHashGindexGloas, FinalizedRootGindexGloas,
+        NextSyncCommitteeGindexGloas,
+    },
+    gloas::primitives::{BlockAccessList, BuilderIndex, PayloadStatus, Transaction},
     phase0::{
-        containers::{BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing, SignedVoluntaryExit},
+        containers::{
+            AttestationData, BeaconBlockHeader, Deposit, Eth1Data, ProposerSlashing,
+            SignedVoluntaryExit,
+        },
         primitives::{
             Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
             Uint256, UnixSeconds, ValidatorIndex,
@@ -29,6 +33,49 @@ use crate::{
     },
     preset::Preset,
 };
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct AggregateAndProof<P: Preset> {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub aggregator_index: ValidatorIndex,
+    pub aggregate: Attestation<P>,
+    pub selection_proof: SignatureBytes,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct SignedAggregateAndProof<P: Preset> {
+    pub message: AggregateAndProof<P>,
+    pub signature: SignatureBytes,
+}
+
+#[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(stable(active = [1; 4]))]
+pub struct Attestation<P: Preset> {
+    pub aggregation_bits: ProgressiveBitList<P::MaxAttestersPerSlot>,
+    pub data: AttestationData,
+    pub signature: AggregateSignatureBytes,
+    pub committee_bits: BitVector<P::MaxCommitteesPerSlot>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[serde(bound = "", deny_unknown_fields)]
+pub struct AttesterSlashing<P: Preset> {
+    pub attestation_1: IndexedAttestation<P>,
+    pub attestation_2: IndexedAttestation<P>,
+}
+
+#[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(stable(active = [1; 3]))]
+pub struct IndexedAttestation<P: Preset> {
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    pub attesting_indices: ProgressiveList<ValidatorIndex, P::MaxAttestersPerSlot>,
+    pub data: AttestationData,
+    pub signature: AggregateSignatureBytes,
+}
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
@@ -44,24 +91,25 @@ pub struct BeaconBlock<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 13]))]
 pub struct BeaconBlockBody<P: Preset> {
     pub randao_reveal: SignatureBytes,
     pub eth1_data: Eth1Data,
     pub graffiti: H256,
-    pub proposer_slashings: ContiguousList<ProposerSlashing, P::MaxProposerSlashings>,
-    pub attester_slashings: ContiguousList<AttesterSlashing<P>, P::MaxAttesterSlashingsElectra>,
-    pub attestations: ContiguousList<Attestation<P>, P::MaxAttestationsElectra>,
-    pub deposits: ContiguousList<Deposit, P::MaxDeposits>,
-    pub voluntary_exits: ContiguousList<SignedVoluntaryExit, P::MaxVoluntaryExits>,
+    pub proposer_slashings: ProgressiveList<ProposerSlashing, P::MaxProposerSlashings>,
+    pub attester_slashings: ProgressiveList<AttesterSlashing<P>, P::MaxAttesterSlashingsElectra>,
+    pub attestations: ProgressiveList<Attestation<P>, P::MaxAttestationsElectra>,
+    pub deposits: ProgressiveList<Deposit, P::MaxDeposits>,
+    pub voluntary_exits: ProgressiveList<SignedVoluntaryExit, P::MaxVoluntaryExits>,
     pub sync_aggregate: SyncAggregate<P>,
     pub bls_to_execution_changes:
-        ContiguousList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
+        ProgressiveList<SignedBlsToExecutionChange, P::MaxBlsToExecutionChanges>,
     pub signed_execution_payload_bid: SignedExecutionPayloadBid<P>,
-    pub payload_attestations: ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
+    pub payload_attestations: ProgressiveList<PayloadAttestation<P>, P::MaxPayloadAttestation>,
     pub parent_execution_requests: ExecutionRequests<P>,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
 pub struct Builder {
     pub pubkey: PublicKeyBytes,
@@ -127,8 +175,8 @@ pub struct BuilderPendingWithdrawal {
 pub struct DataColumnSidecar<P: Preset> {
     #[serde(with = "serde_utils::string_or_native")]
     pub index: ColumnIndex,
-    pub column: ContiguousList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    pub column: ProgressiveList<Cell<P>, P::MaxBlobCommitmentsPerBlock>,
+    pub kzg_proofs: ProgressiveList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
     pub beacon_block_root: H256,
@@ -136,6 +184,7 @@ pub struct DataColumnSidecar<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 19]))]
 pub struct ExecutionPayload<P: Preset> {
     pub parent_hash: ExecutionBlockHash,
     pub fee_recipient: ExecutionAddress,
@@ -158,8 +207,8 @@ pub struct ExecutionPayload<P: Preset> {
     pub block_hash: ExecutionBlockHash,
     // TODO(Grandine Team): Consider removing the `Arc`. It can be removed with no loss of performance
     //                      at the cost of making `ExecutionPayloadV1` more complicated.
-    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
-    pub withdrawals: ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>,
+    pub transactions: Arc<ProgressiveList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    pub withdrawals: ProgressiveList<Withdrawal, P::MaxWithdrawalsPerPayload>,
     #[serde(with = "serde_utils::string_or_native")]
     pub blob_gas_used: Gas,
     #[serde(with = "serde_utils::string_or_native")]
@@ -171,6 +220,7 @@ pub struct ExecutionPayload<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 12]))]
 pub struct ExecutionPayloadBid<P: Preset> {
     pub parent_block_hash: ExecutionBlockHash,
     pub parent_block_root: H256,
@@ -187,12 +237,13 @@ pub struct ExecutionPayloadBid<P: Preset> {
     pub value: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub execution_payment: Gwei,
-    pub blob_kzg_commitments: ContiguousList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
+    pub blob_kzg_commitments: ProgressiveList<KzgCommitment, P::MaxBlobCommitmentsPerBlock>,
     pub execution_requests_root: H256,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 5]))]
 pub struct ExecutionPayloadEnvelope<P: Preset> {
     pub payload: ExecutionPayload<P>,
     pub execution_requests: ExecutionRequests<P>,
@@ -204,13 +255,13 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 5]))]
 pub struct ExecutionRequests<P: Preset> {
-    pub deposits: ContiguousList<DepositRequest, P::MaxDepositRequestsPerPayload>,
-    pub withdrawals: ContiguousList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
-    pub consolidations: ContiguousList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
-    pub builder_deposits:
-        ContiguousList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
-    pub builder_exits: ContiguousList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
+    pub deposits: ProgressiveList<DepositRequest, P::GloasDepositRequestsBound>,
+    pub withdrawals: ProgressiveList<WithdrawalRequest, P::MaxWithdrawalRequestsPerPayload>,
+    pub consolidations: ProgressiveList<ConsolidationRequest, P::MaxConsolidationRequestsPerPayload>,
+    pub builder_deposits: ProgressiveList<BuilderDepositRequest, P::MaxBuilderDepositRequestsPerPayload>,
+    pub builder_exits: ProgressiveList<BuilderExitRequest, P::MaxBuilderExitRequestsPerPayload>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
@@ -223,6 +274,7 @@ pub struct ForkChoiceNode {
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 3]))]
 pub struct IndexedPayloadAttestation<P: Preset> {
     #[serde(with = "serde_utils::string_or_native_sequence")]
     pub attesting_indices: ContiguousList<ValidatorIndex, P::PtcSize>,
@@ -242,6 +294,7 @@ pub struct PayloadAttestationData {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
+#[ssz(stable(active = [1; 3]))]
 pub struct PayloadAttestation<P: Preset> {
     pub aggregation_bits: BitVector<P::PtcSize>,
     pub data: PayloadAttestationData,
@@ -275,7 +328,8 @@ pub struct PayloadAttestationMessage {
 pub struct LightClientBootstrap<P: Preset> {
     pub header: LightClientHeader,
     pub current_sync_committee: SyncCommittee<P>,
-    pub current_sync_committee_branch: ContiguousVector<H256, Log2<CurrentSyncCommitteeIndex>>,
+    pub current_sync_committee_branch:
+        ContiguousVector<H256, Log2<CurrentSyncCommitteeGindexGloas>>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
@@ -283,7 +337,7 @@ pub struct LightClientBootstrap<P: Preset> {
 pub struct LightClientFinalityUpdate<P: Preset> {
     pub attested_header: LightClientHeader,
     pub finalized_header: LightClientHeader,
-    pub finality_branch: ContiguousVector<H256, Log2<FinalizedRootIndex>>,
+    pub finality_branch: ContiguousVector<H256, Log2<FinalizedRootGindexGloas>>,
     pub sync_aggregate: SyncAggregate<P>,
     #[serde(with = "serde_utils::string_or_native")]
     pub signature_slot: Slot,
@@ -311,9 +365,9 @@ pub struct LightClientOptimisticUpdate<P: Preset> {
 pub struct LightClientUpdate<P: Preset> {
     pub attested_header: LightClientHeader,
     pub next_sync_committee: SyncCommittee<P>,
-    pub next_sync_committee_branch: ContiguousVector<H256, Log2<NextSyncCommitteeIndex>>,
+    pub next_sync_committee_branch: ContiguousVector<H256, Log2<NextSyncCommitteeGindexGloas>>,
     pub finalized_header: LightClientHeader,
-    pub finality_branch: ContiguousVector<H256, Log2<FinalizedRootIndex>>,
+    pub finality_branch: ContiguousVector<H256, Log2<FinalizedRootGindexGloas>>,
     pub sync_aggregate: SyncAggregate<P>,
     #[serde(with = "serde_utils::string_or_native")]
     pub signature_slot: Slot,

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use arithmetic::U64Ext as _;
+use ssz::SszListMut as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
@@ -66,6 +67,7 @@ mod tests {
     use std::collections::HashMap;
 
     use enum_map::enum_map;
+    use ssz::SszList as _;
     use types::{
         nonstandard::smallvec,
         phase0::{consts::FAR_FUTURE_EPOCH, containers::Validator},

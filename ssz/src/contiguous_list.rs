@@ -10,7 +10,8 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
 use crate::{
-    error::{ReadError, WriteError},
+    error::{IndexError, ReadError, WriteError},
+    list::SszList,
     merkle_tree::{self, MerkleTree},
     porcelain::{SszHash, SszRead, SszSize, SszWrite},
     shared,
@@ -125,6 +126,41 @@ impl<T: SszHash + SszWrite, N: MerkleElements<T>> SszHash for ContiguousList<T, 
             MerkleTree::<N::PackedMerkleTreeDepth>::merkleize_packed(self)
         };
         merkle_tree::mix_in_length(root, self.len())
+    }
+}
+
+impl<T, N> SszList<T> for ContiguousList<T, N>
+where
+    T: SszHash + SszWrite + Send + Sync + Debug,
+    N: MerkleElements<T> + Send + Sync,
+{
+    fn len_usize(&self) -> usize {
+        self.elements.len()
+    }
+
+    fn len_u64(&self) -> u64 {
+        u64::try_from(self.elements.len()).expect("list length fits in u64")
+    }
+
+    fn get(&self, index: u64) -> Result<&T, IndexError> {
+        let index = usize::try_from(index).map_err(|_| IndexError::DoesNotFitInUsize { index })?;
+
+        let length = self.elements.len();
+
+        self.elements
+            .get(index)
+            .ok_or(IndexError::OutOfBounds { length, index })
+    }
+
+    fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a> {
+        Box::new(self.elements.iter())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn SszList<T>>
+    where
+        T: Clone + 'static,
+    {
+        Box::new(self.clone())
     }
 }
 

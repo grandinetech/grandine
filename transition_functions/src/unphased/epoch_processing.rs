@@ -13,7 +13,7 @@ use helper_functions::{
     predicates::{is_active_validator, is_eligible_for_activation},
 };
 use itertools::Itertools as _;
-use ssz::{PersistentList, SszHash as _};
+use ssz::{PersistentList, SszHash as _, SszListMut as _};
 use types::{
     config::Config,
     nonstandard::AttestationEpoch,
@@ -67,7 +67,7 @@ pub fn process_rewards_and_penalties<P: Preset>(
         Ok(())
     };
 
-    state.balances_mut().update(|balance| {
+    state.balances_mut().update(&mut |balance| {
         if result.is_err() {
             return;
         }

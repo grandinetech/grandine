@@ -16,7 +16,7 @@ use types::{
         validator_list::PartialValidator,
     },
     preset::Preset,
-    traits::{BeaconState, PostElectraBeaconState},
+    traits::{BeaconState, PostElectraAttestation, PostElectraBeaconState},
 };
 
 use crate::{
@@ -90,23 +90,23 @@ pub fn get_indexed_attestation<P: Preset>(
 // > Return the set of attesting indices corresponding to ``aggregation_bits`` and ``committee_bits``.
 pub fn get_attesting_indices<P: Preset>(
     state: &impl BeaconState<P>,
-    attestation: &Attestation<P>,
+    attestation: &impl PostElectraAttestation<P>,
 ) -> Result<HashSet<ValidatorIndex>> {
     let mut output = HashSet::new();
-    let committee_indices = get_committee_indices::<P>(attestation.committee_bits);
+    let committee_indices = get_committee_indices::<P>(attestation.committee_bits());
     let mut committee_offset: usize = 0;
 
     for index in committee_indices {
-        let committee = beacon_committee(state, attestation.data.slot, index)?;
+        let committee = beacon_committee(state, attestation.data().slot, index)?;
         let mut committee_attesters = vec![];
 
         for (i, index) in committee.into_iter().enumerate() {
             let bit_index = committee_offset.try_add(i)?;
 
             if attestation
-                .aggregation_bits
-                .get(bit_index)
-                .is_some_and(|b| *b)
+                .aggregation_bits()
+                .get_bit(bit_index)
+                .is_some_and(|bit| bit)
             {
                 committee_attesters.push(index);
             }
@@ -124,9 +124,9 @@ pub fn get_attesting_indices<P: Preset>(
 
     // This works the same as `assert len(attestation.aggregation_bits) == committee_offset`
     ensure!(
-        committee_offset == attestation.aggregation_bits.len(),
+        committee_offset == attestation.aggregation_bits().len_usize(),
         Error::ParticipantsCountMismatch {
-            aggregation_bitlist_length: attestation.aggregation_bits.len(),
+            aggregation_bitlist_length: attestation.aggregation_bits().len_usize(),
             participants_count: committee_offset
         },
     );

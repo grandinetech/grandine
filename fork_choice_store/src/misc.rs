@@ -12,13 +12,13 @@ use features::Feature;
 use futures::channel::{mpsc::Sender, oneshot::Sender as OneshotSender};
 use helper_functions::misc;
 use serde::{Serialize, Serializer};
+use ssz::SszList;
 use static_assertions::assert_eq_size;
 use std_ext::ArcExt as _;
 use strum::AsRefStr;
 use thiserror::Error;
 use transition_functions::unphased::StateRootPolicy;
 use types::{
-    Validators,
     combined::{
         Attestation, AttestingIndices, BeaconState, DataColumnSidecar, SignedAggregateAndProof,
         SignedBeaconBlock,
@@ -34,7 +34,7 @@ use types::{
         ValidationOutcomeWithReason,
     },
     phase0::{
-        containers::{AttestationData, Checkpoint},
+        containers::{AttestationData, Checkpoint, Validator},
         primitives::{ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
@@ -1689,6 +1689,6 @@ pub trait Storage<P: Preset>: Sync + Sized {
     fn stored_state_by_block_root(
         &self,
         block_root: H256,
-        finalized_validators: Option<&Validators<P>>,
+        finalized_validators: Option<&dyn SszList<Validator>>,
     ) -> Result<Option<Arc<BeaconState<P>>>>;
 }

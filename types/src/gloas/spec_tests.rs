@@ -18,9 +18,8 @@ mod tested_types {
             BlsToExecutionChange, HistoricalSummary, SignedBlsToExecutionChange, Withdrawal,
         },
         electra::containers::{
-            AggregateAndProof, Attestation, AttesterSlashing, ConsolidationRequest, DepositRequest,
-            IndexedAttestation, PendingConsolidation, PendingDeposit, PendingPartialWithdrawal,
-            SignedAggregateAndProof, SingleAttestation, WithdrawalRequest,
+            ConsolidationRequest, DepositRequest, PendingConsolidation, PendingDeposit,
+            PendingPartialWithdrawal, SingleAttestation, WithdrawalRequest,
         },
         fulu::containers::{DataColumnsByRootIdentifier, MatrixEntry},
         gloas::{beacon_state::BeaconState, containers::*},

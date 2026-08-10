@@ -298,7 +298,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     .body()
                     .with_blob_kzg_commitments()
                     .map(BlockBodyWithBlobKzgCommitments::blob_kzg_commitments)
-                    .map(|contiguous_list| contiguous_list.len())
+                    .map(|kzg_commitments| kzg_commitments.len_usize())
                     .unwrap_or_default();
 
                 let beacon_block_root = block.message().hash_tree_root();

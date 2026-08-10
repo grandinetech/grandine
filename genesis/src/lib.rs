@@ -6,7 +6,7 @@ use arithmetic::U64Ext as _;
 use deposit_tree::DepositTree;
 use helper_functions::{accessors, misc, mutators::increase_balance};
 use pubkey_cache::PubkeyCache;
-use ssz::{Hc, PersistentList, PersistentVector, SszHash as _};
+use ssz::{Hc, PersistentVector, SszHash as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use transition_functions::combined;
@@ -199,9 +199,9 @@ impl<'config, P: Preset> Incremental<'config, P> {
             combined::process_deposit_data(self.config, pubkey_cache, &mut self.beacon_state, data)?
         {
             if let Some(state) = self.beacon_state.post_electra_mut() {
-                let pending_deposits = state.pending_deposits().clone();
+                let pending_deposits = state.pending_deposits().clone_boxed();
 
-                for deposit in &pending_deposits {
+                for deposit in &*pending_deposits {
                     let validator_index = accessors::index_of_public_key(state, &deposit.pubkey)
                         .expect(
                             "public keys in state.pending_deposits are taken from state.validators",
@@ -211,7 +211,9 @@ impl<'config, P: Preset> Incremental<'config, P> {
                     increase_balance(balance, deposit.amount)?;
                 }
 
-                *state.pending_deposits_mut() = PersistentList::default();
+                state
+                    .pending_deposits_mut()
+                    .try_assign_from_iter(&mut core::iter::empty())?;
             }
 
             let balance = *self.beacon_state.balances().get(validator_index)?;

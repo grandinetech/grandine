@@ -8,6 +8,7 @@ use helper_functions::{
     mutators::decrease_balance,
 };
 use pubkey_cache::PubkeyCache;
+use ssz::SszListMut as _;
 use typenum::Unsigned as _;
 use types::{
     bellatrix::beacon_state::BeaconState as BellatrixBeaconState, config::Config,
@@ -189,7 +190,7 @@ pub fn process_slashings<P: Preset, S: SlashingPenalties>(
         Ok(())
     };
 
-    balances.update(|balance| {
+    balances.update(&mut |balance| {
         if update_result.is_err() {
             return;
         }

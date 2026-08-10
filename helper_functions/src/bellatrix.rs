@@ -66,6 +66,7 @@ mod tests {
     use std::collections::HashMap;
 
     use enum_map::enum_map;
+    use ssz::SszList as _;
     use types::{
         bellatrix::beacon_state::BeaconState as BellatrixBeaconState,
         nonstandard::smallvec,

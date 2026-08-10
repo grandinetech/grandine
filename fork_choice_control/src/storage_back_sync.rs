@@ -6,16 +6,15 @@ use database::Database;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
-use ssz::SszHash as _;
+use ssz::{SszHash as _, SszList};
 use std_ext::ArcExt as _;
 use transition_functions::combined;
 use types::{
-    Validators,
     combined::{DataColumnSidecar, SignedBeaconBlock},
     deneb::containers::BlobSidecar,
     gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{FinalizedCheckpoint, WithOrigin},
-    phase0::primitives::Slot,
+    phase0::{containers::Validator, primitives::Slot},
     preset::Preset,
     traits::SignedBeaconBlock as _,
 };
@@ -43,7 +42,7 @@ impl<P: Preset> Storage<P> {
         end_slot: Slot,
         anchor_checkpoint_provider: &AnchorCheckpointProvider<P>,
         is_exiting: &Arc<AtomicBool>,
-        finalized_validators: &Validators<P>,
+        finalized_validators: &dyn SszList<Validator>,
     ) -> Result<()> {
         let WithOrigin { value, origin } = anchor_checkpoint_provider.checkpoint();
 
@@ -259,14 +258,14 @@ mod tests {
             );
         }
 
-        let finalized_validators = genesis_state.validators().clone();
+        let finalized_validators = genesis_state.validators().clone_boxed();
 
         storage.archive_back_sync_states(
             0,
             128,
             &AnchorCheckpointProvider::custom_from_genesis(genesis_state),
             &Arc::new(AtomicBool::new(false)),
-            &finalized_validators,
+            &*finalized_validators,
         )?;
 
         // Assert that the mappings from state root to slot are stored.
@@ -279,7 +278,7 @@ mod tests {
         for state_root in [state_1_root, state_22_root, state_96_root, state_128_root] {
             assert_eq!(
                 storage
-                    .stored_state_by_state_root(state_root, &finalized_validators)?
+                    .stored_state_by_state_root(state_root, &*finalized_validators)?
                     .map(|state| state.hash_tree_root()),
                 Some(state_root),
             );
