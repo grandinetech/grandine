@@ -11,7 +11,7 @@ use types::{
     gloas::containers::{
         SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
     },
-    phase0::primitives::{Epoch, Gwei, H256, Slot, SubnetId, ValidatorIndex},
+    phase0::primitives::{Epoch, H256, Slot, SubnetId, ValidatorIndex},
     preset::{Mainnet, Preset},
 };
 
@@ -192,10 +192,10 @@ pub enum Error<P: Preset> {
         bid_prev_randao: Box<H256>,
         prev_randao: Box<H256>,
     },
-    #[error("execution payload bid's signature for self-build is not empty")]
-    ExecutionPayloadBidSignatureNotEmpty,
-    #[error("execution payload bid's value for self-build is not zero, value: {value} gwei")]
-    ExecutionPayloadBidValueNonZero { value: Gwei },
+    #[error("self-build execution payload bids are never broadcast: {payload_bid:?}")]
+    ExecutionPayloadBidSelfBuild {
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
+    },
     #[error(
         "execution payload bid's builder version mismatch \
          (payload_bid: {payload_bid:?}, builder_version: {builder_version}, expected: {expected})"

@@ -6003,7 +6003,6 @@ dependencies = [
  "anyhow",
  "arithmetic",
  "bitvec",
- "bls",
  "clock",
  "crossbeam-skiplist",
  "derivative",

@@ -8,7 +8,6 @@ use types::{
     phase0::primitives::{ExecutionAddress, H256},
 };
 
-#[expect(clippy::struct_excessive_bools)]
 #[derive(Clone, Debug, Derivative)]
 #[derivative(Default)]
 pub struct ValidatorConfig {
@@ -25,5 +24,4 @@ pub struct ValidatorConfig {
     pub backfill_custody_groups: bool,
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
-    pub enable_local_payload_building: bool,
 }
