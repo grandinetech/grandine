@@ -353,6 +353,11 @@ impl BlockOrigin {
     }
 
     #[must_use]
+    pub const fn is_own(&self) -> bool {
+        matches!(self, Self::Own)
+    }
+
+    #[must_use]
     pub fn state_root_policy(&self) -> StateRootPolicy {
         match self {
             Self::Gossip(_) | Self::Requested(_) | Self::Api(_) | Self::Test(_) => {

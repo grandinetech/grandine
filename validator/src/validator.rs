@@ -81,7 +81,7 @@ use types::{
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
     },
     gloas::{
-        consts::BUILDER_INDEX_SELF_BUILD,
+        consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_STATUS_FULL},
         containers::{
             AggregateAndProof as GloasAggregateAndProof, ExecutionPayloadEnvelope,
             PayloadAttestationData, PayloadAttestationMessage, ProposerPreferences,
@@ -1994,11 +1994,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         // See: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.5/specs/gloas/validator.md#attestation
         let gloas_index = (phase >= Phase::Gloas).then(|| {
+            if slot_head.beacon_state.latest_block_header().slot == slot_head.slot() {
+                return 0;
+            }
+
+            let (head_root, payload_status) = self.controller.head_root_with_payload_status();
+
+            // The status belongs to fork choice's head, which may have moved since `slot_head`
+            // was taken. Signalling a payload the attestation does not point at would put weight
+            // behind the wrong branch, so fall back to empty.
             u64::from(
-                slot_head.beacon_state.latest_block_header().slot != slot_head.slot()
-                    && self
-                        .controller
-                        .is_payload_verified(slot_head.beacon_block_root),
+                head_root == slot_head.beacon_block_root && payload_status == PAYLOAD_STATUS_FULL,
             )
         });
 
