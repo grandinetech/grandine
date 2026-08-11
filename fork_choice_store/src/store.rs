@@ -898,6 +898,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.head_with_payload_status().1
     }
 
+    /// The payload status of the head, together with the root it applies to.
+    #[must_use]
+    pub fn head_root_with_payload_status(&self) -> (H256, ExecutionPayloadStatus) {
+        if self.phase() < Phase::Gloas {
+            return (self.head().block_root, PAYLOAD_STATUS_FULL);
+        }
+
+        let (chain_link, payload_status) = self.head_with_payload_status();
+
+        (chain_link.block_root, payload_status)
+    }
+
     fn chain_link_payload_status(
         &self,
         chain_link: &ChainLink<P>,
