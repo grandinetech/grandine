@@ -3321,7 +3321,7 @@ where
                 .parent_block_hash;
 
             // Request payload envelope if fork choice hasn't accepted yet.
-            if !self.store.is_payload_verified(block_root) {
+            if !origin.is_own() && !self.store.is_payload_verified(block_root) {
                 let peer_id = origin.peer_id();
                 self.send_to_p2p(P2pMessage::PayloadEnvelopeNeeded(block_root, peer_id));
             }
