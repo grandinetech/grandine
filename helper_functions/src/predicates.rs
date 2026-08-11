@@ -191,14 +191,21 @@ pub fn is_aggregator<P: Preset>(
 ) -> Result<bool> {
     let committee = accessors::beacon_committee(state, slot, committee_index)?;
 
+    is_aggregator_from_committee_length(committee.len(), slot_signature)
+}
+
+/// [`is_aggregator`] for a committee whose length is already known, as it is in attester duties.
+pub fn is_aggregator_from_committee_length(
+    committee_length: usize,
+    slot_signature: SignatureBytes,
+) -> Result<bool> {
     let dividend = hashing::hash_768(slot_signature)
         .index(..size_of::<u64>())
         .try_into()
         .map(u64::from_le_bytes)
         .expect("slice has the same length as u64");
 
-    let modulo = committee
-        .len()
+    let modulo = committee_length
         .try_conv::<u64>()?
         .div(TargetAggregatorsPerCommittee::U64)
         .try_into()

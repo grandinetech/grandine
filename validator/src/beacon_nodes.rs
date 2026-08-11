@@ -1,24 +1,28 @@
-use core::{convert::identity, fmt::Display, future::Future};
+use core::{convert::identity, fmt::Display, future::Future, ops::Range};
 use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result};
 use fork_choice_control::Wait;
 use futures::future::join_all;
 use logging::{debug_with_peers, warn_with_peers};
+use p2p::BeaconCommitteeSubscription;
 use std_ext::ArcExt;
 use tap::Pipe as _;
 use types::{
     nonstandard::{OwnAttestation, PublishedDuty},
     phase0::{
         containers::AttestationData,
-        primitives::{CommitteeIndex, Slot},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
 };
 
 use crate::{
-    beacon_node_api::BeaconNodeApi, local_beacon_node::LocalBeaconNode,
-    remote_beacon_node::RemoteBeaconNode, remote_beacon_nodes::RemoteBeaconNodes,
+    beacon_node_api::{AttesterDuties, BeaconNodeApi},
+    local_beacon_node::LocalBeaconNode,
+    misc,
+    remote_beacon_node::RemoteBeaconNode,
+    remote_beacon_nodes::RemoteBeaconNodes,
 };
 
 pub struct BeaconNodes<P: Preset, W: Wait> {
@@ -39,9 +43,144 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
             publish_to_every_node,
         }
     }
+
+    fn serving_nodes(&self) -> Vec<Arc<RemoteBeaconNode>> {
+        self.remote_nodes
+            .iter()
+            .filter(|node| node.health().can_serve())
+            .map(ArcExt::clone_arc)
+            .collect()
+    }
+
+    #[must_use]
+    pub const fn has_local_node(&self) -> bool {
+        self.local_node.is_some()
+    }
+
+    // The built-in beacon node computes only what is about to be needed; a remote one answers a
+    // whole epoch per request, so nothing is gained by asking for less than the epochs in flight.
+    #[must_use]
+    pub fn prefetch_slots(&self, current_slot: Slot) -> Range<Slot> {
+        if self.has_local_node() {
+            return misc::slots_to_compute_in_advance(current_slot);
+        }
+
+        let current_epoch = helper_functions::misc::compute_epoch_at_slot::<P>(current_slot);
+
+        helper_functions::misc::compute_start_slot_at_epoch::<P>(current_epoch)
+            ..helper_functions::misc::compute_start_slot_at_epoch::<P>(
+                current_epoch.saturating_add(2),
+            )
+    }
+
+    // `slots` must lie within one epoch, as the duties carry a single dependent root.
+    pub async fn attester_duties_at_slots(
+        &self,
+        slots: Range<Slot>,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<AttesterDuties> {
+        let epoch = helper_functions::misc::compute_epoch_at_slot::<P>(slots.start);
+
+        if let Some(node) = &self.local_node {
+            match node
+                .attester_duties_at_slots(slots, validator_indices)
+                .await
+            {
+                Ok(duties) => return Ok(duties),
+                Err(error) if self.remote_nodes.is_empty() => return Err(error),
+                Err(error) => {
+                    warn_with_peers!(
+                        "{node} beacon node failed to produce attester duties for epoch \
+                         {epoch}: {error:?}",
+                    );
+                }
+            }
+        }
+
+        self.remote_attester_duties(epoch, validator_indices).await
+    }
+
+    async fn remote_attester_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<AttesterDuties> {
+        let operation = format!("produce attester duties for epoch {epoch}");
+        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
+
+        for node in &self.remote_nodes {
+            attempts.push((
+                node.as_ref(),
+                BeaconNodeApi::<P>::attester_duties(node.as_ref(), epoch, validator_indices),
+            ));
+        }
+
+        let (node, duties) = first_success(&operation, attempts).await?;
+
+        debug_with_peers!(
+            "{node} beacon node produced {} attester duties for epoch {epoch} \
+             under dependent root {:?}",
+            duties.duties.len(),
+            duties.dependent_root,
+        );
+
+        Ok(duties)
+    }
 }
 
 impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
+    async fn dependent_root(
+        &self,
+        epoch: Epoch,
+        validator_index: Option<ValidatorIndex>,
+    ) -> Result<H256> {
+        let operation = format!("produce the dependent root of epoch {epoch}");
+
+        if let Some(node) = &self.local_node {
+            match node.dependent_root(epoch, validator_index).await {
+                Ok(dependent_root) => return Ok(dependent_root),
+                Err(error) if self.remote_nodes.is_empty() => return Err(error),
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                }
+            }
+        }
+
+        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
+
+        for node in &self.remote_nodes {
+            attempts.push((
+                node.as_ref(),
+                BeaconNodeApi::<P>::dependent_root(node.as_ref(), epoch, validator_index),
+            ));
+        }
+
+        first_success(&operation, attempts)
+            .await
+            .map(|(_, dependent_root)| dependent_root)
+    }
+
+    async fn attester_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<AttesterDuties> {
+        if let Some(node) = &self.local_node {
+            match node.attester_duties(epoch, validator_indices).await {
+                Ok(duties) => return Ok(duties),
+                Err(error) if self.remote_nodes.is_empty() => return Err(error),
+                Err(error) => {
+                    warn_with_peers!(
+                        "{node} beacon node failed to produce attester duties for epoch \
+                         {epoch}: {error:?}",
+                    );
+                }
+            }
+        }
+
+        self.remote_attester_duties(epoch, validator_indices).await
+    }
+
     async fn attestation_data(
         &self,
         slot: Slot,
@@ -58,6 +197,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
 
                     return Ok(data);
                 }
+                Err(error) if self.remote_nodes.is_empty() => return Err(error),
                 Err(error) => {
                     warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
                 }
@@ -90,19 +230,26 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         &self,
         attestations: &[OwnAttestation<P>],
     ) -> Result<()> {
-        let publish_to = self
-            .remote_nodes
-            .iter()
-            .filter(|node| node.health().can_serve())
-            .map(ArcExt::clone_arc)
-            .collect::<Vec<_>>();
+        let publish_to = self.serving_nodes();
 
         if !publish_to.is_empty() {
             if self
                 .publish_to_every_node
                 .contains(&PublishedDuty::Attestations)
             {
-                spawn_publish_to_every_node(publish_to, attestations.to_vec());
+                let attestations = Arc::new(attestations.to_vec());
+
+                spawn_broadcast("publish attestations", publish_to, move |node| {
+                    let attestations = attestations.clone_arc();
+
+                    async move {
+                        BeaconNodeApi::<P>::publish_singular_attestations(
+                            node.as_ref(),
+                            &attestations,
+                        )
+                        .await
+                    }
+                });
             } else {
                 spawn_publish(publish_to, attestations.to_vec());
             }
@@ -113,14 +260,51 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
             None => Ok(()),
         }
     }
+
+    async fn subscribe_to_beacon_committees(
+        &self,
+        current_slot: Slot,
+        subscriptions: &[BeaconCommitteeSubscription],
+    ) -> Result<()> {
+        if subscriptions.is_empty() {
+            return Ok(());
+        }
+
+        let subscribe_on = self.serving_nodes();
+
+        if !subscribe_on.is_empty() {
+            let subscriptions = Arc::new(subscriptions.to_vec());
+
+            // Every node is told, as any of them may be asked to produce or aggregate later.
+            spawn_broadcast(
+                "update beacon committee subscriptions",
+                subscribe_on,
+                move |node| {
+                    let subscriptions = subscriptions.clone_arc();
+
+                    async move {
+                        BeaconNodeApi::<P>::subscribe_to_beacon_committees(
+                            node.as_ref(),
+                            current_slot,
+                            &subscriptions,
+                        )
+                        .await
+                    }
+                },
+            );
+        }
+
+        match &self.local_node {
+            Some(node) => {
+                node.subscribe_to_beacon_committees(current_slot, subscriptions)
+                    .await
+            }
+            None => Ok(()),
+        }
+    }
 }
 
-/// Publishes to the first remote node that accepts, without holding up the caller.
-///
-/// The walk is detached rather than each node separately, so that the nodes are still tried in
-/// order: deciding whether to fall through to the next one needs the previous one's result.
-/// Attestations are published from the validator's main loop, so awaiting the walk there would let
-/// a single unresponsive node delay every later duty in the slot.
+// Detached as a whole rather than per node, so that the nodes are still tried in order.
 fn spawn_publish<P: Preset>(
     remotes: Vec<Arc<RemoteBeaconNode>>,
     attestations: Vec<OwnAttestation<P>>,
@@ -139,35 +323,37 @@ fn spawn_publish<P: Preset>(
             .await
             .is_err()
         {
-            warn_with_peers!("no remote beacon node accepted the attestations");
+            warn_with_peers!("no remote beacon node was able to publish attestations");
         }
     });
 }
 
-fn spawn_publish_to_every_node<P: Preset>(
-    remotes: Vec<Arc<RemoteBeaconNode>>,
-    attestations: Vec<OwnAttestation<P>>,
-) {
+// Detached for the same reason as `spawn_publish`.
+fn spawn_broadcast<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)
+where
+    F: Fn(Arc<RemoteBeaconNode>) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<()>> + Send,
+{
     tokio::spawn(async move {
-        let attestations = attestations.as_slice();
-
         let accepted = remotes
             .iter()
-            .map(|node| async move {
-                node.publish_singular_attestations(attestations)
-                    .await
-                    .inspect_err(|error| {
-                        warn_with_peers!(
-                            "{node} beacon node failed to publish attestations: {error:?}"
-                        );
-                    })
-                    .is_ok()
+            .map(|node| {
+                let attempt = attempt(node.clone_arc());
+
+                async move {
+                    attempt
+                        .await
+                        .inspect_err(|error| {
+                            warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                        })
+                        .is_ok()
+                }
             })
             .pipe(join_all)
             .await;
 
         if !accepted.into_iter().any(identity) {
-            warn_with_peers!("no remote beacon node accepted the attestations");
+            warn_with_peers!("no remote beacon node was able to {operation}");
         }
     });
 }
