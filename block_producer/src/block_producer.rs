@@ -770,7 +770,6 @@ pub struct BlockBuildOptions {
     pub disable_blockprint_graffiti: bool,
     pub skip_randao_verification: bool,
     pub builder_boost_factor: Uint256,
-    pub enable_local_payload_building: bool,
 }
 
 #[derive(Clone)]
@@ -1352,36 +1351,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let mut without_state_root_with_payload =
             if let Some(state) = self.beacon_state.post_gloas() {
-                let snapshot = self.producer_context.controller.snapshot();
-
-                let signed_payload_bid = if self.should_build_local_payload() {
-                    self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
-                        .await?
-                } else {
-                    // TODO: (gloas): select from received bids based on proposer preference
-                    let parent_block_hash = if snapshot.should_build_on_full(state.slot()) {
-                        state.latest_execution_payload_bid().block_hash
-                    } else {
-                        state.latest_execution_payload_bid().parent_block_hash
-                    };
-
-                    let selected_bid =
-                        snapshot.highest_payload_bid_at_slot(state.slot(), parent_block_hash);
-
-                    if selected_bid.is_some() {
+                let signed_payload_bid =
+                    if let Some(bid) = self.select_best_builder_bid(state, block_mev) {
                         // Set block_mev value to the in-protocol builder bid value
-                        block_mev = selected_bid.as_ref().map(|bid| {
-                            Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI)
-                        });
+                        block_mev =
+                            Some(Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI));
 
-                        selected_bid
+                        Some(bid)
                     } else {
-                        // No builder bid available — fall back to self-build using the local
-                        // payload that was already prepared via engine_forkchoiceUpdated
+                        // No builder bid selected — self-build using the local payload that was
+                        // already prepared via engine_forkchoiceUpdated
                         self.cache_and_build_self_payload_bid(state, execution_payload, commitments)
                             .await?
-                    }
-                };
+                    };
 
                 let Some(signed_payload_bid) = signed_payload_bid else {
                     return Ok(None);
@@ -2232,11 +2214,52 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         None
     }
 
-    fn should_build_local_payload(&self) -> bool {
-        self.beacon_state.post_gloas().is_none_or(|state| {
-            self.options.enable_local_payload_building
-                || accessors::get_active_builder_indices(state).count() == 0
-        })
+    /// Returns the most valuable bid that the node is willing to propose on top of the head block.
+    ///
+    /// [`None`] means the node should build the payload itself, either because there is no bid
+    /// worth taking or because the local payload is worth more.
+    // TODO: allow to configure bid selection, e.g. builders preference over highest bid
+    fn select_best_builder_bid(
+        &self,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
+        local_mev: Option<Uint256>,
+    ) -> Option<SignedExecutionPayloadBid<P>> {
+        let snapshot = self.producer_context.controller.snapshot();
+
+        let parent_block_hash = if snapshot.should_build_on_full(state.slot()) {
+            state.latest_execution_payload_bid().block_hash
+        } else {
+            state.latest_execution_payload_bid().parent_block_hash
+        };
+
+        let bid = snapshot
+            .selectable_payload_bids(state.slot(), parent_block_hash, self.head_block_root)
+            .max_by_key(|bid| bid.message.value)?;
+
+        // The bid value is what the builder pays the proposer for the slot, so it is comparable to
+        // the MEV of a locally built payload. `builder_boost_factor` biases the comparison the same
+        // way it does for the pre-Gloas builder API.
+        if let Some(local_mev) = local_mev {
+            let builder_boost_factor = self.options.builder_boost_factor;
+            let builder_mev = Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI);
+
+            let boosted_builder_mev = builder_mev
+                .div(Uint256::from_u64(100))
+                .saturating_mul(builder_boost_factor);
+
+            if local_mev >= boosted_builder_mev {
+                info_with_peers!(
+                    "using more profitable local payload: \
+                     local MEV: {local_mev}, builder MEV: {builder_mev}, \
+                     boosted builder MEV: {boosted_builder_mev}, \
+                     builder_boost_factor: {builder_boost_factor}",
+                );
+
+                return None;
+            }
+        }
+
+        Some(bid.clone())
     }
 
     pub fn get_local_execution_payload(&self) -> Option<LocalExecutionPayloadJoinHandle<P>> {
