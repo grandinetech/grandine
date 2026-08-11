@@ -2532,6 +2532,8 @@ where
                 self.update_store_snapshot();
             }
             Ok(ExecutionPayloadBidAction::Ignore(message)) => {
+                debug_with_peers!("payload bid ignored (reason: {message})");
+
                 let (gossip_id, sender) = origin.split();
 
                 if let Some(gossip_id) = gossip_id {

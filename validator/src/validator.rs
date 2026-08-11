@@ -993,7 +993,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 graffiti,
                 disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
                 builder_boost_factor: self.validator_config.builder_boost_factor(*public_key),
-                enable_local_payload_building: self.validator_config.enable_local_payload_building,
                 ..BlockBuildOptions::default()
             },
         );

@@ -1463,15 +1463,14 @@ impl<P: Preset> Snapshot<'_, P> {
         self.store_snapshot.accepted_payload_bids_at_slot(slot)
     }
 
-    #[must_use]
-    pub fn highest_payload_bid_at_slot(
+    pub fn selectable_payload_bids(
         &self,
         slot: Slot,
         parent_block_hash: ExecutionBlockHash,
-    ) -> Option<SignedExecutionPayloadBid<P>> {
+        parent_block_root: H256,
+    ) -> impl Iterator<Item = &SignedExecutionPayloadBid<P>> {
         self.store_snapshot
-            .highest_payload_bid_at_slot(slot, parent_block_hash)
-            .cloned()
+            .selectable_payload_bids(slot, parent_block_hash, parent_block_root)
     }
 }
 
