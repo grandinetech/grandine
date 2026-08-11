@@ -1598,14 +1598,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ///
     /// [`get_shuffling_dependent_root`]: https://github.com/ethereum/consensus-specs/pull/5374
     pub fn shuffling_dependent_root(&self, root: H256, epoch: Epoch) -> Option<H256> {
-        // Genesis block parent.
-        if epoch <= P::MinSeedLookahead::U64 {
-            return Some(H256::zero());
-        }
-
-        let dependent_slot =
+        // The genesis block is the dependent block for the first two epochs.
+        let dependent_slot = if epoch <= P::MinSeedLookahead::U64 {
+            GENESIS_SLOT
+        } else {
             misc::compute_start_slot_at_epoch::<P>(epoch.saturating_sub(P::MinSeedLookahead::U64))
-                .saturating_sub(1);
+                .saturating_sub(1)
+        };
 
         self.ancestor(root, dependent_slot)
     }
