@@ -4663,11 +4663,19 @@ fn publish_block_with_data_column_sidecars_to_network<P: Preset>(
     data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
 ) {
-    for data_column_sidecar in data_column_sidecars {
-        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar.clone_arc()).send(api_to_p2p_tx);
-    }
+    let publish_data_column_sidecars = || {
+        for data_column_sidecar in data_column_sidecars {
+            ApiToP2p::PublishDataColumnSidecar(data_column_sidecar.clone_arc()).send(api_to_p2p_tx);
+        }
+    };
 
-    ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
+    if block.phase() >= Phase::Gloas {
+        ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
+        publish_data_column_sidecars();
+    } else {
+        publish_data_column_sidecars();
+        ApiToP2p::PublishBeaconBlock(block).send(api_to_p2p_tx);
+    }
 }
 
 #[instrument(skip_all, level = "debug")]
