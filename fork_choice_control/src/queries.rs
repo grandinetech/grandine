@@ -660,6 +660,11 @@ where
         self.store_snapshot().is_payload_present_timely(block_root)
     }
 
+    #[must_use]
+    pub fn head_root_with_payload_status(&self) -> (H256, ExecutionPayloadStatus) {
+        self.store_snapshot().head_root_with_payload_status()
+    }
+
     pub fn blocks_by_root(
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,
