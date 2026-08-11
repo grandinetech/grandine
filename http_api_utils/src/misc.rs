@@ -1,10 +1,31 @@
 use core::time::Duration;
 use std::sync::Arc;
 
+use bls::PublicKeyBytes;
 use parse_display::Display;
 use prometheus_metrics::Metrics;
+use serde::{Deserialize, Serialize};
+use types::phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex};
 
 pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getAttesterDuties>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorAttesterDutyResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committee_index: CommitteeIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committee_length: usize,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committees_at_slot: u64,
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_committee_index: usize,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+}
 
 #[derive(Clone, Copy)]
 enum ApiType {

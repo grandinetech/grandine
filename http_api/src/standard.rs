@@ -37,7 +37,9 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
-use http_api_utils::{BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId};
+use http_api_utils::{
+    BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId, ValidatorAttesterDutyResponse,
+};
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
@@ -472,23 +474,6 @@ pub struct NodeSyncingResponse {
     is_syncing: bool,
     is_optimistic: bool,
     el_offline: bool,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorAttesterDutyResponse {
-    #[serde(with = "serde_utils::string_or_native")]
-    committee_index: CommitteeIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    committee_length: usize,
-    #[serde(with = "serde_utils::string_or_native")]
-    committees_at_slot: u64,
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_committee_index: usize,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
 }
 
 #[derive(Serialize)]

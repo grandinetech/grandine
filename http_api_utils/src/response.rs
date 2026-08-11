@@ -114,6 +114,11 @@ impl<T, M, F> EthResponse<T, M, F> {
     }
 
     #[must_use]
+    pub fn into_data_and_dependent_root(self) -> (T, Option<H256>) {
+        (self.data, self.dependent_root)
+    }
+
+    #[must_use]
     pub const fn version(mut self, phase: Phase) -> Self {
         self.version = Some(phase);
         self
