@@ -15,8 +15,7 @@ impl Health {
         matches!(self, Self::Ready)
     }
 
-    /// A degraded node is still worth asking, but an [`Self::Incompatible`] one would answer under
-    /// the wrong domain and an [`Self::Unreachable`] one would only burn the deadline.
+    // A degraded node is still worth asking, unlike one on the wrong network or an unreachable one.
     #[must_use]
     pub const fn can_serve(self) -> bool {
         matches!(self, Self::Unusable | Self::Unknown | Self::Ready)

@@ -6,23 +6,27 @@ use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
 use derive_more::Display;
-use http_api_utils::{ETH_CONSENSUS_VERSION, EthResponse};
+use http_api_utils::{ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use p2p::BeaconCommitteeSubscription;
 use reqwest::{Client, Response, StatusCode};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use types::{
     config::Config as ChainConfig,
     nonstandard::OwnAttestation,
     phase0::{
         containers::AttestationData,
-        primitives::{CommitteeIndex, Slot, Version},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex, Version},
     },
     preset::Preset,
     redacting_url::RedactingUrl,
 };
 
-use crate::{beacon_node_api::BeaconNodeApi, health::Health};
+use crate::{
+    beacon_node_api::{AttesterDuties, BeaconNodeApi},
+    health::Health,
+};
 
 const REQUEST_TIMEOUT_QUOTIENT: u32 = 4;
 
@@ -50,10 +54,15 @@ struct Genesis {
     genesis_fork_version: Version,
 }
 
-// <https://ethereum.github.io/beacon-APIs/#/Node/getSyncingStatus>
-//
+/// The request body of `getAttesterDuties`, whose indices are quoted in JSON.
+#[derive(Serialize)]
+#[serde(transparent)]
+struct ValidatorIndices(
+    #[serde(with = "serde_utils::string_or_native_sequence")] Vec<ValidatorIndex>,
+);
+
 // `head_slot` and `sync_distance` are ignored: neither separates a node that has fallen behind
-// from a chain with missed slots. `is_optimistic` and `el_offline` are optional in the API.
+// from a chain with missed slots.
 #[derive(Deserialize)]
 struct SyncingStatus {
     is_syncing: bool,
@@ -70,8 +79,6 @@ pub enum NetworkCheck {
 }
 
 /// A beacon node reached over <https://ethereum.github.io/beacon-APIs/>.
-///
-/// `RedactingUrl` strips credentials when it is displayed.
 #[derive(Display)]
 #[display("{url}")]
 pub struct RemoteBeaconNode {
@@ -168,8 +175,7 @@ impl RemoteBeaconNode {
             .expect("REQUEST_TIMEOUT_QUOTIENT is not zero")
     }
 
-    /// [`Self::ensure_same_network`], with the two failure modes separated because they warrant
-    /// different responses. Only success is remembered.
+    // The two failure modes are separated because they warrant different responses.
     pub async fn check_network(&self) -> NetworkCheck {
         match self.ensure_same_network().await {
             Ok(()) => NetworkCheck::Matches,
@@ -236,6 +242,57 @@ impl RemoteBeaconNode {
 }
 
 impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
+    async fn dependent_root(
+        &self,
+        epoch: Epoch,
+        validator_index: Option<ValidatorIndex>,
+    ) -> Result<H256> {
+        <Self as BeaconNodeApi<P>>::attester_duties(self, epoch, validator_index.as_slice())
+            .await
+            .map(|duties| duties.dependent_root)
+    }
+
+    async fn attester_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<AttesterDuties> {
+        let url = self.endpoint(format!("/eth/v1/validator/duties/attester/{epoch}").as_str())?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        let response = self.check_status(response).await?;
+
+        let (duties, dependent_root) = response
+            .json::<EthResponse<Vec<ValidatorAttesterDutyResponse>>>()
+            .await?
+            .into_data_and_dependent_root();
+
+        let dependent_root = dependent_root.ok_or_else(|| {
+            AnyhowError::msg(format!(
+                "beacon node at {} did not report a dependent root for attester duties",
+                self.url,
+            ))
+        })?;
+
+        debug_with_peers!(
+            "{} produced {} attester duties for epoch {epoch}",
+            self.url,
+            duties.len(),
+        );
+
+        Ok(AttesterDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
     async fn attestation_data(
         &self,
         slot: Slot,
@@ -294,11 +351,37 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
 
         Ok(())
     }
+
+    async fn subscribe_to_beacon_committees(
+        &self,
+        _current_slot: Slot,
+        subscriptions: &[BeaconCommitteeSubscription],
+    ) -> Result<()> {
+        let url = self.endpoint("/eth/v1/validator/beacon_committee_subscriptions")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&subscriptions)
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "subscribed to {} beacon committees on {}",
+            subscriptions.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use bls::{SignatureBytes, traits::SignatureBytes as _};
+    use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
     use serde_json::json;
     use types::{
         combined::Attestation, electra::containers::SingleAttestation, phase0::primitives::H256,
@@ -306,6 +389,56 @@ mod tests {
     };
 
     use super::*;
+
+    // The endpoint takes a bare array of quoted validator indices.
+    #[test]
+    fn serializes_attester_duties_request_body() -> Result<()> {
+        let body = serde_json::to_value(ValidatorIndices(vec![1, 2]))?;
+
+        assert_eq!(body, json!(["1", "2"]));
+
+        Ok(())
+    }
+
+    // The dependent root lives in the response envelope rather than the duties themselves.
+    #[test]
+    fn parses_attester_duties_response() -> Result<()> {
+        let response = json!({
+            "dependent_root":
+                "0x0404040404040404040404040404040404040404040404040404040404040404",
+            "execution_optimistic": false,
+            "data": [{
+                "pubkey": PublicKeyBytes::zero(),
+                "validator_index": "1",
+                "committee_index": "2",
+                "committee_length": "3",
+                "committees_at_slot": "4",
+                "validator_committee_index": "5",
+                "slot": "6",
+            }],
+        });
+
+        let (duties, dependent_root) =
+            serde_json::from_value::<EthResponse<Vec<ValidatorAttesterDutyResponse>>>(response)?
+                .into_data_and_dependent_root();
+
+        assert_eq!(dependent_root, Some(H256::repeat_byte(4)));
+
+        assert_eq!(
+            duties,
+            [ValidatorAttesterDutyResponse {
+                committee_index: 2,
+                committee_length: 3,
+                committees_at_slot: 4,
+                pubkey: PublicKeyBytes::zero(),
+                slot: 6,
+                validator_committee_index: 5,
+                validator_index: 1,
+            }],
+        );
+
+        Ok(())
+    }
 
     // The node names itself by URL, so logging it must not leak credentials.
     #[test]
@@ -398,6 +531,26 @@ mod tests {
         assert_eq!(body[0]["committee_index"], json!("4"));
         assert_eq!(body[0]["attester_index"], json!("5"));
         assert_eq!(body[0]["data"]["slot"], json!("0"));
+
+        Ok(())
+    }
+
+    // The endpoint takes a bare array of subscriptions with quoted numbers.
+    #[test]
+    fn serializes_beacon_committee_subscription_body() -> Result<()> {
+        let body = serde_json::to_value([BeaconCommitteeSubscription {
+            validator_index: 1,
+            committee_index: 2,
+            committees_at_slot: 3,
+            slot: 4,
+            is_aggregator: true,
+        }])?;
+
+        assert_eq!(body[0]["validator_index"], json!("1"));
+        assert_eq!(body[0]["committee_index"], json!("2"));
+        assert_eq!(body[0]["committees_at_slot"], json!("3"));
+        assert_eq!(body[0]["slot"], json!("4"));
+        assert_eq!(body[0]["is_aggregator"], json!(true));
 
         Ok(())
     }

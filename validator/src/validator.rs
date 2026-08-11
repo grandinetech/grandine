@@ -119,7 +119,7 @@ use crate::{
     remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
-    tasks::{UpdateBeaconCommitteeSubscriptionsTask, update_beacon_committee_subscriptions},
+    tasks::UpdateBeaconCommitteeSubscriptionsTask,
     validator_config::ValidatorConfig,
 };
 
@@ -321,6 +321,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.controller.clone_arc(),
                 self.attestation_agg_pool.clone_arc(),
                 self.p2p_tx.clone(),
+                self.subnet_service_tx.clone(),
                 wait_group.clone(),
             )
         });
@@ -792,7 +793,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         if let Err(error) = self
-            .update_subnet_subscriptions(&wait_group, slot_head.as_ref())
+            .update_subnet_subscriptions(&wait_group, tick, slot_head.as_ref())
             .await
         {
             warn_with_peers!("failed to update subnet subscriptions: {error:?}");
@@ -1464,36 +1465,35 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_ref()
             .map(|metrics| metrics.validator_attest_times.start_timer());
 
-        let dependent_root = self
-            .controller
-            .attestation_committee_dependent_root_for_slot(
+        let beacon_nodes = self.beacon_nodes(slot_head, wait_group);
+
+        let Some((own_members, needs_to_update_subscriptions)) = self
+            .own_beacon_committee_members
+            .get_or_init_at_slot(
+                &self.controller,
+                &beacon_nodes,
                 &slot_head.beacon_state,
                 slot_head.slot(),
-            )?;
-
-        let needs_to_update_subscriptions = self
-            .own_beacon_committee_members
-            .needs_to_compute_members_at_slot(dependent_root, slot_head.slot())
-            .await;
-
-        let Some(own_members) = self
-            .own_beacon_committee_members
-            .get_or_init_at_slot(&slot_head.beacon_state, dependent_root, slot_head.slot())
-            .await
+            )
+            .await?
         else {
             return Ok(());
         };
 
-        if needs_to_update_subscriptions {
-            update_beacon_committee_subscriptions(
-                slot_head.slot(),
-                &own_members,
-                &self.subnet_service_tx,
-            )
-            .await;
+        if needs_to_update_subscriptions
+            && let Err(error) = beacon_nodes
+                .subscribe_to_beacon_committees(
+                    slot_head.slot(),
+                    &own_members
+                        .iter()
+                        .copied()
+                        .map(Into::into)
+                        .collect::<Vec<_>>(),
+                )
+                .await
+        {
+            warn_with_peers!("failed to update beacon committee subscriptions: {error:?}");
         }
-
-        let beacon_nodes = self.beacon_nodes(slot_head, wait_group);
 
         let own_singular_attestations = self
             .own_singular_attestations(slot_head, &own_members, &beacon_nodes)
@@ -2540,24 +2540,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
 
                 let up_to_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
-                own_members.prune(up_to_slot).await;
+                own_members.prune::<P>(up_to_slot).await;
                 own_ptc_members.prune(up_to_slot).await;
                 Ok::<_, AnyhowError>(())
             })
             .detach()
     }
 
-    fn spawn_update_beacon_committee_subscriptions(
-        &self,
-        wait_group: W,
-        beacon_state: Arc<BeaconState<P>>,
-    ) {
+    fn spawn_update_beacon_committee_subscriptions(&self, wait_group: W, slot_head: &SlotHead<P>) {
         let task = UpdateBeaconCommitteeSubscriptionsTask {
             chain_config: self.chain_config.clone_arc(),
             controller: self.controller.clone_arc(),
-            beacon_state,
+            beacon_state: slot_head.beacon_state.clone_arc(),
             own_beacon_committee_members: self.own_beacon_committee_members.clone_arc(),
-            subnet_service_tx: self.subnet_service_tx.clone(),
+            beacon_nodes: self.beacon_nodes(slot_head, &wait_group),
             wait_group,
         };
 
@@ -2590,37 +2586,51 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn update_subnet_subscriptions(
         &mut self,
         wait_group: &W,
+        tick: Tick,
         slot_head: Option<&SlotHead<P>>,
     ) -> Result<()> {
         if !self.controller.is_forward_synced() {
             return Ok(());
         }
 
-        let beacon_state = match slot_head.map(|sh| sh.beacon_state.clone_arc()) {
-            Some(state) => state,
-            None => match self.controller.preprocessed_state_at_current_slot().await {
-                Ok(state) => state,
-                Err(error) => {
-                    let is_too_many_empty_slots = matches!(
-                        error.downcast_ref(),
-                        Some(StateCacheError::StateFarBehind { .. })
-                    );
+        let slot_head = match slot_head {
+            Some(slot_head) => slot_head.clone(),
+            None => {
+                let beacon_state = match self.controller.preprocessed_state_at_current_slot().await
+                {
+                    Ok(state) => state,
+                    Err(error) => {
+                        let is_too_many_empty_slots = matches!(
+                            error.downcast_ref(),
+                            Some(StateCacheError::StateFarBehind { .. })
+                        );
 
-                    if !is_too_many_empty_slots {
-                        warn_with_peers!("failed to obtain beacon state for current slot: {error}");
+                        if !is_too_many_empty_slots {
+                            warn_with_peers!(
+                                "failed to obtain beacon state for current slot: {error}"
+                            );
+                        }
+
+                        return Ok(());
                     }
+                };
 
-                    return Ok(());
+                let head = self.controller.head_block_root();
+
+                SlotHead {
+                    config: self.chain_config.clone_arc(),
+                    beacon_block_root: head.value,
+                    beacon_state,
+                    optimistic: head.status.is_optimistic(),
                 }
-            },
+            }
         };
 
-        self.spawn_update_beacon_committee_subscriptions(
-            wait_group.clone(),
-            beacon_state.clone_arc(),
-        );
+        if tick.is_start_of_slot() {
+            self.spawn_update_beacon_committee_subscriptions(wait_group.clone(), &slot_head);
+        }
 
-        self.update_sync_committee_subscriptions(&beacon_state)
+        self.update_sync_committee_subscriptions(&slot_head.beacon_state)
     }
 
     #[instrument(level = "debug", skip_all)]

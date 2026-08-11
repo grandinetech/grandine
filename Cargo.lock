@@ -7146,6 +7146,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
+ "bls",
  "features",
  "hex-literal 1.1.0",
  "http 1.4.0",
@@ -7157,6 +7158,7 @@ dependencies = [
  "parse-display",
  "prometheus_metrics",
  "serde",
+ "serde_utils",
  "ssz",
  "tap",
  "test-case",
