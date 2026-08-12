@@ -33,7 +33,8 @@ use eth2_libp2p::{
 use features::Feature;
 use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS};
 use fork_choice_store::{
-    BuilderCircuitBreakerConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig,
+    BuilderCircuitBreakerConfig, DEFAULT_BUILDER_MAX_BLACKLIST_PERIOD,
+    DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig,
 };
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
@@ -902,6 +903,18 @@ struct ValidatorOptions {
     #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
     builder_max_skipped_slots_per_epoch: u64,
 
+    /// Blacklisting builders that did not reveal a payload they won the auction
+    #[clap(long)]
+    builder_blacklisting_enabled: bool,
+
+    /// Number of epochs a builder can remain blacklisted for
+    #[clap(
+        long,
+        default_value_t = DEFAULT_BUILDER_MAX_BLACKLIST_PERIOD,
+        value_parser = clap::value_parser!(u64).range(1..=u64::from(u8::MAX)),
+    )]
+    builder_max_blacklist_period: Epoch,
+
     /// Percentage multiplier to apply to the builder's payload value when choosing between a builder payload header and payload from the paired execution node
     #[clap(long, default_value_t = ValidatorConfig::default().default_builder_boost_factor)]
     default_builder_boost_factor: Uint256,
@@ -1141,6 +1154,8 @@ impl GrandineArgs {
             builder_disable_checks,
             builder_max_skipped_slots,
             builder_max_skipped_slots_per_epoch,
+            builder_blacklisting_enabled,
+            builder_max_blacklist_period,
             default_builder_boost_factor,
             default_gas_limit,
             use_validator_key_cache,
@@ -1449,9 +1464,11 @@ impl GrandineArgs {
         });
 
         let builder_circuit_breaker = BuilderCircuitBreakerConfig {
-            disabled: builder_disable_checks,
+            global_disabled: builder_disable_checks,
+            blacklisting_enabled: builder_blacklisting_enabled,
             max_skipped_slots: builder_max_skipped_slots,
             max_skipped_slots_per_epoch: builder_max_skipped_slots_per_epoch,
+            max_blacklist_period: builder_max_blacklist_period,
         };
 
         let web3signer_urls = if web3signer_urls.is_empty() && !web3signer_api_urls.is_empty() {
@@ -2049,10 +2066,27 @@ mod tests {
     }
 
     #[test]
-    fn builder_disable_checks_disables_the_gloas_circuit_breaker() {
+    fn builder_disable_checks_disables_the_global_tier_only() {
         let config = config_from_args(["--builder-disable-checks"]);
 
-        assert!(config.builder_circuit_breaker.disabled);
+        assert!(config.builder_circuit_breaker.global_disabled);
+        assert!(!config.builder_circuit_breaker.blacklisting_enabled);
+    }
+
+    #[test]
+    fn builder_blacklisting_is_disabled_by_default() {
+        assert!(
+            !config_from_args([])
+                .builder_circuit_breaker
+                .blacklisting_enabled
+        );
+
+        // The two tiers are independent.
+        let config =
+            config_from_args(["--builder-blacklisting-enabled", "--builder-disable-checks"]);
+
+        assert!(config.builder_circuit_breaker.blacklisting_enabled);
+        assert!(config.builder_circuit_breaker.global_disabled);
     }
 
     #[test]
