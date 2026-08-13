@@ -48,6 +48,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOL
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum BuilderApiError {
+    #[error("request auth slot ({auth_slot}) has already passed (current slot: {current_slot})")]
+    AuthSlotAlreadyPassed { auth_slot: Slot, current_slot: Slot },
     #[error(
         "request auth slot ({auth_slot}) does not match execution payload bid path slot ({path_slot})"
     )]
@@ -611,8 +613,10 @@ impl Api {
         Ok(Some(bid))
     }
 
-    pub async fn submit_builder_preferences(
+    pub async fn submit_builder_preferences<P: Preset>(
         &self,
+        chain_config: &ChainConfig,
+        genesis_time: UnixSeconds,
         pubkey: PublicKeyBytes,
         request_body: &BuilderPreferencesRequest,
     ) -> Result<()> {
@@ -621,6 +625,33 @@ impl Api {
                 .builder_submit_builder_preferences_times
                 .start_timer()
         });
+
+        // ethereum/builder-specs#165: auth.message.slot is the proposal slot preferences
+        // apply to; the builder MUST reject if it has already passed. Client preflight
+        // is best-effort (clock may skew). See
+        // <https://github.com/ethereum/builder-specs/pull/165>.
+        let current_slot = clock::Tick::current::<P>(chain_config, genesis_time)?.slot;
+        let auth_slot = request_body.auth.message.slot;
+        debug_with_peers!(
+            "submit_builder_preferences auth_slot={auth_slot} current_slot={current_slot}"
+        );
+        ensure!(
+            auth_slot >= current_slot,
+            BuilderApiError::AuthSlotAlreadyPassed {
+                auth_slot,
+                current_slot,
+            },
+        );
+
+        // Eth-Consensus-Version is required and must match the fork of the proposal slot.
+        let phase = chain_config.phase_at_slot::<P>(auth_slot);
+        ensure!(
+            phase >= Phase::Gloas,
+            BuilderApiError::VersionMismatch {
+                computed: phase,
+                in_response: Phase::Gloas,
+            },
+        );
 
         let url = self.url(&format!("/eth/v1/builder/builder_preferences/{pubkey:?}"))?;
 
@@ -631,7 +662,7 @@ impl Api {
         let request = self
             .client
             .post(url.into_url())
-            .header(ETH_CONSENSUS_VERSION, Phase::Gloas.as_ref());
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
 
         let request = if use_json {
             request.json(request_body)
@@ -867,11 +898,15 @@ mod tests {
     }
 
     fn sample_auth() -> SignedRequestAuth {
+        sample_auth_for_slot(1)
+    }
+
+    fn sample_auth_for_slot(slot: Slot) -> SignedRequestAuth {
         SignedRequestAuth {
             message: RequestAuth {
                 data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
                     .expect("builder URL fits MAX_DATA_SIZE"),
-                slot: 1,
+                slot,
             },
             signature: SignatureBytes::default(),
         }
@@ -1416,8 +1451,11 @@ mod tests {
         let server = MockServer::start();
         let pubkey = PublicKeyBytes::default();
         let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let genesis_time = genesis_time_now();
+        let current_slot = clock::Tick::current::<Mainnet>(&chain_config, genesis_time)?.slot;
         let request_body = BuilderPreferencesRequest {
-            auth: sample_auth(),
+            auth: sample_auth_for_slot(current_slot.saturating_add(32)),
             preferences: BuilderPreferences {
                 max_execution_payment: 0,
             },
@@ -1431,9 +1469,134 @@ mod tests {
         });
 
         let api = test_api(&server.url("/"));
-        api.submit_builder_preferences(pubkey, &request_body)
-            .await?;
+        api.submit_builder_preferences::<Mainnet>(
+            &chain_config,
+            genesis_time,
+            pubkey,
+            &request_body,
+        )
+        .await?;
         mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_allows_auth_slot_equal_to_current() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let genesis_time = genesis_time_now();
+        let current_slot = clock::Tick::current::<Mainnet>(&chain_config, genesis_time)?.slot;
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(current_slot),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas");
+            then.status(202);
+        });
+
+        let api = test_api(&server.url("/"));
+        api.submit_builder_preferences::<Mainnet>(
+            &chain_config,
+            genesis_time,
+            pubkey,
+            &request_body,
+        )
+        .await?;
+        mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_rejects_auth_slot_already_passed() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let chain_config = gloas_chain_config();
+        // Genesis far enough in the past that the current slot is well above 0.
+        let genesis_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is after unix epoch")
+            .as_secs()
+            .saturating_sub(12 * 1_000);
+        let current_slot = clock::Tick::current::<Mainnet>(&chain_config, genesis_time)?.slot;
+        let auth_slot = current_slot.saturating_sub(1);
+        assert!(
+            auth_slot < current_slot,
+            "test requires a past auth slot (current_slot={current_slot})"
+        );
+
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(auth_slot),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_builder_preferences::<Mainnet>(
+                &chain_config,
+                genesis_time,
+                pubkey,
+                &request_body,
+            )
+            .await
+            .expect_err("past auth.slot should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::AuthSlotAlreadyPassed {
+                    auth_slot: past,
+                    current_slot: now,
+                } if *past == auth_slot && *now == current_slot
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_rejects_pre_gloas_proposal_slot() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        // Mainnet config has no Gloas fork; phase_at_slot stays Phase0.
+        let chain_config = Config::mainnet();
+        let genesis_time = genesis_time_now();
+        let current_slot = clock::Tick::current::<Mainnet>(&chain_config, genesis_time)?.slot;
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(current_slot.saturating_add(32)),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_builder_preferences::<Mainnet>(
+                &chain_config,
+                genesis_time,
+                pubkey,
+                &request_body,
+            )
+            .await
+            .expect_err("pre-Gloas proposal slot should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::VersionMismatch {
+                    computed: Phase::Phase0,
+                    in_response: Phase::Gloas,
+                }
+            )
+        }));
         Ok(())
     }
 
@@ -1442,8 +1605,11 @@ mod tests {
         let server = MockServer::start();
         let pubkey = PublicKeyBytes::default();
         let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let genesis_time = genesis_time_now();
+        let current_slot = clock::Tick::current::<Mainnet>(&chain_config, genesis_time)?.slot;
         let request_body = BuilderPreferencesRequest {
-            auth: sample_auth(),
+            auth: sample_auth_for_slot(current_slot.saturating_add(32)),
             preferences: BuilderPreferences {
                 max_execution_payment: 0,
             },
@@ -1456,7 +1622,12 @@ mod tests {
 
         let api = test_api(&server.url("/"));
         let err = api
-            .submit_builder_preferences(pubkey, &request_body)
+            .submit_builder_preferences::<Mainnet>(
+                &chain_config,
+                genesis_time,
+                pubkey,
+                &request_body,
+            )
             .await
             .expect_err("400 should fail");
         mock.assert();
