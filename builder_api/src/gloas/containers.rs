@@ -5,7 +5,6 @@
 use bls::SignatureBytes;
 use serde::{Deserialize, Serialize};
 use ssz::{ByteList, ReadError, Size, Ssz, SszRead, SszReadDefault, SszSize};
-use typenum::U4096;
 use types::{
     gloas::containers::SignedExecutionPayloadBid,
     nonstandard::Phase,
@@ -13,10 +12,7 @@ use types::{
     preset::Preset,
 };
 
-/// [`MAX_DATA_SIZE`] from `builder-specs` (Gloas).
-///
-/// [`MAX_DATA_SIZE`]: https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants
-pub type MaxDataSize = U4096;
+use crate::consts::MaxDataSize;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Ssz)]
 pub struct RequestAuth {

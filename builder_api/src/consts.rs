@@ -1,4 +1,5 @@
 use hex_literal::hex;
+use typenum::U4096;
 use types::{
     bellatrix::primitives::Gas,
     phase0::primitives::{DomainType, H32},
@@ -18,6 +19,11 @@ pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
 ///
 /// [`DOMAIN_REQUEST_AUTH`]: https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants
 pub const DOMAIN_REQUEST_AUTH: DomainType = H32(hex!("0b000001"));
+
+/// [`MAX_DATA_SIZE`] from `builder-specs` (Gloas).
+///
+/// [`MAX_DATA_SIZE`]: https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants
+pub type MaxDataSize = U4096;
 
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
 

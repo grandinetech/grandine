@@ -793,10 +793,9 @@ mod tests {
 
     use crate::{
         BuilderApi, BuilderConfig,
-        consts::DOMAIN_REQUEST_AUTH,
+        consts::{DOMAIN_REQUEST_AUTH, MaxDataSize},
         gloas::containers::{
-            BuilderPreferences, BuilderPreferencesRequest, MaxDataSize, RequestAuth,
-            SignedRequestAuth,
+            BuilderPreferences, BuilderPreferencesRequest, RequestAuth, SignedRequestAuth,
         },
     };
 
