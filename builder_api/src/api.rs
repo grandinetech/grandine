@@ -54,6 +54,22 @@ pub enum BuilderApiError {
     AuthSlotMismatch { auth_slot: Slot, path_slot: Slot },
     #[error("bad request to Builder API (builder node response: {message})")]
     BadRequest { message: String },
+    #[error(
+        "execution payload bid parent_block_hash ({bid_parent_hash:?}) does not match request parent_hash ({request_parent_hash:?})"
+    )]
+    BidParentHashMismatch {
+        bid_parent_hash: ExecutionBlockHash,
+        request_parent_hash: ExecutionBlockHash,
+    },
+    #[error(
+        "execution payload bid parent_block_root ({bid_parent_root:?}) does not match request parent_root ({request_parent_root:?})"
+    )]
+    BidParentRootMismatch {
+        bid_parent_root: H256,
+        request_parent_root: H256,
+    },
+    #[error("execution payload bid slot ({bid_slot}) does not match request slot ({request_slot})")]
+    BidSlotMismatch { bid_slot: Slot, request_slot: Slot },
     #[error("builder node internal error (builder node response: {message})")]
     BuilderNodeInternalError { message: String },
     #[error("{missing_blocks} consecutive missing blocks since head")]
@@ -469,9 +485,10 @@ impl Api {
         })
     }
 
-    // Bid signature verification is deferred to the caller; it needs beacon state
-    // (`state.builders()` lookup by `builder_index`). See
+    // Full bid validation (signature, builder eligibility, etc.) is deferred to the caller; it
+    // needs beacon state. See
     // <https://github.com/ethereum/builder-specs/blob/main/specs/gloas/validator.md#validating-a-signedexecutionpayloadbid>.
+    // Request slot / parent_hash / parent_root consistency is checked below.
     pub async fn get_execution_payload_bid<P: Preset>(
         &self,
         chain_config: &ChainConfig,
@@ -566,6 +583,28 @@ impl Api {
         let bid = bid_response.into_bid();
 
         debug_with_peers!("get_execution_payload_bid response: {bid:?}");
+
+        ensure!(
+            bid.message.slot == slot,
+            BuilderApiError::BidSlotMismatch {
+                bid_slot: bid.message.slot,
+                request_slot: slot,
+            },
+        );
+        ensure!(
+            bid.message.parent_block_hash == parent_hash,
+            BuilderApiError::BidParentHashMismatch {
+                bid_parent_hash: bid.message.parent_block_hash,
+                request_parent_hash: parent_hash,
+            },
+        );
+        ensure!(
+            bid.message.parent_block_root == parent_root,
+            BuilderApiError::BidParentRootMismatch {
+                bid_parent_root: bid.message.parent_block_root,
+                request_parent_root: parent_root,
+            },
+        );
 
         info_with_peers!("received execution payload bid from builder for slot {slot}");
 
@@ -838,6 +877,18 @@ mod tests {
         }
     }
 
+    fn sample_bid(
+        slot: Slot,
+        parent_hash: ExecutionBlockHash,
+        parent_root: H256,
+    ) -> SignedExecutionPayloadBid<Mainnet> {
+        let mut bid = SignedExecutionPayloadBid::<Mainnet>::default();
+        bid.message.slot = slot;
+        bid.message.parent_block_hash = parent_hash;
+        bid.message.parent_block_root = parent_root;
+        bid
+    }
+
     fn sample_gloas_block() -> SignedBeaconBlock<Mainnet> {
         SignedBeaconBlock::Gloas(GloasSignedBeaconBlock {
             message: Hc::from(GloasBeaconBlock::default()),
@@ -924,7 +975,7 @@ mod tests {
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
 
-        let bid = SignedExecutionPayloadBid::<Mainnet>::default();
+        let bid = sample_bid(slot, parent_hash, parent_root);
         let mock = server.mock(|when, then| {
             when.method(Method::POST)
                 .path(&path)
@@ -1183,7 +1234,7 @@ mod tests {
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
 
-        let bid = SignedExecutionPayloadBid::<Mainnet>::default();
+        let bid = sample_bid(slot, parent_hash, parent_root);
         let mock = server.mock(|when, then| {
             when.method(Method::POST)
                 .path(&path)
@@ -1211,6 +1262,152 @@ mod tests {
 
         mock.assert();
         assert!(result.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_bid_slot_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(2, parent_hash, parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("bid.slot != request slot should fail");
+
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::BidSlotMismatch {
+                    bid_slot: 2,
+                    request_slot: 1,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_bid_parent_hash_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let other_parent_hash = ExecutionBlockHash::repeat_byte(1);
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(slot, other_parent_hash, parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("bid.parent_block_hash != request parent_hash should fail");
+
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::BidParentHashMismatch {
+                    bid_parent_hash,
+                    request_parent_hash,
+                } if *bid_parent_hash == other_parent_hash && *request_parent_hash == parent_hash
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_bid_parent_root_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let other_parent_root = H256::repeat_byte(1);
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(slot, parent_hash, other_parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("bid.parent_block_root != request parent_root should fail");
+
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::BidParentRootMismatch {
+                    bid_parent_root,
+                    request_parent_root,
+                } if *bid_parent_root == other_parent_root && *request_parent_root == parent_root
+            )
+        }));
         Ok(())
     }
 
