@@ -19,7 +19,7 @@ use types::{
 pub type MaxDataSize = U4096;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Ssz)]
-pub struct RequestAuthV1 {
+pub struct RequestAuth {
     /// Opaque authentication data (up to [`MAX_DATA_SIZE`] bytes). When nothing was agreed out of
     /// band, SHOULD default to the UTF-8 bytes of the builder's advertised URL. JSON: `0x`-prefixed hex.
     ///
@@ -31,21 +31,21 @@ pub struct RequestAuthV1 {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Ssz)]
-pub struct SignedRequestAuthV1 {
-    pub message: RequestAuthV1,
+pub struct SignedRequestAuth {
+    pub message: RequestAuth,
     pub signature: SignatureBytes,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Ssz)]
-pub struct BuilderPreferencesV1 {
+pub struct BuilderPreferences {
     #[serde(with = "serde_utils::string_or_native")]
     pub max_execution_payment: Gwei,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Ssz)]
-pub struct BuilderPreferencesRequestV1 {
-    pub auth: SignedRequestAuthV1,
-    pub preferences: BuilderPreferencesV1,
+pub struct BuilderPreferencesRequest {
+    pub auth: SignedRequestAuth,
+    pub preferences: BuilderPreferences,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,18 +96,18 @@ mod tests {
     // SSZ field order is auth then preferences (fixed part ends at offset 12).
     #[test]
     fn builder_preferences_request_ssz_field_order_is_auth_then_preferences() {
-        let auth = SignedRequestAuthV1 {
-            message: RequestAuthV1 {
+        let auth = SignedRequestAuth {
+            message: RequestAuth {
                 data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
                     .expect("builder URL fits MAX_DATA_SIZE"),
                 slot: 42,
             },
             signature: SignatureBytes::default(),
         };
-        let preferences = BuilderPreferencesV1 {
+        let preferences = BuilderPreferences {
             max_execution_payment: 1_000_000_000,
         };
-        let request = BuilderPreferencesRequestV1 {
+        let request = BuilderPreferencesRequest {
             auth: auth.clone(),
             preferences,
         };
@@ -123,7 +123,7 @@ mod tests {
         assert_eq!(&encoded[12..], auth_ssz.as_slice());
 
         let decoded =
-            BuilderPreferencesRequestV1::from_ssz_default(&encoded).expect("SSZ decode round-trip");
+            BuilderPreferencesRequest::from_ssz_default(&encoded).expect("SSZ decode round-trip");
         assert_eq!(decoded.auth.message.slot, 42);
         assert_eq!(decoded.auth.message.data, auth.message.data);
         assert_eq!(decoded.preferences.max_execution_payment, 1_000_000_000);

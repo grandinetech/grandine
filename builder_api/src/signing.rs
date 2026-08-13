@@ -8,7 +8,7 @@ use crate::{
     deneb::containers::BuilderBid as DenebBuilderBid,
     electra::containers::BuilderBid as ElectraBuilderBid,
     fulu::containers::BuilderBid as FuluBuilderBid,
-    gloas::containers::RequestAuthV1,
+    gloas::containers::RequestAuth,
     unphased::containers::ValidatorRegistrationV1,
 };
 
@@ -49,7 +49,7 @@ impl SignForAllForks for ValidatorRegistrationV1 {
 }
 
 /// <https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants>
-impl SignForAllForks for RequestAuthV1 {
+impl SignForAllForks for RequestAuth {
     const DOMAIN_TYPE: DomainType = DOMAIN_REQUEST_AUTH;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::RequestAuth;
 }

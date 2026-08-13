@@ -38,7 +38,7 @@ use crate::{
     combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
     consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
     gloas::containers::{
-        BuilderPreferencesRequestV1, GetExecutionPayloadBidResponse, SignedRequestAuthV1,
+        BuilderPreferencesRequest, GetExecutionPayloadBidResponse, SignedRequestAuth,
     },
     unphased::containers::SignedValidatorRegistrationV1,
 };
@@ -481,7 +481,7 @@ impl Api {
         parent_hash: ExecutionBlockHash,
         parent_root: H256,
         pubkey: PublicKeyBytes,
-        signed_request_auth: &SignedRequestAuthV1,
+        signed_request_auth: &SignedRequestAuth,
     ) -> Result<Option<SignedExecutionPayloadBid<P>>> {
         let _timer = self.metrics.as_ref().map(|metrics| {
             metrics
@@ -577,7 +577,7 @@ impl Api {
     pub async fn submit_builder_preferences(
         &self,
         pubkey: PublicKeyBytes,
-        request_body: &BuilderPreferencesRequestV1,
+        request_body: &BuilderPreferencesRequest,
     ) -> Result<()> {
         let _timer = self.metrics.as_ref().map(|metrics| {
             metrics
@@ -795,8 +795,8 @@ mod tests {
         BuilderApi, BuilderConfig,
         consts::DOMAIN_REQUEST_AUTH,
         gloas::containers::{
-            BuilderPreferencesRequestV1, BuilderPreferencesV1, MaxDataSize, RequestAuthV1,
-            SignedRequestAuthV1,
+            BuilderPreferences, BuilderPreferencesRequest, MaxDataSize, RequestAuth,
+            SignedRequestAuth,
         },
     };
 
@@ -830,9 +830,9 @@ mod tests {
         Config::mainnet().upgrade_once(Phase::Gloas, 0)
     }
 
-    fn sample_auth() -> SignedRequestAuthV1 {
-        SignedRequestAuthV1 {
-            message: RequestAuthV1 {
+    fn sample_auth() -> SignedRequestAuth {
+        SignedRequestAuth {
+            message: RequestAuth {
                 data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
                     .expect("builder URL fits MAX_DATA_SIZE"),
                 slot: 1,
@@ -890,7 +890,7 @@ mod tests {
     #[test]
     fn request_auth_signing_root_uses_domain_request_auth() {
         let config = Config::mainnet();
-        let auth = RequestAuthV1 {
+        let auth = RequestAuth {
             data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
                 .expect("builder URL fits MAX_DATA_SIZE"),
             slot: 42,
@@ -899,12 +899,12 @@ mod tests {
         let root = auth.signing_root(&config);
         assert_ne!(root, H256::zero());
 
-        let other_data = RequestAuthV1 {
+        let other_data = RequestAuth {
             data: ByteList::<MaxDataSize>::try_from(b"http://other.example.com".to_vec())
                 .expect("builder URL fits MAX_DATA_SIZE"),
             slot: 42,
         };
-        let other_slot = RequestAuthV1 {
+        let other_slot = RequestAuth {
             data: auth.data,
             slot: 43,
         };
@@ -1222,9 +1222,9 @@ mod tests {
         let server = MockServer::start();
         let pubkey = PublicKeyBytes::default();
         let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
-        let request_body = BuilderPreferencesRequestV1 {
+        let request_body = BuilderPreferencesRequest {
             auth: sample_auth(),
-            preferences: BuilderPreferencesV1 {
+            preferences: BuilderPreferences {
                 max_execution_payment: 0,
             },
         };
@@ -1248,9 +1248,9 @@ mod tests {
         let server = MockServer::start();
         let pubkey = PublicKeyBytes::default();
         let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
-        let request_body = BuilderPreferencesRequestV1 {
+        let request_body = BuilderPreferencesRequest {
             auth: sample_auth(),
-            preferences: BuilderPreferencesV1 {
+            preferences: BuilderPreferences {
                 max_execution_payment: 0,
             },
         };
