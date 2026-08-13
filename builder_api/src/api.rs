@@ -35,11 +35,9 @@ use types::{
 
 use crate::{
     BuilderApiFormat, BuilderConfig,
-    combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
+    combined::{ExecutionPayloadAndBlobsBundle, GetExecutionPayloadBidResponse, SignedBuilderBid},
     consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
-    gloas::containers::{
-        BuilderPreferencesRequest, GetExecutionPayloadBidResponse, SignedRequestAuth,
-    },
+    gloas::containers::{BuilderPreferencesRequest, SignedRequestAuth},
     unphased::containers::SignedValidatorRegistrationV1,
 };
 

@@ -4,13 +4,8 @@
 
 use bls::SignatureBytes;
 use serde::{Deserialize, Serialize};
-use ssz::{ByteList, ReadError, Size, Ssz, SszRead, SszReadDefault, SszSize};
-use types::{
-    gloas::containers::SignedExecutionPayloadBid,
-    nonstandard::Phase,
-    phase0::primitives::{Gwei, Slot},
-    preset::Preset,
-};
+use ssz::{ByteList, Ssz};
+use types::phase0::primitives::{Gwei, Slot};
 
 use crate::consts::MaxDataSize;
 
@@ -42,44 +37,6 @@ pub struct BuilderPreferences {
 pub struct BuilderPreferencesRequest {
     pub auth: SignedRequestAuth,
     pub preferences: BuilderPreferences,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(
-    bound = "",
-    deny_unknown_fields,
-    rename_all = "lowercase",
-    tag = "version",
-    content = "data"
-)]
-pub enum GetExecutionPayloadBidResponse<P: Preset> {
-    Gloas(SignedExecutionPayloadBid<P>),
-}
-
-impl<P: Preset> SszSize for GetExecutionPayloadBidResponse<P> {
-    const SIZE: Size = SignedExecutionPayloadBid::<P>::SIZE;
-}
-
-impl<P: Preset> SszRead<Phase> for GetExecutionPayloadBidResponse<P> {
-    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
-        // Container is Gloas-shaped; header may report any post-Gloas phase.
-        if *phase >= Phase::Gloas {
-            return Ok(Self::Gloas(SszReadDefault::from_ssz_default(bytes)?));
-        }
-
-        Err(ReadError::Custom {
-            message: "execution payload bid response is only available from Gloas onwards",
-        })
-    }
-}
-
-impl<P: Preset> GetExecutionPayloadBidResponse<P> {
-    #[must_use]
-    pub fn into_bid(self) -> SignedExecutionPayloadBid<P> {
-        match self {
-            Self::Gloas(bid) => bid,
-        }
-    }
 }
 
 #[cfg(test)]
