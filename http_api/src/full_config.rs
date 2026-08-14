@@ -22,7 +22,10 @@ use types::{
     bellatrix::primitives::Gas,
     capella::consts::DOMAIN_BLS_TO_EXECUTION_CHANGE,
     config::Config,
-    gloas::consts::{DOMAIN_BEACON_BUILDER, DOMAIN_PROPOSER_PREFERENCES, DOMAIN_PTC_ATTESTER},
+    gloas::consts::{
+        DOMAIN_BEACON_BUILDER, DOMAIN_BUILDER_DEPOSIT, DOMAIN_PROPOSER_PREFERENCES,
+        DOMAIN_PTC_ATTESTER,
+    },
     nonstandard::Phase,
     phase0::{
         consts::{
@@ -158,6 +161,7 @@ pub struct FullConfig {
     domain_beacon_builder: DomainType,
     domain_ptc_attester: DomainType,
     domain_proposer_preferences: DomainType,
+    domain_builder_deposit: DomainType,
 
     // TODO(feature/deneb): Add constants from the Polynomial Commitments specification if needed.
 
@@ -276,6 +280,7 @@ impl FullConfig {
             domain_beacon_builder: DOMAIN_BEACON_BUILDER,
             domain_ptc_attester: DOMAIN_PTC_ATTESTER,
             domain_proposer_preferences: DOMAIN_PROPOSER_PREFERENCES,
+            domain_builder_deposit: DOMAIN_BUILDER_DEPOSIT,
 
             // Builder constants
             builder_proposal_delay_tolerance: BUILDER_PROPOSAL_DELAY_TOLERANCE,

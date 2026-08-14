@@ -348,6 +348,13 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     // Gloas
     const MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: u64 = 1 << 14;
 
+    // Gloas type-specific SSZ bounds
+    const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE: u64 = 16_829;
+    const MAX_ATTESTER_SLASHING_SIZE: u64 = 2_097_616;
+    const MAX_DATA_COLUMN_SIDECAR_SIZE: u64 = 8_585_272;
+    const MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE: u64 = 8_585_741;
+    const MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE: u64 = 196_932;
+
     /// Returns the default configuration associated with a preset.
     ///
     /// This should only be used in tests and benchmarks.
@@ -560,6 +567,10 @@ impl Preset for Minimal {
 
     // Gloas
     const MAX_BUILDERS_PER_WITHDRAWALS_SWEEP: u64 = 16;
+
+    // Gloas type-specific SSZ bounds
+    const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE: u64 = 1462;
+    const MAX_ATTESTER_SLASHING_SIZE: u64 = 131_536;
 }
 
 /// [Medalla preset](https://github.com/eth-clients/eth2-networks/blob/674f7a1d01d9c18345456eab76e3871b3df2126b/shared/medalla/config.yaml).
@@ -1156,6 +1167,16 @@ pub struct GloasPreset {
     max_builder_deposit_requests_per_payload: u64,
     #[serde(with = "serde_utils::string_or_native")]
     max_builder_exit_requests_per_payload: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_signed_aggregate_and_proof_size: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_attester_slashing_size: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_data_column_sidecar_size: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_partial_data_column_sidecar_size: u64,
+    #[serde(with = "serde_utils::string_or_native")]
+    max_signed_execution_payload_bid_size: u64,
 }
 
 impl GloasPreset {
@@ -1169,6 +1190,11 @@ impl GloasPreset {
             max_builders_per_withdrawals_sweep: P::MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,
             max_builder_deposit_requests_per_payload: P::MaxBuilderDepositRequestsPerPayload::U64,
             max_builder_exit_requests_per_payload: P::MaxBuilderExitRequestsPerPayload::U64,
+            max_signed_aggregate_and_proof_size: P::MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE,
+            max_attester_slashing_size: P::MAX_ATTESTER_SLASHING_SIZE,
+            max_data_column_sidecar_size: P::MAX_DATA_COLUMN_SIDECAR_SIZE,
+            max_partial_data_column_sidecar_size: P::MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE,
+            max_signed_execution_payload_bid_size: P::MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE,
         }
     }
 }
