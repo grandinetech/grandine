@@ -78,6 +78,8 @@ pub enum BuilderApiError {
     ConsecutiveMissingBlocks { missing_blocks: u64 },
     #[error("{missing_blocks} missing blocks in the last rolling epoch")]
     RollingEpochMissingBlocks { missing_blocks: u64 },
+    #[error("Builder API is applicable from Gloas onwards (phase: {phase})")]
+    PhaseBeforeGloas { phase: Phase },
     #[error(
         "execution payload root ({payload_root:?}) does not match header root ({header_root:?})"
     )]
@@ -509,13 +511,7 @@ impl Api {
         // See <https://github.com/ethereum/builder-specs/blob/main/apis/builder/execution_payload_bid.yaml>
         // (applicable from Gloas onwards).
         let phase = chain_config.phase_at_slot::<P>(slot);
-        ensure!(
-            phase >= Phase::Gloas,
-            BuilderApiError::VersionMismatch {
-                computed: phase,
-                in_response: Phase::Gloas,
-            },
-        );
+        ensure_gloas_phase(phase)?;
 
         ensure!(
             signed_request_auth.message.slot == slot,
@@ -645,13 +641,7 @@ impl Api {
 
         // Eth-Consensus-Version is required and must match the fork of the proposal slot.
         let phase = chain_config.phase_at_slot::<P>(auth_slot);
-        ensure!(
-            phase >= Phase::Gloas,
-            BuilderApiError::VersionMismatch {
-                computed: phase,
-                in_response: Phase::Gloas,
-            },
-        );
+        ensure_gloas_phase(phase)?;
 
         let url = self.url(&format!("/eth/v1/builder/builder_preferences/{pubkey:?}"))?;
 
@@ -701,6 +691,11 @@ impl Api {
                 .start_timer()
         });
 
+        // Applicable from Gloas onwards. See
+        // <https://github.com/ethereum/builder-specs/pull/165>.
+        let phase = block.phase();
+        ensure_gloas_phase(phase)?;
+
         let url = self.url("/eth/v1/builder/beacon_blocks")?;
 
         let (next_interval, remaining_time) =
@@ -720,7 +715,7 @@ impl Api {
             .client
             .post(url.into_url())
             .timeout(remaining_time)
-            .header(ETH_CONSENSUS_VERSION, block.phase().as_ref());
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
 
         let request = if use_json {
             request.json(block)
@@ -831,6 +826,15 @@ fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
             computed,
             in_response,
         },
+    );
+
+    Ok(())
+}
+
+fn ensure_gloas_phase(phase: Phase) -> Result<()> {
+    ensure!(
+        phase >= Phase::Gloas,
+        BuilderApiError::PhaseBeforeGloas { phase },
     );
 
     Ok(())
@@ -1143,9 +1147,8 @@ mod tests {
         assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
             matches!(
                 e,
-                BuilderApiError::VersionMismatch {
-                    computed: Phase::Phase0,
-                    in_response: Phase::Gloas,
+                BuilderApiError::PhaseBeforeGloas {
+                    phase: Phase::Phase0,
                 }
             )
         }));
@@ -1591,9 +1594,8 @@ mod tests {
         assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
             matches!(
                 e,
-                BuilderApiError::VersionMismatch {
-                    computed: Phase::Phase0,
-                    in_response: Phase::Gloas,
+                BuilderApiError::PhaseBeforeGloas {
+                    phase: Phase::Phase0,
                 }
             )
         }));
@@ -1656,6 +1658,30 @@ mod tests {
         )
         .await?;
         mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_signed_beacon_block_rejects_pre_gloas_block() -> Result<()> {
+        let server = MockServer::start();
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_signed_beacon_block::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                &SignedBeaconBlock::Phase0(Default::default()),
+            )
+            .await
+            .expect_err("pre-Gloas block should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::PhaseBeforeGloas {
+                    phase: Phase::Phase0,
+                }
+            )
+        }));
         Ok(())
     }
 
