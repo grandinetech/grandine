@@ -1,6 +1,6 @@
 //! Gloas containers from [`builder-specs`].
 //!
-//! [`builder-specs`]: https://github.com/ethereum/builder-specs/blob/main/specs/gloas/validator.md
+//! [`builder-specs`]: https://github.com/ethereum/builder-specs/pull/165
 
 use bls::SignatureBytes;
 use serde::{Deserialize, Serialize};

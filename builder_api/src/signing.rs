@@ -48,7 +48,7 @@ impl SignForAllForks for ValidatorRegistrationV1 {
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Builder;
 }
 
-/// <https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants>
+/// <https://github.com/ethereum/builder-specs/pull/165>
 impl SignForAllForks for RequestAuth {
     const DOMAIN_TYPE: DomainType = DOMAIN_REQUEST_AUTH;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::RequestAuth;
