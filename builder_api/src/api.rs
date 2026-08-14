@@ -681,8 +681,6 @@ impl Api {
     // See <https://github.com/ethereum/builder-specs/blob/main/apis/builder/beacon_blocks.yaml>.
     pub async fn submit_signed_beacon_block<P: Preset>(
         &self,
-        chain_config: &ChainConfig,
-        genesis_time: UnixSeconds,
         block: &SignedBeaconBlock<P>,
     ) -> Result<()> {
         let _timer = self.metrics.as_ref().map(|metrics| {
@@ -698,14 +696,11 @@ impl Api {
 
         let url = self.url("/eth/v1/builder/beacon_blocks")?;
 
-        let (next_interval, remaining_time) =
-            clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
-
         let use_json = self.config.builder_api_format == BuilderApiFormat::Json;
 
         debug_with_peers!(
-            "submitting signed beacon block to {url} with timeout of {remaining_time:?} \
-             before next interval {next_interval:?}, use_json: {use_json}",
+            "submitting signed beacon block to {url} with timeout of {REQUEST_TIMEOUT:?}, \
+             use_json: {use_json}",
         );
 
         let block_root = block.message().hash_tree_root();
@@ -714,7 +709,7 @@ impl Api {
         let request = self
             .client
             .post(url.into_url())
-            .timeout(remaining_time)
+            .timeout(REQUEST_TIMEOUT)
             .header(ETH_CONSENSUS_VERSION, phase.as_ref());
 
         let request = if use_json {
@@ -1651,12 +1646,8 @@ mod tests {
         });
 
         let api = test_api(&server.url("/"));
-        api.submit_signed_beacon_block::<Mainnet>(
-            &gloas_chain_config(),
-            genesis_time_now(),
-            &sample_gloas_block(),
-        )
-        .await?;
+        api.submit_signed_beacon_block::<Mainnet>(&sample_gloas_block())
+            .await?;
         mock.assert();
         Ok(())
     }
@@ -1666,11 +1657,7 @@ mod tests {
         let server = MockServer::start();
         let api = test_api(&server.url("/"));
         let err = api
-            .submit_signed_beacon_block::<Mainnet>(
-                &gloas_chain_config(),
-                genesis_time_now(),
-                &SignedBeaconBlock::Phase0(Default::default()),
-            )
+            .submit_signed_beacon_block::<Mainnet>(&SignedBeaconBlock::Phase0(Default::default()))
             .await
             .expect_err("pre-Gloas block should fail before HTTP");
 
@@ -1696,11 +1683,7 @@ mod tests {
 
         let api = test_api(&server.url("/"));
         let err = api
-            .submit_signed_beacon_block::<Mainnet>(
-                &gloas_chain_config(),
-                genesis_time_now(),
-                &sample_gloas_block(),
-            )
+            .submit_signed_beacon_block::<Mainnet>(&sample_gloas_block())
             .await
             .expect_err("200 should not be accepted");
         mock.assert();
