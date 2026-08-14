@@ -95,6 +95,8 @@ pub struct Config {
     #[serde(with = "As::<DurationMilliSeconds<String>>")]
     pub slot_duration_ms: Duration,
     #[serde(with = "serde_utils::string_or_native")]
+    pub proposer_reorg_cutoff_bps: u64,
+    #[serde(with = "serde_utils::string_or_native")]
     pub attestation_due_bps: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub aggregate_due_bps: u64,
@@ -152,6 +154,10 @@ pub struct Config {
     pub reorg_max_epochs_since_finalization: u64,
     #[serde(with = "serde_utils::string_or_native")]
     pub reorg_parent_weight_threshold: u64,
+
+    // Fast confirmation rule
+    #[serde(with = "serde_utils::string_or_native")]
+    pub confirmation_byzantine_threshold: u64,
 
     // Deposit contract
     #[serde(with = "serde_utils::string_or_native")]
@@ -273,6 +279,7 @@ impl Default for Config {
             seconds_per_eth1_block: 14,
             shard_committee_period: 256,
             slot_duration_ms: Duration::from_secs(12),
+            proposer_reorg_cutoff_bps: 1667,
             attestation_due_bps: 3333,
             aggregate_due_bps: 6667,
             sync_message_due_bps: 3333,
@@ -305,6 +312,9 @@ impl Default for Config {
             reorg_head_weight_threshold: 20,
             reorg_max_epochs_since_finalization: 2,
             reorg_parent_weight_threshold: 160,
+
+            // Fast confirmation rule
+            confirmation_byzantine_threshold: 25,
 
             // Deposit contract
             deposit_chain_id: 0,
