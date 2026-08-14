@@ -2,11 +2,11 @@ use std::{path::PathBuf, sync::Arc};
 
 use clock::Tick;
 use duplicate::duplicate_item;
-use execution_engine::PayloadStatusWithBlockHash;
+use execution_engine::{PayloadStatusV1, PayloadStatusWithBlockHash, PayloadValidationStatus};
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use serde::Deserialize;
-use spec_test_utils::Case;
+use spec_test_utils::{BlsSetting, Case};
 use ssz::{ContiguousList, SszList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -86,6 +86,16 @@ struct Checks {
     proposer_boost_root: Option<H256>,
     payload_timeliness_vote: Option<PtcVotes>,
     payload_data_availability_vote: Option<PtcVotes>,
+
+    // FCR checks — present only in `tests/*/phase0/fast_confirmation/*/*/*` vectors.
+    // See `tests/formats/fast_confirmation/README.md` in `consensus-specs`.
+    previous_epoch_observed_justified_checkpoint: Option<Checkpoint>,
+    current_epoch_observed_justified_checkpoint: Option<Checkpoint>,
+    previous_epoch_greatest_unrealized_checkpoint: Option<Checkpoint>,
+    previous_slot_head: Option<H256>,
+    current_slot_head: Option<H256>,
+    confirmed_root: Option<H256>,
+    safe_execution_block_hash: Option<H256>,
 }
 
 #[derive(Deserialize)]
@@ -205,12 +215,35 @@ fn function_name(case: Case<'_>) {
     let config = Arc::new(preset::default_config().start_and_stay_in(Phase::phase));
 
     rt.block_on(async {
-        run_case::<preset>(&config, case).await;
+        run_case::<preset>(&config, case, false).await;
+    });
+}
+
+// Fast Confirmation Rule spec-test vectors (added in `consensus-specs` v1.7.0-alpha.9).
+// Per the release layout, FCR vectors exist only under `tests/minimal/<phase>/fast_confirmation/`;
+// mainnet presets are not generated. See `tests/formats/fast_confirmation/README.md`.
+#[duplicate_item(
+    glob                                                                                function_name                     preset    phase;
+    ["consensus-spec-tests/tests/minimal/altair/fast_confirmation/*/*/*"]               [altair_minimal_fcr]              [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fast_confirmation/*/*/*"]            [bellatrix_minimal_fcr]           [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/capella/fast_confirmation/*/*/*"]              [capella_minimal_fcr]             [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/deneb/fast_confirmation/*/*/*"]                [deneb_minimal_fcr]               [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/electra/fast_confirmation/*/*/*"]              [electra_minimal_fcr]             [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/fulu/fast_confirmation/*/*/*"]                 [fulu_minimal_fcr]                [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/gloas/fast_confirmation/*/*/*"]                [gloas_minimal_fcr]               [Minimal] [Gloas];
+)]
+#[test_resources(glob)]
+fn function_name(case: Case<'_>) {
+    let rt = tokio::runtime::Runtime::new().expect("Tokio runtime starts successfully in tests");
+    let config = Arc::new(preset::default_config().start_and_stay_in(Phase::phase));
+
+    rt.block_on(async {
+        run_case::<preset>(&config, case, true).await;
     });
 }
 
 #[expect(clippy::too_many_lines)]
-async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
+async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>, fast_confirmation_rule: bool) {
     let anchor_block = case
         .ssz::<_, BeaconBlock<P>>(config.as_ref(), "anchor_block")
         .with_zero_signature()
@@ -227,13 +260,17 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
             .expect("configurations used in tests have valid values of SECONDS_PER_SLOT")
     };
 
+    let trust_all_signatures = matches!(case.meta().bls_setting, BlsSetting::Ignored);
+
     let mut context = Context::<P>::new(
         config.clone_arc(),
         pubkey_cache,
         anchor_block,
         anchor_state,
         false,
-        None,
+        fast_confirmation_rule,
+        trust_all_signatures,
+        fast_confirmation_rule,
     );
 
     let mut last_payload_status: Option<PayloadStatusWithBlockHash> = None;
@@ -247,7 +284,11 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
             Step::Attestation { attestation, valid } => {
                 let attestation = case.ssz::<_, Attestation<P>>(config, attestation);
                 if valid {
-                    context.on_valid_test_attestation(attestation, meta.bls_setting);
+                    if fast_confirmation_rule {
+                        context.on_fcr_test_attestation(attestation, meta.bls_setting);
+                    } else {
+                        context.on_valid_test_attestation(attestation, meta.bls_setting);
+                    }
                 } else {
                     context.on_invalid_test_attestation(attestation, meta.bls_setting);
                 }
@@ -328,9 +369,44 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                         context.on_block_with_missing_blobs(&block, expected_blob_count);
                     }
                 } else if valid {
-                    context.on_valid_block(&block);
+                    if fast_confirmation_rule {
+                        context.on_valid_test_block(&block, meta.bls_setting);
+                    } else {
+                        context.on_valid_block(&block);
+                    }
+                } else if fast_confirmation_rule {
+                    context.on_invalid_test_block(&block, meta.bls_setting);
                 } else {
                     context.on_invalid_block(&block);
+                }
+
+                // FCR spec-test path: the pyspec test generator's `add_block` is atomic
+                // (see `consensus-specs/tests/core/pyspec/.../helpers/fork_choice.py`) — it
+                // calls `spec.on_block` directly and emits no `payload_status` step. Grandine
+                // however defaults post-merge blocks to `PayloadStatus::Optimistic`
+                // (`initial_payload_status` in `store.rs`) until the EL confirms. Since
+                // `is_one_confirmed` MUST reject non-VALID blocks per the optimistic-sync spec,
+                // we promote the payload to VALID here so the FCR check logic can see the
+                // same world the pyspec does. Gated on `fast_confirmation_rule` so this does
+                // not affect existing fork_choice tests.
+                if fast_confirmation_rule
+                    && valid
+                    && let Some(payload) = block
+                        .message()
+                        .body()
+                        .with_execution_payload()
+                        .map(types::traits::BlockBodyWithExecutionPayload::execution_payload)
+                {
+                    let payload_status = PayloadStatusV1 {
+                        status: PayloadValidationStatus::Valid,
+                        latest_valid_hash: Some(payload.block_hash()),
+                        validation_error: None,
+                    };
+                    context.on_notified_new_payload(
+                        beacon_block_root,
+                        payload.block_hash(),
+                        payload_status,
+                    );
                 }
             }
             Step::ExecutionPayload {
@@ -410,6 +486,13 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     proposer_boost_root,
                     payload_timeliness_vote,
                     payload_data_availability_vote,
+                    previous_epoch_observed_justified_checkpoint,
+                    current_epoch_observed_justified_checkpoint,
+                    previous_epoch_greatest_unrealized_checkpoint,
+                    previous_slot_head,
+                    current_slot_head,
+                    confirmed_root,
+                    safe_execution_block_hash: _,
                 } = *checks;
 
                 if let Some(HeadCheck {
@@ -452,6 +535,41 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
                 if let Some(PtcVotes { block_root, votes }) = payload_data_availability_vote {
                     context.assert_payload_data_availability_vote(block_root, &votes);
+                }
+
+                // FCR checks — only populated by `fast_confirmation/*` test vectors.
+                // Each `checks:` block with FCR fields corresponds to one explicit
+                // `on_fast_confirmation()` call in the pyspec. In FCR spec-test mode, FCR does
+                // NOT run automatically on tick, so we trigger it here to match pyspec exactly.
+                let has_fcr_checks = fast_confirmation_rule
+                    && (confirmed_root.is_some()
+                        || previous_epoch_observed_justified_checkpoint.is_some());
+                if has_fcr_checks {
+                    context.run_fast_confirmation();
+                }
+
+                if let Some(checkpoint) = previous_epoch_observed_justified_checkpoint {
+                    context.assert_fcr_previous_epoch_observed_justified_checkpoint(checkpoint);
+                }
+
+                if let Some(checkpoint) = current_epoch_observed_justified_checkpoint {
+                    context.assert_fcr_current_epoch_observed_justified_checkpoint(checkpoint);
+                }
+
+                if let Some(checkpoint) = previous_epoch_greatest_unrealized_checkpoint {
+                    context.assert_fcr_previous_epoch_greatest_unrealized_checkpoint(checkpoint);
+                }
+
+                if let Some(root) = previous_slot_head {
+                    context.assert_fcr_previous_slot_head(root);
+                }
+
+                if let Some(root) = current_slot_head {
+                    context.assert_fcr_current_slot_head(root);
+                }
+
+                if let Some(root) = confirmed_root {
+                    context.assert_fcr_confirmed_root(root);
                 }
             }
         }

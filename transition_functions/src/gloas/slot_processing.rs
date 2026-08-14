@@ -46,6 +46,7 @@ pub fn process_slots<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut Hc<BeaconState<P>>,
     slot: Slot,
+    trust_all_signatures: bool,
 ) -> Result<()> {
     ensure!(
         state.slot < slot,
@@ -60,7 +61,7 @@ pub fn process_slots<P: Preset>(
 
         // > Process epoch on the start slot of the next epoch
         if misc::is_epoch_start::<P>(state.slot.try_add(1)?) {
-            epoch_processing::process_epoch(config, pubkey_cache, state)?;
+            epoch_processing::process_epoch(config, pubkey_cache, state, trust_all_signatures)?;
         }
 
         state.slot = state.slot.try_add(1)?;

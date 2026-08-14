@@ -36,6 +36,7 @@ pub fn process_epoch(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut BeaconState<impl Preset>,
+    trust_all_signatures: bool,
 ) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
@@ -72,7 +73,7 @@ pub fn process_epoch(
     electra::process_registry_updates(config, state, summaries.as_mut_slice())?;
     electra::process_slashings::<_, ()>(state, summaries)?;
     unphased::process_eth1_data_reset(state)?;
-    process_pending_deposits(config, pubkey_cache, state)?;
+    process_pending_deposits(config, pubkey_cache, state, trust_all_signatures)?;
     electra::process_pending_consolidations(state)?;
 
     process_builder_pending_payments(state)?;
@@ -104,6 +105,7 @@ fn process_pending_deposits<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostElectraBeaconState<P>,
+    trust_all_signatures: bool,
 ) -> Result<()> {
     let next_epoch = get_current_epoch(state).try_add(1)?;
     let available_for_processing = state
@@ -139,7 +141,7 @@ fn process_pending_deposits<P: Preset>(
 
         if is_validator_withdrawn {
             // > Deposited balance will never become active. Increase balance but do not consume churn
-            apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+            apply_pending_deposit(config, pubkey_cache, state, deposit, trust_all_signatures)?;
         } else if is_validator_exited {
             // > Validator is exiting, postpone the deposit until after withdrawable epoch
             deposits_to_postpone.push(*deposit);
@@ -153,7 +155,7 @@ fn process_pending_deposits<P: Preset>(
             }
 
             processed_amount = processed_amount.try_add(deposit.amount)?;
-            apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+            apply_pending_deposit(config, pubkey_cache, state, deposit, trust_all_signatures)?;
         }
 
         next_deposit_index = next_deposit_index.try_add(1)?;
@@ -607,7 +609,7 @@ mod spec_tests {
 
     fn run_pending_deposits_case<P: Preset>(case: Case) {
         run_case::<P>(case, |pubkey_cache, state| {
-            process_pending_deposits(&P::default_config(), pubkey_cache, state)
+            process_pending_deposits(&P::default_config(), pubkey_cache, state, false)
         });
     }
 
@@ -655,7 +657,8 @@ mod spec_tests {
         };
         let post_option: Option<BeaconState<P>> = case.try_ssz_default("post_epoch");
 
-        let result = process_epoch(&P::default_config(), &pubkey_cache, &mut state).map(|()| state);
+        let result =
+            process_epoch(&P::default_config(), &pubkey_cache, &mut state, false).map(|()| state);
 
         if let Some(expected_post) = post_option {
             let actual_post = result.expect("epoch processing should succeed");

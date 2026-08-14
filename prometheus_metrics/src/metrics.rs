@@ -200,6 +200,14 @@ pub struct Metrics {
 
     pub beacon_reorgs_total: IntCounter,
 
+    // Fast Confirmation Rule
+    beacon_fast_confirmation_enabled: IntGauge,
+    beacon_fast_confirmation_confirmed_slot: IntGauge,
+    beacon_fast_confirmation_confirmed_lag_slots: IntGauge,
+    pub beacon_fast_confirmation_advances_total: IntCounter,
+    pub beacon_fast_confirmation_resets_total: IntCounter,
+    pub beacon_fast_confirmation_duration_seconds: Histogram,
+
     beacon_processed_deposits_total: IntGauge,
 
     // Extra EF interop metrics: not available in the docs yet
@@ -896,6 +904,34 @@ impl Metrics {
                 "Total number of chain reorganizations",
             )?,
 
+            // Fast Confirmation Rule
+            beacon_fast_confirmation_enabled: IntGauge::new(
+                "beacon_fast_confirmation_enabled",
+                "1 when the Fast Confirmation Rule is enabled at runtime, 0 otherwise",
+            )?,
+            beacon_fast_confirmation_confirmed_slot: IntGauge::new(
+                "beacon_fast_confirmation_confirmed_slot",
+                "Slot of the most recent block confirmed by the Fast Confirmation Rule",
+            )?,
+            beacon_fast_confirmation_confirmed_lag_slots: IntGauge::new(
+                "beacon_fast_confirmation_confirmed_lag_slots",
+                "Lag in slots between the current store slot and the most recent FCR-confirmed block",
+            )?,
+            beacon_fast_confirmation_advances_total: IntCounter::new(
+                "beacon_fast_confirmation_advances_total",
+                "Total times FCR advanced the confirmed root forward to a descendant",
+            )?,
+            beacon_fast_confirmation_resets_total: IntCounter::new(
+                "beacon_fast_confirmation_resets_total",
+                "Total times FCR changed the confirmed root to a non-descendant (reset to finalized \
+                 or reset+advance after a chain reorg — signals synchrony assumption broken)",
+            )?,
+            beacon_fast_confirmation_duration_seconds: Histogram::with_opts(histogram_opts!(
+                "beacon_fast_confirmation_duration_seconds",
+                "Time to run a single Fast Confirmation Rule pass (update_variables + get_latest_confirmed)",
+                vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0]
+            ))?,
+
             beacon_processed_deposits_total: IntGauge::new(
                 "beacon_processed_deposits_total",
                 "Total number of deposits processed",
@@ -1187,6 +1223,20 @@ impl Metrics {
         default_registry.register(Box::new(self.beacon_previous_justified_epoch.clone()))?;
         default_registry.register(Box::new(self.beacon_current_active_validators.clone()))?;
         default_registry.register(Box::new(self.beacon_reorgs_total.clone()))?;
+        default_registry.register(Box::new(self.beacon_fast_confirmation_enabled.clone()))?;
+        default_registry.register(Box::new(
+            self.beacon_fast_confirmation_confirmed_slot.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.beacon_fast_confirmation_confirmed_lag_slots.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.beacon_fast_confirmation_advances_total.clone(),
+        ))?;
+        default_registry.register(Box::new(self.beacon_fast_confirmation_resets_total.clone()))?;
+        default_registry.register(Box::new(
+            self.beacon_fast_confirmation_duration_seconds.clone(),
+        ))?;
         default_registry.register(Box::new(self.beacon_processed_deposits_total.clone()))?;
         default_registry.register(Box::new(
             self.beacon_participation_prev_epoch_active_gwei_total
@@ -1512,6 +1562,21 @@ impl Metrics {
     pub fn set_beacon_current_active_validators(&self, validator_count: usize) {
         self.beacon_current_active_validators
             .set(validator_count as i64);
+    }
+
+    pub fn set_beacon_fast_confirmation_enabled(&self, enabled: bool) {
+        self.beacon_fast_confirmation_enabled
+            .set(i64::from(enabled));
+    }
+
+    pub fn set_beacon_fast_confirmation_confirmed_slot(&self, slot: Slot) {
+        self.beacon_fast_confirmation_confirmed_slot
+            .set(slot as i64);
+    }
+
+    pub fn set_beacon_fast_confirmation_confirmed_lag_slots(&self, lag: u64) {
+        self.beacon_fast_confirmation_confirmed_lag_slots
+            .set(lag as i64);
     }
 
     pub fn set_beacon_processed_deposits_total(&self, total_deposits: u64) {

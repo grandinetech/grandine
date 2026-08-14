@@ -38,7 +38,7 @@ use scc::HashMap as SccHashMap;
 use ssz::{BitVector, ContiguousList, ProgressiveList, SszHash as _, SszList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
-use tracing::{debug_span, instrument};
+use tracing::{debug, debug_span, instrument};
 use transition_functions::{
     combined,
     unphased::{self, ProcessSlots, StateRootPolicy},
@@ -90,6 +90,7 @@ use crate::{
     data_column_cache::DataColumnCache,
     error::Error,
     execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
+    fast_confirmation,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,
         AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
@@ -1646,7 +1647,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     /// This should never return `None` in normal operation, but the reasons for that are slightly
     /// different at each call site, so we call `Option::expect` every time we use this instead of
     /// changing the type.
-    fn ancestor(&self, descendant_root: H256, ancestor_slot: Slot) -> Option<H256> {
+    pub fn ancestor(&self, descendant_root: H256, ancestor_slot: Slot) -> Option<H256> {
         if let Some(location) = self.unfinalized_locations.get(&descendant_root).copied() {
             let descendant_segment = &self.unfinalized[&location.segment_id];
 
@@ -1739,6 +1740,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.checkpoint_states.get(&checkpoint)
     }
 
+    pub const fn pubkey_cache(&self) -> &Arc<PubkeyCache> {
+        &self.pubkey_cache
+    }
+
     pub fn insert_checkpoint_state(&mut self, checkpoint: Checkpoint, state: Arc<BeaconState<P>>) {
         self.checkpoint_states
             .insert(checkpoint, state)
@@ -1746,14 +1751,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 "the state corresponding to a particular checkpoint should only be inserted once; \
                  the mutator should only spawn one CheckpointStateTask per checkpoint",
             )
-    }
-
-    /// [`get_safe_execution_payload_hash`](https://github.com/ethereum/consensus-specs/blob/v1.3.0/fork_choice/safe-block.md#get_safe_execution_payload_hash)
-    #[must_use]
-    pub fn safe_execution_payload_hash(&self) -> ExecutionBlockHash {
-        self.justified_chain_link()
-            .map(Self::checkpoint_execution_payload_hash)
-            .unwrap_or_default()
     }
 
     // In Post-Gloas phases, block being finalized does not guarantee that the block hash in payload bid
@@ -2478,7 +2475,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let selection_proof = message.selection_proof();
         let aggregate = Arc::new(message.aggregate());
 
-        match self.validate_attestation_internal(&aggregate, false)? {
+        match self.validate_attestation_internal(&aggregate, false, true)? {
             PartialAttestationAction::Accept => {}
             PartialAttestationAction::Ignore => {
                 return Ok(AggregateAndProofAction::Ignore);
@@ -2591,7 +2588,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let public_key = &target_state.validators().get(aggregator_index)?.pubkey;
 
-        if !signature_validated && origin.verify_signatures() {
+        if !signature_validated
+            && !self.store_config.trust_all_signatures
+            && origin.verify_signatures()
+        {
             let chain_config = &self.chain_config;
             let pubkey = self.pubkey_cache.get_or_insert(*public_key)?;
 
@@ -2620,7 +2620,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let attesting_indices = self.attesting_indices(
             &target_state,
             &aggregate,
-            !signature_validated && origin.verify_signatures(),
+            !signature_validated
+                && !self.store_config.trust_all_signatures
+                && origin.verify_signatures(),
         )?;
 
         // > This is the first valid aggregate for this aggregator in this epoch
@@ -2644,9 +2646,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         attestation: AttestationItem<P, I>,
         skip_signatures_verification: bool,
     ) -> Result<AttestationAction<P, I>, AttestationValidationError<P, I>> {
-        match self
-            .validate_attestation_internal(&attestation.item, attestation.origin.is_from_block())
-        {
+        match self.validate_attestation_internal(
+            &attestation.item,
+            attestation.origin.is_from_block(),
+            attestation.origin.must_be_singular(),
+        ) {
             Ok(PartialAttestationAction::Accept) => {}
             Ok(PartialAttestationAction::Ignore) => {
                 return Ok(AttestationAction::Ignore(attestation));
@@ -2799,7 +2803,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let attesting_indices = match self.attesting_indices(
             &target_state,
             &attestation.item,
-            !skip_signatures_verification && attestation.origin.verify_signatures(),
+            !skip_signatures_verification
+                && !self.store_config.trust_all_signatures
+                && attestation.origin.verify_signatures(),
         ) {
             Ok(indices) => indices,
             Err(source) => {
@@ -2839,6 +2845,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &self,
         attestation: &Arc<Attestation<P>>,
         is_from_block: bool,
+        require_single_committee: bool,
     ) -> Result<PartialAttestationAction> {
         let AttestationData {
             slot,
@@ -2878,16 +2885,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     }
                 );
 
-                if let Attestation::Electra(electra_attestation) = attestation.as_ref() {
-                    let committee_indices =
-                        misc::get_committee_indices::<P>(electra_attestation.committee_bits);
+                if require_single_committee {
+                    if let Attestation::Electra(electra_attestation) = attestation.as_ref() {
+                        let committee_indices =
+                            misc::get_committee_indices::<P>(electra_attestation.committee_bits);
 
-                    ensure!(
-                        committee_indices.count() == 1,
-                        Error::AttestationFromMultipleCommittees {
-                            attestation: attestation.clone_arc()
-                        }
-                    );
+                        ensure!(
+                            committee_indices.count() == 1,
+                            Error::AttestationFromMultipleCommittees {
+                                attestation: attestation.clone_arc()
+                            }
+                        );
+                    }
                 }
             }
 
@@ -3106,7 +3115,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Result<Vec<ValidatorIndex>> {
         match attester_slashing {
             AttesterSlashing::Phase0(attester_slashing) => {
-                if origin.verify_signatures() {
+                if origin.verify_signatures() && !self.store_config.trust_all_signatures {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
                         &self.pubkey_cache,
@@ -3124,7 +3133,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             }
             AttesterSlashing::Electra(attester_slashing) => {
-                if origin.verify_signatures() {
+                if origin.verify_signatures() && !self.store_config.trust_all_signatures {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
                         &self.pubkey_cache,
@@ -3142,7 +3151,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 }
             }
             AttesterSlashing::Gloas(attester_slashing) => {
-                if origin.verify_signatures() {
+                if origin.verify_signatures() && !self.store_config.trust_all_signatures {
                     unphased::validate_attester_slashing(
                         &self.chain_config,
                         &self.pubkey_cache,
@@ -3947,7 +3956,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        if origin.verify_signatures() {
+        if origin.verify_signatures() && !self.store_config.trust_all_signatures {
             // Verify signature with proposer key if proposer choose to self-build
             let pubkey = if builder_index == BUILDER_INDEX_SELF_BUILD {
                 *accessors::public_key(&state, block.message().proposer_index())?
@@ -4069,7 +4078,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let attesting_indices_positions = match self.attesting_indices_positions(
             &state,
             &payload_attestation.item,
-            !skip_signatures_verification && payload_attestation.origin.verify_signatures(),
+            !skip_signatures_verification
+                && !self.store_config.trust_all_signatures
+                && payload_attestation.origin.verify_signatures(),
         ) {
             Ok(indices) => indices,
             Err(source) => {
@@ -5828,7 +5839,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.head_segment_id = best.map(|(_, segment_id)| segment_id);
     }
 
-    fn active_balances(state: &BeaconState<P>) -> Arc<[Gwei]> {
+    pub(crate) fn active_balances(state: &BeaconState<P>) -> Arc<[Gwei]> {
         let epoch = accessors::get_current_epoch(state);
 
         state
@@ -6626,5 +6637,419 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             "timely_payloads",
             self.timely_payloads.len(),
         );
+    }
+
+    /// Sums active balances of equivocating validators whose committee assignments fall in `from_slot..=to_slot`.
+    ///
+    /// Roughly corresponds to [`get_equivocation_score`] from the Fast Confirmation specification.
+    /// Per spec `get_slot_committee` (line 240), committees come from `store.block_states[head]`
+    /// — the head state — not from the FCR balance source. `fcr_slot_committee_participants`
+    /// handles both the standard `±1`-epoch range and the `current_epoch − 2` reconfirmation
+    /// case via its randao-mixes fallback.
+    ///
+    /// [`get_equivocation_score`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/phase0/fast-confirmation.md#get_equivocation_score
+    fn fcr_get_equivocation_score(
+        &self,
+        from_slot: Slot,
+        to_slot: Slot,
+        active_balances: &[Gwei],
+    ) -> Gwei {
+        let head_state = self.head().state(self);
+        let mut eq_set: StdHashSet<ValidatorIndex> = StdHashSet::new();
+        for s in from_slot..=to_slot {
+            for vi in fast_confirmation::fcr_slot_committee_participants::<P>(&head_state, s) {
+                if self.equivocating_indices.contains(&vi) {
+                    eq_set.insert(vi);
+                }
+            }
+        }
+        eq_set
+            .iter()
+            .filter_map(|&i| {
+                let idx = usize::try_from(i).ok()?;
+                active_balances.get(idx).copied()
+            })
+            .filter(|&b| b > 0)
+            .sum()
+    }
+
+    /// Sums active balances of validators whose latest message descends through `root` at `slot`.
+    ///
+    /// Roughly corresponds to [`get_attestation_score`] from the Fork Choice specification.
+    ///
+    /// [`get_attestation_score`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/phase0/fork-choice.md#get_attestation_score
+    fn fcr_get_attestation_score(&self, root: H256, slot: Slot, active_balances: &[Gwei]) -> Gwei {
+        self.latest_messages
+            .iter()
+            .enumerate()
+            .filter_map(|(i, msg_opt)| {
+                let msg = msg_opt.as_ref()?;
+                let balance = *active_balances.get(i)?;
+                if balance == 0 {
+                    return None;
+                }
+                if self.equivocating_indices.contains(&(i as ValidatorIndex)) {
+                    return None;
+                }
+                if !self.contains_block(msg.root) {
+                    return None;
+                }
+                let anc = self.ancestor(msg.root, slot)?;
+                if anc != root {
+                    return None;
+                }
+                Some(balance)
+            })
+            .sum()
+    }
+
+    /// Pre-computes the empty-slot support discount for a block; returns 0 when `parent_slot + 1 == slot`.
+    ///
+    /// Roughly corresponds to [`compute_empty_slot_support_discount`] from the Fast Confirmation specification.
+    ///
+    /// [`compute_empty_slot_support_discount`]: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/phase0/fast-confirmation.md#compute_empty_slot_support_discount
+    fn fcr_precompute_support_discount(
+        &self,
+        parent_slot: Slot,
+        slot: Slot,
+        parent_root: H256,
+        active_balances: &[Gwei],
+        total_active_balance: Gwei,
+    ) -> Gwei {
+        if parent_slot + 1 == slot {
+            return 0;
+        }
+
+        let empty_start = parent_slot + 1;
+        let empty_end = slot - 1;
+
+        // spec `get_block_support_between_slots` collects participants from the head state's
+        // shuffling (spec line 240: `shuffling_source = store.block_states[head]`), not from
+        // the balance source. `fcr_slot_committee_participants` mirrors pyspec
+        // `get_beacon_committee` and additionally serves `current_epoch − 2` lookups via the
+        // randao-mixes fallback path required by the empty-slot reconfirmation spec note.
+        let head_state = self.head().state(self);
+        let mut participants: StdHashSet<ValidatorIndex> = StdHashSet::new();
+        for s in empty_start..=empty_end {
+            participants.extend(fast_confirmation::fcr_slot_committee_participants::<P>(
+                &head_state,
+                s,
+            ));
+        }
+        let parent_support_in_empty: Gwei = participants
+            .iter()
+            .filter_map(|&i| {
+                let idx = usize::try_from(i).ok()?;
+                let balance = *active_balances.get(idx)?;
+                if balance == 0 {
+                    return None;
+                }
+                if self.equivocating_indices.contains(&i) {
+                    return None;
+                }
+                let msg = self.latest_messages.get(idx)?.as_ref()?;
+                if msg.root != parent_root {
+                    return None;
+                }
+                Some(balance)
+            })
+            .sum();
+
+        let empty_committee_weight = fast_confirmation::estimate_committee_weight_between_slots::<P>(
+            total_active_balance,
+            empty_start,
+            empty_end,
+        );
+        let empty_equivocation: Gwei = if self.equivocating_indices.is_empty() {
+            0
+        } else {
+            self.fcr_get_equivocation_score(empty_start, empty_end, active_balances)
+        };
+        let adv_empty = fast_confirmation::compute_adversarial_weight(
+            empty_committee_weight,
+            empty_equivocation,
+            self.chain_config.confirmation_byzantine_threshold,
+        );
+        parent_support_in_empty.saturating_sub(adv_empty)
+    }
+
+    /// Builds per-block pre-computed data for the chain from `terminal_root` (exclusive)
+    /// to `block_root` (inclusive), oldest-first.
+    ///
+    /// This is the single O(validators) pre-computation pass. It stays on `Store`
+    /// because it needs `self.latest_messages`, `self.equivocating_indices`,
+    /// `self.checkpoint_states`, and `accessors::beacon_committees`.
+    ///
+    /// `previous_slot_head` is the `FastConfirmationStore::previous_slot_head` value, passed in
+    /// explicitly so this helper carries no FCR state of its own.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Single-pass O(validators) pre-computation; splitting would require reading the \
+                  same state twice."
+    )]
+    pub(crate) fn fcr_build_chain_info(
+        &self,
+        previous_slot_head: H256,
+        block_root: H256,
+        terminal_root: H256,
+        active_balances: &[Gwei],
+        total_active_balance: Gwei,
+    ) -> Vec<fast_confirmation::ChainInfo> {
+        // Collect ancestor chain oldest-first (terminal exclusive, block_root inclusive)
+        let terminal_slot = match self.chain_link(terminal_root) {
+            Some(cl) => cl.slot(),
+            None => {
+                debug!(?terminal_root, "FCR: terminal root not found in store");
+                return vec![];
+            }
+        };
+
+        let mut roots = Vec::new();
+        let mut current = block_root;
+        loop {
+            let Some(cl) = self.chain_link(current) else {
+                debug!(
+                    ?current,
+                    "FCR: ancestor not found in store while building chain"
+                );
+                return vec![];
+            };
+            if cl.slot() <= terminal_slot {
+                debug!(
+                    slot = cl.slot(),
+                    terminal_slot, "FCR: chain reached terminal slot"
+                );
+                return vec![];
+            }
+            roots.push(current);
+            let parent = cl.block.message().parent_root();
+            if parent == terminal_root {
+                roots.reverse();
+                break;
+            }
+            current = parent;
+        }
+
+        let current_slot = self.slot();
+        let current_epoch = self.current_epoch();
+        let proposer_score_boost = self.chain_config.proposer_score_boost;
+        let end_slot = if current_slot > 0 {
+            current_slot - 1
+        } else {
+            0
+        };
+
+        roots
+            .into_iter()
+            .filter_map(|root| {
+                let cl = self.chain_link(root)?;
+                let slot = cl.slot();
+                let parent_root = cl.block.message().parent_root();
+                let parent_slot = match self.chain_link(parent_root) {
+                    Some(cl) => cl.slot(),
+                    None => {
+                        debug!(
+                            ?root,
+                            ?parent_root,
+                            "FCR: parent not in store mid-chain, skipping block"
+                        );
+                        return None;
+                    }
+                };
+                let epoch = misc::compute_epoch_at_slot::<P>(slot);
+                let parent_epoch = misc::compute_epoch_at_slot::<P>(parent_slot);
+
+                // Spec `get_voting_source(store, block_root)`:
+                //   - block from prior epoch  → store.unrealized_justifications[block_root]
+                //   - block from current epoch → store.block_states[block_root].current_justified_checkpoint
+                // The current-epoch branch uses the BLOCK'S OWN state, not the store's global
+                // justified checkpoint. The two diverge on competing forks where the store has
+                // already absorbed a higher justification from a different chain.
+                let voting_source_epoch = fast_confirmation::get_voting_source_epoch(
+                    epoch,
+                    current_epoch,
+                    cl.unrealized_justified_checkpoint.epoch,
+                    cl.current_justified_checkpoint.epoch,
+                );
+
+                let seen_by_prev_head = self
+                    .ancestor(previous_slot_head, slot)
+                    .is_some_and(|a| a == root);
+
+                // spec: get_attestation_score
+                let support = self.fcr_get_attestation_score(root, slot, active_balances);
+
+                // Adversarial slot range start: epoch start if block crosses epoch boundary
+                let adv_start_slot = if epoch > parent_epoch {
+                    misc::compute_start_slot_at_epoch::<P>(epoch)
+                } else {
+                    slot
+                };
+
+                let committee_weight = if current_slot > 0 {
+                    fast_confirmation::estimate_committee_weight_between_slots::<P>(
+                        total_active_balance,
+                        parent_slot + 1,
+                        end_slot,
+                    )
+                } else {
+                    0
+                };
+
+                let adv_committee_weight = if current_slot > 0 {
+                    fast_confirmation::estimate_committee_weight_between_slots::<P>(
+                        total_active_balance,
+                        adv_start_slot,
+                        end_slot,
+                    )
+                } else {
+                    0
+                };
+
+                // spec: get_equivocation_score for adv_start..=end_slot
+                let adversarial: Gwei = if current_slot > 0 && !self.equivocating_indices.is_empty()
+                {
+                    self.fcr_get_equivocation_score(adv_start_slot, end_slot, active_balances)
+                } else {
+                    0
+                };
+
+                let proposer_score = fast_confirmation::compute_proposer_score::<P>(
+                    total_active_balance,
+                    proposer_score_boost,
+                );
+
+                // spec: compute_empty_slot_support_discount
+                let support_discount: Gwei = self.fcr_precompute_support_discount(
+                    parent_slot,
+                    slot,
+                    parent_root,
+                    active_balances,
+                    total_active_balance,
+                );
+
+                Some(fast_confirmation::ChainInfo {
+                    block_root: root,
+                    epoch,
+                    voting_source_epoch,
+                    seen_by_prev_head,
+                    support,
+                    adversarial,
+                    committee_weight,
+                    adv_committee_weight,
+                    proposer_score,
+                    support_discount,
+                    // Per the optimistic sync spec, a block must have VALID payload to be confirmable.
+                    // In test mode (trust_all_signatures), the mock EL never responds, so blocks
+                    // stay Optimistic indefinitely. Treat them as valid to allow FCR spec tests to run.
+                    is_valid: !cl.is_optimistic() || self.store_config.trust_all_signatures,
+                    byzantine_threshold: self.chain_config.confirmation_byzantine_threshold,
+                })
+            })
+            .collect()
+    }
+
+    /// Builds `FcrFfgData` from the per-slot FFG cache and current store state.
+    ///
+    /// `get_current_target_score` stays here because it requires `self.latest_messages`
+    /// and `self.ancestor()`.
+    ///
+    /// The two snapshot params mirror `FastConfirmationStore` fields, passed in explicitly so
+    /// this helper carries no FCR state of its own.
+    pub(crate) fn fcr_build_ffg_data(
+        &self,
+        honest_ffg_support: Gwei,
+        active_balances: &[Gwei],
+        total_active_balance: Gwei,
+    ) -> fast_confirmation::FcrFfgData {
+        let current_slot = self.slot();
+        let current_epoch = self.current_epoch();
+        let epoch_start = misc::compute_start_slot_at_epoch::<P>(current_epoch);
+
+        let head = self.head();
+
+        // current_target for the spec shortcut in will_no_conflicting_checkpoint_be_justified
+        let current_target = self
+            .ancestor(head.block_root, epoch_start)
+            .map(|root| Checkpoint {
+                epoch: current_epoch,
+                root,
+            });
+
+        // spec: get_current_target_score — stays on Store (needs latest_messages + ancestor)
+        let current_target_root = current_target.map(|cp| cp.root);
+        let current_target_score: Gwei = current_target_root
+            .map(|target_root| {
+                self.latest_messages
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, msg_opt)| {
+                        let msg = msg_opt.as_ref()?;
+                        let balance = *active_balances.get(i)?;
+                        if balance == 0 {
+                            return None;
+                        }
+                        if self.equivocating_indices.contains(&(i as ValidatorIndex)) {
+                            return None;
+                        }
+                        if misc::compute_epoch_at_slot::<P>(msg.slot) != current_epoch {
+                            return None;
+                        }
+                        if !self.contains_block(msg.root) {
+                            return None;
+                        }
+                        let vote_target = self.ancestor(msg.root, epoch_start)?;
+                        if vote_target != target_root {
+                            return None;
+                        }
+                        Some(balance)
+                    })
+                    .sum()
+            })
+            .unwrap_or(0);
+
+        let ffg_weight_till_now = if current_slot > 0 {
+            fast_confirmation::estimate_committee_weight_between_slots::<P>(
+                total_active_balance,
+                epoch_start,
+                current_slot - 1,
+            )
+        } else {
+            0
+        };
+
+        // spec `compute_adversarial_weight(store, balance_source, epoch_start, current_slot − 1)`:
+        // always returns `max_adversarial − equivocation_score` (saturated at 0), regardless of
+        // whether any validators have equivocated. The equivocation lookup goes through the
+        // head-state-based committee accessor (spec `get_slot_committee` uses
+        // `store.block_states[head]`).
+        let adversarial_this_epoch: Gwei = if current_slot > 0 {
+            let adv_weight = fast_confirmation::estimate_committee_weight_between_slots::<P>(
+                total_active_balance,
+                epoch_start,
+                current_slot - 1,
+            );
+            let max_adversarial =
+                adv_weight / 100 * self.chain_config.confirmation_byzantine_threshold;
+            let eq_score = if self.equivocating_indices.is_empty() {
+                0
+            } else {
+                self.fcr_get_equivocation_score(epoch_start, current_slot - 1, active_balances)
+            };
+            max_adversarial.saturating_sub(eq_score)
+        } else {
+            0
+        };
+
+        fast_confirmation::FcrFfgData {
+            honest_ffg_support,
+            total_active_balance,
+            unrealized_justified_checkpoint: self.unrealized_justified_checkpoint,
+            current_target,
+            current_target_score,
+            ffg_weight_till_now,
+            adversarial_this_epoch,
+            byzantine_threshold: self.chain_config.confirmation_byzantine_threshold,
+        }
     }
 }

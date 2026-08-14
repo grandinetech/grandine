@@ -74,6 +74,10 @@ pub trait Verifier {
     fn finish(&self) -> Result<()>;
 
     fn has_option(&self, option: VerifierOption) -> bool;
+
+    fn trust_all_signatures(&self) -> bool {
+        Self::IS_NULL
+    }
 }
 
 impl<V: Verifier> Verifier for &mut V {

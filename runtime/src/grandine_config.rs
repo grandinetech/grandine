@@ -80,6 +80,7 @@ pub struct GrandineConfig {
     pub report_validator_performance: bool,
     pub backfill_custody_groups: bool,
     pub sync_without_reconstruction: bool,
+    pub fast_confirmation_rule: bool,
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
 }

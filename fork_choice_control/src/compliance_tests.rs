@@ -161,11 +161,9 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
         anchor_block,
         anchor_state,
         false,
-        // Use a single worker thread to serialise task execution. Two same-slot blocks are delayed in
-        // the proposer equivocation case; only the first received gets the boost. In production the
-        // race is inconsequential, but compliance tests assert a specific proposer_boost_root so the
-        // retry order of delayed blocks must be deterministic.
-        Some(1),
+        false,
+        false,
+        false,
     );
 
     let mut last_payload_status: Option<PayloadStatusWithBlockHash> = None;

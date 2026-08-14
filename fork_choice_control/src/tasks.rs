@@ -115,19 +115,32 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
         let block_slot = block.item.message().slot();
         let block_root = block.item.message().hash_tree_root();
 
+        let trust_all_signatures = store_snapshot.store_config().trust_all_signatures;
+
         let result = match origin {
             BlockOrigin::Gossip(_) | BlockOrigin::Requested(_) | BlockOrigin::Api(_) => {
-                block_processor.validate_block(
-                    &store_snapshot,
-                    block,
-                    origin.state_root_policy(),
-                    origin.data_availability_policy(),
-                    execution_engine,
-                    MultiVerifier::default(),
-                )
+                if trust_all_signatures {
+                    block_processor.validate_block(
+                        &store_snapshot,
+                        block,
+                        origin.state_root_policy(),
+                        origin.data_availability_policy(),
+                        execution_engine,
+                        NullVerifier,
+                    )
+                } else {
+                    block_processor.validate_block(
+                        &store_snapshot,
+                        block,
+                        origin.state_root_policy(),
+                        origin.data_availability_policy(),
+                        execution_engine,
+                        MultiVerifier::default(),
+                    )
+                }
             }
             BlockOrigin::Own => {
-                if Feature::TrustOwnBlockSignatures.is_enabled() {
+                if trust_all_signatures || Feature::TrustOwnBlockSignatures.is_enabled() {
                     block_processor.validate_block(
                         &store_snapshot,
                         block,

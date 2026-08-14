@@ -168,6 +168,39 @@ pub fn block_justifying_current_epoch<P: Preset>(
     )
 }
 
+/// Creates a block at `block_slot` that includes attestations for the given `attestation_slots`.
+///
+/// Unlike [`block_justifying_current_epoch`], the caller controls both the block slot and the
+/// range of slots for which attestations are included. This is useful for tests that need to
+/// justify an epoch with a block that is not at the last slot of the epoch (for example, when
+/// the GU snapshot in FCR must be taken at a specific slot).
+pub fn block_with_attestations_for_slots<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    pre_state: Arc<BeaconState<P>>,
+    block_slot: Slot,
+    attestation_slots: Range<Slot>,
+    graffiti: H256,
+) -> Result<BlockWithState<P>> {
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, block_slot)?;
+    let eth1_data = advanced_state.eth1_data();
+    let attestations = full_block_attestations(config, &advanced_state, attestation_slots)?;
+    let deposits = ContiguousList::default();
+    let sync_aggregate = SyncAggregate::empty();
+
+    block(
+        config,
+        pubkey_cache,
+        advanced_state,
+        eth1_data,
+        graffiti,
+        attestations,
+        deposits,
+        sync_aggregate,
+        None,
+    )
+}
+
 pub fn block_with_deposits<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,

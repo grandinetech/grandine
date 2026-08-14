@@ -24,8 +24,8 @@ use execution_engine::{ExecutionEngine, PayloadStatusV1};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, AttestationOrigin, AttesterSlashingOrigin,
     BlobSidecarOrigin, BlockItem, BlockOrigin, DataColumnSidecarOrigin, ExecutionPayloadBidOrigin,
-    ExecutionPayloadEnvelopeOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
-    ProposerPreferencesOrigin, StateCacheProcessor, Store, StoreConfig,
+    ExecutionPayloadEnvelopeOrigin, FastConfirmationStore, PayloadAttestationItem,
+    PayloadAttestationOrigin, ProposerPreferencesOrigin, StateCacheProcessor, Store, StoreConfig,
 };
 use futures::channel::{mpsc::Sender as MultiSender, oneshot::Sender as OneshotSender};
 use genesis::AnchorCheckpointProvider;
@@ -87,6 +87,8 @@ use crate::{
 pub struct Controller<P: Preset, E, A, W: Wait> {
     // The latest consistent snapshot of the store.
     store_snapshot: Arc<ArcSwap<Store<P, Storage<P>>>>,
+    // The latest consistent snapshot of the Fast Confirmation Rule store (None when FCR is disabled).
+    fcr_snapshot: Arc<ArcSwap<Option<FastConfirmationStore<P>>>>,
     block_processor: Arc<BlockProcessor<P>>,
     execution_engine: E,
     pubkey_cache: Arc<PubkeyCache>,
@@ -156,6 +158,17 @@ where
 
         store.apply_tick(tick)?;
 
+        // Instantiate the Fast Confirmation Rule store iff the feature is enabled. Per spec
+        // `get_fast_confirmation_store`, it anchors at `store.finalized_checkpoint`.
+        let fcr_store = store
+            .store_config()
+            .fast_confirmation_rule
+            .then(|| FastConfirmationStore::new(&store));
+        if let Some(metrics) = metrics.as_ref() {
+            metrics.set_beacon_fast_confirmation_enabled(fcr_store.is_some());
+        }
+        let fcr_snapshot = Arc::new(ArcSwap::from_pointee(fcr_store));
+
         let state_cache = store.state_cache();
         let store_snapshot = Arc::new(ArcSwap::from_pointee(store));
         let thread_pool =
@@ -174,6 +187,7 @@ where
         let mut mutator = Mutator::new(
             pubkey_cache.clone_arc(),
             store_snapshot.clone_arc(),
+            fcr_snapshot.clone_arc(),
             state_cache.clone_arc(),
             block_processor.clone_arc(),
             event_channels,
@@ -208,6 +222,7 @@ where
 
         let controller = Arc::new(Self {
             store_snapshot,
+            fcr_snapshot,
             block_processor,
             execution_engine,
             pubkey_cache,
@@ -281,6 +296,16 @@ where
                 metrics.set_beacon_clock_slot(tick.slot);
             }
         }
+    }
+
+    /// Explicitly triggers one FCR cycle (`on_fast_confirmation`) without a tick event.
+    /// Used in FCR spec tests (`fcr_spec_test_mode = true`) to match the pyspec's model where
+    /// FCR runs exactly once per `checks:` step, not automatically on every slot tick.
+    pub fn run_fast_confirmation(&self) {
+        MutatorMessage::RunFastConfirmation {
+            wait_group: self.owned_wait_group(),
+        }
+        .send(&self.mutator_tx);
     }
 
     pub fn on_back_sync_status(&self, is_back_synced: bool) {
@@ -1090,6 +1115,10 @@ where
 
     pub(crate) fn owned_store_snapshot(&self) -> Arc<Store<P, Storage<P>>> {
         self.store_snapshot.load_full()
+    }
+
+    pub(crate) fn fcr_snapshot(&self) -> Guard<Arc<Option<FastConfirmationStore<P>>>> {
+        self.fcr_snapshot.load()
     }
 
     pub(crate) fn owned_storage(&self) -> Arc<Storage<P>> {

@@ -8,7 +8,7 @@ use execution_engine::ExecutionEngine;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeAction,
-    ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadEnvelopeOrigin, FastConfirmationStore, StateCacheProcessor, Store,
 };
 use futures::Future;
 use helper_functions::{accessors, misc};
@@ -85,6 +85,62 @@ where
     #[must_use]
     pub fn finalized_root(&self) -> H256 {
         self.store_snapshot().finalized_root()
+    }
+
+    /// Returns the current FCR-confirmed block root when the Fast Confirmation Rule is enabled.
+    /// Returns `None` when FCR is disabled — there is no "confirmed root" concept outside
+    /// the FCR context.
+    #[must_use]
+    pub fn confirmed_root(&self) -> Option<H256> {
+        self.fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(FastConfirmationStore::confirmed_root)
+    }
+
+    /// Returns the FCR `previous_epoch_observed_justified_checkpoint` when FCR is enabled.
+    #[must_use]
+    pub fn fcr_previous_epoch_observed_justified_checkpoint(&self) -> Option<Checkpoint> {
+        self.fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(FastConfirmationStore::previous_epoch_observed_justified_checkpoint)
+    }
+
+    /// Returns the FCR `current_epoch_observed_justified_checkpoint` when FCR is enabled.
+    #[must_use]
+    pub fn fcr_current_epoch_observed_justified_checkpoint(&self) -> Option<Checkpoint> {
+        self.fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(FastConfirmationStore::current_epoch_observed_justified_checkpoint)
+    }
+
+    /// Returns the FCR `previous_epoch_greatest_unrealized_checkpoint` when FCR is enabled.
+    #[must_use]
+    pub fn fcr_previous_epoch_greatest_unrealized_checkpoint(&self) -> Option<Checkpoint> {
+        self.fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(FastConfirmationStore::previous_epoch_greatest_unrealized_checkpoint)
+    }
+
+    /// Returns the FCR `previous_slot_head` when FCR is enabled.
+    #[must_use]
+    pub fn fcr_previous_slot_head(&self) -> Option<H256> {
+        self.fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(FastConfirmationStore::previous_slot_head)
+    }
+
+    /// Returns the FCR `current_slot_head` when FCR is enabled.
+    #[must_use]
+    pub fn fcr_current_slot_head(&self) -> Option<H256> {
+        self.fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(FastConfirmationStore::current_slot_head)
     }
 
     #[must_use]
@@ -235,10 +291,25 @@ where
             })
             .collect();
 
+        let extra_data = self
+            .fcr_snapshot()
+            .as_ref()
+            .as_ref()
+            .map(|fcr| FcrExtraData {
+                confirmed_root: fcr.confirmed_root(),
+                current_epoch_observed_justified_checkpoint: fcr
+                    .current_epoch_observed_justified_checkpoint(),
+                previous_epoch_greatest_unrealized_checkpoint: fcr
+                    .previous_epoch_greatest_unrealized_checkpoint(),
+                previous_slot_head: fcr.previous_slot_head(),
+                current_slot_head: fcr.current_slot_head(),
+            });
+
         ForkChoiceContext {
             justified_checkpoint: store.justified_checkpoint(),
             finalized_checkpoint: store.finalized_checkpoint(),
             fork_choice_nodes,
+            extra_data,
         }
     }
 
@@ -952,6 +1023,7 @@ where
         Snapshot {
             pubkey_cache: self.pubkey_cache().clone_arc(),
             store_snapshot: self.store_snapshot(),
+            fcr_snapshot: self.fcr_snapshot(),
             state_cache: self.state_cache().clone_arc(),
             storage: self.storage(),
         }
@@ -1166,6 +1238,19 @@ pub struct ForkChoiceContext {
     justified_checkpoint: Checkpoint,
     finalized_checkpoint: Checkpoint,
     fork_choice_nodes: Vec<FCNode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_data: Option<FcrExtraData>,
+}
+
+/// FCR internal state exposed on `GET /eth/v1/debug/fork_choice`.
+/// Only serialized when `store_config.fast_confirmation_rule` is enabled.
+#[derive(Serialize)]
+struct FcrExtraData {
+    confirmed_root: H256,
+    current_epoch_observed_justified_checkpoint: Checkpoint,
+    previous_epoch_greatest_unrealized_checkpoint: Checkpoint,
+    previous_slot_head: H256,
+    current_slot_head: H256,
 }
 
 #[derive(Serialize)]
@@ -1222,6 +1307,7 @@ pub struct Snapshot<'storage, P: Preset> {
     // Use a `Guard` instead of an owned snapshot unlike in tasks based on the intuition that
     // `Snapshot`s will be less common than tasks.
     store_snapshot: Guard<Arc<Store<P, Storage<P>>>>,
+    fcr_snapshot: Guard<Arc<Option<FastConfirmationStore<P>>>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: &'storage Storage<P>,
 }
@@ -1333,9 +1419,26 @@ impl<P: Preset> Snapshot<'_, P> {
         self.store_snapshot.is_forward_synced()
     }
 
+    /// Returns the execution payload hash exposed as the `"safe"` tag.
+    ///
+    /// When FCR is enabled, resolves the FCR-confirmed block via `FastConfirmationStore`.
+    /// Otherwise falls back to the justified block's execution payload hash.
+    ///
+    /// Related: <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.9/specs/phase0/fast-confirmation.md>
     #[must_use]
     pub fn safe_execution_payload_hash(&self) -> ExecutionBlockHash {
-        self.store_snapshot.safe_execution_payload_hash()
+        let store = &*self.store_snapshot;
+        let fcr_guard = self.fcr_snapshot.as_ref().as_ref();
+        if let Some(fcr) = fcr_guard {
+            return store
+                .chain_link(fcr.confirmed_root())
+                .and_then(ChainLink::execution_block_hash)
+                .unwrap_or_default();
+        }
+        store
+            .justified_chain_link()
+            .and_then(ChainLink::execution_block_hash)
+            .unwrap_or_default()
     }
 
     #[must_use]

@@ -1310,6 +1310,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         report_validator_performance,
         backfill_custody_groups,
         sync_without_reconstruction,
+        fast_confirmation_rule,
         custody_mode,
         disable_wait_for_late_blocks,
         ..
@@ -1361,6 +1362,9 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         kzg_backend,
         sync_without_reconstruction,
         builder_circuit_breaker,
+        fast_confirmation_rule,
+        trust_all_signatures: false,
+        fcr_spec_test_mode: false,
     };
 
     let eth1_auth = Arc::new(Auth::new(auth_options)?);

@@ -153,6 +153,10 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub reorg_parent_weight_threshold: u64,
 
+    // Fast Confirmation Rule
+    #[serde(with = "serde_utils::string_or_native")]
+    pub confirmation_byzantine_threshold: u64,
+
     // Deposit contract
     #[serde(with = "serde_utils::string_or_native")]
     pub deposit_chain_id: ChainId,
@@ -305,6 +309,9 @@ impl Default for Config {
             reorg_head_weight_threshold: 20,
             reorg_max_epochs_since_finalization: 2,
             reorg_parent_weight_threshold: 160,
+
+            // Fast Confirmation Rule
+            confirmation_byzantine_threshold: 25,
 
             // Deposit contract
             deposit_chain_id: 0,
