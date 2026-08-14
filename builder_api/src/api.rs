@@ -108,6 +108,7 @@ pub struct Api {
     metrics: Option<Arc<Metrics>>,
     supports_block_ssz: ArcSwap<Option<bool>>,
     supports_validators_ssz: ArcSwap<Option<bool>>,
+    supports_bid_ssz: ArcSwap<Option<bool>>,
 }
 
 impl Api {
@@ -125,6 +126,7 @@ impl Api {
             metrics,
             supports_block_ssz: ArcSwap::from_pointee(None),
             supports_validators_ssz: ArcSwap::from_pointee(None),
+            supports_bid_ssz: ArcSwap::from_pointee(None),
         }
     }
 
@@ -526,59 +528,59 @@ impl Api {
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         ))?;
 
-        let (_, remaining_time) =
-            clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
-        // Integer milliseconds: X-Timeout-Ms and reqwest timeout must be the same value.
-        // See <https://github.com/ethereum/builder-specs/pull/165>.
-        let timeout_ms =
-            u64::try_from(REQUEST_TIMEOUT.min(remaining_time).as_millis()).unwrap_or(u64::MAX);
+        let use_json = self.config.builder_api_format == BuilderApiFormat::Json
+            || self
+                .supports_bid_ssz
+                .load()
+                .is_some_and(|supported| !supported);
 
-        // Bid fetch is on the proposal hot path. Do not wait past the next interval;
-        // still cap at BUILDER_PROPOSAL_DELAY_TOLERANCE.
-        if timeout_ms == 0 {
+        let Some(mut response) = self
+            .send_execution_payload_bid::<P>(
+                chain_config,
+                genesis_time,
+                &url,
+                phase,
+                signed_request_auth,
+                use_json,
+            )
+            .await?
+        else {
             info_with_peers!(
                 "skipping execution payload bid request for slot {slot}: \
                  no time remaining before next interval"
             );
             return Ok(None);
-        }
-
-        let timeout = Duration::from_millis(timeout_ms);
-        let use_json = self.config.builder_api_format == BuilderApiFormat::Json;
-
-        debug_with_peers!(
-            "getting execution payload bid from {url} with timeout of {timeout:?}, \
-             use_json: {use_json}"
-        );
-
-        let date_ms = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|timestamp| timestamp.as_millis())
-            .map_err(|error| anyhow::anyhow!("unable to calculate Date-Milliseconds: {error:?}"))?;
-
-        let request = self
-            .client
-            .post(url.into_url())
-            .timeout(timeout)
-            .header(DATE_MS_HEADER, format!("{date_ms}"))
-            .header(X_TIMEOUT_MS_HEADER, format!("{timeout_ms}"))
-            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
-
-        let request = if use_json {
-            request
-                .header(ACCEPT, APPLICATION_JSON.as_ref())
-                .json(signed_request_auth)
-        } else {
-            request
-                .header(
-                    ACCEPT,
-                    format!("{APPLICATION_OCTET_STREAM};q=1,{APPLICATION_JSON};q=0.9"),
-                )
-                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
-                .body(signed_request_auth.to_ssz()?)
         };
 
-        let response = request.send().await?;
+        // JSON-only builders reject SSZ request bodies with 415. Retry once as JSON.
+        // See <https://github.com/ethereum/builder-specs/pull/165>.
+        if !use_json && response.status() == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            debug_with_peers!(
+                "builder rejected SSZ execution payload bid request, retrying in JSON"
+            );
+            self.supports_bid_ssz.store(Arc::new(Some(false)));
+            let Some(json_response) = self
+                .send_execution_payload_bid::<P>(
+                    chain_config,
+                    genesis_time,
+                    &url,
+                    phase,
+                    signed_request_auth,
+                    true,
+                )
+                .await?
+            else {
+                // Do not report this as "no bid"; the SSZ request failed and we could not retry.
+                handle_error(response).await?;
+                unreachable!("HTTP 415 is a client error");
+            };
+            response = json_response;
+        } else if !use_json
+            && (response.status() == StatusCode::OK || response.status() == StatusCode::NO_CONTENT)
+        {
+            self.supports_bid_ssz.store(Arc::new(Some(true)));
+        }
+
         let response = handle_error(response).await?;
 
         if response.status() == StatusCode::NO_CONTENT {
@@ -756,6 +758,57 @@ impl Api {
         })
     }
 
+    async fn send_execution_payload_bid<P: Preset>(
+        &self,
+        chain_config: &ChainConfig,
+        genesis_time: UnixSeconds,
+        url: &RedactingUrl,
+        phase: Phase,
+        signed_request_auth: &SignedRequestAuth,
+        use_json: bool,
+    ) -> Result<Option<Response>> {
+        let timeout_ms = execution_payload_bid_timeout_ms::<P>(chain_config, genesis_time)?;
+        if timeout_ms == 0 {
+            return Ok(None);
+        }
+
+        let timeout = Duration::from_millis(timeout_ms);
+
+        debug_with_peers!(
+            "getting execution payload bid from {url} with timeout of {timeout:?}, \
+             use_json: {use_json}"
+        );
+
+        let date_ms = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|timestamp| timestamp.as_millis())
+            .map_err(|error| anyhow::anyhow!("unable to calculate Date-Milliseconds: {error:?}"))?;
+
+        let request = self
+            .client
+            .post(url.clone().into_url())
+            .timeout(timeout)
+            .header(DATE_MS_HEADER, format!("{date_ms}"))
+            .header(X_TIMEOUT_MS_HEADER, format!("{timeout_ms}"))
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
+
+        let request = if use_json {
+            request
+                .header(ACCEPT, APPLICATION_JSON.as_ref())
+                .json(signed_request_auth)
+        } else {
+            request
+                .header(
+                    ACCEPT,
+                    format!("{APPLICATION_OCTET_STREAM};q=1,{APPLICATION_JSON};q=0.9"),
+                )
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(signed_request_auth.to_ssz()?)
+        };
+
+        Ok(Some(request.send().await?))
+    }
+
     async fn parse_gloas_response<T: DeserializeOwned + SszRead<Phase>>(
         &self,
         response: Response,
@@ -854,6 +907,15 @@ fn ensure_gloas_phase(phase: Phase) -> Result<()> {
     Ok(())
 }
 
+fn execution_payload_bid_timeout_ms<P: Preset>(
+    chain_config: &ChainConfig,
+    genesis_time: UnixSeconds,
+) -> Result<u64> {
+    let (_, remaining_time) =
+        clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
+    Ok(u64::try_from(REQUEST_TIMEOUT.min(remaining_time).as_millis()).unwrap_or(u64::MAX))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -895,9 +957,13 @@ mod tests {
     ];
 
     fn test_api(builder_url: &str) -> BuilderApi {
+        test_api_with_format(builder_url, BuilderApiFormat::Json)
+    }
+
+    fn test_api_with_format(builder_url: &str, builder_api_format: BuilderApiFormat) -> BuilderApi {
         BuilderApi::new(
             BuilderConfig {
-                builder_api_format: BuilderApiFormat::Json,
+                builder_api_format,
                 builder_api_url: builder_url
                     .parse()
                     .expect("test builder URL should be valid"),
@@ -1471,6 +1537,95 @@ mod tests {
                 } if *bid_parent_root == other_parent_root && *request_parent_root == parent_root
             )
         }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_retries_json_after_ssz_415() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+        let bid = sample_bid(slot, parent_hash, parent_root);
+
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(415).body("ssz not supported");
+        });
+        let json_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_JSON.as_ref());
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        let result = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await?;
+
+        ssz_mock.assert();
+        json_mock.assert();
+        assert!(result.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_does_not_retry_ssz_400_as_json() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(400).body("invalid auth");
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("400 on SSZ should not fall back to JSON");
+
+        ssz_mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
         Ok(())
     }
 
