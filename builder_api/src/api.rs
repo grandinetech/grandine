@@ -500,6 +500,7 @@ impl Api {
     // Full bid validation (signature, builder eligibility, etc.) is deferred to the caller; it
     // needs beacon state. See <https://github.com/ethereum/builder-specs/pull/165>.
     // Request slot / parent_hash / parent_root consistency is checked below.
+    #[expect(clippy::too_many_arguments)]
     pub async fn get_execution_payload_bid<P: Preset>(
         &self,
         chain_config: &ChainConfig,
