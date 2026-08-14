@@ -496,6 +496,7 @@ impl Api {
     pub async fn get_execution_payload_bid<P: Preset>(
         &self,
         chain_config: &ChainConfig,
+        genesis_time: UnixSeconds,
         slot: Slot,
         parent_hash: ExecutionBlockHash,
         parent_root: H256,
@@ -525,9 +526,30 @@ impl Api {
             "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         ))?;
 
+        let (_, remaining_time) =
+            clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
+        // Integer milliseconds: X-Timeout-Ms and reqwest timeout must be the same value.
+        // See <https://github.com/ethereum/builder-specs/pull/165>.
+        let timeout_ms =
+            u64::try_from(REQUEST_TIMEOUT.min(remaining_time).as_millis()).unwrap_or(u64::MAX);
+
+        // Bid fetch is on the proposal hot path. Do not wait past the next interval;
+        // still cap at BUILDER_PROPOSAL_DELAY_TOLERANCE.
+        if timeout_ms == 0 {
+            info_with_peers!(
+                "skipping execution payload bid request for slot {slot}: \
+                 no time remaining before next interval"
+            );
+            return Ok(None);
+        }
+
+        let timeout = Duration::from_millis(timeout_ms);
         let use_json = self.config.builder_api_format == BuilderApiFormat::Json;
 
-        debug_with_peers!("getting execution payload bid from {url}, use_json: {use_json}");
+        debug_with_peers!(
+            "getting execution payload bid from {url} with timeout of {timeout:?}, \
+             use_json: {use_json}"
+        );
 
         let date_ms = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -537,12 +559,9 @@ impl Api {
         let request = self
             .client
             .post(url.into_url())
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(timeout)
             .header(DATE_MS_HEADER, format!("{date_ms}"))
-            .header(
-                X_TIMEOUT_MS_HEADER,
-                format!("{}", REQUEST_TIMEOUT.as_millis()),
-            )
+            .header(X_TIMEOUT_MS_HEADER, format!("{timeout_ms}"))
             .header(ETH_CONSENSUS_VERSION, phase.as_ref());
 
         let request = if use_json {
@@ -1014,7 +1033,7 @@ mod tests {
             when.method(Method::POST)
                 .path(&path)
                 .header("Eth-Consensus-Version", "gloas")
-                .header("X-Timeout-Ms", "1000")
+                .header_exists("X-Timeout-Ms")
                 .header_exists("Date-Milliseconds");
             then.status(200).json_body(json!({
                 "version": "gloas",
@@ -1026,6 +1045,7 @@ mod tests {
         let result = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1056,7 +1076,7 @@ mod tests {
             when.method(Method::POST)
                 .path(&path)
                 .header("Eth-Consensus-Version", "gloas")
-                .header("X-Timeout-Ms", "1000")
+                .header_exists("X-Timeout-Ms")
                 .header_exists("Date-Milliseconds");
             then.status(204);
         });
@@ -1065,6 +1085,7 @@ mod tests {
         let result = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1099,6 +1120,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1130,6 +1152,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &chain_config,
+                genesis_time_now(),
                 1,
                 ExecutionBlockHash::zero(),
                 H256::zero(),
@@ -1159,6 +1182,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 2,
                 ExecutionBlockHash::zero(),
                 H256::zero(),
@@ -1201,6 +1225,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1238,6 +1263,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1272,7 +1298,7 @@ mod tests {
             when.method(Method::POST)
                 .path(&path)
                 .header("Eth-Consensus-Version", "gloas")
-                .header("X-Timeout-Ms", "1000")
+                .header_exists("X-Timeout-Ms")
                 .header_exists("Date-Milliseconds")
                 .json_body_obj(&auth);
             then.status(200).json_body(json!({
@@ -1285,6 +1311,7 @@ mod tests {
         let result = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1324,6 +1351,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1373,6 +1401,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
@@ -1422,6 +1451,7 @@ mod tests {
         let err = api
             .get_execution_payload_bid::<Mainnet>(
                 &gloas_chain_config(),
+                genesis_time_now(),
                 slot,
                 parent_hash,
                 parent_root,
