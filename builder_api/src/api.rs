@@ -972,6 +972,7 @@ mod tests {
         nonstandard::{
             DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
         },
+        phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
         phase0::primitives::H256,
         preset::Mainnet,
     };
@@ -2080,7 +2081,9 @@ mod tests {
         let server = MockServer::start();
         let api = test_api(&server.url("/"));
         let err = api
-            .submit_signed_beacon_block::<Mainnet>(&SignedBeaconBlock::Phase0(Default::default()))
+            .submit_signed_beacon_block::<Mainnet>(&SignedBeaconBlock::Phase0(
+                Phase0SignedBeaconBlock::default(),
+            ))
             .await
             .expect_err("pre-Gloas block should fail before HTTP");
 
