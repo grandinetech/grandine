@@ -20,7 +20,9 @@ use execution_engine::{
 use features::Feature;
 use fork_choice_control::Wait;
 use futures::{
+    future::{self, FutureExt as _},
     lock::Mutex,
+    pin_mut,
     stream::{FuturesOrdered, StreamExt as _},
 };
 use helper_functions::{accessors, misc, predicates};
@@ -112,6 +114,13 @@ const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
 pub type LocalExecutionPayloadJoinHandle<P> =
     JoinHandle<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
+
+type BeaconBlockWithRewards<P> = (WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>);
+type BlindedBlockWithMev<P> = (BlindedBeaconBlock<P>, Option<BlockRewards>, Uint256);
+type ValidatorBlockWithRewards<P> = (
+    WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
+    Option<BlockRewards>,
+);
 
 type PayloadCache<P> =
     Mutex<SizedCache<H256, WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
@@ -878,14 +887,72 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 .await
         });
 
-        let beacon_block_opt = wait_for_result(produce_beacon_block_join_handle).await?;
+        let local_fut = wait_for_result(produce_beacon_block_join_handle);
+        let blinded_fut = wait_for_result(produce_blinded_block_join_handle);
+        pin_mut!(local_fut, blinded_fut);
 
-        info_with_peers!("block producer finished building local option");
+        let prefer_local = self.options.builder_boost_factor == Uint256::ZERO;
 
-        let blinded_block_opt = wait_for_result(produce_blinded_block_join_handle).await?;
+        match future::select(local_fut, blinded_fut).await {
+            future::Either::Left((local_result, blinded_remaining)) => {
+                let beacon_block_opt =
+                    option_from_job_result(local_result, "failed to produce local beacon block");
 
-        info_with_peers!("block producer finished building blinded option");
+                info_with_peers!("block producer finished building local option");
 
+                let blinded_block_opt = option_from_job_result(
+                    blinded_remaining.await,
+                    "failed to produce blinded beacon block",
+                );
+
+                info_with_peers!("block producer finished building blinded option");
+
+                Ok(self.choose_local_or_builder(beacon_block_opt, blinded_block_opt))
+            }
+            future::Either::Right((blinded_result, local_remaining)) => {
+                let blinded_block_opt = option_from_job_result(
+                    blinded_result,
+                    "failed to produce blinded beacon block",
+                );
+
+                info_with_peers!("block producer finished building blinded option");
+
+                if blinded_block_opt.is_none() || prefer_local {
+                    let beacon_block_opt = option_from_job_result(
+                        local_remaining.await,
+                        "failed to produce local beacon block",
+                    );
+
+                    info_with_peers!("block producer finished building local option");
+
+                    return Ok(self.choose_local_or_builder(beacon_block_opt, blinded_block_opt));
+                }
+
+                if let Some(local_result) = local_remaining.now_or_never() {
+                    let beacon_block_opt = option_from_job_result(
+                        local_result,
+                        "failed to produce local beacon block",
+                    );
+
+                    info_with_peers!("block producer finished building local option");
+
+                    return Ok(self.choose_local_or_builder(beacon_block_opt, blinded_block_opt));
+                }
+
+                debug_with_peers!(
+                    "using builder header without waiting for local execution payload"
+                );
+
+                Ok(self.choose_local_or_builder(None, blinded_block_opt))
+            }
+        }
+    }
+
+    fn choose_local_or_builder(
+        &self,
+        beacon_block_opt: Option<BeaconBlockWithRewards<P>>,
+        blinded_block_opt: Option<BlindedBlockWithMev<P>>,
+    ) -> Option<ValidatorBlockWithRewards<P>> {
         match (beacon_block_opt, blinded_block_opt) {
             (
                 Some((beacon_block, beacon_block_rewards)),
@@ -905,25 +972,33 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                              boosted builder MEV: {boosted_builder_mev}, builder_boost_factor: {builder_boost_factor}",
                         );
 
-                        return Ok(Some((
+                        return Some((
                             beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
                             beacon_block_rewards,
-                        )));
+                        ));
                     }
                 }
 
                 let block = ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block);
 
-                Ok(Some((
+                Some((
                     WithBlobsAndMev::new(block, None, None, None, Some(builder_mev), None),
                     blinded_block_rewards,
-                )))
+                ))
             }
-            (Some((beacon_block, beacon_block_rewards)), None) => Ok(Some((
+            (Some((beacon_block, beacon_block_rewards)), None) => Some((
                 beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
                 beacon_block_rewards,
-            ))),
-            _ => Ok(None),
+            )),
+            (None, Some((blinded_block, blinded_block_rewards, builder_mev))) => {
+                let block = ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block);
+
+                Some((
+                    WithBlobsAndMev::new(block, None, None, None, Some(builder_mev), None),
+                    blinded_block_rewards,
+                ))
+            }
+            (None, None) => None,
         }
     }
 
@@ -2567,4 +2642,14 @@ async fn wait_for_result<T: Send>(job: Job<Result<T>>) -> Result<T> {
     job.await
         .map_err(AnyhowError::msg)
         .context("block producer task failed")?
+}
+
+fn option_from_job_result<T>(result: Result<Option<T>>, error_message: &str) -> Option<T> {
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            warn_with_peers!("{error_message}: {error:?}");
+            None
+        }
+    }
 }
