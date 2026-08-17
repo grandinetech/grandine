@@ -66,6 +66,16 @@ pub const fn compute_start_slot_at_epoch<P: Preset>(epoch: Epoch) -> Slot {
 }
 
 #[must_use]
+pub const fn compute_shuffling_dependent_slot<P: Preset>(epoch: Epoch) -> Slot {
+    if epoch <= P::MinSeedLookahead::U64 {
+        return GENESIS_SLOT;
+    }
+
+    compute_start_slot_at_epoch::<P>(epoch.saturating_sub(P::MinSeedLookahead::U64))
+        .saturating_sub(1)
+}
+
+#[must_use]
 pub fn is_epoch_start<P: Preset>(slot: Slot) -> bool {
     slots_since_epoch_start::<P>(slot) == 0
 }
