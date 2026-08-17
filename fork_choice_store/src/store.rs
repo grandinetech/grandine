@@ -1556,10 +1556,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     fn is_valid_dependent_root(&self, chain_link: &ChainLink<P>, start_slot: Slot) -> bool {
         let root = chain_link.block_root;
 
-        if chain_link.slot() >= start_slot {
-            return false;
-        }
-
         let has_child_in_epoch = self
             .unfinalized
             .values()
@@ -1727,15 +1723,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ///
     /// [`get_shuffling_dependent_root`]: https://github.com/ethereum/consensus-specs/pull/5374
     pub fn shuffling_dependent_root(&self, root: H256, epoch: Epoch) -> Option<H256> {
-        // The genesis block is the dependent block for the first two epochs.
-        let dependent_slot = if epoch <= P::MinSeedLookahead::U64 {
-            GENESIS_SLOT
-        } else {
-            misc::compute_start_slot_at_epoch::<P>(epoch.saturating_sub(P::MinSeedLookahead::U64))
-                .saturating_sub(1)
-        };
-
-        self.ancestor(root, dependent_slot)
+        self.ancestor(root, misc::compute_shuffling_dependent_slot::<P>(epoch))
     }
 
     fn parent_payload_presence(
@@ -2492,10 +2480,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let lookahead_epoch = proposal_epoch.saturating_sub(P::MinSeedLookahead::U64);
         let lookahead_start_slot = misc::compute_start_slot_at_epoch::<P>(lookahead_epoch);
 
-        // _[REJECT]_ The slot of the block with root `preferences.dependent_root` is strictly less
-        // than `compute_start_slot_at_epoch(compute_epoch_at_slot(preferences.proposal_slot) - MIN_SEED_LOOKAHEAD)`.
+        // _[REJECT]_ The slot of the block with root `preferences.dependent_root` is at most
+        // `compute_shuffling_dependent_slot(compute_epoch_at_slot(preferences.proposal_slot))`.
         ensure!(
-            dependent_chain_link.slot() < lookahead_start_slot,
+            dependent_chain_link.slot()
+                <= misc::compute_shuffling_dependent_slot::<P>(proposal_epoch),
             Error::<P>::InvalidProposerPreferencesDependentRoot { signed_preferences },
         );
 
