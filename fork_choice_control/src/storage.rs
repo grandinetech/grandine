@@ -40,6 +40,7 @@ use types::{
 };
 
 use crate::checkpoint_sync;
+use http_api_utils::BlockId;
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 pub const MAX_DATA_COLUMN_EPOCHS_TO_PRUNE: usize = 100;
@@ -48,10 +49,12 @@ pub enum StateLoadStrategy<P: Preset> {
     Auto {
         state_slot: Option<Slot>,
         checkpoint_sync_url: Option<RedactingUrl>,
+        checkpoint_sync_block_id: BlockId,
         anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     },
     Remote {
         checkpoint_sync_url: RedactingUrl,
+        checkpoint_sync_block_id: BlockId,
     },
     Anchor {
         block: Arc<SignedBeaconBlock<P>>,
@@ -119,6 +122,7 @@ impl<P: Preset> Storage<P> {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
+                checkpoint_sync_block_id,
                 anchor_checkpoint_provider,
             } => 'block: {
                 // Attempt to load local state first: either latest or from specified slot.
@@ -129,17 +133,24 @@ impl<P: Preset> Storage<P> {
 
                 if let Some(url) = checkpoint_sync_url {
                     if local_state_storage.is_none() {
-                        let result = if let Some(checkpoint) =
-                            anchor_checkpoint_provider.checkpoint().checkpoint_synced()
+                        let result = if let Some(checkpoint) = anchor_checkpoint_provider
+                            .checkpoint()
+                            .checkpoint_synced()
+                            .filter(|_| checkpoint_sync_block_id == BlockId::Finalized)
                         {
                             info_with_peers!(
                                 "anchor checkpoint is already loaded from remote checkpoint sync server"
                             );
                             Ok(checkpoint)
                         } else {
-                            checkpoint_sync::load_finalized_from_remote(&self.config, client, &url)
-                                .await
-                                .context(Error::CheckpointSyncFailed)
+                            checkpoint_sync::load_from_remote(
+                                &self.config,
+                                client,
+                                &url,
+                                checkpoint_sync_block_id,
+                            )
+                            .await
+                            .context(Error::CheckpointSyncFailed)
                         };
 
                         match result {
@@ -187,15 +198,16 @@ impl<P: Preset> Storage<P> {
             }
             StateLoadStrategy::Remote {
                 checkpoint_sync_url,
+                checkpoint_sync_block_id,
             } => {
-                let FinalizedCheckpoint { block, state } =
-                    checkpoint_sync::load_finalized_from_remote(
-                        &self.config,
-                        client,
-                        &checkpoint_sync_url,
-                    )
-                    .await
-                    .context(Error::CheckpointSyncFailed)?;
+                let FinalizedCheckpoint { block, state } = checkpoint_sync::load_from_remote(
+                    &self.config,
+                    client,
+                    &checkpoint_sync_url,
+                    checkpoint_sync_block_id,
+                )
+                .await
+                .context(Error::CheckpointSyncFailed)?;
 
                 anchor_block = block;
                 anchor_state = state;

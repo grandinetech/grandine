@@ -1,9 +1,8 @@
 use parse_display::{Display, FromStr};
 use types::phase0::primitives::{H256, Slot};
 
-#[derive(Clone, Copy, Display, FromStr)]
+#[derive(Clone, Copy, Debug, Display, Eq, FromStr, PartialEq)]
 #[display(style = "lowercase")]
-#[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub enum BlockId {
     Head,
     Genesis,

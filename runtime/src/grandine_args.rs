@@ -38,6 +38,7 @@ use fork_choice_store::{
 use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
 use http_api::HttpApiConfig;
+use http_api_utils::BlockId;
 use itertools::{EitherOrBoth, Itertools as _};
 use kzg_utils::{DEFAULT_KZG_BACKEND, KzgBackend};
 use logging::{info_with_peers, warn_with_peers};
@@ -290,6 +291,11 @@ struct BeaconNodeOptions {
     /// [default: None]
     #[clap(long)]
     checkpoint_sync_url: Option<RedactingUrl>,
+
+    /// Beacon block to use as the checkpoint-sync starting point.
+    /// Non-finalized values explicitly trust the configured checkpoint-sync URL.
+    #[clap(long, requires = "checkpoint_sync_url")]
+    checkpoint_sync_block_id: Option<BlockId>,
 
     /// Number of epochs to keep blob or data column sidecars available for peer requests.
     /// Overrides `Config::min_epochs_for_blob_sidecars_requests` and
@@ -1081,6 +1087,7 @@ impl GrandineArgs {
             max_empty_slots,
             max_events,
             checkpoint_sync_url,
+            checkpoint_sync_block_id,
             data_availability_window,
             eth1_rpc_urls,
             force_checkpoint_sync,
@@ -1520,6 +1527,7 @@ impl GrandineArgs {
             genesis_state_file,
             genesis_state_download_url,
             checkpoint_sync_url,
+            checkpoint_sync_block_id: checkpoint_sync_block_id.unwrap_or(BlockId::Finalized),
             force_checkpoint_sync,
             back_sync_enabled,
             eth1_rpc_urls,
@@ -2956,6 +2964,31 @@ mod tests {
         );
 
         assert!(config.back_sync_enabled);
+    }
+
+    #[test]
+    fn checkpoint_sync_uses_finalized_block_by_default() {
+        let config = config_from_args(["--checkpoint-sync-url", "https://checkpoint.example"]);
+
+        assert_eq!(config.checkpoint_sync_block_id, BlockId::Finalized);
+    }
+
+    #[test]
+    fn checkpoint_sync_accepts_non_finalized_block_id() {
+        let config = config_from_args([
+            "--checkpoint-sync-url",
+            "https://checkpoint.example",
+            "--checkpoint-sync-block-id",
+            "head",
+        ]);
+
+        assert_eq!(config.checkpoint_sync_block_id, BlockId::Head);
+    }
+
+    #[test]
+    fn checkpoint_sync_block_id_requires_url() {
+        try_config_from_args(["--checkpoint-sync-block-id", "head"])
+            .expect_err("checkpoint block selection without a remote URL should be rejected");
     }
 
     fn config_from_args<'a>(arguments: impl IntoIterator<Item = &'a str>) -> GrandineConfig {

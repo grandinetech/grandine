@@ -2,12 +2,12 @@ use core::time::Duration;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use helper_functions::misc;
+use helper_functions::{accessors, misc};
 use http_api_utils::{BlockId, StateId};
 use logging::info_with_peers;
 use mime::APPLICATION_OCTET_STREAM;
 use reqwest::{Client, StatusCode, header::ACCEPT};
-use ssz::SszRead;
+use ssz::{SszHash as _, SszRead};
 use thiserror::Error;
 use types::{
     combined::{BeaconState, SignedBeaconBlock},
@@ -19,16 +19,17 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
-pub async fn load_finalized_from_remote<P: Preset>(
+pub async fn load_from_remote<P: Preset>(
     config: &Config,
     client: &Client,
     url: &RedactingUrl,
+    block_id: BlockId,
 ) -> Result<FinalizedCheckpoint<P>> {
-    info_with_peers!("performing checkpoint sync from {url}…");
+    info_with_peers!("performing checkpoint sync from block {block_id} at {url}…");
 
-    let mut block = fetch_block(config, client, url, BlockId::Finalized)
+    let mut block = fetch_block(config, client, url, block_id)
         .await?
-        .ok_or(Error::NoFinalizedBlock)?;
+        .ok_or(Error::BlockNotFound { block_id })?;
 
     let initial_slot = block.message().slot();
 
@@ -55,6 +56,24 @@ pub async fn load_finalized_from_remote<P: Preset>(
     let state = fetch_state(config, client, url, StateId::Slot(slot))
         .await?
         .ok_or(Error::MissingPostState { block_root })?;
+
+    let state_root = state.hash_tree_root();
+
+    if block.message().state_root() != state_root {
+        bail!(Error::BlockStateRootMismatch {
+            block_state_root: block.message().state_root(),
+            state_root,
+        });
+    }
+
+    let state_block_root = accessors::latest_block_root(state.as_ref());
+
+    if state_block_root != block_root {
+        bail!(Error::BlockStateMismatch {
+            block_root,
+            state_block_root,
+        });
+    }
 
     info_with_peers!("loaded state at slot {slot} from {url}");
 
@@ -107,10 +126,24 @@ async fn fetch<T: SszRead<Config>>(
 
 #[derive(Debug, Error)]
 enum Error {
+    #[error(
+        "downloaded block state root {block_state_root:?} does not match downloaded state root {state_root:?}"
+    )]
+    BlockStateRootMismatch {
+        block_state_root: H256,
+        state_root: H256,
+    },
+    #[error(
+        "downloaded block root {block_root:?} does not match the downloaded state's latest block root {state_block_root:?}"
+    )]
+    BlockStateMismatch {
+        block_root: H256,
+        state_block_root: H256,
+    },
+    #[error("remote beacon node does not have block {block_id}")]
+    BlockNotFound { block_id: BlockId },
     #[error("remote beacon node does not have post-state of block {block_root:?}")]
     MissingPostState { block_root: H256 },
     #[error("remote beacon node has no block usable as anchor")]
     NoBlockUsableAsAnchor,
-    #[error("remote beacon node has no finalized block")]
-    NoFinalizedBlock,
 }
