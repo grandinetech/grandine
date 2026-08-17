@@ -344,6 +344,7 @@ where
                     result,
                     origin,
                     payload_envelope_identifier,
+                    seen_before_deadline,
                     processing_timings,
                     tracing_span,
                 } => self.handle_execution_payload_envelope(
@@ -351,6 +352,7 @@ where
                     result,
                     origin,
                     payload_envelope_identifier,
+                    seen_before_deadline,
                     processing_timings,
                     tracing_span,
                 ),
@@ -2126,12 +2128,14 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
+    #[expect(clippy::too_many_arguments)]
     fn handle_execution_payload_envelope(
         &mut self,
         wait_group: W,
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
         payload_envelope_identifier: PayloadEnvelopeIdentifier,
+        seen_before_deadline: bool,
         processing_timings: ProcessingTimings,
         tracing_span: Span,
     ) {
@@ -2147,17 +2151,13 @@ where
                 let block_hash = envelope.message.payload.block_hash;
                 let should_send_gossip_event = origin.should_send_gossip_event();
                 let should_generate_event = origin.should_generate_event();
-                let is_before_deadline = self.store.slot() == slot
-                    && self
-                        .store
-                        .is_before_due_bps_deadline(self.store.chain_config().payload_due_bps);
 
                 if self.store.is_forward_synced() {
                     debug_with_peers!(
                         "execution payload envelope accepted (\
                             block root: {beacon_block_root:?}, \
                             slot: {slot}, \
-                            is before deadline: {is_before_deadline} \
+                            seen before deadline: {seen_before_deadline} \
                         )",
                     );
                 } else {
@@ -2194,7 +2194,7 @@ where
                     Ok(ValidationOutcome::Accept),
                 );
 
-                self.accept_execution_payload_envelope(&wait_group, envelope, is_before_deadline);
+                self.accept_execution_payload_envelope(&wait_group, envelope, seen_before_deadline);
 
                 if should_generate_event
                     && let Some(chain_link) = self.store.chain_link(beacon_block_root)
@@ -2260,6 +2260,7 @@ where
                     PendingExecutionPayloadEnvelope {
                         execution_payload_envelope,
                         origin,
+                        seen_before_deadline,
                         processing_timings,
                         tracing_span,
                     },
@@ -2285,6 +2286,7 @@ where
                 let pending_envelope = PendingExecutionPayloadEnvelope {
                     execution_payload_envelope,
                     origin,
+                    seen_before_deadline,
                     processing_timings,
                     tracing_span,
                 };
@@ -2326,6 +2328,7 @@ where
                 let pending_payload_envelope = PendingExecutionPayloadEnvelope {
                     execution_payload_envelope,
                     origin,
+                    seen_before_deadline,
                     processing_timings,
                     tracing_span,
                 };
@@ -4475,6 +4478,7 @@ where
         let PendingExecutionPayloadEnvelope {
             execution_payload_envelope,
             origin,
+            seen_before_deadline,
             processing_timings,
             tracing_span,
         } = pending_execution_payload_envelope;
@@ -4486,6 +4490,7 @@ where
             wait_group,
             execution_payload_envelope,
             origin,
+            seen_before_deadline,
             processing_timings,
             metrics: self.metrics.clone(),
             tracing_span,
@@ -5713,6 +5718,7 @@ fn reply_delayed_payload_envelope_validation_result<P: Preset>(
     let PendingExecutionPayloadEnvelope {
         execution_payload_envelope,
         origin,
+        seen_before_deadline,
         processing_timings,
         tracing_span,
     } = pending_envelope;
@@ -5723,6 +5729,7 @@ fn reply_delayed_payload_envelope_validation_result<P: Preset>(
         PendingExecutionPayloadEnvelope {
             execution_payload_envelope,
             origin: ExecutionPayloadEnvelopeOrigin::Api(None),
+            seen_before_deadline,
             processing_timings,
             tracing_span,
         }
@@ -5730,6 +5737,7 @@ fn reply_delayed_payload_envelope_validation_result<P: Preset>(
         PendingExecutionPayloadEnvelope {
             execution_payload_envelope,
             origin,
+            seen_before_deadline,
             processing_timings,
             tracing_span,
         }
