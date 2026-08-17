@@ -640,6 +640,7 @@ pub struct ExecutionPayloadEnvelopeTask<P: Preset, E, W> {
     pub wait_group: W,
     pub execution_payload_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     pub origin: ExecutionPayloadEnvelopeOrigin,
+    pub seen_before_deadline: bool,
     pub processing_timings: ProcessingTimings,
     pub metrics: Option<Arc<Metrics>>,
     pub tracing_span: Span,
@@ -663,6 +664,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
             wait_group,
             execution_payload_envelope,
             origin,
+            seen_before_deadline,
             processing_timings,
             metrics,
             tracing_span,
@@ -688,6 +690,7 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for ExecutionPayloadEnvelop
             result,
             origin,
             payload_envelope_identifier,
+            seen_before_deadline,
             processing_timings,
             tracing_span,
         }

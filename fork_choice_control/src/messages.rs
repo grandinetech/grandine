@@ -161,6 +161,7 @@ pub enum MutatorMessage<P: Preset, W> {
         result: Result<ExecutionPayloadEnvelopeAction<P>>,
         origin: ExecutionPayloadEnvelopeOrigin,
         payload_envelope_identifier: PayloadEnvelopeIdentifier,
+        seen_before_deadline: bool,
         processing_timings: ProcessingTimings,
         tracing_span: Span,
     },
