@@ -15,7 +15,7 @@ use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 use anyhow::{Result, anyhow, bail, ensure};
 use binary_utils::TelemetryConfig;
 use bls::PublicKeyBytes;
-use builder_api::{BuilderApiFormat, BuilderConfig, PREFERRED_EXECUTION_GAS_LIMIT};
+use builder_api::{BuilderApiFormat, BuilderConfig};
 use bytesize::ByteSize;
 use clap::{
     Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind,
@@ -906,9 +906,9 @@ struct ValidatorOptions {
     #[clap(long, default_value_t = ValidatorConfig::default().default_builder_boost_factor)]
     default_builder_boost_factor: Uint256,
 
-    /// Default execution gas limit for all validators
-    #[clap(long, default_value_t = PREFERRED_EXECUTION_GAS_LIMIT)]
-    default_gas_limit: Gas,
+    /// Default execution gas limit for all validators [default: scheduled gas limit, or 60000000]
+    #[clap(long)]
+    default_gas_limit: Option<Gas>,
 
     /// List of public keys to use from Web3Signer
     #[clap(long, num_args = 1.., value_delimiter = ',')]

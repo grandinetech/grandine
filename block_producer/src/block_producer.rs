@@ -2534,11 +2534,17 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
     fn gas_limit(&self) -> Result<Gas> {
         let proposer_pubkey = accessors::public_key(&self.beacon_state, self.proposer_index)?;
+        let epoch = accessors::get_current_epoch(&self.beacon_state);
+
+        let configured = self
+            .producer_context
+            .proposer_configs
+            .gas_limit(*proposer_pubkey);
 
         Ok(self
             .producer_context
-            .proposer_configs
-            .gas_limit(*proposer_pubkey))
+            .chain_config
+            .gas_limit(configured, epoch))
     }
 
     fn spawn_job<T, F>(&self, task: T) -> Job<F::Output>

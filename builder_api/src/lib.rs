@@ -1,7 +1,6 @@
 pub use crate::{
     api::Api as BuilderApi,
     config::{BuilderApiFormat, Config as BuilderConfig},
-    consts::PREFERRED_EXECUTION_GAS_LIMIT,
 };
 
 pub mod combined;
