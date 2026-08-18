@@ -18,7 +18,9 @@ use bls::PublicKeyBytes;
 use builder_api::{BuilderApiFormat, BuilderConfig, PREFERRED_EXECUTION_GAS_LIMIT};
 use bytesize::ByteSize;
 use clap::{
-    Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind,
+    Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum,
+    builder::{PossibleValuesParser, TypedValueParser},
+    error::ErrorKind,
     parser::ValueSource,
 };
 use derivative::Derivative;
@@ -52,6 +54,7 @@ use slasher::SlasherConfig;
 use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
 use ssz::Uint256;
 use std_ext::ArcExt as _;
+use strum::VariantNames as _;
 use thiserror::Error;
 use tower_http::cors::AllowOrigin;
 use tracing::Level;
@@ -961,8 +964,20 @@ struct RemoteValidatorOptions {
     disable_local_beacon_node: bool,
 
     /// List of duties to publish to every beacon node rather than the first one
-    #[clap(long, value_delimiter = ',', requires = "beacon_node_urls")]
+    #[clap(
+        long,
+        value_delimiter = ',',
+        requires = "beacon_node_urls",
+        value_parser = published_duty_parser(),
+    )]
     publish_to_every_node: Vec<PublishedDuty>,
+}
+
+fn published_duty_parser() -> impl TypedValueParser<Value = PublishedDuty> {
+    PossibleValuesParser::new(PublishedDuty::VARIANTS).map(|duty| {
+        duty.parse()
+            .expect("value parser only accepts PublishedDuty variants")
+    })
 }
 
 #[derive(Debug, Args)]

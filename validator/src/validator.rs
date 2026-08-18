@@ -1617,18 +1617,34 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let config = &self.chain_config;
-        let phase = slot_head.phase();
+        let beacon_nodes = self.beacon_nodes(slot_head, wait_group);
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
             .iter()
-            .map(|(key, aggregators)| async {
-                self.attestation_agg_pool
-                    .best_aggregate_attestation(*key)
-                    .await
-                    .into_iter()
-                    .flat_map(|aggregate| {
-                        aggregators.iter().filter_map(move |aggregator| {
+            .map(|(key, aggregators)| {
+                let beacon_nodes = &beacon_nodes;
+
+                async move {
+                    let aggregate = match beacon_nodes
+                        .aggregate_attestation(key.data, key.committee_index)
+                        .await
+                    {
+                        Ok(aggregate) => aggregate,
+                        Err(error) => {
+                            warn_with_peers!(
+                                "failed to obtain an aggregate attestation for committee {} \
+                                 in slot {}: {error:?}",
+                                key.committee_index,
+                                key.data.slot,
+                            );
+                            return vec![];
+                        }
+                    };
+
+                    aggregators
+                        .iter()
+                        .filter_map(|aggregator| {
                             let Aggregator {
                                 aggregator_index,
                                 position_in_committee,
@@ -1636,39 +1652,33 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                 selection_proof,
                             } = *aggregator;
 
-                            if !*aggregate.aggregation_bits.get(position_in_committee)? {
+                            if !aggregated_by(&aggregate, position_in_committee)? {
                                 return None;
                             }
 
-                            let aggregate_and_proof = if phase < Phase::Electra {
-                                AggregateAndProof::from(Phase0AggregateAndProof {
-                                    aggregator_index,
-                                    aggregate: aggregate.clone().into_phase0_attestation(),
-                                    selection_proof,
-                                })
-                            } else if phase < Phase::Gloas {
-                                let aggregate = operation_pools::convert_to_electra_attestation(
-                                    aggregate.clone(),
-                                )
-                                .ok()?;
-
-                                AggregateAndProof::from(ElectraAggregateAndProof {
-                                    aggregator_index,
-                                    aggregate,
-                                    selection_proof,
-                                })
-                            } else {
-                                let aggregate = operation_pools::convert_to_electra_attestation(
-                                    aggregate.clone(),
-                                )
-                                .ok()?
-                                .into();
-
-                                AggregateAndProof::from(GloasAggregateAndProof {
-                                    aggregator_index,
-                                    aggregate,
-                                    selection_proof,
-                                })
+                            let aggregate_and_proof = match aggregate.clone() {
+                                Attestation::Phase0(aggregate) => {
+                                    AggregateAndProof::from(Phase0AggregateAndProof {
+                                        aggregator_index,
+                                        aggregate,
+                                        selection_proof,
+                                    })
+                                }
+                                Attestation::Electra(aggregate) => {
+                                    AggregateAndProof::from(ElectraAggregateAndProof {
+                                        aggregator_index,
+                                        aggregate,
+                                        selection_proof,
+                                    })
+                                }
+                                Attestation::Gloas(aggregate) => {
+                                    AggregateAndProof::from(GloasAggregateAndProof {
+                                        aggregator_index,
+                                        aggregate,
+                                        selection_proof,
+                                    })
+                                }
+                                Attestation::Single(_) => return None,
                             };
 
                             let triple = SigningTriple {
@@ -1682,8 +1692,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                             Some((triple, aggregate_and_proof))
                         })
-                    })
-                    .collect_vec()
+                        .collect_vec()
+                }
             })
             .collect::<FuturesOrdered<_>>()
             .collect::<Vec<_>>()
@@ -1752,14 +1762,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             aggregate_and_proof.slot(),
         );
 
-        for aggregate_and_proof in aggregates_and_proofs {
-            let attestation = Arc::new(aggregate_and_proof.aggregate());
-            let aggregate_and_proof = Arc::new(aggregate_and_proof);
+        let aggregates_and_proofs = aggregates_and_proofs
+            .into_iter()
+            .map(Arc::new)
+            .collect_vec();
 
-            self.attestation_agg_pool
-                .insert_attestation(wait_group.clone(), attestation, None);
-
-            ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof).send(&self.p2p_tx);
+        if let Err(error) = beacon_nodes
+            .publish_aggregates_and_proofs(&aggregates_and_proofs)
+            .await
+        {
+            warn_with_peers!("failed to publish aggregates and proofs: {error:?}");
         }
     }
 
@@ -3110,6 +3122,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 // Use `BTreeMap` to make grouping deterministic for snapshot testing.
 // There is no equivalent of `Itertools::into_group_map` that collects into a `BTreeMap`.
 // See <https://github.com/rust-itertools/itertools/issues/520>.
+fn aggregated_by<P: Preset>(
+    aggregate: &Attestation<P>,
+    position_in_committee: usize,
+) -> Option<bool> {
+    match aggregate {
+        Attestation::Phase0(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
+        Attestation::Electra(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
+        Attestation::Gloas(aggregate) => aggregate.aggregation_bits.get(position_in_committee),
+        Attestation::Single(_) => None,
+    }
+    .map(|bit| *bit)
+}
+
 fn group_into_btreemap<K: Ord, V>(pairs: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, Vec<V>> {
     let mut groups = BTreeMap::<_, Vec<_>>::new();
 

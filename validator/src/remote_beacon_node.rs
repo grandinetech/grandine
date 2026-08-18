@@ -6,15 +6,21 @@ use std::sync::Arc;
 
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
 use derive_more::Display;
+use helper_functions::misc;
 use http_api_utils::{ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::BeaconCommitteeSubscription;
 use reqwest::{Client, Response, StatusCode};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use ssz::SszHash as _;
 use thiserror::Error;
 use types::{
+    combined::{Attestation, SignedAggregateAndProof},
     config::Config as ChainConfig,
-    nonstandard::OwnAttestation,
+    electra::containers::Attestation as ElectraAttestation,
+    gloas::containers::Attestation as GloasAttestation,
+    nonstandard::{OwnAttestation, Phase},
+    phase0::containers::Attestation as Phase0Attestation,
     phase0::{
         containers::AttestationData,
         primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex, Version},
@@ -41,6 +47,16 @@ enum Error {
         expected: Version,
         actual: Version,
     },
+    #[error(
+        "beacon node returned an aggregate covering committees {actual:?} \
+         where only committee {expected} was requested"
+    )]
+    UnexpectedCommittees {
+        expected: CommitteeIndex,
+        actual: Vec<CommitteeIndex>,
+    },
+    #[error("beacon node reported {reported} data where {expected} was expected")]
+    UnexpectedVersion { expected: Phase, reported: Phase },
     #[error("request to beacon node at {url} failed with status {status}: {body}")]
     Response {
         url: String,
@@ -224,6 +240,23 @@ impl RemoteBeaconNode {
         Ok(response.json::<EthResponse<T>>().await?.into_data())
     }
 
+    async fn parse_versioned_data<T: DeserializeOwned>(
+        &self,
+        response: Response,
+        expected: Phase,
+    ) -> Result<T> {
+        let response = self.check_status(response).await?;
+
+        let (data, reported) = response
+            .json::<EthResponse<T>>()
+            .await?
+            .into_data_and_version();
+
+        check_version(expected, reported)?;
+
+        Ok(data)
+    }
+
     async fn check_status(&self, response: Response) -> Result<Response> {
         let status = response.status();
 
@@ -315,6 +348,43 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         self.parse_data(response).await
     }
 
+    async fn aggregate_attestation(
+        &self,
+        data: AttestationData,
+        committee_index: CommitteeIndex,
+    ) -> Result<Attestation<P>> {
+        let url = self.endpoint(&aggregate_attestation_path(data, committee_index))?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        // Electra and Gloas attestations have the same fields, so untagged deserialization would
+        // always read a Gloas one as Electra.
+        let phase = self.chain_config.phase_at_slot::<P>(data.slot);
+
+        let attestation = if phase < Phase::Electra {
+            self.parse_versioned_data::<Phase0Attestation<P>>(response, phase)
+                .await
+                .map(Attestation::Phase0)?
+        } else if phase < Phase::Gloas {
+            self.parse_versioned_data::<ElectraAttestation<P>>(response, phase)
+                .await
+                .map(Attestation::Electra)?
+        } else {
+            self.parse_versioned_data::<GloasAttestation<P>>(response, phase)
+                .await
+                .map(Attestation::Gloas)?
+        };
+
+        ensure_requested_committee(&attestation, committee_index)?;
+
+        Ok(attestation)
+    }
+
     async fn publish_singular_attestations(
         &self,
         attestations: &[OwnAttestation<P>],
@@ -352,6 +422,37 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         Ok(())
     }
 
+    async fn publish_aggregates_and_proofs(
+        &self,
+        aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
+    ) -> Result<()> {
+        let Some(first) = aggregates_and_proofs.first() else {
+            return Ok(());
+        };
+
+        let phase = self.chain_config.phase_at_slot::<P>(first.slot());
+        let url = self.endpoint("/eth/v2/validator/aggregate_and_proofs")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref())
+            .json(&aggregates_and_proofs)
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "published {} aggregates and proofs to {}",
+            aggregates_and_proofs.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
     async fn subscribe_to_beacon_committees(
         &self,
         _current_slot: Slot,
@@ -379,12 +480,63 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
     }
 }
 
+// Aggregation bits from Electra on span every committee in `committee_bits`, so a position in the
+// requested committee only indexes them when that is the sole committee covered.
+fn ensure_requested_committee<P: Preset>(
+    attestation: &Attestation<P>,
+    committee_index: CommitteeIndex,
+) -> Result<()> {
+    let Some(committee_bits) = attestation.committee_bits() else {
+        return Ok(());
+    };
+
+    let actual = misc::get_committee_indices::<P>(committee_bits).collect::<Vec<_>>();
+
+    ensure!(
+        actual == [committee_index],
+        Error::UnexpectedCommittees {
+            expected: committee_index,
+            actual,
+        },
+    );
+
+    Ok(())
+}
+
+fn check_version(expected: Phase, reported: Option<Phase>) -> Result<()> {
+    if let Some(reported) = reported {
+        ensure!(
+            reported == expected,
+            Error::UnexpectedVersion { expected, reported },
+        );
+    }
+
+    Ok(())
+}
+
+fn aggregate_attestation_path(data: AttestationData, committee_index: CommitteeIndex) -> String {
+    format!(
+        "/eth/v2/validator/aggregate_attestation?attestation_data_root={:?}\
+         &slot={}&committee_index={committee_index}",
+        data.hash_tree_root(),
+        data.slot,
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
+    use bls::{
+        AggregateSignatureBytes, PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _,
+    };
     use serde_json::json;
+    use ssz::BitVector;
     use types::{
-        combined::Attestation, electra::containers::SingleAttestation, phase0::primitives::H256,
+        combined::Attestation,
+        electra::containers::{
+            AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
+            SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
+        },
+        phase0::primitives::H256,
         preset::Mainnet,
     };
 
@@ -531,6 +683,140 @@ mod tests {
         assert_eq!(body[0]["committee_index"], json!("4"));
         assert_eq!(body[0]["attester_index"], json!("5"));
         assert_eq!(body[0]["data"]["slot"], json!("0"));
+
+        Ok(())
+    }
+
+    fn electra_aggregate_body() -> serde_json::Value {
+        json!({
+            "aggregation_bits": "0x07",
+            "data": {
+                "slot": "6",
+                "index": "0",
+                "beacon_block_root": H256::zero(),
+                "source": { "epoch": "0", "root": H256::zero() },
+                "target": { "epoch": "0", "root": H256::zero() },
+            },
+            "signature": AggregateSignatureBytes::empty(),
+            "committee_bits": "0x0100000000000000",
+        })
+    }
+
+    // Why `aggregate_attestation` parses by phase instead of letting serde choose: Electra and
+    // Gloas attestations have the same fields, so an untagged read of either yields Electra.
+    #[test]
+    fn a_gloas_attestation_is_untagged_as_electra() -> Result<()> {
+        let attestation = serde_json::from_value::<Attestation<Mainnet>>(electra_aggregate_body())?;
+
+        assert!(matches!(attestation, Attestation::Electra(_)));
+
+        Ok(())
+    }
+
+    // The phases that `deny_unknown_fields` does separate stay separated.
+    #[test]
+    fn an_electra_aggregate_is_not_a_phase0_one() -> Result<()> {
+        let body = electra_aggregate_body();
+
+        serde_json::from_value::<ElectraAttestation<Mainnet>>(body.clone())?;
+        serde_json::from_value::<GloasAttestation<Mainnet>>(body.clone())?;
+
+        serde_json::from_value::<Phase0Attestation<Mainnet>>(body)
+            .expect_err("committee bits should not fit a phase 0 attestation");
+
+        Ok(())
+    }
+
+    // Reading a position in the requested committee against bits covering other committees would
+    // silently pick the wrong validator.
+    #[test]
+    fn rejects_an_aggregate_covering_other_committees() -> Result<()> {
+        let aggregate = |indices: &[usize]| {
+            let mut committee_bits = BitVector::default();
+
+            for index in indices {
+                committee_bits.set(*index, true);
+            }
+
+            Attestation::<Mainnet>::Electra(ElectraAttestation {
+                committee_bits,
+                ..ElectraAttestation::default()
+            })
+        };
+
+        ensure_requested_committee(&aggregate(&[3]), 3)?;
+
+        ensure_requested_committee(&aggregate(&[2]), 3)
+            .expect_err("an aggregate for another committee should be rejected");
+
+        ensure_requested_committee(&aggregate(&[2, 3]), 3)
+            .expect_err("an aggregate covering several committees should be rejected");
+
+        ensure_requested_committee(&aggregate(&[]), 3)
+            .expect_err("an aggregate covering no committee should be rejected");
+
+        Ok(())
+    }
+
+    // A phase 0 aggregate has no committee bits; its committee is fixed by the data root.
+    #[test]
+    fn accepts_a_phase0_aggregate() -> Result<()> {
+        let aggregate = Attestation::<Mainnet>::Phase0(Phase0Attestation::default());
+
+        ensure_requested_committee(&aggregate, 3)
+    }
+
+    // A node that reports no version is taken at its word; one that disagrees is not.
+    #[test]
+    fn check_version_rejects_only_a_disagreeing_node() -> Result<()> {
+        check_version(Phase::Electra, None)?;
+        check_version(Phase::Electra, Some(Phase::Electra))?;
+
+        check_version(Phase::Electra, Some(Phase::Gloas))
+            .expect_err("a node reporting another phase should be rejected");
+
+        Ok(())
+    }
+
+    // The root goes into the query in full; `Display` would abbreviate it.
+    #[test]
+    fn aggregate_attestation_path_spells_out_the_root() {
+        let data = AttestationData {
+            slot: 6,
+            ..AttestationData::default()
+        };
+
+        let path = aggregate_attestation_path(data, 3);
+
+        let root = path
+            .split("attestation_data_root=")
+            .nth(1)
+            .and_then(|rest| rest.split('&').next())
+            .expect("path contains the attestation data root");
+
+        assert!(root.starts_with("0x"));
+        assert_eq!(root.len(), 66);
+        assert!(path.ends_with("&slot=6&committee_index=3"));
+    }
+
+    // The publication body is the bare aggregate and proof, not an `Arc`-wrapped one.
+    #[test]
+    fn serializes_aggregate_and_proof_body() -> Result<()> {
+        let aggregate_and_proof = Arc::new(SignedAggregateAndProof::<Mainnet>::from(
+            ElectraSignedAggregateAndProof {
+                message: ElectraAggregateAndProof {
+                    aggregator_index: 6,
+                    aggregate: ElectraAttestation::default(),
+                    selection_proof: SignatureBytes::empty(),
+                },
+                signature: SignatureBytes::empty(),
+            },
+        ));
+
+        let body = serde_json::to_value([&aggregate_and_proof])?;
+
+        assert_eq!(body[0]["message"]["aggregator_index"], json!("6"));
+        assert_eq!(body[0]["message"]["aggregate"]["data"]["slot"], json!("0"));
 
         Ok(())
     }
