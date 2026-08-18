@@ -1091,8 +1091,8 @@ pub fn apply_attestation<P: Preset>(
     for (validator_index, base_reward, effective_balance) in attesting_indices_with_base_rewards {
         let epoch_participation = epoch_participation.get_mut(validator_index)?;
 
-        // > For same-slot attestations, check if we're setting any new flags
-        // If we are, this validator hasn't contributed to this slot's quorum yet
+        // > [New in Gloas:EIP7732]
+        let had_no_participation = *epoch_participation == 0;
         let mut will_set_new_flag = false;
 
         for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
@@ -1106,9 +1106,12 @@ pub fn apply_attestation<P: Preset>(
 
         *epoch_participation |= participation_flags;
 
-        // > Add weight for same-slot attestations when any new flag is set
-        // This ensures each validator contributes exactly once per slot
-        if will_set_new_flag && is_attestation_same_slot && payment.withdrawal.amount > 0 {
+        // > [New in Gloas:EIP7732]
+        if will_set_new_flag
+            && had_no_participation
+            && is_attestation_same_slot
+            && payment.withdrawal.amount > 0
+        {
             payment.weight = payment.weight.try_add(effective_balance)?;
         }
     }
