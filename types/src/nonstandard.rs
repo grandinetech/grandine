@@ -11,7 +11,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
 use ssz::{ContiguousList, Size, SszList, SszSize, SszWrite, WriteError};
 use static_assertions::assert_eq_size;
-use strum::{AsRefStr, Display, EnumString};
+use strum::{AsRefStr, Display, EnumString, VariantNames};
 
 use crate::{
     altair::{
@@ -243,9 +243,10 @@ pub struct BlockRewards {
     pub attester_slashings: Gwei,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString, VariantNames)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum PublishedDuty {
+    Aggregates,
     Attestations,
 }
 

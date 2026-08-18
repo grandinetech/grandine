@@ -1,7 +1,7 @@
 use core::ops::Range;
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Error as AnyhowError, Result};
 use derive_more::Display;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
@@ -10,11 +10,11 @@ use futures::channel::{mpsc::UnboundedSender, oneshot};
 use helper_functions::{accessors, misc};
 use http_api_utils::ValidatorAttesterDutyResponse;
 use itertools::Itertools as _;
-use operation_pools::AttestationAggPool;
+use operation_pools::{AttestationAggPool, AttestationKey};
 use p2p::{BeaconCommitteeSubscription, ToSubnetService, ValidatorToP2p};
 use std_ext::ArcExt as _;
 use types::{
-    combined::BeaconState,
+    combined::{Attestation, BeaconState, SignedAggregateAndProof},
     nonstandard::{OwnAttestation, Phase},
     phase0::{
         containers::{AttestationData, Checkpoint},
@@ -143,6 +143,40 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         })
     }
 
+    async fn aggregate_attestation(
+        &self,
+        data: AttestationData,
+        committee_index: CommitteeIndex,
+    ) -> Result<Attestation<P>> {
+        let aggregate = self
+            .attestation_agg_pool
+            .best_aggregate_attestation(AttestationKey {
+                data,
+                committee_index,
+            })
+            .await
+            .ok_or_else(|| {
+                AnyhowError::msg(format!(
+                    "no aggregate attestation for committee {committee_index} in slot {}",
+                    data.slot,
+                ))
+            })?;
+
+        let phase = self.slot_head.config.phase_at_slot::<P>(data.slot);
+
+        if phase < Phase::Electra {
+            Ok(Attestation::Phase0(aggregate.into_phase0_attestation()))
+        } else if phase < Phase::Gloas {
+            aggregate
+                .try_into_electra_attestation()
+                .map(Attestation::Electra)
+        } else {
+            aggregate
+                .try_into_electra_attestation()
+                .map(|aggregate| Attestation::Gloas(aggregate.into()))
+        }
+    }
+
     async fn publish_singular_attestations(
         &self,
         attestations: &[OwnAttestation<P>],
@@ -176,6 +210,26 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 attestation,
                 Some(*validator_index),
             );
+        }
+
+        Ok(())
+    }
+
+    async fn publish_aggregates_and_proofs(
+        &self,
+        aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
+    ) -> Result<()> {
+        for aggregate_and_proof in aggregates_and_proofs {
+            let attestation = Arc::new(aggregate_and_proof.aggregate());
+
+            self.attestation_agg_pool.insert_attestation(
+                self.wait_group.clone(),
+                attestation,
+                None,
+            );
+
+            ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof.clone_arc())
+                .send(&self.p2p_tx);
         }
 
         Ok(())
