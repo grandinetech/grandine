@@ -1,9 +1,11 @@
 use core::future::Future;
+use std::sync::Arc;
 
 use anyhow::Result;
 use http_api_utils::ValidatorAttesterDutyResponse;
 use p2p::BeaconCommitteeSubscription;
 use types::{
+    combined::{Attestation, SignedAggregateAndProof},
     nonstandard::OwnAttestation,
     phase0::{
         containers::AttestationData,
@@ -42,10 +44,23 @@ pub trait BeaconNodeApi<P: Preset> {
         committee_index: CommitteeIndex,
     ) -> impl Future<Output = Result<AttestationData>> + Send;
 
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/getAggregatedAttestationV2>
+    fn aggregate_attestation(
+        &self,
+        data: AttestationData,
+        committee_index: CommitteeIndex,
+    ) -> impl Future<Output = Result<Attestation<P>>> + Send;
+
     /// <https://ethereum.github.io/beacon-APIs/#/Beacon/submitPoolAttestationsV2>
     fn publish_singular_attestations(
         &self,
         attestations: &[OwnAttestation<P>],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/publishAggregateAndProofsV2>
+    fn publish_aggregates_and_proofs(
+        &self,
+        aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
     ) -> impl Future<Output = Result<()>> + Send;
 
     /// <https://ethereum.github.io/beacon-APIs/#/Validator/prepareBeaconCommitteeSubnet>

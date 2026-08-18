@@ -26,7 +26,9 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::AttesterDuties, beacon_nodes::BeaconNodes, local_beacon_node::duties_at_slot,
+    beacon_node_api::{AttesterDuties, BeaconNodeApi as _},
+    beacon_nodes::BeaconNodes,
+    local_beacon_node::duties_at_slot,
     misc::slots_by_epoch,
 };
 
@@ -209,7 +211,7 @@ impl OwnBeaconCommitteeMembers {
     // The narrowest range covering the slots that still need members, or `None` when they all
     // have them. Slots that do not need them may fall inside it; those are skipped when caching,
     // so including them costs a committee walk but never a signature.
-    pub async fn slots_to_compute<P: Preset>(
+    async fn slots_to_compute<P: Preset>(
         &self,
         dependent_root: H256,
         slots: Range<Slot>,
@@ -228,6 +230,26 @@ impl OwnBeaconCommitteeMembers {
         }
 
         Some(first?..last?.saturating_add(1))
+    }
+
+    // Nothing cached means every slot needs computing, and the request that fetches the duties
+    // reports the dependent root anyway.
+    pub async fn slots_to_compute_at_epoch<P: Preset, W: Wait + Sync>(
+        &self,
+        beacon_nodes: &BeaconNodes<P, W>,
+        epoch: Epoch,
+        slots: Range<Slot>,
+        validator_index: ValidatorIndex,
+    ) -> Result<Option<Range<Slot>>> {
+        if self.cached_dependent_root(epoch).await.is_none() {
+            return Ok(Some(slots));
+        }
+
+        let dependent_root = beacon_nodes
+            .dependent_root(epoch, Some(validator_index))
+            .await?;
+
+        Ok(self.slots_to_compute::<P>(dependent_root, slots).await)
     }
 
     pub async fn prune<P: Preset>(&self, up_to_slot: Slot) {

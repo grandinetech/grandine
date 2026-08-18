@@ -54,11 +54,12 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
                 continue;
             };
 
-            let dependent_root = match beacon_nodes
-                .dependent_root(epoch, Some(validator_index))
+            let slots = match own_beacon_committee_members
+                .slots_to_compute_at_epoch(&beacon_nodes, epoch, slots, validator_index)
                 .await
             {
-                Ok(dependent_root) => dependent_root,
+                Ok(Some(slots)) => slots,
+                Ok(None) => continue,
                 Err(error) => {
                     warn_with_peers!(
                         "unable to find dependent root for epoch: {epoch} against state with \
@@ -68,13 +69,6 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
 
                     continue;
                 }
-            };
-
-            let Some(slots) = own_beacon_committee_members
-                .slots_to_compute::<P>(dependent_root, slots)
-                .await
-            else {
-                continue;
             };
 
             let phase_at_epoch = chain_config.phase_at_epoch(epoch);

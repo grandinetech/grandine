@@ -21,7 +21,7 @@ use ssz::{
 };
 use static_assertions::assert_eq_size;
 use std_ext::CopyExt as _;
-use strum::{AsRefStr, Display, EnumString};
+use strum::{AsRefStr, Display, EnumString, VariantNames};
 use try_from_iterator::TryFromIterator;
 
 use crate::{
@@ -262,9 +262,10 @@ pub struct BlockRewards {
     pub attester_slashings: Gwei,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString, VariantNames)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
 pub enum PublishedDuty {
+    Aggregates,
     Attestations,
 }
 

@@ -9,6 +9,7 @@ use p2p::BeaconCommitteeSubscription;
 use std_ext::ArcExt;
 use tap::Pipe as _;
 use types::{
+    combined::{Attestation, SignedAggregateAndProof},
     nonstandard::{OwnAttestation, PublishedDuty},
     phase0::{
         containers::AttestationData,
@@ -226,6 +227,40 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         Ok(data)
     }
 
+    async fn aggregate_attestation(
+        &self,
+        data: AttestationData,
+        committee_index: CommitteeIndex,
+    ) -> Result<Attestation<P>> {
+        let operation = format!(
+            "produce an aggregate attestation for committee {committee_index} in slot {}",
+            data.slot,
+        );
+
+        if let Some(node) = &self.local_node {
+            match node.aggregate_attestation(data, committee_index).await {
+                Ok(aggregate) => return Ok(aggregate),
+                Err(error) if self.remote_nodes.is_empty() => return Err(error),
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                }
+            }
+        }
+
+        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
+
+        for node in &self.remote_nodes {
+            attempts.push((
+                node.as_ref(),
+                BeaconNodeApi::<P>::aggregate_attestation(node.as_ref(), data, committee_index),
+            ));
+        }
+
+        first_success(&operation, attempts)
+            .await
+            .map(|(_, aggregate)| aggregate)
+    }
+
     async fn publish_singular_attestations(
         &self,
         attestations: &[OwnAttestation<P>],
@@ -233,30 +268,69 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         let publish_to = self.serving_nodes();
 
         if !publish_to.is_empty() {
+            let owned = Arc::new(attestations.to_vec());
+
+            let attempt = move |node: Arc<RemoteBeaconNode>| {
+                let attestations = owned.clone_arc();
+
+                async move {
+                    BeaconNodeApi::<P>::publish_singular_attestations(node.as_ref(), &attestations)
+                        .await
+                }
+            };
+
             if self
                 .publish_to_every_node
                 .contains(&PublishedDuty::Attestations)
             {
-                let attestations = Arc::new(attestations.to_vec());
-
-                spawn_broadcast("publish attestations", publish_to, move |node| {
-                    let attestations = attestations.clone_arc();
-
-                    async move {
-                        BeaconNodeApi::<P>::publish_singular_attestations(
-                            node.as_ref(),
-                            &attestations,
-                        )
-                        .await
-                    }
-                });
+                spawn_broadcast("publish attestations", publish_to, attempt);
             } else {
-                spawn_publish(publish_to, attestations.to_vec());
+                spawn_publish("publish attestations", publish_to, attempt);
             }
         }
 
         match &self.local_node {
             Some(node) => node.publish_singular_attestations(attestations).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn publish_aggregates_and_proofs(
+        &self,
+        aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
+    ) -> Result<()> {
+        let publish_to = self.serving_nodes();
+
+        if !publish_to.is_empty() {
+            let owned = Arc::new(aggregates_and_proofs.to_vec());
+
+            let attempt = move |node: Arc<RemoteBeaconNode>| {
+                let aggregates_and_proofs = owned.clone_arc();
+
+                async move {
+                    BeaconNodeApi::<P>::publish_aggregates_and_proofs(
+                        node.as_ref(),
+                        &aggregates_and_proofs,
+                    )
+                    .await
+                }
+            };
+
+            if self
+                .publish_to_every_node
+                .contains(&PublishedDuty::Aggregates)
+            {
+                spawn_broadcast("publish aggregates and proofs", publish_to, attempt);
+            } else {
+                spawn_publish("publish aggregates and proofs", publish_to, attempt);
+            }
+        }
+
+        match &self.local_node {
+            Some(node) => {
+                node.publish_aggregates_and_proofs(aggregates_and_proofs)
+                    .await
+            }
             None => Ok(()),
         }
     }
@@ -305,25 +379,19 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
 }
 
 // Detached as a whole rather than per node, so that the nodes are still tried in order.
-fn spawn_publish<P: Preset>(
-    remotes: Vec<Arc<RemoteBeaconNode>>,
-    attestations: Vec<OwnAttestation<P>>,
-) {
+fn spawn_publish<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)
+where
+    F: Fn(Arc<RemoteBeaconNode>) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<()>> + Send,
+{
     tokio::spawn(async move {
-        let mut attempts = Vec::with_capacity(remotes.len());
+        let attempts = remotes
+            .iter()
+            .map(|node| (node.clone_arc(), attempt(node.clone_arc())))
+            .collect::<Vec<_>>();
 
-        for node in &remotes {
-            attempts.push((
-                node.as_ref(),
-                node.publish_singular_attestations(&attestations),
-            ));
-        }
-
-        if first_success("publish attestations", attempts)
-            .await
-            .is_err()
-        {
-            warn_with_peers!("no remote beacon node was able to publish attestations");
+        if first_success(operation, attempts).await.is_err() {
+            warn_with_peers!("no remote beacon node was able to {operation}");
         }
     });
 }
