@@ -45,7 +45,7 @@ impl KeyManager {
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
         default_fee_recipient: ExecutionAddress,
-        default_gas_limit: Gas,
+        default_gas_limit: Option<Gas>,
         default_graffiti: H256,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Self {
@@ -82,7 +82,7 @@ impl KeyManager {
         secrets_directory: PathBuf,
         keystore_storage_password_path: Option<&Path>,
         default_fee_recipient: ExecutionAddress,
-        default_gas_limit: Gas,
+        default_gas_limit: Option<Gas>,
         default_graffiti: H256,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Result<Self> {

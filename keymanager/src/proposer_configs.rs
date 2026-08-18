@@ -21,7 +21,7 @@ const DB_MAX_SIZE: ByteSize = ByteSize::gib(1);
 
 pub struct ProposerConfigs {
     default_fee_recipient: ExecutionAddress,
-    default_gas_limit: Gas,
+    default_gas_limit: Option<Gas>,
     default_graffiti: H256,
     validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
 }
@@ -30,7 +30,7 @@ impl ProposerConfigs {
     #[must_use]
     pub const fn new(
         default_fee_recipient: ExecutionAddress,
-        default_gas_limit: Gas,
+        default_gas_limit: Option<Gas>,
         default_graffiti: H256,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Self {
@@ -79,13 +79,14 @@ impl ProposerConfigs {
         })?
     }
 
+    /// Returns the gas limit configured for `pubkey`, if any.
     #[must_use]
-    pub fn gas_limit(&self, pubkey: PublicKeyBytes) -> Gas {
+    pub fn gas_limit(&self, pubkey: PublicKeyBytes) -> Option<Gas> {
         self.validator_definitions
             .read()
             .get(pubkey)
             .and_then(|definition| definition.gas_limit)
-            .unwrap_or(self.default_gas_limit)
+            .or(self.default_gas_limit)
     }
 
     pub fn set_gas_limit(&self, pubkey: PublicKeyBytes, gas_limit: Gas) -> Result<()> {
@@ -376,7 +377,7 @@ mod tests {
 
         Ok(ProposerConfigs::new(
             DEFAULT_FEE_RECIPIENT,
-            DEFAULT_GAS_LIMIT,
+            Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
             validator_definitions,
         ))
@@ -424,7 +425,7 @@ mod tests {
     fn test_get_gas_limit_when_gas_limit_is_not_set() -> Result<()> {
         let proposer_configs = in_memory()?;
 
-        assert_eq!(proposer_configs.gas_limit(PUBKEY), DEFAULT_GAS_LIMIT);
+        assert_eq!(proposer_configs.gas_limit(PUBKEY), Some(DEFAULT_GAS_LIMIT));
 
         Ok(())
     }
@@ -435,7 +436,7 @@ mod tests {
 
         proposer_configs.set_gas_limit(PUBKEY, 12345)?;
 
-        assert_eq!(proposer_configs.gas_limit(PUBKEY), 12345);
+        assert_eq!(proposer_configs.gas_limit(PUBKEY), Some(12345));
 
         Ok(())
     }
@@ -447,7 +448,7 @@ mod tests {
         proposer_configs.set_gas_limit(PUBKEY, 12345)?;
         proposer_configs.delete_gas_limit(PUBKEY)?;
 
-        assert_eq!(proposer_configs.gas_limit(PUBKEY), DEFAULT_GAS_LIMIT);
+        assert_eq!(proposer_configs.gas_limit(PUBKEY), Some(DEFAULT_GAS_LIMIT));
 
         Ok(())
     }
@@ -537,7 +538,7 @@ mod tests {
 
         let proposer_configs = ProposerConfigs::new(
             DEFAULT_FEE_RECIPIENT,
-            DEFAULT_GAS_LIMIT,
+            Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
             validator_definitions,
         );
@@ -553,12 +554,12 @@ mod tests {
 
         let reloaded = ProposerConfigs::new(
             DEFAULT_FEE_RECIPIENT,
-            DEFAULT_GAS_LIMIT,
+            Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
             reloaded_definitions,
         );
 
-        assert_eq!(reloaded.gas_limit(PUBKEY), 12345);
+        assert_eq!(reloaded.gas_limit(PUBKEY), Some(12345));
         assert_eq!(reloaded.fee_recipient(PUBKEY), TEST_FEE_RECIPIENT);
 
         Ok(())

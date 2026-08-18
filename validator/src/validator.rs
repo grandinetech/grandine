@@ -2722,7 +2722,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .map(|pubkey| {
                     Ok(ValidatorRegistrationV1 {
                         fee_recipient: proposer_configs.fee_recipient(pubkey),
-                        gas_limit: proposer_configs.gas_limit(pubkey),
+                        gas_limit: chain_config
+                            .gas_limit(proposer_configs.gas_limit(pubkey), current_epoch),
                         timestamp: SystemTime::now()
                             .duration_since(SystemTime::UNIX_EPOCH)?
                             .as_secs(),
@@ -2730,6 +2731,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
+
+            if let Some(scheduled) = chain_config.get_scheduled_gas_limit(current_epoch) {
+                let over_limit = registrations
+                    .iter()
+                    .filter(|registration| registration.gas_limit > scheduled)
+                    .count();
+
+                if over_limit > 0 {
+                    warn_with_peers!(
+                        "{over_limit} validators configured gas limit exceeds the recommended gas limit of {scheduled}"
+                    );
+                }
+            }
 
             let triples = registrations
                 .iter()
@@ -2844,7 +2858,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     proposal_slot,
                     validator_index,
                     fee_recipient: self.proposer_configs.fee_recipient(pubkey),
-                    target_gas_limit: self.proposer_configs.gas_limit(pubkey),
+                    target_gas_limit: self
+                        .chain_config
+                        .gas_limit(self.proposer_configs.gas_limit(pubkey), proposal_epoch),
                 },
             ))
         })

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use arithmetic::NonZeroExt as _;
 use builder_api::consts::{
     BUILDER_PROPOSAL_DELAY_TOLERANCE, DOMAIN_APPLICATION_BUILDER,
-    EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION, PREFERRED_EXECUTION_GAS_LIMIT,
+    EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
 };
 use byteorder::LittleEndian;
 use serde::Serialize;
@@ -21,7 +21,7 @@ use types::{
     },
     bellatrix::primitives::Gas,
     capella::consts::DOMAIN_BLS_TO_EXECUTION_CHANGE,
-    config::Config,
+    config::{Config, PREFERRED_EXECUTION_GAS_LIMIT},
     gloas::consts::{
         DOMAIN_BEACON_BUILDER, DOMAIN_BUILDER_DEPOSIT, DOMAIN_PROPOSER_PREFERENCES,
         DOMAIN_PTC_ATTESTER,

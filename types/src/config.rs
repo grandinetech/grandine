@@ -15,7 +15,7 @@ use thiserror::Error;
 use typenum::Unsigned as _;
 
 use crate::{
-    bellatrix::primitives::Difficulty,
+    bellatrix::primitives::{Difficulty, Gas},
     fulu::containers::DataColumnsByRootIdentifier,
     nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
@@ -27,6 +27,9 @@ use crate::{
     },
     preset::{Preset, PresetName},
 };
+
+/// Gas limit to propose with when neither the operator nor gas limit schedule configured.
+pub const PREFERRED_EXECUTION_GAS_LIMIT: Gas = 60_000_000;
 
 /// Configuration variables customizable at runtime.
 ///
@@ -202,6 +205,7 @@ pub struct Config {
     #[serde(with = "serde_utils::string_or_native")]
     pub max_request_payloads: u64,
     pub blob_schedule: Vec<BlobScheduleEntry>,
+    pub gas_limit_schedule: Vec<GasLimitScheduleEntry>,
 
     // Transition
     pub terminal_block_hash: ExecutionBlockHash,
@@ -341,6 +345,7 @@ impl Default for Config {
             max_request_blob_sidecars_fulu: 1536,
             max_request_payloads: 128,
             blob_schedule: vec![],
+            gas_limit_schedule: vec![],
 
             // Transition
             terminal_block_hash: ExecutionBlockHash::zero(),
@@ -373,6 +378,15 @@ pub struct BlobScheduleEntry {
     pub epoch: Epoch,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_blobs_per_block: usize,
+}
+
+#[derive(Constructor, Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub struct GasLimitScheduleEntry {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub epoch: Epoch,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub gas_limit: Gas,
 }
 
 // TODO(Grandine Team): Consider adding the linked repositories as submodules and adding
@@ -1145,6 +1159,25 @@ impl Config {
     }
 
     #[must_use]
+    pub fn gas_limit(&self, configured: Option<Gas>, epoch: Epoch) -> Gas {
+        configured
+            .or_else(|| self.get_scheduled_gas_limit(epoch))
+            .unwrap_or(PREFERRED_EXECUTION_GAS_LIMIT)
+    }
+
+    #[must_use]
+    pub fn get_scheduled_gas_limit(&self, epoch: Epoch) -> Option<Gas> {
+        if epoch < self.gloas_fork_epoch {
+            return None;
+        }
+
+        self.gas_limit_schedule
+            .iter()
+            .sorted_by(|a, b| b.epoch.cmp(&a.epoch))
+            .find_map(|entry| (epoch >= entry.epoch).then_some(entry.gas_limit))
+    }
+
+    #[must_use]
     pub fn max_blobs_per_block(&self, epoch: Epoch) -> u64 {
         let phase = self.phase_at_epoch(epoch);
         let max_blobs = match phase {
@@ -1282,5 +1315,48 @@ mod tests {
     ) {
         config.maximum_gossip_clock_disparity = config.slot_duration_ms.saturating_mul(2);
         assert_eq!(config.max_gossip_future_slots(), 2)
+    }
+
+    #[test]
+    fn get_scheduled_gas_limit_returns_none_with_empty_schedule() {
+        assert_eq!(Config::mainnet().get_scheduled_gas_limit(1_000_000), None);
+    }
+
+    #[test]
+    fn gas_limit_falls_back_to_preferred_without_schedule() {
+        assert_eq!(
+            Config::mainnet().gas_limit(None, 1_000_000),
+            PREFERRED_EXECUTION_GAS_LIMIT,
+        );
+    }
+
+    #[test_case(99 => None)]
+    #[test_case(100 => Some(75_000_000))]
+    #[test_case(149 => Some(75_000_000))]
+    #[test_case(150 => Some(90_000_000))]
+    #[test_case(1_000_000 => Some(90_000_000))]
+    fn get_scheduled_gas_limit_resolves_unsorted_schedule(epoch: Epoch) -> Option<Gas> {
+        let mut config = Config::mainnet();
+
+        config.gloas_fork_epoch = 100;
+        config.gas_limit_schedule = vec![
+            GasLimitScheduleEntry::new(150, 90_000_000),
+            GasLimitScheduleEntry::new(100, 75_000_000),
+        ];
+
+        config.get_scheduled_gas_limit(epoch)
+    }
+
+    #[test_case(Some(12345), 99  => 12345)]
+    #[test_case(Some(12345), 100 => 12345)]
+    #[test_case(None,        99  => PREFERRED_EXECUTION_GAS_LIMIT)]
+    #[test_case(None,        100 => 75_000_000)]
+    fn gas_limit_prefers_configured_over_schedule(configured: Option<Gas>, epoch: Epoch) -> Gas {
+        let mut config = Config::mainnet();
+
+        config.gloas_fork_epoch = 100;
+        config.gas_limit_schedule = vec![GasLimitScheduleEntry::new(100, 75_000_000)];
+
+        config.gas_limit(configured, epoch)
     }
 }

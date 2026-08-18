@@ -20,7 +20,7 @@ pub struct ValidatorConfig {
     pub suggested_fee_recipient: ExecutionAddress,
     #[derivative(Default(value = "Uint256::from_u64(100)"))]
     pub default_builder_boost_factor: Uint256,
-    pub default_gas_limit: Gas,
+    pub default_gas_limit: Option<Gas>,
     pub keystore_storage_password_file: Option<PathBuf>,
     #[derivative(Default(value = "true"))]
     pub backfill_custody_groups: bool,
