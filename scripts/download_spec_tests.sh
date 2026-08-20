@@ -16,6 +16,14 @@ CRYPTO_TESTS_DIR="cryptography-spec-tests"
 CRYPTO_VERSION_FILE="${CRYPTO_TESTS_DIR}/.version"
 CRYPTO_URL="https://github.com/ethereum/cryptography-specs/releases/download/${CRYPTO_SPEC_VERSION}/tests.zip"
 
+# SSZ generic test vectors were moved out of consensus-specs and now live in
+# <https://github.com/ethereum/ssz-specs>, which releases them as a single
+# `ssz-test-vectors-<version>.tar.gz` containing `fixtures/ssz`.
+SSZ_SPEC_VERSION="${SSZ_SPEC_VERSION:-v0.0.1.dev2}"
+SSZ_TESTS_DIR="ssz-spec-tests"
+SSZ_VERSION_FILE="${SSZ_TESTS_DIR}/.version"
+SSZ_URL="https://github.com/ethereum/ssz-specs/releases/download/${SSZ_SPEC_VERSION}/ssz-test-vectors-${SSZ_SPEC_VERSION}.tar.gz"
+
 # Tarballs to download. "comptests" bundles the fork choice compliance tests
 # that are now part of the consensus-spec release (run by compliance_tests.rs).
 TARBALLS=("general" "minimal" "mainnet" "comptests")
@@ -26,6 +34,8 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
     VERSION_FILE=$(cygpath -m "$VERSION_FILE")
     CRYPTO_TESTS_DIR=$(cygpath -m "$CRYPTO_TESTS_DIR")
     CRYPTO_VERSION_FILE=$(cygpath -m "$CRYPTO_VERSION_FILE")
+    SSZ_TESTS_DIR=$(cygpath -m "$SSZ_TESTS_DIR")
+    SSZ_VERSION_FILE=$(cygpath -m "$SSZ_VERSION_FILE")
 fi
 
 fetch_url() {
@@ -243,5 +253,67 @@ download_cryptography_tests() {
     return 1
 }
 
+download_ssz_tests() {
+    if [[ -f "$SSZ_VERSION_FILE" ]]; then
+        local existing_version
+        existing_version=$(<"$SSZ_VERSION_FILE")
+        if [[ "$existing_version" == "$SSZ_SPEC_VERSION" ]]; then
+            echo "SSZ-spec-tests ${SSZ_SPEC_VERSION} already exists."
+            return 0
+        fi
+
+        echo "Found existing SSZ tests version ${existing_version}, updating to ${SSZ_SPEC_VERSION}..."
+    fi
+
+    rm -rf "$SSZ_TESTS_DIR"
+    mkdir -p "$SSZ_TESTS_DIR"
+
+    echo "Downloading ssz-spec-tests ${SSZ_SPEC_VERSION}..."
+
+    local temp_file="${SSZ_TESTS_DIR}/.ssz-test-vectors.tar.gz.tmp"
+    local attempt=1
+
+    while [[ $attempt -le $MAX_RETRIES ]]; do
+        echo "Downloading ssz-test-vectors-${SSZ_SPEC_VERSION}.tar.gz (attempt ${attempt}/${MAX_RETRIES})..."
+
+        if fetch_url "$SSZ_URL" "$temp_file"; then
+            if gzip -t "$temp_file" 2>/dev/null; then
+                if tar -xzf "$temp_file" -C "$SSZ_TESTS_DIR"; then
+                    rm -f "$temp_file"
+
+                    if [[ -n "$(ls -A "${SSZ_TESTS_DIR}/fixtures/ssz" 2>/dev/null)" ]]; then
+                        echo "  ✓ ssz-test-vectors extracted and verified"
+                        echo "$SSZ_SPEC_VERSION" > "$SSZ_VERSION_FILE"
+                        echo "Successfully downloaded and extracted SSZ tests to ${SSZ_TESTS_DIR}"
+                        return 0
+                    fi
+
+                    echo "  ✗ Extraction verification failed for ssz-test-vectors"
+                else
+                    echo "  ✗ Failed to extract ssz-test-vectors"
+                fi
+            else
+                echo "  ✗ Downloaded file is not a valid gzip archive"
+            fi
+        else
+            echo "  ✗ Download failed for ssz-test-vectors"
+        fi
+
+        rm -rf "${SSZ_TESTS_DIR:?}/"*
+        rm -f "$temp_file"
+
+        if [[ $attempt -lt $MAX_RETRIES ]]; then
+            echo "  Retrying in 2 seconds..."
+            sleep 2
+        fi
+
+        attempt=$((attempt + 1))
+    done
+
+    echo "Error: Failed to download and extract ssz-test-vectors after ${MAX_RETRIES} attempts"
+    return 1
+}
+
 download_consensus_tests
 download_cryptography_tests
+download_ssz_tests

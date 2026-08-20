@@ -17,6 +17,7 @@ book/deploy
 # large files
 consensus-spec-tests/
 cryptography-spec-tests/
+ssz-spec-tests/
 
 # exception logs
 exception.log
