@@ -37,7 +37,7 @@ use types::{
     fulu::beacon_state::BeaconState as FuluBeaconState,
     gloas::{
         beacon_state::BeaconState as GloasBeaconState,
-        consts::PAYLOAD_BUILDER_VERSION,
+        consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_BUILDER_VERSION},
         containers::{ExecutionPayloadBid, ExecutionRequests},
         primitives::BuilderIndex,
     },
@@ -860,8 +860,14 @@ pub fn upgrade_to_gloas<P: Preset>(
     };
 
     let latest_execution_payload_bid = ExecutionPayloadBid {
+        parent_block_hash: latest_execution_payload_header.parent_hash,
+        parent_block_root: latest_block_header.parent_root,
         block_hash: latest_execution_payload_header.block_hash,
+        prev_randao: latest_execution_payload_header.prev_randao,
+        fee_recipient: ExecutionAddress::zero(),
         gas_limit: latest_execution_payload_header.gas_limit,
+        builder_index: BUILDER_INDEX_SELF_BUILD,
+        slot: latest_block_header.slot,
         execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
         ..Default::default()
     };
