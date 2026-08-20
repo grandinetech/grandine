@@ -386,7 +386,7 @@ mod tests {
             .force()
             .clone_arc();
 
-        for validator in genesis_state.validators() {
+        for validator in genesis_state.validators().iter() {
             pubkey_cache.get_or_insert(validator.pubkey)?;
         }
 

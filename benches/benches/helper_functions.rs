@@ -88,7 +88,7 @@ impl Criterion {
                 let pubkey_cache = PubkeyCache::default();
                 let state = state.force();
 
-                for validator in state.validators() {
+                for validator in state.validators().iter() {
                     pubkey_cache.get_or_insert(validator.pubkey).ok();
                 }
 

@@ -160,6 +160,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
     }
 
     #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_lines)]
     pub async fn new(
         network_config: Arc<NetworkConfig>,
         controller: RealController<P>,

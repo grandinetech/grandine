@@ -299,7 +299,7 @@ impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
         match &mut self.cache {
             Some(cache) => cache.push_leaf(old_length),
             None => self.cache = Some(CacheNode::empty_leaf()),
-        };
+        }
 
         Ok(())
     }

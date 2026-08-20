@@ -12,6 +12,7 @@ use criterion::{Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{LazyBeaconState, goerli, holesky};
 use operation_pools::AttestationPacker;
+use operation_pools::PoolAttestation;
 use std_ext::ArcExt as _;
 use types::{config::Config, phase0::containers::Attestation, preset::Preset};
 

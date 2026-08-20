@@ -214,6 +214,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             .push(proposer_slashing);
     }
 
+    #[expect(clippy::too_many_lines)]
     pub async fn discard_old_data(&self, current_epoch: Epoch) {
         let finalized_state = self
             .producer_context

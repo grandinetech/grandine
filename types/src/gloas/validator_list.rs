@@ -273,7 +273,7 @@ impl SszValidatorListMut for ProgressiveValidatorList {
         match &mut self.cache {
             Some(cache) => cache.push_leaf(old_length),
             None => self.cache = Some(CacheNode::empty_single(0)),
-        };
+        }
 
         Ok(())
     }
