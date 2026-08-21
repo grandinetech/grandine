@@ -849,9 +849,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             }))
             .await?;
 
+        info_with_peers!("block producer built beacon block without state root");
+
         let block = block_without_state_root.clone();
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
+            info_with_peers!("block producer starting to build local option");
+
             build_context
                 .produce_beacon_block(block, local_execution_payload_handle)
                 .await
@@ -863,6 +867,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             .map(|version| version.clone_arc());
 
         let produce_blinded_block_join_handle = self.spawn_job(|build_context| async move {
+            info_with_peers!("block producer starting to build blinded option");
+
             build_context
                 .produce_blinded_block(
                     block_without_state_root,
@@ -873,7 +879,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         });
 
         let beacon_block_opt = wait_for_result(produce_beacon_block_join_handle).await?;
+
+        info_with_peers!("block producer finished building local option");
+
         let blinded_block_opt = wait_for_result(produce_blinded_block_join_handle).await?;
+
+        info_with_peers!("block producer finished building blinded option");
 
         match (beacon_block_opt, blinded_block_opt) {
             (

@@ -975,6 +975,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
+        info_with_peers!(
+            "starting block proposal task for validator {proposer_index} at slot {}",
+            slot_head.slot()
+        );
+
         let _propose_timer = self
             .metrics
             .as_ref()
@@ -1025,6 +1030,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
+        info_with_peers!(
+            "block producer starting block production task at slot {}",
+            slot_head.slot()
+        );
+
         let beacon_block_option = match block_build_context
             .build_blinded_beacon_block(
                 randao_reveal,
@@ -1057,6 +1067,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             );
             return Ok(());
         };
+
+        info_with_peers!(
+            "block producer finished block production task at slot {}",
+            slot_head.slot()
+        );
 
         let beacon_block_or_root = match validator_blinded_block {
             ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
