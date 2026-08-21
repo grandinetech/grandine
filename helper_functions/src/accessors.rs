@@ -1,5 +1,5 @@
 use core::{fmt::Debug, num::NonZeroU64, ops::Div as _};
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Result, anyhow, bail, ensure};
 use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
@@ -35,7 +35,7 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, PartialValidator, Participation, RelativeEpoch},
+    nonstandard::{AttestationEpoch, PartialValidator, Participation, Phase, RelativeEpoch},
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -1237,7 +1237,7 @@ pub fn get_active_builder_indices<P: Preset>(
 /// Check if validator is proposer for given slot in `proposer_lookahead`.
 ///
 /// Uses `post_fulu()` not `post_gloas()`.
-/// This allows pre-fork validation of preferences broadcast one epoch before Gloas
+/// This allows pre-fork validation of preferences published one epoch before Gloas
 /// (as mentioned in the spec).
 #[must_use]
 pub fn is_valid_proposal_slot<P: Preset>(
@@ -1268,40 +1268,38 @@ pub fn is_valid_proposal_slot<P: Preset>(
         .unwrap_or(false)
 }
 
-/// Get the future proposal slots within the proposer lookahead, i.e. the current epoch up to `MIN_SEED_LOOKAHEAD` epochs ahead.
-///
-/// Returns empty Vec if state is pre-Fulu (no `proposer_lookahead`).
-/// Uses `post_fulu()` not `post_gloas()` so pre-fork broadcast works one epoch before Gloas
-/// (<https://github.com/ethereum/consensus-specs/blob/2e55491d98828b0741a535064860942c9045ab24/specs/gloas/p2p-interface.md?plain=1#L431>).
-/// Currently we are using this to send per epoch relevant proposals per validator to follow spec.
-/// We can also use a slot driven (or partial epoch bucket / mid epoch) approach instead of broadcasting at once.
-#[must_use]
-pub fn get_upcoming_proposal_slots<P: Preset>(
-    state: &impl BeaconState<P>,
-    validator_index: ValidatorIndex,
-) -> Vec<Slot> {
-    let Some(post_fulu) = state.post_fulu() else {
-        return Vec::new();
-    };
+pub fn get_upcoming_proposal_slots<'a, P: Preset>(
+    chain_config: &'a Config,
+    state: &'a impl BeaconState<P>,
+    validator_indices: &'a HashSet<ValidatorIndex>,
+) -> impl Iterator<Item = (Slot, ValidatorIndex)> + 'a {
+    let start_slot = misc::compute_start_slot_at_epoch::<P>(get_current_epoch(state));
+    let state_slot = state.slot();
 
-    let current_epoch_start = misc::compute_start_slot_at_epoch::<P>(get_current_epoch(state));
-    post_fulu
-        .proposer_lookahead()
+    state
+        .post_fulu()
+        .map(PostFuluBeaconState::proposer_lookahead)
         .into_iter()
+        .flatten()
         .enumerate()
-        .filter_map(|(offset, proposer)| {
-            let slot = current_epoch_start.saturating_add(offset as u64);
-            if slot <= state.slot() {
+        .filter_map(move |(offset, proposer)| {
+            let slot = start_slot.saturating_add(offset as u64);
+
+            if slot <= state_slot || chain_config.phase_at_slot::<P>(slot) < Phase::Gloas {
                 return None;
             }
-            (*proposer == validator_index).then_some(slot)
+
+            validator_indices
+                .contains(proposer)
+                .then_some((slot, *proposer))
         })
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use types::{
+        ProposerLookahead,
+        fulu::beacon_state::BeaconState as FuluBeaconState,
         phase0::{
             beacon_state::BeaconState as Phase0BeaconState, consts::GENESIS_EPOCH,
             containers::Validator,
@@ -1428,5 +1426,54 @@ mod tests {
         itertools::assert_equal(indices, [0, 2]);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_get_upcoming_proposal_slots_skips_past_and_pre_gloas_slots() -> Result<()> {
+        // `Minimal` has 8 slots per epoch and a 16 slot proposer lookahead.
+        // The state is in the epoch before Gloas, so the lookahead covers slots 8 to 23 and
+        // Gloas starts at slot 16.
+        let config = Config::minimal().upgrade_once(Phase::Gloas, 2);
+
+        let mut lookahead = [0; 16];
+        lookahead[0] = 1; // slot 8, already passed
+        lookahead[4] = 1; // slot 12, the current slot
+        lookahead[6] = 1; // slot 14, still pre-Gloas
+        lookahead[8] = 1; // slot 16
+        lookahead[9] = 2; // slot 17
+        lookahead[10] = 3; // slot 18, not ours
+        lookahead[15] = 1; // slot 23
+
+        let state = FuluBeaconState::<Minimal> {
+            slot: 12,
+            proposer_lookahead: ProposerLookahead::<Minimal>::try_from_iter(lookahead)?,
+            ..FuluBeaconState::default()
+        };
+
+        let validator_indices = HashSet::from([1, 2]);
+
+        itertools::assert_equal(
+            get_upcoming_proposal_slots(&config, &state, &validator_indices),
+            [(16, 1), (17, 2), (23, 1)],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_upcoming_proposal_slots_is_empty_pre_fulu() {
+        let config = Config::minimal().upgrade_once(Phase::Gloas, 2);
+
+        let state = Phase0BeaconState::<Minimal> {
+            slot: 12,
+            ..Phase0BeaconState::default()
+        };
+
+        let validator_indices = HashSet::from([1, 2]);
+
+        assert_eq!(
+            get_upcoming_proposal_slots(&config, &state, &validator_indices).next(),
+            None,
+        );
     }
 }

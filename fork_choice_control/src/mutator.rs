@@ -2711,6 +2711,11 @@ where
     ) {
         match result {
             Ok(ProposerPreferencesAction::Accept(signed_preferences)) => {
+                let phase = self
+                    .store
+                    .chain_config()
+                    .phase_at_slot::<P>(signed_preferences.message.proposal_slot);
+
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_proposer_preferences(&["accepted"]);
                 }
@@ -2729,10 +2734,8 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Accept));
 
-                self.event_channels.send_proposer_preferences_event(
-                    self.store.head().block.phase(),
-                    signed_preferences.clone_arc(),
-                );
+                self.event_channels
+                    .send_proposer_preferences_event(phase, signed_preferences.clone_arc());
 
                 self.store_mut()
                     .apply_proposer_preferences(signed_preferences);
