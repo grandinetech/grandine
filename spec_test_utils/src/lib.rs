@@ -156,6 +156,18 @@ impl<'path> Case<'path> {
         Some(value)
     }
 
+    pub fn read_file(self) -> Vec<u8> {
+        let file_path = workspace_root_relative_to_tested_crate_root()
+            .join(self.case_path_relative_to_workspace_root);
+        try_read(file_path).expect("the file should exist")
+    }
+
+    pub fn json<T: DeserializeOwned>(self) -> T {
+        let bytes = self.read_file();
+        serde_json::from_slice(bytes.as_slice())
+            .expect("the file should contain a value encoded in JSON")
+    }
+
     fn try_yaml<T: DeserializeOwned>(self, file_name: impl AsRef<Path>) -> Option<T> {
         let file_path = self.resolve(file_name).with_extension("yaml");
         let bytes = try_read(file_path)?;

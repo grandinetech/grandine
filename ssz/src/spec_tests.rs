@@ -1,662 +1,539 @@
 use core::fmt::Debug;
+use std::collections::HashMap;
 
 use duplicate::duplicate_item;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::Value;
 use spec_test_utils::Case;
 use ssz_derive::Ssz;
 use static_assertions::assert_not_impl_any;
 use test_generator::test_resources;
 use typenum::{
-    Sum, U0, U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U15, U16, U17, U31, U32, U33, U123, U128,
-    U256, U257, U511, U512, U513, U1024, U2048,
+    Prod, U0, U1, U3, U4, U7, U8, U9, U16, U32, U52, U64, U255, U256, U257, U512, U1024, U2048,
 };
 
 use crate::{
     bit_list::BitList,
     bit_vector::BitVector,
     byte_list::ByteList,
+    byte_vector::ByteVector,
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
-    incomplete_persistent_vector::IncompletePersistentVector,
-    persistent_progressive_list::PersistentProgressiveList,
-    persistent_vector::PersistentVector,
-    porcelain::{SszHash, SszReadDefault, SszSize, SszWrite},
+    error::{ReadError, WriteError},
+    merkle_tree,
+    porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszWrite},
     progressive_bit_list::ProgressiveBitList,
-    progressive_byte_list::ProgressiveByteList,
     progressive_list::ProgressiveList,
+    size::Size,
     uint256::Uint256,
 };
 
-// `typenum` only defines constants up to `U1024` individually.
-type U1280 = Sum<U1024, U256>;
-type U1281 = Sum<U1280, U1>;
+type U524288 = Prod<U512, U1024>;
 
-// `u128` values are stored in `value.yaml` files as [single-quoted scalars].
-// [`serde_yaml::Deserializer::deserialize_u*`] methods expect a [plain scalar].
-// This is surprising, because [`serde_yaml::Deserializer::deserialize_str`] allows plain scalars.
-//
-// [single-quoted scalars]:                       https://yaml.org/spec/1.2.2/ext/glossary/#single-quoted-scalar
-// [plain scalar]:                                https://yaml.org/spec/1.2.2/ext/glossary/#plain-scalar
-// [`serde_yaml::Deserializer::deserialize_u*`]:  https://github.com/dtolnay/serde-yaml/blob/1e06dd7fdb4a0f967d96c979666eedf4224b5180/src/de.rs#L1303-L1345
-// [`serde_yaml::Deserializer::deserialize_str`]: https://github.com/dtolnay/serde-yaml/blob/1e06dd7fdb4a0f967d96c979666eedf4224b5180/src/de.rs#L1383-L1404
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(transparent)]
-#[ssz(internal, transparent)]
-struct StringyU128 {
-    #[serde(with = "serde_utils::string_or_native")]
-    value: u128,
-}
+// --- Progressive container types matching ssz-spec-tests fixtures ---
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct SingleFieldTestStruct {
-    a: u8,
-}
-
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct SmallTestStruct {
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1]))]
+struct SampleOneField {
     a: u16,
-    b: u16,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct FixedTestStruct {
-    a: u8,
-    b: u64,
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 0, 1]))]
+struct SampleSquare {
+    side: u16,
+    color: u8,
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [0, 1, 1]))]
+struct SampleCircle {
+    radius: u16,
+    color: u8,
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [0, 0, 1]))]
+struct SampleLeadingGaps {
     c: u32,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct VarTestStruct {
-    a: u16,
-    b: ContiguousList<u16, U1024>,
-    c: u8,
-}
-
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct ComplexTestStruct {
-    a: u16,
-    b: ContiguousList<u16, U128>,
-    c: u8,
-    d: ByteList<U256>,
-    e: VarTestStruct,
-    f: ContiguousVector<FixedTestStruct, U4>,
-    g: ContiguousVector<VarTestStruct, U2>,
-}
-
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct BitsStruct {
-    a: BitList<U5>,
-    b: BitVector<U2>,
-    c: BitVector<U1>,
-    d: BitList<U6>,
-    e: BitVector<U8>,
-}
-
-// `ProgressiveList` and `ProgressiveBitList` are unbounded in the spec. The type level limits
-// below are chosen large enough to hold the biggest generated case (`max_bytes_length = 2000`,
-// `max_list_length = 1500`) and do not affect the hash tree root.
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct ProgressiveTestStruct {
-    a: ProgressiveByteList<U2048>,
-    b: ProgressiveList<u64>,
-    c: ProgressiveList<SmallTestStruct>,
-    d: ProgressiveList<ProgressiveList<VarTestStruct>>,
-}
-
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal)]
-struct ProgressiveBitsStruct {
-    a: BitVector<U256>,
-    b: BitList<U256>,
-    c: ProgressiveBitList<U2048>,
-    d: BitVector<U257>,
-    e: BitList<U257>,
-    f: ProgressiveBitList<U2048>,
-    g: BitVector<U1280>,
-    h: BitList<U1280>,
-    i: ProgressiveBitList<U2048>,
-    j: BitVector<U1281>,
-    k: BitList<U1281>,
-    l: ProgressiveBitList<U2048>,
-}
-
-// The following types mirror the `ProgressiveContainer` test structs defined by the
-// `ssz_generic/progressive_containers` suite (EIP-7495 / EIP-7688). Their `active_fields`
-// arrays include inactive (`0`) slots that do not correspond to any Rust field; the number
-// of active (`1`) slots must equal the field count. `ProgressiveList`/`ProgressiveBitList`
-// are unbounded in the spec, so the type-level limits below are chosen large enough to hold
-// the biggest generated case (`max_list_length = 1500`) and do not affect the hash tree root.
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal, stable(active = [1]))]
-struct ProgressiveSingleFieldContainerTestStruct {
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 0, 0, 1, 0, 1]))]
+struct SampleMultipleGaps {
     a: u8,
+    b: u16,
+    c: u32,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal, stable(active = [0, 0, 0, 0, 1]))]
-struct ProgressiveSingleListContainerTestStruct {
-    c: ProgressiveBitList<U2048>,
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 1, 1]))]
+struct SampleProgressiveFields {
+    head: u64,
+    numbers: ProgressiveList<u64>,
+    flags: ProgressiveBitList<U2048>,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
-#[ssz(internal, stable(active = [1, 0, 1, 0, 1]))]
-struct ProgressiveVarTestStruct {
-    a: u8,
-    b: ContiguousList<u16, U123>,
-    c: ProgressiveBitList<U2048>,
-}
-
-#[derive(PartialEq, Eq, Debug, Deserialize, Ssz)]
-#[serde(deny_unknown_fields, rename_all = "UPPERCASE")]
+#[derive(Debug, Ssz)]
 #[ssz(internal, stable(active = [
-    1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
 ]))]
-struct ProgressiveComplexTestStruct {
-    a: u8,
-    b: ContiguousList<u16, U123>,
-    c: ProgressiveBitList<U2048>,
-    d: ProgressiveList<u64>,
-    e: ProgressiveList<SmallTestStruct>,
-    f: ProgressiveList<ProgressiveList<VarTestStruct>>,
-    g: ContiguousList<ProgressiveSingleFieldContainerTestStruct, U10>,
-    h: ProgressiveList<ProgressiveVarTestStruct>,
+struct SampleLevelBoundary {
+    first: u16,
+    last: u8,
 }
 
-mod valid {
-    use super::*;
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+]))]
+struct SampleWidestLayout {
+    tail: u8,
+}
 
-    #[duplicate_item(
-        glob                                                                                          function_name              ssz_type;
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_1_*"]            [basic_vector_bool_1]      [ContiguousVector<bool, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_2_*"]            [basic_vector_bool_2]      [ContiguousVector<bool, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_3_*"]            [basic_vector_bool_3]      [ContiguousVector<bool, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_4_*"]            [basic_vector_bool_4]      [ContiguousVector<bool, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_5_*"]            [basic_vector_bool_5]      [ContiguousVector<bool, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_8_*"]            [basic_vector_bool_8]      [ContiguousVector<bool, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_16_*"]           [basic_vector_bool_16]     [ContiguousVector<bool, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_31_*"]           [basic_vector_bool_31]     [ContiguousVector<bool, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_512_*"]          [basic_vector_bool_512]    [ContiguousVector<bool, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_512_*"]          [basic_persistent_vector_bool_512] [PersistentVector<bool, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_512_*"]          [basic_incomplete_persistent_vector_bool_512] [IncompletePersistentVector<bool, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_513_*"]          [basic_vector_bool_513]    [ContiguousVector<bool, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_bool_513_*"]          [basic_persistent_vector_bool_513] [IncompletePersistentVector<bool, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_1_*"]           [basic_vector_uint8_1]     [ContiguousVector<u8, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_2_*"]           [basic_vector_uint8_2]     [ContiguousVector<u8, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_3_*"]           [basic_vector_uint8_3]     [ContiguousVector<u8, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_4_*"]           [basic_vector_uint8_4]     [ContiguousVector<u8, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_5_*"]           [basic_vector_uint8_5]     [ContiguousVector<u8, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_8_*"]           [basic_vector_uint8_8]     [ContiguousVector<u8, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_16_*"]          [basic_vector_uint8_16]    [ContiguousVector<u8, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_31_*"]          [basic_vector_uint8_31]    [ContiguousVector<u8, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_512_*"]         [basic_vector_uint8_512]   [ContiguousVector<u8, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_512_*"]         [basic_persistent_vector_uint8_512] [PersistentVector<u8, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_512_*"]         [basic_incomplete_persistent_vector_uint8_512] [IncompletePersistentVector<u8, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_513_*"]         [basic_vector_uint8_513]   [ContiguousVector<u8, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint8_513_*"]         [basic_persistent_vector_uint8_513] [IncompletePersistentVector<u8, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_1_*"]          [basic_vector_uint16_1]    [ContiguousVector<u16, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_2_*"]          [basic_vector_uint16_2]    [ContiguousVector<u16, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_3_*"]          [basic_vector_uint16_3]    [ContiguousVector<u16, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_4_*"]          [basic_vector_uint16_4]    [ContiguousVector<u16, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_5_*"]          [basic_vector_uint16_5]    [ContiguousVector<u16, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_8_*"]          [basic_vector_uint16_8]    [ContiguousVector<u16, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_16_*"]         [basic_vector_uint16_16]   [ContiguousVector<u16, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_16_*"]         [basic_persistent_vector_uint16_16] [PersistentVector<u16, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_16_*"]         [basic_incomplete_persistent_vector_uint16_16] [IncompletePersistentVector<u16, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_31_*"]         [basic_vector_uint16_31]   [ContiguousVector<u16, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_31_*"]         [basic_persistent_vector_uint16_31] [IncompletePersistentVector<u16, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_512_*"]        [basic_vector_uint16_512]  [ContiguousVector<u16, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_512_*"]        [basic_persistent_vector_uint16_512] [PersistentVector<u16, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_512_*"]        [basic_incomplete_persistent_vector_uint16_512] [IncompletePersistentVector<u16, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_513_*"]        [basic_vector_uint16_513]  [ContiguousVector<u16, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint16_513_*"]        [basic_persistent_vector_uint16_513] [IncompletePersistentVector<u16, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_1_*"]          [basic_vector_uint32_1]    [ContiguousVector<u32, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_2_*"]          [basic_vector_uint32_2]    [ContiguousVector<u32, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_3_*"]          [basic_vector_uint32_3]    [ContiguousVector<u32, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_4_*"]          [basic_vector_uint32_4]    [ContiguousVector<u32, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_5_*"]          [basic_vector_uint32_5]    [ContiguousVector<u32, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_8_*"]          [basic_vector_uint32_8]    [ContiguousVector<u32, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_8_*"]          [basic_persistent_vector_uint32_8] [PersistentVector<u32, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_8_*"]          [basic_incomplete_persistent_vector_uint32_8] [IncompletePersistentVector<u32, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_16_*"]         [basic_vector_uint32_16]   [ContiguousVector<u32, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_16_*"]         [basic_persistent_vector_uint32_16] [PersistentVector<u32, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_16_*"]         [basic_incomplete_persistent_vector_uint32_16] [IncompletePersistentVector<u32, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_31_*"]         [basic_vector_uint32_31]   [ContiguousVector<u32, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_31_*"]         [basic_persistent_vector_uint32_31] [IncompletePersistentVector<u32, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_512_*"]        [basic_vector_uint32_512]  [ContiguousVector<u32, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_512_*"]        [basic_persistent_vector_uint32_512] [PersistentVector<u32, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_512_*"]        [basic_incomplete_persistent_vector_uint32_512] [IncompletePersistentVector<u32, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_513_*"]        [basic_vector_uint32_513]  [ContiguousVector<u32, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint32_513_*"]        [basic_persistent_vector_uint32_513] [IncompletePersistentVector<u32, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_1_*"]          [basic_vector_uint64_1]    [ContiguousVector<u64, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_2_*"]          [basic_vector_uint64_2]    [ContiguousVector<u64, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_3_*"]          [basic_vector_uint64_3]    [ContiguousVector<u64, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_4_*"]          [basic_vector_uint64_4]    [ContiguousVector<u64, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_4_*"]          [basic_persistent_vector_uint64_4] [PersistentVector<u64, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_4_*"]          [basic_incomplete_persistent_vector_uint64_4] [IncompletePersistentVector<u64, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_5_*"]          [basic_vector_uint64_5]    [ContiguousVector<u64, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_5_*"]          [basic_persistent_vector_uint64_5] [IncompletePersistentVector<u64, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_8_*"]          [basic_vector_uint64_8]    [ContiguousVector<u64, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_8_*"]          [basic_persistent_vector_uint64_8] [PersistentVector<u64, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_8_*"]          [basic_incomplete_persistent_vector_uint64_8] [IncompletePersistentVector<u64, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_16_*"]         [basic_vector_uint64_16]   [ContiguousVector<u64, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_16_*"]         [basic_persistent_vector_uint64_16] [PersistentVector<u64, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_16_*"]         [basic_incomplete_persistent_vector_uint64_16] [IncompletePersistentVector<u64, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_31_*"]         [basic_vector_uint64_31]   [ContiguousVector<u64, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_31_*"]         [basic_persistent_vector_uint64_31] [IncompletePersistentVector<u64, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_512_*"]        [basic_vector_uint64_512]  [ContiguousVector<u64, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_512_*"]        [basic_persistent_vector_uint64_512] [PersistentVector<u64, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_512_*"]        [basic_incomplete_persistent_vector_uint64_512] [IncompletePersistentVector<u64, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_513_*"]        [basic_vector_uint64_513]  [ContiguousVector<u64, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint64_513_*"]        [basic_persistent_vector_uint64_513] [IncompletePersistentVector<u64, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_1_*"]         [basic_vector_uint128_1]   [ContiguousVector<StringyU128, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_2_*"]         [basic_vector_uint128_2]   [ContiguousVector<StringyU128, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_2_*"]         [basic_persistent_vector_uint128_2] [PersistentVector<StringyU128, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_2_*"]         [basic_incomplete_persistent_vector_uint128_2] [IncompletePersistentVector<StringyU128, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_3_*"]         [basic_vector_uint128_3]   [ContiguousVector<StringyU128, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_3_*"]         [basic_persistent_vector_uint128_3] [IncompletePersistentVector<StringyU128, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_4_*"]         [basic_vector_uint128_4]   [ContiguousVector<StringyU128, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_4_*"]         [basic_persistent_vector_uint128_4] [PersistentVector<StringyU128, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_4_*"]         [basic_incomplete_persistent_vector_uint128_4] [IncompletePersistentVector<StringyU128, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_5_*"]         [basic_vector_uint128_5]   [ContiguousVector<StringyU128, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_5_*"]         [basic_persistent_vector_uint128_5] [IncompletePersistentVector<StringyU128, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_8_*"]         [basic_vector_uint128_8]   [ContiguousVector<StringyU128, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_8_*"]         [basic_persistent_vector_uint128_8] [PersistentVector<StringyU128, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_8_*"]         [basic_incomplete_persistent_vector_uint128_8] [IncompletePersistentVector<StringyU128, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_16_*"]        [basic_vector_uint128_16]  [ContiguousVector<StringyU128, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_16_*"]        [basic_persistent_vector_uint128_16] [PersistentVector<StringyU128, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_16_*"]        [basic_incomplete_persistent_vector_uint128_16] [IncompletePersistentVector<StringyU128, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_31_*"]        [basic_vector_uint128_31]  [ContiguousVector<StringyU128, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_31_*"]        [basic_persistent_vector_uint128_31] [IncompletePersistentVector<StringyU128, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_512_*"]       [basic_vector_uint128_512] [ContiguousVector<StringyU128, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_512_*"]       [basic_persistent_vector_uint128_512] [PersistentVector<StringyU128, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_512_*"]       [basic_incomplete_persistent_vector_uint128_512] [IncompletePersistentVector<StringyU128, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_513_*"]       [basic_vector_uint128_513] [ContiguousVector<StringyU128, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint128_513_*"]       [basic_persistent_vector_uint128_513] [IncompletePersistentVector<StringyU128, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_1_*"]         [basic_vector_uint256_1]   [ContiguousVector<Uint256, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_1_*"]         [basic_persistent_vector_uint256_1] [PersistentVector<Uint256, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_1_*"]         [basic_incomplete_persistent_vector_uint256_1] [IncompletePersistentVector<Uint256, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_2_*"]         [basic_vector_uint256_2]   [ContiguousVector<Uint256, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_2_*"]         [basic_persistent_vector_uint256_2] [PersistentVector<Uint256, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_2_*"]         [basic_incomplete_persistent_vector_uint256_2] [IncompletePersistentVector<Uint256, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_3_*"]         [basic_vector_uint256_3]   [ContiguousVector<Uint256, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_3_*"]         [basic_persistent_vector_uint256_3] [IncompletePersistentVector<Uint256, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_4_*"]         [basic_vector_uint256_4]   [ContiguousVector<Uint256, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_4_*"]         [basic_persistent_vector_uint256_4] [PersistentVector<Uint256, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_4_*"]         [basic_incomplete_persistent_vector_uint256_4] [IncompletePersistentVector<Uint256, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_5_*"]         [basic_vector_uint256_5]   [ContiguousVector<Uint256, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_5_*"]         [basic_persistent_vector_uint256_5] [IncompletePersistentVector<Uint256, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_8_*"]         [basic_vector_uint256_8]   [ContiguousVector<Uint256, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_8_*"]         [basic_persistent_vector_uint256_8] [PersistentVector<Uint256, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_8_*"]         [basic_incomplete_persistent_vector_uint256_8] [IncompletePersistentVector<Uint256, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_16_*"]        [basic_vector_uint256_16]  [ContiguousVector<Uint256, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_16_*"]        [basic_persistent_vector_uint256_16] [PersistentVector<Uint256, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_16_*"]        [basic_incomplete_persistent_vector_uint256_16] [IncompletePersistentVector<Uint256, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_31_*"]        [basic_vector_uint256_31]  [ContiguousVector<Uint256, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_31_*"]        [basic_persistent_vector_uint256_31] [IncompletePersistentVector<Uint256, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_512_*"]       [basic_vector_uint256_512] [ContiguousVector<Uint256, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_512_*"]       [basic_persistent_vector_uint256_512] [PersistentVector<Uint256, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_512_*"]       [basic_incomplete_persistent_vector_uint256_512] [IncompletePersistentVector<Uint256, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_513_*"]       [basic_vector_uint256_513] [ContiguousVector<Uint256, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/valid/*_uint256_513_*"]       [basic_persistent_vector_uint256_513] [IncompletePersistentVector<Uint256, U513>];
-        // Progressive lists are unbounded in the spec. The type-level limits below are chosen
-        // large enough to hold the biggest generated case (1366 elements) and do not affect
-        // the hash tree root.
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_bool_*"]    [basic_progressive_list_bool]    [ProgressiveList<bool>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_bool_*"]    [basic_persistent_progressive_list_bool]    [PersistentProgressiveList<bool>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint8_*"]   [basic_progressive_list_uint8]   [ProgressiveList<u8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint8_*"]   [basic_persistent_progressive_list_uint8]   [PersistentProgressiveList<u8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint16_*"]  [basic_progressive_list_uint16]  [ProgressiveList<u16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint16_*"]  [basic_persistent_progressive_list_uint16]  [PersistentProgressiveList<u16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint32_*"]  [basic_progressive_list_uint32]  [ProgressiveList<u32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint32_*"]  [basic_persistent_progressive_list_uint32]  [PersistentProgressiveList<u32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint64_*"]  [basic_progressive_list_uint64]  [ProgressiveList<u64>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint64_*"]  [basic_persistent_progressive_list_uint64]  [PersistentProgressiveList<u64>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint128_*"] [basic_progressive_list_uint128] [ProgressiveList<StringyU128>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint128_*"] [basic_persistent_progressive_list_uint128] [PersistentProgressiveList<StringyU128>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint256_*"] [basic_progressive_list_uint256] [ProgressiveList<Uint256>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/valid/proglist_uint256_*"] [basic_persistent_progressive_list_uint256] [PersistentProgressiveList<Uint256>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_1_*"]                      [bitlist_1]                [BitList<U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_2_*"]                      [bitlist_2]                [BitList<U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_3_*"]                      [bitlist_3]                [BitList<U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_4_*"]                      [bitlist_4]                [BitList<U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_5_*"]                      [bitlist_5]                [BitList<U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_6_*"]                      [bitlist_6]                [BitList<U6>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_7_*"]                      [bitlist_7]                [BitList<U7>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_8_*"]                      [bitlist_8]                [BitList<U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_9_*"]                      [bitlist_9]                [BitList<U9>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_15_*"]                     [bitlist_15]               [BitList<U15>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_16_*"]                     [bitlist_16]               [BitList<U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_17_*"]                     [bitlist_17]               [BitList<U17>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_31_*"]                     [bitlist_31]               [BitList<U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_32_*"]                     [bitlist_32]               [BitList<U32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_33_*"]                     [bitlist_33]               [BitList<U33>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_511_*"]                    [bitlist_511]              [BitList<U511>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_512_*"]                    [bitlist_512]              [BitList<U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/valid/*_513_*"]                    [bitlist_513]              [BitList<U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_1_*"]                    [bitvector_1]              [BitVector<U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_2_*"]                    [bitvector_2]              [BitVector<U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_3_*"]                    [bitvector_3]              [BitVector<U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_4_*"]                    [bitvector_4]              [BitVector<U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_5_*"]                    [bitvector_5]              [BitVector<U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_6_*"]                    [bitvector_6]              [BitVector<U6>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_7_*"]                    [bitvector_7]              [BitVector<U7>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_8_*"]                    [bitvector_8]              [BitVector<U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_9_*"]                    [bitvector_9]              [BitVector<U9>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_15_*"]                   [bitvector_15]             [BitVector<U15>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_16_*"]                   [bitvector_16]             [BitVector<U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_17_*"]                   [bitvector_17]             [BitVector<U17>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_31_*"]                   [bitvector_31]             [BitVector<U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_32_*"]                   [bitvector_32]             [BitVector<U32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_33_*"]                   [bitvector_33]             [BitVector<U33>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_511_*"]                  [bitvector_511]            [BitVector<U511>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_512_*"]                  [bitvector_512]            [BitVector<U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/valid/*_513_*"]                  [bitvector_513]            [BitVector<U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/boolean/valid/*"]                          [boolean]                  [bool];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/BitsStruct_*"]            [bits_struct]              [BitsStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/ComplexTestStruct_*"]     [complex_test_struct]      [ComplexTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/FixedTestStruct_*"]       [fixed_test_struct]        [FixedTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/ProgressiveBitsStruct_*"] [progressive_bits_struct]  [ProgressiveBitsStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/ProgressiveTestStruct_*"] [progressive_test_struct]  [ProgressiveTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/SingleFieldTestStruct_*"] [single_field_test_struct] [SingleFieldTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/SmallTestStruct_*"]       [small_test_struct]        [SmallTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/valid/VarTestStruct_*"]         [var_test_struct]          [VarTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_bitlist/valid/progbitlist_*"]  [progressive_bitlist]      [ProgressiveBitList<U2048>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveSingleFieldContainerTestStruct_*"] [progressive_single_field_container_test_struct] [ProgressiveSingleFieldContainerTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveSingleListContainerTestStruct_*"]  [progressive_single_list_container_test_struct]  [ProgressiveSingleListContainerTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveVarTestStruct_*"]                  [progressive_var_test_struct]                    [ProgressiveVarTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/valid/ProgressiveComplexTestStruct_*"]              [progressive_complex_test_struct]                [ProgressiveComplexTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_8_*"]                        [uints_8]                  [u8];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_16_*"]                       [uints_16]                 [u16];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_32_*"]                       [uints_32]                 [u32];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_64_*"]                       [uints_64]                 [u64];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_128_*"]                      [uints_128]                [StringyU128];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/valid/*_256_*"]                      [uints_256]                [Uint256];
-    )]
-    #[test_resources(glob)]
-    fn function_name(case: Case) {
-        run_valid_case::<ssz_type>(case);
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 0, 1]))]
+struct SampleBoundedListField {
+    head: u64,
+    body: ContiguousList<u16, U4>,
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 0, 1]))]
+struct SampleInnerShape {
+    x: u16,
+    y: u8,
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 0, 1]))]
+struct SampleOuterShape {
+    head: u8,
+    inner: SampleInnerShape,
+}
+
+// --- Container types ---
+
+#[derive(Debug, Ssz)]
+#[ssz(internal)]
+struct SampleShapeContainer {
+    tag: u8,
+    shape: SampleSquare,
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal)]
+struct SampleContainerWithProgressiveList {
+    a: u16,
+    b: ProgressiveList<u64>,
+    c: u8,
+}
+
+// --- Compatible union types ---
+
+#[derive(Debug)]
+enum SampleUnionShape {
+    Square1(SampleSquare),
+    Circle(SampleCircle),
+    Square127(SampleSquare),
+}
+
+impl SszSize for SampleUnionShape {
+    const SIZE: Size = Size::Variable { minimum_size: 1 };
+}
+
+impl<C> SszRead<C> for SampleUnionShape {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        let (&selector, payload) = bytes.split_first().ok_or(ReadError::Custom {
+            message: "empty union",
+        })?;
+
+        match selector {
+            1 => Ok(Self::Square1(SampleSquare::from_ssz(context, payload)?)),
+            2 => Ok(Self::Circle(SampleCircle::from_ssz(context, payload)?)),
+            127 => Ok(Self::Square127(SampleSquare::from_ssz(context, payload)?)),
+            _ => Err(ReadError::Custom {
+                message: "invalid union selector",
+            }),
+        }
     }
 }
 
-mod invalid {
-    use super::*;
-
-    #[duplicate_item(
-        glob                                                                                            function_name              ssz_type;
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_1_*"]            [basic_vector_bool_1]      [ContiguousVector<bool, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_2_*"]            [basic_vector_bool_2]      [ContiguousVector<bool, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_3_*"]            [basic_vector_bool_3]      [ContiguousVector<bool, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_4_*"]            [basic_vector_bool_4]      [ContiguousVector<bool, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_5_*"]            [basic_vector_bool_5]      [ContiguousVector<bool, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_8_*"]            [basic_vector_bool_8]      [ContiguousVector<bool, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_16_*"]           [basic_vector_bool_16]     [ContiguousVector<bool, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_31_*"]           [basic_vector_bool_31]     [ContiguousVector<bool, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_512_*"]          [basic_vector_bool_512]    [ContiguousVector<bool, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_512_*"]          [basic_persistent_vector_bool_512] [PersistentVector<bool, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_512_*"]          [basic_incomplete_persistent_vector_bool_512] [IncompletePersistentVector<bool, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_513_*"]          [basic_vector_bool_513]    [ContiguousVector<bool, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_bool_513_*"]          [basic_persistent_vector_bool_513] [IncompletePersistentVector<bool, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_1_*"]           [basic_vector_uint8_1]     [ContiguousVector<u8, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_2_*"]           [basic_vector_uint8_2]     [ContiguousVector<u8, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_3_*"]           [basic_vector_uint8_3]     [ContiguousVector<u8, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_4_*"]           [basic_vector_uint8_4]     [ContiguousVector<u8, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_5_*"]           [basic_vector_uint8_5]     [ContiguousVector<u8, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_8_*"]           [basic_vector_uint8_8]     [ContiguousVector<u8, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_16_*"]          [basic_vector_uint8_16]    [ContiguousVector<u8, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_31_*"]          [basic_vector_uint8_31]    [ContiguousVector<u8, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_512_*"]         [basic_vector_uint8_512]   [ContiguousVector<u8, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_512_*"]         [basic_persistent_vector_uint8_512] [PersistentVector<u8, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_512_*"]         [basic_incomplete_persistent_vector_uint8_512] [IncompletePersistentVector<u8, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_513_*"]         [basic_vector_uint8_513]   [ContiguousVector<u8, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint8_513_*"]         [basic_persistent_vector_uint8_513] [IncompletePersistentVector<u8, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_1_*"]          [basic_vector_uint16_1]    [ContiguousVector<u16, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_2_*"]          [basic_vector_uint16_2]    [ContiguousVector<u16, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_3_*"]          [basic_vector_uint16_3]    [ContiguousVector<u16, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_4_*"]          [basic_vector_uint16_4]    [ContiguousVector<u16, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_5_*"]          [basic_vector_uint16_5]    [ContiguousVector<u16, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_8_*"]          [basic_vector_uint16_8]    [ContiguousVector<u16, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_16_*"]         [basic_vector_uint16_16]   [ContiguousVector<u16, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_16_*"]         [basic_persistent_vector_uint16_16] [PersistentVector<u16, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_16_*"]         [basic_incomplete_persistent_vector_uint16_16] [IncompletePersistentVector<u16, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_31_*"]         [basic_vector_uint16_31]   [ContiguousVector<u16, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_31_*"]         [basic_persistent_vector_uint16_31] [IncompletePersistentVector<u16, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_512_*"]        [basic_vector_uint16_512]  [ContiguousVector<u16, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_512_*"]        [basic_persistent_vector_uint16_512] [PersistentVector<u16, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_512_*"]        [basic_incomplete_persistent_vector_uint16_512] [IncompletePersistentVector<u16, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_513_*"]        [basic_vector_uint16_513]  [ContiguousVector<u16, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint16_513_*"]        [basic_persistent_vector_uint16_513] [IncompletePersistentVector<u16, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_1_*"]          [basic_vector_uint32_1]    [ContiguousVector<u32, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_2_*"]          [basic_vector_uint32_2]    [ContiguousVector<u32, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_3_*"]          [basic_vector_uint32_3]    [ContiguousVector<u32, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_4_*"]          [basic_vector_uint32_4]    [ContiguousVector<u32, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_5_*"]          [basic_vector_uint32_5]    [ContiguousVector<u32, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_8_*"]          [basic_vector_uint32_8]    [ContiguousVector<u32, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_8_*"]          [basic_persistent_vector_uint32_8] [PersistentVector<u32, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_8_*"]          [basic_incomplete_persistent_vector_uint32_8] [IncompletePersistentVector<u32, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_16_*"]         [basic_vector_uint32_16]   [ContiguousVector<u32, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_16_*"]         [basic_persistent_vector_uint32_16] [PersistentVector<u32, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_16_*"]         [basic_incomplete_persistent_vector_uint32_16] [IncompletePersistentVector<u32, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_31_*"]         [basic_vector_uint32_31]   [ContiguousVector<u32, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_31_*"]         [basic_persistent_vector_uint32_31] [IncompletePersistentVector<u32, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_512_*"]        [basic_vector_uint32_512]  [ContiguousVector<u32, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_512_*"]        [basic_persistent_vector_uint32_512] [PersistentVector<u32, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_512_*"]        [basic_incomplete_persistent_vector_uint32_512] [IncompletePersistentVector<u32, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_513_*"]        [basic_vector_uint32_513]  [ContiguousVector<u32, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint32_513_*"]        [basic_persistent_vector_uint32_513] [IncompletePersistentVector<u32, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_1_*"]          [basic_vector_uint64_1]    [ContiguousVector<u64, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_2_*"]          [basic_vector_uint64_2]    [ContiguousVector<u64, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_3_*"]          [basic_vector_uint64_3]    [ContiguousVector<u64, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_4_*"]          [basic_vector_uint64_4]    [ContiguousVector<u64, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_4_*"]          [basic_persistent_vector_uint64_4] [PersistentVector<u64, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_4_*"]          [basic_incomplete_persistent_vector_uint64_4] [IncompletePersistentVector<u64, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_5_*"]          [basic_vector_uint64_5]    [ContiguousVector<u64, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_5_*"]          [basic_persistent_vector_uint64_5] [IncompletePersistentVector<u64, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_8_*"]          [basic_vector_uint64_8]    [ContiguousVector<u64, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_8_*"]          [basic_persistent_vector_uint64_8] [PersistentVector<u64, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_8_*"]          [basic_incomplete_persistent_vector_uint64_8] [IncompletePersistentVector<u64, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_16_*"]         [basic_vector_uint64_16]   [ContiguousVector<u64, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_16_*"]         [basic_persistent_vector_uint64_16] [PersistentVector<u64, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_16_*"]         [basic_incomplete_persistent_vector_uint64_16] [IncompletePersistentVector<u64, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_31_*"]         [basic_vector_uint64_31]   [ContiguousVector<u64, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_31_*"]         [basic_persistent_vector_uint64_31] [IncompletePersistentVector<u64, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_512_*"]        [basic_vector_uint64_512]  [ContiguousVector<u64, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_512_*"]        [basic_persistent_vector_uint64_512] [PersistentVector<u64, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_512_*"]        [basic_incomplete_persistent_vector_uint64_512] [IncompletePersistentVector<u64, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_513_*"]        [basic_vector_uint64_513]  [ContiguousVector<u64, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint64_513_*"]        [basic_persistent_vector_uint64_513] [IncompletePersistentVector<u64, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_1_*"]         [basic_vector_uint128_1]   [ContiguousVector<StringyU128, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_2_*"]         [basic_vector_uint128_2]   [ContiguousVector<StringyU128, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_2_*"]         [basic_persistent_vector_uint128_2] [PersistentVector<StringyU128, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_2_*"]         [basic_incomplete_persistent_vector_uint128_2] [IncompletePersistentVector<StringyU128, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_3_*"]         [basic_vector_uint128_3]   [ContiguousVector<StringyU128, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_3_*"]         [basic_persistent_vector_uint128_3] [IncompletePersistentVector<StringyU128, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_4_*"]         [basic_vector_uint128_4]   [ContiguousVector<StringyU128, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_4_*"]         [basic_persistent_vector_uint128_4] [PersistentVector<StringyU128, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_4_*"]         [basic_incomplete_persistent_vector_uint128_4] [IncompletePersistentVector<StringyU128, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_5_*"]         [basic_vector_uint128_5]   [ContiguousVector<StringyU128, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_5_*"]         [basic_persistent_vector_uint128_5] [IncompletePersistentVector<StringyU128, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_8_*"]         [basic_vector_uint128_8]   [ContiguousVector<StringyU128, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_8_*"]         [basic_persistent_vector_uint128_8] [PersistentVector<StringyU128, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_8_*"]         [basic_incomplete_persistent_vector_uint128_8] [IncompletePersistentVector<StringyU128, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_16_*"]        [basic_vector_uint128_16]  [ContiguousVector<StringyU128, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_16_*"]        [basic_persistent_vector_uint128_16] [PersistentVector<StringyU128, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_16_*"]        [basic_incomplete_persistent_vector_uint128_16] [IncompletePersistentVector<StringyU128, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_31_*"]        [basic_vector_uint128_31]  [ContiguousVector<StringyU128, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_31_*"]        [basic_persistent_vector_uint128_31] [IncompletePersistentVector<StringyU128, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_512_*"]       [basic_vector_uint128_512] [ContiguousVector<u128, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_512_*"]       [basic_persistent_vector_uint128_512] [PersistentVector<StringyU128, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_512_*"]       [basic_incomplete_persistent_vector_uint128_512] [IncompletePersistentVector<StringyU128, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_513_*"]       [basic_vector_uint128_513] [ContiguousVector<StringyU128, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint128_513_*"]       [basic_persistent_vector_uint128_513] [IncompletePersistentVector<StringyU128, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_1_*"]         [basic_vector_uint256_1]   [ContiguousVector<Uint256, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_1_*"]         [basic_persistent_vector_uint256_1] [PersistentVector<Uint256, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_1_*"]         [basic_incomplete_persistent_vector_uint256_1] [IncompletePersistentVector<Uint256, U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_2_*"]         [basic_vector_uint256_2]   [ContiguousVector<Uint256, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_2_*"]         [basic_persistent_vector_uint256_2] [PersistentVector<Uint256, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_2_*"]         [basic_incomplete_persistent_vector_uint256_2] [IncompletePersistentVector<Uint256, U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_3_*"]         [basic_vector_uint256_3]   [ContiguousVector<Uint256, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_3_*"]         [basic_persistent_vector_uint256_3] [IncompletePersistentVector<Uint256, U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_4_*"]         [basic_vector_uint256_4]   [ContiguousVector<Uint256, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_4_*"]         [basic_persistent_vector_uint256_4] [PersistentVector<Uint256, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_4_*"]         [basic_incomplete_persistent_vector_uint256_4] [IncompletePersistentVector<Uint256, U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_5_*"]         [basic_vector_uint256_5]   [ContiguousVector<Uint256, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_5_*"]         [basic_persistent_vector_uint256_5] [IncompletePersistentVector<Uint256, U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_8_*"]         [basic_vector_uint256_8]   [ContiguousVector<Uint256, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_8_*"]         [basic_persistent_vector_uint256_8] [PersistentVector<Uint256, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_8_*"]         [basic_incomplete_persistent_vector_uint256_8] [IncompletePersistentVector<Uint256, U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_16_*"]        [basic_vector_uint256_16]  [ContiguousVector<Uint256, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_16_*"]        [basic_persistent_vector_uint256_16] [PersistentVector<Uint256, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_16_*"]        [basic_incomplete_persistent_vector_uint256_16] [IncompletePersistentVector<Uint256, U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_31_*"]        [basic_vector_uint256_31]  [ContiguousVector<Uint256, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_31_*"]        [basic_persistent_vector_uint256_31] [IncompletePersistentVector<Uint256, U31>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_512_*"]       [basic_vector_uint256_512] [ContiguousVector<Uint256, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_512_*"]       [basic_persistent_vector_uint256_512] [PersistentVector<Uint256, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_512_*"]       [basic_incomplete_persistent_vector_uint256_512] [IncompletePersistentVector<Uint256, U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_513_*"]       [basic_vector_uint256_513] [ContiguousVector<Uint256, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/*_uint256_513_*"]       [basic_persistent_vector_uint256_513] [IncompletePersistentVector<Uint256, U513>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_bool_*"]    [basic_progressive_list_bool]    [ProgressiveList<bool>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_bool_*"]    [basic_persistent_progressive_list_bool]    [PersistentProgressiveList<bool>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint16_*"]  [basic_progressive_list_uint16]  [ProgressiveList<u16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint16_*"]  [basic_persistent_progressive_list_uint16]  [PersistentProgressiveList<u16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint32_*"]  [basic_progressive_list_uint32]  [ProgressiveList<u32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint32_*"]  [basic_persistent_progressive_list_uint32]  [PersistentProgressiveList<u32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint64_*"]  [basic_progressive_list_uint64]  [ProgressiveList<u64>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint64_*"]  [basic_persistent_progressive_list_uint64]  [PersistentProgressiveList<u64>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint128_*"] [basic_progressive_list_uint128] [ProgressiveList<StringyU128>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint128_*"] [basic_persistent_progressive_list_uint128] [PersistentProgressiveList<StringyU128>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint256_*"] [basic_progressive_list_uint256] [ProgressiveList<Uint256>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/basic_progressive_list/invalid/proglist_uint256_*"] [basic_persistent_progressive_list_uint256] [PersistentProgressiveList<Uint256>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_1_*"]                      [bitlist_1]                [BitList<U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_2_*"]                      [bitlist_2]                [BitList<U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_3_*"]                      [bitlist_3]                [BitList<U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_4_*"]                      [bitlist_4]                [BitList<U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_5_*"]                      [bitlist_5]                [BitList<U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_6_*"]                      [bitlist_6]                [BitList<U6>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_7_*"]                      [bitlist_7]                [BitList<U7>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_8_*"]                      [bitlist_8]                [BitList<U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_32_*"]                     [bitlist_32]               [BitList<U32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_512_*"]                    [bitlist_512]              [BitList<U512>];
-        // The longest of the `*_no_delimiter_*` cases is 3 bytes long,
-        // so it would have to have a maximum length of at least 16 bits to be valid.
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitlist/invalid/*_no_delimiter_*"]           [bitlist_no_delimiter]     [BitList<U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_1_*"]                    [bitvector_1]              [BitVector<U1>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_2_*"]                    [bitvector_2]              [BitVector<U2>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_3_*"]                    [bitvector_3]              [BitVector<U3>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_4_*"]                    [bitvector_4]              [BitVector<U4>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_5_*"]                    [bitvector_5]              [BitVector<U5>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_8_*"]                    [bitvector_8]              [BitVector<U8>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_9_*"]                    [bitvector_9]              [BitVector<U9>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_16_*"]                   [bitvector_16]             [BitVector<U16>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_32_*"]                   [bitvector_32]             [BitVector<U32>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/*_512_*"]                  [bitvector_512]            [BitVector<U512>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/boolean/invalid/*"]                          [boolean]                  [bool];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/BitsStruct_*"]            [bits_struct]              [BitsStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/ComplexTestStruct_*"]     [complex_test_struct]      [ComplexTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/FixedTestStruct_*"]       [fixed_test_struct]        [FixedTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/ProgressiveBitsStruct_*"] [progressive_bits_struct]  [ProgressiveBitsStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/ProgressiveTestStruct_*"] [progressive_test_struct]  [ProgressiveTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/SingleFieldTestStruct_*"] [single_field_test_struct] [SingleFieldTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/SmallTestStruct_*"]       [small_test_struct]        [SmallTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/containers/invalid/VarTestStruct_*"]         [var_test_struct]          [VarTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_bitlist/invalid/progbitlist_*"] [progressive_bitlist]     [ProgressiveBitList<U2048>];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveSingleFieldContainerTestStruct_*"] [progressive_single_field_container_test_struct] [ProgressiveSingleFieldContainerTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveSingleListContainerTestStruct_*"]  [progressive_single_list_container_test_struct]  [ProgressiveSingleListContainerTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveVarTestStruct_*"]                  [progressive_var_test_struct]                    [ProgressiveVarTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/progressive_containers/invalid/ProgressiveComplexTestStruct_*"]              [progressive_complex_test_struct]                [ProgressiveComplexTestStruct];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_8_*"]                        [uints_8]                  [u8];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_16_*"]                       [uints_16]                 [u16];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_32_*"]                       [uints_32]                 [u32];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_64_*"]                       [uints_64]                 [u64];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_128_*"]                      [uints_128]                [StringyU128];
-        ["consensus-spec-tests/tests/general/*/ssz_generic/uints/invalid/*_256_*"]                      [uints_256]                [Uint256];
-    )]
-    #[test_resources(glob)]
-    fn function_name(case: Case) {
-        run_invalid_case::<ssz_type>(case);
+impl SszWrite for SampleUnionShape {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        let (selector, encoded) = match self {
+            Self::Square1(v) => (1, v.to_ssz()?),
+            Self::Circle(v) => (2, v.to_ssz()?),
+            Self::Square127(v) => (127, v.to_ssz()?),
+        };
+        bytes.push(selector);
+        bytes.extend(encoded);
+        Ok(())
     }
 }
 
-fn run_valid_case<T>(case: Case)
-where
-    T: SszReadDefault + SszWrite + SszHash + DeserializeOwned + PartialEq + Debug,
-{
-    let root = case.meta().root;
-    let expected_ssz_bytes = case.bytes("serialized.ssz_snappy");
-    let yaml_value = case.yaml::<T>("value");
+impl SszHash for SampleUnionShape {
+    type PackingFactor = U1;
 
-    let actual_ssz_bytes = yaml_value.to_ssz().expect("SSZ encoding should succeed");
-    let ssz_value = T::from_ssz_default(&expected_ssz_bytes).expect("SSZ decoding should succeed");
-
-    // > Encoding: After encoding the given `value` object, the output should match `serialized`.
-    assert_eq!(actual_ssz_bytes, expected_ssz_bytes);
-
-    // > Decoding: After decoding the given `serialized` bytes, it should match the `value` object.
-    assert_eq!(ssz_value, yaml_value);
-
-    // > Hash-tree-root: the root should match the root declared in the metadata.
-    assert_eq!(yaml_value.hash_tree_root(), root);
+    fn hash_tree_root(&self) -> crate::H256 {
+        let (selector, root) = match self {
+            Self::Square1(v) => (1, v.hash_tree_root()),
+            Self::Circle(v) => (2, v.hash_tree_root()),
+            Self::Square127(v) => (127, v.hash_tree_root()),
+        };
+        merkle_tree::mix_in_length(root, selector)
+    }
 }
 
-fn run_invalid_case<T>(case: Case)
-where
-    T: SszReadDefault + Debug,
-{
-    let bytes = case.bytes("serialized.ssz_snappy");
+#[derive(Debug)]
+enum SampleNestedUnionShape {
+    Shape(SampleUnionShape),
+}
 
-    // > Unlike the `valid` suite, invalid encodings do not have any `value` or hash tree root.
-    // > The `serialized` data should simply not be decoded without raising an error.
+impl SszSize for SampleNestedUnionShape {
+    const SIZE: Size = Size::Variable { minimum_size: 1 };
+}
+
+impl<C> SszRead<C> for SampleNestedUnionShape {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        let (&selector, payload) = bytes.split_first().ok_or(ReadError::Custom {
+            message: "empty union",
+        })?;
+
+        match selector {
+            1 => Ok(Self::Shape(SampleUnionShape::from_ssz(context, payload)?)),
+            _ => Err(ReadError::Custom {
+                message: "invalid union selector",
+            }),
+        }
+    }
+}
+
+impl SszWrite for SampleNestedUnionShape {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        let Self::Shape(v) = self;
+        bytes.push(1);
+        v.write_variable(bytes)?;
+        Ok(())
+    }
+}
+
+impl SszHash for SampleNestedUnionShape {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> crate::H256 {
+        let Self::Shape(v) = self;
+        merkle_tree::mix_in_length(v.hash_tree_root(), 1)
+    }
+}
+
+#[derive(Debug)]
+enum SampleNumbers {
+    V1(ContiguousList<u16, U16>),
+    V2(ContiguousList<u16, U16>),
+}
+
+impl SszSize for SampleNumbers {
+    const SIZE: Size = Size::Variable { minimum_size: 1 };
+}
+
+impl<C> SszRead<C> for SampleNumbers {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        let (&selector, payload) = bytes.split_first().ok_or(ReadError::Custom {
+            message: "empty union",
+        })?;
+
+        match selector {
+            1 => Ok(Self::V1(ContiguousList::from_ssz(context, payload)?)),
+            2 => Ok(Self::V2(ContiguousList::from_ssz(context, payload)?)),
+            _ => Err(ReadError::Custom {
+                message: "invalid union selector",
+            }),
+        }
+    }
+}
+
+impl SszWrite for SampleNumbers {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::V1(v) => {
+                bytes.push(1);
+                v.write_variable(bytes)?;
+            }
+            Self::V2(v) => {
+                bytes.push(2);
+                v.write_variable(bytes)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl SszHash for SampleNumbers {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> crate::H256 {
+        let (selector, root) = match self {
+            Self::V1(v) => (1, v.hash_tree_root()),
+            Self::V2(v) => (2, v.hash_tree_root()),
+        };
+        merkle_tree::mix_in_length(root, selector)
+    }
+}
+
+#[derive(Debug)]
+enum SampleEmptyProne {
+    V1(ProgressiveList<u16>),
+    V2(ProgressiveList<u8>),
+}
+
+impl SszSize for SampleEmptyProne {
+    const SIZE: Size = Size::Variable { minimum_size: 1 };
+}
+
+impl<C> SszRead<C> for SampleEmptyProne {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        let (&selector, payload) = bytes.split_first().ok_or(ReadError::Custom {
+            message: "empty union",
+        })?;
+
+        match selector {
+            1 => Ok(Self::V1(ProgressiveList::from_ssz(context, payload)?)),
+            2 => Ok(Self::V2(ProgressiveList::from_ssz(context, payload)?)),
+            _ => Err(ReadError::Custom {
+                message: "invalid union selector",
+            }),
+        }
+    }
+}
+
+impl SszWrite for SampleEmptyProne {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::V1(v) => {
+                bytes.push(1);
+                v.write_variable(bytes)?;
+            }
+            Self::V2(v) => {
+                bytes.push(2);
+                v.write_variable(bytes)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl SszHash for SampleEmptyProne {
+    type PackingFactor = U1;
+
+    fn hash_tree_root(&self) -> crate::H256 {
+        let (selector, root) = match self {
+            Self::V1(v) => (1, v.hash_tree_root()),
+            Self::V2(v) => (2, v.hash_tree_root()),
+        };
+        merkle_tree::mix_in_length(root, selector)
+    }
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal)]
+struct SampleUnionShapeContainer {
+    tag: u64,
+    body: SampleUnionShape,
+}
+
+#[derive(Debug, Ssz)]
+#[ssz(internal, stable(active = [1, 0, 1]))]
+struct SampleUnionShapeProgressiveContainer {
+    tag: u64,
+    body: SampleUnionShape,
+}
+
+// --- Fixture parsing ---
+
+struct SszFixture {
+    serialized: Vec<u8>,
+    root: crate::H256,
+    raw_bytes: Option<Vec<u8>>,
+    has_rejection: bool,
+}
+
+fn decode_hex(hex_str: &str) -> Vec<u8> {
+    let stripped = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+    if stripped.is_empty() {
+        return Vec::new();
+    }
+    hex::decode(stripped).expect("valid hex string")
+}
+
+fn load_fixture(case: Case) -> SszFixture {
+    let file_bytes = case.read_file();
+    let json: HashMap<String, Value> =
+        serde_json::from_slice(&file_bytes).expect("valid JSON fixture");
+
+    let fixture = json
+        .into_values()
+        .next()
+        .expect("fixture should have at least one test case");
+
+    let serialized_hex = fixture["serialized"]
+        .as_str()
+        .expect("serialized should be a string");
+    let root_hex = fixture["root"].as_str().expect("root should be a string");
+
+    let serialized = decode_hex(serialized_hex);
+
+    let root = if root_hex.is_empty() {
+        crate::H256::zero()
+    } else {
+        let root_bytes = decode_hex(root_hex);
+        crate::H256::from_slice(&root_bytes)
+    };
+
+    let has_rejection = fixture.get("rejectionReason").is_some_and(Value::is_string);
+
+    let raw_bytes = fixture
+        .get("rawBytes")
+        .and_then(Value::as_str)
+        .map(decode_hex);
+
+    SszFixture {
+        serialized,
+        root,
+        raw_bytes,
+        has_rejection,
+    }
+}
+
+fn run_valid<T: SszReadDefault + SszWrite + SszHash + Debug>(fixture: &SszFixture) {
+    let decoded = T::from_ssz_default(&fixture.serialized).expect("SSZ decoding should succeed");
+    let re_encoded = decoded.to_ssz().expect("SSZ encoding should succeed");
+
+    assert_eq!(re_encoded, fixture.serialized, "SSZ round-trip mismatch");
+    assert_eq!(
+        decoded.hash_tree_root(),
+        fixture.root,
+        "hash tree root mismatch"
+    );
+}
+
+fn run_invalid<T: SszReadDefault + Debug>(fixture: &SszFixture) {
+    let bytes = fixture.raw_bytes.as_ref().unwrap_or(&fixture.serialized);
     T::from_ssz_default(bytes).expect_err("SSZ decoding should fail");
 }
 
-// > Note that for some type declarations in the invalid suite, the type itself may technically be
-// > invalid.  This is a valid way of detecting `invalid` data too. E.g. a 0-length basic vector.
+fn run_fixture<T: SszReadDefault + SszWrite + SszHash + Debug>(case: Case) {
+    let fixture = load_fixture(case);
+    if fixture.has_rejection {
+        run_invalid::<T>(&fixture);
+    } else {
+        run_valid::<T>(&fixture);
+    }
+}
 
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_bool_0`
+// --- Tests ---
+
+// Each entry maps a glob pattern to a Rust type. The test function auto-detects
+// valid vs. invalid cases based on the presence of `rejectionReason` in the fixture.
+#[duplicate_item(
+    glob                                                                                                                           function_name                                  ssz_type;
+    // === test_basic_types ===
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_boolean_*.json"]                                                       [boolean]                                      [bool];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint8_*.json"]                                                         [uint8]                                        [u8];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint16_[moz]*.json"]                                                   [uint16]                                       [u16];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint32_[moz]*.json"]                                                   [uint32]                                       [u32];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint64_[moz]*.json"]                                                   [uint64]                                       [u64];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint128_*.json"]                                                       [uint128]                                      [u128];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint256_*.json"]                                                       [uint256]                                      [Uint256];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bytes4_*.json"]                                                        [bytes4]                                       [ByteVector<U4>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bytes32_[itz]*.json"]                                                  [bytes32]                                      [ByteVector<U32>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bytes52_*.json"]                                                       [bytes52]                                      [ByteVector<U52>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bytes64_*.json"]                                                       [bytes64]                                      [ByteVector<U64>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bytelist_*.json"]                                                      [bytelist]                                     [ByteList<U524288>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bitlist_*.json"]                                                       [bitlist_16]                                   [BitList<U16>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bitvector8_*.json"]                                                    [bitvector_8]                                  [BitVector<U8>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bitvector64_*.json"]                                                   [bitvector_64]                                 [BitVector<U64>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint16_vector3_*.json"]                                                [uint16_vector3]                               [ContiguousVector<u16, U3>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint64_vector4_*.json"]                                                [uint64_vector4]                               [ContiguousVector<u64, U4>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_uint32_list_*.json"]                                                   [uint32_list_16]                               [ContiguousList<u32, U16>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_basic_types/test_bytes32_list_*.json"]                                                  [bytes32_list_8]                               [ContiguousList<ByteVector<U32>, U8>];
+    // === test_merkleization_boundaries ===
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitvector_length_one_all_set.json"]                       [boundary_bitvector_1]                         [BitVector<U1>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitvector_length_seven_all_set.json"]                     [boundary_bitvector_7]                         [BitVector<U7>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitvector_length_nine_all_set.json"]                      [boundary_bitvector_9]                         [BitVector<U9>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitvector_length_255_all_set.json"]                       [boundary_bitvector_255]                       [BitVector<U255>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitvector_length_256_all_set.json"]                       [boundary_bitvector_256]                       [BitVector<U256>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitvector_length_257_all_set.json"]                       [boundary_bitvector_257]                       [BitVector<U257>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_bitlist_filled_to_chunk_boundary_limit.json"]             [boundary_bitlist_256]                         [BitList<U256>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_merkleization_boundaries/test_uint64_list_with_misaligned_chunk_count.json"]            [boundary_uint64_list_32]                      [ContiguousList<u64, U32>];
+    // === test_decode_failure_smoke ===
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_decode_failure_smoke/test_ssz_decode_failure_bitlist_exceeds_limit.json"]               [decode_failure_bitlist_exceeds_limit]         [BitList<U8>];
+    // === test_progressive_types ===
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_types/test_progressive_bitlist_*.json"]                                     [progressive_bitlist]                          [ProgressiveBitList<U2048>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_types/test_progressive_list_[efs]*.json"]                                   [progressive_list_uint64]                      [ProgressiveList<u64>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_types/test_progressive_list_opens_*.json"]                                  [progressive_list_uint64_opens]                [ProgressiveList<u64>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_types/test_progressive_list_of_composites_*.json"]                          [progressive_list_bytes32]                     [ProgressiveList<ByteVector<U32>>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_types/test_progressive_list_of_variable_size_elements.json"]                [progressive_list_nested]                      [ProgressiveList<ProgressiveList<u16>>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_types/test_container_with_*progressive_list_field.json"]                    [container_with_progressive_list]              [SampleContainerWithProgressiveList];
+    // === test_progressive_containers ===
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_single_field.json"]                   [progressive_container_single_field]           [SampleOneField];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_square.json"]                         [progressive_container_square]                 [SampleSquare];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_decode_failure_trailing_byte.json"]   [progressive_container_trailing_byte]          [SampleSquare];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_circle.json"]                         [progressive_container_circle]                 [SampleCircle];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_leading_gaps.json"]                   [progressive_container_leading_gaps]           [SampleLeadingGaps];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_multiple_gaps.json"]                  [progressive_container_multiple_gaps]          [SampleMultipleGaps];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_with_progressive_fields.json"]        [progressive_container_with_fields]            [SampleProgressiveFields];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_opens_the_fourth_level.json"]         [progressive_container_fourth_level]           [SampleLevelBoundary];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_widest_layout.json"]                  [progressive_container_widest_layout]          [SampleWidestLayout];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_with_bounded_list_field.json"]        [progressive_container_bounded_list]           [SampleBoundedListField];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_with_empty_variable_field.json"]      [progressive_container_empty_variable]         [SampleBoundedListField];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_container_decode_failure_first_offset.json"]    [progressive_container_bad_offset]             [SampleBoundedListField];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_nested_progressive_containers.json"]                        [nested_progressive_containers]                [SampleOuterShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_progressive_list_of_progressive_containers.json"]           [progressive_list_of_containers]               [ProgressiveList<SampleSquare>];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_progressive_containers/test_container_holding_a_progressive_container.json"]            [container_holding_progressive]                [SampleShapeContainer];
+    // === test_compatible_unions ===
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_first_option.json"]                             [union_first_option]                           [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_second_option.json"]                            [union_second_option]                          [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_highest_selector.json"]                         [union_highest_selector]                       [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_decode_failure_empty_input.json"]               [union_decode_failure_empty]                   [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_decode_failure_reserved_zero_selector.json"]    [union_decode_failure_zero_selector]           [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_decode_failure_trailing_byte.json"]             [union_decode_failure_trailing]                [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_decode_failure_truncated_payload.json"]         [union_decode_failure_truncated]               [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_decode_failure_undeclared_selector.json"]       [union_decode_failure_undeclared]              [SampleUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_of_unions.json"]                                [union_of_unions]                              [SampleNestedUnionShape];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_variable_size_option.json"]                     [union_variable_size_option]                   [SampleNumbers];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_empty_variable_size_option.json"]               [union_empty_variable_size]                    [SampleNumbers];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_empty_list_options_separated_by_the_selector.json"]  [union_empty_list_sel1]                   [SampleEmptyProne];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_compatible_union_other_empty_list_option.json"]                  [union_empty_list_sel2]                        [SampleEmptyProne];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_container_holding_a_compatible_union.json"]                      [container_holding_union]                      [SampleUnionShapeContainer];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_progressive_container_holding_a_compatible_union.json"]          [progressive_container_holding_union]          [SampleUnionShapeProgressiveContainer];
+    ["ssz-spec-tests/fixtures/ssz/ssz/test_compatible_unions/test_progressive_list_of_compatible_unions.json"]                     [progressive_list_of_unions]                   [ProgressiveList<SampleUnionShape>];
+)]
+#[test_resources(glob)]
+fn function_name(case: Case) {
+    run_fixture::<ssz_type>(case);
+}
+
+// 0-length vectors are invalid SSZ types and must not implement SSZ traits.
 assert_not_impl_any!(ContiguousVector<bool, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<bool, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint128_0`
-assert_not_impl_any!(ContiguousVector<StringyU128, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<StringyU128, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint16_0`
-assert_not_impl_any!(ContiguousVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint256_0`
-assert_not_impl_any!(ContiguousVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint32_0`
-assert_not_impl_any!(ContiguousVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint64_0`
-assert_not_impl_any!(ContiguousVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/basic_vector/invalid/vec_uint8_0`
 assert_not_impl_any!(ContiguousVector<u8, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-assert_not_impl_any!(PersistentVector<u8, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
-
-// `consensus-spec-tests/tests/general/*/ssz_generic/bitvector/invalid/bitvec_0`
-// This is already covered in `ssz::negative`, but there's no harm in having it here as well.
+assert_not_impl_any!(ContiguousVector<u16, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u32, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u64, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<u128, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
+assert_not_impl_any!(ContiguousVector<Uint256, U0>: SszSize, SszReadDefault, SszWrite, SszHash);
 assert_not_impl_any!(BitVector<U0>: SszSize, SszReadDefault, SszWrite, SszHash);
