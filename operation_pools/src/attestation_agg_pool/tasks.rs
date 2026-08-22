@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
+    time::Instant,
 };
 
 use anyhow::Result;
@@ -56,6 +57,8 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
                 .start_timer()
         });
 
+        let started_at = Instant::now();
+
         let attestations = pool.best_proposable_attestations(beacon_state.slot()).await;
         let slot = controller.slot();
 
@@ -79,11 +82,19 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
             true,
         )?;
 
-        Ok(
+        let attestations =
             pack_attestations_greedily(&controller, &attestation_packer, &pool, &beacon_state)
                 .await?
-                .attestations,
-        )
+                .attestations;
+
+        features::log!(
+            DebugAttestationPacker,
+            "packed {} attestations for slot: {slot} in {} ms",
+            attestations.len(),
+            started_at.elapsed().as_millis(),
+        );
+
+        Ok(attestations)
     }
 }
 
@@ -130,6 +141,8 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
                 .start_timer()
         });
 
+        let started_at = Instant::now();
+
         let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
         let slot = controller.slot().saturating_add(1);
 
@@ -147,9 +160,10 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
 
         features::log!(
             DebugAttestationPacker,
-            "pack outcome for slot: {slot}, attestations: {}, deadline_reached: {}",
+            "pack outcome for slot: {slot}, attestations: {}, deadline_reached: {}, elapsed: {} ms",
             outcome.attestations.len(),
             outcome.deadline_reached,
+            started_at.elapsed().as_millis(),
         );
 
         pool.set_best_proposable_attestations(outcome.attestations, beacon_state.slot())
