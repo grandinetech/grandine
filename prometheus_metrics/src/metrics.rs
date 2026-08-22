@@ -144,6 +144,8 @@ pub struct Metrics {
     pub att_pool_pack_iterations: IntCounter,
     pub att_pool_insert_attestation_task_times: Histogram,
     pub att_pool_attestation_tracking_times: Histogram,
+    pub att_pool_best_proposable_attestations_times: Histogram,
+    pub att_pool_pack_proposable_attestations_times: Histogram,
 
     pub sync_pool_add_own_contribution_times: Histogram,
     pub sync_pool_aggregate_own_messages_times: Histogram,
@@ -670,6 +672,18 @@ impl Metrics {
                 "Attestation agg pool track attestation times",
             ))?,
 
+            att_pool_best_proposable_attestations_times: Histogram::with_opts(histogram_opts!(
+                "ATT_POOL_BEST_PROPOSABLE_ATTESTATIONS_TIMES",
+                "Attestation agg pool best proposable attestations task times",
+                exponential_buckets(0.01, 3.0, 9)?,
+            ))?,
+
+            att_pool_pack_proposable_attestations_times: Histogram::with_opts(histogram_opts!(
+                "ATT_POOL_PACK_PROPOSABLE_ATTESTATIONS_TIMES",
+                "Attestation agg pool pack proposable attestations task times",
+                exponential_buckets(0.01, 3.0, 9)?,
+            ))?,
+
             sync_pool_add_own_contribution_times: Histogram::with_opts(histogram_opts!(
                 "SYNC_POOL_ADD_OWN_CONTRIBUTION_TIMES",
                 "Sync committee contribution agg pool add own contribution task times",
@@ -1116,6 +1130,12 @@ impl Metrics {
             self.att_pool_insert_attestation_task_times.clone(),
         ))?;
         default_registry.register(Box::new(self.att_pool_attestation_tracking_times.clone()))?;
+        default_registry.register(Box::new(
+            self.att_pool_best_proposable_attestations_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.att_pool_pack_proposable_attestations_times.clone(),
+        ))?;
         default_registry.register(Box::new(self.sync_pool_add_own_contribution_times.clone()))?;
         default_registry.register(Box::new(
             self.sync_pool_aggregate_own_messages_times.clone(),

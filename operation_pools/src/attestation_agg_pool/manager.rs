@@ -136,6 +136,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             controller: self.controller.clone_arc(),
             pool: self.pool.clone_arc(),
             beacon_state,
+            metrics: self.metrics.clone(),
         })
         .await
     }
@@ -173,6 +174,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
         self.spawn_detached(PackProposableAttestationsTask {
             pool: self.pool.clone_arc(),
             controller: self.controller.clone_arc(),
+            metrics: self.metrics.clone(),
         });
     }
 

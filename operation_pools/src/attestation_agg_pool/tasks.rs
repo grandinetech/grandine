@@ -36,6 +36,7 @@ pub struct BestProposableAttestationsTask<P: Preset, W: Wait> {
     pub pool: Arc<Pool<P>>,
     pub controller: ApiController<P, W>,
     pub beacon_state: Arc<BeaconState<P>>,
+    pub metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
@@ -46,7 +47,14 @@ impl<P: Preset, W: Wait> PoolTask for BestProposableAttestationsTask<P, W> {
             pool,
             controller,
             beacon_state,
+            metrics,
         } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .att_pool_best_proposable_attestations_times
+                .start_timer()
+        });
 
         let attestations = pool.best_proposable_attestations(beacon_state.slot()).await;
         let slot = controller.slot();
@@ -103,13 +111,24 @@ impl<P: Preset> PoolTask for ComputeProposerIndicesTask<P> {
 pub struct PackProposableAttestationsTask<P: Preset, W: Wait> {
     pub pool: Arc<Pool<P>>,
     pub controller: ApiController<P, W>,
+    pub metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
     type Output = ();
 
     async fn run(self) -> Result<Self::Output> {
-        let Self { pool, controller } = self;
+        let Self {
+            pool,
+            controller,
+            metrics,
+        } = self;
+
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .att_pool_pack_proposable_attestations_times
+                .start_timer()
+        });
 
         let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
         let slot = controller.slot().saturating_add(1);
