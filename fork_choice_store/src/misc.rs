@@ -1124,6 +1124,11 @@ impl DataColumnSidecarOrigin {
     }
 
     #[must_use]
+    pub const fn is_from_sync(&self) -> bool {
+        matches!(self, Self::Requested(_) | Self::BackSync)
+    }
+
+    #[must_use]
     pub const fn is_from_el(&self) -> bool {
         matches!(self, Self::ExecutionLayer)
     }
@@ -1229,6 +1234,7 @@ pub enum DataColumnSidecarAction<P: Preset> {
     // so the column may still be needed.
     // Other ignores mean nothing is left to fetch, so they must not trigger a refetch.
     IgnoreTooFarInFuture,
+    DelayUntilBlock(Arc<DataColumnSidecar<P>>),
     DelayUntilState(Arc<DataColumnSidecar<P>>, H256),
     DelayUntilParent(Arc<DataColumnSidecar<P>>),
     DelayUntilSlot(Arc<DataColumnSidecar<P>>),
