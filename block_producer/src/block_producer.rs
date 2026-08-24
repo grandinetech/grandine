@@ -932,6 +932,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         randao_reveal: SignatureBytes,
     ) -> Result<BeaconBlock<P>> {
+        info_with_peers!("block producer starting build beacon block without state root task");
+
         let eth1_data = self.beacon_state.eth1_data();
         let deposits = ContiguousList::default();
 
@@ -940,11 +942,24 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         //                      slashed once. The code below can handle invalid blocks, but it may
         //                      prevent the validator from proposing.
         let proposer_slashings = self.prepare_proposer_slashings().await;
+
+        info_with_peers!("block producer prepared proposer slashings");
+
         let voluntary_exits = self.prepare_voluntary_exits().await;
 
+        info_with_peers!("block producer prepared voluntary exits");
+
         let attestations = self.prepare_attestations().await?;
+
+        info_with_peers!("block producer prepared attestations");
+
         let sync_aggregate = self.prepare_sync_aggregate().await?;
+
+        info_with_peers!("block producer prepared sync aggregate");
+
         let bls_to_execution_changes = self.prepare_bls_to_execution_changes().await;
+
+        info_with_peers!("block producer prepared bls to execution changes");
 
         let slot = self.beacon_state.slot();
         let proposer_index = self.proposer_index;
@@ -957,7 +972,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let state_root = H256::zero();
         let phase = self.beacon_state.phase();
 
-        match phase {
+        let result = match phase {
             Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {
                 slot,
                 proposer_index,
@@ -1087,6 +1102,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                     }
                 }
 
+                info_with_peers!("block producer converted attestations");
+
                 let attestations = results
                     .into_iter()
                     .filter_map(|(_, _, attestations)| {
@@ -1099,6 +1116,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         }
                     })
                     .take(P::MaxAttestationsElectra::USIZE);
+
+                info_with_peers!("block producer computed on chain aggregates");
 
                 let attestations = ContiguousList::try_from_iter(attestations)?;
 
@@ -1159,6 +1178,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                             ProgressiveList::default()
                         };
 
+                        info_with_peers!("block producer prepared payload attestations");
+
                         let parent_execution_requests = if snapshot.should_build_on_full(slot) {
                             // TODO(gloas): the block root needs to be checked if it is gloas or not.
                             // the current behavior erronously returns empty execution requests when
@@ -1172,6 +1193,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         } else {
                             GloasExecutionRequests::default()
                         };
+
+                        info_with_peers!("block producer prepared parent execution requests");
 
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
                             slot,
@@ -1203,7 +1226,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 }
             }
         }
-        .pipe(Ok)
+        .pipe(Ok);
+
+        info_with_peers!("block producer finishing build beacon block without state root task");
+
+        result
     }
 
     fn compute_on_chain_aggregate(
