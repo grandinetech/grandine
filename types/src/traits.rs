@@ -40,6 +40,7 @@ use crate::{
             ExecutionPayload as BellatrixExecutionPayload,
             ExecutionPayloadHeader as BellatrixExecutionPayloadHeader,
         },
+        primitives::Gas,
     },
     cache::Cache,
     capella::{
@@ -1816,6 +1817,7 @@ pub trait ExecutionPayload<P: Preset>: SszHash<PackingFactor = U1> {
     fn block_hash(&self) -> ExecutionBlockHash;
     fn block_number(&self) -> Option<ExecutionBlockNumber>;
     fn parent_hash(&self) -> ExecutionBlockHash;
+    fn gas_limit(&self) -> Gas;
 
     fn is_default_payload(&self) -> bool;
     fn to_header(&self) -> CombinedExecutionPayloadHeader<P>;
@@ -1832,6 +1834,10 @@ impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayload<P> {
 
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_hash
+    }
+
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
     }
 
     fn is_default_payload(&self) -> bool {
@@ -1856,6 +1862,10 @@ impl<P: Preset> ExecutionPayload<P> for BellatrixExecutionPayloadHeader<P> {
         self.parent_hash
     }
 
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
+    }
+
     fn is_default_payload(&self) -> bool {
         self.is_default()
     }
@@ -1876,6 +1886,10 @@ impl<P: Preset> ExecutionPayload<P> for CapellaExecutionPayload<P> {
 
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_hash
+    }
+
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
     }
 
     fn is_default_payload(&self) -> bool {
@@ -1900,6 +1914,10 @@ impl<P: Preset> ExecutionPayload<P> for CapellaExecutionPayloadHeader<P> {
         self.parent_hash
     }
 
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
+    }
+
     fn is_default_payload(&self) -> bool {
         self.is_default()
     }
@@ -1920,6 +1938,10 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayload<P> {
 
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_hash
+    }
+
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
     }
 
     fn is_default_payload(&self) -> bool {
@@ -1944,6 +1966,10 @@ impl<P: Preset> ExecutionPayload<P> for DenebExecutionPayloadHeader<P> {
         self.parent_hash
     }
 
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
+    }
+
     fn is_default_payload(&self) -> bool {
         self.is_default()
     }
@@ -1964,6 +1990,10 @@ impl<P: Preset> ExecutionPayload<P> for ExecutionPayloadBid<P> {
 
     fn parent_hash(&self) -> ExecutionBlockHash {
         self.parent_block_hash
+    }
+
+    fn gas_limit(&self) -> Gas {
+        self.gas_limit
     }
 
     fn is_default_payload(&self) -> bool {
