@@ -8,6 +8,7 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+arithmetic = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
 block_producer = { workspace = true }
@@ -41,11 +42,12 @@ operation_pools = { workspace = true }
 p2p = { workspace = true }
 prometheus_metrics = { workspace = true }
 rand = { workspace = true }
-rayon = { workspace = true }
 reqwest = { workspace = true }
 scc = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_utils = { workspace = true }
+sse-stream = { workspace = true }
 signer = { workspace = true }
 slasher = { workspace = true }
 slashing_protection = { workspace = true }
@@ -55,7 +57,6 @@ std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-stream = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
 try_from_iterator = { workspace = true }
@@ -80,7 +81,6 @@ interop = { workspace = true }
 #num_cpus = { workspace = true }
 pubkey_cache = { workspace = true }
 reqwest = { workspace = true }
-serde_json = { workspace = true }
 #spec_test_utils = { workspace = true }
 tempfile = { workspace = true }
 test-case = { workspace = true }

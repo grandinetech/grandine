@@ -14458,14 +14458,12 @@ dependencies = [
  "chrono",
  "derivative",
  "duplicate",
- "factory",
  "fs-err",
  "glob",
  "helper_functions",
  "hex-literal 1.1.0",
  "itertools 0.14.0",
  "logging",
- "pubkey_cache",
  "refinery",
  "rusqlite",
  "serde",
@@ -15655,6 +15653,19 @@ dependencies = [
  "js-sys",
  "rsqlite-vfs",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "sse-stream"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c123f296ade4ec4b8b0f6162116e6629f5146922ca5ab40ca9d3c2e73ab4761e"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body 1.0.1",
+ "http-body-util",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -17417,6 +17428,7 @@ name = "validator"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "arithmetic",
  "axum 0.8.9",
  "axum-extra",
  "block_producer",
@@ -17455,7 +17467,6 @@ dependencies = [
  "prometheus_metrics",
  "pubkey_cache",
  "rand 0.8.6",
- "rayon",
  "reqwest 0.13.2",
  "scc 3.7.0",
  "serde",
@@ -17464,6 +17475,7 @@ dependencies = [
  "signer",
  "slasher",
  "slashing_protection",
+ "sse-stream",
  "ssz",
  "static_assertions",
  "std_ext",
@@ -17472,7 +17484,6 @@ dependencies = [
  "test-case",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tower-http",
  "tracing",
  "try_from_iterator",

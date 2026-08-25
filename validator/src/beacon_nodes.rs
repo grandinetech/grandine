@@ -1,14 +1,23 @@
 use core::{convert::identity, fmt::Display, future::Future, ops::Range};
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use anyhow::{Error as AnyhowError, Result};
+use bls::PublicKeyBytes;
 use fork_choice_control::Wait;
 use futures::future::join_all;
+use http_api_utils::ValidatorSyncDutyResponse;
 use logging::{debug_with_peers, warn_with_peers};
-use p2p::BeaconCommitteeSubscription;
+use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use std_ext::ArcExt;
 use tap::Pipe as _;
 use types::{
+    altair::{
+        containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
+        primitives::SubcommitteeIndex,
+    },
     combined::{Attestation, SignedAggregateAndProof},
     nonstandard::{OwnAttestation, PublishedDuty},
     phase0::{
@@ -24,23 +33,30 @@ use crate::{
     misc,
     remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
+    slot_head::SlotHead,
 };
 
 pub struct BeaconNodes<P: Preset, W: Wait> {
     local_node: Option<LocalBeaconNode<P, W>>,
     remote_nodes: Vec<Arc<RemoteBeaconNode>>,
+    current_slot: Slot,
+    max_empty_slots: u64,
     publish_to_every_node: Vec<PublishedDuty>,
 }
 
 impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
     pub fn new(
         local_node: Option<LocalBeaconNode<P, W>>,
+        current_slot: Slot,
+        max_empty_slots: u64,
         remotes: &RemoteBeaconNodes,
         publish_to_every_node: Vec<PublishedDuty>,
     ) -> Self {
         Self {
             local_node,
             remote_nodes: remotes.serving().map(ArcExt::clone_arc).collect(),
+            current_slot,
+            max_empty_slots,
             publish_to_every_node,
         }
     }
@@ -58,13 +74,14 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
         self.local_node.is_some()
     }
 
-    // The built-in beacon node computes only what is about to be needed; a remote one answers a
-    // whole epoch per request, so nothing is gained by asking for less than the epochs in flight.
     #[must_use]
     pub fn prefetch_slots(&self, current_slot: Slot) -> Range<Slot> {
         if self.has_local_node() {
             return misc::slots_to_compute_in_advance(current_slot);
         }
+
+        // A remote node answers a whole epoch per request, so nothing is gained by asking for
+        // less than the epochs in flight.
 
         let current_epoch = helper_functions::misc::compute_epoch_at_slot::<P>(current_slot);
 
@@ -74,58 +91,121 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
             )
     }
 
-    // `slots` must lie within one epoch, as the duties carry a single dependent root.
     pub async fn attester_duties_at_slots(
         &self,
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
     ) -> Result<AttesterDuties> {
+        // `slots` must lie within one epoch, as the duties carry a single dependent root.
         let epoch = helper_functions::misc::compute_epoch_at_slot::<P>(slots.start);
+        let operation = format!("produce attester duties for epoch {epoch}");
 
+        let (node, duties) = self
+            .local_then_remotes(
+                &operation,
+                |node| node.attester_duties_at_slots(slots, validator_indices),
+                |node| node.attester_duties(epoch, validator_indices),
+            )
+            .await?;
+
+        if let Some(node) = node {
+            debug_with_peers!(
+                "{node} beacon node produced {} attester duties for epoch {epoch} \
+                 under dependent root {:?}",
+                duties.duties.len(),
+                duties.dependent_root,
+            );
+        }
+
+        Ok(duties)
+    }
+
+    /// Performs a duty against the built-in beacon node, falling back to the remote ones in
+    /// order. Returns the remote node that answered, or [`None`] for the built-in one.
+    async fn local_then_remotes<'this, T, LFut, RFut>(
+        &'this self,
+        operation: &str,
+        local: impl FnOnce(&'this LocalBeaconNode<P, W>) -> LFut,
+        remote: impl Fn(&'this RemoteBeaconNode) -> RFut,
+    ) -> Result<(Option<&'this RemoteBeaconNode>, T)>
+    where
+        LFut: Future<Output = Result<T>>,
+        RFut: Future<Output = Result<T>>,
+    {
         if let Some(node) = &self.local_node {
-            match node
-                .attester_duties_at_slots(slots, validator_indices)
-                .await
-            {
-                Ok(duties) => return Ok(duties),
+            match local(node).await {
+                Ok(value) => return Ok((None, value)),
                 Err(error) if self.remote_nodes.is_empty() => return Err(error),
                 Err(error) => {
-                    warn_with_peers!(
-                        "{node} beacon node failed to produce attester duties for epoch \
-                         {epoch}: {error:?}",
-                    );
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
                 }
             }
         }
 
-        self.remote_attester_duties(epoch, validator_indices).await
-    }
-
-    async fn remote_attester_duties(
-        &self,
-        epoch: Epoch,
-        validator_indices: &[ValidatorIndex],
-    ) -> Result<AttesterDuties> {
-        let operation = format!("produce attester duties for epoch {epoch}");
         let mut attempts = Vec::with_capacity(self.remote_nodes.len());
 
         for node in &self.remote_nodes {
-            attempts.push((
-                node.as_ref(),
-                BeaconNodeApi::<P>::attester_duties(node.as_ref(), epoch, validator_indices),
-            ));
+            attempts.push((node.as_ref(), remote(node.as_ref())));
         }
 
-        let (node, duties) = first_success(&operation, attempts).await?;
+        first_success(operation, attempts)
+            .await
+            .map(|(node, value)| (Some(node), value))
+    }
 
-        debug_with_peers!(
-            "{node} beacon node produced {} attester duties for epoch {epoch} \
-             under dependent root {:?}",
-            duties.duties.len(),
-            duties.dependent_root,
-        );
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlockRoot>
+    pub async fn head_block_root(&self) -> Result<H256> {
+        let operation = "produce the head block root";
 
-        Ok(duties)
+        if let Some(node) = &self.local_node {
+            return Ok(node.head_block_root());
+        }
+
+        // The head of the earliest node holding one, so that the root signed for is one it knows.
+        for node in &self.remote_nodes {
+            if let Ok(Some(block_root)) = node
+                .chain_head()
+                .get(self.current_slot, self.max_empty_slots)
+            {
+                return Ok(block_root);
+            }
+        }
+
+        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
+
+        for node in &self.remote_nodes {
+            attempts.push((node.as_ref(), node.fresh_head_block_root(self.current_slot)));
+        }
+
+        let (node, root) = first_success(operation, attempts).await?;
+
+        debug_with_peers!("{node} beacon node reported head block root {root:?}");
+
+        Ok(root)
+    }
+
+    /// Publishes to the serving remote nodes, to all of them or the first that accepts as
+    /// `--publish-to-every-node` directs. `make_attempt` is only called when there are any.
+    fn spawn_publish_to_remotes<F, Fut>(
+        &self,
+        operation: &'static str,
+        duty: PublishedDuty,
+        make_attempt: impl FnOnce() -> F,
+    ) where
+        F: Fn(Arc<RemoteBeaconNode>) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<()>> + Send,
+    {
+        let publish_to = self.serving_nodes();
+
+        if publish_to.is_empty() {
+            return;
+        }
+
+        if self.publish_to_every_node.contains(&duty) {
+            spawn_broadcast(operation, publish_to, make_attempt());
+        } else {
+            spawn_publish(operation, publish_to, make_attempt());
+        }
     }
 }
 
@@ -137,49 +217,13 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
     ) -> Result<H256> {
         let operation = format!("produce the dependent root of epoch {epoch}");
 
-        if let Some(node) = &self.local_node {
-            match node.dependent_root(epoch, validator_index).await {
-                Ok(dependent_root) => return Ok(dependent_root),
-                Err(error) if self.remote_nodes.is_empty() => return Err(error),
-                Err(error) => {
-                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
-                }
-            }
-        }
-
-        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
-
-        for node in &self.remote_nodes {
-            attempts.push((
-                node.as_ref(),
-                BeaconNodeApi::<P>::dependent_root(node.as_ref(), epoch, validator_index),
-            ));
-        }
-
-        first_success(&operation, attempts)
-            .await
-            .map(|(_, dependent_root)| dependent_root)
-    }
-
-    async fn attester_duties(
-        &self,
-        epoch: Epoch,
-        validator_indices: &[ValidatorIndex],
-    ) -> Result<AttesterDuties> {
-        if let Some(node) = &self.local_node {
-            match node.attester_duties(epoch, validator_indices).await {
-                Ok(duties) => return Ok(duties),
-                Err(error) if self.remote_nodes.is_empty() => return Err(error),
-                Err(error) => {
-                    warn_with_peers!(
-                        "{node} beacon node failed to produce attester duties for epoch \
-                         {epoch}: {error:?}",
-                    );
-                }
-            }
-        }
-
-        self.remote_attester_duties(epoch, validator_indices).await
+        self.local_then_remotes(
+            &operation,
+            |node| node.dependent_root(epoch, validator_index),
+            |node| BeaconNodeApi::<P>::dependent_root(node, epoch, validator_index),
+        )
+        .await
+        .map(|(_, dependent_root)| dependent_root)
     }
 
     async fn attestation_data(
@@ -189,40 +233,31 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
     ) -> Result<AttestationData> {
         let operation = format!("produce attestation data for slot {slot}");
 
-        if let Some(node) = &self.local_node {
-            match node.attestation_data(slot, committee_index).await {
-                Ok(data) => {
+        let (node, data) = self
+            .local_then_remotes(
+                &operation,
+                |node| node.attestation_data(slot, committee_index),
+                |node| BeaconNodeApi::<P>::attestation_data(node, slot, committee_index),
+            )
+            .await?;
+
+        match node {
+            Some(node) => {
+                if !node.health().is_ready() {
                     debug_with_peers!(
-                        "{node} beacon node produced attestation data for slot {slot}: {data:?}",
+                        "attestation data for slot {slot} came from {node}, \
+                         which is not fully synced",
                     );
+                }
 
-                    return Ok(data);
-                }
-                Err(error) if self.remote_nodes.is_empty() => return Err(error),
-                Err(error) => {
-                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
-                }
+                debug_with_peers!(
+                    "{node} beacon node produced attestation data for slot {slot}: {data:?}",
+                );
             }
+            None => debug_with_peers!(
+                "local beacon node produced attestation data for slot {slot}: {data:?}",
+            ),
         }
-
-        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
-
-        for node in &self.remote_nodes {
-            attempts.push((
-                node.as_ref(),
-                BeaconNodeApi::<P>::attestation_data(node.as_ref(), slot, committee_index),
-            ));
-        }
-
-        let (node, data) = first_success(&operation, attempts).await?;
-
-        if !node.health().is_ready() {
-            debug_with_peers!(
-                "attestation data for slot {slot} came from {node}, which is not fully synced",
-            );
-        }
-
-        debug_with_peers!("{node} beacon node produced attestation data for slot {slot}: {data:?}",);
 
         Ok(data)
     }
@@ -237,57 +272,31 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
             data.slot,
         );
 
-        if let Some(node) = &self.local_node {
-            match node.aggregate_attestation(data, committee_index).await {
-                Ok(aggregate) => return Ok(aggregate),
-                Err(error) if self.remote_nodes.is_empty() => return Err(error),
-                Err(error) => {
-                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
-                }
-            }
-        }
-
-        let mut attempts = Vec::with_capacity(self.remote_nodes.len());
-
-        for node in &self.remote_nodes {
-            attempts.push((
-                node.as_ref(),
-                BeaconNodeApi::<P>::aggregate_attestation(node.as_ref(), data, committee_index),
-            ));
-        }
-
-        first_success(&operation, attempts)
-            .await
-            .map(|(_, aggregate)| aggregate)
+        self.local_then_remotes(
+            &operation,
+            |node| node.aggregate_attestation(data, committee_index),
+            |node| BeaconNodeApi::<P>::aggregate_attestation(node, data, committee_index),
+        )
+        .await
+        .map(|(_, aggregate)| aggregate)
     }
 
     async fn publish_singular_attestations(
         &self,
         attestations: &[OwnAttestation<P>],
     ) -> Result<()> {
-        let publish_to = self.serving_nodes();
-
-        if !publish_to.is_empty() {
+        self.spawn_publish_to_remotes("publish attestations", PublishedDuty::Attestations, || {
             let owned = Arc::new(attestations.to_vec());
 
-            let attempt = move |node: Arc<RemoteBeaconNode>| {
+            move |node: Arc<RemoteBeaconNode>| {
                 let attestations = owned.clone_arc();
 
                 async move {
                     BeaconNodeApi::<P>::publish_singular_attestations(node.as_ref(), &attestations)
                         .await
                 }
-            };
-
-            if self
-                .publish_to_every_node
-                .contains(&PublishedDuty::Attestations)
-            {
-                spawn_broadcast("publish attestations", publish_to, attempt);
-            } else {
-                spawn_publish("publish attestations", publish_to, attempt);
             }
-        }
+        });
 
         match &self.local_node {
             Some(node) => node.publish_singular_attestations(attestations).await,
@@ -299,32 +308,25 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         &self,
         aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
     ) -> Result<()> {
-        let publish_to = self.serving_nodes();
+        self.spawn_publish_to_remotes(
+            "publish aggregates and proofs",
+            PublishedDuty::Aggregates,
+            || {
+                let owned = Arc::new(aggregates_and_proofs.to_vec());
 
-        if !publish_to.is_empty() {
-            let owned = Arc::new(aggregates_and_proofs.to_vec());
+                move |node: Arc<RemoteBeaconNode>| {
+                    let aggregates_and_proofs = owned.clone_arc();
 
-            let attempt = move |node: Arc<RemoteBeaconNode>| {
-                let aggregates_and_proofs = owned.clone_arc();
-
-                async move {
-                    BeaconNodeApi::<P>::publish_aggregates_and_proofs(
-                        node.as_ref(),
-                        &aggregates_and_proofs,
-                    )
-                    .await
+                    async move {
+                        BeaconNodeApi::<P>::publish_aggregates_and_proofs(
+                            node.as_ref(),
+                            &aggregates_and_proofs,
+                        )
+                        .await
+                    }
                 }
-            };
-
-            if self
-                .publish_to_every_node
-                .contains(&PublishedDuty::Aggregates)
-            {
-                spawn_broadcast("publish aggregates and proofs", publish_to, attempt);
-            } else {
-                spawn_publish("publish aggregates and proofs", publish_to, attempt);
-            }
-        }
+            },
+        );
 
         match &self.local_node {
             Some(node) => {
@@ -376,9 +378,238 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
             None => Ok(()),
         }
     }
+
+    async fn validator_indices(
+        &self,
+        public_keys: &[PublicKeyBytes],
+    ) -> Result<HashMap<PublicKeyBytes, ValidatorIndex>> {
+        let operation = "resolve validator indices";
+        let mut indices = HashMap::new();
+        let mut answered = false;
+        let mut last_error = None;
+
+        if let Some(node) = &self.local_node {
+            match node.validator_indices(public_keys).await {
+                Ok(resolved) => {
+                    answered = true;
+                    indices.extend(resolved);
+                }
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                    last_error = Some(error);
+                }
+            }
+        }
+
+        // A validator missing from one node's head may be present in another's.
+        for node in &self.remote_nodes {
+            let unresolved = public_keys
+                .iter()
+                .copied()
+                .filter(|public_key| !indices.contains_key(public_key))
+                .collect::<Vec<_>>();
+
+            if unresolved.is_empty() {
+                break;
+            }
+
+            match BeaconNodeApi::<P>::validator_indices(node.as_ref(), &unresolved).await {
+                Ok(resolved) => {
+                    answered = true;
+                    indices.extend(resolved);
+                }
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                    last_error = Some(error);
+                }
+            }
+        }
+
+        // Keys nobody knows are simply missing from the answer. An error is reported only when no
+        // node managed to answer at all, so that one unreachable node does not make a validator
+        // look undeposited.
+        match last_error {
+            Some(error) if !answered => Err(error),
+            _ => Ok(indices),
+        }
+    }
+
+    async fn slot_head(&self, slot: Slot) -> Result<Option<SlotHead<P>>> {
+        if let Some(node) = &self.local_node {
+            return node.slot_head(slot).await;
+        }
+
+        for node in &self.remote_nodes {
+            match BeaconNodeApi::<P>::slot_head(node.as_ref(), slot).await {
+                Ok(Some(slot_head)) => return Ok(Some(slot_head)),
+                Ok(None) => {}
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node reported an unusable head: {error:?}");
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn sync_committee_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorSyncDutyResponse>> {
+        let operation = format!("produce sync committee duties for epoch {epoch}");
+
+        let (node, duties) = self
+            .local_then_remotes(
+                &operation,
+                |node| node.sync_committee_duties(epoch, validator_indices),
+                |node| BeaconNodeApi::<P>::sync_committee_duties(node, epoch, validator_indices),
+            )
+            .await?;
+
+        if let Some(node) = node {
+            debug_with_peers!(
+                "{node} beacon node produced {} sync committee duties for epoch {epoch}",
+                duties.len(),
+            );
+        }
+
+        Ok(duties)
+    }
+
+    async fn publish_sync_committee_messages(
+        &self,
+        messages: &BTreeMap<SubcommitteeIndex, Vec<SyncCommitteeMessage>>,
+    ) -> Result<()> {
+        self.spawn_publish_to_remotes(
+            "publish sync committee messages",
+            PublishedDuty::SyncCommitteeMessages,
+            || {
+                let owned = Arc::new(messages.clone());
+
+                move |node: Arc<RemoteBeaconNode>| {
+                    let messages = owned.clone_arc();
+
+                    async move {
+                        BeaconNodeApi::<P>::publish_sync_committee_messages(
+                            node.as_ref(),
+                            &messages,
+                        )
+                        .await
+                    }
+                }
+            },
+        );
+
+        match &self.local_node {
+            Some(node) => node.publish_sync_committee_messages(messages).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn subscribe_to_sync_committees(
+        &self,
+        current_epoch: Epoch,
+        subscriptions: &[SyncCommitteeSubscription],
+    ) -> Result<()> {
+        if subscriptions.is_empty() {
+            return Ok(());
+        }
+
+        let subscribe_on = self.serving_nodes();
+
+        if !subscribe_on.is_empty() {
+            let subscriptions = Arc::new(subscriptions.to_vec());
+
+            // Every node is told, as any of them may be asked to contribute later.
+            spawn_broadcast(
+                "update sync committee subscriptions",
+                subscribe_on,
+                move |node| {
+                    let subscriptions = subscriptions.clone_arc();
+
+                    async move {
+                        BeaconNodeApi::<P>::subscribe_to_sync_committees(
+                            node.as_ref(),
+                            current_epoch,
+                            &subscriptions,
+                        )
+                        .await
+                    }
+                },
+            );
+        }
+
+        match &self.local_node {
+            Some(node) => {
+                node.subscribe_to_sync_committees(current_epoch, subscriptions)
+                    .await
+            }
+            None => Ok(()),
+        }
+    }
+
+    async fn sync_committee_contribution(
+        &self,
+        slot: Slot,
+        subcommittee_index: SubcommitteeIndex,
+        beacon_block_root: H256,
+    ) -> Result<SyncCommitteeContribution<P>> {
+        let operation = format!(
+            "produce a sync committee contribution for subcommittee {subcommittee_index} \
+             in slot {slot}",
+        );
+
+        self.local_then_remotes(
+            &operation,
+            |node| node.sync_committee_contribution(slot, subcommittee_index, beacon_block_root),
+            |node| {
+                BeaconNodeApi::<P>::sync_committee_contribution(
+                    node,
+                    slot,
+                    subcommittee_index,
+                    beacon_block_root,
+                )
+            },
+        )
+        .await
+        .map(|(_, contribution)| contribution)
+    }
+
+    async fn publish_contributions_and_proofs(
+        &self,
+        contributions_and_proofs: &[SignedContributionAndProof<P>],
+    ) -> Result<()> {
+        self.spawn_publish_to_remotes(
+            "publish contributions and proofs",
+            PublishedDuty::SyncCommitteeContributions,
+            || {
+                let owned = Arc::new(contributions_and_proofs.to_vec());
+
+                move |node: Arc<RemoteBeaconNode>| {
+                    let contributions_and_proofs = owned.clone_arc();
+
+                    async move {
+                        BeaconNodeApi::<P>::publish_contributions_and_proofs(
+                            node.as_ref(),
+                            &contributions_and_proofs,
+                        )
+                        .await
+                    }
+                }
+            },
+        );
+
+        match &self.local_node {
+            Some(node) => {
+                node.publish_contributions_and_proofs(contributions_and_proofs)
+                    .await
+            }
+            None => Ok(()),
+        }
+    }
 }
 
-// Detached as a whole rather than per node, so that the nodes are still tried in order.
 fn spawn_publish<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)
 where
     F: Fn(Arc<RemoteBeaconNode>) -> Fut + Send + 'static,
@@ -396,7 +627,6 @@ where
     });
 }
 
-// Detached for the same reason as `spawn_publish`.
 fn spawn_broadcast<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)
 where
     F: Fn(Arc<RemoteBeaconNode>) -> Fut + Send + 'static,

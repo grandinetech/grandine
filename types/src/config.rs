@@ -20,6 +20,7 @@ use crate::{
     nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
         consts::{AttestationSubnetCount, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        containers::Fork,
         primitives::{
             ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H32, H160,
             H256, NetworkId, Slot, UnixSeconds, Version,
@@ -962,6 +963,17 @@ impl Config {
         self.version(phase)
     }
 
+    #[must_use]
+    pub fn fork_at_epoch(&self, epoch: Epoch) -> Fork {
+        let phase = self.phase_at_epoch(epoch);
+
+        Fork {
+            previous_version: self.version(phase.previous().unwrap_or(phase)),
+            current_version: self.version(phase),
+            epoch: self.fork_epoch(phase),
+        }
+    }
+
     #[inline]
     #[must_use]
     pub const fn fork_epoch(&self, phase: Phase) -> Epoch {
@@ -1282,5 +1294,95 @@ mod tests {
     ) {
         config.maximum_gossip_clock_disparity = config.slot_duration_ms.saturating_mul(2);
         assert_eq!(config.max_gossip_future_slots(), 2)
+    }
+
+    #[test_case(Config::mainnet())]
+    #[test_case(Config::minimal())]
+    #[test_case(Config::medalla())]
+    #[test_case(Config::goerli())]
+    #[test_case(Config::sepolia())]
+    #[test_case(Config::holesky())]
+    #[test_case(Config::holesky_devnet())]
+    fn config_fork_at_epoch_agrees_with_version_at_epoch(config: Config) {
+        let boundaries = config
+            .fork_epochs()
+            .map(|(_, fork_epoch)| fork_epoch)
+            .filter(|fork_epoch| *fork_epoch != FAR_FUTURE_EPOCH)
+            .flat_map(|fork_epoch| {
+                [
+                    fork_epoch.saturating_sub(1),
+                    fork_epoch,
+                    fork_epoch.saturating_add(1),
+                ]
+            })
+            .chain([GENESIS_EPOCH])
+            .collect_vec();
+
+        for epoch in boundaries {
+            assert_eq!(
+                config.fork_at_epoch(epoch).current_version,
+                config.version_at_epoch(epoch),
+                "fork at epoch {epoch} names the wrong current version",
+            );
+        }
+    }
+
+    fn fork_schedule() -> Config {
+        Config {
+            altair_fork_epoch: 2,
+            bellatrix_fork_epoch: 4,
+            // Never scheduled, so nothing may fall back to their versions.
+            capella_fork_epoch: FAR_FUTURE_EPOCH,
+            deneb_fork_epoch: FAR_FUTURE_EPOCH,
+            electra_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_epoch: FAR_FUTURE_EPOCH,
+            gloas_fork_epoch: FAR_FUTURE_EPOCH,
+            ..Config::mainnet()
+        }
+    }
+
+    #[test]
+    fn config_fork_at_epoch_is_genesis_before_the_first_fork() {
+        let config = fork_schedule();
+
+        for epoch in [GENESIS_EPOCH, 1] {
+            let fork = config.fork_at_epoch(epoch);
+
+            assert_eq!(fork.previous_version, config.genesis_fork_version);
+            assert_eq!(fork.current_version, config.genesis_fork_version);
+            assert_eq!(fork.epoch, GENESIS_EPOCH);
+        }
+    }
+
+    #[test]
+    fn config_fork_at_epoch_switches_in_the_epoch_of_the_fork() {
+        let config = fork_schedule();
+        let fork = config.fork_at_epoch(2);
+
+        assert_eq!(fork.previous_version, config.genesis_fork_version);
+        assert_eq!(fork.current_version, config.altair_fork_version);
+        assert_eq!(fork.epoch, 2);
+    }
+
+    #[test]
+    fn config_fork_at_epoch_carries_the_version_of_the_fork_before() {
+        let config = fork_schedule();
+        let fork = config.fork_at_epoch(4);
+
+        assert_eq!(fork.previous_version, config.altair_fork_version);
+        assert_eq!(fork.current_version, config.bellatrix_fork_version);
+        assert_eq!(fork.epoch, 4);
+    }
+
+    // `phase_at_epoch` stops at the first phase that is not scheduled, so the one before the
+    // current phase is always scheduled too.
+    #[test]
+    fn config_fork_at_epoch_ignores_phases_that_are_never_scheduled() {
+        let config = fork_schedule();
+        let fork = config.fork_at_epoch(FAR_FUTURE_EPOCH - 1);
+
+        assert_eq!(fork.previous_version, config.altair_fork_version);
+        assert_eq!(fork.current_version, config.bellatrix_fork_version);
+        assert_eq!(fork.epoch, 4);
     }
 }

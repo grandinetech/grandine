@@ -1,4 +1,4 @@
-use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter};
+use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter, market::PhantomData};
 use std::sync::Arc;
 #[cfg(target_os = "zkvm")]
 use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};
@@ -30,7 +30,10 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, DataColumnSidecar, ExecutionRequests, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconState as CombinedBeaconState, DataColumnSidecar, ExecutionRequests,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
@@ -38,11 +41,11 @@ use crate::{
     },
     fulu::containers::DataColumnIdentifier,
     phase0::{
-        containers::{SignedBeaconBlockHeader, Validator},
+        containers::{Fork, SignedBeaconBlockHeader, Validator},
         primitives::{Epoch, Gwei, Slot, Uint256, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
+    traits::{BeaconState, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 pub use smallvec::smallvec;
@@ -262,11 +265,34 @@ pub struct BlockRewards {
     pub attester_slashings: Gwei,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ForkInfo<P: Preset> {
+    pub fork: Fork,
+    pub genesis_validators_root: H256,
+    // Neither field depends on the preset. `P` is carried so that `From<&BS>` constrains it, and
+    // so that a type like `SlotHead`, whose only preset-dependent field is a `ForkInfo`, needs no
+    // `PhantomData` of its own.
+    #[serde(skip)]
+    pub phantom: PhantomData<P>,
+}
+
+impl<P: Preset, BS: BeaconState<P> + ?Sized> From<&BS> for ForkInfo<P> {
+    fn from(state: &BS) -> Self {
+        Self {
+            fork: state.fork(),
+            genesis_validators_root: state.genesis_validators_root(),
+            phantom: PhantomData,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString, VariantNames)]
-#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
+#[strum(serialize_all = "kebab-case", ascii_case_insensitive)]
 pub enum PublishedDuty {
     Aggregates,
     Attestations,
+    SyncCommitteeContributions,
+    SyncCommitteeMessages,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -687,7 +713,7 @@ pub struct SystemStats {
 #[derive(Clone)]
 pub struct FinalizedCheckpoint<P: Preset> {
     pub block: Arc<SignedBeaconBlock<P>>,
-    pub state: Arc<BeaconState<P>>,
+    pub state: Arc<CombinedBeaconState<P>>,
 }
 
 #[derive(Clone, Copy)]

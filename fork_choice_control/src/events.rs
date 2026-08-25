@@ -10,7 +10,7 @@ use helper_functions::misc;
 use logging::warn_with_peers;
 use prometheus_metrics::Metrics;
 use scc::HashMap as SccHashMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_with::DeserializeFromStr;
 use ssz::ContiguousList;
 use strum::{AsRefStr, EnumString};
@@ -997,7 +997,7 @@ pub struct FinalizedCheckpointEvent {
     pub execution_optimistic: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct HeadEvent {
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
