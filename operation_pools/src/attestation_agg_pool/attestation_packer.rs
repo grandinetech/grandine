@@ -9,6 +9,7 @@ use helper_functions::{
     misc, phase0,
 };
 use itertools::Itertools as _;
+use logging::info_with_peers;
 use typenum::Unsigned as _;
 use types::{
     altair::{consts::PARTICIPATION_FLAG_WEIGHTS, primitives::ParticipationFlags},
@@ -81,6 +82,8 @@ impl<P: Preset> AttestationPacker<P> {
         // Use `BTreeMap` to make attestation packing deterministic for snapshot testing.
         let mut candidates = BTreeMap::new();
 
+        info_with_peers!("attestation packer start packing attestations greedily");
+
         // In general it may be possible to construct better aggregates out of smaller ones, but
         // they must not overlap because aggregating a signature with itself is not idempotent and
         // would require keeping track of aggregation counts rather than bits.
@@ -113,6 +116,8 @@ impl<P: Preset> AttestationPacker<P> {
 
         let mut candidates = candidates.into_values().collect_vec();
 
+        info_with_peers!("attestation packer candidates count: {}", candidates.len());
+
         // Picking the best attestations is a variation of the set packing problem, which is
         // NP-complete. See:
         // - <https://en.wikipedia.org/wiki/Set_packing>
@@ -128,6 +133,8 @@ impl<P: Preset> AttestationPacker<P> {
             .ok()
         });
 
+        info_with_peers!("attestation packer sorted candidates");
+
         let attestations = core::iter::from_fn(move || {
             let attestation = candidates.pop()?;
 
@@ -141,6 +148,8 @@ impl<P: Preset> AttestationPacker<P> {
         })
         .take(P::MaxAttestations::USIZE)
         .collect();
+
+        info_with_peers!("attestation packer finished packing greedily");
 
         PackOutcome {
             attestations,
