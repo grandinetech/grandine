@@ -5,14 +5,13 @@ use anyhow::Result;
 use bls::PublicKeyBytes;
 use derivative::Derivative;
 use fs_err::File;
-use helper_functions::{accessors, misc};
+use helper_functions::misc;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use rusqlite::{Connection, OptionalExtension, Rows, Transaction, TransactionBehavior};
 use ssz::{SszReadDefault as _, SszWrite as _};
 use thiserror::Error;
 use types::{
-    combined::BeaconState,
     phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
 };
@@ -619,13 +618,11 @@ impl SlashingProtector {
         Ok(result)
     }
 
-    pub fn validate_and_store_own_attestations<P: Preset>(
+    pub fn validate_and_store_own_attestations(
         &mut self,
-        state: &BeaconState<P>,
+        current_epoch: Epoch,
         attestations: impl IntoIterator<Item = (Attestation, PublicKeyBytes)> + Clone,
     ) -> Result<Vec<Option<Attestation>>> {
-        let current_epoch = accessors::get_current_epoch(state);
-
         if self.validate_current_epoch(current_epoch)?.is_some() {
             return Ok(vec![]);
         }
@@ -1026,12 +1023,11 @@ fn move_slashing_protection_db_to_validator_dir(
 mod tests {
     use duplicate::duplicate_item;
     use hex_literal::hex;
-    use pubkey_cache::PubkeyCache;
     use serde::{Deserialize, de::IgnoredAny};
     use tempfile::{Builder, TempDir};
     use test_case::test_case;
     use test_generator::test_resources;
-    use types::{config::Config, preset::Minimal, traits::BeaconState as _};
+    use types::preset::Minimal;
 
     use super::*;
 
@@ -1221,9 +1217,6 @@ mod tests {
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_current_epoch(constructor: Constructor) -> Result<()> {
-        let config = Config::minimal();
-        let pubkey_cache = PubkeyCache::default();
-
         let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         assert_eq!(slashing_protector.stored_current_epoch()?, None);
@@ -1244,12 +1237,10 @@ mod tests {
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
 
-        let (mut state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
-
         let attestation = build_own_attestation(2, 32);
 
         let accepted_attestations = slashing_protector
-            .validate_and_store_own_attestations(&state, core::iter::once((attestation, PUBKEY)))?;
+            .validate_and_store_own_attestations(32, core::iter::once((attestation, PUBKEY)))?;
 
         assert_eq!(count_some(&accepted_attestations), 0);
         assert_eq!(
@@ -1262,10 +1253,8 @@ mod tests {
             )),
         );
 
-        *state.slot_mut() = misc::compute_start_slot_at_epoch::<Minimal>(1024);
-
         let accepted_attestations = slashing_protector
-            .validate_and_store_own_attestations(&state, core::iter::once((attestation, PUBKEY)))?;
+            .validate_and_store_own_attestations(1024, core::iter::once((attestation, PUBKEY)))?;
 
         assert_eq!(slashing_protector.validate_current_epoch(1024)?, None);
         assert_eq!(count_some(&accepted_attestations), 1);
@@ -1294,21 +1283,16 @@ mod tests {
     #[test_case(build_persistent_slashing_protector)]
     #[test_case(build_in_memory_slashing_protector)]
     fn test_slashing_protection_attestation_pruning(constructor: Constructor) -> Result<()> {
-        let config = Config::minimal();
-        let pubkey_cache = PubkeyCache::default();
-
         let (mut slashing_protector, _store_dir, _validator_dir) = constructor()?;
 
         slashing_protector.register_validators(core::iter::once(PUBKEY))?;
-
-        let (state, _) = factory::min_genesis_state::<Minimal>(&config, &pubkey_cache)?;
 
         let attestation_1 = build_own_attestation(2, 32);
         let attestation_2 = build_own_attestation(34, 64);
         let attestation_3 = build_own_attestation(64, 66);
 
         let accepted_attestations = slashing_protector.validate_and_store_own_attestations(
-            &state,
+            0,
             [
                 (attestation_1, PUBKEY),
                 (attestation_2, PUBKEY),

@@ -35,7 +35,9 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, PartialValidator, Participation, Phase, RelativeEpoch},
+    nonstandard::{
+        AttestationEpoch, ForkInfo, PartialValidator, Participation, Phase, RelativeEpoch,
+    },
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -555,7 +557,23 @@ pub fn get_domain<P: Preset>(
     epoch: Option<Epoch>,
 ) -> H256 {
     let epoch = epoch.unwrap_or_else(|| get_current_epoch(state));
-    let fork = state.fork();
+
+    get_domain_from_fork_info(config, state.into(), domain_type, epoch)
+}
+
+/// [`get_domain`] for a fork that is already known, as it is to a validator without a state.
+#[must_use]
+pub fn get_domain_from_fork_info<P: Preset>(
+    config: &Config,
+    fork_info: ForkInfo<P>,
+    domain_type: DomainType,
+    epoch: Epoch,
+) -> H256 {
+    let ForkInfo {
+        fork,
+        genesis_validators_root,
+        ..
+    } = fork_info;
 
     let fork_version = if epoch < fork.epoch {
         fork.previous_version
@@ -567,7 +585,7 @@ pub fn get_domain<P: Preset>(
         config,
         domain_type,
         Some(fork_version),
-        Some(state.genesis_validators_root()),
+        Some(genesis_validators_root),
     )
 }
 

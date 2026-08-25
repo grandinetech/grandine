@@ -38,7 +38,8 @@ use futures::{
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use http_api_utils::{
-    BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId, ValidatorAttesterDutyResponse,
+    BlockHeadersResponse, BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId,
+    ValidatorAttesterDutyResponse, ValidatorSyncDutyResponse,
 };
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
@@ -108,7 +109,7 @@ use types::{
         consts::{GENESIS_SLOT, TargetAggregatorsPerCommittee},
         containers::{
             AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint, Fork,
-            ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
+            ProposerSlashing, SignedVoluntaryExit, Validator,
         },
         primitives::{
             ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, Uint256,
@@ -403,13 +404,6 @@ pub struct StateValidatorBalanceResponse {
 }
 
 #[derive(Serialize)]
-pub struct BlockHeadersResponse {
-    root: H256,
-    canonical: bool,
-    header: SignedBeaconBlockHeader,
-}
-
-#[derive(Serialize)]
 pub struct DepositContractResponse {
     address: ExecutionAddress,
     #[serde(with = "serde_utils::string_or_native")]
@@ -492,15 +486,6 @@ pub struct ValidatorProposerDutyResponse {
     validator_index: ValidatorIndex,
     #[serde(with = "serde_utils::string_or_native")]
     slot: Slot,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorSyncDutyResponse {
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    #[serde(with = "As::<Vec<DisplayFromStr>>")]
-    validator_sync_committee_indices: Vec<usize>,
 }
 
 #[derive(Serialize)]

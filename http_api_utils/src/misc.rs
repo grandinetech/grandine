@@ -5,7 +5,10 @@ use bls::PublicKeyBytes;
 use parse_display::Display;
 use prometheus_metrics::Metrics;
 use serde::{Deserialize, Serialize};
-use types::phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex};
+use types::phase0::{
+    containers::SignedBeaconBlockHeader,
+    primitives::{CommitteeIndex, H256, Slot, ValidatorIndex},
+};
 
 pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
 
@@ -25,6 +28,24 @@ pub struct ValidatorAttesterDutyResponse {
     pub validator_committee_index: usize,
     #[serde(with = "serde_utils::string_or_native")]
     pub validator_index: ValidatorIndex,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getSyncCommitteeDuties>
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorSyncDutyResponse {
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    pub validator_sync_committee_indices: Vec<usize>,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlockHeader>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct BlockHeadersResponse {
+    pub root: H256,
+    pub canonical: bool,
+    pub header: SignedBeaconBlockHeader,
 }
 
 #[derive(Clone, Copy)]

@@ -1,25 +1,42 @@
 use core::{
+    marker::PhantomData,
     sync::atomic::{AtomicU8, Ordering},
     time::Duration,
 };
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{Arc, OnceLock},
+};
 
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
+use bls::PublicKeyBytes;
 use derive_more::Display;
+use fork_choice_control::HeadEvent;
+use futures::{Stream, StreamExt as _, future};
 use helper_functions::misc;
-use http_api_utils::{ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse};
+use http_api_utils::{
+    BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
+    ValidatorSyncDutyResponse,
+};
+use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
-use p2p::BeaconCommitteeSubscription;
-use reqwest::{Client, Response, StatusCode};
+use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
+use reqwest::{Body, Client, Response, StatusCode, header::ACCEPT};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use sse_stream::SseStream;
 use ssz::SszHash as _;
+use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
+    altair::{
+        containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
+        primitives::SubcommitteeIndex,
+    },
     combined::{Attestation, SignedAggregateAndProof},
     config::Config as ChainConfig,
     electra::containers::Attestation as ElectraAttestation,
     gloas::containers::Attestation as GloasAttestation,
-    nonstandard::{OwnAttestation, Phase},
+    nonstandard::{ForkInfo, OwnAttestation, Phase},
     phase0::containers::Attestation as Phase0Attestation,
     phase0::{
         containers::AttestationData,
@@ -31,10 +48,13 @@ use types::{
 
 use crate::{
     beacon_node_api::{AttesterDuties, BeaconNodeApi},
+    chain_head::ChainHead,
     health::Health,
+    slot_head::SlotHead,
 };
 
 const REQUEST_TIMEOUT_QUOTIENT: u32 = 4;
+const VALIDATOR_IDS_PER_REQUEST: usize = 1024;
 
 #[derive(Debug, Error)]
 enum Error {
@@ -47,6 +67,15 @@ enum Error {
         expected: Version,
         actual: Version,
     },
+    #[error("beacon node at {url} reported an optimistic head")]
+    OptimisticHead { url: String },
+    #[error("beacon node at {url} did not report whether its head is optimistic")]
+    UnknownOptimisticStatus { url: String },
+    #[error(
+        "beacon node at {url} returned a sync committee contribution \
+         that does not match the request"
+    )]
+    UnexpectedContribution { url: String },
     #[error(
         "beacon node returned an aggregate covering committees {actual:?} \
          where only committee {expected} was requested"
@@ -68,6 +97,26 @@ enum Error {
 #[derive(Deserialize)]
 struct Genesis {
     genesis_fork_version: Version,
+    genesis_validators_root: H256,
+}
+
+/// The request body of `postStateValidators`.
+#[derive(Serialize)]
+struct ValidatorIds<'keys> {
+    ids: &'keys [PublicKeyBytes],
+}
+
+/// An entry of the `postStateValidators` response, of which only the key and index are needed.
+#[derive(Deserialize)]
+struct StateValidator {
+    #[serde(with = "serde_utils::string_or_native")]
+    index: ValidatorIndex,
+    validator: ValidatorPublicKey,
+}
+
+#[derive(Deserialize)]
+struct ValidatorPublicKey {
+    pubkey: PublicKeyBytes,
 }
 
 /// The request body of `getAttesterDuties`, whose indices are quoted in JSON.
@@ -101,24 +150,138 @@ pub struct RemoteBeaconNode {
     chain_config: Arc<ChainConfig>,
     client: Client,
     url: RedactingUrl,
+    max_empty_slots: u64,
     /// A [`Health`] discriminant. Atomic because it is read on the duty path.
     health: AtomicU8,
+    chain_head: ChainHead,
+    /// Learned from the genesis check and unchanging thereafter.
+    genesis_validators_root: OnceLock<H256>,
 }
 
 impl RemoteBeaconNode {
     #[must_use]
-    pub const fn new(chain_config: Arc<ChainConfig>, client: Client, url: RedactingUrl) -> Self {
+    pub const fn new(
+        chain_config: Arc<ChainConfig>,
+        client: Client,
+        url: RedactingUrl,
+        max_empty_slots: u64,
+    ) -> Self {
         Self {
             chain_config,
             client,
             url,
+            max_empty_slots,
             health: AtomicU8::new(Health::Unknown.as_u8()),
+            chain_head: ChainHead::new(),
+            genesis_validators_root: OnceLock::new(),
         }
+    }
+
+    #[must_use]
+    pub const fn chain_head(&self) -> &ChainHead {
+        &self.chain_head
     }
 
     #[must_use]
     pub fn health(&self) -> Health {
         Health::from_u8(self.health.load(Ordering::Relaxed))
+    }
+
+    pub async fn head_events(
+        &self,
+    ) -> Result<impl Stream<Item = Result<HeadEvent>> + Send + use<>> {
+        let url = self.endpoint("/eth/v1/events?topics=head")?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            // Without this some beacon nodes answer with an empty body rather than a stream.
+            .header(ACCEPT, "text/event-stream")
+            // The client is built with a request timeout, which would end the stream even while
+            // events are still arriving.
+            .timeout(Duration::MAX)
+            .send()
+            .await?;
+
+        let body = Body::from(self.check_status(response).await?);
+
+        // An event without data carries no head, as a keep-alive does, and is not a failure.
+        let events = SseStream::new(body).filter_map(|event| {
+            let head_event = match event {
+                Ok(event) => event
+                    .data
+                    .map(|data| serde_json::from_str(&data).map_err(Into::into)),
+                Err(error) => Some(Err(error.into())),
+            };
+
+            future::ready(head_event)
+        });
+
+        Ok(events)
+    }
+
+    /// Asked for only while the event stream is not keeping the head up to date, so that a
+    /// stream that is down costs a request per slot rather than the slot's duties.
+    pub async fn refresh_head(&self, slot: Slot) {
+        // A node on a different network would otherwise cache a head from another chain,
+        // mirroring the filter on the event stream.
+        if self.health() == Health::Incompatible {
+            return;
+        }
+
+        // Polled whenever the head is not from the previous slot, as the stream may be silently
+        // dead; a healthy stream keeps this a no-op.
+        if self.chain_head.can_serve(slot, 1) {
+            return;
+        }
+
+        match self.head_header().await {
+            // Recorded at the head's own slot, so that a stale head is cached as stale rather
+            // than appearing fresh for another `max_empty_slots` slots.
+            Ok((head_slot, block_root)) => self.chain_head.overwrite(slot, head_slot, block_root),
+            Err(error) => {
+                debug_with_peers!("{} did not report its head: {error:?}", self.url);
+            }
+        }
+    }
+
+    /// The current head, polled and bounded like the cached one.
+    pub(crate) async fn fresh_head_block_root(&self, slot: Slot) -> Result<H256> {
+        let (head_slot, block_root) = self.head_header().await?;
+
+        self.chain_head.overwrite(slot, head_slot, block_root);
+
+        self.chain_head
+            .get(slot, self.max_empty_slots)?
+            .ok_or_else(|| {
+                AnyhowError::msg(format!(
+                    "head of beacon node at {} is too old to sign for slot {slot}",
+                    self.url,
+                ))
+            })
+    }
+
+    /// The slot and root of the node's head, refused while it is optimistic, like a head event.
+    async fn head_header(&self) -> Result<(Slot, H256)> {
+        let url = self.endpoint("/eth/v1/beacon/headers/head")?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        let response = self.check_status(response).await?;
+
+        let (block_header, execution_optimistic) = response
+            .json::<EthResponse<BlockHeadersResponse>>()
+            .await?
+            .into_data_and_execution_optimistic();
+
+        check_not_optimistic(&self.url, execution_optimistic)?;
+
+        Ok((block_header.header.message.slot, block_header.root))
     }
 
     pub async fn refresh_health(&self) {
@@ -183,7 +346,6 @@ impl RemoteBeaconNode {
         self.parse_data(response).await
     }
 
-    /// Short enough that a node that does not answer leaves time to try another within the slot.
     fn request_timeout(&self) -> Duration {
         self.chain_config
             .slot_duration_ms
@@ -191,7 +353,6 @@ impl RemoteBeaconNode {
             .expect("REQUEST_TIMEOUT_QUOTIENT is not zero")
     }
 
-    // The two failure modes are separated because they warrant different responses.
     pub async fn check_network(&self) -> NetworkCheck {
         match self.ensure_same_network().await {
             Ok(()) => NetworkCheck::Matches,
@@ -209,7 +370,6 @@ impl RemoteBeaconNode {
         self.url.join(path).map_err(Into::into)
     }
 
-    /// Checked once. Prevents producing attestations signed under the wrong domain.
     async fn ensure_same_network(&self) -> Result<()> {
         let url = self.endpoint("/eth/v1/beacon/genesis")?;
 
@@ -223,6 +383,7 @@ impl RemoteBeaconNode {
         let genesis = self.parse_data::<Genesis>(response).await?;
         let expected = self.chain_config.genesis_fork_version;
 
+        // Prevents producing attestations signed under the wrong domain.
         ensure!(
             genesis.genesis_fork_version == expected,
             Error::NetworkMismatch {
@@ -231,6 +392,10 @@ impl RemoteBeaconNode {
                 actual: genesis.genesis_fork_version,
             },
         );
+
+        let _ = self
+            .genesis_validators_root
+            .set(genesis.genesis_validators_root);
 
         Ok(())
     }
@@ -272,20 +437,9 @@ impl RemoteBeaconNode {
             body,
         })
     }
-}
 
-impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
-    async fn dependent_root(
-        &self,
-        epoch: Epoch,
-        validator_index: Option<ValidatorIndex>,
-    ) -> Result<H256> {
-        <Self as BeaconNodeApi<P>>::attester_duties(self, epoch, validator_index.as_slice())
-            .await
-            .map(|duties| duties.dependent_root)
-    }
-
-    async fn attester_duties(
+    // Epoch-shaped because `getAttesterDuties` is; the built-in node answers per slot instead.
+    pub async fn attester_duties(
         &self,
         epoch: Epoch,
         validator_indices: &[ValidatorIndex],
@@ -324,6 +478,18 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             dependent_root,
             duties,
         })
+    }
+}
+
+impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
+    async fn dependent_root(
+        &self,
+        epoch: Epoch,
+        validator_index: Option<ValidatorIndex>,
+    ) -> Result<H256> {
+        self.attester_duties(epoch, validator_index.as_slice())
+            .await
+            .map(|duties| duties.dependent_root)
     }
 
     async fn attestation_data(
@@ -478,10 +644,229 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
 
         Ok(())
     }
+
+    async fn validator_indices(
+        &self,
+        public_keys: &[PublicKeyBytes],
+    ) -> Result<HashMap<PublicKeyBytes, ValidatorIndex>> {
+        let mut indices = HashMap::new();
+
+        // Split up because the whole key set of a large validator client does not belong in a
+        // single request body.
+        for keys in public_keys.chunks(VALIDATOR_IDS_PER_REQUEST) {
+            let url = self.endpoint("/eth/v1/beacon/states/head/validators")?;
+
+            let response = self
+                .client
+                .post(url.into_url())
+                .json(&ValidatorIds { ids: keys })
+                .timeout(self.request_timeout())
+                .send()
+                .await?;
+
+            let validators = self.parse_data::<Vec<StateValidator>>(response).await?;
+
+            indices.extend(
+                validators
+                    .into_iter()
+                    .map(|validator| (validator.validator.pubkey, validator.index)),
+            );
+        }
+
+        debug_with_peers!(
+            "{} resolved {} of {} validator indices",
+            self.url,
+            indices.len(),
+            public_keys.len(),
+        );
+
+        Ok(indices)
+    }
+
+    async fn slot_head(&self, slot: Slot) -> Result<Option<SlotHead<P>>> {
+        let Some(beacon_block_root) = self.chain_head.get(slot, self.max_empty_slots)? else {
+            return Ok(None);
+        };
+
+        let Some(genesis_validators_root) = self.genesis_validators_root.get().copied() else {
+            return Ok(None);
+        };
+
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        let slot_head = SlotHead {
+            config: self.chain_config.clone_arc(),
+            slot,
+            beacon_block_root,
+            fork_info: ForkInfo {
+                fork: self.chain_config.fork_at_epoch(epoch),
+                genesis_validators_root,
+                phantom: PhantomData,
+            },
+            // Optimistic heads never reach the cache.
+            optimistic: false,
+        };
+
+        Ok(Some(slot_head))
+    }
+
+    async fn sync_committee_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorSyncDutyResponse>> {
+        let url = self.endpoint(format!("/eth/v1/validator/duties/sync/{epoch}").as_str())?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        let duties = self
+            .parse_data::<Vec<ValidatorSyncDutyResponse>>(response)
+            .await?;
+
+        debug_with_peers!(
+            "{} produced {} sync committee duties for epoch {epoch}",
+            self.url,
+            duties.len(),
+        );
+
+        Ok(duties)
+    }
+
+    async fn publish_sync_committee_messages(
+        &self,
+        messages: &BTreeMap<SubcommitteeIndex, Vec<SyncCommitteeMessage>>,
+    ) -> Result<()> {
+        // The endpoint derives the subnets itself, so a validator in several subcommittees is
+        // submitted only once.
+        let bodies = messages
+            .values()
+            .flatten()
+            .unique_by(|message| message.validator_index)
+            .collect::<Vec<_>>();
+
+        if bodies.is_empty() {
+            return Ok(());
+        }
+
+        let url = self.endpoint("/eth/v1/beacon/pool/sync_committees")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&bodies)
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "published {} sync committee messages to {}",
+            bodies.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn subscribe_to_sync_committees(
+        &self,
+        _current_epoch: Epoch,
+        subscriptions: &[SyncCommitteeSubscription],
+    ) -> Result<()> {
+        let url = self.endpoint("/eth/v1/validator/sync_committee_subscriptions")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&subscriptions)
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "subscribed to {} sync committees on {}",
+            subscriptions.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn sync_committee_contribution(
+        &self,
+        slot: Slot,
+        subcommittee_index: SubcommitteeIndex,
+        beacon_block_root: H256,
+    ) -> Result<SyncCommitteeContribution<P>> {
+        let url = self.endpoint(&sync_committee_contribution_path(
+            slot,
+            subcommittee_index,
+            beacon_block_root,
+        ))?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        let contribution = self
+            .parse_data::<SyncCommitteeContribution<P>>(response)
+            .await?;
+
+        // Signing a mismatched answer would produce a self-inconsistent contribution and proof.
+        ensure!(
+            contribution.slot == slot
+                && contribution.subcommittee_index == subcommittee_index
+                && contribution.beacon_block_root == beacon_block_root,
+            Error::UnexpectedContribution {
+                url: self.url.to_string(),
+            },
+        );
+
+        Ok(contribution)
+    }
+
+    async fn publish_contributions_and_proofs(
+        &self,
+        contributions_and_proofs: &[SignedContributionAndProof<P>],
+    ) -> Result<()> {
+        if contributions_and_proofs.is_empty() {
+            return Ok(());
+        }
+
+        let url = self.endpoint("/eth/v1/validator/contribution_and_proofs")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&contributions_and_proofs)
+            .timeout(self.request_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "published {} contributions and proofs to {}",
+            contributions_and_proofs.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
 }
 
-// Aggregation bits from Electra on span every committee in `committee_bits`, so a position in the
-// requested committee only indexes them when that is the sole committee covered.
 fn ensure_requested_committee<P: Preset>(
     attestation: &Attestation<P>,
     committee_index: CommitteeIndex,
@@ -490,6 +875,8 @@ fn ensure_requested_committee<P: Preset>(
         return Ok(());
     };
 
+    // Aggregation bits from Electra on span every committee in `committee_bits`, so a position
+    // in the requested committee only indexes them when that is the sole committee covered.
     let actual = misc::get_committee_indices::<P>(committee_bits).collect::<Vec<_>>();
 
     ensure!(
@@ -501,6 +888,20 @@ fn ensure_requested_committee<P: Preset>(
     );
 
     Ok(())
+}
+
+fn check_not_optimistic(url: &RedactingUrl, execution_optimistic: Option<bool>) -> Result<()> {
+    match execution_optimistic {
+        Some(false) => Ok(()),
+        Some(true) => bail!(Error::OptimisticHead {
+            url: url.to_string(),
+        }),
+        // Not saying is not the same as saying no, and an optimistic validator must not sign
+        // across the sync committee domains.
+        None => bail!(Error::UnknownOptimisticStatus {
+            url: url.to_string(),
+        }),
+    }
 }
 
 fn check_version(expected: Phase, reported: Option<Phase>) -> Result<()> {
@@ -520,6 +921,17 @@ fn aggregate_attestation_path(data: AttestationData, committee_index: CommitteeI
          &slot={}&committee_index={committee_index}",
         data.hash_tree_root(),
         data.slot,
+    )
+}
+
+fn sync_committee_contribution_path(
+    slot: Slot,
+    subcommittee_index: SubcommitteeIndex,
+    beacon_block_root: H256,
+) -> String {
+    format!(
+        "/eth/v1/validator/sync_committee_contribution?slot={slot}\
+         &subcommittee_index={subcommittee_index}&beacon_block_root={beacon_block_root:?}",
     )
 }
 
@@ -592,6 +1004,39 @@ mod tests {
         Ok(())
     }
 
+    // The head's true slot lives in the header, so a stale head is cached as stale.
+    #[test]
+    fn parses_block_header_response() -> Result<()> {
+        let response = json!({
+            "execution_optimistic": false,
+            "finalized": false,
+            "data": {
+                "root": H256::repeat_byte(1),
+                "canonical": true,
+                "header": {
+                    "message": {
+                        "slot": "6",
+                        "proposer_index": "2",
+                        "parent_root": H256::repeat_byte(3),
+                        "state_root": H256::repeat_byte(4),
+                        "body_root": H256::repeat_byte(5),
+                    },
+                    "signature": SignatureBytes::empty(),
+                },
+            },
+        });
+
+        let (block_header, execution_optimistic) =
+            serde_json::from_value::<EthResponse<BlockHeadersResponse>>(response)?
+                .into_data_and_execution_optimistic();
+
+        assert_eq!(execution_optimistic, Some(false));
+        assert_eq!(block_header.root, H256::repeat_byte(1));
+        assert_eq!(block_header.header.message.slot, 6);
+
+        Ok(())
+    }
+
     // The node names itself by URL, so logging it must not leak credentials.
     #[test]
     fn display_is_the_redacted_url() -> Result<()> {
@@ -599,6 +1044,7 @@ mod tests {
             Arc::new(ChainConfig::mainnet()),
             Client::new(),
             "http://user:password@localhost:5052/".parse()?,
+            32,
         );
 
         assert_eq!(node.to_string(), "http://*:*@localhost:5052/");
@@ -613,6 +1059,7 @@ mod tests {
             Arc::new(ChainConfig::mainnet()),
             Client::new(),
             "http://localhost:5052/".parse()?,
+            32,
         );
 
         assert_eq!(node.request_timeout(), Duration::from_secs(3));
@@ -778,6 +1225,18 @@ mod tests {
         Ok(())
     }
 
+    // Signing across the sync committee domains requires a head the node has verified.
+    #[test]
+    fn check_not_optimistic_accepts_only_a_verified_head() -> Result<()> {
+        let url = "http://localhost:5052/".parse()?;
+
+        check_not_optimistic(&url, Some(false))?;
+        check_not_optimistic(&url, Some(true)).expect_err("an optimistic head is not verified");
+        check_not_optimistic(&url, None).expect_err("an unreported head is not verified");
+
+        Ok(())
+    }
+
     // The root goes into the query in full; `Display` would abbreviate it.
     #[test]
     fn aggregate_attestation_path_spells_out_the_root() {
@@ -797,6 +1256,18 @@ mod tests {
         assert!(root.starts_with("0x"));
         assert_eq!(root.len(), 66);
         assert!(path.ends_with("&slot=6&committee_index=3"));
+    }
+
+    // The root goes into the query in full, for the same reason.
+    #[test]
+    fn sync_committee_contribution_path_spells_out_the_root() {
+        let path = sync_committee_contribution_path(6, 3, H256::repeat_byte(1));
+
+        assert_eq!(
+            path,
+            "/eth/v1/validator/sync_committee_contribution?slot=6&subcommittee_index=3\
+             &beacon_block_root=0x0101010101010101010101010101010101010101010101010101010101010101",
+        );
     }
 
     // The publication body is the bare aggregate and proof, not an `Arc`-wrapped one.

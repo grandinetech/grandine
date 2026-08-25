@@ -83,15 +83,26 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
         self.subscriptions = self.subscriptions.split_off(&current_period);
     }
 
-    pub fn take_epoch_subscriptions(
-        &mut self,
-        current_epoch: Epoch,
-    ) -> Option<Vec<SyncCommitteeSubscription>> {
+    /// The subscriptions that are due at `current_epoch`.
+    ///
+    /// Kept rather than taken so that they can be sent again every epoch. A beacon node that was
+    /// restarted, or that was unreachable when they were first sent, would otherwise never learn
+    /// about them, and a period lasts far too long to leave a fallback node unsubscribed.
+    pub fn epoch_subscriptions(&self, current_epoch: Epoch) -> Vec<SyncCommitteeSubscription> {
         let current_period = misc::sync_committee_period::<P>(current_epoch);
 
         self.subscriptions
-            .get_mut(&current_period)
-            .and_then(|subscriptions| subscriptions.remove(&current_epoch))
+            .range(current_period..)
+            .flat_map(|(_, by_epoch)| {
+                by_epoch
+                    .iter()
+                    // Subscriptions for the next period are held back until the epoch they were
+                    // randomly assigned, as the specification requires.
+                    .filter(|(epoch, _)| **epoch <= current_epoch)
+                    .flat_map(|(_, subscriptions)| subscriptions)
+            })
+            .cloned()
+            .collect()
     }
 }
 
@@ -118,6 +129,75 @@ fn sync_committee_subscriptions<P: Preset>(
                 until_epoch,
             },
         )
+}
+
+#[cfg(test)]
+mod epoch_subscription_tests {
+    use types::{phase0::primitives::ValidatorIndex, preset::Minimal};
+
+    use super::*;
+
+    // A sync committee period is 8 epochs long under the minimal preset.
+    #[test]
+    fn subscriptions_are_returned_again_in_every_epoch_of_their_period() {
+        let subscriptions = subscriptions([(0, 0, 1)]);
+
+        assert_eq!(indices(&subscriptions, 0), [1]);
+        assert_eq!(indices(&subscriptions, 3), [1]);
+        assert_eq!(indices(&subscriptions, 7), [1]);
+    }
+
+    #[test]
+    fn subscriptions_for_the_next_period_are_held_back_until_their_epoch() {
+        let subscriptions = subscriptions([(0, 0, 1), (1, 6, 2)]);
+
+        assert_eq!(indices(&subscriptions, 5), [1]);
+        assert_eq!(indices(&subscriptions, 6), [1, 2]);
+    }
+
+    #[test]
+    fn subscriptions_of_a_past_period_are_left_out() {
+        let subscriptions = subscriptions([(0, 0, 1), (1, 6, 2)]);
+
+        assert_eq!(indices(&subscriptions, 8), [2]);
+    }
+
+    fn subscriptions(
+        entries: impl IntoIterator<Item = (u64, Epoch, ValidatorIndex)>,
+    ) -> OwnSyncCommitteeSubscriptions<Minimal> {
+        let mut subscriptions =
+            BTreeMap::<u64, HashMap<Epoch, Vec<SyncCommitteeSubscription>>>::new();
+
+        for (period, epoch, validator_index) in entries {
+            subscriptions
+                .entry(period)
+                .or_default()
+                .entry(epoch)
+                .or_default()
+                .push(SyncCommitteeSubscription {
+                    validator_index,
+                    sync_committee_indices: vec![0],
+                    until_epoch: 0,
+                });
+        }
+
+        OwnSyncCommitteeSubscriptions {
+            subscriptions,
+            phantom: PhantomData,
+        }
+    }
+
+    fn indices(
+        subscriptions: &OwnSyncCommitteeSubscriptions<Minimal>,
+        current_epoch: Epoch,
+    ) -> Vec<ValidatorIndex> {
+        subscriptions
+            .epoch_subscriptions(current_epoch)
+            .into_iter()
+            .map(|subscription| subscription.validator_index)
+            .sorted()
+            .collect()
+    }
 }
 
 #[cfg(test)]

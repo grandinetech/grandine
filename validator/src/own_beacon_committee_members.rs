@@ -21,6 +21,7 @@ use tracing::instrument;
 use types::{
     combined::BeaconState,
     config::Config as ChainConfig,
+    nonstandard::ForkInfo,
     phase0::primitives::{CommitteeIndex, Epoch, Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -91,27 +92,28 @@ impl OwnBeaconCommitteeMembers {
     pub async fn get_or_init_at_slot<P: Preset, W: Wait + Sync>(
         &self,
         controller: &ApiController<P, W>,
-        beacon_nodes: &BeaconNodes<P, W>,
-        state: &BeaconState<P>,
+        beacon_state: Option<&Arc<BeaconState<P>>>,
         slot: Slot,
     ) -> Result<Option<(Arc<[BeaconCommitteeMember]>, bool)>> {
-        let dependent_root = if beacon_nodes.has_local_node() {
-            controller.attestation_committee_dependent_root_for_slot(state, slot)?
-        } else {
-            let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let dependent_root = match beacon_state {
+            Some(state) => controller.attestation_committee_dependent_root_for_slot(state, slot)?,
+            None => {
+                let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-            match self.cached_dependent_root(epoch).await {
-                Some(dependent_root) => dependent_root,
-                None => {
-                    if !self.own_validator_indices(state).is_empty() {
-                        warn_with_peers!(
-                            "no attester duties were prefetched for slot {slot}, so no \
-                             attestation will be produced; check that the beacon nodes given \
-                             with --beacon-node-urls are reachable",
-                        );
+                match self.cached_dependent_root(epoch).await {
+                    Some(dependent_root) => dependent_root,
+                    None => {
+                        // Asked of the signer rather than a state, as there is none to ask.
+                        if self.signer.load().keys().next().is_some() {
+                            warn_with_peers!(
+                                "no attester duties were prefetched for slot {slot}, so no \
+                                 attestation will be produced; check that the beacon nodes given \
+                                 with --beacon-node-urls are reachable",
+                            );
+                        }
+
+                        return Ok(None);
                     }
-
-                    return Ok(None);
                 }
             }
         };
@@ -120,7 +122,7 @@ impl OwnBeaconCommitteeMembers {
             .needs_to_compute_members_at_slot::<P>(dependent_root, slot)
             .await;
 
-        if needs_to_compute && beacon_nodes.has_local_node() {
+        if needs_to_compute && let Some(state) = beacon_state {
             self.init_at_slot(state, dependent_root, slot).await?;
         }
 
@@ -130,8 +132,6 @@ impl OwnBeaconCommitteeMembers {
             .map(|members| (members, needs_to_compute)))
     }
 
-    // Scoped to one slot rather than reusing `init_at_epoch` because this runs against the
-    // attestation deadline.
     async fn init_at_slot<P: Preset>(
         &self,
         state: &BeaconState<P>,
@@ -145,8 +145,13 @@ impl OwnBeaconCommitteeMembers {
 
         let duties = tokio::task::block_in_place(|| duties_at_slot(state, slot, &indices))?;
 
-        self.init_from_duties(state, dependent_root, slot..slot.saturating_add(1), duties)
-            .await
+        self.init_from_duties(
+            state.into(),
+            dependent_root,
+            slot..slot.saturating_add(1),
+            duties,
+        )
+        .await
     }
 
     async fn cached_dependent_root(&self, epoch: Epoch) -> Option<H256> {
@@ -162,14 +167,14 @@ impl OwnBeaconCommitteeMembers {
             .and_then(|entry| entry.1.get(&slot).map(ArcExt::clone_arc))
     }
 
-    // Split per epoch because a shuffling, and so a dependent root, covers exactly one.
     pub async fn init_at_slots<P: Preset, W: Wait + Sync>(
         &self,
         beacon_nodes: &BeaconNodes<P, W>,
-        state: &BeaconState<P>,
+        fork_info: ForkInfo<P>,
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
+        // Split per epoch because a shuffling, and so a dependent root, covers exactly one.
         for (_, slots) in slots_by_epoch::<P>(slots) {
             let AttesterDuties {
                 dependent_root,
@@ -178,14 +183,13 @@ impl OwnBeaconCommitteeMembers {
                 .attester_duties_at_slots(slots.clone(), validator_indices)
                 .await?;
 
-            self.init_from_duties(state, dependent_root, slots, duties)
+            self.init_from_duties(fork_info, dependent_root, slots, duties)
                 .await?;
         }
 
         Ok(())
     }
 
-    // Ascending, so that the same validator is asked about every time.
     pub fn own_validator_indices<P: Preset>(&self, state: &BeaconState<P>) -> Vec<ValidatorIndex> {
         self.signer
             .load()
@@ -208,9 +212,6 @@ impl OwnBeaconCommitteeMembers {
             .is_none_or(|entry| entry.0 != dependent_root || !entry.1.contains_key(&slot))
     }
 
-    // The narrowest range covering the slots that still need members, or `None` when they all
-    // have them. Slots that do not need them may fall inside it; those are skipped when caching,
-    // so including them costs a committee walk but never a signature.
     async fn slots_to_compute<P: Preset>(
         &self,
         dependent_root: H256,
@@ -232,8 +233,6 @@ impl OwnBeaconCommitteeMembers {
         Some(first?..last?.saturating_add(1))
     }
 
-    // Nothing cached means every slot needs computing, and the request that fetches the duties
-    // reports the dependent root anyway.
     pub async fn slots_to_compute_at_epoch<P: Preset, W: Wait + Sync>(
         &self,
         beacon_nodes: &BeaconNodes<P, W>,
@@ -241,6 +240,7 @@ impl OwnBeaconCommitteeMembers {
         slots: Range<Slot>,
         validator_index: ValidatorIndex,
     ) -> Result<Option<Range<Slot>>> {
+        // The request that fetches the duties reports the dependent root anyway.
         if self.cached_dependent_root(epoch).await.is_none() {
             return Ok(Some(slots));
         }
@@ -260,12 +260,10 @@ impl OwnBeaconCommitteeMembers {
             .await;
     }
 
-    // Slots without any duty are cached as empty, so that a later pass does not mistake
-    // "nothing to do" for "not computed yet".
     #[instrument(skip_all, level = "debug", fields(dependent_root = ?dependent_root))]
     async fn init_from_duties<P: Preset>(
         &self,
-        state: &BeaconState<P>,
+        fork_info: ForkInfo<P>,
         dependent_root: H256,
         slots: Range<Slot>,
         duties: Vec<ValidatorAttesterDutyResponse>,
@@ -283,6 +281,8 @@ impl OwnBeaconCommitteeMembers {
                 .needs_to_compute_members_at_slot::<P>(dependent_root, slot)
                 .await
             {
+                // Cached as empty so that a later pass does not mistake "nothing to do" for
+                // "not computed yet".
                 members_by_slot.insert(slot, vec![]);
             }
         }
@@ -311,13 +311,15 @@ impl OwnBeaconCommitteeMembers {
             .iter()
             .map(|duty| SigningTriple::<P> {
                 message: SigningMessage::AggregationSlot { slot: duty.slot },
-                signing_root: duty.slot.signing_root(&self.config, state),
+                signing_root: duty
+                    .slot
+                    .signing_root_from_fork_info(&self.config, fork_info),
                 public_key: duty.pubkey,
             })
             .collect::<Vec<_>>();
 
         let selection_proofs = signer_snapshot
-            .sign_triples_without_slashing_protection(triples, Some(state.into()))
+            .sign_triples_without_slashing_protection(triples, Some(fork_info))
             .await?;
 
         for (duty, selection_proof) in duties.into_iter().zip(selection_proofs) {
@@ -440,7 +442,7 @@ mod tests {
         // Deliberately out of order, to check that members come back committee-major.
         own_members
             .init_from_duties::<Minimal>(
-                &state,
+                state.as_ref().into(),
                 dependent_root,
                 misc::slots_in_epoch::<Minimal>(0)?,
                 vec![
@@ -530,7 +532,7 @@ mod tests {
         for (dependent_root, slot) in [(old_root, 1), (new_root, 2)] {
             own_members
                 .init_from_duties::<Minimal>(
-                    &state,
+                    state.as_ref().into(),
                     dependent_root,
                     slot..slot.saturating_add(1),
                     vec![duty(public_key, 41, 0, 0, slot)],
