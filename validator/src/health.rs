@@ -15,9 +15,9 @@ impl Health {
         matches!(self, Self::Ready)
     }
 
-    // A degraded node is still worth asking, unlike one on the wrong network or an unreachable one.
     #[must_use]
     pub const fn can_serve(self) -> bool {
+        // A degraded node is still worth asking, unlike one on the wrong network.
         matches!(self, Self::Unusable | Self::Unknown | Self::Ready)
     }
 

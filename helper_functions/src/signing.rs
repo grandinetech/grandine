@@ -40,6 +40,7 @@ use types::{
             PayloadAttestationData, ProposerPreferences,
         },
     },
+    nonstandard::ForkInfo,
     phase0::{
         consts::{
             DOMAIN_AGGREGATE_AND_PROOF, DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER,
@@ -143,8 +144,18 @@ pub trait SignForSingleFork<P: Preset>: SszHash {
     fn epoch(&self) -> Epoch;
 
     fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
-        let epoch = Some(self.epoch());
-        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, epoch);
+        self.signing_root_from_fork_info(config, beacon_state.into())
+    }
+
+    /// [`Self::signing_root`] for a fork that is already known.
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
+        let domain = accessors::get_domain_from_fork_info(
+            config,
+            fork_info,
+            Self::DOMAIN_TYPE,
+            self.epoch(),
+        );
+
         misc::compute_signing_root(self, domain)
     }
 
@@ -183,8 +194,20 @@ pub trait SignForSingleForkAtSlot<P: Preset>: SszHash {
         beacon_state: &(impl BeaconState<P> + ?Sized),
         slot: Slot,
     ) -> H256 {
+        self.signing_root_from_fork_info(config, beacon_state.into(), slot)
+    }
+
+    /// [`Self::signing_root`] for a fork that is already known.
+    fn signing_root_from_fork_info(
+        &self,
+        config: &Config,
+        fork_info: ForkInfo<P>,
+        slot: Slot,
+    ) -> H256 {
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
-        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, Some(epoch));
+        let domain =
+            accessors::get_domain_from_fork_info(config, fork_info, Self::DOMAIN_TYPE, epoch);
+
         misc::compute_signing_root(self, domain)
     }
 

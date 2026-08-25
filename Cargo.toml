@@ -435,6 +435,7 @@ snap = '1'
 sp1-helper = '6.1.0'
 sp1-sdk = '6.1.0'
 sp1-zkvm = { version = '6.1.0' }
+sse-stream = '0.2'
 static_assertions = '1'
 strum = { version = '0.28', features = ['derive'] }
 syn = { version = '2', features = ['full'] }

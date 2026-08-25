@@ -1,10 +1,18 @@
 use core::future::Future;
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use anyhow::Result;
-use http_api_utils::ValidatorAttesterDutyResponse;
-use p2p::BeaconCommitteeSubscription;
+use bls::PublicKeyBytes;
+use http_api_utils::{ValidatorAttesterDutyResponse, ValidatorSyncDutyResponse};
+use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use types::{
+    altair::{
+        containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
+        primitives::SubcommitteeIndex,
+    },
     combined::{Attestation, SignedAggregateAndProof},
     nonstandard::OwnAttestation,
     phase0::{
@@ -14,6 +22,8 @@ use types::{
     preset::Preset,
 };
 
+use crate::slot_head::SlotHead;
+
 pub struct AttesterDuties {
     pub dependent_root: H256,
     pub duties: Vec<ValidatorAttesterDutyResponse>,
@@ -21,21 +31,17 @@ pub struct AttesterDuties {
 
 /// A beacon node the validator can perform duties against.
 pub trait BeaconNodeApi<P: Preset> {
-    // A remote beacon node reports the dependent root only alongside duties, so `validator_index`
-    // names the one validator whose duties are requested to obtain it. The built-in node derives
-    // the root without asking anything and is given `None`.
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/postStateValidators>
+    fn validator_indices(
+        &self,
+        public_keys: &[PublicKeyBytes],
+    ) -> impl Future<Output = Result<HashMap<PublicKeyBytes, ValidatorIndex>>> + Send;
+
     fn dependent_root(
         &self,
         epoch: Epoch,
         validator_index: Option<ValidatorIndex>,
     ) -> impl Future<Output = Result<H256>> + Send;
-
-    /// <https://ethereum.github.io/beacon-APIs/#/Validator/getAttesterDuties>
-    fn attester_duties(
-        &self,
-        epoch: Epoch,
-        validator_indices: &[ValidatorIndex],
-    ) -> impl Future<Output = Result<AttesterDuties>> + Send;
 
     /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceAttestationData>
     fn attestation_data(
@@ -68,5 +74,44 @@ pub trait BeaconNodeApi<P: Preset> {
         &self,
         current_slot: Slot,
         subscriptions: &[BeaconCommitteeSubscription],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// [`None`] when this node has no head recent enough to sign for.
+    fn slot_head(&self, slot: Slot) -> impl Future<Output = Result<Option<SlotHead<P>>>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/getSyncCommitteeDuties>
+    fn sync_committee_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> impl Future<Output = Result<Vec<ValidatorSyncDutyResponse>>> + Send;
+
+    // Grouped by subcommittee because the built-in node gossips each message on the subnet of
+    // every subcommittee its validator sits in.
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/submitPoolSyncCommitteeSignatures>
+    fn publish_sync_committee_messages(
+        &self,
+        messages: &BTreeMap<SubcommitteeIndex, Vec<SyncCommitteeMessage>>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/prepareSyncCommitteeSubnets>
+    fn subscribe_to_sync_committees(
+        &self,
+        current_epoch: Epoch,
+        subscriptions: &[SyncCommitteeSubscription],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceSyncCommitteeContribution>
+    fn sync_committee_contribution(
+        &self,
+        slot: Slot,
+        subcommittee_index: SubcommitteeIndex,
+        beacon_block_root: H256,
+    ) -> impl Future<Output = Result<SyncCommitteeContribution<P>>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/submitPoolSyncCommitteeContributionAndProofs>
+    fn publish_contributions_and_proofs(
+        &self,
+        contributions_and_proofs: &[SignedContributionAndProof<P>],
     ) -> impl Future<Output = Result<()>> + Send;
 }

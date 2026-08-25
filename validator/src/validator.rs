@@ -53,13 +53,12 @@ use operation_pools::{
 };
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
 use ssz::{BitList, ContiguousList, ReadError};
 use static_assertions::assert_not_impl_any;
-use std_ext::ArcExt as _;
+use std_ext::ArcExt;
 use tap::{Conv as _, Pipe as _};
 use tokio::time::timeout;
 use tracing::instrument;
@@ -88,10 +87,7 @@ use types::{
             SignedExecutionPayloadEnvelope, SignedProposerPreferences,
         },
     },
-    nonstandard::{
-        CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev,
-        WithStatus,
-    },
+    nonstandard::{CustodyMode, KzgProofs, OwnAttestation, Phase, WithBlobsAndMev, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
@@ -103,7 +99,7 @@ use types::{
     },
     preset::Preset,
     redacting_url::RedactingUrl,
-    traits::{BeaconState as _, PostAltairBeaconState, SignedBeaconBlock as _},
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator_statistics::ValidatorStatistics;
 
@@ -112,14 +108,20 @@ use crate::{
     beacon_nodes::BeaconNodes,
     local_beacon_node::LocalBeaconNode,
     messages::{ApiToValidator, InternalMessage},
-    misc::{Aggregator, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember},
+    misc::{
+        Aggregator, DutySource, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember, ValidatorMode,
+    },
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
+    own_validator_indices::OwnValidatorIndices,
     remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
-    tasks::UpdateBeaconCommitteeSubscriptionsTask,
+    tasks::{
+        OwnSyncCommitteeMembers, PrefetchSyncCommitteeDutiesTask,
+        UpdateBeaconCommitteeSubscriptionsTask,
+    },
     validator_config::ValidatorConfig,
 };
 
@@ -132,6 +134,9 @@ const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
 // That didn't work because processing registrations for 1000 validators takes around 3 seconds,
 // which happens to be the default timeout for validator registration requests in `mev-boost`.
 const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
+
+/// The head at a slot and the state the built-in beacon node holds for it.
+type LocalHead<P> = (SlotHead<P>, Arc<BeaconState<P>>);
 
 #[derive(Display)]
 #[display("too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
@@ -171,11 +176,16 @@ pub struct Validator<P: Preset, W: Wait> {
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
     own_singular_attestations: OnceCell<Vec<OwnAttestation<P>>>,
-    own_sync_committee_members: OnceCell<Vec<SyncCommitteeMember>>,
+    own_sync_committee_members: Arc<OwnSyncCommitteeMembers>,
+    own_validator_indices: Arc<OwnValidatorIndices>,
     own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions<P>,
+    sent_sync_committee_subscriptions_for: Option<Epoch>,
     own_ptc_members: Arc<OwnPTCMembers>,
     own_payload_attestations: OnceCell<Vec<PayloadAttestationMessage>>,
     published_own_sync_committee_messages_for: Option<SlotHead<P>>,
+    // Contributions must aggregate the root the messages voted for, which is the head of the
+    // beacon node the duty was performed against rather than the head this validator sees.
+    own_sync_committee_message_root: Option<H256>,
     own_aggregators: BTreeMap<AttestationKey, Vec<Aggregator>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
@@ -201,7 +211,7 @@ pub struct Validator<P: Preset, W: Wait> {
     dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     last_proposer_preferences_epoch: Option<Epoch>,
     remote_beacon_nodes: Arc<RemoteBeaconNodes>,
-    disable_local_beacon_node: bool,
+    mode: ValidatorMode,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -238,9 +248,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     chain_config.clone_arc(),
                     signer.load().client().clone(),
                     url,
+                    validator_config.max_empty_slots,
                 ))
             })
             .collect::<Vec<_>>();
+
+        let mode = ValidatorMode::new(disable_local_beacon_node, !remote_beacon_nodes.is_empty());
 
         let Channels {
             api_to_validator_rx,
@@ -276,11 +289,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             attestation_agg_pool,
             own_beacon_committee_members,
             own_singular_attestations: OnceCell::new(),
-            own_sync_committee_members: OnceCell::new(),
+            own_sync_committee_members: Arc::new(OwnSyncCommitteeMembers::new()),
+            own_validator_indices: Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
             own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions::default(),
+            sent_sync_committee_subscriptions_for: None,
             own_ptc_members,
             own_payload_attestations: OnceCell::new(),
             published_own_sync_committee_messages_for: None,
+            own_sync_committee_message_root: None,
             own_aggregators: BTreeMap::new(),
             builder_api,
             doppelganger_protection,
@@ -304,37 +320,78 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             dedicated_executor_normal_priority,
             dedicated_executor_low_priority,
             last_proposer_preferences_epoch: None,
-            remote_beacon_nodes: Arc::new(RemoteBeaconNodes::new(
-                chain_config.clone_arc(),
-                remote_beacon_nodes,
-            )),
-            disable_local_beacon_node,
+            remote_beacon_nodes: Arc::new(RemoteBeaconNodes::new(remote_beacon_nodes)),
+            mode,
         }
     }
 
-    /// The beacon nodes to perform this tick's duties against: any nodes given with
-    /// `--beacon-node-urls`, plus the built-in one unless `--disable-local-beacon-node` was passed.
-    fn beacon_nodes(&self, slot_head: &SlotHead<P>, wait_group: &W) -> BeaconNodes<P, W> {
-        let local = (!self.disable_local_beacon_node).then(|| {
-            LocalBeaconNode::new(
-                slot_head.clone(),
-                self.controller.clone_arc(),
-                self.attestation_agg_pool.clone_arc(),
-                self.p2p_tx.clone(),
-                self.subnet_service_tx.clone(),
-                wait_group.clone(),
-            )
-        });
+    fn beacon_nodes(&self, source: &DutySource<P>, wait_group: &W) -> BeaconNodes<P, W> {
+        let slot_head = source.slot_head();
+
+        let local = source
+            .beacon_state()
+            .filter(|_| self.mode.uses_local_node())
+            .map(|beacon_state| {
+                LocalBeaconNode::new(
+                    self.controller.clone_arc(),
+                    slot_head.clone(),
+                    beacon_state.clone_arc(),
+                    self.attestation_agg_pool.clone_arc(),
+                    self.sync_committee_agg_pool.clone_arc(),
+                    self.p2p_tx.clone(),
+                    self.subnet_service_tx.clone(),
+                    wait_group.clone(),
+                )
+            });
 
         BeaconNodes::new(
             local,
+            slot_head.slot(),
+            self.validator_config.max_empty_slots,
+            &self.remote_beacon_nodes,
+            self.validator_config.publish_to_every_node.clone(),
+        )
+    }
+
+    async fn remote_slot_head(&self, slot: Slot) -> Result<Option<SlotHead<P>>> {
+        if !self.mode.has_remote_nodes() {
+            return Ok(None);
+        }
+
+        let slot_head = self.remote_beacon_nodes_at(slot).slot_head(slot).await?;
+
+        if slot_head.is_none() {
+            warn_with_peers!(
+                "no beacon node given with --beacon-node-urls reported a head recent enough to \
+                 perform duties for slot {slot}",
+            );
+        }
+
+        Ok(slot_head)
+    }
+
+    fn remote_beacon_nodes_at(&self, slot: Slot) -> BeaconNodes<P, W> {
+        BeaconNodes::new(
+            None,
+            slot,
+            self.validator_config.max_empty_slots,
             &self.remote_beacon_nodes,
             self.validator_config.publish_to_every_node.clone(),
         )
     }
 
     pub async fn run(self) -> Result<()> {
-        self.remote_beacon_nodes.check_on_startup().await?;
+        if !self.mode.supports_block_production() {
+            warn_with_peers!(
+                "--disable-local-beacon-node does not support block production or payload \
+                 attestations; any such duties will be missed",
+            );
+        }
+
+        self.remote_beacon_nodes
+            .check_on_startup(self.controller.slot())
+            .await?;
+        self.remote_beacon_nodes.spawn_head_streams();
         self.run_internal().await;
 
         Ok(())
@@ -342,7 +399,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     async fn run_internal(mut self) {
         let mut health_check = HealthCheck::new("validator");
-        let mut beacon_node_health = self.remote_beacon_nodes.poll_interval();
 
         loop {
             let mut slasher_to_validator_rx = self
@@ -354,11 +410,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             select! {
                 _ = health_check.interval.select_next_some() => {
                     health_check.check();
-                },
-
-                _ = beacon_node_health.select_next_some() => {
-                    let remote_beacon_nodes = self.remote_beacon_nodes.clone_arc();
-                    tokio::spawn(async move { remote_beacon_nodes.check_status().await });
                 },
 
                 message = self.internal_rx.select_next_some() => match message {
@@ -500,7 +551,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let slot_head = self.safe_slot_head(current_slot).await;
 
         let failures = slot_head
-            .map(|slot_head| {
+            .map(|(slot_head, _)| {
                 self.handle_external_contributions_and_proofs(slot_head, contributions_and_proofs)
             })
             .conv::<OptionFuture<_>>()
@@ -615,8 +666,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     ) {
         let slot_head = self.safe_slot_head(slot).await;
 
-        if let Some(slot_head) = slot_head {
-            let proposer_index = match slot_head.proposer_index() {
+        if let Some((slot_head, beacon_state)) = slot_head {
+            let proposer_index = match slot_head.proposer_index(&beacon_state) {
                 Ok(proposer_index) => proposer_index,
                 Err(error) => {
                     error_with_peers!(
@@ -638,7 +689,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
 
             let block_build_context = self.block_producer.new_build_context(
-                slot_head.beacon_state.clone_arc(),
+                beacon_state.clone_arc(),
                 slot_head.beacon_block_root,
                 proposer_index,
                 BlockBuildOptions::default(),
@@ -659,11 +710,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
             };
 
-            if let Some(state) = slot_head.beacon_state.post_bellatrix() {
+            if let Some(state) = beacon_state.post_bellatrix() {
                 let payload = state.latest_execution_payload_header();
 
                 self.event_channels.send_payload_attributes_event(
-                    slot_head.beacon_state.phase(),
+                    slot_head.phase(),
                     slot,
                     proposer_index,
                     slot_head.beacon_block_root,
@@ -733,6 +784,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         debug_with_peers!("{kind:?} tick in slot {slot}");
 
+        if kind == TickKind::ProposeFourth {
+            let remote_beacon_nodes = self.remote_beacon_nodes.clone_arc();
+            tokio::spawn(async move { remote_beacon_nodes.check_status(slot).await });
+        }
+
         if tick.is_start_of_epoch::<P>() {
             let _timer = self
                 .metrics
@@ -783,7 +839,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         self.track_collection_metrics().await;
 
-        let slot_head = if no_validators {
+        let local_head = if no_validators || !self.mode.uses_local_node() {
             None
         } else {
             self.slot_head(slot)
@@ -792,8 +848,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .ok()
         };
 
+        // Fallback if local node has no slot head
+        let duty_source = match local_head {
+            Some((slot_head, beacon_state)) => Some(DutySource::Local {
+                slot_head,
+                beacon_state,
+            }),
+            None if no_validators => None,
+            None => self
+                .remote_slot_head(slot)
+                .await?
+                .map(|slot_head| DutySource::Remote { slot_head }),
+        };
+
         if let Err(error) = self
-            .update_subnet_subscriptions(&wait_group, tick, slot_head.as_ref())
+            .update_subnet_subscriptions(&wait_group, tick, duty_source.as_ref())
             .await
         {
             warn_with_peers!("failed to update subnet subscriptions: {error:?}");
@@ -803,7 +872,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.refresh_signer_keys();
         }
 
-        let Some(slot_head) = slot_head else {
+        let Some(duty_source) = duty_source else {
             return Ok(());
         };
 
@@ -822,30 +891,25 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             });
         }
 
-        self.attestation_agg_pool
-            .compute_proposer_indices(slot_head.beacon_state.clone_arc());
-
-        if let Some(state) = slot_head.beacon_state.post_altair() {
-            if misc::is_epoch_start::<P>(state.slot().saturating_add(1)) {
-                self.own_sync_committee_members.take();
-
-                self.own_sync_committee_members.get_or_try_init(|| {
-                    self.own_sync_committee_members_for_epoch(SyncCommitteeEpoch::Next, state)
-                })?;
-            }
-
-            self.own_sync_committee_members.get_or_try_init(|| {
-                self.own_sync_committee_members_for_epoch(SyncCommitteeEpoch::Current, state)
-            })?;
-        }
-
-        // Broadcast proposer preferences once per epoch
-        if self.last_proposer_preferences_epoch != Some(current_epoch)
-            && (slot_head.beacon_state.post_gloas().is_some()
-                || self.chain_config.gloas_fork_epoch == current_epoch.saturating_add(1))
+        // Only the built-in beacon node has a state, and only it performs these.
+        if let DutySource::Local {
+            slot_head,
+            beacon_state,
+        } = &duty_source
         {
-            self.broadcast_proposer_preferences(&slot_head).await;
-            self.last_proposer_preferences_epoch = Some(current_epoch);
+            self.attestation_agg_pool
+                .compute_proposer_indices(beacon_state.clone_arc());
+
+            // Broadcast proposer preferences once per epoch
+            if self.last_proposer_preferences_epoch != Some(current_epoch)
+                && (beacon_state.post_gloas().is_some()
+                    || self.chain_config.gloas_fork_epoch == current_epoch.saturating_add(1))
+            {
+                self.broadcast_proposer_preferences(slot_head, beacon_state)
+                    .await;
+
+                self.last_proposer_preferences_epoch = Some(current_epoch);
+            }
         }
 
         match kind {
@@ -856,13 +920,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .map(|metrics| metrics.validator_propose_tick_times.start_timer());
 
                 // TODO(Gloas): review and fix
-                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
-                let slot_head = Some(slot_head);
+                // let duty_source = self.wait_for_fully_validated_head(duty_source).await;
 
                 self.discard_previous_slot_attestations();
                 self.discard_previous_slot_payload_attestations();
-                self.propose(wait_group, slot_head.as_ref()).await?;
+                self.propose(wait_group, Some(&duty_source)).await?;
                 self.published_own_sync_committee_messages_for = None;
+                self.own_sync_committee_message_root = None;
             }
             TickKind::Attest => {
                 let _timer = self
@@ -871,18 +935,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
                 // TODO(Gloas): review and fix
-                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
-                let slot_head = Some(slot_head);
+                // let duty_source = self.wait_for_fully_validated_head(duty_source).await;
 
                 if let Err(error) = self
-                    .attest_and_start_aggregating(&wait_group, slot_head.as_ref())
+                    .attest_and_start_aggregating(&wait_group, Some(&duty_source))
                     .await
                 {
                     error_with_peers!("failed to produce and publish own attestations: {error:?}");
                 }
 
                 if let Err(error) = self
-                    .publish_sync_committee_messages(&wait_group, slot_head)
+                    .publish_sync_committee_messages(&wait_group, Some(&duty_source))
                     .await
                 {
                     error_with_peers!(
@@ -897,25 +960,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .map(|metrics| metrics.validator_aggregate_tick_times.start_timer());
 
                 // TODO(Gloas): review and fix
-                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
-                let slot_head = Some(slot_head);
+                // let duty_source = self.wait_for_fully_validated_head(duty_source).await;
 
-                self.publish_aggregates_and_proofs(&wait_group, slot_head.as_ref())
+                self.publish_aggregates_and_proofs(&wait_group, Some(&duty_source))
                     .await;
 
-                self.publish_contributions_and_proofs(
-                    self.published_own_sync_committee_messages_for
-                        .as_ref()
-                        .or(slot_head.as_ref()),
-                )
-                .await;
+                self.publish_contributions_and_proofs(&wait_group, Some(&duty_source))
+                    .await;
             }
             TickKind::PayloadAttest => {
                 // TODO(Gloas): review and fix
-                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
-                let slot_head = Some(slot_head);
+                // let duty_source = self.wait_for_fully_validated_head(duty_source).await;
 
-                if let Err(error) = self.attest_payload(&wait_group, slot_head.as_ref()).await {
+                if let Err(error) = self.attest_payload(&wait_group, Some(&duty_source)).await {
                     error_with_peers!(
                         "failed to produce and publish own payload attestations: {error:?}"
                     );
@@ -934,7 +991,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[instrument(level = "debug", skip_all)]
-    async fn safe_slot_head(&self, slot: Slot) -> Option<SlotHead<P>> {
+    async fn safe_slot_head(&self, slot: Slot) -> Option<LocalHead<P>> {
         self.slot_head(slot)
             .await
             .map(Result::ok)
@@ -945,7 +1002,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     // The nested `Result` is inspired by `sled`:
     // <https://sled.rs/errors.html#making-unhandled-errors-unrepresentable>
     #[instrument(level = "debug", skip_all, fields(slot = slot))]
-    async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
+    async fn slot_head(&self, slot: Slot) -> Result<Result<LocalHead<P>, HeadFarBehind>> {
         let WithStatus {
             value: head,
             status,
@@ -976,23 +1033,35 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             state
         };
 
-        Ok(Ok(SlotHead {
+        let slot_head = SlotHead {
             config: self.chain_config.clone_arc(),
+            slot,
             beacon_block_root: block_root,
-            beacon_state,
+            fork_info: beacon_state.as_ref().into(),
             optimistic: status.is_optimistic(),
-        }))
+        };
+
+        Ok(Ok((slot_head, beacon_state)))
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    async fn propose(&mut self, wait_group: W, slot_head: Option<&SlotHead<P>>) -> Result<()> {
-        let Some(slot_head) = slot_head else {
+    async fn propose(&mut self, wait_group: W, source: Option<&DutySource<P>>) -> Result<()> {
+        let Some(source) = source else {
             warn_with_peers!(
                 "validator cannot produce a block because \
                  chain head has not been fully verified by an execution engine",
             );
+            return Ok(());
+        };
+
+        // Blocks are produced by the built-in beacon node alone.
+        let DutySource::Local {
+            slot_head,
+            beacon_state,
+        } = source
+        else {
             return Ok(());
         };
 
@@ -1002,8 +1071,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        let proposer_index = tokio::task::block_in_place(|| slot_head.proposer_index())?;
-        let public_key = slot_head.public_key(proposer_index);
+        let proposer_index =
+            tokio::task::block_in_place(|| slot_head.proposer_index(beacon_state))?;
+
+        let public_key = accessors::public_key(beacon_state.as_ref(), proposer_index)?;
         let signer_snapshot = self.signer.load();
 
         if !signer_snapshot.has_key(*public_key) {
@@ -1041,7 +1112,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .or_else(|| self.next_graffiti());
 
         let block_build_context = self.block_producer.new_build_context(
-            slot_head.beacon_state.clone_arc(),
+            beacon_state.clone_arc(),
             slot_head.beacon_block_root,
             proposer_index,
             BlockBuildOptions {
@@ -1063,8 +1134,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let result = signer_snapshot
             .sign_without_slashing_protection(
                 SigningMessage::RandaoReveal { epoch },
-                RandaoEpoch::from(epoch).signing_root(&self.chain_config, &slot_head.beacon_state),
-                Some(slot_head.beacon_state.as_ref().into()),
+                RandaoEpoch::from(epoch)
+                    .signing_root_from_fork_info(&self.chain_config, slot_head.fork_info),
+                Some(slot_head.fork_info),
                 *public_key,
             )
             .await;
@@ -1398,8 +1470,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let envelope_sig = match signer_snapshot
             .sign_without_slashing_protection(
                 SigningMessage::ExecutionPayloadEnvelope(&envelope),
-                envelope.signing_root(&self.chain_config, &slot_head.beacon_state),
-                Some(slot_head.beacon_state.as_ref().into()),
+                envelope.signing_root_from_fork_info(&self.chain_config, slot_head.fork_info),
+                Some(slot_head.fork_info),
                 *public_key,
             )
             .await
@@ -1445,15 +1517,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn attest_and_start_aggregating(
         &mut self,
         wait_group: &W,
-        slot_head: Option<&SlotHead<P>>,
+        source: Option<&DutySource<P>>,
     ) -> Result<()> {
-        let Some(slot_head) = slot_head else {
+        let Some(source) = source else {
             warn_with_peers!(
                 "validator cannot participate in attestation because \
                  chain head has not been fully verified by an execution engine",
             );
             return Ok(());
         };
+
+        let slot_head = source.slot_head();
 
         // Skip attesting if validators already attested at slot
         if self.attested_in_current_slot() {
@@ -1465,16 +1539,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_ref()
             .map(|metrics| metrics.validator_attest_times.start_timer());
 
-        let beacon_nodes = self.beacon_nodes(slot_head, wait_group);
+        let beacon_nodes = self.beacon_nodes(source, wait_group);
 
         let Some((own_members, needs_to_update_subscriptions)) = self
             .own_beacon_committee_members
-            .get_or_init_at_slot(
-                &self.controller,
-                &beacon_nodes,
-                &slot_head.beacon_state,
-                slot_head.slot(),
-            )
+            .get_or_init_at_slot(&self.controller, source.beacon_state(), slot_head.slot())
             .await?
         else {
             return Ok(());
@@ -1523,12 +1592,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let committee_index = misc::committee_index(attestation);
 
             debug_with_peers!(
-                "validator {} of committee {} ({:?}) attesting in slot {}: {:?}",
+                "validator {} of committee {} attesting in slot {}: {:?}",
                 validator_index,
                 committee_index,
-                slot_head
-                    .beacon_committee(committee_index)
-                    .expect("committee was already used to construct attestation"),
                 slot_head.slot(),
                 attestation,
             );
@@ -1591,8 +1657,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    async fn publish_aggregates_and_proofs(&self, wait_group: &W, slot_head: Option<&SlotHead<P>>) {
-        let Some(slot_head) = slot_head else {
+    async fn publish_aggregates_and_proofs(&self, wait_group: &W, source: Option<&DutySource<P>>) {
+        let Some(source) = source else {
             warn_with_peers!(
                 "validators cannot participate in aggregation because \
                  chain head has not been fully verified by an execution engine",
@@ -1600,8 +1666,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         };
 
+        let slot_head = source.slot_head();
         let config = &self.chain_config;
-        let beacon_nodes = self.beacon_nodes(slot_head, wait_group);
+        let beacon_nodes = self.beacon_nodes(source, wait_group);
 
         let (triples, proofs): (Vec<_>, Vec<_>) = self
             .own_aggregators
@@ -1670,7 +1737,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                                     aggregate_and_proof.clone(),
                                 )),
                                 signing_root: aggregate_and_proof
-                                    .signing_root(config, &slot_head.beacon_state),
+                                    .signing_root_from_fork_info(config, slot_head.fork_info),
                                 public_key,
                             };
 
@@ -1689,10 +1756,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let signer_snapshot = self.signer.load();
 
         let sign_result = signer_snapshot
-            .sign_triples_without_slashing_protection(
-                triples,
-                Some(slot_head.beacon_state.as_ref().into()),
-            )
+            .sign_triples_without_slashing_protection(triples, Some(slot_head.fork_info))
             .await;
 
         let signatures = match sign_result {
@@ -1764,15 +1828,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn publish_sync_committee_messages(
         &mut self,
         wait_group: &W,
-        slot_head: Option<SlotHead<P>>,
+        source: Option<&DutySource<P>>,
     ) -> Result<()> {
-        let Some(slot_head) = slot_head else {
+        let Some(source) = source else {
             warn_with_peers!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
             );
             return Ok(());
         };
+
+        let slot_head = source.slot_head();
 
         // > To reduce complexity during the Altair fork, sync committees are not expected to
         // > produce signatures for `compute_epoch_at_slot(ALTAIR_FORK_EPOCH) - 1`.
@@ -1788,7 +1854,40 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        let own_messages = self.own_sync_committee_messages(&slot_head).await?;
+        let beacon_nodes = self.beacon_nodes(source, wait_group);
+
+        let Some(members) = self
+            .sync_committee_members(&beacon_nodes, slot_head.slot())
+            .await
+        else {
+            // A node holding no keys has nothing to prefetch and nothing to sign.
+            if self.signer.load().keys().next().is_some() {
+                OwnSyncCommitteeMembers::warn_about_missing_duties(slot_head.slot());
+            }
+
+            return Ok(());
+        };
+
+        if members.is_empty() {
+            self.published_own_sync_committee_messages_for = Some(slot_head.clone());
+            return Ok(());
+        }
+
+        let beacon_block_root = match beacon_nodes.head_block_root().await {
+            Ok(beacon_block_root) => beacon_block_root,
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to obtain a head block root for sync committee messages in slot {}: \
+                     {error:?}",
+                    slot_head.slot(),
+                );
+                return Ok(());
+            }
+        };
+
+        let own_messages = self
+            .own_sync_committee_messages(slot_head, beacon_block_root, &members)
+            .await?;
 
         for (subcommittee_index, messages) in &own_messages {
             if !messages.is_empty() {
@@ -1798,41 +1897,96 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     slot_head.slot(),
                 );
             }
-        }
 
-        for (sync_subnet_id, messages) in own_messages {
-            for sync_committee_message in &messages {
+            for sync_committee_message in messages {
                 debug_with_peers!(
                     "validator {} publishing sync committee message (subnet_id: {}): {:?}",
                     sync_committee_message.validator_index,
-                    sync_subnet_id,
+                    subcommittee_index,
                     sync_committee_message,
                 );
-
-                ValidatorToP2p::PublishSyncCommitteeMessage(Box::new((
-                    sync_subnet_id,
-                    *sync_committee_message,
-                )))
-                .send(&self.p2p_tx);
             }
-
-            self.sync_committee_agg_pool.aggregate_own_messages(
-                wait_group.clone(),
-                messages,
-                sync_subnet_id,
-                slot_head.beacon_state.clone_arc(),
-            );
         }
 
-        self.published_own_sync_committee_messages_for = Some(slot_head);
+        if let Err(error) = beacon_nodes
+            .publish_sync_committee_messages(&own_messages)
+            .await
+        {
+            warn_with_peers!("failed to publish sync committee messages: {error:?}");
+        }
+
+        self.published_own_sync_committee_messages_for = Some(slot_head.clone());
+        self.own_sync_committee_message_root = Some(beacon_block_root);
 
         Ok(())
     }
 
+    /// The sync committee members serving in `slot`, or [`None`] when duties were never obtained.
+    async fn sync_committee_members(
+        &self,
+        beacon_nodes: &BeaconNodes<P, W>,
+        slot: Slot,
+    ) -> Option<Vec<SyncCommitteeMember>> {
+        self.cached_sync_committee_members(beacon_nodes, slot)
+            .await
+            .map(|members| {
+                // A key removed at runtime must not fail the whole signing batch.
+                let signer_snapshot = self.signer.load();
+
+                members
+                    .iter()
+                    .filter(|member| signer_snapshot.has_key(member.public_key))
+                    .copied()
+                    .collect()
+            })
+    }
+
+    async fn cached_sync_committee_members(
+        &self,
+        beacon_nodes: &BeaconNodes<P, W>,
+        slot: Slot,
+    ) -> Option<Arc<[SyncCommitteeMember]>> {
+        if let Some(members) = self.own_sync_committee_members.get_at_slot::<P>(slot).await {
+            return Some(members);
+        }
+
+        // A restart may reach the deadline before the prefetch; only the built-in beacon node
+        // answers from its state in time.
+        if !beacon_nodes.has_local_node() {
+            return None;
+        }
+
+        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+
+        self.own_validator_indices
+            .update(beacon_nodes, current_epoch)
+            .await;
+
+        let validator_indices = self.own_validator_indices.get().await;
+
+        match self
+            .own_sync_committee_members
+            .get_or_init_at_slot(&self.chain_config, beacon_nodes, slot, &validator_indices)
+            .await
+        {
+            Ok(members) => members,
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to obtain sync committee duties for slot {slot}: {error:?}",
+                );
+                None
+            }
+        }
+    }
+
     /// <https://github.com/ethereum/consensus-specs/blob/v1.1.1/specs/altair/validator.md#broadcast-sync-committee-contribution>
     #[instrument(level = "debug", skip_all)]
-    async fn publish_contributions_and_proofs(&self, slot_head: Option<&SlotHead<P>>) {
-        let Some(slot_head) = slot_head else {
+    async fn publish_contributions_and_proofs(
+        &self,
+        wait_group: &W,
+        source: Option<&DutySource<P>>,
+    ) {
+        let Some(source) = source else {
             warn_with_peers!(
                 "validator cannot participate in sync committees because \
                  chain head has not been fully verified by an execution engine",
@@ -1840,15 +1994,38 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         };
 
-        if !self.controller.is_forward_synced() {
-            return;
-        }
+        // The messages voted for the head of the slot they were signed in, which the
+        // contributions must aggregate.
+        let slot_head = self
+            .published_own_sync_committee_messages_for
+            .as_ref()
+            .unwrap_or_else(|| source.slot_head());
 
         if !slot_head.has_sync_committee() {
             return;
         }
 
-        let contributions = match self.own_contributions_and_proofs(slot_head).await {
+        let beacon_nodes = self.beacon_nodes(source, wait_group);
+
+        let Some(members) = self
+            .sync_committee_members(&beacon_nodes, slot_head.slot())
+            .await
+        else {
+            return;
+        };
+
+        if members.is_empty() {
+            return;
+        }
+
+        let beacon_block_root = self
+            .own_sync_committee_message_root
+            .unwrap_or(slot_head.beacon_block_root);
+
+        let contributions = match self
+            .own_contributions_and_proofs(&beacon_nodes, slot_head, beacon_block_root, &members)
+            .await
+        {
             Ok(contributions) => contributions,
             Err(error) => {
                 error_with_peers!("error while producing own contributions and proofs: {error:?}");
@@ -1869,32 +2046,39 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             slot_head.slot(),
         );
 
-        for contribution_and_proof in contributions {
+        for contribution_and_proof in &contributions {
             debug_with_peers!(
                 "validator {} publishing sync committee contribution and proof: {:?}",
                 contribution_and_proof.message.aggregator_index,
                 contribution_and_proof,
             );
+        }
 
-            ValidatorToP2p::PublishContributionAndProof(Box::new(contribution_and_proof))
-                .send(&self.p2p_tx);
-
-            self.sync_committee_agg_pool.add_own_contribution(
-                contribution_and_proof.message.aggregator_index,
-                contribution_and_proof.message.contribution,
-                slot_head.beacon_state.clone_arc(),
-            );
+        if let Err(error) = beacon_nodes
+            .publish_contributions_and_proofs(&contributions)
+            .await
+        {
+            warn_with_peers!("failed to publish contributions and proofs: {error:?}");
         }
     }
 
     #[instrument(level = "debug", skip_all)]
-    async fn attest_payload(&self, wait_group: &W, slot_head: Option<&SlotHead<P>>) -> Result<()> {
-        let Some(slot_head) = slot_head else {
+    async fn attest_payload(&self, wait_group: &W, source: Option<&DutySource<P>>) -> Result<()> {
+        let Some(source) = source else {
             warn_with_peers!(
                 "validator cannot participate in payload attestation because \
                  chain head has not been fully verified by an execution engine",
             );
 
+            return Ok(());
+        };
+
+        // Payload attestation committees are computed from a state.
+        let DutySource::Local {
+            slot_head,
+            beacon_state,
+        } = source
+        else {
             return Ok(());
         };
 
@@ -1910,14 +2094,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let dependent_root = self
             .controller
-            .attestation_committee_dependent_root_for_slot(
-                &slot_head.beacon_state,
-                slot_head.slot(),
-            )?;
+            .attestation_committee_dependent_root_for_slot(beacon_state, slot_head.slot())?;
 
         let Some(own_members) = self
             .own_ptc_members
-            .get_or_init_at_slot(&slot_head.beacon_state, dependent_root, slot_head.slot())
+            .get_or_init_at_slot(beacon_state, dependent_root, slot_head.slot())
             .await
         else {
             return Ok(());
@@ -1954,8 +2135,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             ValidatorToP2p::PublishPayloadAttestation(payload_attestation).send(&self.p2p_tx);
         }
 
-        let next_proposer_index = tokio::task::block_in_place(|| slot_head.next_proposer_index())?;
-        let public_key = slot_head.public_key(next_proposer_index);
+        let next_proposer_index =
+            tokio::task::block_in_place(|| slot_head.next_proposer_index(beacon_state))?;
+
+        let public_key = accessors::public_key(beacon_state.as_ref(), next_proposer_index)?;
         let signer_snapshot = self.signer.load();
 
         // Only add the messages into the pool if any attached validators is the next proposer
@@ -1963,7 +2146,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.payload_attestation_agg_pool.aggregate_own_messages(
                 wait_group.clone(),
                 own_payload_attestations.to_vec(),
-                slot_head.beacon_state.clone_arc(),
+                beacon_state.clone_arc(),
             );
         }
 
@@ -1980,13 +2163,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         }
 
+        // The early-publish paths act on the head of the built-in beacon node.
+        if !self.mode.uses_local_node() {
+            return;
+        }
+
+        let beacon_state = self.controller.state_by_chain_link(&head);
+
         let slot_head = SlotHead {
             config: self.chain_config.clone_arc(),
+            slot: head.slot(),
             beacon_block_root: head.block_root,
-            beacon_state: self.controller.state_by_chain_link(&head),
+            fork_info: beacon_state.as_ref().into(),
             // Validator is only notified about new fully validated chain heads
             // (ValidatorMessage::Head event does not inform validator about optimistic heads)
             optimistic: false,
+        };
+
+        let duty_source = DutySource::Local {
+            slot_head,
+            beacon_state,
         };
 
         // Publish attestations late by default.
@@ -1994,7 +2190,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishAttestationsEarly.is_enabled()
             && let Err(error) = self
-                .attest_and_start_aggregating(wait_group, Some(&slot_head))
+                .attest_and_start_aggregating(wait_group, Some(&duty_source))
                 .await
         {
             error_with_peers!("failed to produce and publish own attestations: {error:?}");
@@ -2005,7 +2201,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishSyncCommitteeMessagesEarly.is_enabled()
             && let Err(error) = self
-                .publish_sync_committee_messages(wait_group, Some(slot_head))
+                .publish_sync_committee_messages(wait_group, Some(&duty_source))
                 .await
         {
             error_with_peers!(
@@ -2129,7 +2325,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     let triple = SigningTriple {
                         message: SigningMessage::<P>::Attestation(data),
                         signing_root: data
-                            .signing_root(&self.chain_config, &slot_head.beacon_state),
+                            .signing_root_from_fork_info(&self.chain_config, slot_head.fork_info),
                         public_key: member.public_key,
                     };
 
@@ -2143,7 +2339,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let result = snapshot
             .sign_triples(
                 triples,
-                slot_head.beacon_state.as_ref(),
+                slot_head.fork_info,
+                slot_head.current_epoch(),
                 self.slashing_protector.clone_arc(),
             )
             .await;
@@ -2202,65 +2399,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[instrument(level = "debug", skip_all)]
-    fn own_sync_committee_members_for_epoch(
-        &self,
-        relative_epoch: SyncCommitteeEpoch,
-        state: &(impl PostAltairBeaconState<P> + ?Sized),
-    ) -> Result<Vec<SyncCommitteeMember>> {
-        let own_public_keys = self.own_public_keys();
-
-        tokio::task::block_in_place(|| {
-            let sync_committee = match relative_epoch {
-                SyncCommitteeEpoch::Current => state.current_sync_committee(),
-                SyncCommitteeEpoch::Next => {
-                    if misc::sync_committee_period::<P>(accessors::get_current_epoch(state))
-                        == misc::sync_committee_period::<P>(accessors::get_next_epoch(state)?)
-                    {
-                        state.current_sync_committee()
-                    } else {
-                        state.next_sync_committee()
-                    }
-                }
-            };
-
-            sync_committee
-                .pubkeys
-                .iter()
-                .filter_map(|public_key| {
-                    if !own_public_keys.contains(public_key) {
-                        return None;
-                    }
-
-                    let validator_index = accessors::index_of_public_key(state, public_key)?;
-                    Some((validator_index, public_key))
-                })
-                .sorted_by_key(|(validator_index, _)| *validator_index)
-                .collect_vec()
-                .into_par_iter()
-                .map(|(validator_index, public_key)| {
-                    let subnets = misc::compute_subnets_for_sync_committee(state, validator_index)?;
-
-                    Ok(SyncCommitteeMember {
-                        validator_index,
-                        public_key: *public_key,
-                        subnets,
-                    })
-                })
-                .collect()
-        })
-    }
-
-    #[instrument(level = "debug", skip_all)]
     async fn own_sync_committee_messages(
         &self,
         slot_head: &SlotHead<P>,
+        beacon_block_root: H256,
+        members: &[SyncCommitteeMember],
     ) -> Result<BTreeMap<SubcommitteeIndex, Vec<SyncCommitteeMessage>>> {
-        let indices_with_pubkeys = self
-            .own_sync_committee_members()
+        let indices_with_pubkeys = members
+            .iter()
             .map(|member| (member.validator_index, member.public_key));
 
         let messages = match slot_head
-            .sync_committee_messages(slot_head.slot(), indices_with_pubkeys, &self.signer)
+            .sync_committee_messages(
+                slot_head.slot(),
+                beacon_block_root,
+                indices_with_pubkeys,
+                &self.signer,
+            )
             .await
         {
             Ok(messages) => messages,
@@ -2276,7 +2431,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         Ok(messages
             .into_iter()
-            .zip(self.own_sync_committee_members())
+            .zip(members)
             .flat_map(|(message, member)| {
                 core::iter::zip(member.subnets, 0..)
                     .filter(|(in_subnet, _)| *in_subnet)
@@ -2287,58 +2442,69 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     async fn own_contributions_and_proofs(
         &self,
+        beacon_nodes: &BeaconNodes<P, W>,
         slot_head: &SlotHead<P>,
+        beacon_block_root: H256,
+        members: &[SyncCommitteeMember],
     ) -> Result<Vec<SignedContributionAndProof<P>>> {
-        let subcommittee_aggregators = self.own_subcommittee_aggregators(slot_head).await?;
+        let subcommittee_aggregators = self
+            .own_subcommittee_aggregators(slot_head, members)
+            .await?;
 
-        // TODO(Grandine Team): Parallelize.
-        //                      This used `into_par_iter` before, however, `build_sync_committee_contribution`
-        //                      uses blocking calls from `tokio`, and mixing `tokio` with `rayon` is tricky
-        //                      and invites all kinds of trouble.
-        let (triples, proofs): (Vec<_>, Vec<_>) = futures::stream::iter(subcommittee_aggregators)
-            .then(|(subcommittee_index, aggregators)| async move {
-                let contribution = self
-                    .sync_committee_agg_pool
-                    .best_subcommittee_contribution(
+        let fetches = subcommittee_aggregators.into_iter().map(
+            |(subcommittee_index, aggregators)| async move {
+                let contribution = beacon_nodes
+                    .sync_committee_contribution(
                         slot_head.slot(),
-                        slot_head.beacon_block_root,
                         subcommittee_index,
+                        beacon_block_root,
                     )
-                    .await;
+                    .await
+                    .inspect_err(|error| {
+                        warn_with_peers!(
+                            "failed to obtain a contribution for sync subcommittee \
+                             {subcommittee_index} in slot {}: {error:?}",
+                            slot_head.slot(),
+                        );
+                    })
+                    .ok();
 
                 (contribution, aggregators)
-            })
+            },
+        );
+
+        // Concurrent, so that one slow node does not spend the deadline of every subcommittee.
+        let (triples, proofs): (Vec<_>, Vec<_>) = join_all(fetches)
+            .await
+            .into_iter()
             .flat_map(|(contribution, aggregators)| {
                 aggregators
                     .into_iter()
-                    .map(move |(aggregator, selection_proof)| {
+                    .filter_map(move |(aggregator, selection_proof)| {
                         let contribution_and_proof = ContributionAndProof {
                             aggregator_index: aggregator.validator_index,
-                            contribution,
+                            contribution: contribution?,
                             selection_proof,
                         };
 
                         let triple = SigningTriple {
                             message: SigningMessage::ContributionAndProof(contribution_and_proof),
-                            signing_root: contribution_and_proof
-                                .signing_root(&self.chain_config, &slot_head.beacon_state),
+                            signing_root: contribution_and_proof.signing_root_from_fork_info(
+                                &self.chain_config,
+                                slot_head.fork_info,
+                            ),
                             public_key: aggregator.public_key,
                         };
 
-                        (triple, contribution_and_proof)
+                        Some((triple, contribution_and_proof))
                     })
-                    .pipe(futures::stream::iter)
             })
-            .unzip()
-            .await;
+            .unzip();
 
         let signer_snapshot = self.signer.load();
 
         let result = signer_snapshot
-            .sign_triples_without_slashing_protection(
-                triples,
-                Some(slot_head.beacon_state.as_ref().into()),
-            )
+            .sign_triples_without_slashing_protection(triples, Some(slot_head.fork_info))
             .await;
 
         let signatures = match result {
@@ -2419,7 +2585,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     let triple = SigningTriple {
                         message: SigningMessage::<P>::PayloadAttestation(data),
                         signing_root: data
-                            .signing_root(&self.chain_config, &slot_head.beacon_state),
+                            .signing_root_from_fork_info(&self.chain_config, slot_head.fork_info),
                         public_key: member.public_key,
                     };
 
@@ -2433,7 +2599,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let result = snapshot
             .sign_triples(
                 triples,
-                slot_head.beacon_state.as_ref(),
+                slot_head.fork_info,
+                slot_head.current_epoch(),
                 self.slashing_protector.clone_arc(),
             )
             .await;
@@ -2470,16 +2637,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .map(Vec::as_slice)
     }
 
-    fn own_sync_committee_members(&self) -> impl Iterator<Item = &SyncCommitteeMember> {
-        self.own_sync_committee_members.get().into_iter().flatten()
-    }
-
-    async fn own_subcommittee_aggregators(
+    async fn own_subcommittee_aggregators<'members>(
         &self,
         slot_head: &SlotHead<P>,
-    ) -> Result<BTreeMap<SubcommitteeIndex, Vec<(&SyncCommitteeMember, SignatureBytes)>>> {
-        let subcommittee_members = self
-            .own_sync_committee_members()
+        members: &'members [SyncCommitteeMember],
+    ) -> Result<BTreeMap<SubcommitteeIndex, Vec<(&'members SyncCommitteeMember, SignatureBytes)>>>
+    {
+        let subcommittee_members = members
+            .iter()
             .flat_map(|member| {
                 core::iter::zip(member.subnets, 0..)
                     .filter(|(in_subnet, _)| *in_subnet)
@@ -2561,13 +2726,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .detach()
     }
 
-    fn spawn_update_beacon_committee_subscriptions(&self, wait_group: W, slot_head: &SlotHead<P>) {
+    fn spawn_update_beacon_committee_subscriptions(&self, wait_group: W, source: &DutySource<P>) {
         let task = UpdateBeaconCommitteeSubscriptionsTask {
             chain_config: self.chain_config.clone_arc(),
             controller: self.controller.clone_arc(),
-            beacon_state: slot_head.beacon_state.clone_arc(),
+            source: source.clone(),
             own_beacon_committee_members: self.own_beacon_committee_members.clone_arc(),
-            beacon_nodes: self.beacon_nodes(slot_head, &wait_group),
+            own_validator_indices: self.own_validator_indices.clone_arc(),
+            beacon_nodes: self.beacon_nodes(source, &wait_group),
             wait_group,
         };
 
@@ -2576,23 +2742,66 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .detach()
     }
 
-    fn update_sync_committee_subscriptions(&mut self, beacon_state: &BeaconState<P>) -> Result<()> {
-        if let Some(post_altair_state) = beacon_state.post_altair() {
-            let own_public_keys = self.own_public_keys();
+    fn spawn_prefetch_sync_committee_duties(&self, wait_group: W, source: &DutySource<P>) {
+        let task = PrefetchSyncCommitteeDutiesTask {
+            chain_config: self.chain_config.clone_arc(),
+            current_slot: source.slot_head().slot(),
+            own_sync_committee_members: self.own_sync_committee_members.clone_arc(),
+            own_validator_indices: self.own_validator_indices.clone_arc(),
+            beacon_nodes: self.beacon_nodes(source, &wait_group),
+            wait_group,
+        };
 
-            self.own_sync_committee_subscriptions
-                .build(post_altair_state, &own_public_keys)?;
+        self.dedicated_executor_normal_priority
+            .spawn(task.run())
+            .detach()
+    }
 
-            let current_epoch = accessors::get_current_epoch(beacon_state);
+    async fn update_sync_committee_subscriptions(
+        &mut self,
+        wait_group: &W,
+        source: &DutySource<P>,
+    ) -> Result<()> {
+        // Subscriptions are built from the sync committees a state carries.
+        let Some(beacon_state) = source.beacon_state() else {
+            return Ok(());
+        };
 
-            if let Some(subscriptions) = self
-                .own_sync_committee_subscriptions
-                .take_epoch_subscriptions(current_epoch)
-            {
-                ToSubnetService::UpdateSyncCommitteeSubscriptions(current_epoch, subscriptions)
-                    .send(&self.subnet_service_tx);
-            }
+        let Some(post_altair_state) = beacon_state.post_altair() else {
+            return Ok(());
+        };
+
+        let own_public_keys = self.own_public_keys();
+
+        self.own_sync_committee_subscriptions
+            .build(post_altair_state, &own_public_keys)?;
+
+        let current_epoch = accessors::get_current_epoch(beacon_state);
+
+        // Sent once an epoch rather than once a period, so that a beacon node which was down or
+        // still starting up when the period began is subscribed by the next epoch.
+        if self.sent_sync_committee_subscriptions_for == Some(current_epoch) {
+            return Ok(());
         }
+
+        let subscriptions = self
+            .own_sync_committee_subscriptions
+            .epoch_subscriptions(current_epoch);
+
+        if subscriptions.is_empty() {
+            return Ok(());
+        }
+
+        if let Err(error) = self
+            .beacon_nodes(source, wait_group)
+            .subscribe_to_sync_committees(current_epoch, &subscriptions)
+            .await
+        {
+            warn_with_peers!("failed to update sync committee subscriptions: {error:?}");
+            return Ok(());
+        }
+
+        self.sent_sync_committee_subscriptions_for = Some(current_epoch);
 
         Ok(())
     }
@@ -2601,14 +2810,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &mut self,
         wait_group: &W,
         tick: Tick,
-        slot_head: Option<&SlotHead<P>>,
+        source: Option<&DutySource<P>>,
     ) -> Result<()> {
-        if !self.controller.is_forward_synced() {
-            return Ok(());
-        }
-
-        let slot_head = match slot_head {
-            Some(slot_head) => slot_head.clone(),
+        let source = match source {
+            Some(source) => source.clone(),
+            // Duties must not fall back to the state of the disabled built-in node.
+            None if !self.mode.uses_local_node() => return Ok(()),
+            // A node that is still syncing holds a state too old to drive duties.
+            None if !self.controller.is_forward_synced() => return Ok(()),
             None => {
                 let beacon_state = match self.controller.preprocessed_state_at_current_slot().await
                 {
@@ -2631,20 +2840,28 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let head = self.controller.head_block_root();
 
-                SlotHead {
+                let slot_head = SlotHead {
                     config: self.chain_config.clone_arc(),
+                    slot: beacon_state.slot(),
                     beacon_block_root: head.value,
-                    beacon_state,
+                    fork_info: beacon_state.as_ref().into(),
                     optimistic: head.status.is_optimistic(),
+                };
+
+                DutySource::Local {
+                    slot_head,
+                    beacon_state,
                 }
             }
         };
 
         if tick.is_start_of_slot() {
-            self.spawn_update_beacon_committee_subscriptions(wait_group.clone(), &slot_head);
+            self.spawn_update_beacon_committee_subscriptions(wait_group.clone(), &source);
+            self.spawn_prefetch_sync_committee_duties(wait_group.clone(), &source);
         }
 
-        self.update_sync_committee_subscriptions(&slot_head.beacon_state)
+        self.update_sync_committee_subscriptions(wait_group, &source)
+            .await
     }
 
     #[instrument(level = "debug", skip_all)]
@@ -2838,12 +3055,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     /// Broadcasts proposer preferences for the next epoch's slots where we are proposing.
     #[instrument(level = "debug", skip_all)]
-    async fn broadcast_proposer_preferences(&self, slot_head: &SlotHead<P>) {
+    async fn broadcast_proposer_preferences(
+        &self,
+        slot_head: &SlotHead<P>,
+        beacon_state: &Arc<BeaconState<P>>,
+    ) {
         let chain_config = self.chain_config.clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
         let p2p_tx = self.p2p_tx.clone();
-        let beacon_state = slot_head.beacon_state.clone_arc();
+        let beacon_state = beacon_state.clone_arc();
         let beacon_block_root = slot_head.beacon_block_root;
         let controller = self.controller.clone_arc();
 
@@ -3042,10 +3263,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 if block_event.block == head.block_root && self.controller.slot() == head.slot() {
                     debug_with_peers!("fork choice head changed (block event: {block_event:?})");
 
+                    let beacon_state = self.controller.state_by_chain_link(&head);
+
                     break Some(SlotHead {
                         config: self.chain_config.clone_arc(),
+                        slot: head.slot(),
                         beacon_block_root: head.block_root,
-                        beacon_state: self.controller.state_by_chain_link(&head),
+                        fork_info: beacon_state.as_ref().into(),
                         optimistic: head.is_optimistic(),
                     });
                 }
@@ -3078,9 +3302,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 }
 
-// Use `BTreeMap` to make grouping deterministic for snapshot testing.
-// There is no equivalent of `Itertools::into_group_map` that collects into a `BTreeMap`.
-// See <https://github.com/rust-itertools/itertools/issues/520>.
 fn aggregated_by<P: Preset>(
     aggregate: &Attestation<P>,
     position_in_committee: usize,
@@ -3094,6 +3315,9 @@ fn aggregated_by<P: Preset>(
     .map(|bit| *bit)
 }
 
+// Use `BTreeMap` to make grouping deterministic for snapshot testing.
+// There is no equivalent of `Itertools::into_group_map` that collects into a `BTreeMap`.
+// See <https://github.com/rust-itertools/itertools/issues/520>.
 fn group_into_btreemap<K: Ord, V>(pairs: impl IntoIterator<Item = (K, V)>) -> BTreeMap<K, Vec<V>> {
     let mut groups = BTreeMap::<_, Vec<_>>::new();
 

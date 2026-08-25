@@ -19,3 +19,8 @@ consensus-spec-tests/
 
 # exception logs
 exception.log
+
+AGENTS.md
+
+.zed
+.claude
