@@ -1948,10 +1948,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             optimistic: false,
         };
 
-        // Publish attestations late by default.
-        // This noticeably improves rewards in Goerli.
-        // This is a deviation from the Honest Validator specification.
-        if Feature::PublishAttestationsEarly.is_enabled()
+        if (slot_head.phase() >= Phase::Gloas || Feature::PublishAttestationsEarly.is_enabled())
             && let Err(error) = self
                 .attest_and_start_aggregating(wait_group, Some(&slot_head))
                 .await
