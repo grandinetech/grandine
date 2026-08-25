@@ -2336,17 +2336,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
-        if !self
-            .execution_payload_locations
-            .contains_key(&bid.parent_block_hash)
-        {
+        let Some(parent_payload_chain_link) =
+            self.unfinalized_chain_link_by_execution_block_hash(bid.parent_block_hash)
+        else {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
             ));
-        }
+        };
 
         // > Check `is_gas_limit_target_compatible(parent_gas_limit, bid.gas_limit, target_gas_limit)` is True.
-        let parent_gas_limit = post_gloas_state.latest_execution_payload_bid().gas_limit;
+        //
+        // `parent_gas_limit` is the `gas_limit` of the execution payload identified by
+        // `bid.parent_block_hash`, which is committed to by the bid of the block that carries it
+        // (envelopes must match their bid's `gas_limit`). This is not necessarily the payload of
+        // `bid.parent_block_root`: a bid may build on the parent's parent payload when the parent
+        // block's payload was withheld. Pre-Gloas blocks carry the payload itself.
+        let parent_payload_block_body = parent_payload_chain_link.block.message().body();
+        let Some(parent_gas_limit) = parent_payload_block_body
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().message.gas_limit)
+            .or_else(|| {
+                parent_payload_block_body
+                    .with_execution_payload()
+                    .map(|body| body.execution_payload().gas_limit())
+            })
+        else {
+            return Ok(ExecutionPayloadBidAction::Ignore(
+                "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
+            ));
+        };
         if !predicates::is_gas_limit_target_compatible(
             parent_gas_limit,
             bid.gas_limit,
