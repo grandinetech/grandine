@@ -1188,6 +1188,7 @@ impl Context {
             }
         };
 
+        Feature::DebugAttestationPacker.enable();
         Feature::LogBlockProcessingTime.enable();
 
         run_after_genesis(
