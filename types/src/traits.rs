@@ -168,7 +168,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     fn eth1_data_mut(&mut self) -> &mut Eth1Data;
     fn eth1_data_votes_mut(&mut self) -> &mut Eth1DataVotes<P>;
     fn eth1_deposit_index_mut(&mut self) -> &mut DepositIndex;
-    fn validators_mut(&mut self) -> &mut dyn SszValidatorListMut;
+    fn validators_mut(&mut self) -> &mut dyn SszValidatorList;
     fn balances_mut(&mut self) -> &mut dyn SszListMut<Gwei>;
     fn randao_mixes_mut(&mut self) -> &mut RandaoMixes<P>;
     fn slashings_mut(&mut self) -> &mut Slashings<P>;
@@ -183,7 +183,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // in the state, but that would be unnecessarily verbose for our use case.
     fn validators_mut_with_balances(
         &mut self,
-    ) -> (&mut dyn SszValidatorListMut, &dyn SszList<Gwei>);
+    ) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>);
     fn balances_mut_with_slashings(&mut self) -> (&mut dyn SszListMut<Gwei>, &Slashings<P>);
 
     fn post_electra(&self) -> Option<&dyn PostElectraBeaconState<P>>;
@@ -489,7 +489,7 @@ impl<parameters> BeaconState<P> for implementor {
         [eth1_data]                     [eth1_data_mut]                     [Eth1Data];
         [eth1_data_votes]               [eth1_data_votes_mut]               [Eth1DataVotes<P>];
         [eth1_deposit_index]            [eth1_deposit_index_mut]            [DepositIndex];
-        [validators]                    [validators_mut]                    [dyn SszValidatorListMut];
+        [validators]                    [validators_mut]                    [dyn SszValidatorList];
         [balances]                      [balances_mut]                      [dyn SszListMut<Gwei>];
         [randao_mixes]                  [randao_mixes_mut]                  [RandaoMixes<P>];
         [slashings]                     [slashings_mut]                     [Slashings<P>];
@@ -505,7 +505,7 @@ impl<parameters> BeaconState<P> for implementor {
 
     fn validators_mut_with_balances(
         &mut self,
-    ) -> (&mut dyn SszValidatorListMut, &dyn SszList<Gwei>) {
+    ) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>) {
         validators_mut_with_balances_body
     }
 
@@ -2194,13 +2194,42 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
 
     fn effective_balance(&self, index: u64) -> Result<u64, IndexError>;
 
+    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError>;
+
     fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError>;
 
+    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError>;
+
     fn pubkeys(&self) -> &PubkeyList;
+
+    fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error> {
+        self.set_pubkeys_from(pubkeys, 0)
+    }
+
+    /// Sets every pubkey, but only rebuilds the merkle cache from `first_missing` onwards.
+    ///
+    /// `first_missing` must be the index of the first validator whose pubkey is *not* already
+    /// correct. Pass a larger value and the stale cache nodes below it are kept, so
+    /// `hash_tree_root` returns a root over the zeroed pubkeys that used to be there - a wrong
+    /// state root, with no error. Pass 0 (or use `set_pubkeys`) to rebuild the whole cache.
+    fn set_pubkeys_from(
+        &mut self,
+        pubkeys: &PubkeyList,
+        first_missing: usize,
+    ) -> Result<(), anyhow::Error>;
+
+    fn clear_pubkeys(&mut self, count: usize);
 
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator>;
 
     fn effective_balances(&self) -> VectorIter<'_, Gwei>;
+
+    fn update_effective_balances(
+        &mut self,
+        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
+    ) -> Result<(), anyhow::Error>;
+
+    fn push(&mut self, validator: Validator) -> Result<(), PushError>;
 
     fn len_usize(&self) -> usize;
 
@@ -2209,21 +2238,4 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a>;
 
     fn clone_boxed(&self) -> Box<dyn SszValidatorList>;
-}
-
-pub trait SszValidatorListMut: SszValidatorList {
-    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError>;
-
-    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError>;
-
-    fn update_effective_balances(
-        &mut self,
-        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
-    ) -> Result<(), anyhow::Error>;
-
-    fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
-
-    fn clear_pubkeys(&mut self, count: usize);
-
-    fn push(&mut self, validator: Validator) -> Result<(), PushError>;
 }

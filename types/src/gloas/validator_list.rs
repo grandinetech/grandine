@@ -29,7 +29,7 @@ use crate::{
         primitives::Gwei,
         validator_list::{CacheNode as MerkleTreeCacheNode, ValidatorList},
     },
-    traits::{SszValidatorList, SszValidatorListMut},
+    traits::SszValidatorList,
 };
 
 #[derive(Clone, Debug, Default, Derivative)]
@@ -185,12 +185,55 @@ impl SszValidatorList for ProgressiveValidatorList {
         self.buf.effective_balance(index)
     }
 
+    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError> {
+        self.invalidate_index(
+            index
+                .try_into()
+                .map_err(|_| IndexError::DoesNotFitInUsize { index })?,
+        );
+
+        self.buf.effective_balance_mut(index)
+    }
+
     fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError> {
         self.buf.partial_validator(index)
     }
 
+    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError> {
+        self.invalidate_index(
+            index
+                .try_into()
+                .map_err(|_| IndexError::DoesNotFitInUsize { index })?,
+        );
+
+        self.buf.partial_validator_mut(index)
+    }
+
     fn pubkeys(&self) -> &PubkeyList {
         self.buf.pubkeys()
+    }
+
+    fn set_pubkeys_from(&mut self, pubkeys: &PubkeyList, first_missing: usize) -> Result<()> {
+        self.buf.set_pubkeys(pubkeys)?;
+
+        let length = self.len_usize();
+
+        match self.cache.as_mut().filter(|_| first_missing > 0) {
+            Some(cache) => {
+                for index in first_missing.min(length)..length {
+                    cache.invalidate(index, length);
+                }
+            }
+            None => self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0)),
+        }
+
+        Ok(())
+    }
+
+    fn clear_pubkeys(&mut self, count: usize) {
+        self.buf.clear_pubkeys(count);
+        let length = self.len_usize();
+        self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
     }
 
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
@@ -199,6 +242,30 @@ impl SszValidatorList for ProgressiveValidatorList {
 
     fn effective_balances(&self) -> VectorIter<'_, Gwei> {
         self.buf.effective_balances()
+    }
+
+    fn update_effective_balances(
+        &mut self,
+        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
+    ) -> Result<(), anyhow::Error> {
+        self.buf.update_effective_balances(updater, |index, len| {
+            if let Some(cache) = self.cache.as_mut() {
+                cache.invalidate(index, len);
+            }
+        })
+    }
+
+    fn push(&mut self, validator: Validator) -> Result<(), PushError> {
+        let old_length = self.len_usize();
+
+        self.buf.push(validator);
+
+        match &mut self.cache {
+            Some(cache) => cache.push_leaf(old_length),
+            None => self.cache = Some(CacheNode::empty_single(0)),
+        }
+
+        Ok(())
     }
 
     fn len_usize(&self) -> usize {
@@ -215,67 +282,6 @@ impl SszValidatorList for ProgressiveValidatorList {
 
     fn clone_boxed(&self) -> Box<dyn SszValidatorList> {
         Box::new(self.clone())
-    }
-}
-
-impl SszValidatorListMut for ProgressiveValidatorList {
-    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError> {
-        self.invalidate_index(
-            index
-                .try_into()
-                .map_err(|_| IndexError::DoesNotFitInUsize { index })?,
-        );
-
-        self.buf.effective_balance_mut(index)
-    }
-
-    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError> {
-        self.invalidate_index(
-            index
-                .try_into()
-                .map_err(|_| IndexError::DoesNotFitInUsize { index })?,
-        );
-
-        self.buf.partial_validator_mut(index)
-    }
-
-    fn update_effective_balances(
-        &mut self,
-        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
-    ) -> Result<(), anyhow::Error> {
-        self.buf.update_effective_balances(updater, |index, len| {
-            if let Some(cache) = self.cache.as_mut() {
-                cache.invalidate(index, len);
-            }
-        })
-    }
-
-    fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
-        self.buf.set_pubkeys(pubkeys)?;
-
-        let length = self.len_usize();
-        self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
-
-        Ok(())
-    }
-
-    fn clear_pubkeys(&mut self, count: usize) {
-        self.buf.clear_pubkeys(count);
-        let length = self.len_usize();
-        self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
-    }
-
-    fn push(&mut self, validator: Validator) -> Result<(), PushError> {
-        let old_length = self.len_usize();
-
-        self.buf.push(validator);
-
-        match &mut self.cache {
-            Some(cache) => cache.push_leaf(old_length),
-            None => self.cache = Some(CacheNode::empty_single(0)),
-        }
-
-        Ok(())
     }
 }
 
