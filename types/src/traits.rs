@@ -9,7 +9,7 @@
 //                      Update the comment at the top of `ssz::traits` if needed.
 // TODO(Grandine Team): GC unused impls for pointers.
 
-use core::fmt::Debug;
+use core::{fmt::Debug, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
 use std::sync::Arc;
@@ -168,7 +168,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     fn eth1_data_mut(&mut self) -> &mut Eth1Data;
     fn eth1_data_votes_mut(&mut self) -> &mut Eth1DataVotes<P>;
     fn eth1_deposit_index_mut(&mut self) -> &mut DepositIndex;
-    fn validators_mut(&mut self) -> &mut dyn SszValidatorListMut;
+    fn validators_mut(&mut self) -> &mut dyn SszValidatorList;
     fn balances_mut(&mut self) -> &mut dyn SszListMut<Gwei>;
     fn randao_mixes_mut(&mut self) -> &mut RandaoMixes<P>;
     fn slashings_mut(&mut self) -> &mut Slashings<P>;
@@ -181,9 +181,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // These are needed to split borrows in epoch processing.
     // A more general way to do this would be to return a struct containing references to all fields
     // in the state, but that would be unnecessarily verbose for our use case.
-    fn validators_mut_with_balances(
-        &mut self,
-    ) -> (&mut dyn SszValidatorListMut, &dyn SszList<Gwei>);
+    fn validators_mut_with_balances(&mut self) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>);
     fn balances_mut_with_slashings(&mut self) -> (&mut dyn SszListMut<Gwei>, &Slashings<P>);
 
     fn post_electra(&self) -> Option<&dyn PostElectraBeaconState<P>>;
@@ -489,7 +487,7 @@ impl<parameters> BeaconState<P> for implementor {
         [eth1_data]                     [eth1_data_mut]                     [Eth1Data];
         [eth1_data_votes]               [eth1_data_votes_mut]               [Eth1DataVotes<P>];
         [eth1_deposit_index]            [eth1_deposit_index_mut]            [DepositIndex];
-        [validators]                    [validators_mut]                    [dyn SszValidatorListMut];
+        [validators]                    [validators_mut]                    [dyn SszValidatorList];
         [balances]                      [balances_mut]                      [dyn SszListMut<Gwei>];
         [randao_mixes]                  [randao_mixes_mut]                  [RandaoMixes<P>];
         [slashings]                     [slashings_mut]                     [Slashings<P>];
@@ -503,9 +501,7 @@ impl<parameters> BeaconState<P> for implementor {
         get_ref_mut([field], [method])
     }
 
-    fn validators_mut_with_balances(
-        &mut self,
-    ) -> (&mut dyn SszValidatorListMut, &dyn SszList<Gwei>) {
+    fn validators_mut_with_balances(&mut self) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>) {
         validators_mut_with_balances_body
     }
 
@@ -2194,13 +2190,37 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
 
     fn effective_balance(&self, index: u64) -> Result<u64, IndexError>;
 
+    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError>;
+
     fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError>;
 
+    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError>;
+
     fn pubkeys(&self) -> &PubkeyList;
+
+    /// Restores the public keys that were removed by [`Self::clear_pubkeys`].
+    fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
+
+    /// Fills in the public keys in `range` from `pubkeys`, leaving the keys outside it as they
+    /// are and only invalidating the cached hashes that `range` covers.
+    fn restore_pubkeys_in(
+        &mut self,
+        pubkeys: &PubkeyList,
+        range: Range<usize>,
+    ) -> Result<(), anyhow::Error>;
+
+    fn clear_pubkeys(&mut self, count: usize);
 
     fn partial_validators(&self) -> VectorIter<'_, PartialValidator>;
 
     fn effective_balances(&self) -> VectorIter<'_, Gwei>;
+
+    fn update_effective_balances(
+        &mut self,
+        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
+    ) -> Result<(), anyhow::Error>;
+
+    fn push(&mut self, validator: Validator) -> Result<(), PushError>;
 
     fn len_usize(&self) -> usize;
 
@@ -2209,21 +2229,4 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a>;
 
     fn clone_boxed(&self) -> Box<dyn SszValidatorList>;
-}
-
-pub trait SszValidatorListMut: SszValidatorList {
-    fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError>;
-
-    fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError>;
-
-    fn update_effective_balances(
-        &mut self,
-        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
-    ) -> Result<(), anyhow::Error>;
-
-    fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
-
-    fn clear_pubkeys(&mut self, count: usize);
-
-    fn push(&mut self, validator: Validator) -> Result<(), PushError>;
 }

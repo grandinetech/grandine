@@ -10,7 +10,7 @@ use types::{
     nonstandard::SlashingKind,
     phase0::primitives::ValidatorIndex,
     preset::Preset,
-    traits::{SszValidatorList as _, SszValidatorListMut as _},
+    traits::SszValidatorList as _,
 };
 
 use crate::{
