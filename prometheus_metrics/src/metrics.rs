@@ -189,6 +189,10 @@ pub struct Metrics {
     pub deposit_signature_cache_miss_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
 
+    // Delta state storage metrics
+    pub state_patch_sizes: HistogramVec,
+    pub state_patch_compute_times: HistogramVec,
+
     // Transition function metrics
     pub blinded_block_transition_times: Histogram,
     pub block_transition_times: Histogram,
@@ -874,6 +878,27 @@ impl Metrics {
                 "Total active balance cache init count",
             )?,
 
+            // Delta state storage metrics
+            // Buckets span both patches (kilobytes) and snapshot frames
+            // (hundreds of megabytes), since both are recorded here.
+            state_patch_sizes: HistogramVec::new(
+                histogram_opts!(
+                    "STATE_PATCH_SIZES",
+                    "Serialized and compressed size in bytes of states written to the delta store",
+                    exponential_buckets(1024.0, 4.0, 11)?,
+                ),
+                &["layer"],
+            )?,
+
+            state_patch_compute_times: HistogramVec::new(
+                histogram_opts!(
+                    "STATE_PATCH_COMPUTE_TIMES",
+                    "Time taken to compute a delta patch against a hierarchy ancestor",
+                    exponential_buckets(0.01, 2.0, 12)?,
+                ),
+                &["layer"],
+            )?,
+
             // Transition function metrics
             blinded_block_transition_times: Histogram::with_opts(histogram_opts!(
                 "BLINDED_BLOCK_TRANSITION_TIMES",
@@ -1214,6 +1239,8 @@ impl Metrics {
         default_registry.register(Box::new(self.deposit_signature_cache_hit_count.clone()))?;
         default_registry.register(Box::new(self.deposit_signature_cache_miss_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
+        default_registry.register(Box::new(self.state_patch_sizes.clone()))?;
+        default_registry.register(Box::new(self.state_patch_compute_times.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
         default_registry.register(Box::new(self.block_transition_times.clone()))?;
         default_registry.register(Box::new(self.epoch_processing_times.clone()))?;

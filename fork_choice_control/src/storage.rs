@@ -13,6 +13,7 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, deposit_signatures, misc};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use prometheus_metrics::{Metrics, observe_vec, start_timer_vec, stop_and_record};
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
 use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
@@ -84,6 +85,7 @@ pub struct Storage<P: Preset> {
     pub(crate) anchor_slot: Arc<AtomicU64>,
     frame_cache: FrameCache<P>,
     forward_spine: Arc<Spine<P>>,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset> Storage<P> {
@@ -125,6 +127,7 @@ impl<P: Preset> Storage<P> {
         database: Database,
         storage_mode: StorageMode,
         state_storage_config: StateStorageConfig,
+        metrics: Option<Arc<Metrics>>,
     ) -> Self {
         let StateStorageConfig {
             hierarchy,
@@ -158,6 +161,7 @@ impl<P: Preset> Storage<P> {
             frame_cache: FrameCache::new(cache_sizes)
                 .expect("unexpected error occurred, while instantiating storage cache"),
             forward_spine,
+            metrics,
         }
     }
 
@@ -199,6 +203,7 @@ impl<P: Preset> Storage<P> {
     }
 
     #[expect(clippy::too_many_lines)]
+    #[expect(clippy::cast_precision_loss)]
     pub async fn load(
         &self,
         client: &Client,
@@ -384,6 +389,14 @@ impl<P: Preset> Storage<P> {
                 self.compression_level,
             )?;
 
+            if let Some(metrics) = self.metrics.as_ref() {
+                observe_vec(
+                    &metrics.state_patch_sizes,
+                    "0",
+                    serialized_frame.len() as f64,
+                );
+            }
+
             batch.push((serialized_key, serialized_frame));
         }
 
@@ -428,6 +441,7 @@ impl<P: Preset> Storage<P> {
 
     #[inline]
     #[expect(clippy::too_many_arguments)]
+    #[expect(clippy::cast_precision_loss)]
     pub(crate) fn append_finalized_state(
         &self,
         state: Arc<BeaconState<P>>,
@@ -512,10 +526,26 @@ impl<P: Preset> Storage<P> {
             };
 
             let key = parent_key.extend_chain(block_root);
+            let layer = key.parents.len().to_string();
+
+            let timer = self
+                .metrics
+                .as_ref()
+                .and_then(|metrics| start_timer_vec(&metrics.state_patch_compute_times, &layer));
 
             let patch = BeaconStatePatch::diff(patch_config, &parent_state, &state)?;
 
+            stop_and_record(timer);
+
             let (serialized_key, serialized_patch) = serialize_raw(&key, patch)?;
+
+            if let Some(metrics) = self.metrics.as_ref() {
+                observe_vec(
+                    &metrics.state_patch_sizes,
+                    &layer,
+                    serialized_patch.len() as f64,
+                );
+            }
 
             batch.push((serialized_key, serialized_patch));
             spine.insert(slot, key, state);
@@ -544,6 +574,14 @@ impl<P: Preset> Storage<P> {
                     prepare_state(state.clone_arc(), finalized_validators.len_usize()),
                     self.compression_level,
                 )?;
+
+                if let Some(metrics) = self.metrics.as_ref() {
+                    observe_vec(
+                        &metrics.state_patch_sizes,
+                        "0",
+                        serialized_frame.len() as f64,
+                    );
+                }
 
                 batch.push((serialized_key, serialized_frame));
                 *update_finalized_validators = true;
@@ -798,6 +836,7 @@ impl<P: Preset> Storage<P> {
         Ok(persisted_blob_ids)
     }
 
+    #[expect(clippy::cast_precision_loss)]
     pub(crate) fn append_states(
         &self,
         states_with_block_roots: impl Iterator<Item = (Arc<BeaconState<P>>, H256)>,
@@ -816,6 +855,14 @@ impl<P: Preset> Storage<P> {
                     prepare_state(archival_state, finalized_validators.len_usize()),
                     self.compression_level,
                 )?;
+
+                if let Some(metrics) = self.metrics.as_ref() {
+                    observe_vec(
+                        &metrics.state_patch_sizes,
+                        "0",
+                        serialized_frame.len() as f64,
+                    );
+                }
 
                 slots.push(state.slot());
                 batch.push((serialized_key, serialized_frame));
@@ -2375,6 +2422,7 @@ mod tests {
                 cache_sizes,
                 ..StateStorageConfig::default()
             },
+            None,
         ))
     }
 
@@ -2562,6 +2610,7 @@ mod tests {
             database,
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         // slots 1, 3, 10
@@ -2636,6 +2685,7 @@ mod tests {
             database,
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         assert_eq!(storage.finalized_block_count()?, 2);
@@ -2706,6 +2756,7 @@ mod tests {
             database,
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let retained_slots = storage.retained_prune_slots(33);
@@ -2745,6 +2796,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let validator_source = state_with_slot(0);
@@ -2884,6 +2936,7 @@ mod tests {
             database,
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let blob_id_0 = BlobIdentifier {
@@ -2946,6 +2999,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
         let envelope = Arc::new(SignedExecutionPayloadEnvelope::default());
         let block_root = envelope.block_root();
@@ -2980,6 +3034,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let anchor_block_root = H256::repeat_byte(1);
@@ -3036,6 +3091,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let state = state_with_slot(32);
@@ -3070,6 +3126,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let state = state_with_slot(32);
@@ -3126,6 +3183,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         storage.forward_spine().insert(
@@ -3196,6 +3254,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let spine = storage.forward_spine();
@@ -3232,13 +3291,14 @@ mod tests {
     /// Writes a snapshot and a delta against it, then reads the delta back
     /// from the database with the spine cleared, so the reconstruction path
     /// runs for real.
-    fn append_and_read_back_states() -> Result<()> {
+    fn append_and_read_back_states(metrics: Option<Arc<Metrics>>) -> Result<()> {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            metrics,
         );
 
         let validator_source = state_with_slot(0);
@@ -3276,8 +3336,8 @@ mod tests {
     }
 
     #[test]
-    fn appends_and_reads_back_states() -> Result<()> {
-        append_and_read_back_states()
+    fn storage_without_metrics_appends_and_reads_states() -> Result<()> {
+        append_and_read_back_states(None)
     }
 
     /// The spine short-circuits the delta-chain walk, bypassing both the
@@ -3291,6 +3351,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         let validator_source = state_with_slot(0);
@@ -3341,6 +3402,41 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn storage_with_metrics_records_patch_sizes_and_compute_times() -> Result<()> {
+        let metrics = Arc::new(Metrics::new()?);
+
+        append_and_read_back_states(Some(metrics.clone_arc()))?;
+
+        // One snapshot at layer 0 and one patch at layer 1.
+        assert_eq!(
+            metrics
+                .state_patch_sizes
+                .get_metric_with_label_values(&["0"])?
+                .get_sample_count(),
+            1,
+        );
+
+        assert_eq!(
+            metrics
+                .state_patch_sizes
+                .get_metric_with_label_values(&["1"])?
+                .get_sample_count(),
+            1,
+        );
+
+        // Only the patch is computed; the snapshot is not diffed.
+        assert_eq!(
+            metrics
+                .state_patch_compute_times
+                .get_metric_with_label_values(&["1"])?
+                .get_sample_count(),
+            1,
+        );
+
+        Ok(())
+    }
+
     /// Anchor 0, 512 and 544 are consecutive hierarchy ancestors under the
     /// default hierarchy, so appending them in this order yields a snapshot
     /// followed by two deltas.
@@ -3351,6 +3447,7 @@ mod tests {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         )
     }
 
@@ -4115,6 +4212,7 @@ mod tests {
             database,
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         );
 
         assert_eq!(storage.block_root_before_or_at_slot(1)?, None);
