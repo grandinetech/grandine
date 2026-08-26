@@ -721,6 +721,19 @@ impl<P: Preset> SignedBeaconBlock<P> {
             })
     }
 
+    pub fn execution_gas_limit(&self) -> Option<Gas> {
+        self.message()
+            .body()
+            .with_payload_bid()
+            .map(|body| body.signed_execution_payload_bid().message.gas_limit)
+            .or_else(|| {
+                self.message()
+                    .body()
+                    .with_execution_payload()
+                    .map(|body| body.execution_payload().gas_limit())
+            })
+    }
+
     pub fn to_header(&self) -> SignedBeaconBlockHeader {
         self.message().to_header().with_signature(self.signature())
     }

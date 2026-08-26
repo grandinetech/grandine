@@ -3546,13 +3546,33 @@ where
         is_before_deadline: bool,
     ) {
         let beacon_block_root = envelope.block_root();
+        let execution_block_hash = envelope.message.payload.block_hash;
 
         self.store_mut()
             .apply_execution_payload_envelope(envelope, is_before_deadline);
 
         self.update_store_snapshot();
 
+        // `notify_new_payload` is called after the envelope validated, so the payload status
+        // may arrive before the payload is even handled in the mutator
+        if let Some(payload_statuses) = self.delayed_until_payload.remove(&execution_block_hash) {
+            for (payload_status, _) in payload_statuses {
+                self.handle_notified_new_payload(
+                    wait_group,
+                    beacon_block_root,
+                    execution_block_hash,
+                    payload_status,
+                );
+            }
+        }
+
         self.notify_forkchoice_updated(self.store.head());
+
+        // The next slot's payload attributes depend on the head's payload presence,
+        // which this envelope has just changed.
+        if beacon_block_root == self.store.head().block_root {
+            self.spawn_preprocess_head_state_for_next_slot_task();
+        }
 
         if let Some(delayed) = self.take_delayed_until_envelope(beacon_block_root) {
             self.retry_delayed(delayed, wait_group);
@@ -3756,8 +3776,14 @@ where
         let safe_block_hash = store.safe_execution_payload_hash();
         let finalized_block_hash = store.finalized_execution_payload_hash();
 
-        let head_block_hash = if let Some(post_gloas_state) = new_head.state(store).post_gloas() {
-            post_gloas_state.latest_block_hash()
+        let head_block_hash = if let Some(post_gloas_state) = new_head_state.post_gloas() {
+            // `latest_block_hash` is still the parent's payload until the head's envelope
+            // is processed in `apply_parent_execution_payload` of the child block.
+            if store.is_payload_verified(new_head.block_root) {
+                post_gloas_state.latest_execution_payload_bid().block_hash
+            } else {
+                post_gloas_state.latest_block_hash()
+            }
         } else {
             state.latest_execution_payload_header().block_hash()
         };
