@@ -296,7 +296,23 @@ impl Database {
         Ok(contains_key)
     }
 
+    pub fn contains_prefixed_key(&self, prefix: impl AsRef<[u8]>) -> Result<bool> {
+        let prefix = prefix.as_ref();
+
+        Ok(self
+            .next_key(prefix)?
+            .is_some_and(|key| key.starts_with(prefix)))
+    }
+
     pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
+        self.get_raw(key)?
+            .map(|compressed| decompress(&compressed))
+            .transpose()
+    }
+
+    /// Like [`Database::get`], but returns the value as present in the database, without
+    /// decompressing it.
+    pub fn get_raw(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -307,17 +323,15 @@ impl Database {
                 let transaction = environment.begin_ro_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                transaction
-                    .get::<Cow<_>>(database.dbi(), key.as_ref())?
-                    .map(|compressed| decompress(&compressed))
+                transaction.get::<Vec<u8>>(database.dbi(), key.as_ref())?
             }
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
                 .get(key.as_ref())
-                .map(|compressed| decompress(compressed)),
+                .map(|value| value.to_vec()),
         }
-        .transpose()
+        .pipe(Ok)
     }
 
     #[cfg(not(target_os = "zkvm"))]
@@ -355,7 +369,7 @@ impl Database {
 
     pub fn iterate_all_keys_with_lengths(
         &self,
-    ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, usize)>>> {
+    ) -> Result<impl Iterator<Item = Result<(Vec<u8>, usize)>>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -368,7 +382,7 @@ impl Database {
 
                 let mut cursor = transaction.cursor(database.dbi())?;
 
-                core::iter::from_fn(move || cursor.next().transpose())
+                core::iter::from_fn(move || cursor.next::<Vec<u8>, ObjectLength>().transpose())
                     .map(|result| {
                         let (key, ObjectLength(length)) = result?;
                         Ok((key, length))
@@ -381,7 +395,7 @@ impl Database {
                 let it = map
                     .clone()
                     .into_iter()
-                    .map(|(key, value)| Ok((Cow::Owned(key.to_vec()), value.len())));
+                    .map(|(key, value)| Ok((key.to_vec(), value.len())));
 
                 #[cfg(not(target_os = "zkvm"))]
                 {
@@ -397,11 +411,20 @@ impl Database {
         .pipe(Ok)
     }
 
-    #[expect(clippy::type_complexity)]
     pub fn iterator_ascending(
         &self,
         range: RangeFrom<impl AsRef<[u8]>>,
-    ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, Vec<u8>)>>> {
+    ) -> Result<impl Iterator<Item = Result<(Vec<u8>, Vec<u8>)>>> {
+        self.iterator_ascending_raw(range)
+            .map(|iterator| iterator.map(|result| decompress_pair(result?)))
+    }
+
+    /// Like [`Database::iterator_ascending`], but yields values as present in the database,
+    /// without decompressing them.
+    pub fn iterator_ascending_raw(
+        &self,
+        range: RangeFrom<impl AsRef<[u8]>>,
+    ) -> Result<impl Iterator<Item = Result<(Vec<u8>, Vec<u8>)>>> {
         let start = range.start.as_ref();
 
         match self.kind() {
@@ -417,11 +440,11 @@ impl Database {
                 let mut cursor = transaction.cursor(database.dbi())?;
 
                 cursor
-                    .set_range(start)
+                    .set_range::<Vec<u8>, Vec<u8>>(start)
                     .transpose()
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.next().transpose()))
-                    .map(|result| decompress_pair(result?))
+                    .map(|result| result.map_err(Into::into))
                     .pipe(Either::Left)
             }
             DatabaseKind::InMemory { map } => {
@@ -435,9 +458,9 @@ impl Database {
                         .expect_none("start_pair should have been discarded by OrdMap::split");
                 }
 
-                let it = above.into_iter().map(|(key, value)| {
-                    Ok((Cow::Owned(key.to_vec()), decompress(value.as_ref())?))
-                });
+                let it = above
+                    .into_iter()
+                    .map(|(key, value)| Ok((key.to_vec(), value.to_vec())));
 
                 #[cfg(not(target_os = "zkvm"))]
                 {
@@ -453,11 +476,62 @@ impl Database {
         .pipe(Ok)
     }
 
-    #[expect(clippy::type_complexity)]
+    pub fn keys_ascending(
+        &self,
+        range: RangeFrom<impl AsRef<[u8]>>,
+    ) -> Result<impl Iterator<Item = Result<Vec<u8>>>> {
+        let start = range.start.as_ref();
+
+        match self.kind() {
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database_name,
+                environment,
+                restart_tx: _,
+            } => {
+                let transaction = environment.begin_ro_txn()?;
+                let database = transaction.open_db(Some(database_name))?;
+                let mut cursor = transaction.cursor(database.dbi())?;
+
+                cursor
+                    .set_range::<Vec<u8>, ()>(start)
+                    .transpose()
+                    .into_iter()
+                    .chain(core::iter::from_fn(move || cursor.next().transpose()))
+                    .map(|result| result.map(|(key, ())| key).map_err(Into::into))
+                    .pipe(Either::Left)
+            }
+            DatabaseKind::InMemory { map } => {
+                let map = map.lock().expect("in-memory database mutex is poisoned");
+                let start_pair = map.get_key_value(start);
+                let (_, mut above) = map.split(start);
+
+                if let Some((key, value)) = start_pair {
+                    above
+                        .insert(key.clone_arc(), value.clone_arc())
+                        .expect_none("start_pair should have been discarded by OrdMap::split");
+                }
+
+                let it = above.into_iter().map(|(key, _)| Ok(key.to_vec()));
+
+                #[cfg(not(target_os = "zkvm"))]
+                {
+                    it.pipe(Either::Right)
+                }
+
+                #[cfg(target_os = "zkvm")]
+                {
+                    it
+                }
+            }
+        }
+        .pipe(Ok)
+    }
+
     pub fn iterator_descending(
         &self,
         range: RangeToInclusive<impl AsRef<[u8]>>,
-    ) -> Result<impl Iterator<Item = Result<(Cow<'_, [u8]>, Vec<u8>)>>> {
+    ) -> Result<impl Iterator<Item = Result<(Vec<u8>, Vec<u8>)>>> {
         let end = range.end.as_ref();
 
         match self.kind() {
@@ -499,9 +573,10 @@ impl Database {
                         .expect_none("end_pair should have been discarded by OrdMap::split");
                 }
 
-                let it = below.into_iter().rev().map(|(key, value)| {
-                    Ok((Cow::Owned(key.to_vec()), decompress(value.as_ref())?))
-                });
+                let it = below
+                    .into_iter()
+                    .rev()
+                    .map(|(key, value)| Ok((key.to_vec(), decompress(value.as_ref())?)));
 
                 #[cfg(not(target_os = "zkvm"))]
                 {
@@ -522,6 +597,15 @@ impl Database {
     }
 
     pub fn put_batch(&self, pairs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<()> {
+        let compressed_pairs = pairs
+            .into_iter()
+            .map(|(key, value)| Ok((key, compress(value.as_ref())?)))
+            .collect::<Result<Vec<_>>>()?;
+
+        self.put_batch_raw(compressed_pairs)
+    }
+
+    pub fn put_batch_raw(&self, pairs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<()> {
         if pairs.is_empty() {
             return Ok(());
         }
@@ -533,20 +617,15 @@ impl Database {
                 environment,
                 restart_tx,
             } => {
-                let compressed_pairs = pairs
-                    .into_iter()
-                    .map(|(key, value)| Ok((key, compress(value.as_ref())?)))
-                    .collect::<Result<Vec<_>>>()?;
-
                 let transaction = environment.begin_rw_txn()?;
                 let database = transaction.open_db(Some(database_name))?;
 
-                for (key, compressed) in &compressed_pairs {
+                for (key, value) in pairs {
                     transaction
                         .put(
                             database.dbi(),
                             key.as_ref(),
-                            compressed,
+                            value.as_ref(),
                             WriteFlags::default(),
                         )
                         .map_err(|error| {
@@ -560,15 +639,10 @@ impl Database {
             }
             DatabaseKind::InMemory { map } => {
                 let mut map = map.lock().expect("in-memory database mutex is poisoned");
-                let mut new_map = map.clone();
 
                 for (key, value) in pairs {
-                    let key = key.as_ref().into();
-                    let compressed = compress(value.as_ref())?.into();
-                    new_map.insert(key, compressed);
+                    map.insert(key.as_ref().into(), value.as_ref().into());
                 }
-
-                *map = new_map;
             }
         }
 
@@ -620,6 +694,42 @@ impl Database {
     ///
     /// [`im::OrdMap::get_next`]: https://docs.rs/im/15.1.0/im/ordmap/struct.OrdMap.html#method.get_next
     pub fn next(&self, key: impl AsRef<[u8]>) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        self.next_raw(key)?
+            .map(|(key, value)| Ok((key, decompress(&value)?)))
+            .transpose()
+    }
+
+    /// Returns the first key-value pair whose key is greater than or equal to `key`.
+    /// Returns value as present in database, without doing decompression first.
+    ///
+    /// Behaves like [`im::OrdMap::get_next`].
+    ///
+    /// [`im::OrdMap::get_next`]: https://docs.rs/im/15.1.0/im/ordmap/struct.OrdMap.html#method.get_next
+    pub fn next_raw(&self, key: impl AsRef<[u8]>) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+        match self.kind() {
+            #[cfg(not(target_os = "zkvm"))]
+            DatabaseKind::Persistent {
+                database_name,
+                environment,
+                restart_tx: _,
+            } => {
+                let transaction = environment.begin_ro_txn()?;
+                let database = transaction.open_db(Some(database_name))?;
+                let mut cursor = transaction.cursor(database.dbi())?;
+
+                cursor.set_range::<Vec<u8>, Vec<u8>>(key.as_ref())?
+            }
+            DatabaseKind::InMemory { map } => map
+                .lock()
+                .expect("in-memory database mutex is poisoned")
+                .get_next(key.as_ref())
+                .map(|(key, value)| (key.to_vec(), value.to_vec())),
+        }
+        .pipe(Ok)
+    }
+
+    /// Returns the first key that is greater than or equal to `key`.
+    pub fn next_key(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>> {
         match self.kind() {
             #[cfg(not(target_os = "zkvm"))]
             DatabaseKind::Persistent {
@@ -632,15 +742,17 @@ impl Database {
 
                 let mut cursor = transaction.cursor(database.dbi())?;
 
-                cursor.set_range(key.as_ref())?.map(decompress_pair)
+                cursor
+                    .set_range::<Vec<u8>, ()>(key.as_ref())?
+                    .map(|(found_key, ())| found_key)
             }
             DatabaseKind::InMemory { map } => map
                 .lock()
                 .expect("in-memory database mutex is poisoned")
                 .get_next(key.as_ref())
-                .map(|(key, value)| Ok((key.to_vec(), decompress(value)?))),
+                .map(|(found_key, _)| found_key.to_vec()),
         }
-        .transpose()
+        .pipe(Ok)
     }
 
     const fn kind(&self) -> &DatabaseKind {
@@ -698,12 +810,11 @@ fn compress(data: &[u8]) -> Result<Vec<u8>> {
     Encoder::new().compress_vec(data).map_err(Into::into)
 }
 
-fn decompress(data: &[u8]) -> Result<Vec<u8>> {
+pub fn decompress(data: &[u8]) -> Result<Vec<u8>> {
     Decoder::new().decompress_vec(data).map_err(Into::into)
 }
 
-#[cfg(not(target_os = "zkvm"))]
-fn decompress_pair<K>((key, compressed_value): (K, Cow<[u8]>)) -> Result<(K, Vec<u8>)> {
+fn decompress_pair<K>((key, compressed_value): (K, Vec<u8>)) -> Result<(K, Vec<u8>)> {
     let value = decompress(&compressed_value)?;
     Ok((key, value))
 }
@@ -981,6 +1092,153 @@ mod tests {
         assert_eq!(database.next("D")?, Some(to_bytes_pair(("E", "5"))));
         assert_eq!(database.next("E")?, Some(to_bytes_pair(("E", "5"))));
         assert_eq!(database.next("F")?, None);
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn next_raw_returns_the_stored_value_without_decompressing_it(
+        constructor: Constructor,
+    ) -> Result<()> {
+        let database = constructor()?;
+
+        assert_eq!(database.next_raw("F")?, None);
+
+        let (key, value) = database
+            .next_raw("D")?
+            .expect("E is the first key at or after D");
+
+        assert_eq!(key, to_bytes("E"));
+        assert_eq!(value, compress(b"5")?);
+        assert_eq!(decompress(&value)?, to_bytes("5"));
+
+        Ok(())
+    }
+
+    // `next_raw` used to hand out `libmdbx` page pointers that were only valid while the read
+    // transaction it opened was alive, which it was not by the time the value reached the caller.
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn next_raw_data_outlives_the_read_and_later_writes(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+
+        let (key, value) = database.next_raw("A")?.expect("A is stored");
+
+        // Enough data to make the database allocate and dirty new pages.
+        database.put_batch(
+            (0..1024)
+                .map(|index| (format!("filler-{index}"), "x".repeat(1024)))
+                .collect(),
+        )?;
+
+        database.delete_range("A".."F")?;
+
+        assert_eq!(key, to_bytes("A"));
+        assert_eq!(decompress(&value)?, to_bytes("1"));
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn next_key_returns_the_first_key_at_or_after_the_given_one(
+        constructor: Constructor,
+    ) -> Result<()> {
+        let database = constructor()?;
+
+        assert_eq!(database.next_key("0")?, Some(to_bytes("A")));
+        assert_eq!(database.next_key("A")?, Some(to_bytes("A")));
+        assert_eq!(database.next_key("D")?, Some(to_bytes("E")));
+        assert_eq!(database.next_key("F")?, None);
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn next_key_data_outlives_the_read_and_later_writes(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+
+        let key = database.next_key("B")?.expect("B is stored");
+
+        database.put_batch(
+            (0..1024)
+                .map(|index| (format!("filler-{index}"), "x".repeat(1024)))
+                .collect(),
+        )?;
+
+        database.delete_range("A".."F")?;
+
+        assert_eq!(key, to_bytes("B"));
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn contains_prefixed_key_matches_only_keys_starting_with_the_prefix(
+        constructor: Constructor,
+    ) -> Result<()> {
+        let database = constructor()?;
+
+        database.put("prefix-1", "value")?;
+
+        assert!(database.contains_prefixed_key("prefix")?);
+        assert!(database.contains_prefixed_key("prefix-1")?);
+        assert!(!database.contains_prefixed_key("prefix-2")?);
+        assert!(!database.contains_prefixed_key("D")?);
+        assert!(!database.contains_prefixed_key("F")?);
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn keys_ascending_yields_keys_without_values(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+
+        let keys = database
+            .keys_ascending("B"..)?
+            .collect::<Result<Vec<_>>>()?;
+
+        assert_eq!(keys, [to_bytes("B"), to_bytes("C"), to_bytes("E")]);
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn put_batch_raw_stores_values_verbatim(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+
+        database.put_batch_raw(vec![("A", compress(b"9")?)])?;
+
+        assert_eq!(database.get("A")?, Some(to_bytes("9")));
+        assert_eq!(
+            database.next_raw("A")?,
+            Some((to_bytes("A"), compress(b"9")?)),
+        );
+
+        Ok(())
+    }
+
+    #[test_case(build_persistent_database)]
+    #[test_case(build_in_memory_database)]
+    fn iterator_ascending_raw_yields_undecompressed_values(constructor: Constructor) -> Result<()> {
+        let database = constructor()?;
+
+        let pairs = database
+            .iterator_ascending_raw("C"..)?
+            .collect::<Result<Vec<_>>>()?;
+
+        assert_eq!(
+            pairs,
+            [
+                (to_bytes("C"), compress(b"3")?),
+                (to_bytes("E"), compress(b"5")?),
+            ],
+        );
 
         Ok(())
     }
