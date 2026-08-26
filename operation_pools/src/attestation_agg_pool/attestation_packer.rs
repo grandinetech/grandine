@@ -77,8 +77,14 @@ impl<P: Preset> AttestationPacker<P> {
         // TODO(Grandine Team): Storing candidates in a map allows for quick lookups during
         //                      aggregation without having to manage an index, but prevents the
         //                      algorithm from packing multiple aggregates with the same
-        //                      `AttestationData`.
+        //                      `AttestationKey`.
 
+        // Candidates are keyed by `AttestationKey` (`AttestationData` + committee index), not by
+        // `AttestationData` alone. Post-Electra, `data.index` no longer identifies the committee
+        // (Gloas even uses it for the payload presence vote), so aggregates from all committees of
+        // a slot share the same `AttestationData` and keying by it alone would keep only one
+        // committee per slot.
+        //
         // Use `BTreeMap` to make attestation packing deterministic for snapshot testing.
         let mut candidates = BTreeMap::new();
 
@@ -108,10 +114,10 @@ impl<P: Preset> AttestationPacker<P> {
                     // may speed up block processing by producing smaller aggregates later.
                     *added_weight > 0
                 })
-                .into_grouping_map_by(|(aggregate, _)| aggregate.data)
+                .into_grouping_map_by(|(aggregate, _)| aggregate.key())
                 .max_by_key(|_, (_, added_weight)| *added_weight)
                 .into_values()
-                .map(|(aggregate, _)| (aggregate.data, aggregate.clone())),
+                .map(|(aggregate, _)| (aggregate.key(), aggregate.clone())),
         );
 
         let mut candidates = candidates.into_values().collect_vec();
