@@ -1,6 +1,7 @@
 use core::{
     marker::PhantomData,
-    sync::atomic::{AtomicU8, Ordering},
+    num::{NonZeroU32, NonZeroU64},
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
     time::Duration,
 };
 use std::{
@@ -39,6 +40,7 @@ use types::{
     nonstandard::{ForkInfo, OwnAttestation, Phase},
     phase0::containers::Attestation as Phase0Attestation,
     phase0::{
+        consts::BASIS_POINTS,
         containers::AttestationData,
         primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex, Version},
     },
@@ -53,7 +55,19 @@ use crate::{
     slot_head::SlotHead,
 };
 
-const REQUEST_TIMEOUT_QUOTIENT: u32 = 4;
+/// The end of the slot as a due point, at 100% of the slot's basis points.
+const SLOT_END_BPS: u64 = BASIS_POINTS;
+/// No timeout falls below this; short slots must not shrink requests below real network latency.
+const MIN_TIMEOUT: Duration = Duration::from_secs(1);
+/// A deadline-bound request may use half its window, leaving the rest for another node.
+const DEADLINE_ATTEMPTS: NonZeroU64 = NonZeroU64::new(2).expect("the literal is not zero");
+/// A lone serving node has no fallback to leave time for; give it a generous fixed wait.
+const LONE_NODE_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Requests off the duty path can afford to wait for a slow node.
+const BACKGROUND_TIMEOUT_QUOTIENT: NonZeroU32 =
+    NonZeroU32::new(2).expect("the literal is not zero");
+
 const VALIDATOR_IDS_PER_REQUEST: usize = 1024;
 
 #[derive(Debug, Error)]
@@ -156,6 +170,9 @@ pub struct RemoteBeaconNode {
     chain_head: ChainHead,
     /// Learned from the genesis check and unchanging thereafter.
     genesis_validators_root: OnceLock<H256>,
+    /// How many nodes of the fleet can serve, shared between them; a lone node is not held to
+    /// timeouts that reserve time for a fallback.
+    serving_count: Arc<AtomicUsize>,
 }
 
 impl RemoteBeaconNode {
@@ -165,6 +182,7 @@ impl RemoteBeaconNode {
         client: Client,
         url: RedactingUrl,
         max_empty_slots: u64,
+        serving_count: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             chain_config,
@@ -174,6 +192,7 @@ impl RemoteBeaconNode {
             health: AtomicU8::new(Health::Unknown.as_u8()),
             chain_head: ChainHead::new(),
             genesis_validators_root: OnceLock::new(),
+            serving_count,
         }
     }
 
@@ -268,7 +287,7 @@ impl RemoteBeaconNode {
         let response = self
             .client
             .get(url.into_url())
-            .timeout(self.request_timeout())
+            .timeout(self.head_timeout())
             .send()
             .await?;
 
@@ -290,6 +309,12 @@ impl RemoteBeaconNode {
 
         if health != previous {
             info_with_peers!("beacon node at {} is now {health:?}", self.url);
+
+            match (previous.can_serve(), health.can_serve()) {
+                (false, true) => _ = self.serving_count.fetch_add(1, Ordering::Relaxed),
+                (true, false) => _ = self.serving_count.fetch_sub(1, Ordering::Relaxed),
+                _ => {}
+            }
         }
 
         self.health.store(health.as_u8(), Ordering::Relaxed);
@@ -339,18 +364,76 @@ impl RemoteBeaconNode {
         let response = self
             .client
             .get(url.into_url())
-            .timeout(self.request_timeout())
+            .timeout(self.background_timeout())
             .send()
             .await?;
 
         self.parse_data(response).await
     }
 
-    fn request_timeout(&self) -> Duration {
-        self.chain_config
-            .slot_duration_ms
-            .checked_div(REQUEST_TIMEOUT_QUOTIENT)
-            .expect("REQUEST_TIMEOUT_QUOTIENT is not zero")
+    fn attestation_timeout(&self, phase: Phase) -> Duration {
+        let config = &self.chain_config;
+
+        self.window_timeout(
+            config.attestation_due_bps_at(phase),
+            config.aggregate_due_bps_at(phase),
+        )
+    }
+
+    fn aggregate_timeout(&self, phase: Phase) -> Duration {
+        self.window_timeout(self.chain_config.aggregate_due_bps_at(phase), SLOT_END_BPS)
+    }
+
+    fn sync_message_timeout(&self, phase: Phase) -> Duration {
+        let config = &self.chain_config;
+
+        self.window_timeout(
+            config.sync_message_due_bps_at(phase),
+            config.contribution_due_bps_at(phase),
+        )
+    }
+
+    fn contribution_timeout(&self, phase: Phase) -> Duration {
+        self.window_timeout(
+            self.chain_config.contribution_due_bps_at(phase),
+            SLOT_END_BPS,
+        )
+    }
+
+    /// The head is polled without a preset in scope, so the tighter of the two schedules applies.
+    fn head_timeout(&self) -> Duration {
+        self.sync_message_timeout(Phase::Phase0)
+            .min(self.sync_message_timeout(Phase::Gloas))
+    }
+
+    fn background_timeout(&self) -> Duration {
+        self.slot_fraction_by(BACKGROUND_TIMEOUT_QUOTIENT)
+    }
+
+    /// Half the window between the due points, so a failing node leaves the rest for another.
+    fn window_timeout(&self, from_bps: u64, until_bps: u64) -> Duration {
+        // With no fallback, giving up early buys nothing.
+        if self.serving_count.load(Ordering::Relaxed) <= 1 {
+            return LONE_NODE_TIMEOUT;
+        }
+
+        let window = self
+            .chain_config
+            .fraction_of_slot(until_bps.saturating_sub(from_bps));
+
+        let nanos = u64::try_from(window.as_nanos())
+            .expect("windows are far below u64::MAX nanoseconds")
+            / DEADLINE_ATTEMPTS;
+
+        Duration::from_nanos(nanos).max(MIN_TIMEOUT)
+    }
+
+    fn slot_fraction_by(&self, quotient: NonZeroU32) -> Duration {
+        let nanos = u64::try_from(self.chain_config.slot_duration_ms.as_nanos())
+            .expect("slot durations are far below u64::MAX nanoseconds")
+            / NonZeroU64::from(quotient);
+
+        Duration::from_nanos(nanos).max(MIN_TIMEOUT)
     }
 
     pub async fn check_network(&self) -> NetworkCheck {
@@ -376,7 +459,7 @@ impl RemoteBeaconNode {
         let response = self
             .client
             .get(url.into_url())
-            .timeout(self.request_timeout())
+            .timeout(self.background_timeout())
             .send()
             .await?;
 
@@ -450,7 +533,7 @@ impl RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&ValidatorIndices(validator_indices.to_vec()))
-            .timeout(self.request_timeout())
+            .timeout(self.background_timeout())
             .send()
             .await?;
 
@@ -497,6 +580,8 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         slot: Slot,
         committee_index: CommitteeIndex,
     ) -> Result<AttestationData> {
+        let phase = self.chain_config.phase_at_slot::<P>(slot);
+
         let url = self.endpoint(
             format!(
                 "/eth/v1/validator/attestation_data?slot={slot}&committee_index={committee_index}"
@@ -507,7 +592,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         let response = self
             .client
             .get(url.into_url())
-            .timeout(self.request_timeout())
+            .timeout(self.attestation_timeout(phase))
             .send()
             .await?;
 
@@ -519,19 +604,18 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         data: AttestationData,
         committee_index: CommitteeIndex,
     ) -> Result<Attestation<P>> {
+        let phase = self.chain_config.phase_at_slot::<P>(data.slot);
         let url = self.endpoint(&aggregate_attestation_path(data, committee_index))?;
 
         let response = self
             .client
             .get(url.into_url())
-            .timeout(self.request_timeout())
+            .timeout(self.aggregate_timeout(phase))
             .send()
             .await?;
 
         // Electra and Gloas attestations have the same fields, so untagged deserialization would
         // always read a Gloas one as Electra.
-        let phase = self.chain_config.phase_at_slot::<P>(data.slot);
-
         let attestation = if phase < Phase::Electra {
             self.parse_versioned_data::<Phase0Attestation<P>>(response, phase)
                 .await
@@ -577,7 +661,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .post(url.into_url())
             .header(ETH_CONSENSUS_VERSION, phase.as_ref())
             .json(&bodies)
-            .timeout(self.request_timeout())
+            .timeout(self.attestation_timeout(phase))
             .send()
             .await?;
 
@@ -604,7 +688,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .post(url.into_url())
             .header(ETH_CONSENSUS_VERSION, phase.as_ref())
             .json(&aggregates_and_proofs)
-            .timeout(self.request_timeout())
+            .timeout(self.aggregate_timeout(phase))
             .send()
             .await?;
 
@@ -630,7 +714,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&subscriptions)
-            .timeout(self.request_timeout())
+            .timeout(MIN_TIMEOUT)
             .send()
             .await?;
 
@@ -660,7 +744,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
                 .client
                 .post(url.into_url())
                 .json(&ValidatorIds { ids: keys })
-                .timeout(self.request_timeout())
+                .timeout(self.background_timeout())
                 .send()
                 .await?;
 
@@ -721,7 +805,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&ValidatorIndices(validator_indices.to_vec()))
-            .timeout(self.request_timeout())
+            .timeout(self.background_timeout())
             .send()
             .await?;
 
@@ -750,17 +834,18 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .unique_by(|message| message.validator_index)
             .collect::<Vec<_>>();
 
-        if bodies.is_empty() {
+        let Some(first) = bodies.first() else {
             return Ok(());
-        }
+        };
 
+        let phase = self.chain_config.phase_at_slot::<P>(first.slot);
         let url = self.endpoint("/eth/v1/beacon/pool/sync_committees")?;
 
         let response = self
             .client
             .post(url.into_url())
             .json(&bodies)
-            .timeout(self.request_timeout())
+            .timeout(self.sync_message_timeout(phase))
             .send()
             .await?;
 
@@ -786,7 +871,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&subscriptions)
-            .timeout(self.request_timeout())
+            .timeout(MIN_TIMEOUT)
             .send()
             .await?;
 
@@ -807,6 +892,8 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         subcommittee_index: SubcommitteeIndex,
         beacon_block_root: H256,
     ) -> Result<SyncCommitteeContribution<P>> {
+        let phase = self.chain_config.phase_at_slot::<P>(slot);
+
         let url = self.endpoint(&sync_committee_contribution_path(
             slot,
             subcommittee_index,
@@ -816,7 +903,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         let response = self
             .client
             .get(url.into_url())
-            .timeout(self.request_timeout())
+            .timeout(self.contribution_timeout(phase))
             .send()
             .await?;
 
@@ -841,9 +928,13 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         &self,
         contributions_and_proofs: &[SignedContributionAndProof<P>],
     ) -> Result<()> {
-        if contributions_and_proofs.is_empty() {
+        let Some(first) = contributions_and_proofs.first() else {
             return Ok(());
-        }
+        };
+
+        let phase = self
+            .chain_config
+            .phase_at_slot::<P>(first.message.contribution.slot);
 
         let url = self.endpoint("/eth/v1/validator/contribution_and_proofs")?;
 
@@ -851,7 +942,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&contributions_and_proofs)
-            .timeout(self.request_timeout())
+            .timeout(self.contribution_timeout(phase))
             .send()
             .await?;
 
@@ -1037,32 +1128,82 @@ mod tests {
         Ok(())
     }
 
+    fn test_node(
+        chain_config: ChainConfig,
+        url: &str,
+        serving_count: usize,
+    ) -> Result<RemoteBeaconNode> {
+        Ok(RemoteBeaconNode::new(
+            Arc::new(chain_config),
+            Client::new(),
+            url.parse()?,
+            32,
+            Arc::new(AtomicUsize::new(serving_count)),
+        ))
+    }
+
     // The node names itself by URL, so logging it must not leak credentials.
     #[test]
     fn display_is_the_redacted_url() -> Result<()> {
-        let node = RemoteBeaconNode::new(
-            Arc::new(ChainConfig::mainnet()),
-            Client::new(),
-            "http://user:password@localhost:5052/".parse()?,
-            32,
-        );
+        let node = test_node(
+            ChainConfig::mainnet(),
+            "http://user:password@localhost:5052/",
+            1,
+        )?;
 
         assert_eq!(node.to_string(), "http://*:*@localhost:5052/");
 
         Ok(())
     }
 
-    // A request must end early enough to leave time for another node.
+    // A deadline-bound request may use half its window, leaving the rest for another node.
     #[test]
-    fn request_timeout_is_a_quarter_of_a_slot() -> Result<()> {
-        let node = RemoteBeaconNode::new(
-            Arc::new(ChainConfig::mainnet()),
-            Client::new(),
-            "http://localhost:5052/".parse()?,
-            32,
-        );
+    fn timeouts_follow_the_due_points_of_the_phase() -> Result<()> {
+        let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 2)?;
 
-        assert_eq!(node.request_timeout(), Duration::from_secs(3));
+        // The pre-Gloas windows of the mainnet configuration are 3334 and 3333 basis points.
+        assert_eq!(
+            node.attestation_timeout(Phase::Electra),
+            Duration::from_micros(2_000_400),
+        );
+        assert_eq!(
+            node.aggregate_timeout(Phase::Electra),
+            Duration::from_micros(1_999_800),
+        );
+        assert_eq!(
+            node.attestation_timeout(Phase::Gloas),
+            Duration::from_millis(1500),
+        );
+        assert_eq!(node.aggregate_timeout(Phase::Gloas), Duration::from_secs(3));
+        assert_eq!(node.head_timeout(), Duration::from_millis(1500));
+        assert_eq!(node.background_timeout(), Duration::from_secs(6));
+
+        Ok(())
+    }
+
+    // Short slots must not shrink timeouts below what real networks can answer within.
+    #[test]
+    fn timeouts_do_not_fall_below_the_minimum() -> Result<()> {
+        let config = ChainConfig {
+            slot_duration_ms: Duration::from_secs(2),
+            ..ChainConfig::mainnet()
+        };
+
+        let node = test_node(config, "http://localhost:5052/", 2)?;
+
+        assert_eq!(node.attestation_timeout(Phase::Electra), MIN_TIMEOUT);
+        assert_eq!(node.background_timeout(), MIN_TIMEOUT);
+
+        Ok(())
+    }
+
+    // With no fallback there is no reason to give up early.
+    #[test]
+    fn a_lone_serving_node_gets_the_generous_timeout() -> Result<()> {
+        let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 1)?;
+
+        assert_eq!(node.attestation_timeout(Phase::Electra), LONE_NODE_TIMEOUT);
+        assert_eq!(node.aggregate_timeout(Phase::Gloas), LONE_NODE_TIMEOUT);
 
         Ok(())
     }
