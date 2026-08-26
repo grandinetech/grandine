@@ -149,7 +149,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // refactor, including `post_electra`/`post_fulu`/`post_gloas` methods, and
     // maybe few dozen other places.
     fn validators(&self) -> &dyn SszValidatorList;
-    fn balances(&self) -> &dyn SszList<Gwei>;
+    fn balances(&self) -> &dyn SszListMut<Gwei>;
     fn randao_mixes(&self) -> &RandaoMixes<P>;
     fn slashings(&self) -> &Slashings<P>;
     fn justification_bits(&self) -> BitVector<JustificationBitsLength>;
@@ -183,7 +183,7 @@ pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     // in the state, but that would be unnecessarily verbose for our use case.
     fn validators_mut_with_balances(
         &mut self,
-    ) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>);
+    ) -> (&mut dyn SszValidatorList, &dyn SszListMut<Gwei>);
     fn balances_mut_with_slashings(&mut self) -> (&mut dyn SszListMut<Gwei>, &Slashings<P>);
 
     fn post_electra(&self) -> Option<&dyn PostElectraBeaconState<P>>;
@@ -468,7 +468,7 @@ impl<parameters> BeaconState<P> for implementor {
         [historical_roots] [HistoricalRoots<P>];
         [eth1_data_votes]  [Eth1DataVotes<P>];
         [validators]       [dyn SszValidatorList];
-        [balances]         [dyn SszList<Gwei>];
+        [balances]         [dyn SszListMut<Gwei>];
         [randao_mixes]     [RandaoMixes<P>];
         [slashings]        [Slashings<P>];
         [cache]            [Cache];
@@ -505,7 +505,7 @@ impl<parameters> BeaconState<P> for implementor {
 
     fn validators_mut_with_balances(
         &mut self,
-    ) -> (&mut dyn SszValidatorList, &dyn SszList<Gwei>) {
+    ) -> (&mut dyn SszValidatorList, &dyn SszListMut<Gwei>) {
         validators_mut_with_balances_body
     }
 
@@ -543,9 +543,9 @@ impl<parameters> BeaconState<P> for implementor {
 }
 
 pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
-    fn previous_epoch_participation(&self) -> &dyn SszList<ParticipationFlags>;
-    fn current_epoch_participation(&self) -> &dyn SszList<ParticipationFlags>;
-    fn inactivity_scores(&self) -> &dyn SszList<u64>;
+    fn previous_epoch_participation(&self) -> &dyn SszListMut<ParticipationFlags>;
+    fn current_epoch_participation(&self) -> &dyn SszListMut<ParticipationFlags>;
+    fn inactivity_scores(&self) -> &dyn SszListMut<u64>;
     fn current_sync_committee(&self) -> &Arc<Hc<SyncCommittee<P>>>;
     fn next_sync_committee(&self) -> &Arc<Hc<SyncCommittee<P>>>;
 
@@ -605,10 +605,10 @@ pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
 impl<parameters> PostAltairBeaconState<P> for implementor {
     #[duplicate_item(
         field                          return_type;
-        [previous_epoch_participation] [dyn SszList<ParticipationFlags>];
-        [current_epoch_participation]  [dyn SszList<ParticipationFlags>];
+        [previous_epoch_participation] [dyn SszListMut<ParticipationFlags>];
+        [current_epoch_participation]  [dyn SszListMut<ParticipationFlags>];
         [current_sync_committee]       [Arc<Hc<SyncCommittee<P>>>];
-        [inactivity_scores]            [dyn SszList<u64>];
+        [inactivity_scores]            [dyn SszListMut<u64>];
         [next_sync_committee]          [Arc<Hc<SyncCommittee<P>>>];
     )]
     fn field(&self) -> &return_type {
@@ -826,9 +826,9 @@ pub trait PostElectraBeaconState<P: Preset>: PostCapellaBeaconState<P> {
     fn earliest_exit_epoch(&self) -> Epoch;
     fn consolidation_balance_to_consume(&self) -> Gwei;
     fn earliest_consolidation_epoch(&self) -> Epoch;
-    fn pending_deposits(&self) -> &dyn SszList<PendingDeposit>;
-    fn pending_partial_withdrawals(&self) -> &dyn SszList<PendingPartialWithdrawal>;
-    fn pending_consolidations(&self) -> &dyn SszList<PendingConsolidation>;
+    fn pending_deposits(&self) -> &dyn SszListMut<PendingDeposit>;
+    fn pending_partial_withdrawals(&self) -> &dyn SszListMut<PendingPartialWithdrawal>;
+    fn pending_consolidations(&self) -> &dyn SszListMut<PendingConsolidation>;
 
     fn deposit_requests_start_index_mut(&mut self) -> &mut u64;
     fn deposit_balance_to_consume_mut(&mut self) -> &mut Gwei;
@@ -888,9 +888,9 @@ impl<parameters> PostElectraBeaconState<P> for implementor {
 
     #[duplicate_item(
         field                         return_type;
-        [pending_deposits]            [dyn SszList<PendingDeposit>];
-        [pending_partial_withdrawals] [dyn SszList<PendingPartialWithdrawal>];
-        [pending_consolidations]      [dyn SszList<PendingConsolidation>];
+        [pending_deposits]            [dyn SszListMut<PendingDeposit>];
+        [pending_partial_withdrawals] [dyn SszListMut<PendingPartialWithdrawal>];
+        [pending_consolidations]      [dyn SszListMut<PendingConsolidation>];
     )]
     fn field(&self) -> &return_type {
         get_ref([field])
