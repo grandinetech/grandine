@@ -996,15 +996,15 @@ impl<P: Preset> Storage<P> {
             .database
             .iterator_descending(..=BlockRootBySlot(start_from_slot).to_string())?;
 
-        let results = itertools::process_results(results, |iter| {
-            iter.take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                .map(|(_, v)| v)
-                .collect::<Vec<_>>()
-        })?;
-
         let mut block_roots = vec![];
 
-        for value_bytes in results {
+        for result in results {
+            let (key_bytes, value_bytes) = result?;
+
+            if !BlockRootBySlot::has_prefix(&key_bytes) {
+                break;
+            }
+
             let block_root = H256::from_ssz_default(value_bytes)?;
 
             if self.contains_key(StateByBlockRoot(block_root))? {
