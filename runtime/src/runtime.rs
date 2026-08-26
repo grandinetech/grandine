@@ -269,6 +269,7 @@ pub async fn run_after_genesis<P: Preset>(
         storage_database,
         storage_mode,
         state_storage_config.clone(),
+        metrics.clone(),
     ));
 
     let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
@@ -1751,6 +1752,7 @@ fn handle_command<P: Preset>(
                 storage_database,
                 *storage_mode,
                 state_storage_config.clone(),
+                None,
             );
 
             let output_dir = output_dir.unwrap_or(std::env::current_dir()?);

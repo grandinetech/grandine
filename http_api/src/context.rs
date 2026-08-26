@@ -144,6 +144,7 @@ impl<P: Preset> Context<P> {
             Database::in_memory(),
             StorageMode::default(),
             StateStorageConfig::default(),
+            None,
         ));
 
         let state_load_strategy = StateLoadStrategy::Anchor {

@@ -119,6 +119,7 @@ where
                 custom_data_availability_window: None,
             },
             StateStorageConfig::default(),
+            None,
         ));
 
         let event_channels = Arc::new(EventChannels::default());

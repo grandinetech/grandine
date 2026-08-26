@@ -76,6 +76,7 @@ impl Criterion {
                     Database::in_memory(),
                     StorageMode::default(),
                     StateStorageConfig::default(),
+                    None,
                 ));
 
                 let mut store = Store::new(
