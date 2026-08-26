@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::{error::Error as StdError, time::Duration};
+use core::{error::Error as StdError, sync::atomic::AtomicUsize, time::Duration};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
@@ -241,6 +241,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         disable_local_beacon_node: bool,
     ) -> Self {
         let chain_config = controller.chain_config().clone_arc();
+        let serving_count = Arc::new(AtomicUsize::new(beacon_node_urls.len()));
 
         let remote_beacon_nodes = beacon_node_urls
             .into_iter()
@@ -250,6 +251,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     signer.load().client().clone(),
                     url,
                     validator_config.max_empty_slots,
+                    serving_count.clone_arc(),
                 ))
             })
             .collect::<Vec<_>>();

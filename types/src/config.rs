@@ -1,7 +1,7 @@
 use core::{cmp::Ordering, num::NonZeroU64, time::Duration};
 use std::{borrow::Cow, collections::BTreeMap};
 
-use arithmetic::UsizeExt as _;
+use arithmetic::{U64Ext as _, UsizeExt as _};
 use derive_more::Constructor;
 use enum_iterator::Sequence as _;
 use hex_literal::hex;
@@ -19,7 +19,7 @@ use crate::{
     fulu::containers::DataColumnsByRootIdentifier,
     nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
-        consts::{AttestationSubnetCount, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        consts::{AttestationSubnetCount, BASIS_POINTS, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::Fork,
         primitives::{
             ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H32, H160,
@@ -972,6 +972,54 @@ impl Config {
             current_version: self.version(phase),
             epoch: self.fork_epoch(phase),
         }
+    }
+
+    #[must_use]
+    pub fn attestation_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.attestation_due_bps
+        } else {
+            self.attestation_due_bps_gloas
+        }
+    }
+
+    #[must_use]
+    pub fn aggregate_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.aggregate_due_bps
+        } else {
+            self.aggregate_due_bps_gloas
+        }
+    }
+
+    #[must_use]
+    pub fn sync_message_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.sync_message_due_bps
+        } else {
+            self.sync_message_due_bps_gloas
+        }
+    }
+
+    #[must_use]
+    pub fn contribution_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.contribution_due_bps
+        } else {
+            self.contribution_due_bps_gloas
+        }
+    }
+
+    /// The duration of `bps` basis points of a slot.
+    #[must_use]
+    pub fn fraction_of_slot(&self, bps: u64) -> Duration {
+        let nanos = u64::try_from(self.slot_duration_ms.as_nanos())
+            .expect("slot durations are far below u64::MAX nanoseconds")
+            .try_mul(bps)
+            .and_then(|nanos| nanos.try_div(BASIS_POINTS))
+            .expect("BASIS_POINTS should always be < u64::MAX");
+
+        Duration::from_nanos(nanos)
     }
 
     #[inline]
