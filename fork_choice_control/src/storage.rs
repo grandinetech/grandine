@@ -501,7 +501,6 @@ impl<P: Preset> Storage<P> {
         let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
                 iter.take_while(|(key_bytes, _)| SlotBlobId::has_prefix(key_bytes))
-                    .map(|(k, v)| (k.into_owned(), v))
                     .unzip()
             })?;
 
@@ -523,7 +522,6 @@ impl<P: Preset> Storage<P> {
         let (mut keys_to_remove, block_roots_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
                 iter.take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                    .map(|(k, v)| (k.into_owned(), v))
                     .unzip()
             })?;
 
@@ -546,7 +544,6 @@ impl<P: Preset> Storage<P> {
 
         let results = itertools::process_results(results, |iter| {
             iter.take_while(|(key_bytes, _)| SlotByStateRoot::has_prefix(key_bytes))
-                .map(|(k, v)| (k.into_owned(), v))
                 .collect::<Vec<_>>()
         })?;
 
@@ -571,7 +568,6 @@ impl<P: Preset> Storage<P> {
 
         let results = itertools::process_results(results, |iter| {
             iter.take_while(|(key_bytes, _)| UnfinalizedBlockByRoot::has_prefix(key_bytes))
-                .map(|(k, v)| (k.into_owned(), v))
                 .collect::<Vec<_>>()
         })?;
 
@@ -687,7 +683,6 @@ impl<P: Preset> Storage<P> {
                             .saturating_mul(P::SlotsPerEpoch::USIZE)
                             .saturating_mul(P::NumberOfColumns::USIZE),
                     )
-                    .map(|(k, v)| (k.into_owned(), v))
                     .unzip()
             })?;
 
@@ -726,7 +721,6 @@ impl<P: Preset> Storage<P> {
         let (mut keys_to_remove, envelopes_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
                 iter.take_while(|(key_bytes, _)| EnvelopeRootBySlot::has_prefix(key_bytes))
-                    .map(|(k, v)| (k.into_owned(), v))
                     .unzip()
             })?;
 
