@@ -143,6 +143,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     metrics: Option<Arc<Metrics>>,
     finished_loading_from_storage: bool,
     has_pending_archive_tasks: bool,
+    pending_state_cache_prune: Option<bool>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
     attestation_verifier_tx: TS,
@@ -210,6 +211,7 @@ where
             metrics,
             finished_loading_from_storage: false,
             has_pending_archive_tasks: false,
+            pending_state_cache_prune: None,
             mutator_tx,
             mutator_rx,
             attestation_verifier_tx,
@@ -572,11 +574,14 @@ where
             return Ok(());
         };
 
-        self.spawn_state_cache_prune_task(
+        // schedule state cache prune task on a new slot, but not at the beginning of the slot
+        if changes.is_slot_updated() {
             // preserve unfinalized fork tips if not finalized or epoch did not change
-            !changes.is_finalized_checkpoint_updated() || !changes.is_epoch_updated(),
-            wait_group.clone(),
-        );
+            self.pending_state_cache_prune =
+                Some(!changes.is_finalized_checkpoint_updated() || !changes.is_epoch_updated());
+        } else if let Some(preserve_unfinalized_fork_tips) = self.pending_state_cache_prune.take() {
+            self.spawn_state_cache_prune_task(preserve_unfinalized_fork_tips, wait_group.clone());
+        }
 
         if changes.is_finalized_checkpoint_updated() {
             self.has_pending_archive_tasks = true;
