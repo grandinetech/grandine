@@ -20,6 +20,7 @@ members = [
     'debug_info',
     'deposit_tree',
     'directories',
+    'diff',
     'doppelganger_protection',
     'eip_2335',
     'eip_7594',
@@ -403,6 +404,7 @@ replace_with = '0.1'
 reqwest = { version = '0.13', features = ['json', 'native-tls-vendored'] }
 risc0-build = { version = '3.0.5', features = ['unstable'] }
 risc0-zkvm = { version = '3.0.5', features = ['unstable', 'heap-embedded-alloc'] }
+rkyv = '0.8'
 rusqlite = { version = '0.38', features = ['bundled', 'fallible_uint'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
@@ -439,6 +441,7 @@ strum = { version = '0.28', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
 sysinfo = '0.38'
 tap = '1'
+tabled = { version = '0.21', default-features = false, features = ['std'] }
 tempfile = '3'
 test-case = '3'
 test-generator = '0.3'
@@ -474,6 +477,7 @@ xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
 zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
 zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
+zstd = '0.13'
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
@@ -493,6 +497,7 @@ data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
 debug_info = { path = 'debug_info' }
 deposit_tree = { path = 'deposit_tree' }
+diff = { path = 'diff' }
 directories = { path = 'directories' }
 doppelganger_protection = { path = 'doppelganger_protection' }
 eip_2335 = { path = 'eip_2335' }
