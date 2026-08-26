@@ -10,7 +10,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
 use helper_functions::accessors;
-use logging::{exception, warn_with_peers};
+use logging::{exception, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -442,9 +442,13 @@ fn acceptable_attestation_targets_for_packing<'a, P: Preset, W: Wait>(
         .collect::<HashSet<_>>()
         .into_iter()
         .filter_map(|target| {
+            info_with_peers!("attestation packet getting target state for {target:?}");
+
             // `BestProposableAttestationsTask` and `PackProposableAttestationsTask` already run in `DedicatedExecutor`
             // Attestation target validity is already checked before attestation is submitted to the pool
             let target_state = controller.checkpoint_state_blocking(target).ok()??;
+
+            info_with_peers!("attestation packet got target state for {target:?}");
 
             let target_dependent_root = controller.dependent_root(&target_state, dependent_root_epoch).expect(
                 "only previous and current epoch attestations are selected from the pool, they should never have their target slots from the future",
