@@ -25,7 +25,7 @@ pub fn block<P: Preset, W: Wait>(
             .genesis()
             .map(|checkpoint| checkpoint.block)
             .map(WithStatus::valid_and_finalized),
-        BlockId::Finalized => Some(controller.last_finalized_block()),
+        BlockId::Finalized => controller.block_by_root(controller.finalized_root())?,
         BlockId::Slot(slot) => controller
             .block_by_slot(slot)?
             .map(|with_status| with_status.map(|block_with_root| block_with_root.block)),
@@ -47,7 +47,7 @@ pub fn block_root<P: Preset, W: Wait>(
             .genesis()
             .map(|checkpoint| checkpoint.block.message().hash_tree_root())
             .map(WithStatus::valid_and_finalized),
-        BlockId::Finalized => Some(controller.last_finalized_block_root()),
+        BlockId::Finalized => controller.check_block_root(controller.finalized_root())?,
         BlockId::Slot(slot) => controller
             .block_by_slot(slot)?
             .map(|with_status| with_status.map(|with_status| with_status.root)),

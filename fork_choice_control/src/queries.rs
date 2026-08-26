@@ -79,12 +79,12 @@ where
 
     #[must_use]
     pub fn finalized_epoch(&self) -> Epoch {
-        self.store_snapshot().finalized_epoch()
+        self.store_snapshot().protocol_finalized_epoch()
     }
 
     #[must_use]
     pub fn finalized_root(&self) -> H256 {
-        self.store_snapshot().finalized_root()
+        self.store_snapshot().protocol_finalized_root()
     }
 
     #[must_use]
@@ -411,6 +411,32 @@ where
         }
 
         Ok(None)
+    }
+
+    pub fn state_by_block_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
+        let store = self.store_snapshot();
+
+        if let Some(state) = store.state_by_block_root(block_root) {
+            let finalized = store
+                .chain_link(block_root)
+                .is_some_and(|chain_link| store.is_slot_finalized(chain_link.slot()));
+
+            return Ok(Some(WithStatus::valid(state, finalized)));
+        }
+
+        let Some(state) = self
+            .storage()
+            .state_by_block_root(block_root, Some(&*store.finalized_validators()))?
+        else {
+            return Ok(None);
+        };
+
+        let finalized = store.is_slot_finalized(state.slot());
+
+        Ok(Some(WithStatus::valid(state, finalized)))
     }
 
     pub fn exhibits_equivocation(&self, block: &Arc<SignedBeaconBlock<P>>) -> bool {
@@ -1280,17 +1306,17 @@ impl<P: Preset> Snapshot<'_, P> {
 
     #[must_use]
     pub fn finalized_epoch(&self) -> Epoch {
-        self.store_snapshot.finalized_epoch()
+        self.store_snapshot.protocol_finalized_epoch()
     }
 
     #[must_use]
     pub fn finalized_slot(&self) -> Slot {
-        self.store_snapshot.finalized_slot()
+        self.store_snapshot.protocol_finalized_slot()
     }
 
     #[must_use]
     pub fn finalized_root(&self) -> H256 {
-        self.store_snapshot.finalized_root()
+        self.store_snapshot.protocol_finalized_root()
     }
 
     #[must_use]

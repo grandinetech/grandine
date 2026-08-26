@@ -11,7 +11,6 @@
 #![expect(clippy::similar_names)]
 #![expect(clippy::too_many_lines)]
 
-#[cfg(feature = "eth2-cache")]
 use std::sync::Arc;
 
 #[cfg(feature = "eth2-cache")]
@@ -21,22 +20,73 @@ use eth2_libp2p::GossipId;
 use helper_functions::misc;
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
-#[cfg(feature = "eth2-cache")]
-use types::{config::Config, preset::Medalla};
 use types::{
+    config::Config,
     nonstandard::PayloadStatus,
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        containers::Checkpoint,
         primitives::H256,
     },
     preset::Minimal,
     traits::SignedBeaconBlock as _,
 };
 
+#[cfg(feature = "eth2-cache")]
+use types::preset::Medalla;
+
 use crate::helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch};
 
-#[cfg(feature = "eth2-cache")]
 use crate::specialized::TestController;
+
+#[test]
+fn non_finalized_startup_reports_protocol_finality_separately_from_anchor() {
+    let source = Context::minimal();
+    let (_, genesis_state) = source.genesis();
+    let anchor_epoch = 3;
+    let (anchor_block, anchor_state) = source.empty_block(
+        &genesis_state,
+        start_of_epoch(anchor_epoch),
+        H256::repeat_byte(1),
+    );
+    let anchor_root = anchor_block.message().hash_tree_root();
+    drop(source);
+
+    let protocol_finalized_checkpoint = Checkpoint {
+        epoch: 1,
+        root: H256::repeat_byte(2),
+    };
+    let (controller, _mutator_handle) = TestController::quiet_with_protocol_finality(
+        Arc::new(Config::minimal()),
+        anchor_block.clone(),
+        anchor_state.clone(),
+        protocol_finalized_checkpoint,
+    );
+
+    assert_eq!(
+        controller.store_snapshot().finalized_checkpoint(),
+        Checkpoint {
+            epoch: anchor_epoch,
+            root: anchor_root,
+        },
+    );
+    assert_eq!(
+        controller.finalized_epoch(),
+        protocol_finalized_checkpoint.epoch
+    );
+    assert_eq!(
+        controller.finalized_root(),
+        protocol_finalized_checkpoint.root
+    );
+    assert!(!controller.head().finalized);
+
+    let (finalized_controller, _finalized_mutator_handle) =
+        TestController::quiet(Arc::new(Config::minimal()), anchor_block, anchor_state);
+
+    assert_eq!(finalized_controller.finalized_epoch(), anchor_epoch);
+    assert_eq!(finalized_controller.finalized_root(), anchor_root);
+    assert!(finalized_controller.head().finalized);
+}
 
 // This test was added to reproduce the bug described in
 // <https://github.com/ethereum/consensus-specs/issues/1887>.

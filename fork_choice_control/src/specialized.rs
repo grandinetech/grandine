@@ -16,7 +16,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::StorageMode,
-    phase0::primitives::Slot,
+    phase0::{containers::Checkpoint, primitives::Slot},
     preset::Preset,
 };
 
@@ -102,6 +102,7 @@ where
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        protocol_finalized_checkpoint: Option<Checkpoint>,
         database: Database,
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
@@ -128,6 +129,7 @@ where
             store_config,
             anchor_block,
             anchor_state,
+            protocol_finalized_checkpoint,
             tick,
             event_channels,
             execution_engine,
@@ -165,6 +167,7 @@ impl<P: Preset> AdHocBenchController<P> {
             store_config,
             anchor_block,
             anchor_state,
+            None,
             database,
             NullExecutionEngine,
             None,
@@ -189,6 +192,7 @@ impl<P: Preset> BenchController<P> {
             StoreConfig::default(),
             anchor_block,
             anchor_state,
+            None,
             Database::in_memory(),
             NullExecutionEngine,
             None,
@@ -233,11 +237,35 @@ impl<P: Preset> TestController<P> {
             store_config,
             anchor_block,
             anchor_state,
+            None,
             Database::in_memory(),
             execution_engine,
             None,
             p2p_tx,
             thread_pool_size,
+        )
+    }
+
+    pub(crate) fn quiet_with_protocol_finality(
+        chain_config: Arc<ChainConfig>,
+        anchor_block: Arc<SignedBeaconBlock<P>>,
+        anchor_state: Arc<BeaconState<P>>,
+        protocol_finalized_checkpoint: Checkpoint,
+    ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
+        let store_config = StoreConfig::aggressive(&chain_config);
+
+        Self::new_internal(
+            chain_config,
+            Arc::new(PubkeyCache::default()),
+            store_config,
+            anchor_block,
+            anchor_state,
+            Some(protocol_finalized_checkpoint),
+            Database::in_memory(),
+            Arc::new(Mutex::new(MockExecutionEngine::new(true, false, None))),
+            None,
+            futures::sink::drain(),
+            None,
         )
     }
 

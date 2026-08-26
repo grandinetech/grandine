@@ -272,7 +272,11 @@ pub async fn run_after_genesis<P: Preset>(
         storage_mode,
     ));
 
-    let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
+    let (
+        (anchor_state, anchor_block, unfinalized_blocks),
+        loaded_from_remote,
+        protocol_finalized_checkpoint,
+    ) = storage
         .load(signer_snapshot.client(), state_load_strategy)
         .await?;
 
@@ -315,6 +319,7 @@ pub async fn run_after_genesis<P: Preset>(
         store_config,
         anchor_block,
         anchor_state.clone_arc(),
+        protocol_finalized_checkpoint,
         current_tick,
         event_channels.clone_arc(),
         execution_engine.clone_arc(),

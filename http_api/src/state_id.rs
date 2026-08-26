@@ -22,7 +22,7 @@ pub fn state<P: Preset, W: Wait>(
             .genesis()
             .map(|checkpoint| checkpoint.state)
             .map(WithStatus::valid_and_finalized),
-        StateId::Finalized => Some(controller.last_finalized_state()),
+        StateId::Finalized => controller.state_by_block_root(controller.finalized_root())?,
         StateId::Justified => Some(controller.justified_state()?),
         StateId::Slot(slot) => {
             tokio::task::block_in_place(|| controller.state_at_slot_cached_blocking(*slot))?
