@@ -14,5 +14,11 @@ ignore = [
     'RUSTSEC-2026-0099',
     'RUSTSEC-2026-0104',
     # TODO: revisit once libp2p and zkm-sdk are updated
-    'RUSTSEC-2026-0119'
+    'RUSTSEC-2026-0119',
+    # Optional zkVM prover backends pull in h2 0.3 (zkm-sdk via tonic 0.8 & ethers 2.0,
+    # sp1-sdk & boundless-market via hyper 0.14). The fix is only in h2 >= 0.4.16 and
+    # 0.3.27 is the last 0.3.x release, so this cannot be resolved from our side.
+    # Not reachable from the node: none of these features are enabled by default.
+    # TODO: remove this once zkm-sdk, sp1-sdk and boundless-market move to h2 0.4
+    'RUSTSEC-2026-0258'
 ]
