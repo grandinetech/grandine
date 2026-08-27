@@ -156,12 +156,14 @@ impl<'path> Case<'path> {
         Some(value)
     }
 
+    #[must_use]
     pub fn read_file(self) -> Vec<u8> {
         let file_path = workspace_root_relative_to_tested_crate_root()
             .join(self.case_path_relative_to_workspace_root);
         try_read(file_path).expect("the file should exist")
     }
 
+    #[must_use]
     pub fn json<T: DeserializeOwned>(self) -> T {
         let bytes = self.read_file();
         serde_json::from_slice(bytes.as_slice())
