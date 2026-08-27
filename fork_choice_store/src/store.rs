@@ -4192,7 +4192,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > Check if blob data is available
         // > If not, this payload MAY be queued and subsequently considered when blob data becomes available
-        if self.should_check_data_availability_at_slot(slot)
+        if origin.data_availability_policy().check()
+            && self.should_check_data_availability_at_slot(slot)
             && !self.indices_of_missing_data_columns(&block).is_empty()
         {
             return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(
@@ -4227,19 +4228,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        let mut header = state.latest_block_header();
+        if matches!(origin.state_root_policy(), StateRootPolicy::Verify) {
+            let mut header = state.latest_block_header();
 
-        header.state_root = state.hash_tree_root();
+            header.state_root = state.hash_tree_root();
 
-        let header_root = header.hash_tree_root();
+            let header_root = header.hash_tree_root();
 
-        ensure!(
-            envelope.message().block_root() == header_root,
-            Error::<P>::ExecutionPayloadBeaconBlockRootMismatch {
-                expected: Box::new(header_root),
-                actual: Box::new(beacon_block_root),
-            },
-        );
+            ensure!(
+                envelope.message().block_root() == header_root,
+                Error::<P>::ExecutionPayloadBeaconBlockRootMismatch {
+                    expected: Box::new(header_root),
+                    actual: Box::new(beacon_block_root),
+                },
+            );
+        }
 
         let parent_beacon_block_root = state.latest_block_header().parent_root;
 
@@ -4988,6 +4991,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &mut self,
         envelope: Arc<E>,
         is_before_deadline: bool,
+        is_persisted: bool,
     ) {
         let slot = envelope.message().slot();
         let beacon_block_root = envelope.message().block_root();
@@ -5019,7 +5023,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         if !is_block_invalid && let Some(envelope) = envelope.into_full() {
-            self.execution_payload_envelope_cache.insert(envelope);
+            self.execution_payload_envelope_cache
+                .insert(envelope, is_persisted);
         }
     }
 

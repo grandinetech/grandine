@@ -690,12 +690,12 @@ impl<P: Preset> Storage<P> {
 
     pub(crate) fn append_execution_payload_envelopes(
         &self,
-        envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+        envelopes: impl IntoIterator<Item = (Arc<SignedExecutionPayloadEnvelope<P>>, bool)>,
     ) -> Result<Vec<H256>> {
         let mut batch = vec![];
         let mut persisted_block_roots = vec![];
 
-        for envelope in envelopes {
+        for (envelope, is_timely) in envelopes {
             let block_root = envelope.block_root();
             let slot = envelope.slot();
 
@@ -711,6 +711,13 @@ impl<P: Preset> Storage<P> {
                 batch.push(
                     self.serialize_zstd(ExecutionPayloadBySlotAndRoot(slot, block_root), payload)?,
                 );
+            }
+
+            if is_timely {
+                batch.push(serialize(
+                    TimelyEnvelopeByBlockRoot(block_root),
+                    block_root,
+                )?);
             }
 
             persisted_block_roots.push(block_root);
@@ -770,6 +777,10 @@ impl<P: Preset> Storage<P> {
         Ok(Some(StoredEnvelope::Full(Arc::new(
             envelope.unblind(payload_body)?,
         ))))
+    }
+
+    pub(crate) fn is_execution_payload_envelope_timely(&self, block_root: H256) -> Result<bool> {
+        self.contains_key(TimelyEnvelopeByBlockRoot(block_root))
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
@@ -832,6 +843,7 @@ impl<P: Preset> Storage<P> {
 
             keys_to_remove.push(EnvelopeByBlockRoot::full(block_root).to_string().into());
             keys_to_remove.push(EnvelopeByBlockRoot::blinded(block_root).to_string().into());
+            keys_to_remove.push(TimelyEnvelopeByBlockRoot(block_root).to_string().into());
         }
 
         self.database.delete_batch(keys_to_remove)
@@ -1911,6 +1923,14 @@ impl PrefixableKey for EnvelopeRootBySlot {
     }
 }
 
+#[derive(Display)]
+#[display("{}{_0:x}", Self::PREFIX)]
+pub struct TimelyEnvelopeByBlockRoot(pub H256);
+
+impl PrefixableKey for TimelyEnvelopeByBlockRoot {
+    const PREFIX: &'static str = "y";
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("checkpoint sync failed")]
@@ -2283,8 +2303,8 @@ mod tests {
         );
 
         storage.append_execution_payload_envelopes([
-            Arc::new(new_envelope.clone()),
-            Arc::new(kept_envelope.clone()),
+            (Arc::new(new_envelope.clone()), false),
+            (Arc::new(kept_envelope.clone()), false),
         ])?;
 
         assert!(matches!(
@@ -2324,7 +2344,7 @@ mod tests {
             let mut envelope = SignedExecutionPayloadEnvelope::<Mainnet>::default();
             envelope.message.payload.slot_number = slot;
             envelope.message.beacon_block_root = block_root;
-            Arc::new(envelope)
+            (Arc::new(envelope), true)
         };
 
         let root_5 = H256::repeat_byte(5);
