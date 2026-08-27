@@ -436,11 +436,21 @@ where
 
         self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
 
+        // The first unfinalized block builds on the anchor, so the anchor's payload has to be
+        // replayed as well for that block to pass `BlockAction::DelayUntilPayload`.
+        if self.store.anchor().is_post_gloas() {
+            self.replay_persisted_execution_payload_envelope(
+                &wait_group,
+                self.store.anchor().block_root,
+            )?;
+        }
+
         for result in blocks.chain(core::iter::once(Ok(last_block))) {
             let block = result?;
             let origin = BlockOrigin::Persisted;
             let processing_timings = ProcessingTimings::new();
             let block_root = block.message().hash_tree_root();
+            let is_post_gloas = block.phase() >= Phase::Gloas;
 
             // There is no point in spawning `BlockTask`s to validate persisted blocks.
             // State transitions within a single fork must be performed sequentially.
@@ -465,9 +475,53 @@ where
                 block_root,
                 tracing::debug_span!("handle_unfinalized_block"),
             )?;
+
+            // Envelopes are persisted separately from blocks. The envelope of a block must be
+            // applied before its child is validated.
+            if is_post_gloas {
+                self.replay_persisted_execution_payload_envelope(&wait_group, block_root)?;
+            }
         }
 
         self.finished_loading_from_storage = true;
+
+        Ok(())
+    }
+
+    fn replay_persisted_execution_payload_envelope(
+        &mut self,
+        wait_group: &W,
+        block_root: H256,
+    ) -> Result<()> {
+        let Some(envelope) = self
+            .storage
+            .execution_payload_envelope_by_root(block_root)?
+        else {
+            return Ok(());
+        };
+
+        let origin = ExecutionPayloadEnvelopeOrigin::Persisted;
+        let processing_timings = ProcessingTimings::new();
+        let payload_envelope_identifier = envelope.as_ref().into();
+
+        let result = self.store.validate_execution_payload_envelope(
+            &envelope,
+            &origin,
+            &self.execution_engine,
+            NullVerifier,
+        );
+
+        // TODO: timeliness of a payload does not persisted, so we cannot know if it was seen before
+        // the deadline. We now assume it was, but we should persist that information as well.
+        self.handle_execution_payload_envelope(
+            wait_group.clone(),
+            result,
+            origin,
+            payload_envelope_identifier,
+            true,
+            processing_timings,
+            tracing::debug_span!("handle_persisted_envelope"),
+        );
 
         Ok(())
     }
@@ -2151,13 +2205,14 @@ where
                 let block_hash = envelope.message.payload.block_hash;
                 let should_send_gossip_event = origin.should_send_gossip_event();
                 let should_generate_event = origin.should_generate_event();
+                let is_persisted = origin.is_persisted();
 
                 if self.store.is_forward_synced() {
                     debug_with_peers!(
                         "execution payload envelope accepted (\
                             block root: {beacon_block_root:?}, \
                             slot: {slot}, \
-                            seen before deadline: {seen_before_deadline} \
+                            seen before deadline: {seen_before_deadline}\
                         )",
                     );
                 } else {
@@ -2194,7 +2249,12 @@ where
                     Ok(ValidationOutcome::Accept),
                 );
 
-                self.accept_execution_payload_envelope(&wait_group, envelope, seen_before_deadline);
+                self.accept_execution_payload_envelope(
+                    &wait_group,
+                    envelope,
+                    seen_before_deadline,
+                    is_persisted,
+                );
 
                 if should_generate_event
                     && let Some(chain_link) = self.store.chain_link(beacon_block_root)
@@ -3550,11 +3610,15 @@ where
         wait_group: &W,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         is_before_deadline: bool,
+        is_persisted: bool,
     ) {
         let beacon_block_root = envelope.block_root();
 
-        self.store_mut()
-            .apply_execution_payload_envelope(envelope, is_before_deadline);
+        self.store_mut().apply_execution_payload_envelope(
+            envelope,
+            is_before_deadline,
+            is_persisted,
+        );
 
         self.update_store_snapshot();
 
@@ -3564,7 +3628,9 @@ where
             self.retry_delayed(delayed, wait_group);
         }
 
-        if !self.storage.prune_storage_enabled() {
+        // Envelopes replayed from storage are already persisted. They are marked as such once
+        // replay is over, so that a single task does not write all of them back.
+        if !self.storage.prune_storage_enabled() && self.finished_loading_from_storage {
             self.spawn(PersistExecutionPayloadEnvelopesTask {
                 store_snapshot: self.owned_store(),
                 storage: self.storage.clone_arc(),

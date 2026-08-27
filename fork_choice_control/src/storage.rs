@@ -1548,6 +1548,75 @@ mod tests {
         })
     }
 
+    fn envelope_with_slot(
+        slot: Slot,
+        block_root: H256,
+    ) -> Arc<SignedExecutionPayloadEnvelope<Mainnet>> {
+        let mut envelope = SignedExecutionPayloadEnvelope::<Mainnet>::default();
+
+        envelope.message.payload.slot_number = slot;
+        envelope.message.beacon_block_root = block_root;
+
+        Arc::new(envelope)
+    }
+
+    #[test]
+    fn test_execution_payload_envelopes() -> Result<()> {
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            database,
+            nonzero!(64_u64),
+            StorageMode::default(),
+        );
+
+        let block_root_1 = H256::repeat_byte(1);
+        let block_root_5 = H256::repeat_byte(5);
+
+        let persisted_block_roots = storage.append_execution_payload_envelopes([
+            envelope_with_slot(1, block_root_1),
+            envelope_with_slot(5, block_root_5),
+        ])?;
+
+        assert_eq!(persisted_block_roots, [block_root_1, block_root_5]);
+
+        assert_eq!(
+            storage
+                .execution_payload_envelope_by_root(block_root_1)?
+                .map(|envelope| envelope.slot()),
+            Some(1),
+        );
+        assert_eq!(
+            storage
+                .execution_payload_envelope_by_root(block_root_5)?
+                .map(|envelope| envelope.slot()),
+            Some(5),
+        );
+
+        storage.prune_old_execution_payload_envelopes(3)?;
+
+        assert_eq!(
+            storage.execution_payload_envelope_by_root(block_root_1)?,
+            None
+        );
+        assert_eq!(
+            storage
+                .execution_payload_envelope_by_root(block_root_5)?
+                .map(|envelope| envelope.slot()),
+            Some(5),
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn test_prune_unfinalized_blocks() -> Result<()> {
         let database = Database::persistent(

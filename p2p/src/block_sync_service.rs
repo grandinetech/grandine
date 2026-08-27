@@ -1098,7 +1098,14 @@ impl<P: Preset> BlockSyncService<P> {
             .is_peerdas_activated();
 
         // Batch request data columns by root for missing columns if any
-        if !self.is_forward_synced && is_peerdas_activated {
+        if is_peerdas_activated
+            && (!self.is_forward_synced
+                || self
+                    .controller
+                    .snapshot()
+                    .earliest_data_unavailable_slot()
+                    .is_some())
+        {
             self.batch_request_missing_data_columns().await?;
         }
 

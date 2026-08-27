@@ -1274,6 +1274,7 @@ pub enum ExecutionPayloadEnvelopeOrigin {
     Gossip(GossipId),
     Requested(PeerId),
     Own,
+    Persisted,
     Api(Option<Sender<Result<ValidationOutcome>>>),
     Test(BlsSetting),
 }
@@ -1284,7 +1285,7 @@ impl ExecutionPayloadEnvelopeOrigin {
         match self {
             Self::Gossip(gossip_id) => (Some(gossip_id), None),
             Self::Api(sender) => (None, sender),
-            Self::BackSync | Self::Requested(_) | Self::Own => (None, None),
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Persisted => (None, None),
             Self::Test(_) => (Some(GossipId::default()), None),
         }
     }
@@ -1293,7 +1294,9 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub fn gossip_id(&self) -> Option<GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id.clone()),
-            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) => None,
+            Self::BackSync | Self::Requested(_) | Self::Own | Self::Persisted | Self::Api(_) => {
+                None
+            }
             Self::Test(_) => Some(GossipId::default()),
         }
     }
@@ -1302,7 +1305,12 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub const fn gossip_id_ref(&self) -> Option<&GossipId> {
         match self {
             Self::Gossip(gossip_id) => Some(gossip_id),
-            Self::BackSync | Self::Requested(_) | Self::Own | Self::Api(_) | Self::Test(_) => None,
+            Self::BackSync
+            | Self::Requested(_)
+            | Self::Own
+            | Self::Persisted
+            | Self::Api(_)
+            | Self::Test(_) => None,
         }
     }
 
@@ -1320,14 +1328,45 @@ impl ExecutionPayloadEnvelopeOrigin {
     pub const fn verify_signatures(&self) -> bool {
         match self {
             Self::BackSync | Self::Gossip(_) | Self::Requested(_) | Self::Api(_) => true,
-            Self::Own => false,
+            Self::Own | Self::Persisted => false,
             Self::Test(bls_setting) => !matches!(bls_setting, BlsSetting::Ignored),
+        }
+    }
+
+    #[must_use]
+    pub const fn state_root_policy(&self) -> StateRootPolicy {
+        match self {
+            Self::BackSync
+            | Self::Gossip(_)
+            | Self::Requested(_)
+            | Self::Own
+            | Self::Api(_)
+            | Self::Test(_) => StateRootPolicy::Verify,
+            Self::Persisted => StateRootPolicy::Trust,
+        }
+    }
+
+    #[must_use]
+    pub const fn data_availability_policy(&self) -> DataAvailabilityPolicy {
+        match self {
+            Self::BackSync
+            | Self::Gossip(_)
+            | Self::Requested(_)
+            | Self::Own
+            | Self::Api(_)
+            | Self::Test(_) => DataAvailabilityPolicy::Check,
+            Self::Persisted => DataAvailabilityPolicy::Trust,
         }
     }
 
     #[must_use]
     pub const fn is_own(&self) -> bool {
         matches!(self, Self::Own)
+    }
+
+    #[must_use]
+    pub const fn is_persisted(&self) -> bool {
+        matches!(self, Self::Persisted)
     }
 
     #[must_use]
@@ -1388,7 +1427,7 @@ impl ProposerPreferencesOrigin {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, AsRefStr)]
 pub enum ExecutionPayloadEnvelopeAction<P: Preset> {
     Accept(Arc<SignedExecutionPayloadEnvelope<P>>),
     Ignore(Publishable),

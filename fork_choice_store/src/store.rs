@@ -41,6 +41,7 @@ use tap::Pipe as _;
 use tracing::{debug_span, instrument};
 use transition_functions::{
     combined,
+    gloas::verify_execution_requests_limits,
     unphased::{self, ProcessSlots, StateRootPolicy},
 };
 use typenum::Unsigned as _;
@@ -3894,6 +3895,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .into());
         };
 
+        // [REJECT] block.slot == payload.slot_number
+        ensure!(
+            block.message().slot() == slot,
+            Error::<P>::ExecutionPayloadEnvelopeBlockSlotMismatch {
+                block_slot: block.message().slot(),
+                envelope_slot: slot,
+            },
+        );
+
         // [REJECT] envelope.builder_index == bid.builder_index
         ensure!(
             builder_index == bid.builder_index,
@@ -3930,7 +3940,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // > Check if blob data is available
         // > If not, this payload MAY be queued and subsequently considered when blob data becomes available
-        if self.should_check_data_availability_at_slot(slot)
+        if origin.data_availability_policy().check()
+            && self.should_check_data_availability_at_slot(slot)
             && !self.indices_of_missing_data_columns(&block).is_empty()
         {
             return Ok(ExecutionPayloadEnvelopeAction::DelayUntilData(
@@ -3946,7 +3957,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             ));
         };
 
-        // [REJECT] block.slot equals envelope.slot
         ensure!(
             state.slot() == slot,
             Error::<P>::ExecutionPayloadEnvelopeSlotMismatch {
@@ -3955,19 +3965,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             },
         );
 
-        let mut header = state.latest_block_header();
+        if matches!(origin.state_root_policy(), StateRootPolicy::Verify) {
+            let mut header = state.latest_block_header();
 
-        header.state_root = state.hash_tree_root();
+            header.state_root = state.hash_tree_root();
 
-        let header_root = header.hash_tree_root();
+            let header_root = header.hash_tree_root();
 
-        ensure!(
-            envelope.message.beacon_block_root == header_root,
-            Error::<P>::ExecutionPayloadBeaconBlockRootMismatch {
-                envelope,
-                expected: Box::new(header_root),
-            },
-        );
+            ensure!(
+                envelope.message.beacon_block_root == header_root,
+                Error::<P>::ExecutionPayloadBeaconBlockRootMismatch {
+                    envelope,
+                    expected: Box::new(header_root),
+                },
+            );
+        }
 
         let parent_beacon_block_root = state.latest_block_header().parent_root;
 
@@ -3976,6 +3988,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             Error::<P>::ExecutionPayloadParentBeaconBlockRootMismatch {
                 envelope,
                 expected: Box::new(parent_beacon_block_root),
+            },
+        );
+
+        // [REJECT] The execution request counts are within their limits
+        verify_execution_requests_limits(&envelope.message.execution_requests)?;
+
+        // [REJECT] The number of withdrawals is within the limit
+        let withdrawal_count = envelope.message.payload.withdrawals.len_usize();
+
+        ensure!(
+            withdrawal_count <= P::MaxWithdrawalsPerPayload::USIZE,
+            Error::<P>::ExecutionPayloadTooManyWithdrawals {
+                in_payload: withdrawal_count,
+                maximum: P::MaxWithdrawalsPerPayload::USIZE,
             },
         );
 
@@ -4687,6 +4713,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         &mut self,
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         is_before_deadline: bool,
+        is_persisted: bool,
     ) {
         let slot = envelope.slot();
         let beacon_block_root = envelope.block_root();
@@ -4701,7 +4728,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.accepted_execution_payload_envelopes
             .insert((slot, beacon_block_root, builder_index));
 
-        self.execution_payload_envelope_cache.insert(envelope);
+        self.execution_payload_envelope_cache
+            .insert(envelope, is_persisted);
     }
 
     pub fn apply_blob_sidecar(&mut self, blob_sidecar: Arc<BlobSidecar<P>>) {
