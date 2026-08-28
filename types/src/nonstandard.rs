@@ -10,6 +10,7 @@ use derivative::Derivative;
 use derive_more::{Constructor, From};
 use enum_iterator::Sequence;
 use enum_map::Enum;
+#[cfg(not(target_os = "zkvm"))]
 use im::{HashMap, Vector, vector::Iter as VectorIter};
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
