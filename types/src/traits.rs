@@ -10,10 +10,13 @@
 // TODO(Grandine Team): GC unused impls for pointers.
 
 use core::fmt::Debug;
+#[cfg(target_os = "zkvm")]
+use std::slice::Iter as VectorIter;
 use std::sync::Arc;
 
 use bls::{AggregateSignatureBytes, PublicKeyBytes, SignatureBytes};
 use duplicate::duplicate_item;
+#[cfg(not(target_os = "zkvm"))]
 use im::vector::Iter as VectorIter;
 use ssz::{
     BitVector, ContiguousList, Hc, IndexError, ProgressiveList, PushError, SszBitList, SszHash,
