@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::Result;
 use generic_array::ArrayLength;
-use ssz::ByteList;
+use ssz::{ByteList, ProgressiveByteList};
 
 pub const GRANDINE_SUCCESS: u32 = 0;
 pub const GRANDINE_ERROR_GENERIC: u32 = 1;
@@ -377,5 +377,14 @@ impl<T: ArrayLength<u8>> TryInto<ByteList<T>> for CVec<u8> {
     fn try_into(self) -> Result<ByteList<T>, Self::Error> {
         let vec: Vec<_> = self.into();
         ByteList::try_from(vec)
+    }
+}
+
+impl<T: ArrayLength<u8>> TryInto<ProgressiveByteList<T>> for CVec<u8> {
+    type Error = ssz::ReadError;
+
+    fn try_into(self) -> Result<ProgressiveByteList<T>, Self::Error> {
+        let vec: Vec<_> = self.into();
+        ProgressiveByteList::try_from(vec)
     }
 }

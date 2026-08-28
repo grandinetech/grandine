@@ -233,7 +233,7 @@ public class GrandineEngineApi : IGrandineEngineApi
                     BlockAccessList = payload.block_access_list.AsSpan().ToArray(),
                     SlotNumber = (ulong)payload.slot_number,
                 },
-                GrandineUtils.ConvertVersionedHashes(*versionedHashesPtr),
+                GrandineUtils.ConvertVersionedHashesToHash256(*versionedHashesPtr),
                 parentBeaconBlockRootConverted,
                 executionRequestsConverted)
             .Result;

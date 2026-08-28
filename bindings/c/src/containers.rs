@@ -14,9 +14,14 @@ use generic_array::ArrayLength;
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite};
 use try_from_iterator::TryFromIterator;
 use types::{
-    bellatrix::primitives::Transaction, deneb::primitives::Blob,
+    bellatrix::primitives::Transaction,
+    deneb::primitives::Blob,
     electra::containers::ExecutionRequests as ElectraExecutionRequests,
-    gloas::containers::ExecutionRequests as GloasExecutionRequests, preset::Mainnet,
+    gloas::{
+        containers::ExecutionRequests as GloasExecutionRequests,
+        primitives::Transaction as GloasTransaction,
+    },
+    preset::Mainnet,
 };
 
 use crate::{
@@ -880,6 +885,21 @@ impl TryInto<Transaction<Mainnet>> for CTransaction {
     fn try_into(self) -> Result<Transaction<Mainnet>, Self::Error> {
         let vec: Vec<_> = self.0.into();
         Transaction::<Mainnet>::try_from(vec)
+    }
+}
+
+impl From<GloasTransaction<Mainnet>> for CTransaction {
+    fn from(value: GloasTransaction<Mainnet>) -> Self {
+        CTransaction(value.as_bytes().into())
+    }
+}
+
+impl TryInto<GloasTransaction<Mainnet>> for CTransaction {
+    type Error = ssz::ReadError;
+
+    fn try_into(self) -> Result<GloasTransaction<Mainnet>, Self::Error> {
+        let vec: Vec<_> = self.0.into();
+        GloasTransaction::<Mainnet>::try_from(vec)
     }
 }
 
