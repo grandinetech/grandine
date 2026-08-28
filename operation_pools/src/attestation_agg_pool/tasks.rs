@@ -9,7 +9,7 @@ use bls::{PublicKeyBytes, traits::Signature as _};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::StateCacheError;
-use helper_functions::accessors;
+use helper_functions::{accessors, misc};
 use logging::{exception, info_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
 use std_ext::ArcExt as _;
@@ -436,23 +436,35 @@ fn acceptable_attestation_targets_for_packing<'a, P: Preset, W: Wait>(
     dependent_root_epoch: Epoch,
     attestations: impl IntoIterator<Item = &'a PoolAttestation<P>>,
 ) -> HashSet<H256> {
+    let dependent_root_slot = misc::compute_start_slot_at_epoch::<P>(dependent_root_epoch);
+
     attestations
         .into_iter()
         .map(|attestation| attestation.data.target)
         .collect::<HashSet<_>>()
         .into_iter()
         .filter_map(|target| {
-            info_with_peers!("attestation packet getting target state for {target:?}");
+            info_with_peers!("attestation packer getting target state for {target:?}");
 
             // `BestProposableAttestationsTask` and `PackProposableAttestationsTask` already run in `DedicatedExecutor`
-            // Attestation target validity is already checked before attestation is submitted to the pool
-            let target_state = controller.checkpoint_state_blocking(target).ok()??;
+            // Attestation target validity is already checked before attestation is submitted to the pool.
+            // To check target dependent root, there is no need to do slot processing for lagging targets.
+            // The state at older slot is sufficient.
+            let target_state = controller.checkpoint_state_before_or_at(target)?;
 
-            info_with_peers!("attestation packet got target state for {target:?}");
+            info_with_peers!("attestation packer got target state for {target:?}");
 
-            let target_dependent_root = controller.dependent_root(&target_state, dependent_root_epoch).expect(
-                "only previous and current epoch attestations are selected from the pool, they should never have their target slots from the future",
-            );
+            let target_dependent_root =
+                if dependent_root_slot <= target_state.slot() {
+                    controller.dependent_root(&target_state, dependent_root_epoch).expect(
+                        "only previous and current epoch attestations are selected from the pool, \
+                        they should never have their target slots from the future",
+                    )
+                } else {
+                    // The target state is lagging behind. Processing empty slots will result target root to
+                    // become dependent root at given slot
+                    target.root
+                };
 
             (target_dependent_root == dependent_root).then_some(target.root)
         })

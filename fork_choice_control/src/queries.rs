@@ -180,6 +180,14 @@ where
         }
     }
 
+    #[must_use]
+    pub fn checkpoint_state_before_or_at(
+        &self,
+        checkpoint: Checkpoint,
+    ) -> Option<Arc<BeaconState<P>>> {
+        self.snapshot().checkpoint_state_before_or_at(checkpoint)
+    }
+
     pub fn checkpoint_state_blocking(
         &self,
         checkpoint: Checkpoint,
@@ -1251,6 +1259,22 @@ impl<P: Preset> Snapshot<'_, P> {
         self.store_snapshot
             .cached_execution_payload_envelope_by_root(block_root)
             .cloned()
+    }
+
+    #[must_use]
+    pub fn checkpoint_state_before_or_at(
+        &self,
+        checkpoint: Checkpoint,
+    ) -> Option<Arc<BeaconState<P>>> {
+        if let Some(state) = self.store_snapshot.checkpoint_state(checkpoint) {
+            return Some(state.clone_arc());
+        }
+
+        let Checkpoint { epoch, root } = checkpoint;
+        let slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+
+        self.state_cache
+            .before_or_at_slot(&self.store_snapshot, root, slot)
     }
 
     pub fn checkpoint_state_blocking(
