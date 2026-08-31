@@ -2826,6 +2826,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 return Ok(());
             };
 
+            // `ValidatorRegistrationV1` is deprecated in Gloas in favor of `ProposerPreferences`.
+            if chain_config.phase_at_epoch(current_epoch) >= Phase::Gloas {
+                return Ok(());
+            }
+
             let registrations = pubkeys
                 .into_iter()
                 .map(|pubkey| {
