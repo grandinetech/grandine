@@ -405,7 +405,7 @@ pub async fn run_after_genesis<P: Preset>(
         let (pool_tx, pool_to_liveness_rx) = mpsc::unbounded();
         let (validator_tx, validator_to_liveness_rx) = mpsc::unbounded();
 
-        api_to_liveness_tx = Some(api_tx.clone());
+        api_to_liveness_tx = Some(api_tx);
         pool_to_liveness_tx = Some(pool_tx);
         validator_to_liveness_tx = Some(validator_tx);
 
@@ -418,7 +418,7 @@ pub async fn run_after_genesis<P: Preset>(
         ));
 
         let doppelganger_protection =
-            detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new(api_tx)));
+            detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new()));
 
         (liveness_tracker, doppelganger_protection)
     } else {
@@ -428,10 +428,7 @@ pub async fn run_after_genesis<P: Preset>(
     if let Some(doppelganger_protection) = doppelganger_protection.as_ref() {
         signer.enable_doppelganger_protection(doppelganger_protection);
 
-        signer.update_doppelganger_protection_pubkeys(
-            &controller.head_state().value,
-            controller.slot(),
-        );
+        signer.update_doppelganger_protection_pubkeys(controller.slot());
     }
 
     let data_dumper = Arc::new(DataDumper::new(&controller.chain_config().config_name)?);
@@ -641,6 +638,7 @@ pub async fn run_after_genesis<P: Preset>(
     ));
 
     let validator_channels = ValidatorChannels {
+        api_to_liveness_tx: api_to_liveness_tx.clone(),
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
         p2p_tx: validator_to_p2p_tx,

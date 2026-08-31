@@ -1,3 +1,4 @@
+use core::future::Future;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -6,13 +7,10 @@ use std::{
 use anyhow::{Result, ensure};
 use arc_swap::{ArcSwap, Guard};
 use bls::PublicKeyBytes;
-use futures::channel::mpsc::UnboundedSender;
-use helper_functions::{accessors, misc};
-use liveness_tracker::ApiToLiveness;
+use helper_functions::misc;
 use logging::warn_with_peers;
 use typenum::Unsigned as _;
 use types::{
-    combined::BeaconState,
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
         primitives::{Epoch, Slot, ValidatorIndex},
@@ -24,27 +22,24 @@ use crate::error::Error;
 
 const DOPPELGANGER_CHECK_DURATION_IN_EPOCHS: Epoch = 2;
 
-#[derive(Clone, Copy)]
-struct TrackedValidator {
-    added_in_slot: Slot,
-    validator_index: ValidatorIndex,
-}
-
+#[derive(Default)]
 pub struct DoppelgangerProtection {
     snapshot: ArcSwap<Snapshot>,
-    liveness_checker: LivenessChecker,
 }
 
 impl DoppelgangerProtection {
     #[must_use]
-    pub fn new(liveness_tx: UnboundedSender<ApiToLiveness>) -> Self {
-        Self {
-            snapshot: ArcSwap::from_pointee(Snapshot::default()),
-            liveness_checker: LivenessChecker::Live { liveness_tx },
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn activate_validators_that_pass_checks<P: Preset>(&self, current_slot: Slot) {
+    /// Only validators whose liveness the checks could cover are activated; time alone does not
+    /// clear one whose index is still unknown.
+    fn activate_validators_that_pass_checks<P: Preset>(
+        &self,
+        current_slot: Slot,
+        checked: &HashMap<PublicKeyBytes, ValidatorIndex>,
+    ) {
         let check_duration_in_slots =
             DOPPELGANGER_CHECK_DURATION_IN_EPOCHS.saturating_mul(P::SlotsPerEpoch::U64);
 
@@ -52,12 +47,10 @@ impl DoppelgangerProtection {
             .load()
             .tracked_validators
             .iter()
-            .map(|(public_key, validator)| (*public_key, *validator))
-            .partition(|(_, validator)| {
-                validator
-                    .added_in_slot
-                    .saturating_add(check_duration_in_slots)
-                    <= current_slot
+            .map(|(public_key, added_in_slot)| (*public_key, *added_in_slot))
+            .partition(|(public_key, added_in_slot)| {
+                checked.contains_key(public_key)
+                    && added_in_slot.saturating_add(check_duration_in_slots) <= current_slot
             });
 
         if validators_to_activate.is_empty() {
@@ -77,10 +70,9 @@ impl DoppelgangerProtection {
         });
     }
 
-    pub fn add_tracked_validators<P: Preset>(
+    pub fn add_tracked_validators(
         &self,
         public_keys: impl IntoIterator<Item = PublicKeyBytes>,
-        beacon_state: &BeaconState<P>,
         current_slot: Slot,
     ) {
         let snapshot = self.load();
@@ -110,69 +102,86 @@ impl DoppelgangerProtection {
             let mut snapshot = snapshot.as_ref().clone();
 
             for public_key in &filtered_public_keys {
-                match accessors::index_of_public_key(beacon_state, public_key) {
-                    Some(validator_index) => {
-                        snapshot.tracked_validators
-                            .entry(*public_key)
-                            .or_insert(TrackedValidator {
-                                added_in_slot: current_slot,
-                                validator_index,
-                            });
-                    }
-                    None => {
-                        warn_with_peers!(
-                            "validator with public key {public_key:?} was not found in beacon state!",
-                        );
-                    }
-                }
+                // The validator index is resolved when the checks run, as a key may be tracked
+                // before its deposit is processed.
+                snapshot
+                    .tracked_validators
+                    .entry(*public_key)
+                    .or_insert(current_slot);
             }
 
             snapshot
         });
     }
 
-    pub async fn detect_doppelgangers<P: Preset>(&self, current_slot: Slot) -> Result<()> {
-        self.activate_validators_that_pass_checks::<P>(current_slot);
+    /// Detects doppelgangers among the tracked validators, with their indices supplied by
+    /// `indices_by_pubkey` and their liveness by `check_liveness`.
+    pub async fn detect_doppelgangers<P: Preset, F, Fut>(
+        &self,
+        current_slot: Slot,
+        indices_by_pubkey: &HashMap<PublicKeyBytes, ValidatorIndex>,
+        check_liveness: F,
+    ) -> Result<()>
+    where
+        F: Fn(Epoch, Vec<ValidatorIndex>) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<Vec<(ValidatorIndex, bool)>>> + Send,
+    {
+        let mut checked = HashMap::new();
+        let mut validator_indices_with_pubkeys = HashMap::new();
 
-        let validator_indices_with_pubkeys = self
-            .load()
-            .tracked_validators
-            .iter()
-            .map(|(pubkey, validator)| (validator.validator_index, *pubkey))
-            .collect::<HashMap<_, _>>();
-
-        if validator_indices_with_pubkeys.is_empty() {
-            return Ok(());
+        for public_key in self.load().tracked_validators.keys() {
+            match indices_by_pubkey.get(public_key) {
+                Some(validator_index) => {
+                    checked.insert(*public_key, *validator_index);
+                    validator_indices_with_pubkeys.insert(*validator_index, *public_key);
+                }
+                None => warn_with_peers!(
+                    "liveness of validator with public key {public_key:?} cannot be checked \
+                     until its index is known; it will not perform duties",
+                ),
+            }
         }
 
-        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+        if !validator_indices_with_pubkeys.is_empty() {
+            let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
-        if current_epoch > GENESIS_EPOCH {
-            self.detect_doppelgangers_in_epoch(
-                current_epoch.saturating_sub(1),
+            if current_epoch > GENESIS_EPOCH {
+                Self::detect_doppelgangers_in_epoch(
+                    current_epoch.saturating_sub(1),
+                    &validator_indices_with_pubkeys,
+                    &check_liveness,
+                )
+                .await?;
+            }
+
+            Self::detect_doppelgangers_in_epoch(
+                current_epoch,
                 &validator_indices_with_pubkeys,
+                &check_liveness,
             )
             .await?;
         }
 
-        self.detect_doppelgangers_in_epoch(current_epoch, &validator_indices_with_pubkeys)
-            .await?;
+        // Activation comes after the checks so that a failed liveness query postpones it.
+        self.activate_validators_that_pass_checks::<P>(current_slot, &checked);
 
         Ok(())
     }
 
-    async fn detect_doppelgangers_in_epoch(
-        &self,
+    async fn detect_doppelgangers_in_epoch<F, Fut>(
         epoch: Epoch,
         validator_indices_with_pubkeys: &HashMap<ValidatorIndex, PublicKeyBytes>,
-    ) -> Result<()> {
-        let liveness = self
-            .liveness_checker
-            .check_liveness(
-                epoch,
-                validator_indices_with_pubkeys.keys().copied().collect(),
-            )
-            .await?;
+        check_liveness: &F,
+    ) -> Result<()>
+    where
+        F: Fn(Epoch, Vec<ValidatorIndex>) -> Fut + Send + Sync,
+        Fut: Future<Output = Result<Vec<(ValidatorIndex, bool)>>> + Send,
+    {
+        let liveness = check_liveness(
+            epoch,
+            validator_indices_with_pubkeys.keys().copied().collect(),
+        )
+        .await?;
 
         let public_keys = liveness
             .into_iter()
@@ -201,23 +210,14 @@ impl DoppelgangerProtection {
     {
         self.snapshot.rcu(f)
     }
-
-    #[cfg(test)]
-    #[must_use]
-    pub fn new_with_mock_liveness(liveness: HashMap<Epoch, Vec<(ValidatorIndex, bool)>>) -> Self {
-        Self {
-            snapshot: ArcSwap::from_pointee(Snapshot::default()),
-            liveness_checker: LivenessChecker::Mock { liveness },
-        }
-    }
 }
 
 #[derive(Clone, Default)]
 pub struct Snapshot {
     // Validators that are already active and have passed doppelganger protection checks
     active_validators: HashSet<PublicKeyBytes>,
-    // Validators that are tracked by doppelganger protection
-    tracked_validators: HashMap<PublicKeyBytes, TrackedValidator>,
+    // Validators that are tracked by doppelganger protection, by the slot they were added in
+    tracked_validators: HashMap<PublicKeyBytes, Slot>,
 }
 
 impl Snapshot {
@@ -228,8 +228,8 @@ impl Snapshot {
     pub fn tracking_end_slot<P: Preset>(&self, public_key: PublicKeyBytes) -> Slot {
         self.tracked_validators
             .get(&public_key)
-            .map(|validator| {
-                validator.added_in_slot.saturating_add(
+            .map(|added_in_slot| {
+                added_in_slot.saturating_add(
                     DOPPELGANGER_CHECK_DURATION_IN_EPOCHS.saturating_mul(P::SlotsPerEpoch::U64),
                 )
             })
@@ -237,47 +237,38 @@ impl Snapshot {
     }
 }
 
-enum LivenessChecker {
-    Live {
-        liveness_tx: UnboundedSender<ApiToLiveness>,
-    },
-    #[cfg(test)]
-    Mock {
-        liveness: HashMap<Epoch, Vec<(ValidatorIndex, bool)>>,
-    },
-}
-
-impl LivenessChecker {
-    pub async fn check_liveness(
-        &self,
-        epoch: Epoch,
-        validator_indices: Vec<ValidatorIndex>,
-    ) -> Result<Vec<(ValidatorIndex, bool)>> {
-        match self {
-            Self::Live { liveness_tx } => {
-                let (sender, receiver) = futures::channel::oneshot::channel();
-
-                ApiToLiveness::CheckLiveness(sender, epoch, validator_indices).send(liveness_tx);
-
-                receiver.await?
-            }
-            #[cfg(test)]
-            Self::Mock { liveness } => Ok(liveness.get(&epoch).cloned().unwrap_or_default()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use core::future::{Ready, ready};
+
+    use helper_functions::accessors;
     use pubkey_cache::PubkeyCache;
-    use types::{config::Config, preset::Minimal};
+    use types::{combined::BeaconState, config::Config, preset::Minimal};
 
     use super::*;
 
     fn doppelganger_protection() -> DoppelgangerProtection {
-        let liveness = [(GENESIS_EPOCH, vec![(0, false), (1, true)])].into();
+        DoppelgangerProtection::new()
+    }
 
-        DoppelgangerProtection::new_with_mock_liveness(liveness)
+    fn mock_liveness(
+        epoch: Epoch,
+        _validator_indices: Vec<ValidatorIndex>,
+    ) -> Ready<Result<Vec<(ValidatorIndex, bool)>>> {
+        let liveness: HashMap<Epoch, Vec<(ValidatorIndex, bool)>> =
+            [(GENESIS_EPOCH, vec![(0, false), (1, true)])].into();
+
+        ready(Ok(liveness.get(&epoch).cloned().unwrap_or_default()))
+    }
+
+    fn indices_by_pubkey(
+        state: &BeaconState<Minimal>,
+        validator_indices: impl IntoIterator<Item = ValidatorIndex>,
+    ) -> HashMap<PublicKeyBytes, ValidatorIndex> {
+        validator_indices
+            .into_iter()
+            .map(|validator_index| (validator_pubkey(state, validator_index), validator_index))
+            .collect()
     }
 
     fn minimal_beacon_state() -> Arc<BeaconState<Minimal>> {
@@ -300,7 +291,7 @@ mod tests {
         let state = minimal_beacon_state();
         let pubkey = validator_pubkey(&state, 0);
 
-        doppelganger_protection.add_tracked_validators([pubkey], &state, GENESIS_SLOT);
+        doppelganger_protection.add_tracked_validators([pubkey], GENESIS_SLOT);
 
         let is_active = || doppelganger_protection.load().is_validator_active(pubkey);
 
@@ -312,28 +303,62 @@ mod tests {
         let doppelganger_protection = doppelganger_protection();
         let state = minimal_beacon_state();
         let pubkey = validator_pubkey(&state, 0);
+        let indices = indices_by_pubkey(&state, [0]);
         let added_at_slot = GENESIS_SLOT + 1;
 
-        doppelganger_protection.add_tracked_validators([pubkey], &state, added_at_slot);
+        doppelganger_protection.add_tracked_validators([pubkey], added_at_slot);
 
         let is_active = || doppelganger_protection.load().is_validator_active(pubkey);
 
         assert!(!is_active());
 
         doppelganger_protection
-            .detect_doppelgangers::<Minimal>(added_at_slot + 1)
+            .detect_doppelgangers::<Minimal, _, _>(added_at_slot + 1, &indices, mock_liveness)
             .await?;
 
         assert!(!is_active());
 
         doppelganger_protection
-            .detect_doppelgangers::<Minimal>(added_at_slot + 15)
+            .detect_doppelgangers::<Minimal, _, _>(added_at_slot + 15, &indices, mock_liveness)
             .await?;
 
         assert!(!is_active());
 
         doppelganger_protection
-            .detect_doppelgangers::<Minimal>(added_at_slot + 16)
+            .detect_doppelgangers::<Minimal, _, _>(added_at_slot + 16, &indices, mock_liveness)
+            .await?;
+
+        assert!(is_active());
+
+        Ok(())
+    }
+
+    // A validator whose index is not resolved yet is neither checked nor activated on time alone.
+    #[tokio::test]
+    async fn test_validator_with_unknown_index_is_not_activated() -> Result<()> {
+        let doppelganger_protection = doppelganger_protection();
+        let state = minimal_beacon_state();
+        let pubkey = validator_pubkey(&state, 0);
+        let added_at_slot = GENESIS_SLOT + 1;
+
+        doppelganger_protection.add_tracked_validators([pubkey], added_at_slot);
+
+        let is_active = || doppelganger_protection.load().is_validator_active(pubkey);
+
+        doppelganger_protection
+            .detect_doppelgangers::<Minimal, _, _>(
+                added_at_slot + 16,
+                &HashMap::new(),
+                mock_liveness,
+            )
+            .await?;
+
+        assert!(!is_active());
+
+        let indices = indices_by_pubkey(&state, [0]);
+
+        doppelganger_protection
+            .detect_doppelgangers::<Minimal, _, _>(added_at_slot + 17, &indices, mock_liveness)
             .await?;
 
         assert!(is_active());
@@ -349,11 +374,11 @@ mod tests {
 
         let is_active = || doppelganger_protection.load().is_validator_active(pubkey);
 
-        doppelganger_protection.add_tracked_validators([pubkey], &state, GENESIS_SLOT);
+        doppelganger_protection.add_tracked_validators([pubkey], GENESIS_SLOT);
 
         assert!(is_active());
 
-        doppelganger_protection.add_tracked_validators([pubkey], &state, GENESIS_SLOT + 40);
+        doppelganger_protection.add_tracked_validators([pubkey], GENESIS_SLOT + 40);
 
         assert!(is_active());
     }
@@ -363,13 +388,14 @@ mod tests {
         let doppelganger_protection = doppelganger_protection();
         let state = minimal_beacon_state();
         let pubkey = validator_pubkey(&state, 1);
+        let indices = indices_by_pubkey(&state, [1]);
         let added_at_slot = GENESIS_SLOT + 1;
 
-        doppelganger_protection.add_tracked_validators([pubkey], &state, added_at_slot);
+        doppelganger_protection.add_tracked_validators([pubkey], added_at_slot);
 
         assert_eq!(
             doppelganger_protection
-                .detect_doppelgangers::<Minimal>(added_at_slot + 1)
+                .detect_doppelgangers::<Minimal, _, _>(added_at_slot + 1, &indices, mock_liveness)
                 .await
                 .expect_err("a doppelganger should be detected")
                 .downcast::<Error>()?,

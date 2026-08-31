@@ -5,7 +5,8 @@ pub use helpers::{
 };
 pub use misc::{
     ApiMetrics, BlockHeadersResponse, Direction, ETH_CONSENSUS_VERSION,
-    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorSyncDutyResponse,
 };
 pub use response::{AlwaysJson, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz};
 pub use state_id::StateId;

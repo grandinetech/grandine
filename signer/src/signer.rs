@@ -24,7 +24,6 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::instrument;
 use types::{
-    combined::BeaconState,
     phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
     redacting_url::RedactingUrl,
@@ -143,16 +142,12 @@ impl Signer {
         self.snapshot.rcu(f)
     }
 
-    pub fn update_doppelganger_protection_pubkeys<P: Preset>(
-        &self,
-        beacon_state: &BeaconState<P>,
-        current_slot: Slot,
-    ) {
+    pub fn update_doppelganger_protection_pubkeys(&self, current_slot: Slot) {
         let snapshot = self.load();
         let public_keys = snapshot.keys().copied();
 
         if let Some(doppelganger_protection) = &snapshot.doppelganger_protection {
-            doppelganger_protection.add_tracked_validators(public_keys, beacon_state, current_slot);
+            doppelganger_protection.add_tracked_validators(public_keys, current_slot);
         }
     }
 }

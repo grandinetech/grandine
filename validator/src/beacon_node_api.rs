@@ -7,7 +7,8 @@ use std::{
 use anyhow::Result;
 use bls::PublicKeyBytes;
 use http_api_utils::{
-    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorSyncDutyResponse,
 };
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use types::{
@@ -44,6 +45,13 @@ pub trait BeaconNodeApi<P: Preset> {
         &self,
         public_keys: &[PublicKeyBytes],
     ) -> impl Future<Output = Result<HashMap<PublicKeyBytes, ValidatorIndex>>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/getLiveness>
+    fn liveness(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> impl Future<Output = Result<Vec<ValidatorLivenessResponse>>> + Send;
 
     fn dependent_root(
         &self,

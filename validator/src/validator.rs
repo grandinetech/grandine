@@ -20,7 +20,7 @@ use clock::{Tick, TickKind};
 use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
 use derive_more::Display;
-use doppelganger_protection::DoppelgangerProtection;
+use doppelganger_protection::{DoppelgangerProtection, Error as DoppelgangerProtectionError};
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
@@ -42,7 +42,7 @@ use helper_functions::{
 };
 use itertools::Itertools as _;
 use keymanager::ProposerConfigs;
-use liveness_tracker::ValidatorToLiveness;
+use liveness_tracker::{ApiToLiveness, ValidatorToLiveness};
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use once_cell::sync::OnceCell;
 use operation_pools::{
@@ -149,6 +149,7 @@ struct HeadFarBehind {
 assert_not_impl_any!(HeadFarBehind: StdError);
 
 pub struct Channels<P: Preset, W> {
+    pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
     pub api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
     pub fork_choice_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
     pub p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
@@ -202,6 +203,7 @@ pub struct Validator<P: Preset, W: Wait> {
     validator_statistics: Option<Arc<ValidatorStatistics>>,
     internal_tx: UnboundedSender<InternalMessage>,
     internal_rx: UnboundedReceiver<InternalMessage>,
+    api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
     last_cgc_update_epoch: Option<Epoch>,
@@ -257,6 +259,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let mode = ValidatorMode::new(disable_local_beacon_node, !remote_beacon_nodes.is_empty());
 
         let Channels {
+            api_to_liveness_tx,
             api_to_validator_rx,
             fork_choice_rx,
             p2p_tx,
@@ -315,6 +318,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             validator_statistics,
             internal_rx,
             internal_tx,
+            api_to_liveness_tx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
             last_cgc_update_epoch: None,
@@ -344,6 +348,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     self.signer.clone_arc(),
                     self.p2p_tx.clone(),
                     self.subnet_service_tx.clone(),
+                    self.api_to_liveness_tx.clone(),
                     wait_group.clone(),
                 )
             });
@@ -396,12 +401,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .check_on_startup(self.controller.slot())
             .await?;
         self.remote_beacon_nodes.spawn_head_streams::<P>();
-        self.run_internal().await;
-
-        Ok(())
+        self.run_internal().await
     }
 
-    async fn run_internal(mut self) {
+    async fn run_internal(mut self) -> Result<()> {
         let mut health_check = HealthCheck::new("validator");
 
         loop {
@@ -419,7 +422,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 message = self.internal_rx.select_next_some() => match message {
                     InternalMessage::DoppelgangerProtectionResult(result) => {
                         if let Err(error) = result {
-                            panic!("Doppelganger protection error: {error}");
+                            // The typed error must reach the application restart loop intact:
+                            // it exits for good on `DoppelgangersDetected` instead of retrying.
+                            if error.downcast_ref::<DoppelgangerProtectionError>().is_some() {
+                                return Err(error);
+                            }
+
+                            // A failed liveness query postpones activation instead.
+                            warn_with_peers!("doppelganger liveness check failed: {error:?}");
                         }
                     }
                 },
@@ -510,6 +520,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 complete => break,
             }
         }
+
+        Ok(())
     }
 
     #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
@@ -886,10 +898,34 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         {
             let doppelganger_protection = doppelganger_protection.clone_arc();
             let internal_tx = self.internal_tx.clone();
+            let beacon_nodes = self.beacon_nodes(&duty_source, &wait_group);
+            let own_validator_indices = self.own_validator_indices.clone_arc();
 
             tokio::spawn(async move {
+                own_validator_indices
+                    .update(&beacon_nodes, misc::compute_epoch_at_slot::<P>(slot))
+                    .await;
+
+                let indices_by_pubkey = own_validator_indices.indices_by_pubkey().await;
+
                 let result = doppelganger_protection
-                    .detect_doppelgangers::<P>(slot)
+                    .detect_doppelgangers::<P, _, _>(
+                        slot,
+                        &indices_by_pubkey,
+                        |epoch, validator_indices| {
+                            let beacon_nodes = &beacon_nodes;
+
+                            async move {
+                                let liveness =
+                                    beacon_nodes.liveness(epoch, &validator_indices).await?;
+
+                                Ok(liveness
+                                    .into_iter()
+                                    .map(|response| (response.index, response.is_live))
+                                    .collect())
+                            }
+                        },
+                    )
                     .await;
 
                 InternalMessage::DoppelgangerProtectionResult(result).send(&internal_tx);
@@ -2995,12 +3031,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[instrument(level = "debug", skip_all)]
     fn refresh_signer_keys(&self) {
         let signer = self.signer.clone_arc();
-        let head_state = self.controller.head_state().value;
         let current_slot = self.controller.slot();
 
         tokio::spawn(async move {
             signer.load_keys_from_web3signer().await;
-            signer.update_doppelganger_protection_pubkeys(&head_state, current_slot);
+            signer.update_doppelganger_protection_pubkeys(current_slot);
         });
     }
 

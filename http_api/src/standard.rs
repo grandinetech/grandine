@@ -39,7 +39,8 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use http_api_utils::{
     BlockHeadersResponse, BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId,
-    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorSyncDutyResponse,
 };
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
@@ -477,13 +478,6 @@ pub struct ValidatorProposerDutyResponse {
     validator_index: ValidatorIndex,
     #[serde(with = "serde_utils::string_or_native")]
     slot: Slot,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorLivenessResponse {
-    #[serde(with = "serde_utils::string_or_native")]
-    index: ValidatorIndex,
-    is_live: bool,
 }
 
 /// `GET /eth/v1/beacon/genesis`
