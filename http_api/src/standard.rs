@@ -22,7 +22,10 @@ use axum::{
 use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
-use builder_api::unphased::containers::SignedValidatorRegistrationV1;
+use builder_api::{
+    gloas::containers::BuilderConfig as GloasBuilderConfig,
+    unphased::containers::SignedValidatorRegistrationV1,
+};
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
@@ -129,7 +132,7 @@ use crate::{
     extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{
-        APIBlock, BlockContents, BroadcastValidation,
+        APIBlock, BlockContents, BroadcastValidation, BuilderConfigPhaseDeserializer,
         PayloadAttestationMessageListPhaseDeserializer, SignedAPIBlock,
         SignedAPIBlockPhaseDeserializer, SignedAggregateAndProofListFromPhaseDeserializer,
         SignedBlindedBeaconPhaseDeserializer, SignedExecutionPayloadBidPhaseDeserializer,
@@ -236,7 +239,6 @@ pub struct ValidatorBlockQueryV4 {
     skip_randao_verification: bool,
     #[serde(default = "serde_aux::field_attributes::bool_true")]
     include_payload: bool,
-    builder_boost_factor: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -1843,6 +1845,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let phase = controller.chain_config().phase_at_slot::<P>(slot);
 
     if phase >= Phase::Gloas {
+        // TODO(gloas): forward the block to the builder named by the `Eth-Builder-Url` header.
         // Only publish signed beacon block for post-Gloas
         publish_signed_block_v2(
             Arc::new(signed_beacon_block),
@@ -3558,7 +3561,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         .execution_payload_value(mev.unwrap_or_default()))
 }
 
-/// `GET /eth/v4/validator/blocks/{slot}`
+/// `POST /eth/v4/validator/blocks/{slot}`
 #[expect(clippy::type_complexity)]
 #[instrument(skip_all, level = "debug", name = "http_api::validator_block_v4")]
 pub async fn validator_block_v4<P: Preset, W: Wait>(
@@ -3569,14 +3572,34 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV4>,
     headers: HeaderMap,
+    EthJsonOrSsz(builder_config, _): EthJsonOrSsz<
+        GloasBuilderConfig,
+        BuilderConfigPhaseDeserializer,
+    >,
 ) -> Result<EthResponse<APIBlock<BeaconBlock<P>, P>, (), JsonOrSsz>, Error> {
     let ValidatorBlockQueryV4 {
         randao_reveal,
         graffiti,
         skip_randao_verification,
         include_payload,
-        builder_boost_factor,
     } = query;
+
+    // The SSZ body decodes regardless of phase.
+    let phase = http_api_utils::extract_phase_from_headers(&headers)?;
+
+    if phase < Phase::Gloas {
+        return Err(Error::InvalidPhase {
+            expected: Phase::Gloas,
+            got: phase,
+        });
+    }
+
+    // TODO: request bids from `builders` over the builder API.
+    let GloasBuilderConfig {
+        min_bid: _,
+        builder_boost_factor,
+        builders: _,
+    } = builder_config;
 
     if skip_randao_verification && !randao_reveal.is_empty() {
         return Err(Error::InvalidRandaoReveal);
@@ -3593,10 +3616,6 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
 
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
 
-    let builder_boost_factor = builder_boost_factor
-        .map(Uint256::from_u64)
-        .unwrap_or(validator_config.default_builder_boost_factor);
-
     let block_build_context = block_producer.new_build_context(
         beacon_state.clone_arc(),
         head_block_root,
@@ -3605,7 +3624,7 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
             graffiti,
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
-            builder_boost_factor,
+            builder_boost_factor: Uint256::from_u64(builder_boost_factor),
         },
     );
 
@@ -3662,6 +3681,8 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         validator_block.into()
     };
 
+    // TODO: missing `Eth-Builder-Url` response header as beacon node does not
+    // request any bid from given builders yet
     Ok(EthResponse::json_or_ssz(api_block, &headers)?
         .version(version)
         .consensus_block_value(consensus_block_value)
