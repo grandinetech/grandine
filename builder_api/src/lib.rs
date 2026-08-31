@@ -30,6 +30,11 @@ mod fulu {
     pub mod containers;
 }
 
+pub mod gloas {
+    mod builder_url;
+    pub mod containers;
+}
+
 mod api;
 mod config;
 mod signing;
