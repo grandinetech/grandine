@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use futures::future::join_all;
 use logging::{info_with_peers, warn_with_peers};
 use std_ext::ArcExt;
-use types::phase0::primitives::Slot;
+use types::{phase0::primitives::Slot, preset::Preset};
 
 use crate::{chain_head::stream_head_events, health::Health, remote_beacon_node::RemoteBeaconNode};
 
@@ -19,8 +19,8 @@ impl RemoteBeaconNodes {
         Self { nodes }
     }
 
-    pub fn spawn_head_streams(&self) {
-        tokio::spawn(stream_head_events(
+    pub fn spawn_head_streams<P: Preset>(&self) {
+        tokio::spawn(stream_head_events::<P>(
             self.nodes.iter().map(ArcExt::clone_arc).collect(),
         ));
     }
@@ -42,7 +42,7 @@ impl RemoteBeaconNodes {
     }
 
     async fn refresh(&self, slot: Slot) -> (usize, usize) {
-        join_all(self.nodes.iter().map(|node| node.refresh_health())).await;
+        join_all(self.nodes.iter().map(|node| node.refresh_health(slot))).await;
         join_all(self.nodes.iter().map(|node| node.refresh_head(slot))).await;
 
         let ready = self.count(Health::is_ready);

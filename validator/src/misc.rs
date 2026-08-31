@@ -85,7 +85,7 @@ impl ValidatorMode {
         matches!(self, Self::LocalWithRemotes | Self::RemoteOnly)
     }
 
-    /// Blocks and payload attestations are produced by the built-in beacon node alone.
+    /// Blocks are produced by the built-in beacon node alone.
     #[must_use]
     pub const fn supports_block_production(self) -> bool {
         self.uses_local_node()

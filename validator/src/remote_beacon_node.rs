@@ -12,12 +12,11 @@ use std::{
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
 use bls::PublicKeyBytes;
 use derive_more::Display;
-use fork_choice_control::HeadEvent;
 use futures::{Stream, StreamExt as _, future};
 use helper_functions::misc;
 use http_api_utils::{
     BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
-    ValidatorSyncDutyResponse,
+    ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
 };
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
@@ -36,7 +35,9 @@ use types::{
     combined::{Attestation, SignedAggregateAndProof},
     config::Config as ChainConfig,
     electra::containers::Attestation as ElectraAttestation,
-    gloas::containers::Attestation as GloasAttestation,
+    gloas::containers::{
+        Attestation as GloasAttestation, PayloadAttestationData, PayloadAttestationMessage,
+    },
     nonstandard::{ForkInfo, OwnAttestation, Phase},
     phase0::containers::Attestation as Phase0Attestation,
     phase0::{
@@ -49,8 +50,8 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi},
-    chain_head::ChainHead,
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, PtcDuties},
+    chain_head::{ChainHead, DependentRoots, HeadUpdate},
     health::Health,
     slot_head::SlotHead,
 };
@@ -90,6 +91,15 @@ enum Error {
          that does not match the request"
     )]
     UnexpectedContribution { url: String },
+    #[error(
+        "beacon node at {url} returned payload attestation data for slot {actual} \
+         where slot {expected} was requested"
+    )]
+    UnexpectedPayloadAttestationSlot {
+        url: String,
+        expected: Slot,
+        actual: Slot,
+    },
     #[error(
         "beacon node returned an aggregate covering committees {actual:?} \
          where only committee {expected} was requested"
@@ -131,6 +141,83 @@ struct StateValidator {
 #[derive(Deserialize)]
 struct ValidatorPublicKey {
     pubkey: PublicKeyBytes,
+}
+
+/// The deprecated `head` event, whose dependent roots are named by duty period.
+#[derive(Deserialize)]
+struct HeadEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    slot: Slot,
+    block: H256,
+    previous_duty_dependent_root: H256,
+    current_duty_dependent_root: H256,
+    execution_optimistic: bool,
+}
+
+/// The `head_v2` event, whose dependent roots are named by the epoch they determine.
+#[derive(Deserialize)]
+struct HeadV2Event {
+    data: HeadV2EventData,
+}
+
+#[derive(Deserialize)]
+struct HeadV2EventData {
+    #[serde(with = "serde_utils::string_or_native")]
+    slot: Slot,
+    block: H256,
+    current_epoch_dependent_root: H256,
+    next_epoch_dependent_root: H256,
+    execution_optimistic: bool,
+}
+
+const HEAD_EVENT: &str = "head";
+const HEAD_V2_EVENT: &str = "head_v2";
+
+/// A `head` or `head_v2` event, told apart by shape: only `head_v2` nests under `data`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AnyHeadEvent {
+    V2(HeadV2Event),
+    V1(HeadEvent),
+}
+
+impl AnyHeadEvent {
+    fn parse<P: Preset>(data: &str) -> Result<HeadUpdate> {
+        serde_json::from_str::<Self>(data)
+            .map(Self::into_update::<P>)
+            .map_err(Into::into)
+    }
+
+    fn into_update<P: Preset>(self) -> HeadUpdate {
+        let (slot, block, current, next, execution_optimistic) = match self {
+            Self::V2(HeadV2Event { data }) => (
+                data.slot,
+                data.block,
+                data.current_epoch_dependent_root,
+                data.next_epoch_dependent_root,
+                data.execution_optimistic,
+            ),
+            // The old names label the duty period rather than the epoch; the values are the same.
+            Self::V1(event) => (
+                event.slot,
+                event.block,
+                event.previous_duty_dependent_root,
+                event.current_duty_dependent_root,
+                event.execution_optimistic,
+            ),
+        };
+
+        HeadUpdate {
+            slot,
+            block,
+            execution_optimistic,
+            dependent_roots: DependentRoots {
+                epoch: misc::compute_epoch_at_slot::<P>(slot),
+                current,
+                next,
+            },
+        }
+    }
 }
 
 /// The request body of `getAttesterDuties`, whose indices are quoted in JSON.
@@ -206,10 +293,45 @@ impl RemoteBeaconNode {
         Health::from_u8(self.health.load(Ordering::Relaxed))
     }
 
-    pub async fn head_events(
+    pub async fn head_events<P: Preset>(
         &self,
-    ) -> Result<impl Stream<Item = Result<HeadEvent>> + Send + use<>> {
-        let url = self.endpoint("/eth/v1/events?topics=head")?;
+    ) -> Result<impl Stream<Item = Result<HeadUpdate>> + Send + use<P>> {
+        // Older nodes reject an unknown topic outright rather than streaming nothing; a node
+        // that cannot be reached at all is no more reachable on the old topic.
+        let response = match self.subscribe(HEAD_V2_EVENT).await {
+            Ok(response) => response,
+            Err(error) if error.downcast_ref::<Error>().is_some() => {
+                debug_with_peers!(
+                    "{} does not stream {HEAD_V2_EVENT} events, falling back to {HEAD_EVENT}: \
+                     {error:?}",
+                    self.url,
+                );
+
+                self.subscribe(HEAD_EVENT).await?
+            }
+            Err(error) => return Err(error),
+        };
+
+        // An event without data carries no head, as a keep-alive does, and is not a failure.
+        let events = SseStream::new(Body::from(response)).filter_map(|event| {
+            let head_update = match event {
+                Ok(event) => match (event.event.as_deref(), event.data) {
+                    (Some(HEAD_V2_EVENT | HEAD_EVENT), Some(data)) => {
+                        Some(AnyHeadEvent::parse::<P>(&data))
+                    }
+                    _ => None,
+                },
+                Err(error) => Some(Err(error.into())),
+            };
+
+            future::ready(head_update)
+        });
+
+        Ok(events)
+    }
+
+    async fn subscribe(&self, topic: &str) -> Result<Response> {
+        let url = self.endpoint(&format!("/eth/v1/events?topics={topic}"))?;
 
         let response = self
             .client
@@ -222,21 +344,7 @@ impl RemoteBeaconNode {
             .send()
             .await?;
 
-        let body = Body::from(self.check_status(response).await?);
-
-        // An event without data carries no head, as a keep-alive does, and is not a failure.
-        let events = SseStream::new(body).filter_map(|event| {
-            let head_event = match event {
-                Ok(event) => event
-                    .data
-                    .map(|data| serde_json::from_str(&data).map_err(Into::into)),
-                Err(error) => Some(Err(error.into())),
-            };
-
-            future::ready(head_event)
-        });
-
-        Ok(events)
+        self.check_status(response).await
     }
 
     /// Asked for only while the event stream is not keeping the head up to date, so that a
@@ -303,9 +411,9 @@ impl RemoteBeaconNode {
         Ok((block_header.header.message.slot, block_header.root))
     }
 
-    pub async fn refresh_health(&self) {
+    pub async fn refresh_health(&self, slot: Slot) {
         let previous = self.health();
-        let health = self.poll_health().await;
+        let health = self.poll_health(slot).await;
 
         if health != previous {
             info_with_peers!("beacon node at {} is now {health:?}", self.url);
@@ -320,7 +428,7 @@ impl RemoteBeaconNode {
         self.health.store(health.as_u8(), Ordering::Relaxed);
     }
 
-    async fn poll_health(&self) -> Health {
+    async fn poll_health(&self, slot: Slot) -> Health {
         match self.check_network().await {
             NetworkCheck::Matches => {}
             NetworkCheck::Mismatch(error) => {
@@ -341,7 +449,7 @@ impl RemoteBeaconNode {
             }
         }
 
-        match self.syncing_status().await {
+        let health = match self.syncing_status().await {
             Ok(status) => Health::from_syncing_status(
                 status.el_offline,
                 status.is_syncing,
@@ -355,7 +463,20 @@ impl RemoteBeaconNode {
 
                 Health::Unreachable
             }
+        };
+
+        // A node that has fallen behind keeps serving stale duty data while calling itself
+        // synced; its own head, held to the wall clock, shows what its sync status cannot.
+        if health == Health::Ready && self.chain_head.is_stale(slot, self.max_empty_slots) {
+            debug_with_peers!(
+                "beacon node at {} reports itself synced but its head is stale",
+                self.url,
+            );
+
+            return Health::Unusable;
         }
+
+        health
     }
 
     async fn syncing_status(&self) -> Result<SyncingStatus> {
@@ -398,6 +519,11 @@ impl RemoteBeaconNode {
             self.chain_config.contribution_due_bps_at(phase),
             SLOT_END_BPS,
         )
+    }
+
+    /// The vote is cast at the due point, and gossip only accepts it until the slot ends.
+    fn payload_attestation_timeout(&self) -> Duration {
+        self.window_timeout(self.chain_config.payload_attestation_due_bps, SLOT_END_BPS)
     }
 
     /// The head is polled without a preset in scope, so the tighter of the two schedules applies.
@@ -714,7 +840,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&subscriptions)
-            .timeout(MIN_TIMEOUT)
+            .timeout(self.background_timeout())
             .send()
             .await?;
 
@@ -871,7 +997,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .client
             .post(url.into_url())
             .json(&subscriptions)
-            .timeout(MIN_TIMEOUT)
+            .timeout(self.background_timeout())
             .send()
             .await?;
 
@@ -951,6 +1077,112 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         debug_with_peers!(
             "published {} contributions and proofs to {}",
             contributions_and_proofs.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn ptc_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<PtcDuties> {
+        let url = self.endpoint(format!("/eth/v1/validator/duties/ptc/{epoch}").as_str())?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .timeout(self.background_timeout())
+            .send()
+            .await?;
+
+        let response = self.check_status(response).await?;
+
+        let (duties, dependent_root) = response
+            .json::<EthResponse<Vec<ValidatorPTCDutyResponse>>>()
+            .await?
+            .into_data_and_dependent_root();
+
+        let dependent_root = dependent_root.ok_or_else(|| {
+            AnyhowError::msg(format!(
+                "beacon node at {} did not report a dependent root for PTC duties",
+                self.url,
+            ))
+        })?;
+
+        debug_with_peers!(
+            "{} produced {} PTC duties for epoch {epoch}",
+            self.url,
+            duties.len(),
+        );
+
+        Ok(PtcDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
+        let phase = self.chain_config.phase_at_slot::<P>(slot);
+        let url = self.endpoint(&format!(
+            "/eth/v1/validator/payload_attestation_data?slot={slot}"
+        ))?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            .timeout(self.payload_attestation_timeout())
+            .send()
+            .await?;
+
+        // The endpoint answers with no content when it has seen no block for the slot.
+        if response.status() == StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+
+        let data = self
+            .parse_versioned_data::<PayloadAttestationData>(response, phase)
+            .await?;
+
+        ensure!(
+            data.slot == slot,
+            Error::UnexpectedPayloadAttestationSlot {
+                url: self.url.to_string(),
+                expected: slot,
+                actual: data.slot,
+            },
+        );
+
+        Ok(Some(data))
+    }
+
+    async fn publish_payload_attestations(
+        &self,
+        messages: &[Arc<PayloadAttestationMessage>],
+    ) -> Result<()> {
+        let Some(first) = messages.first() else {
+            return Ok(());
+        };
+
+        let phase = self.chain_config.phase_at_slot::<P>(first.data.slot);
+        let url = self.endpoint("/eth/v1/beacon/pool/payload_attestations")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref())
+            .json(&messages)
+            .timeout(self.payload_attestation_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "published {} payload attestations to {}",
+            messages.len(),
             self.url,
         );
 
@@ -1090,6 +1322,169 @@ mod tests {
                 validator_committee_index: 5,
                 validator_index: 1,
             }],
+        );
+
+        Ok(())
+    }
+
+    // PTC duties carry a dependent root in the envelope like attester duties do.
+    #[test]
+    fn parses_ptc_duties_response() -> Result<()> {
+        let response = json!({
+            "dependent_root":
+                "0x0404040404040404040404040404040404040404040404040404040404040404",
+            "execution_optimistic": false,
+            "data": [{
+                "pubkey": PublicKeyBytes::zero(),
+                "validator_index": "1",
+                "slot": "6",
+            }],
+        });
+
+        let (duties, dependent_root) =
+            serde_json::from_value::<EthResponse<Vec<ValidatorPTCDutyResponse>>>(response)?
+                .into_data_and_dependent_root();
+
+        assert_eq!(dependent_root, Some(H256::repeat_byte(4)));
+
+        assert_eq!(
+            duties,
+            [ValidatorPTCDutyResponse {
+                pubkey: PublicKeyBytes::zero(),
+                validator_index: 1,
+                slot: 6,
+            }],
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_payload_attestation_data_response() -> Result<()> {
+        let response = json!({
+            "version": "gloas",
+            "data": {
+                "beacon_block_root":
+                    "0x0101010101010101010101010101010101010101010101010101010101010101",
+                "slot": "6",
+                "payload_present": true,
+                "blob_data_available": false,
+            },
+        });
+
+        let (data, version) =
+            serde_json::from_value::<EthResponse<PayloadAttestationData>>(response)?
+                .into_data_and_version();
+
+        assert_eq!(version, Some(Phase::Gloas));
+
+        assert_eq!(
+            data,
+            PayloadAttestationData {
+                beacon_block_root: H256::repeat_byte(1),
+                slot: 6,
+                payload_present: true,
+                blob_data_available: false,
+            },
+        );
+
+        Ok(())
+    }
+
+    // The publication body is a bare array of messages, not `Arc`-wrapped ones.
+    #[test]
+    fn serializes_payload_attestation_message_body() -> Result<()> {
+        let message = Arc::new(PayloadAttestationMessage {
+            validator_index: 1,
+            data: PayloadAttestationData {
+                beacon_block_root: H256::repeat_byte(1),
+                slot: 6,
+                payload_present: true,
+                blob_data_available: true,
+            },
+            signature: SignatureBytes::empty(),
+        });
+
+        let body = serde_json::to_value([message])?;
+
+        assert_eq!(
+            body,
+            json!([{
+                "validator_index": "1",
+                "data": {
+                    "beacon_block_root":
+                        "0x0101010101010101010101010101010101010101010101010101010101010101",
+                    "slot": "6",
+                    "payload_present": true,
+                    "blob_data_available": true,
+                },
+                "signature": SignatureBytes::empty(),
+            }]),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_head_v2_event() -> Result<()> {
+        let data = json!({
+            "version": "gloas",
+            "data": {
+                "slot": "70",
+                "block": "0x0101010101010101010101010101010101010101010101010101010101010101",
+                "state": "0x0202020202020202020202020202020202020202020202020202020202020202",
+                "payload_status": "full",
+                "epoch_transition": false,
+                "current_epoch_dependent_root":
+                    "0x0303030303030303030303030303030303030303030303030303030303030303",
+                "next_epoch_dependent_root":
+                    "0x0404040404040404040404040404040404040404040404040404040404040404",
+                "execution_optimistic": false,
+            },
+        });
+
+        let update = AnyHeadEvent::parse::<Mainnet>(&data.to_string())?;
+
+        assert_eq!(update.slot, 70);
+        assert_eq!(update.block, H256::repeat_byte(1));
+        assert!(!update.execution_optimistic);
+        assert_eq!(
+            update.dependent_roots,
+            DependentRoots {
+                epoch: 2,
+                current: H256::repeat_byte(3),
+                next: H256::repeat_byte(4),
+            },
+        );
+
+        Ok(())
+    }
+
+    // The deprecated event names the roots by duty period, which reads backwards.
+    #[test]
+    fn parses_head_event_with_roots_renamed() -> Result<()> {
+        let data = json!({
+            "slot": "70",
+            "block": "0x0101010101010101010101010101010101010101010101010101010101010101",
+            "state": "0x0202020202020202020202020202020202020202020202020202020202020202",
+            "epoch_transition": false,
+            "previous_duty_dependent_root":
+                "0x0303030303030303030303030303030303030303030303030303030303030303",
+            "current_duty_dependent_root":
+                "0x0404040404040404040404040404040404040404040404040404040404040404",
+            "execution_optimistic": true,
+        });
+
+        let update = AnyHeadEvent::parse::<Mainnet>(&data.to_string())?;
+
+        assert!(update.execution_optimistic);
+        assert_eq!(
+            update.dependent_roots,
+            DependentRoots {
+                epoch: 2,
+                current: H256::repeat_byte(3),
+                next: H256::repeat_byte(4),
+            },
         );
 
         Ok(())

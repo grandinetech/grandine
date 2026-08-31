@@ -25,9 +25,7 @@ use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
 use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
-use fork_choice_store::{
-    ChainLink, PayloadAttestationItem, PayloadAttestationOrigin, StateCacheError,
-};
+use fork_choice_store::{ChainLink, StateCacheError};
 use futures::{
     channel::{
         mpsc::{UnboundedReceiver, UnboundedSender},
@@ -342,6 +340,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     beacon_state.clone_arc(),
                     self.attestation_agg_pool.clone_arc(),
                     self.sync_committee_agg_pool.clone_arc(),
+                    self.payload_attestation_agg_pool.clone_arc(),
+                    self.signer.clone_arc(),
                     self.p2p_tx.clone(),
                     self.subnet_service_tx.clone(),
                     wait_group.clone(),
@@ -387,15 +387,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     pub async fn run(self) -> Result<()> {
         if !self.mode.supports_block_production() {
             warn_with_peers!(
-                "--disable-local-beacon-node does not support block production or payload \
-                 attestations; any such duties will be missed",
+                "--disable-local-beacon-node does not support block production; \
+                 any such duties will be missed",
             );
         }
 
         self.remote_beacon_nodes
             .check_on_startup(self.controller.slot())
             .await?;
-        self.remote_beacon_nodes.spawn_head_streams();
+        self.remote_beacon_nodes.spawn_head_streams::<P>();
         self.run_internal().await;
 
         Ok(())
@@ -2089,14 +2089,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
-        // Payload attestation committees are computed from a state.
-        let DutySource::Local {
-            slot_head,
-            beacon_state,
-        } = source
-        else {
+        let slot_head = source.slot_head();
+        let slot = slot_head.slot();
+
+        if slot_head.phase() < Phase::Gloas {
             return Ok(());
-        };
+        }
 
         // Skip attesting if validators already attested at slot
         if self.payload_attested_in_current_slot() {
@@ -2108,20 +2106,40 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .as_ref()
             .map(|metrics| metrics.validator_attest_payload_times.start_timer());
 
-        let dependent_root = self
-            .controller
-            .attestation_committee_dependent_root_for_slot(beacon_state, slot_head.slot())?;
+        let beacon_nodes = self.beacon_nodes(source, wait_group);
 
-        let Some(own_members) = self
-            .own_ptc_members
-            .get_or_init_at_slot(beacon_state, dependent_root, slot_head.slot())
-            .await
-        else {
+        let own_members = match source {
+            DutySource::Local { beacon_state, .. } => {
+                let dependent_root = self
+                    .controller
+                    .attestation_committee_dependent_root_for_slot(beacon_state, slot)?;
+
+                self.own_ptc_members
+                    .get_or_init_at_slot(beacon_state, dependent_root, slot)
+                    .await
+            }
+            DutySource::Remote { .. } => {
+                self.own_ptc_members_from_duties(&beacon_nodes, slot_head)
+                    .await?
+            }
+        };
+
+        let Some(own_members) = own_members else {
+            return Ok(());
+        };
+
+        if own_members.is_empty() {
+            return Ok(());
+        }
+
+        // Skip attesting if no beacon node has seen a beacon block for the assigned slot
+        let Some(data) = beacon_nodes.payload_attestation_data(slot).await? else {
+            debug_with_peers!("no beacon block seen for slot {slot}; skipping payload attestation");
             return Ok(());
         };
 
         let own_payload_attestations = self
-            .own_payload_attestations(slot_head, &own_members)
+            .own_payload_attestations(slot_head, data, &own_members)
             .await?;
 
         if own_payload_attestations.is_empty() {
@@ -2129,44 +2147,68 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         debug_with_peers!(
-            "validators [{}] attesting to payload in slot {}",
+            "validators [{}] attesting to payload in slot {slot}",
             own_payload_attestations
                 .iter()
                 .map(|a| a.validator_index)
                 .join(", "),
-            slot_head.slot(),
         );
 
-        for own_payload_attestation in own_payload_attestations.iter().copied() {
-            let payload_attestation = Arc::new(own_payload_attestation);
+        let messages = own_payload_attestations
+            .iter()
+            .copied()
+            .map(Arc::new)
+            .collect::<Vec<_>>();
 
-            self.controller.on_payload_attestation(
-                wait_group.clone(),
-                PayloadAttestationItem::unverified(
-                    Arc::new(payload_attestation.clone_arc().into()),
-                    PayloadAttestationOrigin::Own,
-                ),
-            );
-
-            ValidatorToP2p::PublishPayloadAttestation(payload_attestation).send(&self.p2p_tx);
-        }
-
-        let next_proposer_index =
-            tokio::task::block_in_place(|| slot_head.next_proposer_index(beacon_state))?;
-
-        let public_key = accessors::public_key(beacon_state.as_ref(), next_proposer_index)?;
-        let signer_snapshot = self.signer.load();
-
-        // Only add the messages into the pool if any attached validators is the next proposer
-        if signer_snapshot.has_key(*public_key) {
-            self.payload_attestation_agg_pool.aggregate_own_messages(
-                wait_group.clone(),
-                own_payload_attestations.to_vec(),
-                beacon_state.clone_arc(),
-            );
+        if let Err(error) = beacon_nodes.publish_payload_attestations(&messages).await {
+            warn_with_peers!("failed to publish payload attestations: {error:?}");
         }
 
         Ok(())
+    }
+
+    /// Own PTC members of the slot from duties, for a head without a state to compute them from.
+    async fn own_ptc_members_from_duties(
+        &self,
+        beacon_nodes: &BeaconNodes<P, W>,
+        slot_head: &SlotHead<P>,
+    ) -> Result<Option<Arc<[PTCMember]>>> {
+        let slot = slot_head.slot();
+        let epoch = slot_head.current_epoch();
+
+        // The same dependent root attester duties were fetched under, as the committees are drawn
+        // from the same shuffling.
+        let Some(dependent_root) = self
+            .own_beacon_committee_members
+            .cached_dependent_root(epoch)
+            .await
+        else {
+            warn_with_peers!(
+                "no attester duties were prefetched for slot {slot}, so no payload attestation \
+                 will be produced; check that the beacon nodes given with --beacon-node-urls are \
+                 reachable",
+            );
+
+            return Ok(None);
+        };
+
+        if let Some(members) = self.own_ptc_members.get_at_slot(dependent_root, slot).await {
+            return Ok(Some(members));
+        }
+
+        self.own_validator_indices.update(beacon_nodes, epoch).await;
+
+        let validator_indices = self.own_validator_indices.get().await;
+
+        if validator_indices.is_empty() {
+            return Ok(None);
+        }
+
+        self.own_ptc_members
+            .init_at_epoch(beacon_nodes, epoch, dependent_root, &validator_indices)
+            .await?;
+
+        Ok(self.own_ptc_members.get_at_slot(dependent_root, slot).await)
     }
 
     #[instrument(level = "debug", skip_all)]
@@ -2260,6 +2302,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     ) -> Result<&[OwnAttestation<P>]> {
         if let Some(own_attestations) = self.own_singular_attestations.get() {
             return Ok(own_attestations);
+        }
+
+        if own_members.is_empty() {
+            return Ok(&[]);
         }
 
         let phase = slot_head.phase();
@@ -2544,38 +2590,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn own_payload_attestations(
         &self,
         slot_head: &SlotHead<P>,
+        data: PayloadAttestationData,
         own_members: &[PTCMember],
     ) -> Result<&[PayloadAttestationMessage]> {
-        // Skip attesting if validators has not seen any beacon block for the assigned slot
-        let Some(block_with_root) = self
-            .controller
-            .block_by_slot(slot_head.slot())?
-            .map(WithStatus::value)
-        else {
-            return Ok(&[]);
-        };
-
-        let beacon_block_root = block_with_root.root;
-
         if let Some(own_payload_attestations) = self.own_payload_attestations.get() {
             return Ok(own_payload_attestations);
         }
 
-        let payload_present = self.controller.is_payload_present_timely(beacon_block_root);
-
-        let blob_data_available = self
-            .controller
-            .indices_of_missing_data_columns(&block_with_root.block)
-            .is_empty();
-
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
-            let data = PayloadAttestationData {
-                slot: slot_head.slot(),
-                beacon_block_root,
-                payload_present,
-                blob_data_available,
-            };
-
             let doppelganger_protection = self
                 .doppelganger_protection
                 .as_deref()
@@ -2705,6 +2727,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     fn discard_previous_slot_attestations(&mut self) {
         self.own_singular_attestations.take();
+        // Aggregation duties are per-slot; a leftover entry would request a stale aggregate.
+        self.own_aggregators.clear();
     }
 
     fn payload_attested_in_current_slot(&self) -> bool {
@@ -2756,6 +2780,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             controller: self.controller.clone_arc(),
             source: source.clone(),
             own_beacon_committee_members: self.own_beacon_committee_members.clone_arc(),
+            own_ptc_members: self.own_ptc_members.clone_arc(),
             own_validator_indices: self.own_validator_indices.clone_arc(),
             beacon_nodes: self.beacon_nodes(source, &wait_group),
             wait_group,

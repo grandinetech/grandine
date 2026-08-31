@@ -39,7 +39,7 @@ use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, misc};
 use http_api_utils::{
     BlockHeadersResponse, BlockId, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz, StateId,
-    ValidatorAttesterDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
 };
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
@@ -468,15 +468,6 @@ pub struct NodeSyncingResponse {
     is_syncing: bool,
     is_optimistic: bool,
     el_offline: bool,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorPTCDutyResponse {
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
 }
 
 #[derive(Serialize)]

@@ -2,13 +2,15 @@ use core::time::Duration;
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Result, ensure};
-use fork_choice_control::HeadEvent;
 use futures::{StreamExt as _, future::join_all};
 use logging::{debug_with_peers, info_with_peers};
 use tap::Pipe as _;
 use thiserror::Error;
 use tokio::time::sleep;
-use types::phase0::primitives::{H256, Slot};
+use types::{
+    phase0::primitives::{Epoch, H256, Slot},
+    preset::Preset,
+};
 
 use crate::{health::Health, remote_beacon_node::RemoteBeaconNode};
 
@@ -28,10 +30,29 @@ struct Head {
     block_root: H256,
 }
 
+/// The roots the duties of an epoch and the next depend on, as reported with a head.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct DependentRoots {
+    /// The epoch of the head the roots were reported with.
+    pub epoch: Epoch,
+    pub current: H256,
+    pub next: H256,
+}
+
+/// A head reported over the event stream, in either version of the event.
+#[derive(Clone, Copy, Debug)]
+pub struct HeadUpdate {
+    pub slot: Slot,
+    pub block: H256,
+    pub execution_optimistic: bool,
+    pub dependent_roots: DependentRoots,
+}
+
 /// The head a beacon node last reported, over the event stream or when asked.
 #[derive(Default)]
 pub struct ChainHead {
     head: RwLock<Option<Head>>,
+    dependent_roots: RwLock<Option<DependentRoots>>,
 }
 
 impl ChainHead {
@@ -39,6 +60,35 @@ impl ChainHead {
     pub const fn new() -> Self {
         Self {
             head: RwLock::new(None),
+            dependent_roots: RwLock::new(None),
+        }
+    }
+
+    /// The root the duties of `epoch` depend on, when a head from `epoch` or the one before
+    /// reported it.
+    pub fn dependent_root_for(&self, epoch: Epoch) -> Option<H256> {
+        let roots = (*self
+            .dependent_roots
+            .read()
+            .expect("dependent roots lock is never poisoned"))?;
+
+        if epoch == roots.epoch {
+            Some(roots.current)
+        } else if epoch == roots.epoch.checked_add(1)? {
+            Some(roots.next)
+        } else {
+            None
+        }
+    }
+
+    pub fn record_dependent_roots(&self, roots: DependentRoots) {
+        let mut current = self
+            .dependent_roots
+            .write()
+            .expect("dependent roots lock is never poisoned");
+
+        if current.is_none_or(|current| roots.epoch >= current.epoch) {
+            *current = Some(roots);
         }
     }
 
@@ -101,18 +151,28 @@ impl ChainHead {
         self.get(at_slot, max_empty_slots)
             .is_ok_and(|block_root| block_root.is_some())
     }
+
+    /// Whether a known head lags `at_slot` by more than `max_empty_slots`. An empty cache is not
+    /// stale: nothing is known about the node's head yet.
+    pub fn is_stale(&self, at_slot: Slot, max_empty_slots: u64) -> bool {
+        let cached = *self.head.read().expect("chain head lock is never poisoned");
+
+        cached.is_some_and(|head| {
+            head.slot <= at_slot && at_slot.saturating_sub(head.slot) > max_empty_slots
+        })
+    }
 }
 
-pub async fn stream_head_events(nodes: Vec<Arc<RemoteBeaconNode>>) {
-    nodes.into_iter().map(follow).pipe(join_all).await;
+pub async fn stream_head_events<P: Preset>(nodes: Vec<Arc<RemoteBeaconNode>>) {
+    nodes.into_iter().map(follow::<P>).pipe(join_all).await;
 }
 
-async fn follow(node: Arc<RemoteBeaconNode>) {
+async fn follow<P: Preset>(node: Arc<RemoteBeaconNode>) {
     let mut delay = RECONNECT_DELAY;
     let mut subscribed_before = false;
 
     loop {
-        let delivered = match node.head_events().await {
+        let delivered = match node.head_events::<P>().await {
             Ok(mut events) => {
                 if subscribed_before {
                     debug_with_peers!("resubscribed to head events from {node}");
@@ -162,11 +222,16 @@ async fn follow(node: Arc<RemoteBeaconNode>) {
     }
 }
 
-fn accept(node: &RemoteBeaconNode, event: HeadEvent) {
+fn accept(node: &RemoteBeaconNode, event: HeadUpdate) {
     // A node on a different network would otherwise report a head from another chain.
     if node.health() == Health::Incompatible {
         return;
     }
+
+    // The roots only decide whether duties are fetched again, so an optimistic head may report
+    // them; nothing is signed by them.
+    node.chain_head()
+        .record_dependent_roots(event.dependent_roots);
 
     // An optimistic validator must not sign across the sync committee domains.
     if event.execution_optimistic {
@@ -239,6 +304,24 @@ mod tests {
     }
 
     #[test]
+    fn dependent_roots_serve_the_reported_epoch_and_the_next() {
+        let chain_head = ChainHead::default();
+
+        assert_eq!(chain_head.dependent_root_for(5), None);
+
+        chain_head.record_dependent_roots(DependentRoots {
+            epoch: 5,
+            current: H256::repeat_byte(1),
+            next: H256::repeat_byte(2),
+        });
+
+        assert_eq!(chain_head.dependent_root_for(4), None);
+        assert_eq!(chain_head.dependent_root_for(5), Some(H256::repeat_byte(1)));
+        assert_eq!(chain_head.dependent_root_for(6), Some(H256::repeat_byte(2)));
+        assert_eq!(chain_head.dependent_root_for(7), None);
+    }
+
+    #[test]
     fn only_a_later_head_replaces_the_cached_one() -> Result<()> {
         let chain_head = ChainHead::default();
 
@@ -258,5 +341,26 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn an_empty_cache_is_unknown_rather_than_stale() {
+        assert!(!ChainHead::new().is_stale(100, 5));
+    }
+
+    #[test]
+    fn a_head_within_the_empty_slot_limit_is_not_stale() {
+        let chain_head = ChainHead::new();
+        chain_head.update(95, H256::repeat_byte(1));
+
+        assert!(!chain_head.is_stale(100, 5));
+    }
+
+    #[test]
+    fn a_head_beyond_the_empty_slot_limit_is_stale() {
+        let chain_head = ChainHead::new();
+        chain_head.update(61, H256::repeat_byte(1));
+
+        assert!(chain_head.is_stale(143, 32));
     }
 }

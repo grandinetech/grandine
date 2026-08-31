@@ -154,7 +154,7 @@ impl OwnBeaconCommitteeMembers {
         .await
     }
 
-    async fn cached_dependent_root(&self, epoch: Epoch) -> Option<H256> {
+    pub async fn cached_dependent_root(&self, epoch: Epoch) -> Option<H256> {
         self.members.get_async(&epoch).await.map(|entry| entry.0)
     }
 

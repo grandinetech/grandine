@@ -6,7 +6,9 @@ use std::{
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
-use http_api_utils::{ValidatorAttesterDutyResponse, ValidatorSyncDutyResponse};
+use http_api_utils::{
+    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use types::{
     altair::{
@@ -14,6 +16,7 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{Attestation, SignedAggregateAndProof},
+    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
     nonstandard::OwnAttestation,
     phase0::{
         containers::AttestationData,
@@ -27,6 +30,11 @@ use crate::slot_head::SlotHead;
 pub struct AttesterDuties {
     pub dependent_root: H256,
     pub duties: Vec<ValidatorAttesterDutyResponse>,
+}
+
+pub struct PtcDuties {
+    pub dependent_root: H256,
+    pub duties: Vec<ValidatorPTCDutyResponse>,
 }
 
 /// A beacon node the validator can perform duties against.
@@ -113,5 +121,25 @@ pub trait BeaconNodeApi<P: Preset> {
     fn publish_contributions_and_proofs(
         &self,
         contributions_and_proofs: &[SignedContributionAndProof<P>],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/getPtcDuties>
+    fn ptc_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> impl Future<Output = Result<PtcDuties>> + Send;
+
+    /// [`None`] when the node has seen no block for `slot`, which is not attested to.
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/producePayloadAttestationData>
+    fn payload_attestation_data(
+        &self,
+        slot: Slot,
+    ) -> impl Future<Output = Result<Option<PayloadAttestationData>>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/submitPayloadAttestationMessages>
+    fn publish_payload_attestations(
+        &self,
+        messages: &[Arc<PayloadAttestationMessage>],
     ) -> impl Future<Output = Result<()>> + Send;
 }
