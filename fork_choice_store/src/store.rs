@@ -123,6 +123,10 @@ pub struct Store<P: Preset, S: Storage<P>> {
     tick: Tick,
     justified_checkpoint: Checkpoint,
     finalized_checkpoint: Checkpoint,
+    // A non-finalized startup anchor is a trusted local boundary, not a claim of protocol
+    // finality. Keep the checkpoint reported to peers and APIs separate until on-chain finality
+    // advances beyond the anchor.
+    protocol_finalized_checkpoint: Checkpoint,
     unrealized_justified_checkpoint: Checkpoint,
     unrealized_finalized_checkpoint: Checkpoint,
     // It would be more idiomatic to make `Store.proposer_boost_root` an `Option<H256>`, but that
@@ -304,6 +308,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         store_config: StoreConfig,
         anchor_block: Arc<SignedBeaconBlock<P>>,
         anchor_state: Arc<BeaconState<P>>,
+        protocol_finalized_checkpoint: Option<Checkpoint>,
         storage: Arc<S>,
         finished_initial_forward_sync: bool,
         finished_back_sync: bool,
@@ -326,6 +331,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             epoch,
             root: block_root,
         };
+        let protocol_finalized_checkpoint = protocol_finalized_checkpoint.unwrap_or(checkpoint);
 
         let anchor = ChainLink {
             block_root,
@@ -352,6 +358,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             tick: Tick::start_of_slot(anchor_state.slot()),
             justified_checkpoint: checkpoint,
             finalized_checkpoint: checkpoint,
+            protocol_finalized_checkpoint,
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
             proposer_boost_root: H256::zero(),
@@ -527,8 +534,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.finalized_checkpoint
     }
 
+    #[must_use]
+    pub const fn protocol_finalized_checkpoint(&self) -> Checkpoint {
+        self.protocol_finalized_checkpoint
+    }
+
     pub const fn override_finalized_checkpoint(&mut self, checkpoint: Checkpoint) {
         self.finalized_checkpoint = checkpoint;
+        self.protocol_finalized_checkpoint = checkpoint;
         self.unrealized_finalized_checkpoint = checkpoint;
     }
 
@@ -550,6 +563,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub const fn finalized_root(&self) -> H256 {
         self.finalized_checkpoint.root
+    }
+
+    #[must_use]
+    pub const fn protocol_finalized_epoch(&self) -> Epoch {
+        self.protocol_finalized_checkpoint.epoch
+    }
+
+    #[must_use]
+    pub const fn protocol_finalized_root(&self) -> H256 {
+        self.protocol_finalized_checkpoint.root
+    }
+
+    #[must_use]
+    pub const fn protocol_finalized_slot(&self) -> Slot {
+        Self::start_of_epoch(self.protocol_finalized_epoch())
     }
 
     #[must_use]
@@ -1242,7 +1270,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // That should be correct because our implementation prunes orphans as soon as possible.
     #[must_use]
     pub const fn is_slot_finalized(&self, slot: Slot) -> bool {
-        slot <= self.finalized_slot()
+        slot <= self.protocol_finalized_slot()
     }
 
     #[must_use]
@@ -4518,6 +4546,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > Update finalized checkpoint
         if finalized_checkpoint.epoch > self.finalized_checkpoint.epoch {
             self.finalized_checkpoint = finalized_checkpoint;
+        }
+
+        if finalized_checkpoint.epoch > self.protocol_finalized_checkpoint.epoch {
+            self.protocol_finalized_checkpoint = finalized_checkpoint;
         }
     }
 

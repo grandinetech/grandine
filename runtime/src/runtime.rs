@@ -47,6 +47,7 @@ use grandine_version::{
 };
 use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
+use http_api_utils::BlockId;
 use keymanager::{
     DefinitionsStorage, KeyManager, LegacyMigration, ValidatorDefinitions,
     ValidatorDefinitionsWithStorage,
@@ -271,7 +272,11 @@ pub async fn run_after_genesis<P: Preset>(
         storage_mode,
     ));
 
-    let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
+    let (
+        (anchor_state, anchor_block, unfinalized_blocks),
+        loaded_from_remote,
+        protocol_finalized_checkpoint,
+    ) = storage
         .load(signer_snapshot.client(), state_load_strategy)
         .await?;
 
@@ -314,6 +319,7 @@ pub async fn run_after_genesis<P: Preset>(
         store_config,
         anchor_block,
         anchor_state.clone_arc(),
+        protocol_finalized_checkpoint,
         current_tick,
         event_channels.clone_arc(),
         execution_engine.clone_arc(),
@@ -963,6 +969,7 @@ struct Context {
     validator_api_config: Option<ValidatorApiConfig>,
     validator_config: Arc<ValidatorConfig>,
     checkpoint_sync_url: Option<RedactingUrl>,
+    checkpoint_sync_block_id: BlockId,
     force_checkpoint_sync: bool,
     back_sync_enabled: bool,
     eth1_rpc_urls: Vec<RedactingUrl>,
@@ -1052,6 +1059,7 @@ impl Context {
             validator_api_config,
             validator_config,
             checkpoint_sync_url,
+            checkpoint_sync_block_id,
             force_checkpoint_sync,
             back_sync_enabled,
             eth1_rpc_urls,
@@ -1179,11 +1187,13 @@ impl Context {
                     "the requires attribute for force_checkpoint_sync \
                      ensures checkpoint_sync_url is present",
                 ),
+                checkpoint_sync_block_id,
             }
         } else {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
+                checkpoint_sync_block_id,
                 anchor_checkpoint_provider: anchor_checkpoint_provider.clone(),
             }
         };
@@ -1277,6 +1287,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         genesis_state_file,
         genesis_state_download_url,
         checkpoint_sync_url,
+        checkpoint_sync_block_id,
         force_checkpoint_sync,
         back_sync_enabled,
         eth1_rpc_urls,
@@ -1563,6 +1574,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         validator_api_config,
         validator_config,
         checkpoint_sync_url,
+        checkpoint_sync_block_id,
         force_checkpoint_sync,
         back_sync_enabled,
         eth1_rpc_urls,

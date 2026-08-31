@@ -12,7 +12,7 @@ use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
-use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
+use ssz::{Ssz, SszHash as _, SszRead, SszReadDefault, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::info;
@@ -32,6 +32,7 @@ use types::{
     },
     phase0::{
         consts::GENESIS_SLOT,
+        containers::Checkpoint,
         primitives::{Epoch, H256, Slot},
     },
     preset::Preset,
@@ -40,6 +41,7 @@ use types::{
 };
 
 use crate::checkpoint_sync;
+use http_api_utils::BlockId;
 
 pub const DEFAULT_ARCHIVAL_EPOCH_INTERVAL: NonZeroU64 = nonzero!(32_u64);
 pub const MAX_DATA_COLUMN_EPOCHS_TO_PRUNE: usize = 100;
@@ -48,10 +50,12 @@ pub enum StateLoadStrategy<P: Preset> {
     Auto {
         state_slot: Option<Slot>,
         checkpoint_sync_url: Option<RedactingUrl>,
+        checkpoint_sync_block_id: BlockId,
         anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     },
     Remote {
         checkpoint_sync_url: RedactingUrl,
+        checkpoint_sync_block_id: BlockId,
     },
     Anchor {
         block: Arc<SignedBeaconBlock<P>>,
@@ -109,16 +113,20 @@ impl<P: Preset> Storage<P> {
         &self,
         client: &Client,
         state_load_strategy: StateLoadStrategy<P>,
-    ) -> Result<(StateStorage<'_, P>, bool)> {
+    ) -> Result<(StateStorage<'_, P>, bool, Option<Checkpoint>)> {
         let anchor_block;
         let anchor_state;
         let unfinalized_blocks: UnfinalizedBlocks<P>;
         let loaded_from_remote;
+        let protocol_finalized_checkpoint;
+        let protocol_finalized_block;
+        let protocol_finalized_state;
 
         match state_load_strategy {
             StateLoadStrategy::Auto {
                 state_slot,
                 checkpoint_sync_url,
+                checkpoint_sync_block_id,
                 anchor_checkpoint_provider,
             } => 'block: {
                 // Attempt to load local state first: either latest or from specified slot.
@@ -129,25 +137,51 @@ impl<P: Preset> Storage<P> {
 
                 if let Some(url) = checkpoint_sync_url {
                     if local_state_storage.is_none() {
-                        let result = if let Some(checkpoint) =
-                            anchor_checkpoint_provider.checkpoint().checkpoint_synced()
+                        let result = if let Some(checkpoint) = anchor_checkpoint_provider
+                            .checkpoint()
+                            .checkpoint_synced()
+                            .filter(|_| checkpoint_sync_block_id == BlockId::Finalized)
                         {
                             info_with_peers!(
                                 "anchor checkpoint is already loaded from remote checkpoint sync server"
                             );
-                            Ok(checkpoint)
+                            Ok(checkpoint_sync::LoadedCheckpoint {
+                                anchor: checkpoint,
+                                protocol_finalized: None,
+                            })
                         } else {
-                            checkpoint_sync::load_finalized_from_remote(&self.config, client, &url)
-                                .await
-                                .context(Error::CheckpointSyncFailed)
+                            checkpoint_sync::load_from_remote(
+                                &self.config,
+                                client,
+                                &url,
+                                checkpoint_sync_block_id,
+                            )
+                            .await
+                            .context(Error::CheckpointSyncFailed)
                         };
 
                         match result {
-                            Ok(FinalizedCheckpoint { block, state }) => {
+                            Ok(checkpoint_sync::LoadedCheckpoint {
+                                anchor: FinalizedCheckpoint { block, state },
+                                protocol_finalized,
+                            }) => {
                                 anchor_block = block;
                                 anchor_state = state;
                                 unfinalized_blocks = Box::new(core::iter::empty());
                                 loaded_from_remote = true;
+                                (
+                                    protocol_finalized_checkpoint,
+                                    protocol_finalized_block,
+                                    protocol_finalized_state,
+                                ) = protocol_finalized
+                                    .map(|finalized| {
+                                        (
+                                            Some(finalized.checkpoint),
+                                            finalized.block,
+                                            finalized.state,
+                                        )
+                                    })
+                                    .unwrap_or_default();
                                 break 'block;
                             }
                             Err(error) => warn_with_peers!("{error:#}"),
@@ -184,29 +218,46 @@ impl<P: Preset> Storage<P> {
                 }
 
                 loaded_from_remote = false;
+                protocol_finalized_checkpoint = None;
+                protocol_finalized_block = None;
+                protocol_finalized_state = None;
             }
             StateLoadStrategy::Remote {
                 checkpoint_sync_url,
+                checkpoint_sync_block_id,
             } => {
-                let FinalizedCheckpoint { block, state } =
-                    checkpoint_sync::load_finalized_from_remote(
-                        &self.config,
-                        client,
-                        &checkpoint_sync_url,
-                    )
-                    .await
-                    .context(Error::CheckpointSyncFailed)?;
+                let checkpoint_sync::LoadedCheckpoint {
+                    anchor: FinalizedCheckpoint { block, state },
+                    protocol_finalized,
+                } = checkpoint_sync::load_from_remote(
+                    &self.config,
+                    client,
+                    &checkpoint_sync_url,
+                    checkpoint_sync_block_id,
+                )
+                .await
+                .context(Error::CheckpointSyncFailed)?;
 
                 anchor_block = block;
                 anchor_state = state;
                 unfinalized_blocks = Box::new(core::iter::empty());
                 loaded_from_remote = true;
+                (
+                    protocol_finalized_checkpoint,
+                    protocol_finalized_block,
+                    protocol_finalized_state,
+                ) = protocol_finalized
+                    .map(|finalized| (Some(finalized.checkpoint), finalized.block, finalized.state))
+                    .unwrap_or_default();
             }
             StateLoadStrategy::Anchor { block, state } => {
                 anchor_block = block;
                 anchor_state = state;
                 unfinalized_blocks = Box::new(core::iter::empty());
                 loaded_from_remote = false;
+                protocol_finalized_checkpoint = None;
+                protocol_finalized_block = None;
+                protocol_finalized_state = None;
             }
         }
 
@@ -235,13 +286,39 @@ impl<P: Preset> Storage<P> {
             )?,
         ];
 
+        if let Some(protocol_finalized_block) = protocol_finalized_block {
+            let block_root = protocol_finalized_block.message().hash_tree_root();
+            let block_slot = protocol_finalized_block.message().slot();
+
+            batch.push(serialize(
+                FinalizedBlockByRoot(block_root),
+                protocol_finalized_block,
+            )?);
+            batch.push(serialize(BlockRootBySlot(block_slot), block_root)?);
+
+            if let Some(protocol_finalized_state) = protocol_finalized_state {
+                let state_root = protocol_finalized_state.hash_tree_root();
+                let validator_count = protocol_finalized_state.validators().len_usize();
+
+                batch.push(serialize(SlotByStateRoot(state_root), block_slot)?);
+                batch.push(serialize(
+                    StateByBlockRoot(block_root),
+                    prepare_state(protocol_finalized_state, validator_count),
+                )?);
+            }
+        }
+
         self.append_finalized_validator_pubkeys_to_batch(&mut batch, anchor_validators)?;
 
         self.database.put_batch(batch)?;
 
         let state_storage = (anchor_state, anchor_block, unfinalized_blocks);
 
-        Ok((state_storage, loaded_from_remote))
+        Ok((
+            state_storage,
+            loaded_from_remote,
+            protocol_finalized_checkpoint,
+        ))
     }
 
     fn load_latest_state(
@@ -737,7 +814,7 @@ impl<P: Preset> Storage<P> {
         self.get(BlockRootBySlot(slot))
     }
 
-    fn state_by_block_root(
+    pub(crate) fn state_by_block_root(
         &self,
         block_root: H256,
         finalized_validators: Option<&dyn SszValidatorList>,

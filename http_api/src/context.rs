@@ -151,11 +151,15 @@ impl<P: Preset> Context<P> {
             state: anchor_state,
         };
 
-        let ((anchor_state, anchor_block, mut unfinalized_blocks), loaded_from_remote) =
-            storage.load(&client, state_load_strategy).await?;
+        let (
+            (anchor_state, anchor_block, mut unfinalized_blocks),
+            loaded_from_remote,
+            protocol_finalized_checkpoint,
+        ) = storage.load(&client, state_load_strategy).await?;
 
         assert!(unfinalized_blocks.next().is_none());
         assert!(!loaded_from_remote);
+        assert!(protocol_finalized_checkpoint.is_none());
 
         drop(unfinalized_blocks);
 
@@ -177,6 +181,7 @@ impl<P: Preset> Context<P> {
             store_config,
             anchor_block,
             anchor_state.clone_arc(),
+            None,
             tick,
             event_channels.clone_arc(),
             execution_engine.clone_arc(),

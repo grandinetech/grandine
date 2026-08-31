@@ -6,6 +6,7 @@ use builder_api::BuilderConfig;
 use eth1_api::AuthOptions;
 use fork_choice_store::BuilderCircuitBreakerConfig;
 use http_api::HttpApiConfig;
+use http_api_utils::BlockId;
 use itertools::Itertools as _;
 use kzg_utils::KzgBackend;
 use p2p::NetworkConfig;
@@ -38,6 +39,7 @@ pub struct GrandineConfig {
     pub genesis_state_file: Option<PathBuf>,
     pub genesis_state_download_url: Option<RedactingUrl>,
     pub checkpoint_sync_url: Option<RedactingUrl>,
+    pub checkpoint_sync_block_id: BlockId,
     pub force_checkpoint_sync: bool,
     pub back_sync_enabled: bool,
     pub eth1_rpc_urls: Vec<RedactingUrl>,
@@ -109,6 +111,7 @@ impl GrandineConfig {
             metrics_config,
             telemetry_config,
             checkpoint_sync_url,
+            checkpoint_sync_block_id,
             use_validator_key_cache,
             validator_api_config,
             sync_without_reconstruction,
@@ -198,6 +201,7 @@ impl GrandineConfig {
 
         if let Some(checkpoint_sync_url) = checkpoint_sync_url {
             info!("checkpoint sync url: {checkpoint_sync_url}");
+            info!("checkpoint sync block: {checkpoint_sync_block_id}");
         }
 
         if !web3signer_config.urls.is_empty() {

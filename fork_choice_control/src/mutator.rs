@@ -3673,7 +3673,7 @@ where
     }
 
     fn notify_about_finalized_checkpoint(&self) {
-        let finalized_checkpoint = self.store.finalized_checkpoint();
+        let finalized_checkpoint = self.store.protocol_finalized_checkpoint();
         let justified_checkpoint = self.store.justified_checkpoint();
         let head = self.store.head();
 
