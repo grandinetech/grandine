@@ -5,6 +5,7 @@ use core::{
 use std::sync::Arc;
 
 use block_producer::ValidatorBlindedBlock;
+use builder_api::gloas::containers::BuilderConfig;
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use serde::{
@@ -400,6 +401,31 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedExecutionPayloadBidPhaseDese
     {
         if self.phase >= Phase::Gloas {
             SignedExecutionPayloadBid::deserialize(deserializer).map(Arc::new)
+        } else {
+            Err(D::Error::custom("invalid phase"))
+        }
+    }
+}
+
+pub struct BuilderConfigPhaseDeserializer {
+    phase: Phase,
+}
+
+impl From<Phase> for BuilderConfigPhaseDeserializer {
+    fn from(phase: Phase) -> Self {
+        Self { phase }
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for BuilderConfigPhaseDeserializer {
+    type Value = BuilderConfig;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if self.phase >= Phase::Gloas {
+            BuilderConfig::deserialize(deserializer)
         } else {
             Err(D::Error::custom("invalid phase"))
         }
