@@ -691,7 +691,7 @@ fn eth_v3_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalS
 }
 
 fn eth_v4_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
-    Router::new().route("/eth/v4/validator/blocks/{slot}", get(validator_block_v4))
+    Router::new().route("/eth/v4/validator/blocks/{slot}", post(validator_block_v4))
 }
 
 #[cfg(test)]
