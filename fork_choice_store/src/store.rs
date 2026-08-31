@@ -2324,8 +2324,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         // > the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice
-        let Some(parent_payload_chain_link) =
-            self.unfinalized_chain_link_by_execution_block_hash(bid.parent_block_hash)
+        let Some(parent_gas_limit) = self
+            .unfinalized_chain_link_by_execution_block_hash(bid.parent_block_hash)
+            .and_then(|chain_link| chain_link.block.execution_gas_limit())
         else {
             return Ok(ExecutionPayloadBidAction::Ignore(
                 "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
@@ -2339,20 +2340,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // (envelopes must match their bid's `gas_limit`). This is not necessarily the payload of
         // `bid.parent_block_root`: a bid may build on the parent's parent payload when the parent
         // block's payload was withheld. Pre-Gloas blocks carry the payload itself.
-        let parent_payload_block_body = parent_payload_chain_link.block.message().body();
-        let Some(parent_gas_limit) = parent_payload_block_body
-            .with_payload_bid()
-            .map(|body| body.signed_execution_payload_bid().message.gas_limit)
-            .or_else(|| {
-                parent_payload_block_body
-                    .with_execution_payload()
-                    .map(|body| body.execution_payload().gas_limit())
-            })
-        else {
-            return Ok(ExecutionPayloadBidAction::Ignore(
-                "the `bid.parent_block_hash` is the block hash of a known execution payload in fork choice",
-            ));
-        };
         if !predicates::is_gas_limit_target_compatible(
             parent_gas_limit,
             bid.gas_limit,
@@ -4701,6 +4688,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.accepted_execution_payload_envelopes
             .insert((slot, beacon_block_root, builder_index));
 
+        if let Some(location) = self.unfinalized_locations.get(&beacon_block_root).copied() {
+            self.execution_payload_locations
+                .insert(envelope.message.payload.block_hash, location);
+        }
+
         self.execution_payload_envelope_cache.insert(envelope);
     }
 
@@ -4853,6 +4845,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let block_root = chain_link.block_root;
         let block = &chain_link.block;
         let parent_root = block.message().parent_root();
+        let is_post_gloas = chain_link.is_post_gloas();
         let execution_block_hash = block.execution_block_hash();
 
         let new_block_location;
@@ -4906,7 +4899,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .insert(block_root, new_block_location)
             .unwrap_none();
 
-        if let Some(block_hash) = execution_block_hash {
+        // Post-Gloas blocks only contain a commitment to a payload, the full payload is propagated
+        // separately in `ExecutionPayloadEnvelope`. So by the time a block is imported, we can't
+        // decide its payload availability yet.
+        if let Some(block_hash) = execution_block_hash
+            && !is_post_gloas
+        {
             self.execution_payload_locations
                 .insert(block_hash, new_block_location);
         }
@@ -5050,11 +5048,19 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     fn remove_orphaned(&mut self, orphaned_blocks: Vector<UnfinalizedBlock<P>>) {
         for block in orphaned_blocks {
-            self.unfinalized_locations
+            let location = self
+                .unfinalized_locations
                 .remove(&block.block_root())
                 .expect(
                     "roots of unfinalized blocks should be present in self.unfinalized_locations",
                 );
+
+            // equivocating blocks can share an execution block hash
+            if let Some(block_hash) = block.chain_link.execution_block_hash()
+                && self.execution_payload_locations.get(&block_hash) == Some(&location)
+            {
+                self.execution_payload_locations.remove(&block_hash);
+            }
         }
     }
 
