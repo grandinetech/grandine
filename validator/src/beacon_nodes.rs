@@ -19,6 +19,7 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{Attestation, SignedAggregateAndProof},
+    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
     nonstandard::{OwnAttestation, PublishedDuty},
     phase0::{
         containers::AttestationData,
@@ -28,7 +29,7 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi},
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, PtcDuties},
     local_beacon_node::LocalBeaconNode,
     misc,
     remote_beacon_node::RemoteBeaconNode,
@@ -201,7 +202,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
             return;
         }
 
-        if self.publish_to_every_node.contains(&duty) {
+        if should_publish_to_every_node(&self.publish_to_every_node, duty) {
             spawn_broadcast(operation, publish_to, make_attempt());
         } else {
             spawn_publish(operation, publish_to, make_attempt());
@@ -216,6 +217,15 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         validator_index: Option<ValidatorIndex>,
     ) -> Result<H256> {
         let operation = format!("produce the dependent root of epoch {epoch}");
+
+        // A head event already reported the root, sparing the request it would take to ask.
+        if self.local_node.is_none() {
+            for node in &self.remote_nodes {
+                if let Some(dependent_root) = node.chain_head().dependent_root_for(epoch) {
+                    return Ok(dependent_root);
+                }
+            }
+        }
 
         self.local_then_remotes(
             &operation,
@@ -608,6 +618,106 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
             None => Ok(()),
         }
     }
+
+    async fn ptc_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<PtcDuties> {
+        let operation = format!("produce PTC duties for epoch {epoch}");
+
+        let (node, duties) = self
+            .local_then_remotes(
+                &operation,
+                |node| node.ptc_duties(epoch, validator_indices),
+                |node| BeaconNodeApi::<P>::ptc_duties(node, epoch, validator_indices),
+            )
+            .await?;
+
+        if let Some(node) = node {
+            debug_with_peers!(
+                "{node} beacon node produced {} PTC duties for epoch {epoch} \
+                 under dependent root {:?}",
+                duties.duties.len(),
+                duties.dependent_root,
+            );
+        }
+
+        Ok(duties)
+    }
+
+    async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
+        let operation = format!("produce payload attestation data for slot {slot}");
+
+        // A node that has seen no block only settles the slot once every node agrees; a node
+        // that has fallen behind never answers with data.
+        let mut none_seen = false;
+        let mut last_error = None;
+
+        if let Some(node) = &self.local_node {
+            match node.payload_attestation_data(slot).await {
+                Ok(Some(data)) => return Ok(Some(data)),
+                Ok(None) => none_seen = true,
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                    last_error = Some(error);
+                }
+            }
+        }
+
+        for node in &self.remote_nodes {
+            match BeaconNodeApi::<P>::payload_attestation_data(node.as_ref(), slot).await {
+                Ok(Some(data)) => {
+                    debug_with_peers!(
+                        "{node} beacon node produced payload attestation data \
+                         for slot {slot}: {data:?}",
+                    );
+
+                    return Ok(Some(data));
+                }
+                Ok(None) => none_seen = true,
+                Err(error) => {
+                    warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                    last_error = Some(error);
+                }
+            }
+        }
+
+        if none_seen {
+            return Ok(None);
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            AnyhowError::msg(format!("no beacon node is configured to {operation}"))
+        }))
+    }
+
+    async fn publish_payload_attestations(
+        &self,
+        messages: &[Arc<PayloadAttestationMessage>],
+    ) -> Result<()> {
+        self.spawn_publish_to_remotes(
+            "publish payload attestations",
+            PublishedDuty::PayloadAttestations,
+            || {
+                let owned = Arc::new(messages.to_vec());
+
+                move |node: Arc<RemoteBeaconNode>| {
+                    let messages = owned.clone_arc();
+
+                    async move {
+                        BeaconNodeApi::<P>::publish_payload_attestations(node.as_ref(), &messages)
+                            .await
+                    }
+                }
+            },
+        );
+
+        match &self.local_node {
+            Some(node) => node.publish_payload_attestations(messages).await,
+            None => Ok(()),
+        }
+    }
 }
 
 fn spawn_publish<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)
@@ -677,6 +787,12 @@ async fn first_success<N: Display, T, F: Future<Output = Result<T>>>(
     }))
 }
 
+fn should_publish_to_every_node(configured: &[PublishedDuty], duty: PublishedDuty) -> bool {
+    configured
+        .iter()
+        .any(|configured| matches!(configured, PublishedDuty::All) || *configured == duty)
+}
+
 #[cfg(test)]
 mod tests {
     use core::{iter::once, time::Duration};
@@ -688,6 +804,34 @@ mod tests {
 
     const SLOW: Duration = Duration::from_millis(50);
     const FAST: Duration = Duration::ZERO;
+
+    #[test]
+    fn all_covers_every_published_duty() {
+        for duty in [
+            PublishedDuty::Aggregates,
+            PublishedDuty::Attestations,
+            PublishedDuty::PayloadAttestations,
+            PublishedDuty::SyncCommitteeContributions,
+            PublishedDuty::SyncCommitteeMessages,
+        ] {
+            assert!(should_publish_to_every_node(&[PublishedDuty::All], duty));
+        }
+
+        assert!(should_publish_to_every_node(
+            &[PublishedDuty::Attestations],
+            PublishedDuty::Attestations,
+        ));
+
+        assert!(!should_publish_to_every_node(
+            &[PublishedDuty::Attestations],
+            PublishedDuty::Aggregates,
+        ));
+
+        assert!(!should_publish_to_every_node(
+            &[],
+            PublishedDuty::Aggregates
+        ));
+    }
 
     // Attempts are ordered, not raced, so the earlier node wins even when a later one is faster.
     #[tokio::test]

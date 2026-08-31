@@ -15,6 +15,7 @@ use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
 use tracing::instrument;
 use types::{
+    combined::BeaconState,
     config::Config as ChainConfig,
     nonstandard::{ForkInfo, Phase},
     phase0::primitives::{Epoch, Slot, ValidatorIndex},
@@ -29,6 +30,7 @@ use crate::{
         subnets_from_sync_committee_indices,
     },
     own_beacon_committee_members::OwnBeaconCommitteeMembers,
+    own_ptc_members::OwnPTCMembers,
     own_validator_indices::OwnValidatorIndices,
 };
 
@@ -37,6 +39,7 @@ pub struct UpdateBeaconCommitteeSubscriptionsTask<P: Preset, W: Wait + Sync> {
     pub controller: ApiController<P, W>,
     pub source: DutySource<P>,
     pub own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
+    pub own_ptc_members: Arc<OwnPTCMembers>,
     pub own_validator_indices: Arc<OwnValidatorIndices>,
     pub beacon_nodes: BeaconNodes<P, W>,
     pub wait_group: W,
@@ -54,6 +57,7 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
             controller,
             source,
             own_beacon_committee_members,
+            own_ptc_members,
             own_validator_indices,
             beacon_nodes,
             wait_group,
@@ -89,8 +93,7 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
                 .slots_to_compute_at_epoch(&beacon_nodes, epoch, slots, validator_index)
                 .await
             {
-                Ok(Some(slots)) => slots,
-                Ok(None) => continue,
+                Ok(slots) => slots,
                 Err(error) => {
                     warn_with_peers!(
                         "unable to find dependent root for epoch: {epoch} in slot \
@@ -101,46 +104,52 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
                 }
             };
 
-            let phase_at_epoch = chain_config.phase_at_epoch(epoch);
+            // Attester duties may be cached from an earlier slot while PTC duties are not yet.
+            if let Some(slots) = slots {
+                // Only the built-in beacon node computes members from a state, and only it has one
+                // to carry across a fork.
+                if let Some(state) = &mut beacon_state
+                    && chain_config.phase_at_slot::<P>(current_slot)
+                        != chain_config.phase_at_epoch(epoch)
+                {
+                    match state_at_fork_of_epoch(&chain_config, &controller, epoch).await {
+                        Ok(next) => *state = next,
+                        Err(error) => {
+                            warn_with_peers!(
+                                "failed to preprocess next fork beacon state for beacon \
+                                 committee subscriptions: {error:?}",
+                            );
+                            break;
+                        }
+                    }
+                }
 
-            // Only the built-in beacon node computes members from a state, and only it has one to
-            // carry across a fork.
-            if let Some(state) = &mut beacon_state
-                && chain_config.phase_at_slot::<P>(current_slot) != phase_at_epoch
-            {
-                *state = match controller
-                    .preprocessed_state_at_epoch(chain_config.fork_epoch(phase_at_epoch))
+                debug_with_peers!("updating beacon committee subscriptions {epoch} {current_slot}");
+
+                let fork_info =
+                    fork_info_at_epoch(&chain_config, beacon_state.as_deref(), epoch, fork_info);
+
+                if let Err(error) = own_beacon_committee_members
+                    .init_at_slots(&beacon_nodes, fork_info, slots, &validator_indices)
                     .await
                 {
-                    Ok(with_status) => with_status.value,
-                    Err(error) => {
-                        warn_with_peers!(
-                            "failed to preprocess next fork beacon state for beacon committee \
-                            subscriptions: {error:?}",
-                        );
-                        break;
-                    }
+                    warn_with_peers!(
+                        "failed to obtain attester duties for epoch {epoch}: {error:?}"
+                    );
+                    continue;
                 }
             }
 
-            debug_with_peers!("updating beacon committee subscriptions {epoch} {current_slot}");
-
-            let fork_info = match &beacon_state {
-                Some(state) => state.as_ref().into(),
-                // The epoch may lie in the next fork; the genesis validators root never changes.
-                None => ForkInfo {
-                    fork: chain_config.fork_at_epoch(epoch),
-                    genesis_validators_root: fork_info.genesis_validators_root,
-                    phantom: PhantomData,
-                },
-            };
-
-            if let Err(error) = own_beacon_committee_members
-                .init_at_slots(&beacon_nodes, fork_info, slots, &validator_indices)
-                .await
-            {
-                warn_with_peers!("failed to obtain attester duties for epoch {epoch}: {error:?}");
-            }
+            prefetch_ptc_duties(
+                &chain_config,
+                &own_beacon_committee_members,
+                &own_ptc_members,
+                &beacon_nodes,
+                current_epoch,
+                epoch,
+                &validator_indices,
+            )
+            .await;
         }
 
         for slot in own_members_misc::slots_to_compute_in_advance(current_slot) {
@@ -162,6 +171,67 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
         }
 
         drop(wait_group);
+    }
+}
+
+async fn state_at_fork_of_epoch<P: Preset, W: Wait + Sync>(
+    chain_config: &ChainConfig,
+    controller: &ApiController<P, W>,
+    epoch: Epoch,
+) -> Result<Arc<BeaconState<P>>> {
+    let fork_epoch = chain_config.fork_epoch(chain_config.phase_at_epoch(epoch));
+
+    controller
+        .preprocessed_state_at_epoch(fork_epoch)
+        .await
+        .map(|with_status| with_status.value)
+}
+
+fn fork_info_at_epoch<P: Preset>(
+    chain_config: &ChainConfig,
+    beacon_state: Option<&BeaconState<P>>,
+    epoch: Epoch,
+    current: ForkInfo<P>,
+) -> ForkInfo<P> {
+    match beacon_state {
+        Some(state) => state.into(),
+        // The epoch may lie in the next fork; the genesis validators root never changes.
+        None => ForkInfo {
+            fork: chain_config.fork_at_epoch(epoch),
+            genesis_validators_root: current.genesis_validators_root,
+            phantom: PhantomData,
+        },
+    }
+}
+
+// PTC duties are drawn from the same shuffling as attester duties, so they are refetched with
+// them whenever the dependent root changes.
+async fn prefetch_ptc_duties<P: Preset, W: Wait + Sync>(
+    chain_config: &ChainConfig,
+    own_beacon_committee_members: &OwnBeaconCommitteeMembers,
+    own_ptc_members: &OwnPTCMembers,
+    beacon_nodes: &BeaconNodes<P, W>,
+    current_epoch: Epoch,
+    epoch: Epoch,
+    validator_indices: &[ValidatorIndex],
+) {
+    // No beacon node serves PTC duties from a pre-Gloas state, even for the fork epoch.
+    if chain_config.phase_at_epoch(current_epoch) < Phase::Gloas {
+        return;
+    }
+
+    let Some(dependent_root) = own_beacon_committee_members
+        .cached_dependent_root(epoch)
+        .await
+    else {
+        return;
+    };
+
+    if let Err(error) = own_ptc_members
+        .init_at_epoch(beacon_nodes, epoch, dependent_root, validator_indices)
+        .await
+    {
+        warn_with_peers!("failed to obtain PTC duties for epoch {epoch}: {error:?}");
     }
 }
 

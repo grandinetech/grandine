@@ -289,8 +289,10 @@ impl<P: Preset, BS: BeaconState<P> + ?Sized> From<&BS> for ForkInfo<P> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString, VariantNames)]
 #[strum(serialize_all = "kebab-case", ascii_case_insensitive)]
 pub enum PublishedDuty {
+    All,
     Aggregates,
     Attestations,
+    PayloadAttestations,
     SyncCommitteeContributions,
     SyncCommitteeMessages,
 }

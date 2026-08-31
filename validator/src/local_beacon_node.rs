@@ -9,17 +9,23 @@ use bls::PublicKeyBytes;
 use derive_more::Display;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
-use fork_choice_store::{AttestationItem, AttestationOrigin};
+use fork_choice_store::{
+    AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+};
 use futures::channel::{mpsc::UnboundedSender, oneshot};
 use helper_functions::{accessors, misc};
-use http_api_utils::{ValidatorAttesterDutyResponse, ValidatorSyncDutyResponse};
+use http_api_utils::{
+    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+};
 use itertools::Itertools as _;
 use operation_pools::{
-    AttestationAggPool, AttestationKey, SyncCommitteeAggPool, convert_to_electra_attestation,
+    AttestationAggPool, AttestationKey, PayloadAttestationAggPool, SyncCommitteeAggPool,
+    convert_to_electra_attestation,
 };
 use p2p::{
     BeaconCommitteeSubscription, SyncCommitteeSubscription, ToSubnetService, ValidatorToP2p,
 };
+use signer::Signer;
 use std_ext::ArcExt as _;
 use types::{
     altair::{
@@ -27,8 +33,11 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{Attestation, BeaconState, SignedAggregateAndProof},
-    gloas::consts::PAYLOAD_STATUS_FULL,
-    nonstandard::{OwnAttestation, Phase, RelativeEpoch},
+    gloas::{
+        consts::PAYLOAD_STATUS_FULL,
+        containers::{PayloadAttestationData, PayloadAttestationMessage},
+    },
+    nonstandard::{OwnAttestation, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::{AttestationData, Checkpoint},
         primitives::{CommitteeIndex, Epoch, H256, Slot, SubnetId, ValidatorIndex},
@@ -38,7 +47,7 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi},
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, PtcDuties},
     slot_head::SlotHead,
 };
 
@@ -52,6 +61,8 @@ pub struct LocalBeaconNode<P: Preset, W: Wait> {
     beacon_state: Arc<BeaconState<P>>,
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
+    payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
+    signer: Arc<Signer>,
     p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
     subnet_service_tx: UnboundedSender<ToSubnetService>,
     wait_group: W,
@@ -65,6 +76,8 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
         beacon_state: Arc<BeaconState<P>>,
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
+        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
+        signer: Arc<Signer>,
         p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
         subnet_service_tx: UnboundedSender<ToSubnetService>,
         wait_group: W,
@@ -75,6 +88,8 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
             beacon_state,
             attestation_agg_pool,
             sync_committee_agg_pool,
+            payload_attestation_agg_pool,
+            signer,
             p2p_tx,
             subnet_service_tx,
             wait_group,
@@ -373,6 +388,107 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
 
         Ok(())
     }
+
+    async fn ptc_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<PtcDuties> {
+        let dependent_root = self.dependent_root(epoch, None).await?;
+        let indices = validator_indices.iter().copied().collect::<HashSet<_>>();
+
+        let duties = tokio::task::block_in_place(|| {
+            ptc_duties_at_epoch(self.beacon_state.as_ref(), epoch, &indices)
+        })?;
+
+        Ok(PtcDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
+        let Some(block_with_root) = self.controller.block_by_slot(slot)?.map(WithStatus::value)
+        else {
+            return Ok(None);
+        };
+
+        let beacon_block_root = block_with_root.root;
+
+        let blob_data_available = self
+            .controller
+            .indices_of_missing_data_columns(&block_with_root.block)
+            .is_empty();
+
+        Ok(Some(PayloadAttestationData {
+            beacon_block_root,
+            slot,
+            payload_present: self.controller.is_payload_present_timely(beacon_block_root),
+            blob_data_available,
+        }))
+    }
+
+    async fn publish_payload_attestations(
+        &self,
+        messages: &[Arc<PayloadAttestationMessage>],
+    ) -> Result<()> {
+        for message in messages {
+            self.controller.on_payload_attestation(
+                self.wait_group.clone(),
+                PayloadAttestationItem::unverified(
+                    Arc::new(message.clone_arc().into()),
+                    PayloadAttestationOrigin::Own,
+                ),
+            );
+
+            ValidatorToP2p::PublishPayloadAttestation(message.clone_arc()).send(&self.p2p_tx);
+        }
+
+        let beacon_state = &self.beacon_state;
+
+        let next_proposer_index =
+            tokio::task::block_in_place(|| self.slot_head.next_proposer_index(beacon_state))?;
+
+        let public_key = accessors::public_key(beacon_state.as_ref(), next_proposer_index)?;
+
+        // The messages are only aggregated when an own validator proposes next.
+        if self.signer.load().has_key(*public_key) {
+            self.payload_attestation_agg_pool.aggregate_own_messages(
+                self.wait_group.clone(),
+                messages.iter().map(|message| **message).collect(),
+                beacon_state.clone_arc(),
+            );
+        }
+
+        Ok(())
+    }
+}
+
+// The payload timeliness committees of `epoch`, which the state carries for the previous epoch
+// through the seed lookahead.
+pub fn ptc_duties_at_epoch<P: Preset>(
+    state: &BeaconState<P>,
+    epoch: Epoch,
+    indices: &HashSet<ValidatorIndex>,
+) -> Result<Vec<ValidatorPTCDutyResponse>> {
+    misc::slots_in_epoch::<P>(epoch)?
+        .map(|slot| {
+            accessors::get_ptc(state, slot)?
+                .into_iter()
+                .filter(|validator_index| indices.contains(validator_index))
+                .map(|validator_index| {
+                    let pubkey = *accessors::public_key(state, validator_index)?;
+
+                    Ok(ValidatorPTCDutyResponse {
+                        pubkey,
+                        validator_index,
+                        slot,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .flatten_ok()
+        .try_collect()
 }
 
 // The sync committee of `epoch`, which the state carries only for the current period and the next.

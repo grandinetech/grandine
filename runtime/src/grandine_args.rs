@@ -963,7 +963,8 @@ struct RemoteValidatorOptions {
     #[clap(long, requires = "beacon_node_urls")]
     disable_local_beacon_node: bool,
 
-    /// List of duties to publish to every beacon node rather than the first one
+    /// List of duties to publish to every beacon node rather than the first one; `all` covers
+    /// every duty
     #[clap(
         long,
         value_delimiter = ',',
