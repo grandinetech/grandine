@@ -104,7 +104,7 @@ use crate::{
 
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
 const MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT: usize = 16;
-const MAX_DELAYED_BLOCKS_UNTIL_PARENT: usize = 64;
+const MAX_DELAYED_BLOCKS_UNTIL_BLOCK: usize = 64;
 
 #[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
@@ -1030,7 +1030,9 @@ where
                     let gossip_id = pending_block.origin.gossip_id_ref().cloned();
 
                     if let Err(error) = self.try_delay_block_until_parent(pending_block) {
-                        debug_with_peers!("unable to delay block until parent: {error:?}");
+                        debug_with_peers!(
+                            "unable to delay block until parent: {block_root:?} {error:?}"
+                        );
 
                         if let Some(gossip_id) = gossip_id {
                             self.send_to_p2p(P2pMessage::IgnoreWithReason(
@@ -1812,7 +1814,8 @@ where
                         self.try_delay_blob_sidecar_until_parent(pending_blob_sidecar)
                     {
                         debug_with_peers!(
-                            "unable to delay blob sidecar until block parent: {parent_root:?} {error:?}"
+                            "unable to delay blob sidecar until block parent: {parent_root:?} \
+                            (identifier: {blob_identifier:?}) {error:?}"
                         );
 
                         if let Some(gossip_id) = gossip_id {
@@ -1962,6 +1965,55 @@ where
 
                 reply_to_http_api(sender, Ok(ValidationOutcome::Ignore(publishable)));
             }
+            Ok(DataColumnSidecarAction::DelayUntilBlock(data_column_sidecar)) => {
+                let block_root = data_column_sidecar.beacon_block_root();
+
+                let pending_data_column_sidecar = PendingDataColumnSidecar {
+                    data_column_sidecar,
+                    block_seen,
+                    origin,
+                    submission_time,
+                };
+
+                if self.store.contains_block(block_root) {
+                    self.retry_data_column_sidecar(wait_group, pending_data_column_sidecar, None);
+                } else {
+                    let peer_id = pending_data_column_sidecar.origin.peer_id();
+                    let gossip_id = pending_data_column_sidecar.origin.gossip_id_ref().cloned();
+
+                    self.send_to_p2p(P2pMessage::BlockNeeded(block_root, peer_id));
+
+                    let pending_data_column_sidecar =
+                        reply_delayed_data_column_sidecar_validation_result(
+                            pending_data_column_sidecar,
+                            Ok(ValidationOutcome::Ignore(false)),
+                        );
+
+                    if let Err(error) = self.try_delay_data_column_sidecar_until_block(
+                        pending_data_column_sidecar,
+                        block_root,
+                    ) {
+                        debug_with_peers!(
+                            "failed to delay data column sidecar until block: \
+                            (identifier: {data_column_identifier:?}) {error}"
+                        );
+
+                        if let Some(gossip_id) = gossip_id {
+                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                                gossip_id,
+                                MutatorIgnoreReason::DataColumnQueueFull {
+                                    data_column_identifier,
+                                },
+                            ));
+                        }
+                    } else {
+                        debug_with_peers!(
+                            "data column sidecar delayed until block: {block_root:?}, \
+                            identifier: {data_column_identifier:?}",
+                        );
+                    }
+                }
+            }
             Ok(DataColumnSidecarAction::DelayUntilState(data_column_sidecar, block_root)) => {
                 let slot = data_column_sidecar.slot();
 
@@ -2045,7 +2097,8 @@ where
                         self.try_delay_data_column_sidecar_until_parent(pending_data_column_sidecar)
                     {
                         debug_with_peers!(
-                            "failed to delay data column sidecar until parent: {error}"
+                            "failed to delay data column sidecar until parent: \
+                            (identifier: {data_column_identifier:?}) {error}"
                         );
 
                         if let Some(gossip_id) = gossip_id {
@@ -3841,7 +3894,7 @@ where
             .insert(beacon_block_root, pending_block);
     }
 
-    fn total_unverified_delayed_block_until_parent(&self) -> usize {
+    fn total_unverified_delayed_blocks_until_block(&self) -> usize {
         self.delayed_until_block
             .values()
             .map(|delayed| delayed.unverified_blocks.len())
@@ -3860,8 +3913,8 @@ where
                 .or_default()
                 .blocks
                 .push(pending_block);
-        } else if self.total_unverified_delayed_block_until_parent()
-            < MAX_DELAYED_BLOCKS_UNTIL_PARENT
+        } else if self.total_unverified_delayed_blocks_until_block()
+            < MAX_DELAYED_BLOCKS_UNTIL_BLOCK
         {
             self.delayed_until_block
                 .entry(parent_root)
@@ -3869,7 +3922,7 @@ where
                 .unverified_blocks
                 .push(pending_block);
         } else {
-            return Err(Error::<P>::DelayedUntilParentQueueFull.into());
+            return Err(Error::<P>::DelayedUntilBlockQueueFull.into());
         }
 
         Ok(())
@@ -4207,24 +4260,24 @@ where
                 .slot,
         );
 
-        let max_delayed_blobs_until_parent = MAX_DELAYED_BLOCKS_UNTIL_PARENT.saturating_mul(
+        let max_delayed_blobs_until_block = MAX_DELAYED_BLOCKS_UNTIL_BLOCK.saturating_mul(
             usize::try_from(self.store.chain_config().max_blobs_per_block(epoch))?,
         );
 
-        let total_delayed_blobs_until_parent = self
+        let total_delayed_blobs_until_block = self
             .delayed_until_block
             .values()
             .map(|delayed| delayed.blob_sidecars.len())
             .sum::<usize>();
 
-        if total_delayed_blobs_until_parent < max_delayed_blobs_until_parent {
+        if total_delayed_blobs_until_block < max_delayed_blobs_until_block {
             self.delayed_until_block
                 .entry(parent_root)
                 .or_default()
                 .blob_sidecars
                 .push(pending_blob_sidecar);
         } else {
-            return Err(Error::<P>::DelayedUntilParentQueueFull.into());
+            return Err(Error::<P>::DelayedUntilBlockQueueFull.into());
         }
 
         Ok(())
@@ -4283,23 +4336,31 @@ where
             return Ok(());
         };
 
-        let total_delayed_data_columns_until_parent = self
+        self.try_delay_data_column_sidecar_until_block(pending_data_column_sidecar, parent_root)
+    }
+
+    fn try_delay_data_column_sidecar_until_block(
+        &mut self,
+        pending_data_column_sidecar: PendingDataColumnSidecar<P>,
+        block_root: H256,
+    ) -> Result<()> {
+        let total_delayed_data_columns_until_block = self
             .delayed_until_block
             .values()
             .map(|delayed| delayed.data_column_sidecars.len())
             .sum::<usize>();
 
-        let max_data_columns_per_parent =
-            MAX_DELAYED_BLOCKS_UNTIL_PARENT.saturating_mul(P::NumberOfColumns::USIZE);
+        let max_delayed_data_columns_until_block =
+            MAX_DELAYED_BLOCKS_UNTIL_BLOCK.saturating_mul(P::NumberOfColumns::USIZE);
 
-        if total_delayed_data_columns_until_parent < max_data_columns_per_parent {
+        if total_delayed_data_columns_until_block < max_delayed_data_columns_until_block {
             self.delayed_until_block
-                .entry(parent_root)
+                .entry(block_root)
                 .or_default()
                 .data_column_sidecars
                 .push(pending_data_column_sidecar);
         } else {
-            return Err(Error::<P>::DelayedUntilParentQueueFull.into());
+            return Err(Error::<P>::DelayedUntilBlockQueueFull.into());
         }
 
         Ok(())

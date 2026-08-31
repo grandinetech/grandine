@@ -3507,9 +3507,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             // [IGNORE] A valid block for the sidecar's `slot` has been seen (via gossip or non-gossip sources).
             // A client MUST queue the sidecar for processing once the block is received or retrieved.
             let Some(block) = self.block(block_root).map(WithStatus::value) else {
-                return Ok(DataColumnSidecarAction::DelayUntilState(
+                return Ok(DataColumnSidecarAction::DelayUntilBlock(
                     data_column_sidecar,
-                    block_root,
                 ));
             };
 

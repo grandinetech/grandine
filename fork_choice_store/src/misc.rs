@@ -1195,6 +1195,7 @@ impl<P: Preset> BlobSidecarAction<P> {
 pub enum DataColumnSidecarAction<P: Preset> {
     Accept(Arc<DataColumnSidecar<P>>),
     Ignore(Publishable),
+    DelayUntilBlock(Arc<DataColumnSidecar<P>>),
     DelayUntilState(Arc<DataColumnSidecar<P>>, H256),
     DelayUntilParent(Arc<DataColumnSidecar<P>>),
     DelayUntilSlot(Arc<DataColumnSidecar<P>>),
