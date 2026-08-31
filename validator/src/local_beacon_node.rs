@@ -15,9 +15,11 @@ use fork_choice_store::{
 use futures::channel::{mpsc::UnboundedSender, oneshot};
 use helper_functions::{accessors, misc};
 use http_api_utils::{
-    ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorSyncDutyResponse,
 };
 use itertools::Itertools as _;
+use liveness_tracker::ApiToLiveness;
 use operation_pools::{
     AttestationAggPool, AttestationKey, PayloadAttestationAggPool, SyncCommitteeAggPool,
     convert_to_electra_attestation,
@@ -65,6 +67,7 @@ pub struct LocalBeaconNode<P: Preset, W: Wait> {
     signer: Arc<Signer>,
     p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
     subnet_service_tx: UnboundedSender<ToSubnetService>,
+    liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
     wait_group: W,
 }
 
@@ -80,6 +83,7 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
         signer: Arc<Signer>,
         p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
         subnet_service_tx: UnboundedSender<ToSubnetService>,
+        liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
         wait_group: W,
     ) -> Self {
         Self {
@@ -92,6 +96,7 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
             signer,
             p2p_tx,
             subnet_service_tx,
+            liveness_tx,
             wait_group,
         }
     }
@@ -124,6 +129,27 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
 }
 
 impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
+    async fn liveness(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorLivenessResponse>> {
+        let liveness_tx = self.liveness_tx.as_ref().ok_or_else(|| {
+            AnyhowError::msg("liveness tracking is disabled; enable it with --track-liveness")
+        })?;
+
+        let (sender, receiver) = oneshot::channel();
+
+        ApiToLiveness::CheckLiveness(sender, epoch, validator_indices.to_vec()).send(liveness_tx);
+
+        let liveness = receiver.await??;
+
+        Ok(liveness
+            .into_iter()
+            .map(|(index, is_live)| ValidatorLivenessResponse { index, is_live })
+            .collect())
+    }
+
     async fn dependent_root(
         &self,
         epoch: Epoch,

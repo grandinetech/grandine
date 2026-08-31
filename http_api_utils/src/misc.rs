@@ -50,6 +50,14 @@ pub struct ValidatorPTCDutyResponse {
     pub slot: Slot,
 }
 
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getLiveness>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorLivenessResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub index: ValidatorIndex,
+    pub is_live: bool,
+}
+
 /// <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlockHeader>
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct BlockHeadersResponse {

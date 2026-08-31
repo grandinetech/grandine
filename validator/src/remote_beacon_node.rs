@@ -16,7 +16,7 @@ use futures::{Stream, StreamExt as _, future};
 use helper_functions::misc;
 use http_api_utils::{
     BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
-    ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorLivenessResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
 };
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
@@ -691,6 +691,24 @@ impl RemoteBeaconNode {
 }
 
 impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
+    async fn liveness(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorLivenessResponse>> {
+        let url = self.endpoint(format!("/eth/v1/validator/liveness/{epoch}").as_str())?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .timeout(self.background_timeout())
+            .send()
+            .await?;
+
+        self.parse_data(response).await
+    }
+
     async fn dependent_root(
         &self,
         epoch: Epoch,

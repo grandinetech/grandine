@@ -239,6 +239,7 @@ impl<P: Preset> Context<P> {
         ));
 
         let validator_channels = ValidatorChannels {
+            api_to_liveness_tx: None,
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
             p2p_tx: validator_to_p2p_tx,

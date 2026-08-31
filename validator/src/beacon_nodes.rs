@@ -4,11 +4,11 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Error as AnyhowError, Result};
+use anyhow::{Error as AnyhowError, Result, ensure};
 use bls::PublicKeyBytes;
 use fork_choice_control::Wait;
 use futures::future::join_all;
-use http_api_utils::ValidatorSyncDutyResponse;
+use http_api_utils::{ValidatorLivenessResponse, ValidatorSyncDutyResponse};
 use logging::{debug_with_peers, warn_with_peers};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use std_ext::ArcExt;
@@ -211,6 +211,67 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
 }
 
 impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
+    /// Combines liveness from every node: a validator seen live by any node is live.
+    async fn liveness(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorLivenessResponse>> {
+        let mut liveness = validator_indices
+            .iter()
+            .map(|validator_index| (*validator_index, false))
+            .collect::<BTreeMap<_, _>>();
+
+        let mut any_success = false;
+
+        let mut merge = |response: Vec<ValidatorLivenessResponse>| {
+            any_success = true;
+
+            for entry in response {
+                if entry.is_live
+                    && let Some(live) = liveness.get_mut(&entry.index)
+                {
+                    *live = true;
+                }
+            }
+        };
+
+        if let Some(node) = &self.local_node {
+            match node.liveness(epoch, validator_indices).await {
+                Ok(response) => merge(response),
+                Err(error) => warn_with_peers!(
+                    "{node} beacon node failed to report liveness for epoch {epoch}: {error:?}",
+                ),
+            }
+        }
+
+        let responses = join_all(self.remote_nodes.iter().map(|node| async move {
+            let result = BeaconNodeApi::<P>::liveness(node.as_ref(), epoch, validator_indices);
+
+            (result.await, node)
+        }))
+        .await;
+
+        for (result, node) in responses {
+            match result {
+                Ok(response) => merge(response),
+                Err(error) => warn_with_peers!(
+                    "{node} beacon node failed to report liveness for epoch {epoch}: {error:?}",
+                ),
+            }
+        }
+
+        ensure!(
+            any_success,
+            "no beacon node could report validator liveness for epoch {epoch}",
+        );
+
+        Ok(liveness
+            .into_iter()
+            .map(|(index, is_live)| ValidatorLivenessResponse { index, is_live })
+            .collect())
+    }
+
     async fn dependent_root(
         &self,
         epoch: Epoch,

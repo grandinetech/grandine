@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use bls::PublicKeyBytes;
 use fork_choice_control::Wait;
@@ -98,6 +98,24 @@ impl OwnValidatorIndices {
             .await;
 
         indices.into_iter().sorted().collect()
+    }
+
+    /// [`Self::get`], keyed by public key, for callers that match keys to indices.
+    pub async fn indices_by_pubkey(&self) -> HashMap<PublicKeyBytes, ValidatorIndex> {
+        let signer_snapshot = self.signer.load();
+        let mut indices = HashMap::new();
+
+        self.indices
+            .iter_async(|public_key, validator_index| {
+                if signer_snapshot.has_key(*public_key) {
+                    indices.insert(*public_key, *validator_index);
+                }
+
+                true
+            })
+            .await;
+
+        indices
     }
 
     async fn keys_to_resolve(&self, current_epoch: Epoch) -> Vec<PublicKeyBytes> {
