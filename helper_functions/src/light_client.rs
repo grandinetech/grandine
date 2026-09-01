@@ -1,3 +1,4 @@
+use crate::misc::{compute_epoch_at_slot, sync_committee_period};
 use anyhow::{Result, bail, ensure};
 use hashing::ZERO_HASHES;
 use itertools::Itertools as _;
@@ -8,8 +9,8 @@ use typenum::Unsigned as _;
 use types::{
     altair::{
         beacon_state::BeaconState as AltairBeaconState,
-        consts::CurrentSyncCommitteeIndex,
-        containers::{LightClientBootstrap, LightClientHeader, LightClientUpdate},
+        consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
+        containers::{LightClientBootstrap, LightClientHeader, LightClientUpdate, SyncCommittee},
     },
     phase0::{
         consts::GENESIS_SLOT,
@@ -208,6 +209,143 @@ pub fn create_light_client_bootstrap<P: Preset>(
         header: block_to_light_client_header(block),
         current_sync_committee: (**state.current_sync_committee).clone(),
         current_sync_committee_branch: ContiguousVector::try_from_iter(branch)?,
+    })
+}
+
+pub fn create_light_client_update<P: Preset>(
+    state: &AltairBeaconState<P>,
+    block: &impl SignedBeaconBlock<P>,
+    attested_state: &AltairBeaconState<P>,
+    attested_block: &impl SignedBeaconBlock<P>,
+    finalized_block: Option<&impl SignedBeaconBlock<P>>,
+) -> Result<LightClientUpdate<P>> {
+    let sync_aggregate = block
+        .message()
+        .body()
+        .with_sync_aggregate()
+        .ok_or(Error::BlockHasNoSyncAggregate)?
+        .sync_aggregate();
+
+    let participants = sync_aggregate.sync_committee_bits.count_ones();
+
+    ensure!(
+        participants >= P::MIN_SYNC_COMMITTEE_PARTICIPANTS,
+        Error::InsufficientSyncCommitteeParticipants {
+            participants,
+            minimum: P::MIN_SYNC_COMMITTEE_PARTICIPANTS,
+        },
+    );
+
+    ensure!(
+        state.slot == state.latest_block_header.slot,
+        Error::StateSlotDoesNotMatchLatestBlockHeader {
+            state_slot: state.slot,
+            header_slot: state.latest_block_header.slot,
+        },
+    );
+
+    let mut header = state.latest_block_header;
+    header.state_root = state.hash_tree_root();
+
+    let header_root = header.hash_tree_root();
+    let block_root = block.message().hash_tree_root();
+
+    ensure!(
+        header_root == block_root,
+        Error::StateIsNotPostStateOfBlock {
+            header_root,
+            block_root,
+        },
+    );
+
+    ensure!(
+        attested_state.slot() == attested_state.latest_block_header().slot,
+        Error::StateSlotDoesNotMatchLatestBlockHeader {
+            state_slot: attested_state.slot(),
+            header_slot: attested_state.latest_block_header().slot,
+        },
+    );
+
+    let mut attested_header = attested_state.latest_block_header();
+    attested_header.state_root = attested_state.hash_tree_root();
+
+    let attested_header_root = attested_header.hash_tree_root();
+    let attested_block_root = attested_block.message().hash_tree_root();
+
+    ensure!(
+        attested_header_root == attested_block_root,
+        Error::StateIsNotPostStateOfBlock {
+            header_root: attested_header_root,
+            block_root: attested_block_root,
+        },
+    );
+
+    let parent_root = block.message().parent_root();
+
+    ensure!(
+        attested_header_root == parent_root,
+        Error::AttestedBlockIsNotParentOfBlock {
+            attested_block_root: attested_header_root,
+            parent_root,
+        },
+    );
+
+    let signature_period =
+        sync_committee_period::<P>(compute_epoch_at_slot::<P>(block.message().slot()));
+    let attested_period =
+        sync_committee_period::<P>(compute_epoch_at_slot::<P>(attested_block.message().slot()));
+
+    let (next_sync_committee, next_sync_committee_branch) = if attested_period == signature_period {
+        let branch = compute_merkle_proof(attested_state, NextSyncCommitteeIndex::U64)?;
+
+        (
+            (**attested_state.next_sync_committee).clone(),
+            ContiguousVector::try_from_iter(branch)?,
+        )
+    } else {
+        (SyncCommittee::default(), ContiguousVector::default())
+    };
+
+    let (finalized_header, finality_branch) = if let Some(finalized_block) = finalized_block {
+        let checkpoint_root = attested_state.finalized_checkpoint.root;
+
+        let finalized_header = if finalized_block.message().slot() == GENESIS_SLOT {
+            ensure!(
+                checkpoint_root.is_zero(),
+                Error::GenesisFinalizedBlockWithNonZeroCheckpoint { checkpoint_root },
+            );
+
+            LightClientHeader::default()
+        } else {
+            let finalized_header = block_to_light_client_header(finalized_block);
+            let finalized_header_root = finalized_header.beacon.hash_tree_root();
+
+            ensure!(
+                finalized_header_root == checkpoint_root,
+                Error::FinalizedBlockDoesNotMatchCheckpoint {
+                    finalized_header_root,
+                    checkpoint_root,
+                },
+            );
+
+            finalized_header
+        };
+
+        let branch = compute_merkle_proof(attested_state, FinalizedRootIndex::U64)?;
+
+        (finalized_header, ContiguousVector::try_from_iter(branch)?)
+    } else {
+        (LightClientHeader::default(), ContiguousVector::default())
+    };
+
+    Ok(LightClientUpdate {
+        attested_header: block_to_light_client_header(attested_block),
+        next_sync_committee,
+        next_sync_committee_branch,
+        finalized_header,
+        finality_branch,
+        sync_aggregate,
+        signature_slot: block.message().slot(),
     })
 }
 
