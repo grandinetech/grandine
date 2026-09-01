@@ -2,12 +2,19 @@ use core::cmp::Reverse;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
+use bls::PublicKeyBytes;
 use futures::future::join_all;
 use logging::{info_with_peers, warn_with_peers};
 use std_ext::ArcExt;
-use types::{phase0::primitives::Slot, preset::Preset};
+use types::{
+    phase0::primitives::{H256, Slot, ValidatorIndex},
+    preset::Preset,
+};
 
-use crate::{chain_head::stream_head_events, health::Health, remote_beacon_node::RemoteBeaconNode};
+use crate::{
+    beacon_node_api::BeaconNodeApi, chain_head::stream_head_events, health::Health,
+    remote_beacon_node::RemoteBeaconNode,
+};
 
 pub struct RemoteBeaconNodes {
     nodes: Vec<Arc<RemoteBeaconNode>>,
@@ -28,6 +35,38 @@ impl RemoteBeaconNodes {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.nodes.is_empty()
+    }
+
+    /// The genesis validators root any serving node has reported.
+    #[must_use]
+    pub fn genesis_validators_root(&self) -> Option<H256> {
+        self.serving()
+            .find_map(|node| node.genesis_validators_root())
+    }
+
+    /// Resolves `pubkey` on the first serving node that answers; [`None`] when no node knows it.
+    pub async fn validator_index<P: Preset>(
+        &self,
+        pubkey: PublicKeyBytes,
+    ) -> Result<Option<ValidatorIndex>> {
+        let mut last_error = None;
+
+        for node in self.serving() {
+            match BeaconNodeApi::<P>::validator_indices(node.as_ref(), &[pubkey]).await {
+                Ok(indices) => return Ok(indices.get(&pubkey).copied()),
+                Err(error) => {
+                    warn_with_peers!(
+                        "{node} beacon node failed to resolve a validator index: {error:?}"
+                    );
+                    last_error = Some(error);
+                }
+            }
+        }
+
+        match last_error {
+            Some(error) => Err(error),
+            None => Ok(None),
+        }
     }
 
     pub fn serving(&self) -> impl Iterator<Item = &Arc<RemoteBeaconNode>> {

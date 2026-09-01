@@ -1,6 +1,9 @@
 pub use crate::{
-    api::{ValidatorApiConfig, run_validator_api},
+    api::{ChainSource, ValidatorApiConfig, run_validator_api},
     messages::ApiToValidator,
+    own_validator_indices::OwnValidatorIndices,
+    remote_beacon_node::RemoteBeaconNode,
+    remote_beacon_nodes::RemoteBeaconNodes,
     validator::{Channels as ValidatorChannels, Validator},
     validator_config::ValidatorConfig,
 };

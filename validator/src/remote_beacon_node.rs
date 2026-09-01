@@ -288,6 +288,12 @@ impl RemoteBeaconNode {
         &self.chain_head
     }
 
+    /// Learned from the genesis check; [`None`] until the node has been reached.
+    #[must_use]
+    pub fn genesis_validators_root(&self) -> Option<H256> {
+        self.genesis_validators_root.get().copied()
+    }
+
     #[must_use]
     pub fn health(&self) -> Health {
         Health::from_u8(self.health.load(Ordering::Relaxed))

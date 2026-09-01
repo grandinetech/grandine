@@ -88,7 +88,8 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
-    Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig, run_validator_api,
+    ChainSource, OwnValidatorIndices, RemoteBeaconNode, RemoteBeaconNodes, Validator,
+    ValidatorApiConfig, ValidatorChannels, ValidatorConfig, run_validator_api,
 };
 use validator_key_cache::ValidatorKeyCache;
 use validator_statistics::ValidatorStatistics;
@@ -637,6 +638,25 @@ pub async fn run_after_genesis<P: Preset>(
         None,
     ));
 
+    // Shared between the validator and the Validator API.
+    let own_validator_indices = Arc::new(OwnValidatorIndices::new(signer.clone_arc()));
+    let serving_count = Arc::new(core::sync::atomic::AtomicUsize::new(beacon_node_urls.len()));
+
+    let remote_beacon_nodes = Arc::new(RemoteBeaconNodes::new(
+        beacon_node_urls
+            .into_iter()
+            .map(|url| {
+                Arc::new(RemoteBeaconNode::new(
+                    chain_config.clone_arc(),
+                    signer.load().client().clone(),
+                    url,
+                    validator_config.max_empty_slots,
+                    serving_count.clone_arc(),
+                ))
+            })
+            .collect(),
+    ));
+
     let validator_channels = ValidatorChannels {
         api_to_liveness_tx: api_to_liveness_tx.clone(),
         api_to_validator_rx,
@@ -668,7 +688,8 @@ pub async fn run_after_genesis<P: Preset>(
         network_config.network_dir.as_deref(),
         dedicated_executor_normal_priority.clone_arc(),
         dedicated_executor_low_priority.clone_arc(),
-        beacon_node_urls,
+        own_validator_indices.clone_arc(),
+        remote_beacon_nodes.clone_arc(),
         disable_local_beacon_node,
     );
 
@@ -825,10 +846,21 @@ pub async fn run_after_genesis<P: Preset>(
         None => Either::Right(core::future::pending()),
     };
 
+    let chain_source = Arc::new(if disable_local_beacon_node {
+        ChainSource::Remote {
+            chain_config: chain_config.clone_arc(),
+            genesis_time: controller.genesis_time(),
+            own_validator_indices,
+            remote_beacon_nodes,
+        }
+    } else {
+        ChainSource::Local(controller.clone_arc())
+    });
+
     let run_validator_api = match validator_api_config {
         Some(validator_api_config) => Either::Left(run_validator_api(
             validator_api_config,
-            controller.clone_arc(),
+            chain_source,
             directories.clone_arc(),
             keymanager,
             signer,
