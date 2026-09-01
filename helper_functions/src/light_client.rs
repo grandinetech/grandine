@@ -1,5 +1,5 @@
 use crate::misc::{compute_epoch_at_slot, sync_committee_period};
-use anyhow::{Result, bail, ensure};
+use anyhow::{Ok, Result, bail, ensure};
 use hashing::ZERO_HASHES;
 use itertools::Itertools as _;
 use ssz::{ContiguousVector, SszHash as _};
@@ -8,17 +8,12 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
-        beacon_state::BeaconState as AltairBeaconState,
-        consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
-        containers::{LightClientBootstrap, LightClientHeader, LightClientUpdate, SyncCommittee},
-    },
-    phase0::{
+        beacon_state::BeaconState as AltairBeaconState, consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex}, containers::{LightClientBootstrap, LightClientFinalityUpdate, LightClientHeader, LightClientOptimisticUpdate, LightClientUpdate, SyncCommittee},
+    }, phase0::{
         consts::GENESIS_SLOT,
         containers::Checkpoint,
         primitives::{H256, Slot},
-    },
-    preset::Preset,
-    traits::{BeaconBlock as _, BeaconState, SignedBeaconBlock},
+    }, preset::Preset, traits::{BeaconBlock as _, BeaconState, SignedBeaconBlock},
 };
 
 pub fn block_to_light_client_header<P: Preset>(
@@ -347,6 +342,20 @@ pub fn create_light_client_update<P: Preset>(
         sync_aggregate,
         signature_slot: block.message().slot(),
     })
+}
+
+pub fn create_light_client_finality_update<P: Preset>(update: LightClientUpdate<P>) -> Result<LightClientFinalityUpdate<P>> {
+    Ok(LightClientFinalityUpdate{
+        attested_header: update.attested_header,
+        finalized_header: update.finalized_header,
+        finality_branch: update.finality_branch,
+        sync_aggregate: update.sync_aggregate,
+        signature_slot: update.signature_slot
+    })
+}
+
+pub fn create_light_client_optimistic_update<P: Preset>(update: LightClientUpdate<P>) -> Result<LightClientOptimisticUpdate<P>> {
+    Ok(LightClientOptimisticUpdate { attested_header: update.attested_header, sync_aggregate: update.sync_aggregate, signature_slot: update.signature_slot })
 }
 
 #[derive(Debug, Error)]
