@@ -657,8 +657,18 @@ pub async fn run_after_genesis<P: Preset>(
             .collect(),
     ));
 
+    // A validator that performs no duties against the built-in beacon node receives ticks
+    // straight from the clock rather than through the mutator.
+    let (validator_tick_tx, direct_tick_rx) = if disable_local_beacon_node {
+        let (tick_tx, tick_rx) = mpsc::unbounded();
+        (Some(tick_tx), Some(tick_rx))
+    } else {
+        (None, None)
+    };
+
     let validator_channels = ValidatorChannels {
         api_to_liveness_tx: api_to_liveness_tx.clone(),
+        direct_tick_rx,
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
         p2p_tx: validator_to_p2p_tx,
@@ -818,7 +828,7 @@ pub async fn run_after_genesis<P: Preset>(
     let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
 
     let (stop_clock_tx, stop_clock_rx) = oneshot::channel();
-    let run_clock = run_clock(controller.clone_arc(), stop_clock_rx);
+    let run_clock = run_clock(controller.clone_arc(), validator_tick_tx, stop_clock_rx);
 
     let run_slasher = match slasher {
         Some(slasher) => Either::Left(slasher.run()),
@@ -903,6 +913,7 @@ pub async fn run_after_genesis<P: Preset>(
 
 async fn run_clock<P: Preset>(
     controller: RealController<P>,
+    validator_tick_tx: Option<UnboundedSender<Tick>>,
     mut stop_clock_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
     let mut ticks =
@@ -911,7 +922,13 @@ async fn run_clock<P: Preset>(
     loop {
         select! {
             tick = ticks.select_next_some() => {
-                controller.on_tick(tick?);
+                let tick = tick?;
+
+                controller.on_tick(tick);
+
+                if let Some(tick_tx) = &validator_tick_tx {
+                    let _ = tick_tx.unbounded_send(tick);
+                }
             }
             _ = &mut stop_clock_rx => {
                 break;

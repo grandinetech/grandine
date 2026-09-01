@@ -148,6 +148,9 @@ assert_not_impl_any!(HeadFarBehind: StdError);
 
 pub struct Channels<P: Preset, W> {
     pub api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
+    /// Ticks straight from the clock, for a validator that performs no duties against the
+    /// built-in beacon node and has no reason to wait for its mutator.
+    pub direct_tick_rx: Option<UnboundedReceiver<Tick>>,
     pub api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
     pub fork_choice_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
     pub p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
@@ -202,6 +205,7 @@ pub struct Validator<P: Preset, W: Wait> {
     internal_tx: UnboundedSender<InternalMessage>,
     internal_rx: UnboundedReceiver<InternalMessage>,
     api_to_liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
+    direct_tick_rx: Option<UnboundedReceiver<Tick>>,
     validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
     validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
     last_cgc_update_epoch: Option<Epoch>,
@@ -243,6 +247,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Channels {
             api_to_liveness_tx,
+            direct_tick_rx,
             api_to_validator_rx,
             fork_choice_rx,
             p2p_tx,
@@ -302,6 +307,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             internal_rx,
             internal_tx,
             api_to_liveness_tx,
+            direct_tick_rx,
             validator_to_liveness_tx,
             validator_to_slasher_tx,
             last_cgc_update_epoch: None,
@@ -388,10 +394,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.run_internal().await
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn run_internal(mut self) -> Result<()> {
         let mut health_check = HealthCheck::new("validator");
 
         loop {
+            let mut direct_tick_rx = self
+                .direct_tick_rx
+                .as_mut()
+                .map(EitherFuture::Left)
+                .unwrap_or_else(|| EitherFuture::Right(futures::stream::pending()));
+
             let mut slasher_to_validator_rx = self
                 .slasher_to_validator_rx
                 .as_mut()
@@ -418,9 +431,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                 },
 
+                tick = direct_tick_rx.select_next_some() => {
+                    if let Err(error) = self.handle_tick(W::default(), tick).await {
+                        panic!("error while handling tick: {error:?}");
+                    }
+                },
+
                 message = self.fork_choice_rx.select_next_some() => match message {
                     ValidatorMessage::Tick(wait_group, tick) => {
-                        if let Err(error) = self.handle_tick(wait_group, tick).await {
+                        // Ignored when the validator ticks itself, or every duty would run twice.
+                        if self.mode.uses_local_node()
+                            && let Err(error) = self.handle_tick(wait_group, tick).await
+                        {
                             panic!("error while handling tick: {error:?}");
                         }
                     }
@@ -428,16 +450,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_head_message(wait_group, head).await
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
-                        self.attestation_agg_pool
-                            .insert_attestation(wait_group, attestation.clone_arc(), None);
+                        self.attestation_agg_pool.insert_attestation(
+                            wait_group,
+                            attestation.clone_arc(),
+                            None,
+                        );
 
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
                             ValidatorToLiveness::ValidAttestation(attestation)
                                 .send(validator_to_liveness_tx);
                         }
-                    },
+                    }
                     ValidatorMessage::ValidPayloadAttestation(wait_group, payload_attestation) => {
-                        let span = tracing::debug_span!("ValidatorMessage::ValidPayloadAttestation", service = "validator");
+                        let span = tracing::debug_span!(
+                            "ValidatorMessage::ValidPayloadAttestation",
+                            service = "validator"
+                        );
                         let _enter = span.enter();
 
                         self.payload_attestation_agg_pool
@@ -449,9 +477,18 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         //     ValidatorToLiveness::ValidPayloadAttestation(payload_attestation)
                         //         .send(validator_to_liveness_tx);
                         // }
-                    },
-                    ValidatorMessage::PrepareExecutionPayload(slot, safe_execution_payload_hash, finalized_execution_payload_hash) => {
-                        self.prepare_execution_payload(slot, safe_execution_payload_hash, finalized_execution_payload_hash).await
+                    }
+                    ValidatorMessage::PrepareExecutionPayload(
+                        slot,
+                        safe_execution_payload_hash,
+                        finalized_execution_payload_hash,
+                    ) => {
+                        self.prepare_execution_payload(
+                            slot,
+                            safe_execution_payload_hash,
+                            finalized_execution_payload_hash,
+                        )
+                        .await
                     }
                     ValidatorMessage::Stop => {
                         if let Some(validator_to_liveness_tx) = &self.validator_to_liveness_tx {
