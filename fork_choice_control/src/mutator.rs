@@ -76,6 +76,7 @@ use types::{
 
 use crate::{
     MutatorIgnoreReason, SidecarsPendingReconstruction,
+    archival_pool::ArchivalPool,
     block_processor::BlockProcessor,
     events::{DependentRootsBundle, EventChannels},
     messages::{
@@ -141,6 +142,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
     state_at_slot_cache: Arc<StateAtSlotCache<P>>,
     storage: Arc<Storage<P>>,
+    archival_pool: ArchivalPool,
     thread_pool: ThreadPool<P, E, W>,
     metrics: Option<Arc<Metrics>>,
     finished_loading_from_storage: bool,
@@ -209,6 +211,7 @@ where
             sidecars_pending_reconstruction,
             state_at_slot_cache,
             storage,
+            archival_pool: ArchivalPool::default(),
             thread_pool,
             metrics,
             finished_loading_from_storage: false,
@@ -3258,9 +3261,7 @@ where
             let wait_group = wait_group.clone();
 
             if !unloaded.is_empty() {
-                Builder::new()
-                .name("store-unloader".to_owned())
-                .spawn(move || {
+                let unload = move || {
                     let finalized_validators = store.finalized_validators();
 
                     debug_with_peers!("persisting unloaded old beacon states…");
@@ -3277,12 +3278,16 @@ where
                             )
                         }
                         Err(error) => {
-                            error_with_peers!("persisting unloaded old beacon states to storage failed: {error:?}")
+                            error_with_peers!(
+                                "persisting unloaded old beacon states to storage failed: {error:?}"
+                            )
                         }
                     }
 
                     drop(wait_group);
-                })?;
+                };
+
+                self.archival_pool.submit(unload)?;
             }
         }
 
@@ -5068,77 +5073,80 @@ where
 
             let last_finalized_slot = self.store.last_finalized().slot();
 
-            Builder::new()
-                .name("store-archiver".to_owned())
-                .spawn(move || {
-                    debug_with_peers!("saving finalized blocks and anchor state…");
+            let archive = move || {
+                debug_with_peers!("saving finalized blocks and anchor state…");
 
-                    match storage.append(core::iter::empty(), archived.iter(), &store) {
-                        Ok(slots) => {
-                            if let Some(chain_link) = archived.back() {
-                                let finalized_block = chain_link.block.clone_arc();
-                                let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
+                match storage.append(core::iter::empty(), archived.iter(), &store) {
+                    Ok(slots) => {
+                        if let Some(chain_link) = archived.back() {
+                            let finalized_block = chain_link.block.clone_arc();
+                            let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
 
-                                for candidate in &archived {
-                                    let candidate_slot = candidate.slot();
-                                    let candidate_epoch = misc::compute_epoch_at_slot::<P>(candidate_slot);
+                            for candidate in &archived {
+                                let candidate_slot = candidate.slot();
+                                let candidate_epoch =
+                                    misc::compute_epoch_at_slot::<P>(candidate_slot);
 
-                                    let is_last_block = candidate_slot.saturating_add(1) == chain_link.slot();
-                                    let is_first_block = candidate_epoch == anchor_epoch.saturating_sub(1)
-                                        && misc::is_epoch_start::<P>(candidate_slot);
+                                let is_last_block =
+                                    candidate_slot.saturating_add(1) == chain_link.slot();
+                                let is_first_block = candidate_epoch
+                                    == anchor_epoch.saturating_sub(1)
+                                    && misc::is_epoch_start::<P>(candidate_slot);
 
-                                    // preload first and the last block of previous epoch into state_at_slot_cache
-                                    // to handle some of the beacon API use cases
-                                    if is_first_block || is_last_block {
-                                        debug_with_peers!(
-                                            "preloading state_at_slot_cache with chain_link: \
+                                // preload first and the last block of previous epoch into state_at_slot_cache
+                                // to handle some of the beacon API use cases
+                                if is_first_block || is_last_block {
+                                    debug_with_peers!(
+                                        "preloading state_at_slot_cache with chain_link: \
                                             slot: {candidate_slot}, epoch: {candidate_epoch}, \
                                             is_first_block: {is_first_block}, is_last_block: {is_last_block}",
-                                        );
+                                    );
 
-                                        if let Err(error) = state_at_slot_cache
-                                            .get_or_try_init(candidate.slot(), || {
-                                                Ok(Some(candidate.state(&store)))
-                                            })
-                                        {
-                                            debug_with_peers!(
-                                                "failed to preload state_at_slot_cache with \
+                                    if let Err(error) = state_at_slot_cache
+                                        .get_or_try_init(candidate.slot(), || {
+                                            Ok(Some(candidate.state(&store)))
+                                        })
+                                    {
+                                        debug_with_peers!(
+                                            "failed to preload state_at_slot_cache with \
                                                 a chainlink: {error:?}",
-                                            );
-                                        }
+                                        );
                                     }
                                 }
-
-                                if finished_loading_from_storage {
-                                    SyncMessage::Finalized(finalized_block).send(&sync_tx);
-                                }
                             }
 
-                            debug_with_peers!(
-                                "finalized blocks and anchor state saved \
+                            if finished_loading_from_storage {
+                                SyncMessage::Finalized(finalized_block).send(&sync_tx);
+                            }
+                        }
+
+                        debug_with_peers!(
+                            "finalized blocks and anchor state saved \
                                  (appended block slots: {slots:?})",
-                            )
-                        }
-                        Err(error) => error_with_peers!("saving to storage failed: {error:?}"),
+                        )
                     }
+                    Err(error) => error_with_peers!("saving to storage failed: {error:?}"),
+                }
 
-                    debug_with_peers!("removing unfinalized blocks");
+                debug_with_peers!("removing unfinalized blocks");
 
-                    if !storage.archive_storage_enabled() {
-                        match storage.prune_unfinalized_blocks(last_finalized_slot) {
-                            Ok(slots) => {
-                                debug_with_peers!(
-                                    "unfinalized block pruning complete: pruned slots: {slots:?}"
-                                );
-                            }
-                            Err(error) => {
-                                error_with_peers!("unfinalized block pruning failed: {error:?}")
-                            }
+                if !storage.archive_storage_enabled() {
+                    match storage.prune_unfinalized_blocks(last_finalized_slot) {
+                        Ok(slots) => {
+                            debug_with_peers!(
+                                "unfinalized block pruning complete: pruned slots: {slots:?}"
+                            );
+                        }
+                        Err(error) => {
+                            error_with_peers!("unfinalized block pruning failed: {error:?}")
                         }
                     }
+                }
 
-                    drop(wait_group);
-                })?;
+                drop(wait_group);
+            };
+
+            self.archival_pool.submit(archive)?;
         }
 
         Ok(())
