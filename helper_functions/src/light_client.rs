@@ -8,12 +8,20 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     altair::{
-        beacon_state::BeaconState as AltairBeaconState, consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex}, containers::{LightClientBootstrap, LightClientFinalityUpdate, LightClientHeader, LightClientOptimisticUpdate, LightClientUpdate, SyncCommittee},
-    }, phase0::{
+        beacon_state::BeaconState as AltairBeaconState,
+        consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
+        containers::{
+            LightClientBootstrap, LightClientFinalityUpdate, LightClientHeader,
+            LightClientOptimisticUpdate, LightClientUpdate, SyncCommittee,
+        },
+    },
+    phase0::{
         consts::GENESIS_SLOT,
         containers::Checkpoint,
         primitives::{H256, Slot},
-    }, preset::Preset, traits::{BeaconBlock as _, BeaconState, SignedBeaconBlock},
+    },
+    preset::Preset,
+    traits::{BeaconBlock as _, SignedBeaconBlock},
 };
 
 pub fn block_to_light_client_header<P: Preset>(
@@ -24,22 +32,6 @@ pub fn block_to_light_client_header<P: Preset>(
     }
 }
 
-// `consensus-specs` builds light client proofs with `compute_merkle_proof(object, gindex)`, which
-// walks an arbitrary generalized index over an arbitrary SSZ object at runtime. We cannot express
-// the `object` half of that: `ssz_derive` unrolls merkleization into a single nested expression at
-// compile time, and Rust has no runtime reflection over struct fields, so there is no way to ask a
-// value for its chunks generically.
-//
-// We can express everything else. `container_proof` walks any generalized index over any list of
-// chunks, and `compute_merkle_proof` supplies the chunks for the Altair `BeaconState` and recurses
-// into nested containers. Only `state_chunks` has to be written out by hand, and only its field
-// order can be wrong -- which is checkable against the struct at a glance, unlike the sibling
-// arithmetic it replaces.
-
-/// The Merkle proof for `gindex` within a container whose chunks are `chunks`.
-///
-/// `chunks` is padded to a power of two with zero leaves, so the zero subtrees fall out of the
-/// hashing rather than having to be named.
 fn container_proof(chunks: &[H256], gindex: u64) -> Result<Vec<H256>> {
     let leaves = chunks.len().next_power_of_two();
     let depth = leaves.ilog2();
@@ -77,13 +69,6 @@ fn container_proof(chunks: &[H256], gindex: u64) -> Result<Vec<H256>> {
     Ok(proof)
 }
 
-/// The chunks of an Altair [`BeaconState`], in SSZ field order.
-///
-/// This is the only part of proof construction that is written out by hand. Keep it in sync with
-/// [`BeaconState`]; the generalized indices in [`types::altair::consts`] assume this exact order and
-/// count.
-///
-/// [`BeaconState`]: AltairBeaconState
 fn state_chunks<P: Preset>(state: &AltairBeaconState<P>) -> [H256; 24] {
     [
         state.genesis_time.hash_tree_root(),
@@ -120,15 +105,6 @@ fn checkpoint_chunks(checkpoint: Checkpoint) -> [H256; 2] {
     ]
 }
 
-/// [`compute_merkle_proof`](https://github.com/ethereum/consensus-specs/blob/v1.5.0-beta.0/specs/altair/light-client/full-node.md)
-/// specialized to the Altair [`BeaconState`].
-///
-/// Handles generalized indices that name a field of the state directly, and ones that descend into
-/// a nested container. `consensus-specs` composes the latter with `concat_generalized_indices`; we
-/// undo that composition here, which is why the sub-proof is emitted first: proofs run from the leaf
-/// upwards, so the deeper siblings come first.
-///
-/// [`BeaconState`]: AltairBeaconState
 pub fn compute_merkle_proof<P: Preset>(
     state: &AltairBeaconState<P>,
     gindex: u64,
@@ -147,7 +123,6 @@ pub fn compute_merkle_proof<P: Preset>(
         Error::GeneralizedIndexNotALeaf { gindex, depth },
     );
 
-    // Split `gindex` into the path through the state and the path through the nested container.
     let remaining = path_length - depth;
     let in_state = gindex >> remaining;
     let in_child = (gindex & ((1 << remaining) - 1)) | (1 << remaining);
@@ -254,14 +229,14 @@ pub fn create_light_client_update<P: Preset>(
     );
 
     ensure!(
-        attested_state.slot() == attested_state.latest_block_header().slot,
+        attested_state.slot == attested_state.latest_block_header.slot,
         Error::StateSlotDoesNotMatchLatestBlockHeader {
-            state_slot: attested_state.slot(),
-            header_slot: attested_state.latest_block_header().slot,
+            state_slot: attested_state.slot,
+            header_slot: attested_state.latest_block_header.slot,
         },
     );
 
-    let mut attested_header = attested_state.latest_block_header();
+    let mut attested_header = attested_state.latest_block_header;
     attested_header.state_root = attested_state.hash_tree_root();
 
     let attested_header_root = attested_header.hash_tree_root();
@@ -334,7 +309,9 @@ pub fn create_light_client_update<P: Preset>(
     };
 
     Ok(LightClientUpdate {
-        attested_header: block_to_light_client_header(attested_block),
+        attested_header: LightClientHeader {
+            beacon: attested_header,
+        },
         next_sync_committee,
         next_sync_committee_branch,
         finalized_header,
@@ -344,18 +321,26 @@ pub fn create_light_client_update<P: Preset>(
     })
 }
 
-pub fn create_light_client_finality_update<P: Preset>(update: LightClientUpdate<P>) -> Result<LightClientFinalityUpdate<P>> {
-    Ok(LightClientFinalityUpdate{
+pub fn create_light_client_finality_update<P: Preset>(
+    update: LightClientUpdate<P>,
+) -> LightClientFinalityUpdate<P> {
+    LightClientFinalityUpdate {
         attested_header: update.attested_header,
         finalized_header: update.finalized_header,
         finality_branch: update.finality_branch,
         sync_aggregate: update.sync_aggregate,
-        signature_slot: update.signature_slot
-    })
+        signature_slot: update.signature_slot,
+    }
 }
 
-pub fn create_light_client_optimistic_update<P: Preset>(update: LightClientUpdate<P>) -> Result<LightClientOptimisticUpdate<P>> {
-    Ok(LightClientOptimisticUpdate { attested_header: update.attested_header, sync_aggregate: update.sync_aggregate, signature_slot: update.signature_slot })
+pub fn create_light_client_optimistic_update<P: Preset>(
+    update: LightClientUpdate<P>,
+) -> LightClientOptimisticUpdate<P> {
+    LightClientOptimisticUpdate {
+        attested_header: update.attested_header,
+        sync_aggregate: update.sync_aggregate,
+        signature_slot: update.signature_slot,
+    }
 }
 
 #[derive(Debug, Error)]
@@ -398,20 +383,15 @@ enum Error {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
+mod extra_tests {
     use arithmetic::U64Ext as _;
-    use bls::{AggregatePublicKeyBytes, PublicKeyBytes};
-    use ssz::{ContiguousVector, Hc};
-    use try_from_iterator::TryFromIterator as _;
-    use typenum::Unsigned as _;
     use types::{
-        altair::{
-            consts::{CurrentSyncCommitteeIndex, FinalizedRootIndex, NextSyncCommitteeIndex},
-            containers::SyncCommittee,
+        altair::containers::SignedBeaconBlock as AltairSignedBeaconBlock,
+        combined::SignedBeaconBlock as CombinedSignedBeaconBlock,
+        phase0::{
+            containers::{BeaconBlockHeader, Eth1Data, Fork, Validator},
+            primitives::Slot,
         },
-        phase0::containers::{BeaconBlockHeader, Eth1Data, Fork, Validator},
         preset::Minimal,
     };
 
@@ -419,21 +399,6 @@ mod tests {
 
     use super::*;
 
-    fn distinct_sync_committee(byte: u8) -> Arc<Hc<SyncCommittee<Minimal>>> {
-        Arc::new(Hc::from(SyncCommittee {
-            pubkeys: Box::new(
-                ContiguousVector::try_from_iter(core::iter::repeat_n(
-                    PublicKeyBytes::repeat_byte(byte),
-                    <Minimal as Preset>::SyncCommitteeSize::USIZE,
-                ))
-                .expect("length matches SyncCommitteeSize"),
-            ),
-            aggregate_pubkey: AggregatePublicKeyBytes::repeat_byte(byte),
-        }))
-    }
-
-    /// A state whose every field relevant to a light client proof is distinguishable, so that a
-    /// transposed chunk changes the computed root.
     fn nontrivial_state() -> AltairBeaconState<Minimal> {
         AltairBeaconState {
             genesis_time: 1,
@@ -472,113 +437,152 @@ mod tests {
                 root: H256::repeat_byte(12),
             },
             inactivity_scores: [13].try_into().expect("one score fits"),
-            current_sync_committee: distinct_sync_committee(14),
-            next_sync_committee: distinct_sync_committee(15),
             ..AltairBeaconState::default()
         }
     }
 
-    /// `is_valid_merkle_branch` wants an index into the leaves, not a generalized index.
+    fn block_with_post_state(
+        mut state: AltairBeaconState<Minimal>,
+        slot: Slot,
+        parent_root: H256,
+    ) -> (
+        CombinedSignedBeaconBlock<Minimal>,
+        AltairBeaconState<Minimal>,
+    ) {
+        let mut block = AltairSignedBeaconBlock::<Minimal>::default();
+
+        block.message.slot = slot;
+        block.message.parent_root = parent_root;
+        block
+            .message
+            .body
+            .sync_aggregate
+            .sync_committee_bits
+            .set(0, true);
+
+        state.slot = slot;
+        state.latest_block_header = block.message.to_header();
+        block.message.state_root = state.hash_tree_root();
+
+        (CombinedSignedBeaconBlock::Altair(block), state)
+    }
+
     fn index_at_leaf_depth(gindex: u64) -> u64 {
         gindex - gindex.prev_power_of_two()
     }
 
     #[test]
-    fn sync_committee_proofs_reconstruct_the_state_root() {
+    fn generalized_indices_outside_the_light_client_protocol_verify() {
         let state = nontrivial_state();
         let root = state.hash_tree_root();
 
-        assert!(is_valid_merkle_branch(
-            state.current_sync_committee.hash_tree_root(),
-            compute_merkle_proof(&state, CurrentSyncCommitteeIndex::U64)
-                .expect("proof is constructible"),
-            index_at_leaf_depth(CurrentSyncCommitteeIndex::U64),
-            root,
-        ));
+        for (gindex, leaf) in [
+            (43, state.validators.hash_tree_root()),
+            (103, state.current_justified_checkpoint.root),
+            (
+                100,
+                state.previous_justified_checkpoint.epoch.hash_tree_root(),
+            ),
+        ] {
+            assert!(is_valid_merkle_branch(
+                leaf,
+                compute_merkle_proof(&state, gindex).expect("proof is constructible"),
+                index_at_leaf_depth(gindex),
+                root,
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_generalized_indices_without_a_proof() {
+        let state = nontrivial_state();
+
+        for gindex in [1, 5, 70] {
+            assert!(compute_merkle_proof(&state, gindex).is_err());
+        }
+    }
+
+    #[test]
+    fn bootstrap_branch_verifies_against_the_header_state_root() {
+        let (block, state) = block_with_post_state(nontrivial_state(), 8, H256::zero());
+
+        let bootstrap =
+            create_light_client_bootstrap(&state, &block).expect("state is the block post state");
+
+        assert_eq!(bootstrap.header.beacon, block.message().to_header());
 
         assert!(is_valid_merkle_branch(
-            state.next_sync_committee.hash_tree_root(),
-            compute_merkle_proof(&state, NextSyncCommitteeIndex::U64)
-                .expect("proof is constructible"),
+            bootstrap.current_sync_committee.hash_tree_root(),
+            bootstrap.current_sync_committee_branch,
+            index_at_leaf_depth(CurrentSyncCommitteeIndex::U64),
+            bootstrap.header.beacon.state_root,
+        ));
+    }
+
+    #[test]
+    fn update_branches_verify_against_the_attested_header_state_root() {
+        let (finalized_block, _) = block_with_post_state(nontrivial_state(), 8, H256::zero());
+
+        let mut attested = nontrivial_state();
+        attested.finalized_checkpoint.root = finalized_block.message().hash_tree_root();
+
+        let (attested_block, attested_state) = block_with_post_state(attested, 16, H256::zero());
+        let (block, state) = block_with_post_state(
+            nontrivial_state(),
+            17,
+            attested_block.message().hash_tree_root(),
+        );
+
+        let update = create_light_client_update(
+            &state,
+            &block,
+            &attested_state,
+            &attested_block,
+            Some(&finalized_block),
+        )
+        .expect("states are the post states of their blocks");
+
+        assert_eq!(
+            update.attested_header.beacon,
+            attested_block.message().to_header()
+        );
+        assert_eq!(
+            update.finalized_header.beacon,
+            finalized_block.message().to_header()
+        );
+        assert_eq!(update.signature_slot, block.message().slot());
+
+        let finality_update = create_light_client_finality_update(update.clone());
+        let optimistic_update = create_light_client_optimistic_update(update.clone());
+
+        assert_eq!(finality_update.finalized_header, update.finalized_header);
+        assert_eq!(finality_update.finality_branch, update.finality_branch);
+        assert_eq!(optimistic_update.attested_header, update.attested_header);
+        assert_eq!(optimistic_update.signature_slot, update.signature_slot);
+
+        let attested_state_root = update.attested_header.beacon.state_root;
+
+        assert!(is_valid_merkle_branch(
+            update.next_sync_committee.hash_tree_root(),
+            update.next_sync_committee_branch,
             index_at_leaf_depth(NextSyncCommitteeIndex::U64),
-            root,
+            attested_state_root,
         ));
-    }
-
-    #[test]
-    fn finality_proof_reconstructs_the_state_root() {
-        let state = nontrivial_state();
 
         assert!(is_valid_merkle_branch(
-            state.finalized_checkpoint.root,
-            compute_merkle_proof(&state, FinalizedRootIndex::U64).expect("proof is constructible"),
+            attested_state.finalized_checkpoint.root,
+            update.finality_branch,
             index_at_leaf_depth(FinalizedRootIndex::U64),
-            state.hash_tree_root(),
-        ));
-    }
-
-    /// The point of taking a generalized index at runtime: indices the light client protocol does
-    /// not use work too, with no code written for them.
-    #[test]
-    fn arbitrary_generalized_indices_verify() {
-        let state = nontrivial_state();
-        let root = state.hash_tree_root();
-
-        // `BeaconState.validators`, field 11, a direct leaf.
-        assert!(is_valid_merkle_branch(
-            state.validators.hash_tree_root(),
-            compute_merkle_proof(&state, 43).expect("43 is a state field"),
-            index_at_leaf_depth(43),
-            root,
-        ));
-
-        // `BeaconState.current_justified_checkpoint.root`, descending into a nested container that
-        // no light client container references.
-        assert!(is_valid_merkle_branch(
-            state.current_justified_checkpoint.root,
-            compute_merkle_proof(&state, 103).expect("103 descends into a checkpoint"),
-            index_at_leaf_depth(103),
-            root,
-        ));
-
-        // `BeaconState.previous_justified_checkpoint.epoch`.
-        assert!(is_valid_merkle_branch(
-            state.previous_justified_checkpoint.epoch.hash_tree_root(),
-            compute_merkle_proof(&state, 100).expect("100 descends into a checkpoint"),
-            index_at_leaf_depth(100),
-            root,
+            attested_state_root,
         ));
     }
 
     #[test]
-    fn rejects_a_generalized_index_that_is_not_a_leaf() {
-        let state = nontrivial_state();
+    fn rejects_a_state_that_is_not_the_block_post_state() {
+        let (block, _) = block_with_post_state(nontrivial_state(), 8, H256::zero());
+        let (_, other_state) = block_with_post_state(nontrivial_state(), 9, H256::zero());
 
-        assert!(compute_merkle_proof(&state, 1).is_err());
-        assert!(compute_merkle_proof(&state, 5).is_err());
-    }
-
-    #[test]
-    fn rejects_descending_into_a_field_without_a_generator() {
-        let state = nontrivial_state();
-
-        // `BeaconState.fork` is field 3 (gindex 35); descending into it is unsupported.
-        assert!(compute_merkle_proof(&state, 70).is_err());
-    }
-
-    /// The proofs must depend on the state; a proof of the right shape but wrong contents would
-    /// pass the tests above if they verified against a root they derived themselves.
-    #[test]
-    fn proofs_reject_a_mismatched_leaf() {
-        let state = nontrivial_state();
-
-        assert!(!is_valid_merkle_branch(
-            state.next_sync_committee.hash_tree_root(),
-            compute_merkle_proof(&state, CurrentSyncCommitteeIndex::U64)
-                .expect("proof is constructible"),
-            index_at_leaf_depth(CurrentSyncCommitteeIndex::U64),
-            state.hash_tree_root(),
-        ));
+        assert!(create_light_client_bootstrap(&other_state, &block).is_err());
     }
 }
 
@@ -615,14 +619,6 @@ mod spec_tests {
         run_state_proof_case::<preset>(case);
     }
 
-    /// Checks the branches we construct against the ones `consensus-specs` publishes.
-    ///
-    /// `predicates::spec_tests` runs the same cases but only verifies the provided proof, because
-    /// there was no code to generate one. These indices now have generators, so we can also make
-    /// the assertion the test format asks for:
-    ///
-    /// > If the implementation supports generating merkle proofs, check that the self-generated
-    /// > proof matches the `proof` provided with the test.
     fn run_state_proof_case<P: Preset>(case: Case) {
         let Proof {
             leaf,
@@ -632,8 +628,6 @@ mod spec_tests {
 
         let state = case.ssz_default::<AltairBeaconState<P>>("object");
 
-        // Unlike the name suggests, `leaf_index` is a generalized index, which is exactly what
-        // `compute_merkle_proof` takes. The match only picks the leaf to check it against.
         let generated = compute_merkle_proof(&state, leaf_index).expect("proof is constructible");
 
         let (expected_leaf, generated) = match leaf_index {
