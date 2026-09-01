@@ -659,17 +659,8 @@ where
             }
         }
 
-        if tick.kind == TickKind::AggregateFourth {
-            let store = &self.store;
-
-            if let Some(state) = self.state_cache.existing_state_at_slot(
-                store,
-                store.head().block_root,
-                store.slot().saturating_add(1),
-            ) {
-                self.prepare_execution_payload_for_next_slot(&state);
-            }
-
+        if tick.is_last_tick::<P>(self.store.chain_config()) {
+            self.prepare_execution_payload_for_head(self.store.head().block_root);
             self.track_collection_metrics();
         }
 
@@ -3560,6 +3551,10 @@ where
 
         self.notify_forkchoice_updated(self.store.head());
 
+        if self.store.head().block_root == beacon_block_root {
+            self.prepare_execution_payload_for_head(beacon_block_root);
+        }
+
         if let Some(delayed) = self.take_delayed_until_envelope(beacon_block_root) {
             self.retry_delayed(delayed, wait_group);
         }
@@ -4945,6 +4940,18 @@ where
             block: block.clone_arc(),
             metrics: self.metrics.clone(),
         });
+    }
+
+    fn prepare_execution_payload_for_head(&self, head_block_root: H256) {
+        let store = &self.store;
+
+        if let Some(state) = self.state_cache.existing_state_at_slot(
+            store,
+            head_block_root,
+            store.slot().saturating_add(1),
+        ) {
+            self.prepare_execution_payload_for_next_slot(&state);
+        }
     }
 
     fn prepare_execution_payload_for_next_slot(&self, next_slot_state: &BeaconState<P>) {
