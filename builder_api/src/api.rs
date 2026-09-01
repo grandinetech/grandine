@@ -20,8 +20,9 @@ use ssz::{ContiguousList, SszHash as _, SszRead, SszWrite as _};
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::{
-    combined::{ExecutionPayload, SignedBlindedBeaconBlock},
+    combined::{ExecutionPayload, SignedBeaconBlock, SignedBlindedBeaconBlock},
     config::Config as ChainConfig,
+    gloas::containers::SignedExecutionPayloadBid,
     nonstandard::{Phase, WithBlobsAndMev},
     phase0::{
         consts::GENESIS_SLOT,
@@ -34,25 +35,54 @@ use types::{
 
 use crate::{
     BuilderApiFormat, BuilderConfig,
-    combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
+    combined::{ExecutionPayloadAndBlobsBundle, GetExecutionPayloadBidResponse, SignedBuilderBid},
     consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
+    gloas::containers::{BuilderPreferencesRequest, SignedRequestAuth},
     unphased::containers::SignedValidatorRegistrationV1,
 };
 
 const DATE_MS_HEADER: &str = "Date-Milliseconds";
+const X_TIMEOUT_MS_HEADER: &str = "X-Timeout-Ms";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum BuilderApiError {
+    #[error(
+        "request auth slot ({auth_slot}) does not match execution payload bid path slot ({path_slot})"
+    )]
+    AuthSlotMismatch { auth_slot: Slot, path_slot: Slot },
     #[error("bad request to Builder API (builder node response: {message})")]
     BadRequest { message: String },
+    #[error(
+        "execution payload bid parent_block_hash ({bid_parent_hash:?}) does not match request parent_hash ({request_parent_hash:?})"
+    )]
+    BidParentHashMismatch {
+        bid_parent_hash: ExecutionBlockHash,
+        request_parent_hash: ExecutionBlockHash,
+    },
+    #[error(
+        "execution payload bid parent_block_root ({bid_parent_root:?}) does not match request parent_root ({request_parent_root:?})"
+    )]
+    BidParentRootMismatch {
+        bid_parent_root: H256,
+        request_parent_root: H256,
+    },
+    #[error("execution payload bid slot ({bid_slot}) does not match request slot ({request_slot})")]
+    BidSlotMismatch { bid_slot: Slot, request_slot: Slot },
+    #[error(
+        "skipped execution payload bid request for slot {slot}: \
+         no time remaining before next interval"
+    )]
+    BidRequestSkippedNoTime { slot: Slot },
     #[error("builder node internal error (builder node response: {message})")]
     BuilderNodeInternalError { message: String },
     #[error("{missing_blocks} consecutive missing blocks since head")]
     ConsecutiveMissingBlocks { missing_blocks: u64 },
     #[error("{missing_blocks} missing blocks in the last rolling epoch")]
     RollingEpochMissingBlocks { missing_blocks: u64 },
+    #[error("phase ({phase}) is before minimum required phase ({minimum})")]
+    PhaseBeforeMinimum { phase: Phase, minimum: Phase },
     #[error(
         "execution payload root ({payload_root:?}) does not match header root ({header_root:?})"
     )]
@@ -81,6 +111,8 @@ pub struct Api {
     metrics: Option<Arc<Metrics>>,
     supports_block_ssz: ArcSwap<Option<bool>>,
     supports_validators_ssz: ArcSwap<Option<bool>>,
+    // Shared across Gloas SSZ request bodies (bid, preferences, notify).
+    supports_ssz_request_body: ArcSwap<Option<bool>>,
 }
 
 impl Api {
@@ -98,6 +130,7 @@ impl Api {
             metrics,
             supports_block_ssz: ArcSwap::from_pointee(None),
             supports_validators_ssz: ArcSwap::from_pointee(None),
+            supports_ssz_request_body: ArcSwap::from_pointee(None),
         }
     }
 
@@ -462,41 +495,403 @@ impl Api {
         })
     }
 
+    // Full bid validation (signature, builder eligibility, etc.) is deferred to the caller; it
+    // needs beacon state. See <https://github.com/ethereum/builder-specs/pull/165>.
+    // Request slot / parent_hash / parent_root consistency is checked below.
+    #[expect(clippy::too_many_arguments)]
+    pub async fn get_execution_payload_bid<P: Preset>(
+        &self,
+        chain_config: &ChainConfig,
+        genesis_time: UnixSeconds,
+        slot: Slot,
+        parent_hash: ExecutionBlockHash,
+        parent_root: H256,
+        pubkey: PublicKeyBytes,
+        signed_request_auth: &SignedRequestAuth,
+    ) -> Result<Option<SignedExecutionPayloadBid<P>>> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .builder_get_execution_payload_bid_times
+                .start_timer()
+        });
+
+        // See <https://github.com/ethereum/builder-specs/pull/165>
+        // (applicable from Gloas onwards).
+        let phase = chain_config.phase_at_slot::<P>(slot);
+        validate_post_phase(phase, Phase::Gloas)?;
+
+        ensure!(
+            signed_request_auth.message.slot == slot,
+            BuilderApiError::AuthSlotMismatch {
+                auth_slot: signed_request_auth.message.slot,
+                path_slot: slot,
+            },
+        );
+
+        let url = self.url(&format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        ))?;
+
+        let use_json = self.use_json_request_body();
+
+        let Some(mut response) = self
+            .send_execution_payload_bid::<P>(
+                chain_config,
+                genesis_time,
+                &url,
+                phase,
+                signed_request_auth,
+                use_json,
+            )
+            .await?
+        else {
+            // Distinct from HTTP 204 (`Ok(None)`): the request was never sent.
+            bail!(BuilderApiError::BidRequestSkippedNoTime { slot });
+        };
+
+        // JSON-only builders reject SSZ request bodies with 415. Retry once as JSON.
+        // See <https://github.com/ethereum/builder-specs/pull/165>.
+        if !use_json && response.status() == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            debug_with_peers!(
+                "builder rejected SSZ execution payload bid request, retrying in JSON"
+            );
+            self.supports_ssz_request_body.store(Arc::new(Some(false)));
+            let Some(json_response) = self
+                .send_execution_payload_bid::<P>(
+                    chain_config,
+                    genesis_time,
+                    &url,
+                    phase,
+                    signed_request_auth,
+                    true,
+                )
+                .await?
+            else {
+                // SSZ was sent and rejected; do not report 204 or BidRequestSkippedNoTime.
+                handle_error(response).await?;
+                unreachable!("HTTP 415 is a client error");
+            };
+            response = json_response;
+        } else if !use_json
+            && (response.status() == StatusCode::OK || response.status() == StatusCode::NO_CONTENT)
+        {
+            self.supports_ssz_request_body.store(Arc::new(Some(true)));
+        }
+
+        let response = handle_error(response).await?;
+
+        if response.status() == StatusCode::NO_CONTENT {
+            info_with_peers!("builder has no execution payload bid available for slot {slot}");
+            return Ok(None);
+        }
+
+        if response.status() != StatusCode::OK {
+            bail!(BuilderApiError::UnexpectedStatusCode {
+                expected: StatusCode::OK,
+                received: response.status()
+            });
+        }
+
+        let bid_response =
+            decode_ssz_or_json_response::<GetExecutionPayloadBidResponse<P>>(response).await?;
+
+        let bid = bid_response.into_bid();
+
+        debug_with_peers!("get_execution_payload_bid response: {bid:?}");
+
+        ensure!(
+            bid.message.slot == slot,
+            BuilderApiError::BidSlotMismatch {
+                bid_slot: bid.message.slot,
+                request_slot: slot,
+            },
+        );
+        ensure!(
+            bid.message.parent_block_hash == parent_hash,
+            BuilderApiError::BidParentHashMismatch {
+                bid_parent_hash: bid.message.parent_block_hash,
+                request_parent_hash: parent_hash,
+            },
+        );
+        ensure!(
+            bid.message.parent_block_root == parent_root,
+            BuilderApiError::BidParentRootMismatch {
+                bid_parent_root: bid.message.parent_block_root,
+                request_parent_root: parent_root,
+            },
+        );
+
+        info_with_peers!("received execution payload bid from builder for slot {slot}");
+
+        Ok(Some(bid))
+    }
+
+    pub async fn submit_builder_preferences<P: Preset>(
+        &self,
+        chain_config: &ChainConfig,
+        pubkey: PublicKeyBytes,
+        request_body: &BuilderPreferencesRequest,
+    ) -> Result<()> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .builder_submit_builder_preferences_times
+                .start_timer()
+        });
+
+        // ethereum/builder-specs#165: auth.message.slot is the proposal slot preferences
+        // apply to; the builder MUST reject if it has already passed. See
+        // <https://github.com/ethereum/builder-specs/pull/165>.
+        let auth_slot = request_body.auth.message.slot;
+
+        // Eth-Consensus-Version is required and must match the fork of the proposal slot.
+        let phase = chain_config.phase_at_slot::<P>(auth_slot);
+        validate_post_phase(phase, Phase::Gloas)?;
+
+        let url = self.url(&format!("/eth/v1/builder/builder_preferences/{pubkey:?}"))?;
+
+        let use_json = self.use_json_request_body();
+
+        debug_with_peers!("submitting builder preferences to {url}, use_json: {use_json}");
+
+        let mut response = self
+            .send_builder_preferences(&url, phase, request_body, use_json)
+            .await?;
+
+        // JSON-only builders reject SSZ request bodies with 415. Retry once as JSON.
+        // See <https://github.com/ethereum/builder-specs/pull/165>.
+        if !use_json && response.status() == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            debug_with_peers!("builder rejected SSZ builder preferences, retrying in JSON");
+            self.supports_ssz_request_body.store(Arc::new(Some(false)));
+            response = self
+                .send_builder_preferences(&url, phase, request_body, true)
+                .await?;
+        } else if !use_json && response.status() == StatusCode::ACCEPTED {
+            self.supports_ssz_request_body.store(Arc::new(Some(true)));
+        }
+
+        let response = handle_error(response).await?;
+
+        if response.status() == StatusCode::ACCEPTED {
+            info_with_peers!("submitted builder preferences for validator {pubkey:?}");
+            return Ok(());
+        }
+
+        bail!(BuilderApiError::UnexpectedStatusCode {
+            expected: StatusCode::ACCEPTED,
+            received: response.status()
+        })
+    }
+
+    // Notifies the builder so it can publish the corresponding
+    // `SignedExecutionPayloadEnvelope`. The proposer must still gossip the beacon block.
+    // See <https://github.com/ethereum/builder-specs/pull/165>.
+    pub async fn submit_signed_beacon_block<P: Preset>(
+        &self,
+        block: &SignedBeaconBlock<P>,
+    ) -> Result<()> {
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .builder_submit_signed_beacon_block_times
+                .start_timer()
+        });
+
+        // Applicable from Gloas onwards. See
+        // <https://github.com/ethereum/builder-specs/pull/165>.
+        let phase = block.phase();
+        validate_post_phase(phase, Phase::Gloas)?;
+
+        let url = self.url("/eth/v1/builder/beacon_blocks")?;
+
+        let use_json = self.use_json_request_body();
+
+        debug_with_peers!(
+            "submitting signed beacon block to {url} with timeout of {REQUEST_TIMEOUT:?}, \
+             use_json: {use_json}",
+        );
+
+        let block_root = block.message().hash_tree_root();
+        let slot = block.message().slot();
+
+        let mut response = self
+            .send_signed_beacon_block(&url, phase, block, use_json)
+            .await?;
+
+        // JSON-only builders reject SSZ request bodies with 415. Retry once as JSON.
+        // See <https://github.com/ethereum/builder-specs/pull/165>.
+        if !use_json && response.status() == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            debug_with_peers!("builder rejected SSZ signed beacon block notify, retrying in JSON");
+            self.supports_ssz_request_body.store(Arc::new(Some(false)));
+            response = self
+                .send_signed_beacon_block(&url, phase, block, true)
+                .await?;
+        } else if !use_json && response.status() == StatusCode::ACCEPTED {
+            self.supports_ssz_request_body.store(Arc::new(Some(true)));
+        }
+
+        let response = handle_error(response).await?;
+
+        if response.status() == StatusCode::ACCEPTED {
+            info_with_peers!(
+                "notified builder of signed beacon block {block_root:?} at slot {slot}"
+            );
+            return Ok(());
+        }
+
+        bail!(BuilderApiError::UnexpectedStatusCode {
+            expected: StatusCode::ACCEPTED,
+            received: response.status()
+        })
+    }
+
+    async fn send_execution_payload_bid<P: Preset>(
+        &self,
+        chain_config: &ChainConfig,
+        genesis_time: UnixSeconds,
+        url: &RedactingUrl,
+        phase: Phase,
+        signed_request_auth: &SignedRequestAuth,
+        use_json: bool,
+    ) -> Result<Option<Response>> {
+        let timeout_ms = execution_payload_bid_timeout_ms::<P>(chain_config, genesis_time)?;
+        // Never sent. `get_execution_payload_bid` maps this to `BidRequestSkippedNoTime`,
+        // not HTTP 204 (`Ok(None)`).
+        if timeout_ms == 0 {
+            return Ok(None);
+        }
+
+        let timeout = Duration::from_millis(timeout_ms);
+
+        debug_with_peers!(
+            "getting execution payload bid from {url} with timeout of {timeout:?}, \
+             use_json: {use_json}"
+        );
+
+        let date_ms = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|timestamp| timestamp.as_millis())
+            .map_err(|error| anyhow::anyhow!("unable to calculate Date-Milliseconds: {error:?}"))?;
+
+        let request = self
+            .client
+            .post(url.clone().into_url())
+            .timeout(timeout)
+            .header(DATE_MS_HEADER, format!("{date_ms}"))
+            .header(X_TIMEOUT_MS_HEADER, format!("{timeout_ms}"))
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
+
+        let request = if use_json {
+            request
+                .header(ACCEPT, APPLICATION_JSON.as_ref())
+                .json(signed_request_auth)
+        } else {
+            request
+                .header(
+                    ACCEPT,
+                    format!("{APPLICATION_OCTET_STREAM};q=1,{APPLICATION_JSON};q=0.9"),
+                )
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(signed_request_auth.to_ssz()?)
+        };
+
+        Ok(Some(request.send().await?))
+    }
+
+    async fn send_builder_preferences(
+        &self,
+        url: &RedactingUrl,
+        phase: Phase,
+        request_body: &BuilderPreferencesRequest,
+        use_json: bool,
+    ) -> Result<Response> {
+        let request = self
+            .client
+            .post(url.clone().into_url())
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
+
+        let request = if use_json {
+            request.json(request_body)
+        } else {
+            request
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(request_body.to_ssz()?)
+        };
+
+        Ok(request.send().await?)
+    }
+
+    async fn send_signed_beacon_block<P: Preset>(
+        &self,
+        url: &RedactingUrl,
+        phase: Phase,
+        block: &SignedBeaconBlock<P>,
+        use_json: bool,
+    ) -> Result<Response> {
+        let request = self
+            .client
+            .post(url.clone().into_url())
+            .timeout(REQUEST_TIMEOUT)
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref());
+
+        // Empty 202 body: do not set Accept. See
+        // <https://github.com/ethereum/builder-specs/pull/165>.
+        let request = if use_json {
+            request.json(block)
+        } else {
+            request
+                .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
+                .body(block.to_ssz()?)
+        };
+
+        Ok(request.send().await?)
+    }
+
     async fn parse_response<T: DeserializeOwned + SszRead<Phase>>(
         &self,
         response: Response,
     ) -> Result<T> {
-        let content_type = response.headers().get(CONTENT_TYPE);
+        let is_ssz = response.headers().get(CONTENT_TYPE)
+            == Some(&HeaderValue::from_static(APPLICATION_OCTET_STREAM.as_ref()));
+        let value = decode_ssz_or_json_response(response).await?;
+        self.supports_block_ssz.store(Arc::new(Some(is_ssz)));
+        Ok(value)
+    }
 
-        debug_with_peers!("received response with content_type: {content_type:?}");
-
-        if content_type.is_none()
-            || content_type == Some(&HeaderValue::from_static(APPLICATION_JSON.as_ref()))
-        {
-            return response
-                .json()
-                .await
-                .inspect(|_| self.supports_block_ssz.store(Arc::new(Some(false))))
-                .map_err(Into::into);
-        }
-
-        if content_type == Some(&HeaderValue::from_static(APPLICATION_OCTET_STREAM.as_ref())) {
-            let phase = http_api_utils::extract_phase_from_headers(response.headers())?;
-            let bytes = response.bytes().await?;
-
-            return T::from_ssz(&phase, &bytes)
-                .inspect(|_| self.supports_block_ssz.store(Arc::new(Some(true))))
-                .map_err(Into::into);
-        }
-
-        bail!(BuilderApiError::UnsupportedContentType {
-            content_type: content_type.cloned(),
-        })
+    fn use_json_request_body(&self) -> bool {
+        self.config.builder_api_format == BuilderApiFormat::Json
+            || self
+                .supports_ssz_request_body
+                .load()
+                .is_some_and(|supported| !supported)
     }
 
     fn url(&self, path: &str) -> Result<RedactingUrl> {
         self.config.builder_api_url.join(path).map_err(Into::into)
     }
+}
+
+async fn decode_ssz_or_json_response<T: DeserializeOwned + SszRead<Phase>>(
+    response: Response,
+) -> Result<T> {
+    let content_type = response.headers().get(CONTENT_TYPE);
+
+    debug_with_peers!("received response with content_type: {content_type:?}");
+
+    if content_type.is_none()
+        || content_type == Some(&HeaderValue::from_static(APPLICATION_JSON.as_ref()))
+    {
+        return response.json().await.map_err(Into::into);
+    }
+
+    if content_type == Some(&HeaderValue::from_static(APPLICATION_OCTET_STREAM.as_ref())) {
+        let phase = http_api_utils::extract_phase_from_headers(response.headers())?;
+        let bytes = response.bytes().await?;
+
+        return T::from_ssz(&phase, &bytes).map_err(Into::into);
+    }
+
+    bail!(BuilderApiError::UnsupportedContentType {
+        content_type: content_type.cloned(),
+    })
 }
 
 async fn handle_error(response: Response) -> Result<Response> {
@@ -525,25 +920,135 @@ fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
     Ok(())
 }
 
+fn validate_post_phase(phase: Phase, post_phase: Phase) -> Result<()> {
+    ensure!(
+        phase >= post_phase,
+        BuilderApiError::PhaseBeforeMinimum {
+            phase,
+            minimum: post_phase
+        },
+    );
+
+    Ok(())
+}
+
+fn execution_payload_bid_timeout_ms<P: Preset>(
+    chain_config: &ChainConfig,
+    genesis_time: UnixSeconds,
+) -> Result<u64> {
+    let (_, remaining_time) =
+        clock::next_interval_with_remaining_time::<P>(chain_config, genesis_time)?;
+    Ok(u64::try_from(REQUEST_TIMEOUT.min(remaining_time).as_millis()).unwrap_or(u64::MAX))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use helper_functions::signing::SignForAllForks as _;
+    use httpmock::{Method, MockServer};
     use reqwest::Client;
+    use serde_json::json;
+    use ssz::{ByteList, Hc};
     use test_case::test_case;
     use types::{
+        config::Config,
+        gloas::containers::{
+            BeaconBlock as GloasBeaconBlock, SignedBeaconBlock as GloasSignedBeaconBlock,
+            SignedExecutionPayloadBid,
+        },
         nonstandard::{
             DEFAULT_BUILDER_MAX_SKIPPED_SLOTS, DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
         },
+        phase0::containers::SignedBeaconBlock as Phase0SignedBeaconBlock,
+        phase0::primitives::H256,
         preset::Mainnet,
     };
 
-    use crate::{BuilderApi, BuilderConfig};
+    use crate::{
+        BuilderApi, BuilderConfig,
+        consts::{DOMAIN_REQUEST_AUTH, MaxDataSize},
+        gloas::containers::{
+            BuilderPreferences, BuilderPreferencesRequest, RequestAuth, SignedRequestAuth,
+        },
+    };
 
     use super::*;
+
+    use bls::SignatureBytes;
 
     const NON_EMPTY_SLOTS: [Slot; 27] = [
         128, 127, 126, 125, 124, 122, 121, 120, 119, 118, 117, 116, 115, 114, 112, 111, 110, 109,
         108, 104, 102, 101, 100, 99, 98, 97, 96,
     ];
+    const PREFERENCES_AUTH_SLOT: Slot = 1_000;
+
+    fn test_api(builder_url: &str) -> BuilderApi {
+        test_api_with_format(builder_url, BuilderApiFormat::Json)
+    }
+
+    fn test_api_with_format(builder_url: &str, builder_api_format: BuilderApiFormat) -> BuilderApi {
+        BuilderApi::new(
+            BuilderConfig {
+                builder_api_format,
+                builder_api_url: builder_url
+                    .parse()
+                    .expect("test builder URL should be valid"),
+                builder_disable_checks: false,
+                builder_max_skipped_slots_per_epoch: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
+                builder_max_skipped_slots: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
+            },
+            PubkeyCache::default().into(),
+            Client::new(),
+            None,
+        )
+    }
+
+    fn gloas_chain_config() -> Config {
+        Config::mainnet().upgrade_once(Phase::Gloas, 0)
+    }
+
+    fn sample_auth() -> SignedRequestAuth {
+        sample_auth_for_slot(1)
+    }
+
+    fn sample_auth_for_slot(slot: Slot) -> SignedRequestAuth {
+        SignedRequestAuth {
+            message: RequestAuth {
+                data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
+                    .expect("builder URL fits MAX_DATA_SIZE"),
+                slot,
+            },
+            signature: SignatureBytes::default(),
+        }
+    }
+
+    fn sample_bid(
+        slot: Slot,
+        parent_hash: ExecutionBlockHash,
+        parent_root: H256,
+    ) -> SignedExecutionPayloadBid<Mainnet> {
+        let mut bid = SignedExecutionPayloadBid::<Mainnet>::default();
+        bid.message.slot = slot;
+        bid.message.parent_block_hash = parent_hash;
+        bid.message.parent_block_root = parent_root;
+        bid
+    }
+
+    fn sample_gloas_block() -> SignedBeaconBlock<Mainnet> {
+        SignedBeaconBlock::Gloas(GloasSignedBeaconBlock {
+            message: Hc::from(GloasBeaconBlock::default()),
+            signature: SignatureBytes::default(),
+        })
+    }
+
+    fn genesis_time_now() -> UnixSeconds {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time is after unix epoch")
+            .as_secs()
+            .saturating_sub(12)
+    }
 
     #[test_case(
         129, NON_EMPTY_SLOTS => Ok(());
@@ -573,21 +1078,952 @@ mod tests {
         slot: Slot,
         nonempty_slots: impl IntoIterator<Item = Slot>,
     ) -> Result<(), BuilderApiError> {
-        let api = BuilderApi::new(
-            BuilderConfig {
-                builder_api_format: BuilderApiFormat::Json,
-                builder_api_url: "http://localhost"
-                    .parse()
-                    .expect("http://localhost should be a valid URL"),
-                builder_disable_checks: false,
-                builder_max_skipped_slots_per_epoch: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
-                builder_max_skipped_slots: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
-            },
-            PubkeyCache::default().into(),
-            Client::new(),
-            None,
+        test_api("http://localhost").can_use_builder_api::<Mainnet>(slot, nonempty_slots)
+    }
+
+    #[test]
+    fn request_auth_signing_root_uses_domain_request_auth() {
+        let config = Config::mainnet();
+        let auth = RequestAuth {
+            data: ByteList::<MaxDataSize>::try_from(b"http://builder.example.com".to_vec())
+                .expect("builder URL fits MAX_DATA_SIZE"),
+            slot: 42,
+        };
+
+        let root = auth.signing_root(&config);
+        assert_ne!(root, H256::zero());
+
+        let other_data = RequestAuth {
+            data: ByteList::<MaxDataSize>::try_from(b"http://other.example.com".to_vec())
+                .expect("builder URL fits MAX_DATA_SIZE"),
+            slot: 42,
+        };
+        let other_slot = RequestAuth {
+            data: auth.data,
+            slot: 43,
+        };
+
+        assert_ne!(root, other_data.signing_root(&config));
+        assert_ne!(root, other_slot.signing_root(&config));
+        assert_eq!(DOMAIN_REQUEST_AUTH.0, [0x0b, 0x00, 0x00, 0x01]);
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_returns_bid_on_200() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
         );
 
-        api.can_use_builder_api::<Mainnet>(slot, nonempty_slots)
+        let bid = sample_bid(slot, parent_hash, parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas")
+                .header_exists("X-Timeout-Ms")
+                .header_exists("Date-Milliseconds");
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let result = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await?;
+
+        mock.assert();
+        assert!(result.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_returns_none_on_204() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas")
+                .header_exists("X-Timeout-Ms")
+                .header_exists("Date-Milliseconds");
+            then.status(204);
+        });
+
+        let api = test_api(&server.url("/"));
+        let result = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await?;
+
+        mock.assert();
+        // HTTP 204 is the only `Ok(None)` path. A skipped send is `BidRequestSkippedNoTime`.
+        assert!(result.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_non_200_success() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(202);
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("202 should not be accepted as a bid");
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::UnexpectedStatusCode {
+                    expected: StatusCode::OK,
+                    received: StatusCode::ACCEPTED,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_pre_gloas_slot() -> Result<()> {
+        let server = MockServer::start();
+        let chain_config = Config::mainnet();
+        let api = test_api(&server.url("/"));
+        let auth = sample_auth();
+
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &chain_config,
+                genesis_time_now(),
+                1,
+                ExecutionBlockHash::zero(),
+                H256::zero(),
+                PublicKeyBytes::default(),
+                &auth,
+            )
+            .await
+            .expect_err("pre-Gloas slot should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::PhaseBeforeMinimum {
+                    phase: Phase::Phase0,
+                    minimum: Phase::Gloas,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_auth_slot_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let api = test_api(&server.url("/"));
+        let auth = sample_auth();
+
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                2,
+                ExecutionBlockHash::zero(),
+                H256::zero(),
+                PublicKeyBytes::default(),
+                &auth,
+            )
+            .await
+            .expect_err("auth.slot != path slot should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::AuthSlotMismatch {
+                    auth_slot: 1,
+                    path_slot: 2,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_maps_400() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(400).body("bad request");
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("400 should fail");
+        mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_maps_500() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(500).body("internal");
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("500 should fail");
+        mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BuilderNodeInternalError { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_sends_auth_body() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(slot, parent_hash, parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas")
+                .header_exists("X-Timeout-Ms")
+                .header_exists("Date-Milliseconds")
+                .json_body_obj(&auth);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let result = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await?;
+
+        mock.assert();
+        assert!(result.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_bid_slot_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(2, parent_hash, parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("bid.slot != request slot should fail");
+
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::BidSlotMismatch {
+                    bid_slot: 2,
+                    request_slot: 1,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_bid_parent_hash_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let other_parent_hash = ExecutionBlockHash::repeat_byte(1);
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(slot, other_parent_hash, parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("bid.parent_block_hash != request parent_hash should fail");
+
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::BidParentHashMismatch {
+                    bid_parent_hash,
+                    request_parent_hash,
+                } if *bid_parent_hash == other_parent_hash && *request_parent_hash == parent_hash
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_rejects_bid_parent_root_mismatch() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let other_parent_root = H256::repeat_byte(1);
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let bid = sample_bid(slot, parent_hash, other_parent_root);
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("bid.parent_block_root != request parent_root should fail");
+
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::BidParentRootMismatch {
+                    bid_parent_root,
+                    request_parent_root,
+                } if *bid_parent_root == other_parent_root && *request_parent_root == parent_root
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_retries_json_after_ssz_415() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+        let bid = sample_bid(slot, parent_hash, parent_root);
+
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(415).body("ssz not supported");
+        });
+        let json_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_JSON.as_ref());
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        let result = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await?;
+
+        ssz_mock.assert();
+        json_mock.assert();
+        assert!(result.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_execution_payload_bid_does_not_retry_ssz_400_as_json() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(400).body("invalid auth");
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        let err = api
+            .get_execution_payload_bid::<Mainnet>(
+                &gloas_chain_config(),
+                genesis_time_now(),
+                slot,
+                parent_hash,
+                parent_root,
+                pubkey,
+                &auth,
+            )
+            .await
+            .expect_err("400 on SSZ should not fall back to JSON");
+
+        ssz_mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_succeeds_on_202() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(PREFERENCES_AUTH_SLOT),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Eth-Consensus-Version", "gloas");
+            then.status(202);
+        });
+
+        let api = test_api(&server.url("/"));
+        api.submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await?;
+        mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_retries_json_after_ssz_415() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(PREFERENCES_AUTH_SLOT),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(415).body("ssz not supported");
+        });
+        let json_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_JSON.as_ref());
+            then.status(202);
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        api.submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await?;
+        ssz_mock.assert();
+        json_mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_does_not_retry_ssz_400_as_json() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(PREFERENCES_AUTH_SLOT),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(400).body("invalid preferences");
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        let err = api
+            .submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await
+            .expect_err("400 on SSZ should not fall back to JSON");
+
+        ssz_mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_maps_builder_past_slot_400() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(0),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(400)
+                .body("Invalid SignedBuilderRequestAuth: auth.message.slot has already passed");
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await
+            .expect_err("builder 400 for past slot should fail");
+
+        mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_rejects_pre_gloas_proposal_slot() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        // Mainnet config has no Gloas fork; phase_at_slot stays Phase0.
+        let chain_config = Config::mainnet();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(PREFERENCES_AUTH_SLOT),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await
+            .expect_err("pre-Gloas proposal slot should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::PhaseBeforeMinimum {
+                    phase: Phase::Phase0,
+                    minimum: Phase::Gloas,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_builder_preferences_maps_400() -> Result<()> {
+        let server = MockServer::start();
+        let pubkey = PublicKeyBytes::default();
+        let path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let chain_config = gloas_chain_config();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(PREFERENCES_AUTH_SLOT),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST).path(&path);
+            then.status(400).body("invalid preferences");
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await
+            .expect_err("400 should fail");
+        mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_signed_beacon_block_succeeds_on_202() -> Result<()> {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/eth/v1/builder/beacon_blocks")
+                .header("Eth-Consensus-Version", "gloas");
+            then.status(202);
+        });
+
+        let api = test_api(&server.url("/"));
+        api.submit_signed_beacon_block::<Mainnet>(&sample_gloas_block())
+            .await?;
+        mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_signed_beacon_block_retries_json_after_ssz_415() -> Result<()> {
+        let server = MockServer::start();
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/eth/v1/builder/beacon_blocks")
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(415).body("ssz not supported");
+        });
+        let json_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/eth/v1/builder/beacon_blocks")
+                .header("Content-Type", APPLICATION_JSON.as_ref());
+            then.status(202);
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        api.submit_signed_beacon_block::<Mainnet>(&sample_gloas_block())
+            .await?;
+        ssz_mock.assert();
+        json_mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_signed_beacon_block_does_not_retry_ssz_400_as_json() -> Result<()> {
+        let server = MockServer::start();
+        let ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/eth/v1/builder/beacon_blocks")
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(400).body("invalid block");
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        let err = api
+            .submit_signed_beacon_block::<Mainnet>(&sample_gloas_block())
+            .await
+            .expect_err("400 on SSZ should not fall back to JSON");
+
+        ssz_mock.assert();
+        assert!(
+            err.downcast_ref::<BuilderApiError>()
+                .is_some_and(|e| { matches!(e, BuilderApiError::BadRequest { .. }) })
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn gloas_ssz_415_cache_is_shared_across_request_bodies() -> Result<()> {
+        let server = MockServer::start();
+        let slot = 1_u64;
+        let parent_hash = ExecutionBlockHash::zero();
+        let parent_root = H256::zero();
+        let pubkey = PublicKeyBytes::default();
+        let auth = sample_auth();
+        let bid_path = format!(
+            "/eth/v1/builder/execution_payload_bid/{slot}/{parent_hash:?}/{parent_root:?}/{pubkey:?}"
+        );
+        let preferences_path = format!("/eth/v1/builder/builder_preferences/{pubkey:?}");
+        let bid = sample_bid(slot, parent_hash, parent_root);
+        let chain_config = gloas_chain_config();
+        let genesis_time = genesis_time_now();
+        let request_body = BuilderPreferencesRequest {
+            auth: sample_auth_for_slot(PREFERENCES_AUTH_SLOT),
+            preferences: BuilderPreferences {
+                max_execution_payment: 0,
+            },
+        };
+
+        let bid_ssz_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&bid_path)
+                .header("Content-Type", APPLICATION_OCTET_STREAM.as_ref());
+            then.status(415).body("ssz not supported");
+        });
+        let bid_json_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&bid_path)
+                .header("Content-Type", APPLICATION_JSON.as_ref());
+            then.status(200).json_body(json!({
+                "version": "gloas",
+                "data": bid,
+            }));
+        });
+        let preferences_json_mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path(&preferences_path)
+                .header("Content-Type", APPLICATION_JSON.as_ref());
+            then.status(202);
+        });
+
+        let api = test_api_with_format(&server.url("/"), BuilderApiFormat::Ssz);
+        api.get_execution_payload_bid::<Mainnet>(
+            &chain_config,
+            genesis_time,
+            slot,
+            parent_hash,
+            parent_root,
+            pubkey,
+            &auth,
+        )
+        .await?;
+        api.submit_builder_preferences::<Mainnet>(&chain_config, pubkey, &request_body)
+            .await?;
+
+        bid_ssz_mock.assert();
+        bid_json_mock.assert();
+        preferences_json_mock.assert();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_signed_beacon_block_rejects_pre_gloas_block() -> Result<()> {
+        let server = MockServer::start();
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_signed_beacon_block::<Mainnet>(&SignedBeaconBlock::Phase0(
+                Phase0SignedBeaconBlock::default(),
+            ))
+            .await
+            .expect_err("pre-Gloas block should fail before HTTP");
+
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::PhaseBeforeMinimum {
+                    phase: Phase::Phase0,
+                    minimum: Phase::Gloas,
+                }
+            )
+        }));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn submit_signed_beacon_block_rejects_non_202_success() -> Result<()> {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/eth/v1/builder/beacon_blocks");
+            then.status(200);
+        });
+
+        let api = test_api(&server.url("/"));
+        let err = api
+            .submit_signed_beacon_block::<Mainnet>(&sample_gloas_block())
+            .await
+            .expect_err("200 should not be accepted");
+        mock.assert();
+        assert!(err.downcast_ref::<BuilderApiError>().is_some_and(|e| {
+            matches!(
+                e,
+                BuilderApiError::UnexpectedStatusCode {
+                    expected: StatusCode::ACCEPTED,
+                    received: StatusCode::OK,
+                }
+            )
+        }));
+        Ok(())
     }
 }

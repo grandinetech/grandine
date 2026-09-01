@@ -1,4 +1,5 @@
 use hex_literal::hex;
+use typenum::U4096;
 use types::{
     bellatrix::primitives::Gas,
     phase0::primitives::{DomainType, H32},
@@ -13,6 +14,16 @@ pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
 /// [`DOMAIN_APPLICATION_BUILDER`]: https://github.com/ethereum/builder-specs/blob/58e2c66e6fecccbe14c5ddf718ebc68a3c6a03eb/specs/bellatrix/builder.md#domain-types
 /// [`DOMAIN_APPLICATION_MASK`]:    https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/phase0/beacon-chain.md#domain-types
 pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
+
+/// [`DOMAIN_REQUEST_AUTH`] from `builder-specs` (Gloas Staked Builder API).
+///
+/// [`DOMAIN_REQUEST_AUTH`]: https://github.com/ethereum/builder-specs/pull/165
+pub const DOMAIN_REQUEST_AUTH: DomainType = H32(hex!("0b000001"));
+
+/// [`MAX_DATA_SIZE`] from `builder-specs` (Gloas).
+///
+/// [`MAX_DATA_SIZE`]: https://github.com/ethereum/builder-specs/pull/165
+pub type MaxDataSize = U4096;
 
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
 
