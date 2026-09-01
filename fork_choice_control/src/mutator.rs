@@ -659,7 +659,11 @@ where
             }
         }
 
-        if tick.kind == TickKind::AggregateFourth {
+        // `TickKind::PayloadAttestFourth` is the last tick before the next slot in post-Gloas
+        if matches!(
+            tick.kind,
+            TickKind::AggregateFourth | TickKind::PayloadAttestFourth
+        ) {
             let store = &self.store;
 
             if let Some(state) = self.state_cache.existing_state_at_slot(
@@ -669,7 +673,9 @@ where
             ) {
                 self.prepare_execution_payload_for_next_slot(&state);
             }
+        }
 
+        if tick.kind == TickKind::AggregateFourth {
             self.track_collection_metrics();
         }
 
