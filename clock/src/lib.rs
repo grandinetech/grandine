@@ -197,6 +197,15 @@ impl Tick {
     }
 
     #[must_use]
+    pub fn is_last_tick<P: Preset>(self, config: &Config) -> bool {
+        if config.phase_at_slot::<P>(self.slot) >= Phase::Gloas {
+            matches!(self.kind, TickKind::PayloadAttestFourth)
+        } else {
+            matches!(self.kind, TickKind::AggregateFourth)
+        }
+    }
+
+    #[must_use]
     pub const fn is_end_of_interval(self) -> bool {
         matches!(
             self.kind,
