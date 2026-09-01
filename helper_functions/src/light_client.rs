@@ -176,6 +176,41 @@ pub fn compute_merkle_proof<P: Preset>(
     Ok(child_proof.into_iter().chain(state_proof).collect())
 }
 
+pub fn create_light_client_bootstrap<P: Preset>(
+    state: &AltairBeaconState<P>,
+    block: &impl SignedBeaconBlock<P>,
+) -> Result<LightClientBootstrap<P>> {
+    ensure!(
+        state.slot == state.latest_block_header.slot,
+        Error::StateSlotDoesNotMatchLatestBlockHeader {
+            state_slot: state.slot,
+            header_slot: state.latest_block_header.slot,
+        },
+    );
+
+    let mut header = state.latest_block_header;
+    header.state_root = state.hash_tree_root();
+
+    let header_root = header.hash_tree_root();
+    let block_root = block.message().hash_tree_root();
+
+    ensure!(
+        header_root == block_root,
+        Error::StateIsNotPostStateOfBlock {
+            header_root,
+            block_root,
+        },
+    );
+
+    let branch = compute_merkle_proof(state, CurrentSyncCommitteeIndex::U64)?;
+
+    Ok(LightClientBootstrap {
+        header: block_to_light_client_header(block),
+        current_sync_committee: (**state.current_sync_committee).clone(),
+        current_sync_committee_branch: ContiguousVector::try_from_iter(branch)?,
+    })
+}
+
 #[derive(Debug, Error)]
 enum Error {
     #[error("generalized index {gindex} is not a leaf of a tree of depth {depth}")]
