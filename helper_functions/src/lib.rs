@@ -6,6 +6,7 @@ pub mod electra;
 pub mod error;
 pub mod fork;
 pub mod gloas;
+pub mod light_client;
 pub mod misc;
 pub mod mutators;
 pub mod par_utils;
