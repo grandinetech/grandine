@@ -45,7 +45,9 @@ use types::{
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
-use validator::{Validator, ValidatorChannels, ValidatorConfig};
+use validator::{
+    OwnValidatorIndices, RemoteBeaconNodes, Validator, ValidatorChannels, ValidatorConfig,
+};
 
 use crate::{
     http_api_config::HttpApiConfig,
@@ -336,7 +338,7 @@ impl<P: Preset> Context<P> {
             None,
             event_channels.clone_arc(),
             keymanager.proposer_configs().clone_arc(),
-            signer,
+            signer.clone_arc(),
             slashing_protector,
             payload_attestation_agg_pool.clone_arc(),
             sync_committee_agg_pool.clone_arc(),
@@ -346,7 +348,8 @@ impl<P: Preset> Context<P> {
             network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
-            Vec::new(),
+            Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
+            Arc::new(RemoteBeaconNodes::new(Vec::new())),
             false,
         );
 

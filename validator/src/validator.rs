@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::{error::Error as StdError, sync::atomic::AtomicUsize, time::Duration};
+use core::{error::Error as StdError, time::Duration};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
@@ -96,7 +96,6 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
     preset::Preset,
-    redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator_statistics::ValidatorStatistics;
@@ -113,7 +112,6 @@ use crate::{
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     own_validator_indices::OwnValidatorIndices,
-    remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
     tasks::{
@@ -237,25 +235,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         _network_dir: Option<&Path>,
         dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
         dedicated_executor_low_priority: Arc<DedicatedExecutor>,
-        beacon_node_urls: Vec<RedactingUrl>,
+        own_validator_indices: Arc<OwnValidatorIndices>,
+        remote_beacon_nodes: Arc<RemoteBeaconNodes>,
         disable_local_beacon_node: bool,
     ) -> Self {
-        let chain_config = controller.chain_config().clone_arc();
-        let serving_count = Arc::new(AtomicUsize::new(beacon_node_urls.len()));
-
-        let remote_beacon_nodes = beacon_node_urls
-            .into_iter()
-            .map(|url| {
-                Arc::new(RemoteBeaconNode::new(
-                    chain_config.clone_arc(),
-                    signer.load().client().clone(),
-                    url,
-                    validator_config.max_empty_slots,
-                    serving_count.clone_arc(),
-                ))
-            })
-            .collect::<Vec<_>>();
-
         let mode = ValidatorMode::new(disable_local_beacon_node, !remote_beacon_nodes.is_empty());
 
         let Channels {
@@ -294,7 +277,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_beacon_committee_members,
             own_singular_attestations: OnceCell::new(),
             own_sync_committee_members: Arc::new(OwnSyncCommitteeMembers::new()),
-            own_validator_indices: Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
+            own_validator_indices,
             own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions::default(),
             sent_sync_committee_subscriptions_for: None,
             own_ptc_members,
@@ -326,7 +309,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             dedicated_executor_low_priority,
             last_proposer_preferences_epoch: None,
             published_proposer_preferences: HashSet::new(),
-            remote_beacon_nodes: Arc::new(RemoteBeaconNodes::new(remote_beacon_nodes)),
+            remote_beacon_nodes,
             mode,
         }
     }
@@ -400,6 +383,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.remote_beacon_nodes
             .check_on_startup(self.controller.slot())
             .await?;
+
         self.remote_beacon_nodes.spawn_head_streams::<P>();
         self.run_internal().await
     }
