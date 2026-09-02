@@ -1914,6 +1914,12 @@ where
                         && !self.store.has_requested_blobs_from_el(&block_root)
                         && !self.store.is_sidecars_construction_started(&block_root)
                     {
+                        // resolve through the block since post-Gloas sidecar carries no commitments
+                        let block_or_sidecar = match self.store.block(block_root) {
+                            Some(block) => block.value.clone_arc().into(),
+                            None => data_column_sidecar.clone_arc().into(),
+                        };
+
                         self.store_mut()
                             .mark_requested_blobs_from_el(block_root, data_column_sidecar.slot());
                         self.update_store_snapshot();
@@ -1930,7 +1936,7 @@ where
 
                         self.request_blobs_from_execution_engine(
                             EngineGetBlobsV2Params {
-                                block_or_sidecar: data_column_sidecar.clone_arc().into(),
+                                block_or_sidecar,
                                 data_column_identifiers,
                             }
                             .into(),
