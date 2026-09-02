@@ -91,12 +91,14 @@ impl OwnBeaconCommitteeMembers {
     #[instrument(skip_all, level = "debug", fields(slot = slot))]
     pub async fn get_or_init_at_slot<P: Preset, W: Wait + Sync>(
         &self,
-        controller: &ApiController<P, W>,
+        controller: Option<&ApiController<P, W>>,
         beacon_state: Option<&Arc<BeaconState<P>>>,
         slot: Slot,
     ) -> Result<Option<(Arc<[BeaconCommitteeMember]>, bool)>> {
-        let dependent_root = match beacon_state {
-            Some(state) => controller.attestation_committee_dependent_root_for_slot(state, slot)?,
+        let dependent_root = match controller.zip(beacon_state) {
+            Some((controller, state)) => {
+                controller.attestation_committee_dependent_root_for_slot(state, slot)?
+            }
             None => {
                 let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
