@@ -5,7 +5,6 @@ use fork_choice_control::Wait;
 use itertools::Itertools as _;
 use scc::HashMap as SccHashMap;
 use signer::Signer;
-use tokio::sync::Mutex;
 use types::{
     phase0::primitives::{Epoch, ValidatorIndex},
     preset::Preset,
@@ -20,8 +19,6 @@ pub struct OwnValidatorIndices {
     // A key no beacon node knows is retried once an epoch rather than every slot, as a validator
     // only becomes known by being deposited for.
     retry_at_epoch: SccHashMap<PublicKeyBytes, Epoch>,
-    // Taken without waiting, so a resolution in flight never stalls a duty behind its requests.
-    resolving: Mutex<()>,
 }
 
 impl OwnValidatorIndices {
@@ -31,7 +28,6 @@ impl OwnValidatorIndices {
             signer,
             indices: SccHashMap::new(),
             retry_at_epoch: SccHashMap::new(),
-            resolving: Mutex::new(()),
         }
     }
 
@@ -43,12 +39,6 @@ impl OwnValidatorIndices {
         beacon_nodes: &BeaconNodes<P, W>,
         current_epoch: Epoch,
     ) {
-        // Another caller resolving means the same keys are already being asked about; duties use
-        // whatever is resolved by the time they read.
-        let Ok(_guard) = self.resolving.try_lock() else {
-            return;
-        };
-
         let public_keys = self.keys_to_resolve(current_epoch).await;
 
         if public_keys.is_empty() {

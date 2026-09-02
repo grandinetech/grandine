@@ -3,13 +3,12 @@
 use core::{error::Error as StdError, time::Duration};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    path::Path,
     sync::Arc,
     time::SystemTime,
 };
 
-use anyhow::{Error as AnyhowError, Result, bail, ensure};
-use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
+use anyhow::{Error as AnyhowError, Result, anyhow, bail, ensure};
+use block_producer::{BlockBuildOptions, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     BuilderApi,
@@ -24,7 +23,7 @@ use doppelganger_protection::{DoppelgangerProtection, Error as DoppelgangerProte
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
+use fork_choice_control::{Event, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{ChainLink, StateCacheError};
 use futures::{
     channel::{
@@ -45,10 +44,7 @@ use keymanager::ProposerConfigs;
 use liveness_tracker::{ApiToLiveness, ValidatorToLiveness};
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
 use once_cell::sync::OnceCell;
-use operation_pools::{
-    AttestationAggPool, AttestationKey, Origin, PayloadAttestationAggPool, PoolAdditionOutcome,
-    SyncCommitteeAggPool,
-};
+use operation_pools::{AttestationKey, Origin, PoolAdditionOutcome};
 use p2p::{P2pToValidator, ToSubnetService, ValidatorToP2p};
 use prometheus_metrics::Metrics;
 use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
@@ -145,7 +141,6 @@ assert_not_impl_any!(HeadFarBehind: StdError);
 
 /// The validator's channels, by what feeds them.
 pub enum Channels<P: Preset, W> {
-    /// The built-in beacon node's services.
     Local {
         api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
         fork_choice_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
@@ -157,19 +152,16 @@ pub enum Channels<P: Preset, W> {
         validator_to_liveness_tx: Option<UnboundedSender<ValidatorToLiveness<P>>>,
         validator_to_slasher_tx: Option<UnboundedSender<ValidatorToSlasher>>,
     },
-    /// Ticks straight from the clock; the built-in node's gossip still needs answering.
     Remote {
-        tick_rx: UnboundedReceiver<Tick>,
-        api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
-        p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
-        p2p_to_validator_rx: UnboundedReceiver<P2pToValidator<P, W>>,
+        runtime_rx: UnboundedReceiver<ValidatorMessage<P, W>>,
     },
 }
 
 impl<P: Preset, W> Channels<P, W> {
-    const fn p2p_tx(&self) -> &UnboundedSender<ValidatorToP2p<P>> {
+    const fn p2p_tx(&self) -> Option<&UnboundedSender<ValidatorToP2p<P>>> {
         match self {
-            Self::Local { p2p_tx, .. } | Self::Remote { p2p_tx, .. } => p2p_tx,
+            Self::Local { p2p_tx, .. } => Some(p2p_tx),
+            Self::Remote { .. } => None,
         }
     }
 
@@ -215,13 +207,11 @@ impl<P: Preset, W> Channels<P, W> {
 #[expect(clippy::struct_field_names)]
 pub struct Validator<P: Preset, W: Wait> {
     validator_config: Arc<ValidatorConfig>,
-    block_producer: Arc<BlockProducer<P, W>>,
     chain_source: Arc<ChainSource<P, W>>,
     channels: Channels<P, W>,
     current_tick: Option<Tick>,
     last_tick: Option<Tick>,
     next_graffiti_index: usize,
-    attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
     own_singular_attestations: OnceCell<Vec<OwnAttestation<P>>>,
     own_sync_committee_members: Arc<OwnSyncCommitteeMembers>,
@@ -236,15 +226,12 @@ pub struct Validator<P: Preset, W: Wait> {
     own_aggregators: BTreeMap<AttestationKey, Vec<Aggregator>>,
     builder_api: Option<Arc<BuilderApi>>,
     doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
-    event_channels: Arc<EventChannels<P>>,
     last_registration_epoch: Option<Epoch>,
     proposer_configs: Arc<ProposerConfigs>,
     signer: Arc<Signer>,
     slashing_protector: Arc<Mutex<SlashingProtector>>,
     registered_validators:
         BTreeMap<Epoch, BTreeMap<PublicKeyBytes, (ValidatorRegistrationV1, Signature)>>,
-    payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
-    sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     metrics: Option<Arc<Metrics>>,
     validator_statistics: Option<Arc<ValidatorStatistics>>,
     internal_tx: UnboundedSender<InternalMessage>,
@@ -261,21 +248,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[must_use]
     pub fn new(
         validator_config: Arc<ValidatorConfig>,
-        block_producer: Arc<BlockProducer<P, W>>,
         chain_source: Arc<ChainSource<P, W>>,
-        attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         builder_api: Option<Arc<BuilderApi>>,
         doppelganger_protection: Option<Arc<DoppelgangerProtection>>,
-        event_channels: Arc<EventChannels<P>>,
         proposer_configs: Arc<ProposerConfigs>,
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
-        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
-        sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         metrics: Option<Arc<Metrics>>,
         validator_statistics: Option<Arc<ValidatorStatistics>>,
         channels: Channels<P, W>,
-        _network_dir: Option<&Path>,
         dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
         dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     ) -> Self {
@@ -290,13 +271,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         Self {
             validator_config,
-            block_producer,
             chain_source,
             channels,
             current_tick: None,
             last_tick: None,
             next_graffiti_index: 0,
-            attestation_agg_pool,
             own_beacon_committee_members,
             own_singular_attestations: OnceCell::new(),
             own_sync_committee_members: Arc::new(OwnSyncCommitteeMembers::new()),
@@ -309,13 +288,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_aggregators: BTreeMap::new(),
             builder_api,
             doppelganger_protection,
-            event_channels,
             last_registration_epoch: None,
             proposer_configs,
             signer,
             slashing_protector,
-            payload_attestation_agg_pool,
-            sync_committee_agg_pool,
             registered_validators: BTreeMap::new(),
             metrics,
             validator_statistics,
@@ -332,26 +308,41 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn beacon_nodes(&self, source: &DutySource<P>, wait_group: &W) -> BeaconNodes<P, W> {
         let slot_head = source.slot_head();
 
-        let local = self
-            .chain_source
-            .controller()
-            .zip(source.beacon_state())
-            .zip(self.channels.subnet_service_tx())
-            .map(|((controller, beacon_state), subnet_service_tx)| {
-                LocalBeaconNode::new(
-                    controller.clone_arc(),
-                    slot_head.clone(),
-                    beacon_state.clone_arc(),
-                    self.attestation_agg_pool.clone_arc(),
-                    self.sync_committee_agg_pool.clone_arc(),
-                    self.payload_attestation_agg_pool.clone_arc(),
-                    self.signer.clone_arc(),
-                    self.channels.p2p_tx().clone(),
-                    subnet_service_tx.clone(),
-                    self.channels.api_to_liveness_tx().cloned(),
-                    wait_group.clone(),
-                )
-            });
+        let local = match self.chain_source.as_ref() {
+            ChainSource::Local {
+                controller,
+                attestation_agg_pool,
+                sync_committee_agg_pool,
+                payload_attestation_agg_pool,
+                ..
+            }
+            | ChainSource::Mixed {
+                controller,
+                attestation_agg_pool,
+                sync_committee_agg_pool,
+                payload_attestation_agg_pool,
+                ..
+            } => source
+                .beacon_state()
+                .zip(self.channels.subnet_service_tx())
+                .zip(self.channels.p2p_tx())
+                .map(|((beacon_state, subnet_service_tx), p2p_tx)| {
+                    LocalBeaconNode::new(
+                        controller.clone_arc(),
+                        slot_head.clone(),
+                        beacon_state.clone_arc(),
+                        attestation_agg_pool.clone_arc(),
+                        sync_committee_agg_pool.clone_arc(),
+                        payload_attestation_agg_pool.clone_arc(),
+                        self.signer.clone_arc(),
+                        p2p_tx.clone(),
+                        subnet_service_tx.clone(),
+                        self.channels.api_to_liveness_tx().cloned(),
+                        wait_group.clone(),
+                    )
+                }),
+            ChainSource::Remote { .. } => None,
+        };
 
         BeaconNodes::new(
             local,
@@ -414,11 +405,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         loop {
             let (
-                mut direct_tick_rx,
-                mut fork_choice_rx,
+                fork_choice_rx,
                 mut slasher_to_validator_rx,
-                api_to_validator_rx,
-                p2p_to_validator_rx,
+                mut api_to_validator_rx,
+                mut p2p_to_validator_rx,
             ) = match &mut self.channels {
                 Channels::Local {
                     api_to_validator_rx,
@@ -427,26 +417,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     slasher_to_validator_rx,
                     ..
                 } => (
-                    EitherFuture::Right(futures::stream::pending()),
-                    EitherFuture::Left(fork_choice_rx),
+                    fork_choice_rx,
                     slasher_to_validator_rx
                         .as_mut()
                         .map(EitherFuture::Left)
                         .unwrap_or_else(|| EitherFuture::Right(futures::stream::pending())),
-                    api_to_validator_rx,
-                    p2p_to_validator_rx,
+                    EitherFuture::Left(api_to_validator_rx),
+                    EitherFuture::Left(p2p_to_validator_rx),
                 ),
-                Channels::Remote {
-                    tick_rx,
-                    api_to_validator_rx,
-                    p2p_to_validator_rx,
-                    ..
-                } => (
-                    EitherFuture::Left(tick_rx),
+                Channels::Remote { runtime_rx } => (
+                    runtime_rx,
                     EitherFuture::Right(futures::stream::pending()),
                     EitherFuture::Right(futures::stream::pending()),
-                    api_to_validator_rx,
-                    p2p_to_validator_rx,
+                    EitherFuture::Right(futures::stream::pending()),
                 ),
             };
 
@@ -470,12 +453,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                 },
 
-                tick = direct_tick_rx.select_next_some() => {
-                    if let Err(error) = self.handle_tick(W::default(), tick).await {
-                        panic!("error while handling tick: {error:?}");
-                    }
-                },
-
                 message = fork_choice_rx.select_next_some() => match message {
                     ValidatorMessage::Tick(wait_group, tick) => {
                         if let Err(error) = self.handle_tick(wait_group, tick).await {
@@ -486,11 +463,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         self.handle_head_message(wait_group, head).await
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
-                        self.attestation_agg_pool.insert_attestation(
-                            wait_group,
-                            attestation.clone_arc(),
-                            None,
-                        );
+                        if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
+                            attestation_agg_pool.insert_attestation(
+                                wait_group,
+                                attestation.clone_arc(),
+                                None,
+                            );
+                        }
 
                         if let Some(validator_to_liveness_tx) = self.channels.validator_to_liveness_tx() {
                             ValidatorToLiveness::ValidAttestation(attestation)
@@ -504,8 +483,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         );
                         let _enter = span.enter();
 
-                        self.payload_attestation_agg_pool
-                            .insert_payload_attestation(wait_group, payload_attestation);
+                        if let Some(pool) = self.chain_source.payload_attestation_agg_pool() {
+                            pool.insert_payload_attestation(wait_group, payload_attestation);
+                        }
 
                         // TODO(gloas): apply payload attestation to liveness_tracker
                         //
@@ -537,10 +517,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 slashing = slasher_to_validator_rx.select_next_some() => match slashing {
                     SlasherToValidator::AttesterSlashing(attester_slashing) => {
-                        self.block_producer.add_new_attester_slashing(AttesterSlashing::Phase0(attester_slashing)).await;
+                        if let Some(block_producer) = self.chain_source.block_producer() {
+                            block_producer.add_new_attester_slashing(AttesterSlashing::Phase0(attester_slashing)).await;
+                        }
                     }
                     SlasherToValidator::ProposerSlashing(proposer_slashing) => {
-                        self.block_producer.add_new_proposer_slashing(proposer_slashing).await;
+                        if let Some(block_producer) = self.chain_source.block_producer() {
+                            block_producer.add_new_proposer_slashing(proposer_slashing).await;
+                        }
                     }
                 },
 
@@ -644,8 +628,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         gossip_id: GossipId,
         _wait_group: W,
     ) {
-        let outcome = match self
-            .block_producer
+        // Without the built-in node's pools the message is only acknowledged.
+        let Some(block_producer) = self.chain_source.block_producer() else {
+            self.handle_pool_addition_outcome_for_p2p(PoolAdditionOutcome::Ignore, gossip_id);
+            return;
+        };
+
+        let outcome = match block_producer
             .handle_external_proposer_slashing(slashing)
             .await
         {
@@ -656,8 +645,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        if matches!(outcome, PoolAdditionOutcome::Accept) {
-            self.event_channels.send_proposer_slashing_event(slashing);
+        if matches!(outcome, PoolAdditionOutcome::Accept)
+            && let Some(event_channels) = self.chain_source.event_channels()
+        {
+            event_channels.send_proposer_slashing_event(slashing);
         }
 
         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -670,8 +661,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         gossip_id: GossipId,
         _wait_group: W,
     ) {
-        let outcome = match self
-            .block_producer
+        // Without the built-in node's pools the message is only acknowledged.
+        let Some(block_producer) = self.chain_source.block_producer() else {
+            self.handle_pool_addition_outcome_for_p2p(PoolAdditionOutcome::Ignore, gossip_id);
+            return;
+        };
+
+        let outcome = match block_producer
             .handle_external_attester_slashing(*slashing.clone())
             .await
         {
@@ -682,8 +678,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        if matches!(outcome, PoolAdditionOutcome::Accept) {
-            self.event_channels.send_attester_slashing_event(slashing);
+        if matches!(outcome, PoolAdditionOutcome::Accept)
+            && let Some(event_channels) = self.chain_source.event_channels()
+        {
+            event_channels.send_attester_slashing_event(slashing);
         }
 
         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -696,8 +694,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         gossip_id: GossipId,
         _wait_group: W,
     ) {
-        let outcome = match self
-            .block_producer
+        // Without the built-in node's pools the message is only acknowledged.
+        let Some(block_producer) = self.chain_source.block_producer() else {
+            self.handle_pool_addition_outcome_for_p2p(PoolAdditionOutcome::Ignore, gossip_id);
+            return;
+        };
+
+        let outcome = match block_producer
             .handle_external_voluntary_exit(voluntary_exit)
             .await
         {
@@ -708,9 +711,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        if matches!(outcome, PoolAdditionOutcome::Accept) {
-            self.event_channels
-                .send_voluntary_exit_event(voluntary_exit);
+        if matches!(outcome, PoolAdditionOutcome::Accept)
+            && let Some(event_channels) = self.chain_source.event_channels()
+        {
+            event_channels.send_voluntary_exit_event(voluntary_exit);
         }
 
         self.handle_pool_addition_outcome_for_p2p(outcome, gossip_id);
@@ -746,6 +750,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         safe_execution_payload_hash: ExecutionBlockHash,
         finalized_execution_payload_hash: ExecutionBlockHash,
     ) {
+        let (ChainSource::Local {
+            block_producer,
+            attestation_agg_pool,
+            event_channels,
+            ..
+        }
+        | ChainSource::Mixed {
+            block_producer,
+            attestation_agg_pool,
+            event_channels,
+            ..
+        }) = self.chain_source.as_ref()
+        else {
+            return;
+        };
+
         let slot_head = self.safe_slot_head(slot).await;
 
         if let Some((slot_head, beacon_state)) = slot_head {
@@ -761,8 +781,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             let should_prepare_execution_payload = Feature::AlwaysPrepareExecutionPayload
                 .is_enabled()
-                || self
-                    .attestation_agg_pool
+                || attestation_agg_pool
                     .is_registered_validator(proposer_index)
                     .await;
 
@@ -770,7 +789,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 return;
             }
 
-            let block_build_context = self.block_producer.new_build_context(
+            let block_build_context = block_producer.new_build_context(
                 beacon_state.clone_arc(),
                 slot_head.beacon_block_root,
                 proposer_index,
@@ -795,7 +814,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             if let Some(state) = beacon_state.post_bellatrix() {
                 let payload = state.latest_execution_payload_header();
 
-                self.event_channels.send_payload_attributes_event(
+                event_channels.send_payload_attributes_event(
                     slot_head.phase(),
                     slot,
                     proposer_index,
@@ -830,7 +849,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        message.send(self.channels.p2p_tx());
+        self.publish(message);
+    }
+
+    fn publish(&self, message: ValidatorToP2p<P>) {
+        if let Some(p2p_tx) = self.channels.p2p_tx() {
+            message.send(p2p_tx);
+        }
     }
 
     #[expect(clippy::too_many_lines)]
@@ -867,7 +892,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let no_validators = self.signer.load().no_keys()
             && self.registered_validators.is_empty()
-            && self.block_producer.no_prepared_proposers().await;
+            && match self.chain_source.block_producer() {
+                Some(block_producer) => block_producer.no_prepared_proposers().await,
+                None => true,
+            };
 
         debug_with_peers!("{kind:?} tick in slot {slot}");
 
@@ -894,7 +922,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             self.discard_old_proposer_preferences(current_epoch);
             self.discard_old_registered_validators(current_epoch);
-            self.block_producer.discard_old_data(current_epoch).await;
+            if let Some(block_producer) = self.chain_source.block_producer() {
+                block_producer.discard_old_data(current_epoch).await;
+            }
             self.own_sync_committee_subscriptions
                 .discard_old_subscriptions(current_epoch);
 
@@ -917,15 +947,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         // Custody is the built-in node's concern, and only while it serves duties.
-        if self.chain_source.uses_local_node()
+        if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool()
             && self.last_cgc_update_epoch != Some(current_epoch)
             && self.validator_config.custody_mode != CustodyMode::Super
             && self.chain_source.chain_config().is_peerdas_scheduled()
         {
-            let own_validator_indices = self
-                .attestation_agg_pool
-                .registered_validator_indices()
-                .await;
+            let own_validator_indices = attestation_agg_pool.registered_validator_indices().await;
 
             if !own_validator_indices.is_empty() {
                 self.handle_custody_requirements_update(slot, &own_validator_indices);
@@ -1016,8 +1043,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             beacon_state,
         } = &duty_source
         {
-            self.attestation_agg_pool
-                .compute_proposer_indices(beacon_state.clone_arc());
+            if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
+                attestation_agg_pool.compute_proposer_indices(beacon_state.clone_arc());
+            }
 
             if self.last_proposer_preferences_epoch != Some(current_epoch)
                 && (beacon_state.post_gloas().is_some()
@@ -1182,12 +1210,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // Blocks are produced by the built-in beacon node alone.
         let (
             Some(controller),
+            Some(block_producer),
             DutySource::Local {
                 slot_head,
                 beacon_state,
             },
         ) = (
             self.chain_source.controller().map(ArcExt::clone_arc),
+            self.chain_source.block_producer().map(ArcExt::clone_arc),
             source,
         )
         else {
@@ -1245,7 +1275,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .graffiti_bytes(*public_key)?
             .or_else(|| self.next_graffiti());
 
-        let block_build_context = self.block_producer.new_build_context(
+        let block_build_context = block_producer.new_build_context(
             beacon_state.clone_arc(),
             slot_head.beacon_block_root,
             proposer_index,
@@ -1435,14 +1465,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 controller.on_own_block(wait_group.clone(), block.clone_arc());
 
-                ValidatorToP2p::PublishBeaconBlock(block).send(self.channels.p2p_tx());
+                self.publish(ValidatorToP2p::PublishBeaconBlock(block));
 
                 // If self-building:
                 // Publish the execution payload envelope after the beacon block so PTC members
                 // have seen the block (and its SignedExecutionPayloadBid) before attesting
                 if self_built
-                    && let Some((envelope, ..)) = self
-                        .block_producer
+                    && let Some((envelope, ..)) = block_producer
                         .build_local_execution_payload_envelope_contents(
                             beacon_block_root,
                             parent_beacon_block_root,
@@ -1589,8 +1618,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         .await;
                 }
 
-                ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
-                    .send(self.channels.p2p_tx());
+                self.publish(ValidatorToP2p::PublishDataColumnSidecar(
+                    data_column_sidecar,
+                ));
             }
         } else {
             for blob_sidecar in misc::construct_blob_sidecars(
@@ -1660,8 +1690,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // Publish envelope to controller and P2P
         controller.on_own_execution_payload_envelope(signed_envelope.clone_arc());
 
-        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope)
-            .send(self.channels.p2p_tx());
+        self.publish(ValidatorToP2p::PublishExecutionPayloadEnvelope(
+            signed_envelope,
+        ));
 
         Ok(())
     }
@@ -2933,7 +2964,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn spawn_update_beacon_committee_subscriptions(&self, wait_group: W, source: &DutySource<P>) {
         let task = UpdateBeaconCommitteeSubscriptionsTask {
             chain_config: self.chain_source.chain_config().clone_arc(),
-            controller: self.chain_source.controller().map(ArcExt::clone_arc),
             source: source.clone(),
             own_beacon_committee_members: self.own_beacon_committee_members.clone_arc(),
             own_ptc_members: self.own_ptc_members.clone_arc(),
@@ -3107,10 +3137,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             || self.last_cgc_update_epoch.is_none()
         {
             // Refresh data column subnets subscriptions in network globals and sampling columns fork choice store
-            ValidatorToP2p::UpdateDataColumnSubnets(
+            self.publish(ValidatorToP2p::UpdateDataColumnSubnets(
                 validator_custody_requirement.max(current_custody_requirements),
-            )
-            .send(self.channels.p2p_tx());
+            ));
         }
 
         self.last_cgc_update_epoch = Some(current_epoch);
@@ -3121,6 +3150,19 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         slot_head: SlotHead<P>,
         contributions_and_proofs: Vec<SignedContributionAndProof<P>>,
     ) -> Vec<(usize, AnyhowError)> {
+        let Some(sync_committee_agg_pool) = self.chain_source.sync_committee_agg_pool() else {
+            return contributions_and_proofs
+                .into_iter()
+                .enumerate()
+                .map(|(index, _)| {
+                    (
+                        index,
+                        anyhow!("the built-in beacon node does not serve duties"),
+                    )
+                })
+                .collect();
+        };
+
         contributions_and_proofs
             .into_iter()
             .enumerate()
@@ -3128,8 +3170,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 contribution_and_proof.message.contribution.slot == slot_head.slot()
             })
             .map(|(index, contribution_and_proof)| async move {
-                let result = self
-                    .sync_committee_agg_pool
+                let result = sync_committee_agg_pool
                     .handle_external_contribution_and_proof(contribution_and_proof, Origin::Api)
                     .await;
 
@@ -3139,13 +3180,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .filter_map(|(index, contribution_and_proof, result)| async move {
                 match result {
                     Ok(_) => {
-                        self.event_channels
-                            .send_contribution_and_proof_event(contribution_and_proof);
+                        if let Some(event_channels) = self.chain_source.event_channels() {
+                            event_channels
+                                .send_contribution_and_proof_event(contribution_and_proof);
+                        }
 
-                        ValidatorToP2p::PublishContributionAndProof(Box::new(
+                        self.publish(ValidatorToP2p::PublishContributionAndProof(Box::new(
                             contribution_and_proof,
-                        ))
-                        .send(self.channels.p2p_tx());
+                        )));
 
                         None
                     }
@@ -3191,7 +3233,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let chain_config = self.chain_source.chain_config().clone_arc();
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
-        let prepared_proposer_indices = self.block_producer.get_prepared_proposer_indices().await;
+        let prepared_proposer_indices = match self.chain_source.block_producer() {
+            Some(block_producer) => block_producer.get_prepared_proposer_indices().await,
+            None => Vec::new(),
+        };
         let registered_validators = self.registered_validators.clone();
         let subnet_service_tx = self.channels.subnet_service_tx().cloned();
 
@@ -3370,7 +3415,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }));
 
         let chain_config = self.chain_source.chain_config().clone_arc();
-        let p2p_tx = self.channels.p2p_tx().clone();
+        let p2p_tx = self.channels.p2p_tx().cloned();
 
         tokio::spawn(async move {
             let triples = preferences
@@ -3412,7 +3457,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
                 controller.on_own_proposer_preferences(signed_preferences.clone_arc());
 
-                ValidatorToP2p::PublishProposerPreferences(signed_preferences).send(&p2p_tx);
+                if let Some(p2p_tx) = &p2p_tx {
+                    ValidatorToP2p::PublishProposerPreferences(signed_preferences).send(p2p_tx);
+                }
             }
         });
     }
@@ -3455,7 +3502,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 self.own_ptc_members.len(),
             );
 
-            self.block_producer.track_collection_metrics().await;
+            if let Some(block_producer) = self.chain_source.block_producer() {
+                block_producer.track_collection_metrics().await;
+            }
         }
 
         if let Some(validator_statistics) = self.validator_statistics.as_ref() {
@@ -3470,6 +3519,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
         let controller = self.chain_source.controller()?;
+        let event_channels = self.chain_source.event_channels()?;
 
         let is_optimistic = match slot_head.is_optimistic(controller) {
             Ok(is_optimistic) => is_optimistic,
@@ -3485,8 +3535,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let result = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
             loop {
-                let block_event = match self.event_channels.receiver_for(Topic::Block).recv().await
-                {
+                let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
                     Ok(Event::Block(block_event)) => block_event,
                     Ok(_) => continue,
                     Err(error) => {

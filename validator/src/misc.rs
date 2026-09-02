@@ -3,11 +3,13 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use arithmetic::UsizeExt as _;
+use block_producer::BlockProducer;
 use bls::{PublicKeyBytes, SignatureBytes};
 use clock::Tick;
 use eth1_api::ApiController;
-use fork_choice_control::Wait;
+use fork_choice_control::{EventChannels, Wait};
 use helper_functions::misc::{compute_epoch_at_slot, compute_start_slot_at_epoch};
+use operation_pools::{AttestationAggPool, PayloadAttestationAggPool, SyncCommitteeAggPool};
 use ssz::{BitVector, H256};
 use typenum::{True, U1, U8, Unsigned as _, assert_type, op};
 use types::{
@@ -70,12 +72,22 @@ pub fn subnets_from_sync_committee_indices<P: Preset>(
 pub enum ChainSource<P: Preset, W: Wait> {
     Local {
         controller: ApiController<P, W>,
+        attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
+        block_producer: Arc<BlockProducer<P, W>>,
+        event_channels: Arc<EventChannels<P>>,
         own_validator_indices: Arc<OwnValidatorIndices>,
+        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
+        sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     },
     Mixed {
         controller: ApiController<P, W>,
+        attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
+        block_producer: Arc<BlockProducer<P, W>>,
+        event_channels: Arc<EventChannels<P>>,
         own_validator_indices: Arc<OwnValidatorIndices>,
+        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
         remote_beacon_nodes: Arc<RemoteBeaconNodes>,
+        sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     },
     Remote {
         chain_config: Arc<ChainConfig>,
@@ -145,6 +157,73 @@ impl<P: Preset, W: Wait> ChainSource<P, W> {
     pub const fn controller(&self) -> Option<&ApiController<P, W>> {
         match self {
             Self::Local { controller, .. } | Self::Mixed { controller, .. } => Some(controller),
+            Self::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn block_producer(&self) -> Option<&Arc<BlockProducer<P, W>>> {
+        match self {
+            Self::Local { block_producer, .. } | Self::Mixed { block_producer, .. } => {
+                Some(block_producer)
+            }
+            Self::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn attestation_agg_pool(&self) -> Option<&Arc<AttestationAggPool<P, W>>> {
+        match self {
+            Self::Local {
+                attestation_agg_pool,
+                ..
+            }
+            | Self::Mixed {
+                attestation_agg_pool,
+                ..
+            } => Some(attestation_agg_pool),
+            Self::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn sync_committee_agg_pool(&self) -> Option<&Arc<SyncCommitteeAggPool<P, W>>> {
+        match self {
+            Self::Local {
+                sync_committee_agg_pool,
+                ..
+            }
+            | Self::Mixed {
+                sync_committee_agg_pool,
+                ..
+            } => Some(sync_committee_agg_pool),
+            Self::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn payload_attestation_agg_pool(
+        &self,
+    ) -> Option<&Arc<PayloadAttestationAggPool<P, W>>> {
+        match self {
+            Self::Local {
+                payload_attestation_agg_pool,
+                ..
+            }
+            | Self::Mixed {
+                payload_attestation_agg_pool,
+                ..
+            } => Some(payload_attestation_agg_pool),
+            Self::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn event_channels(&self) -> Option<&Arc<EventChannels<P>>> {
+        match self {
+            Self::Local { event_channels, .. } | Self::Mixed { event_channels, .. } => {
+                Some(event_channels)
+            }
             Self::Remote { .. } => None,
         }
     }

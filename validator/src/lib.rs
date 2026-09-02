@@ -3,8 +3,8 @@ pub use crate::{
     messages::ApiToValidator,
     misc::ChainSource,
     own_validator_indices::OwnValidatorIndices,
-    remote_beacon_node::RemoteBeaconNode,
-    remote_beacon_nodes::RemoteBeaconNodes,
+    remote_beacon_node::{Genesis, RemoteBeaconNode},
+    remote_beacon_nodes::{RemoteBeaconNodes, StartupError as ValidatorStartupError},
     validator::{Channels as ValidatorChannels, Validator},
     validator_config::ValidatorConfig,
 };

@@ -474,9 +474,9 @@ struct BeaconNodeOptions {
     #[clap(long)]
     track_liveness: bool,
 
-    /// Enable doppelganger protection (liveness tracking must be enabled for this feature)
+    /// Enable doppelganger protection (with the built-in beacon node, liveness tracking must be enabled)
     /// [default: disabled]
-    #[clap(long, requires("track_liveness"))]
+    #[clap(long)]
     detect_doppelgangers: bool,
 
     /// Enable in-memory mode.
@@ -959,8 +959,12 @@ struct RemoteValidatorOptions {
     #[clap(long, num_args = 1..)]
     beacon_node_urls: Vec<RedactingUrl>,
 
-    /// Perform validator duties against `--beacon-node-urls` only, ignoring the built-in beacon node
-    #[clap(long, requires = "beacon_node_urls")]
+    /// Perform validator duties against `--beacon-node-urls` only, without the built-in beacon node
+    #[clap(
+        long,
+        requires = "beacon_node_urls",
+        conflicts_with_all = ["http_address", "http_port", "http_allowed_origins", "timeout"],
+    )]
     disable_local_beacon_node: bool,
 
     /// List of duties to publish to every beacon node rather than the first one; `all` covers
@@ -1195,6 +1199,14 @@ impl GrandineArgs {
             publish_to_every_node,
         } = remote_validator_options;
 
+        // Without the built-in node liveness comes from the remote beacon nodes.
+        if detect_doppelgangers && !disable_local_beacon_node {
+            ensure!(
+                track_liveness,
+                Error::DoppelgangerDetectionRequiresLivenessTracking,
+            );
+        }
+
         if in_memory {
             warn_with_peers!(
                 "running Grandine in in-memory mode; \
@@ -1263,7 +1275,12 @@ impl GrandineArgs {
 
         let predefined_network = network.predefined_network();
 
-        if cfg!(not(feature = "embed")) && predefined_network.is_none() && eth1_rpc_urls.is_empty()
+        // A validator without the built-in node takes genesis from the beacon nodes it performs
+        // duties against, so it needs neither a genesis state nor an execution layer to build one.
+        if cfg!(not(feature = "embed"))
+            && predefined_network.is_none()
+            && eth1_rpc_urls.is_empty()
+            && !disable_local_beacon_node
         {
             ensure!(
                 genesis_state_file.is_some(),
@@ -1398,7 +1415,12 @@ impl GrandineArgs {
             .enable_validator_api
             .then(|| ValidatorApiConfig::from(validator_api_options));
 
-        let http_api_config = Option::<HttpApiConfig>::from(http_api_options);
+        // The beacon node HTTP API is the built-in node's.
+        let http_api_config = if disable_local_beacon_node {
+            None
+        } else {
+            Option::<HttpApiConfig>::from(http_api_options)
+        };
 
         if let Some(http_api_config) = http_api_config.as_ref() {
             services.push((http_api_config.address, "HTTP API"));
@@ -1709,6 +1731,11 @@ enum Error {
          to custom network without --genesis-state-file"
     )]
     MissingEth1RpcUrlsForCustomWithoutGenesisState,
+    #[error(
+        "--track-liveness must be specified for --detect-doppelgangers \
+         with the built-in beacon node"
+    )]
+    DoppelgangerDetectionRequiresLivenessTracking,
     #[error(
         "{phase} variables in {preset_name} preset do not match file ({})",
         differences.iter().join(", "),

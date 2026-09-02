@@ -43,7 +43,7 @@ use types::{
     phase0::{
         consts::BASIS_POINTS,
         containers::AttestationData,
-        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex, Version},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, UnixSeconds, ValidatorIndex, Version},
     },
     preset::Preset,
     redacting_url::RedactingUrl,
@@ -81,6 +81,15 @@ enum Error {
         url: String,
         expected: Version,
         actual: Version,
+    },
+    #[error(
+        "beacon node at {url} is on a chain with genesis validators root {actual:?} \
+         where {expected:?} was expected"
+    )]
+    GenesisValidatorsRootMismatch {
+        url: String,
+        expected: H256,
+        actual: H256,
     },
     #[error("beacon node at {url} reported an optimistic head")]
     OptimisticHead { url: String },
@@ -127,10 +136,13 @@ enum Error {
     },
 }
 
+/// The response of `getGenesis`.
 #[derive(Deserialize)]
-struct Genesis {
-    genesis_fork_version: Version,
-    genesis_validators_root: H256,
+pub struct Genesis {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub genesis_time: UnixSeconds,
+    pub genesis_fork_version: Version,
+    pub genesis_validators_root: H256,
 }
 
 /// The request body of `postStateValidators`.
@@ -264,7 +276,7 @@ pub struct RemoteBeaconNode {
     /// A [`Health`] discriminant. Atomic because it is read on the duty path.
     health: AtomicU8,
     chain_head: ChainHead,
-    /// Learned from the genesis check and unchanging thereafter.
+    /// Seeded at startup or learned from the genesis check, and unchanging thereafter.
     genesis_validators_root: OnceLock<H256>,
     /// How many nodes of the fleet can serve, shared between them; a lone node is not held to
     /// timeouts that reserve time for a fallback.
@@ -297,7 +309,12 @@ impl RemoteBeaconNode {
         &self.chain_head
     }
 
-    /// Learned from the genesis check; [`None`] until the node has been reached.
+    /// Sets the root every genesis check is held to; a later call changes nothing.
+    pub fn seed_genesis_validators_root(&self, genesis_validators_root: H256) {
+        let _ = self.genesis_validators_root.set(genesis_validators_root);
+    }
+
+    /// Seeded or learned from the genesis check; [`None`] until the node has been reached.
     #[must_use]
     pub fn genesis_validators_root(&self) -> Option<H256> {
         self.genesis_validators_root.get().copied()
@@ -581,7 +598,12 @@ impl RemoteBeaconNode {
         match self.ensure_same_network().await {
             Ok(()) => NetworkCheck::Matches,
             Err(error) => {
-                if matches!(error.downcast_ref(), Some(Error::NetworkMismatch { .. })) {
+                if matches!(
+                    error.downcast_ref(),
+                    Some(
+                        Error::NetworkMismatch { .. } | Error::GenesisValidatorsRootMismatch { .. }
+                    )
+                ) {
                     NetworkCheck::Mismatch(error)
                 } else {
                     NetworkCheck::Unreachable(error)
@@ -594,7 +616,7 @@ impl RemoteBeaconNode {
         self.url.join(path).map_err(Into::into)
     }
 
-    async fn ensure_same_network(&self) -> Result<()> {
+    pub async fn genesis(&self) -> Result<Genesis> {
         let url = self.endpoint("/eth/v1/beacon/genesis")?;
 
         let response = self
@@ -604,7 +626,11 @@ impl RemoteBeaconNode {
             .send()
             .await?;
 
-        let genesis = self.parse_data::<Genesis>(response).await?;
+        self.parse_data(response).await
+    }
+
+    async fn ensure_same_network(&self) -> Result<()> {
+        let genesis = self.genesis().await?;
         let expected = self.chain_config.genesis_fork_version;
 
         // Prevents producing attestations signed under the wrong domain.
@@ -617,9 +643,21 @@ impl RemoteBeaconNode {
             },
         );
 
-        let _ = self
-            .genesis_validators_root
-            .set(genesis.genesis_validators_root);
+        match self.genesis_validators_root.get() {
+            Some(expected) => ensure!(
+                *expected == genesis.genesis_validators_root,
+                Error::GenesisValidatorsRootMismatch {
+                    url: self.url.to_string(),
+                    expected: *expected,
+                    actual: genesis.genesis_validators_root,
+                },
+            ),
+            None => {
+                let _ = self
+                    .genesis_validators_root
+                    .set(genesis.genesis_validators_root);
+            }
+        }
 
         Ok(())
     }
