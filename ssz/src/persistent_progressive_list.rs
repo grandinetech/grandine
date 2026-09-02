@@ -30,7 +30,7 @@ use crate::{
     shared,
 };
 
-type PrettyBigU = typenum::U1048576;
+type PrettyBigU = typenum::U4294967296;
 
 // Unlike `PersistentList`, this does not support bundle sizes other than the minimum.
 // EIP-7916 partitions the chunk sequence at absolute positions (1, 4, 16, ... chunks),
