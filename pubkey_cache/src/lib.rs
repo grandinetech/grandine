@@ -19,6 +19,10 @@ use std_ext::ArcExt;
 use typenum::U65536;
 use types::{combined::BeaconState, preset::Preset, traits::BeaconState as _};
 
+pub use crate::deposit_signature_cache::{DepositSignatureCache, DepositSignatureKey};
+
+mod deposit_signature_cache;
+
 type CachedKeys = SccHashMap<PublicKeyBytes, Arc<PublicKey>>;
 
 /// Reimplement the subset of `scc::HashMap` used in this module because `scc`
@@ -89,6 +93,10 @@ pub struct PubkeyCache {
     database: Option<Database>,
     keys: CachedKeys,
     unpersisted: SccHashSet<PublicKeyBytes>,
+    /// Results of `DepositMessage` signature verifications.
+    /// Unrelated to the keys above. Kept here because this cache is already threaded through
+    /// everything that verifies deposits.
+    deposit_signatures: DepositSignatureCache,
 }
 
 impl SszSize for PubkeyCache {
@@ -163,7 +171,13 @@ impl PubkeyCache {
             database: Some(database),
             keys,
             unpersisted: SccHashSet::default(),
+            deposit_signatures: DepositSignatureCache::default(),
         }
+    }
+
+    #[must_use]
+    pub const fn deposit_signatures(&self) -> &DepositSignatureCache {
+        &self.deposit_signatures
     }
 
     // Intended for use with anchor state during startup:
@@ -262,6 +276,13 @@ impl PubkeyCache {
             &type_name,
             "unpersisted",
             self.unpersisted.len(),
+        );
+
+        metrics.set_collection_length(
+            module_path!(),
+            &type_name,
+            "deposit_signatures",
+            self.deposit_signatures.len(),
         );
     }
 

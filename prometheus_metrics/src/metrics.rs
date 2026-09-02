@@ -178,12 +178,15 @@ pub struct Metrics {
     pub fc_preprocess_state_task_times: Histogram,
     pub fc_checkpoint_state_task_times: Histogram,
     pub fc_persist_pubkey_cache_task_times: Histogram,
+    pub fc_cache_deposit_signatures_task_times: Histogram,
     pub fc_block_payload_attestation_task_times: Histogram,
 
     // Cache metrics
     pub active_validator_indices_ordered_init_count: IntCounter,
     pub active_validator_indices_shuffled_init_count: IntCounter,
     pub beacon_proposer_index_init_count: IntCounter,
+    pub deposit_signature_cache_hit_count: IntCounter,
+    pub deposit_signature_cache_miss_count: IntCounter,
     pub total_active_balance_init_count: IntCounter,
 
     // Transition function metrics
@@ -824,6 +827,11 @@ impl Metrics {
                 "Forkchoice PersistPubkeyCacheTask times",
             ))?,
 
+            fc_cache_deposit_signatures_task_times: Histogram::with_opts(histogram_opts!(
+                "FC_CACHE_DEPOSIT_SIGNATURES_TASK_TIMES",
+                "Forkchoice CacheDepositSignaturesTask times",
+            ))?,
+
             fc_checkpoint_state_task_times: Histogram::with_opts(histogram_opts!(
                 "FC_CHECKPOINT_STATE_TASK_TIMES",
                 "Forkchoice CheckpointStateTask times",
@@ -848,6 +856,17 @@ impl Metrics {
             beacon_proposer_index_init_count: IntCounter::new(
                 "BEACON_PROPOSER_INDEX_INIT_COUNT",
                 "Beacon proposer index cache init count",
+            )?,
+
+            deposit_signature_cache_hit_count: IntCounter::new(
+                "DEPOSIT_SIGNATURE_CACHE_HIT_COUNT",
+                "Number of pending deposit signature checks served from the cache",
+            )?,
+
+            deposit_signature_cache_miss_count: IntCounter::new(
+                "DEPOSIT_SIGNATURE_CACHE_MISS_COUNT",
+                "Number of pending deposit signature checks that missed the cache \
+                 and were verified inline",
             )?,
 
             total_active_balance_init_count: IntCounter::new(
@@ -1180,6 +1199,9 @@ impl Metrics {
         default_registry.register(Box::new(self.fc_checkpoint_state_task_times.clone()))?;
         default_registry.register(Box::new(self.fc_persist_pubkey_cache_task_times.clone()))?;
         default_registry.register(Box::new(
+            self.fc_cache_deposit_signatures_task_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
             self.fc_block_payload_attestation_task_times.clone(),
         ))?;
         default_registry.register(Box::new(
@@ -1189,6 +1211,8 @@ impl Metrics {
             self.active_validator_indices_shuffled_init_count.clone(),
         ))?;
         default_registry.register(Box::new(self.beacon_proposer_index_init_count.clone()))?;
+        default_registry.register(Box::new(self.deposit_signature_cache_hit_count.clone()))?;
+        default_registry.register(Box::new(self.deposit_signature_cache_miss_count.clone()))?;
         default_registry.register(Box::new(self.total_active_balance_init_count.clone()))?;
         default_registry.register(Box::new(self.blinded_block_transition_times.clone()))?;
         default_registry.register(Box::new(self.block_transition_times.clone()))?;

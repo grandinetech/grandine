@@ -7,9 +7,6 @@
 //!
 //! All bundle sizes are currently set to minimize rehashing at the cost of higher memory usage.
 
-use std::collections::HashMap;
-
-use bls::SignatureBytes;
 use ssz::{
     ContiguousVector, IncompletePersistentVector, PersistentList, PersistentProgressiveList,
     PersistentVector, UnhashedBundleSize,
@@ -24,7 +21,7 @@ use crate::{
         validator_list::ProgressiveValidatorList,
     },
     phase0::{
-        containers::{DepositMessage, Eth1Data, PendingAttestation},
+        containers::{Eth1Data, PendingAttestation},
         primitives::{Gwei, H256, ValidatorIndex},
         validator_list::ValidatorList,
     },
@@ -106,8 +103,6 @@ pub type BuilderPendingPayments<P> = PersistentVector<
 >;
 
 pub type BuilderPendingWithdrawals = PersistentProgressiveList<BuilderPendingWithdrawal>;
-
-pub type DepositSignatureCache = HashMap<(DepositMessage, SignatureBytes), bool>;
 
 pub type PayloadExpectedWithdrawals = PersistentProgressiveList<Withdrawal>;
 
