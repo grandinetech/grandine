@@ -116,11 +116,6 @@ impl GrandineConfig {
             ..
         } = self;
 
-        let StorageConfig {
-            archival_epoch_interval,
-            ..
-        } = storage_config;
-
         match predefined_network {
             Some(network) => info!("network: {network}"),
             None => info!(
@@ -130,6 +125,16 @@ impl GrandineConfig {
         }
 
         info!("storage mode: {:?}", storage_config.storage_mode);
+        info!(
+            "state storage: hierarchy {}, cache sizes [{}], compression level {}",
+            storage_config.state_storage_config.hierarchy,
+            storage_config
+                .state_storage_config
+                .cache_sizes
+                .iter()
+                .join(", "),
+            storage_config.state_storage_config.compression_level,
+        );
         info!("data directory: {}", data_dir.display());
 
         self.storage_config.print_db_sizes();
@@ -173,7 +178,6 @@ impl GrandineConfig {
             info!("validator API disabled");
         }
 
-        info!("archival interval: {archival_epoch_interval} epochs");
         info!("slasher enabled: {slashing_enabled}");
 
         if let Some(client_version) = &network_config.identify_agent_version {

@@ -30,7 +30,7 @@ use eth1_api::{
     ExecutionBlobFetcher, ExecutionService, RealController,
 };
 use features::Feature;
-use fork_choice_control::{Controller, EventChannels, StateLoadStrategy, Storage};
+use fork_choice_control::{Controller, EventChannels, StateLoadStrategy, Storage, StorageError};
 use fork_choice_store::StoreConfig;
 use futures::{
     channel::{
@@ -169,8 +169,8 @@ pub async fn run_after_genesis<P: Preset>(
     let StorageConfig {
         in_memory,
         ref directories,
-        archival_epoch_interval,
         storage_mode,
+        ref state_storage_config,
         ..
     } = storage_config;
 
@@ -267,8 +267,8 @@ pub async fn run_after_genesis<P: Preset>(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
         storage_database,
-        archival_epoch_interval,
         storage_mode,
+        state_storage_config.clone(),
     ));
 
     let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
@@ -1034,6 +1034,15 @@ impl Context {
                     ) {
                         break Err(error);
                     }
+
+                    // Retrying cannot resolve a configuration error, and every
+                    // attempt reopens the databases and re-runs Eth1 startup.
+                    if matches!(
+                        error.downcast_ref::<StorageError>(),
+                        Some(&StorageError::StateHierarchyMismatch { .. })
+                    ) {
+                        break Err(error);
+                    }
                 }
                 Err(error) => error_with_peers!("application runtime panicked: {error:?}"),
             }
@@ -1718,8 +1727,8 @@ fn handle_command<P: Preset>(
     Feature::InhibitApplicationRestart.enable();
 
     let StorageConfig {
-        archival_epoch_interval,
         storage_mode,
+        state_storage_config,
         ..
     } = storage_config;
 
@@ -1740,8 +1749,8 @@ fn handle_command<P: Preset>(
                 chain_config,
                 pubkey_cache.clone_arc(),
                 storage_database,
-                *archival_epoch_interval,
                 *storage_mode,
+                state_storage_config.clone(),
             );
 
             let output_dir = output_dir.unwrap_or(std::env::current_dir()?);
