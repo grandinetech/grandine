@@ -27,7 +27,7 @@ use helper_functions::{
     },
     predicates::{
         has_compounding_withdrawal_credential, has_eth1_withdrawal_credential,
-        has_execution_withdrawal_credential, is_active_validator,
+        has_execution_withdrawal_credential, is_active_validator, is_valid_attestation_data_index,
         validate_constructed_indexed_attestation,
     },
     signing::{SignForAllForks, SignForSingleFork as _},
@@ -56,7 +56,7 @@ use types::{
             WithdrawalRequest,
         },
     },
-    nonstandard::{AttestationEpoch, PartialValidator, SlashingKind, smallvec},
+    nonstandard::{AttestationEpoch, PartialValidator, Phase, SlashingKind, smallvec},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{
@@ -802,7 +802,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
     );
 
     ensure!(
-        index == 0,
+        is_valid_attestation_data_index(Phase::Electra, index),
         Error::<P>::AttestationWithNonZeroCommitteeIndex {
             attestation: attestation.clone().into(),
         },
