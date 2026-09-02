@@ -435,7 +435,7 @@ fn restore_validators(
     );
 
     // The registry is built with public keys left zeroed. Indexing them here is
-    // exactly the work `set_pubkeys` makes unnecessary.
+    // exactly the work `restore_pubkeys` makes unnecessary.
     let mut validators = ValidatorList::try_from_iter(bytes.chunks_exact(size).map(|chunk| {
         let mut validator = read_validator(config, chunk);
         validator.pubkey = Default::default();
@@ -444,7 +444,7 @@ fn restore_validators(
     .expect("should restore validators");
 
     validators
-        .set_pubkeys(&pubkeys)
+        .restore_pubkeys(&pubkeys)
         .expect("public key list should cover every restored validator");
 
     validators

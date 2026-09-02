@@ -16,8 +16,9 @@ use types::{combined::BeaconState, preset::Mainnet, traits::BeaconState as _};
 
 use crate::common::{PAIRS, state};
 
-/// Pubkeys are stored once per database and restored with `set_pubkeys`, so a patch leaves the
-/// validators it appends with a zeroed pubkey. Clearing both sides compares what the patch owns.
+/// Pubkeys are stored once per database and restored with `restore_pubkeys`, so a patch leaves
+/// the validators it appends with a zeroed pubkey. Clearing both sides compares what the patch
+/// owns.
 fn without_pubkeys(state: &Arc<BeaconState<Mainnet>>) -> Arc<BeaconState<Mainnet>> {
     let mut state = state.clone_arc();
     let validators = state.make_mut().validators_mut();

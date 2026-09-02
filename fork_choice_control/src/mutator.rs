@@ -436,7 +436,7 @@ where
 
         let head_slot = self
             .storage
-            .checkpoint_state_slot(&*self.store.finalized_validators())?
+            .checkpoint_head_slot()?
             .unwrap_or_else(|| last_block.message().slot());
 
         self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
@@ -5275,9 +5275,11 @@ where
                     }
                 }
 
+                let retained_slots = storage.retained_prune_slots(blocks_up_to_slot);
+
                 debug_with_peers!("pruning old blocks and states from storage up to slot {blocks_up_to_slot}…");
 
-                match storage.prune_old_blocks_and_states(blocks_up_to_slot) {
+                match storage.prune_old_blocks_and_states(blocks_up_to_slot, &retained_slots) {
                     Ok(()) => {
                         debug_with_peers!(
                             "pruned old blocks and states from storage up to slot {blocks_up_to_slot}"
@@ -5290,7 +5292,7 @@ where
 
                 debug_with_peers!("pruning old state roots from storage up to slot {blocks_up_to_slot}…");
 
-                match storage.prune_old_state_roots(blocks_up_to_slot) {
+                match storage.prune_old_state_roots(blocks_up_to_slot, &retained_slots) {
                     Ok(()) => {
                         debug_with_peers!(
                             "pruned old state roots from storage up to slot {blocks_up_to_slot}"

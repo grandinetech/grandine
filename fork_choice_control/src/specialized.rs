@@ -24,7 +24,8 @@ use crate::{
     controller::{Controller, MutatorHandle},
     events::EventChannels,
     messages::{AttestationVerifierMessage, P2pMessage},
-    storage::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage},
+    state_storage_config::StateStorageConfig,
+    storage::Storage,
     unbounded_sink::UnboundedSink,
 };
 
@@ -114,10 +115,10 @@ where
             chain_config.clone_arc(),
             pubkey_cache.clone_arc(),
             database,
-            DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::Standard {
                 custom_data_availability_window: None,
             },
+            StateStorageConfig::default(),
         ));
 
         let event_channels = Arc::new(EventChannels::default());
