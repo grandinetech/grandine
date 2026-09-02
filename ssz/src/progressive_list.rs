@@ -12,7 +12,7 @@ use crate::{
     merkle_tree::{self, ProgressiveMerkleTree},
 };
 
-type PrettyBigU = typenum::U1048576;
+type PrettyBigU = typenum::U4294967296;
 
 // TODO(gloas): in spec, ProgressiveList is unbounded container, and its limits
 // are enforced in user-site. This would require careful refactoring, so for
