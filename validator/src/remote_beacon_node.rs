@@ -13,7 +13,7 @@ use anyhow::{Error as AnyhowError, Result, bail, ensure};
 use bls::PublicKeyBytes;
 use derive_more::Display;
 use futures::{Stream, StreamExt as _, future};
-use helper_functions::misc;
+use helper_functions::{misc, predicates};
 use http_api_utils::{
     BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
     ValidatorLivenessResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
@@ -110,6 +110,15 @@ enum Error {
     },
     #[error("beacon node reported {reported} data where {expected} was expected")]
     UnexpectedVersion { expected: Phase, reported: Phase },
+    #[error(
+        "beacon node produced attestation data with index {index} \
+         for committee {committee_index} in {phase}"
+    )]
+    UnexpectedAttestationIndex {
+        phase: Phase,
+        committee_index: CommitteeIndex,
+        index: u64,
+    },
     #[error("request to beacon node at {url} failed with status {status}: {body}")]
     Response {
         url: String,
@@ -746,7 +755,11 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .send()
             .await?;
 
-        self.parse_data(response).await
+        let data = self.parse_data::<AttestationData>(response).await?;
+
+        check_attestation_index(phase, committee_index, data.index)?;
+
+        Ok(data)
     }
 
     async fn aggregate_attestation(
@@ -1214,6 +1227,30 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
     }
 }
 
+// Before Electra `index` names the committee, so it must be the one requested.
+fn check_attestation_index(
+    phase: Phase,
+    committee_index: CommitteeIndex,
+    index: u64,
+) -> Result<()> {
+    let valid = if phase < Phase::Electra {
+        index == committee_index
+    } else {
+        predicates::is_valid_attestation_data_index(phase, index)
+    };
+
+    ensure!(
+        valid,
+        Error::UnexpectedAttestationIndex {
+            phase,
+            committee_index,
+            index,
+        },
+    );
+
+    Ok(())
+}
+
 fn ensure_requested_committee<P: Preset>(
     attestation: &Attestation<P>,
     committee_index: CommitteeIndex,
@@ -1510,6 +1547,24 @@ mod tests {
                 next: H256::repeat_byte(4),
             },
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn attestation_index_names_the_committee_before_electra() -> Result<()> {
+        check_attestation_index(Phase::Deneb, 3, 3)?;
+        check_attestation_index(Phase::Deneb, 3, 0).expect_err("index 0 is not committee 3");
+
+        Ok(())
+    }
+
+    #[test]
+    fn attestation_index_is_checked_against_the_phase_from_electra_on() -> Result<()> {
+        check_attestation_index(Phase::Electra, 3, 0)?;
+        check_attestation_index(Phase::Gloas, 3, 1)?;
+        check_attestation_index(Phase::Fulu, 3, 3).expect_err("index is unused until Gloas");
+        check_attestation_index(Phase::Gloas, 3, 2).expect_err("the payload vote is 0 or 1");
 
         Ok(())
     }

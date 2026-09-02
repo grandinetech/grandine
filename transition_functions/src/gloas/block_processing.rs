@@ -25,7 +25,8 @@ use helper_functions::{
     mutators::{balance, builder_balance, decrease_balance, increase_balance},
     predicates::{
         can_builder_cover_bid, is_active_builder, is_attestation_same_slot,
-        validate_constructed_indexed_attestation, validate_constructed_indexed_payload_attestation,
+        is_valid_attestation_data_index, validate_constructed_indexed_attestation,
+        validate_constructed_indexed_payload_attestation,
     },
     signing::SignForSingleFork as _,
     slot_report::SlotReport,
@@ -51,7 +52,7 @@ use types::{
             SignedExecutionPayloadBid,
         },
     },
-    nonstandard::{AttestationEpoch, SlashingKind},
+    nonstandard::{AttestationEpoch, Phase, SlashingKind},
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, ProposerSlashing},
@@ -1183,7 +1184,7 @@ pub fn validate_attestation_with_verifier<P: Preset>(
 
     // > [Modified in Gloas:EIP7732] Support index of `0` and `1` to signal payload status
     ensure!(
-        index < 2,
+        is_valid_attestation_data_index(Phase::Gloas, index),
         Error::<P>::AttestationWithInvalidPayloadStatus {
             attestation: attestation.clone().into(),
         },

@@ -2962,7 +2962,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if self.phase() >= Phase::Gloas {
             } else if self.phase() >= Phase::Electra {
                 ensure!(
-                    index == 0,
+                    predicates::is_valid_attestation_data_index(self.phase(), index),
                     Error::AttestationDataIndexNotZero {
                         attestation: attestation.clone_arc()
                     }
@@ -3039,7 +3039,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if self.phase() >= Phase::Gloas {
             ensure!(
-                index < 2,
+                predicates::is_valid_attestation_data_index(self.phase(), index),
                 Error::AttestationDataInvalidPayloadStatus {
                     attestation: attestation.clone_arc()
                 }

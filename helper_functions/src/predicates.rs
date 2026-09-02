@@ -27,7 +27,7 @@ use types::{
         },
         primitives::BuilderIndex,
     },
-    nonstandard::PartialValidator,
+    nonstandard::{PartialValidator, Phase},
     phase0::{
         consts::{ETH1_ADDRESS_WITHDRAWAL_PREFIX, FAR_FUTURE_EPOCH, TargetAggregatorsPerCommittee},
         containers::{AttestationData, DepositMessage},
@@ -192,6 +192,19 @@ pub fn is_aggregator<P: Preset>(
     let committee = accessors::beacon_committee(state, slot, committee_index)?;
 
     is_aggregator_from_committee_length(committee.len(), slot_signature)
+}
+
+/// Whether `index` is in range for attestation data of `phase`: unused from Electra on until
+/// Gloas repurposes it as the payload vote.
+#[must_use]
+pub fn is_valid_attestation_data_index(phase: Phase, index: u64) -> bool {
+    if phase < Phase::Electra {
+        true
+    } else if phase < Phase::Gloas {
+        index == 0
+    } else {
+        index < 2
+    }
 }
 
 /// [`is_aggregator`] for a committee whose length is already known, as it is in attester duties.
