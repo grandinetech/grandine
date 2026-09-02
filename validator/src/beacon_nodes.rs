@@ -714,15 +714,14 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
     async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
         let operation = format!("produce payload attestation data for slot {slot}");
 
-        // A node that has seen no block only settles the slot once every node agrees; a node
-        // that has fallen behind never answers with data.
+        // The built-in node settles the slot by itself. A remote node that has seen no block only
+        // settles it once every node agrees; a node that has fallen behind never answers with data.
         let mut none_seen = false;
         let mut last_error = None;
 
         if let Some(node) = &self.local_node {
             match node.payload_attestation_data(slot).await {
-                Ok(Some(data)) => return Ok(Some(data)),
-                Ok(None) => none_seen = true,
+                Ok(data) => return Ok(data),
                 Err(error) => {
                     warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
                     last_error = Some(error);

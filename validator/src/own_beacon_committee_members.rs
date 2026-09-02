@@ -17,6 +17,7 @@ use scc::{HashMap as SccHashMap, hash_map::Entry};
 use signer::{Signer, SigningMessage, SigningTriple};
 use ssz::H256;
 use std_ext::ArcExt;
+use tokio::sync::Mutex;
 use tracing::instrument;
 use types::{
     combined::BeaconState,
@@ -73,6 +74,8 @@ pub struct OwnBeaconCommitteeMembers {
     config: Arc<ChainConfig>,
     signer: Arc<Signer>,
     members: SccHashMap<Epoch, (H256, MembersBySlot)>,
+    /// The indices the members were computed for; a key imported at runtime changes the set.
+    requested: Mutex<Arc<[ValidatorIndex]>>,
 }
 
 impl OwnBeaconCommitteeMembers {
@@ -81,7 +84,19 @@ impl OwnBeaconCommitteeMembers {
             config,
             signer,
             members: SccHashMap::new(),
+            requested: Mutex::new(Arc::from([])),
         }
+    }
+
+    async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
+        let mut requested = self.requested.lock().await;
+
+        if **requested == *validator_indices {
+            return;
+        }
+
+        *requested = validator_indices.into();
+        self.members.clear_async().await;
     }
 
     pub fn len(&self) -> usize {
@@ -97,6 +112,9 @@ impl OwnBeaconCommitteeMembers {
     ) -> Result<Option<(Arc<[BeaconCommitteeMember]>, bool)>> {
         let dependent_root = match controller.zip(beacon_state) {
             Some((controller, state)) => {
+                self.discard_for_other_keys(&self.own_validator_indices(state))
+                    .await;
+
                 controller.attestation_committee_dependent_root_for_slot(state, slot)?
             }
             None => {
@@ -128,9 +146,16 @@ impl OwnBeaconCommitteeMembers {
             self.init_at_slot(state, dependent_root, slot).await?;
         }
 
+        // A concurrent computation under another root may have replaced the epoch's entry since
+        // the check above; members of another shuffling are not returned.
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+
         Ok(self
-            .get_at_slot::<P>(slot)
+            .members
+            .get_async(&epoch)
             .await
+            .filter(|entry| entry.0 == dependent_root)
+            .and_then(|entry| entry.1.get(&slot).map(ArcExt::clone_arc))
             .map(|members| (members, needs_to_compute)))
     }
 
@@ -176,6 +201,8 @@ impl OwnBeaconCommitteeMembers {
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
+        self.discard_for_other_keys(validator_indices).await;
+
         // Split per epoch because a shuffling, and so a dependent root, covers exactly one.
         for (_, slots) in slots_by_epoch::<P>(slots) {
             let AttesterDuties {
@@ -240,12 +267,18 @@ impl OwnBeaconCommitteeMembers {
         beacon_nodes: &BeaconNodes<P, W>,
         epoch: Epoch,
         slots: Range<Slot>,
-        validator_index: ValidatorIndex,
+        validator_indices: &[ValidatorIndex],
     ) -> Result<Option<Range<Slot>>> {
+        self.discard_for_other_keys(validator_indices).await;
+
         // The request that fetches the duties reports the dependent root anyway.
         if self.cached_dependent_root(epoch).await.is_none() {
             return Ok(Some(slots));
         }
+
+        let Some(validator_index) = validator_indices.first().copied() else {
+            return Ok(None);
+        };
 
         let dependent_root = beacon_nodes
             .dependent_root(epoch, Some(validator_index))

@@ -329,26 +329,25 @@ impl<P: Preset> Context<P> {
 
         let chain_source = Arc::new(ChainSource::Local {
             controller: controller.clone_arc(),
+            attestation_agg_pool: attestation_agg_pool.clone_arc(),
+            block_producer: block_producer.clone_arc(),
+            event_channels: event_channels.clone_arc(),
             own_validator_indices: Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
+            payload_attestation_agg_pool: payload_attestation_agg_pool.clone_arc(),
+            sync_committee_agg_pool: sync_committee_agg_pool.clone_arc(),
         });
 
         let validator = Validator::new(
             validator_config.clone_arc(),
-            block_producer.clone_arc(),
             chain_source,
-            attestation_agg_pool.clone_arc(),
             None,
             None,
-            event_channels.clone_arc(),
             keymanager.proposer_configs().clone_arc(),
             signer.clone_arc(),
             slashing_protector,
-            payload_attestation_agg_pool.clone_arc(),
-            sync_committee_agg_pool.clone_arc(),
             None,
             None,
             validator_channels,
-            network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
         );

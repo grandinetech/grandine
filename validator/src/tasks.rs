@@ -5,7 +5,6 @@ use core::{
 use std::sync::Arc;
 
 use anyhow::Result;
-use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::misc;
 use itertools::Itertools as _;
@@ -15,7 +14,6 @@ use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
 use tracing::instrument;
 use types::{
-    combined::BeaconState,
     config::Config as ChainConfig,
     nonstandard::{ForkInfo, Phase},
     phase0::primitives::{Epoch, Slot, ValidatorIndex},
@@ -36,7 +34,6 @@ use crate::{
 
 pub struct UpdateBeaconCommitteeSubscriptionsTask<P: Preset, W: Wait + Sync> {
     pub chain_config: Arc<ChainConfig>,
-    pub controller: Option<ApiController<P, W>>,
     pub source: DutySource<P>,
     pub own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
     pub own_ptc_members: Arc<OwnPTCMembers>,
@@ -54,7 +51,6 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
     pub async fn run(self) {
         let Self {
             chain_config,
-            controller,
             source,
             own_beacon_committee_members,
             own_ptc_members,
@@ -65,11 +61,6 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
 
         let current_slot = source.slot_head().slot();
         let fork_info = source.slot_head().fork_info;
-
-        let mut beacon_state = match source {
-            DutySource::Local { beacon_state, .. } => Some(beacon_state),
-            DutySource::Remote { .. } => None,
-        };
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
@@ -85,12 +76,12 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
         let prefetch_slots = beacon_nodes.prefetch_slots(current_slot);
 
         for (epoch, slots) in own_members_misc::slots_by_epoch::<P>(prefetch_slots) {
-            let Some(validator_index) = validator_indices.first().copied() else {
+            if validator_indices.is_empty() {
                 continue;
-            };
+            }
 
             let slots = match own_beacon_committee_members
-                .slots_to_compute_at_epoch(&beacon_nodes, epoch, slots, validator_index)
+                .slots_to_compute_at_epoch(&beacon_nodes, epoch, slots, &validator_indices)
                 .await
             {
                 Ok(slots) => slots,
@@ -106,29 +97,9 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
 
             // Attester duties may be cached from an earlier slot while PTC duties are not yet.
             if let Some(slots) = slots {
-                // Only the built-in beacon node computes members from a state, and only it has one
-                // to carry across a fork.
-                if let Some(state) = &mut beacon_state
-                    && let Some(controller) = &controller
-                    && chain_config.phase_at_slot::<P>(current_slot)
-                        != chain_config.phase_at_epoch(epoch)
-                {
-                    match state_at_fork_of_epoch(&chain_config, controller, epoch).await {
-                        Ok(next) => *state = next,
-                        Err(error) => {
-                            warn_with_peers!(
-                                "failed to preprocess next fork beacon state for beacon \
-                                 committee subscriptions: {error:?}",
-                            );
-                            break;
-                        }
-                    }
-                }
-
                 debug_with_peers!("updating beacon committee subscriptions {epoch} {current_slot}");
 
-                let fork_info =
-                    fork_info_at_epoch(&chain_config, beacon_state.as_deref(), epoch, fork_info);
+                let fork_info = fork_info_at_epoch(&chain_config, epoch, fork_info);
 
                 if let Err(error) = own_beacon_committee_members
                     .init_at_slots(&beacon_nodes, fork_info, slots, &validator_indices)
@@ -175,33 +146,16 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
     }
 }
 
-async fn state_at_fork_of_epoch<P: Preset, W: Wait + Sync>(
-    chain_config: &ChainConfig,
-    controller: &ApiController<P, W>,
-    epoch: Epoch,
-) -> Result<Arc<BeaconState<P>>> {
-    let fork_epoch = chain_config.fork_epoch(chain_config.phase_at_epoch(epoch));
-
-    controller
-        .preprocessed_state_at_epoch(fork_epoch)
-        .await
-        .map(|with_status| with_status.value)
-}
-
 fn fork_info_at_epoch<P: Preset>(
     chain_config: &ChainConfig,
-    beacon_state: Option<&BeaconState<P>>,
     epoch: Epoch,
     current: ForkInfo<P>,
 ) -> ForkInfo<P> {
-    match beacon_state {
-        Some(state) => state.into(),
-        // The epoch may lie in the next fork; the genesis validators root never changes.
-        None => ForkInfo {
-            fork: chain_config.fork_at_epoch(epoch),
-            genesis_validators_root: current.genesis_validators_root,
-            phantom: PhantomData,
-        },
+    // The epoch may lie in the next fork; the genesis validators root never changes.
+    ForkInfo {
+        fork: chain_config.fork_at_epoch(epoch),
+        genesis_validators_root: current.genesis_validators_root,
+        phantom: PhantomData,
     }
 }
 

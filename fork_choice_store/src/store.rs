@@ -2187,7 +2187,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             (justified, finalized)
         };
 
-        let payload_status = Self::initial_payload_status(&state);
+        // A Gloas block carries no payload; until its envelope is verified it is as verified as
+        // the chain it extends.
+        let payload_status = if state.is_post_gloas() {
+            parent.payload_status
+        } else {
+            Self::initial_payload_status(&state)
+        };
 
         let chain_link = ChainLink {
             block_root,

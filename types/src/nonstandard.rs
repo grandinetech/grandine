@@ -1,4 +1,4 @@
-use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter, market::PhantomData};
+use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter, marker::PhantomData};
 use std::sync::Arc;
 #[cfg(target_os = "zkvm")]
 use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};

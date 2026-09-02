@@ -2902,8 +2902,9 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
     let head_state = controller.head_state();
 
     let state = match accessors::relative_epoch(&head_state.value, epoch) {
-        Ok(_) => head_state,
-        Err(_) => {
+        // The PTC window only appears with the fork upgrade, so a pre-Gloas head cannot serve it.
+        Ok(_) if head_state.value.post_gloas().is_some() => head_state,
+        _ => {
             let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
             state_id::state(
                 &StateId::Slot(start_slot),
@@ -2934,6 +2935,7 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
             accessors::get_ptc(&state, slot)?
                 .into_iter()
                 .filter(|validator_index| indices.contains(validator_index))
+                .unique()
                 .map(|validator_index| {
                     let pubkey = *accessors::public_key(&state, validator_index)?;
 
@@ -3962,6 +3964,11 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
             max_empty_slots,
             slot,
         });
+    }
+
+    // No block for the slot has been seen; the validator must not attest.
+    if head_slot < slot {
+        return Err(Error::BlockNotSeen);
     }
 
     let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);

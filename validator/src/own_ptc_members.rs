@@ -1,16 +1,17 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use bls::PublicKeyBytes;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
-use logging::{debug_with_peers, warn_with_peers};
+use logging::warn_with_peers;
 use scc::HashMap as SccHashMap;
 use signer::Signer;
 use ssz::H256;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use tokio::sync::Mutex;
 use tracing::instrument;
 use types::{
     combined::BeaconState,
@@ -32,6 +33,8 @@ pub struct PTCMember {
 pub struct OwnPTCMembers {
     signer: Arc<Signer>,
     members: SccHashMap<(H256, Slot), Arc<[PTCMember]>>,
+    /// The indices the members were computed for; a key imported at runtime changes the set.
+    requested: Mutex<Arc<[ValidatorIndex]>>,
 }
 
 impl OwnPTCMembers {
@@ -39,7 +42,19 @@ impl OwnPTCMembers {
         Self {
             signer,
             members: SccHashMap::new(),
+            requested: Mutex::new(Arc::from([])),
         }
+    }
+
+    async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
+        let mut requested = self.requested.lock().await;
+
+        if **requested == *validator_indices {
+            return;
+        }
+
+        *requested = validator_indices.into();
+        self.members.clear_async().await;
     }
 
     pub fn len(&self) -> usize {
@@ -53,6 +68,16 @@ impl OwnPTCMembers {
         dependent_root: H256,
         slot: Slot,
     ) -> Option<Arc<[PTCMember]>> {
+        let validator_indices = self
+            .signer
+            .load()
+            .keys()
+            .filter_map(|public_key| accessors::index_of_public_key(state, public_key))
+            .sorted()
+            .collect::<Vec<_>>();
+
+        self.discard_for_other_keys(&validator_indices).await;
+
         if let Some(members) = self.members.get_async(&(dependent_root, slot)).await {
             return Some(members.clone_arc());
         }
@@ -94,6 +119,8 @@ impl OwnPTCMembers {
         dependent_root: H256,
         validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
+        self.discard_for_other_keys(validator_indices).await;
+
         let slots = misc::slots_in_epoch::<P>(epoch)?;
 
         // Every slot of a fetched epoch is cached, so the first one stands for all of them.
@@ -110,12 +137,12 @@ impl OwnPTCMembers {
             duties,
         } = beacon_nodes.ptc_duties(epoch, validator_indices).await?;
 
-        if reported_root != dependent_root {
-            debug_with_peers!(
-                "PTC duties for epoch {epoch} were reported under dependent root \
-                 {reported_root:?} rather than {dependent_root:?}",
-            );
-        }
+        // Another root is another shuffling; the duties cannot stand in for the ones asked for.
+        ensure!(
+            reported_root == dependent_root,
+            "PTC duties for epoch {epoch} were reported under dependent root {reported_root:?} \
+             rather than {dependent_root:?}",
+        );
 
         let signer_snapshot = self.signer.load();
         let mut members_by_slot = slots
@@ -146,7 +173,6 @@ impl OwnPTCMembers {
         for (slot, mut members) in members_by_slot {
             members.sort_unstable_by_key(|member| member.validator_index);
 
-            // Keyed by the root the caller looks up by, so a node reporting another still hits.
             self.members
                 .upsert_async((dependent_root, slot), members.into())
                 .await;

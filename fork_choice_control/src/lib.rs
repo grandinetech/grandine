@@ -13,7 +13,7 @@
 //! [`storage`]: ::storage
 
 pub use crate::{
-    controller::Controller,
+    controller::{Controller, MutatorHandle},
     events::{DEFAULT_MAX_EVENTS, Event, EventChannels, HeadEvent, Topic},
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
