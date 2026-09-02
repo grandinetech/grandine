@@ -1,12 +1,12 @@
 use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, sync::Arc, thread::Builder};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
 use database::{Database, PrefixableKey};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
-use helper_functions::{accessors, misc};
+use helper_functions::{accessors, deposit_signatures, misc};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
@@ -28,10 +28,11 @@ use types::{
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::containers::SignedExecutionPayloadEnvelope,
     nonstandard::{
-        BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint, PubkeyList, StorageMode,
+        BlobSidecarWithId, DataColumnSidecarWithId, FinalizedCheckpoint, Phase, PubkeyList,
+        StorageMode,
     },
     phase0::{
-        consts::GENESIS_SLOT,
+        consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         primitives::{Epoch, H256, Slot},
     },
     preset::Preset,
@@ -71,6 +72,37 @@ pub struct Storage<P> {
 }
 
 impl<P: Preset> Storage<P> {
+    /// Verifies the `pending_deposits` signatures of the anchor state. Runs in the background.
+    /// Deposits from later blocks are handled by `CacheDepositSignaturesTask`.
+    fn spawn_deposit_signature_caching(&self, anchor_state: &Arc<BeaconState<P>>) {
+        if self.config.gloas_fork_epoch == FAR_FUTURE_EPOCH || anchor_state.phase() >= Phase::Gloas
+        {
+            return;
+        }
+
+        let config = self.config.clone_arc();
+        let pubkey_cache = self.pubkey_cache.clone_arc();
+        let state = anchor_state.clone_arc();
+
+        let result = Builder::new()
+            .name("deposit-signature-cache".to_owned())
+            .spawn(move || {
+                let verified = deposit_signatures::cache_pending_deposit_signatures(
+                    &config,
+                    &pubkey_cache,
+                    &state,
+                );
+
+                debug_with_peers!(
+                    "verified {verified} pending deposit signatures from the anchor state",
+                );
+            });
+
+        if let Err(error) = result {
+            warn_with_peers!("failed to spawn deposit signature caching thread: {error:?}");
+        }
+    }
+
     #[must_use]
     pub fn new(
         config: Arc<Config>,
@@ -216,6 +248,8 @@ impl<P: Preset> Storage<P> {
                 "error occurred while loading anchor state keys into pubkey_cache: {error:?}"
             );
         }
+
+        self.spawn_deposit_signature_caching(&anchor_state);
 
         let anchor_slot = anchor_block.message().slot();
         let anchor_block_root = anchor_block.message().hash_tree_root();

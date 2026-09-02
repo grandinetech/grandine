@@ -13,7 +13,6 @@ use ssz::{SszHash as _, SszList as _};
 use tap::TryConv as _;
 use typenum::Unsigned as _;
 use types::{
-    DepositSignatureCache,
     altair::consts::{SyncCommitteeSubnetCount, TARGET_AGGREGATORS_PER_SYNC_SUBCOMMITTEE},
     bellatrix::primitives::Gas,
     combined::BeaconState as CombinedBeaconState,
@@ -43,6 +42,7 @@ use types::{
 
 use crate::{
     accessors,
+    deposit_signatures::is_valid_deposit_signature_cached,
     error::{Error, SignatureKind},
     signing::{SignForAllForks as _, SignForSingleFork as _},
     verifier::Verifier,
@@ -557,36 +557,11 @@ pub fn is_pending_validator<'deposit>(
     pending_deposits: impl IntoIterator<Item = &'deposit PendingDeposit>,
     pubkey: PublicKeyBytes,
     pubkey_cache: &PubkeyCache,
-    signature_cache: &mut DepositSignatureCache,
 ) -> bool {
-    for deposit in pending_deposits {
-        if deposit.pubkey != pubkey {
-            continue;
-        }
-
-        let PendingDeposit {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-            signature,
-            ..
-        } = *deposit;
-
-        let deposit_message = DepositMessage {
-            pubkey,
-            withdrawal_credentials,
-            amount,
-        };
-
-        if *signature_cache
-            .entry((deposit_message, signature))
-            .or_insert_with(|| is_valid_deposit_signature(config, pubkey_cache, deposit))
-        {
-            return true;
-        }
-    }
-
-    false
+    pending_deposits
+        .into_iter()
+        .filter(|deposit| deposit.pubkey == pubkey)
+        .any(|deposit| is_valid_deposit_signature_cached(config, pubkey_cache, deposit))
 }
 
 #[must_use]

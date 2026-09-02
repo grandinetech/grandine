@@ -103,8 +103,7 @@ pub mod gloas {
 }
 
 pub use collections::{
-    DepositSignatureCache, PayloadExpectedWithdrawals, PendingDeposits, ProposerLookahead, Ptc,
-    PtcWindow, Validators,
+    PayloadExpectedWithdrawals, PendingDeposits, ProposerLookahead, Ptc, PtcWindow, Validators,
 };
 
 mod collections;

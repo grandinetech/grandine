@@ -12117,6 +12117,8 @@ dependencies = [
  "eth2_cache_utils",
  "hex-literal 1.1.0",
  "logging",
+ "lru 0.17.0",
+ "nonzero_ext",
  "prometheus_metrics",
  "scc 3.7.0",
  "ssz",

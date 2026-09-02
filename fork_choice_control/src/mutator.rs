@@ -66,6 +66,7 @@ use types::{
         PayloadStatus, Phase, RelativeEpoch, ValidationOutcome, ValidationOutcomeWithReason,
     },
     phase0::{
+        consts::FAR_FUTURE_EPOCH,
         containers::Checkpoint,
         primitives::{ExecutionBlockHash, H256, Slot, ValidatorIndex},
     },
@@ -92,10 +93,11 @@ use crate::{
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockPayloadAttestationsTask,
-        BlockTask, CheckpointStateTask, DataColumnSidecarTask, ExecutionPayloadEnvelopeTask,
-        PayloadAttestationTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
-        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
-        ProposerPreferencesTask, PruneStateCacheTask, RetryDataColumnSidecarTask,
+        BlockTask, CacheDepositSignaturesTask, CheckpointStateTask, DataColumnSidecarTask,
+        ExecutionPayloadEnvelopeTask, PayloadAttestationTask, PersistBlobSidecarsTask,
+        PersistDataColumnSidecarsTask, PersistExecutionPayloadEnvelopesTask,
+        PersistPubkeyCacheTask, PreprocessStateTask, ProposerPreferencesTask, PruneStateCacheTask,
+        RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -3209,7 +3211,23 @@ where
         let block = block.clone_arc();
         let is_post_gloas = chain_link.is_post_gloas();
         let is_valid = chain_link.is_valid();
+        let post_state = chain_link.state.clone();
         let changes = self.store_mut().apply_block(chain_link)?;
+
+        // Verify the deposit signatures now, a block at a time.
+        // The Gloas fork transition would otherwise verify the whole queue at once.
+        if !is_post_gloas
+            && self.store.chain_config().gloas_fork_epoch != FAR_FUTURE_EPOCH
+            && let Some(state) = post_state
+        {
+            self.spawn(CacheDepositSignaturesTask {
+                config: self.store.owned_chain_config(),
+                pubkey_cache: self.pubkey_cache.clone_arc(),
+                state,
+                wait_group: wait_group.clone(),
+                metrics: self.metrics.clone(),
+            });
+        }
         let insertion_time = Instant::now();
 
         let unfinalized_states_in_memory = self.store.store_config().unfinalized_states_in_memory;

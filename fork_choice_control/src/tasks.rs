@@ -17,7 +17,7 @@ use fork_choice_store::{
 };
 use futures::channel::mpsc::Sender as MultiSender;
 use helper_functions::{
-    accessors, misc,
+    accessors, deposit_signatures, misc,
     verifier::{MultiVerifier, NullVerifier},
 };
 use logging::{debug_with_peers, warn_with_peers};
@@ -1108,6 +1108,47 @@ impl<P: Preset, W> Run for PersistPubkeyCacheTask<P, W> {
 
         if let Err(error) = pubkey_cache.persist(&state) {
             warn_with_peers!("failed to persist pubkey cache to disk: {error:?}");
+        }
+
+        drop(wait_group);
+    }
+}
+
+/// Verifies the deposit signatures added to `pending_deposits` by the block just processed.
+pub struct CacheDepositSignaturesTask<P: Preset, W> {
+    pub config: Arc<Config>,
+    pub pubkey_cache: Arc<PubkeyCache>,
+    pub state: Arc<CombinedBeaconState<P>>,
+    pub wait_group: W,
+    pub metrics: Option<Arc<Metrics>>,
+}
+
+impl<P: Preset, W> Run for CacheDepositSignaturesTask<P, W> {
+    #[instrument(skip_all, level = "debug", name = "CacheDepositSignaturesTask::run")]
+    fn run(self) {
+        let Self {
+            config,
+            pubkey_cache,
+            state,
+            wait_group,
+            metrics,
+        } = self;
+
+        let _timer = metrics
+            .as_ref()
+            .map(|metrics| metrics.fc_cache_deposit_signatures_task_times.start_timer());
+
+        let verified = deposit_signatures::cache_new_pending_deposit_signatures(
+            &config,
+            &pubkey_cache,
+            &state,
+        );
+
+        if verified > 0 {
+            debug_with_peers!(
+                "verified {verified} new pending deposit signatures (slot: {})",
+                state.slot(),
+            );
         }
 
         drop(wait_group);

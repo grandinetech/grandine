@@ -15,7 +15,7 @@ use std_ext::{ArcExt as _, CopyExt as _};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
-    DepositSignatureCache, ProposerLookahead, Ptc, PtcWindow,
+    ProposerLookahead, Ptc, PtcWindow,
     altair::beacon_state::BeaconState as AltairBeaconState,
     bellatrix::{
         beacon_state::BeaconState as BellatrixBeaconState,
@@ -53,11 +53,11 @@ use types::{
 
 use crate::{
     accessors,
+    deposit_signatures::is_valid_deposit_signature_cached,
     gloas::add_builder_to_registry,
     misc,
     mutators::{self, builder_balance, increase_balance},
-    phase0,
-    predicates::{self, is_valid_deposit_signature},
+    phase0, predicates,
 };
 
 pub fn upgrade_to_altair<P: Preset>(
@@ -987,7 +987,6 @@ fn onboard_builders<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut GloasBeaconState<P>,
 ) -> Result<()> {
-    let mut signature_cache = DepositSignatureCache::new();
     let validator_pubkeys = state.validators.pubkeys().clone();
     let mut builder_indices: HashMap<PublicKeyBytes, BuilderIndex> = HashMap::new();
     let mut pending_deposits = vec![];
@@ -1011,12 +1010,11 @@ fn onboard_builders<P: Preset>(
                     &pending_deposits,
                     pubkey,
                     pubkey_cache,
-                    &mut signature_cache,
                 );
 
             if is_not_builder {
                 pending_deposits.push(*deposit);
-            } else if is_valid_deposit_signature(config, pubkey_cache, deposit) {
+            } else if is_valid_deposit_signature_cached(config, pubkey_cache, deposit) {
                 let mut address = ExecutionAddress::zero();
                 address.assign_from_slice(&withdrawal_credentials[12..]);
 

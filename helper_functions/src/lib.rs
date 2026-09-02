@@ -2,6 +2,7 @@ pub mod accessors;
 pub mod altair;
 pub mod bellatrix;
 pub mod capella;
+pub mod deposit_signatures;
 pub mod electra;
 pub mod error;
 pub mod fork;

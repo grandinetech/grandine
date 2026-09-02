@@ -415,6 +415,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn owned_chain_config(&self) -> Arc<ChainConfig> {
+        self.chain_config.clone_arc()
+    }
+
+    #[must_use]
     pub const fn store_config(&self) -> StoreConfig {
         self.store_config
     }
