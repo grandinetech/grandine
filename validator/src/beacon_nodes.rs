@@ -50,12 +50,16 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
         local_node: Option<LocalBeaconNode<P, W>>,
         current_slot: Slot,
         max_empty_slots: u64,
-        remotes: &RemoteBeaconNodes,
+        remotes: Option<&RemoteBeaconNodes>,
         publish_to_every_node: Vec<PublishedDuty>,
     ) -> Self {
         Self {
             local_node,
-            remote_nodes: remotes.serving().map(ArcExt::clone_arc).collect(),
+            remote_nodes: remotes
+                .into_iter()
+                .flat_map(RemoteBeaconNodes::serving)
+                .map(ArcExt::clone_arc)
+                .collect(),
             current_slot,
             max_empty_slots,
             publish_to_every_node,

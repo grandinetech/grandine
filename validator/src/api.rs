@@ -31,7 +31,6 @@ use bls::PublicKeyBytes;
 use clock::Tick;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;
-use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, error::Error as HelperError, signing::SignForSingleFork};
 use http_api_utils::{ApiError, ApiMetrics};
@@ -50,17 +49,17 @@ use tower_http::cors::AllowOrigin;
 use tracing::instrument;
 use types::{
     bellatrix::primitives::Gas,
-    config::Config as ChainConfig,
     nonstandard::ForkInfo,
     phase0::{
         containers::{SignedVoluntaryExit, VoluntaryExit},
-        primitives::{Epoch, ExecutionAddress, UnixSeconds},
+        primitives::{Epoch, ExecutionAddress},
     },
     preset::Preset,
 };
 
-use crate::{own_validator_indices::OwnValidatorIndices, remote_beacon_nodes::RemoteBeaconNodes};
 use zeroize::Zeroizing;
+
+use crate::misc::ChainSource;
 
 const VALIDATOR_API_TOKEN_PATH: &str = "api-token.txt";
 const VALIDATOR_API_DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -341,27 +340,6 @@ impl<S: Sync, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T>
             .await
             .map(|Query(query)| Self(query))
             .map_err(Error::InvalidQuery)
-    }
-}
-
-/// What the Validator API reads chain facts from; with `--disable-local-beacon-node` the
-/// built-in node is never consulted, as its stale state answers without an error.
-pub enum ChainSource<P: Preset, W: Wait> {
-    Local(ApiController<P, W>),
-    Remote {
-        chain_config: Arc<ChainConfig>,
-        genesis_time: UnixSeconds,
-        own_validator_indices: Arc<OwnValidatorIndices>,
-        remote_beacon_nodes: Arc<RemoteBeaconNodes>,
-    },
-}
-
-impl<P: Preset, W: Wait> ChainSource<P, W> {
-    fn chain_config(&self) -> &Arc<ChainConfig> {
-        match self {
-            Self::Local(controller) => controller.chain_config(),
-            Self::Remote { chain_config, .. } => chain_config,
-        }
     }
 }
 
@@ -698,7 +676,7 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
     let chain_config = chain_source.chain_config();
 
     let (epoch, validator_index, fork_info) = match chain_source.as_ref() {
-        ChainSource::Local(controller) => {
+        ChainSource::Local { controller, .. } | ChainSource::Mixed { controller, .. } => {
             let state = controller.preprocessed_state_at_current_slot().await?;
             let epoch = query
                 .epoch

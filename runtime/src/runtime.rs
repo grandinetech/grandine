@@ -659,30 +659,57 @@ pub async fn run_after_genesis<P: Preset>(
 
     // A validator that performs no duties against the built-in beacon node receives ticks
     // straight from the clock rather than through the mutator.
-    let (validator_tick_tx, direct_tick_rx) = if disable_local_beacon_node {
+    let (validator_tick_tx, validator_channels) = if disable_local_beacon_node {
         let (tick_tx, tick_rx) = mpsc::unbounded();
-        (Some(tick_tx), Some(tick_rx))
+
+        let channels = ValidatorChannels::Remote {
+            tick_rx,
+            api_to_validator_rx,
+            p2p_tx: validator_to_p2p_tx,
+            p2p_to_validator_rx,
+        };
+
+        (Some(tick_tx), channels)
     } else {
-        (None, None)
+        let channels = ValidatorChannels::Local {
+            api_to_validator_rx,
+            fork_choice_rx: fork_choice_to_validator_rx,
+            p2p_tx: validator_to_p2p_tx,
+            p2p_to_validator_rx,
+            slasher_to_validator_rx,
+            subnet_service_tx: subnet_service_tx.clone(),
+            api_to_liveness_tx: api_to_liveness_tx.clone(),
+            validator_to_liveness_tx,
+            validator_to_slasher_tx,
+        };
+
+        (None, channels)
     };
 
-    let validator_channels = ValidatorChannels {
-        api_to_liveness_tx: api_to_liveness_tx.clone(),
-        direct_tick_rx,
-        api_to_validator_rx,
-        fork_choice_rx: fork_choice_to_validator_rx,
-        p2p_tx: validator_to_p2p_tx,
-        p2p_to_validator_rx,
-        slasher_to_validator_rx,
-        subnet_service_tx: subnet_service_tx.clone(),
-        validator_to_liveness_tx,
-        validator_to_slasher_tx,
-    };
+    let chain_source = Arc::new(if disable_local_beacon_node {
+        ChainSource::Remote {
+            chain_config: chain_config.clone_arc(),
+            genesis_time: controller.genesis_time(),
+            own_validator_indices,
+            remote_beacon_nodes,
+        }
+    } else if remote_beacon_nodes.is_empty() {
+        ChainSource::Local {
+            controller: controller.clone_arc(),
+            own_validator_indices,
+        }
+    } else {
+        ChainSource::Mixed {
+            controller: controller.clone_arc(),
+            own_validator_indices,
+            remote_beacon_nodes,
+        }
+    });
 
     let validator = Validator::new(
         validator_config.clone_arc(),
         block_producer.clone_arc(),
-        controller.clone_arc(),
+        chain_source.clone_arc(),
         attestation_agg_pool.clone_arc(),
         builder_api,
         doppelganger_protection,
@@ -698,9 +725,6 @@ pub async fn run_after_genesis<P: Preset>(
         network_config.network_dir.as_deref(),
         dedicated_executor_normal_priority.clone_arc(),
         dedicated_executor_low_priority.clone_arc(),
-        own_validator_indices.clone_arc(),
-        remote_beacon_nodes.clone_arc(),
-        disable_local_beacon_node,
     );
 
     let p2p_channels = Channels {
@@ -855,17 +879,6 @@ pub async fn run_after_genesis<P: Preset>(
         Some(service) => Either::Left(service.run()),
         None => Either::Right(core::future::pending()),
     };
-
-    let chain_source = Arc::new(if disable_local_beacon_node {
-        ChainSource::Remote {
-            chain_config: chain_config.clone_arc(),
-            genesis_time: controller.genesis_time(),
-            own_validator_indices,
-            remote_beacon_nodes,
-        }
-    } else {
-        ChainSource::Local(controller.clone_arc())
-    });
 
     let run_validator_api = match validator_api_config {
         Some(validator_api_config) => Either::Left(run_validator_api(

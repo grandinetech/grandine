@@ -36,7 +36,7 @@ use crate::{
 
 pub struct UpdateBeaconCommitteeSubscriptionsTask<P: Preset, W: Wait + Sync> {
     pub chain_config: Arc<ChainConfig>,
-    pub controller: ApiController<P, W>,
+    pub controller: Option<ApiController<P, W>>,
     pub source: DutySource<P>,
     pub own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
     pub own_ptc_members: Arc<OwnPTCMembers>,
@@ -109,10 +109,11 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
                 // Only the built-in beacon node computes members from a state, and only it has one
                 // to carry across a fork.
                 if let Some(state) = &mut beacon_state
+                    && let Some(controller) = &controller
                     && chain_config.phase_at_slot::<P>(current_slot)
                         != chain_config.phase_at_epoch(epoch)
                 {
-                    match state_at_fork_of_epoch(&chain_config, &controller, epoch).await {
+                    match state_at_fork_of_epoch(&chain_config, controller, epoch).await {
                         Ok(next) => *state = next,
                         Err(error) => {
                             warn_with_peers!(

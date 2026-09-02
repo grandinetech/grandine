@@ -45,9 +45,7 @@ use types::{
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
-use validator::{
-    OwnValidatorIndices, RemoteBeaconNodes, Validator, ValidatorChannels, ValidatorConfig,
-};
+use validator::{ChainSource, OwnValidatorIndices, Validator, ValidatorChannels, ValidatorConfig};
 
 use crate::{
     http_api_config::HttpApiConfig,
@@ -313,15 +311,14 @@ impl<P: Preset> Context<P> {
             }),
         ));
 
-        let validator_channels = ValidatorChannels {
-            api_to_liveness_tx: None,
-            direct_tick_rx: None,
+        let validator_channels = ValidatorChannels::Local {
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
             p2p_tx: validator_to_p2p_tx,
             p2p_to_validator_rx,
             slasher_to_validator_rx: None,
             subnet_service_tx: subnet_service_tx.clone(),
+            api_to_liveness_tx: None,
             validator_to_liveness_tx: Some(validator_to_liveness_tx),
             validator_to_slasher_tx: None,
         };
@@ -330,10 +327,15 @@ impl<P: Preset> Context<P> {
         network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
         let network_config = Arc::new(network_config);
 
+        let chain_source = Arc::new(ChainSource::Local {
+            controller: controller.clone_arc(),
+            own_validator_indices: Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
+        });
+
         let validator = Validator::new(
             validator_config.clone_arc(),
             block_producer.clone_arc(),
-            controller.clone_arc(),
+            chain_source,
             attestation_agg_pool.clone_arc(),
             None,
             None,
@@ -349,9 +351,6 @@ impl<P: Preset> Context<P> {
             network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
-            Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
-            Arc::new(RemoteBeaconNodes::new(Vec::new())),
-            false,
         );
 
         let subnet_service = SubnetService::new(

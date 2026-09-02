@@ -4,17 +4,24 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use arithmetic::UsizeExt as _;
 use bls::{PublicKeyBytes, SignatureBytes};
+use clock::Tick;
+use eth1_api::ApiController;
+use fork_choice_control::Wait;
 use helper_functions::misc::{compute_epoch_at_slot, compute_start_slot_at_epoch};
 use ssz::{BitVector, H256};
 use typenum::{True, U1, U8, Unsigned as _, assert_type, op};
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
     combined::{BeaconState, SignedBeaconBlock},
-    phase0::primitives::{Epoch, Slot, ValidatorIndex},
+    config::Config as ChainConfig,
+    phase0::primitives::{Epoch, Slot, UnixSeconds, ValidatorIndex},
     preset::{Preset, SyncSubcommitteeSize},
 };
 
-use crate::slot_head::SlotHead;
+use crate::{
+    own_validator_indices::OwnValidatorIndices, remote_beacon_nodes::RemoteBeaconNodes,
+    slot_head::SlotHead,
+};
 
 type ComputeInAdvanceSlots = U8;
 
@@ -55,39 +62,117 @@ pub fn subnets_from_sync_committee_indices<P: Preset>(
     Ok(subnets)
 }
 
-/// How the validator performs duties: against the built-in beacon node, the nodes given with
-/// `--beacon-node-urls`, or both.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ValidatorMode {
-    Local,
-    LocalWithRemotes,
-    RemoteOnly,
+/// Where duties are performed and chain facts are read from.
+///
+/// The built-in beacon node, the nodes given with `--beacon-node-urls`, or both. With
+/// `--disable-local-beacon-node` the built-in node is never consulted, as its stale state answers
+/// without an error.
+pub enum ChainSource<P: Preset, W: Wait> {
+    Local {
+        controller: ApiController<P, W>,
+        own_validator_indices: Arc<OwnValidatorIndices>,
+    },
+    Mixed {
+        controller: ApiController<P, W>,
+        own_validator_indices: Arc<OwnValidatorIndices>,
+        remote_beacon_nodes: Arc<RemoteBeaconNodes>,
+    },
+    Remote {
+        chain_config: Arc<ChainConfig>,
+        genesis_time: UnixSeconds,
+        own_validator_indices: Arc<OwnValidatorIndices>,
+        remote_beacon_nodes: Arc<RemoteBeaconNodes>,
+    },
 }
 
-impl ValidatorMode {
+impl<P: Preset, W: Wait> ChainSource<P, W> {
     #[must_use]
-    pub const fn new(disable_local_beacon_node: bool, has_remote_nodes: bool) -> Self {
-        match (disable_local_beacon_node, has_remote_nodes) {
-            (true, _) => Self::RemoteOnly,
-            (false, true) => Self::LocalWithRemotes,
-            (false, false) => Self::Local,
+    pub fn chain_config(&self) -> &Arc<ChainConfig> {
+        match self {
+            Self::Local { controller, .. } | Self::Mixed { controller, .. } => {
+                controller.chain_config()
+            }
+            Self::Remote { chain_config, .. } => chain_config,
+        }
+    }
+
+    #[must_use]
+    pub fn genesis_time(&self) -> UnixSeconds {
+        match self {
+            Self::Local { controller, .. } | Self::Mixed { controller, .. } => {
+                controller.genesis_time()
+            }
+            Self::Remote { genesis_time, .. } => *genesis_time,
+        }
+    }
+
+    #[must_use]
+    pub fn slot(&self) -> Slot {
+        match self {
+            Self::Local { controller, .. } | Self::Mixed { controller, .. } => controller.slot(),
+            Self::Remote {
+                chain_config,
+                genesis_time,
+                ..
+            } => {
+                Tick::current::<P>(chain_config, *genesis_time)
+                    .expect("genesis time must not be in the future")
+                    .slot
+            }
+        }
+    }
+
+    #[must_use]
+    pub const fn own_validator_indices(&self) -> &Arc<OwnValidatorIndices> {
+        match self {
+            Self::Local {
+                own_validator_indices,
+                ..
+            }
+            | Self::Mixed {
+                own_validator_indices,
+                ..
+            }
+            | Self::Remote {
+                own_validator_indices,
+                ..
+            } => own_validator_indices,
+        }
+    }
+
+    /// The built-in beacon node, when duties may be performed against it.
+    #[must_use]
+    pub const fn controller(&self) -> Option<&ApiController<P, W>> {
+        match self {
+            Self::Local { controller, .. } | Self::Mixed { controller, .. } => Some(controller),
+            Self::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn remote_beacon_nodes(&self) -> Option<&Arc<RemoteBeaconNodes>> {
+        match self {
+            Self::Local { .. } => None,
+            Self::Mixed {
+                remote_beacon_nodes,
+                ..
+            }
+            | Self::Remote {
+                remote_beacon_nodes,
+                ..
+            } => Some(remote_beacon_nodes),
         }
     }
 
     /// Whether duties may be performed against the built-in beacon node.
     #[must_use]
-    pub const fn uses_local_node(self) -> bool {
-        matches!(self, Self::Local | Self::LocalWithRemotes)
-    }
-
-    #[must_use]
-    pub const fn has_remote_nodes(self) -> bool {
-        matches!(self, Self::LocalWithRemotes | Self::RemoteOnly)
+    pub const fn uses_local_node(&self) -> bool {
+        matches!(self, Self::Local { .. } | Self::Mixed { .. })
     }
 
     /// Blocks are produced by the built-in beacon node alone.
     #[must_use]
-    pub const fn supports_block_production(self) -> bool {
+    pub const fn supports_block_production(&self) -> bool {
         self.uses_local_node()
     }
 }
