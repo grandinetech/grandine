@@ -68,6 +68,10 @@ use crate::{
 const LATEST_FINALIZED_BACK_SYNC_CHECKPOINT_KEY: &str = "latest_finalized_back_sync_checkpoint";
 const NETWORK_EVENT_INTERVAL: Duration = Duration::from_secs(1);
 const MISSED_SLOTS_TO_TRIGGER_SYNC: u64 = 2;
+// Batches are only removed from `RangeAndRootRequests` when a request finishes or expires. A request
+// that is sent but never finishes is retried on every expiry, which keeps its target permanently
+// busy and stalls every other request by range. Give up on such a batch and let it be rebuilt.
+const MAX_SYNC_BATCH_RETRIES: usize = 10;
 
 #[derive(Debug, Error)]
 #[error("ran out of request IDs")]
@@ -868,6 +872,14 @@ impl<P: Preset> BlockSyncService<P> {
         let sampling_columns = self.controller.sampling_columns();
 
         for batch in batches {
+            if batch.retry_count >= MAX_SYNC_BATCH_RETRIES {
+                debug_with_peers!(
+                    "dropping batch after {MAX_SYNC_BATCH_RETRIES} retries: {batch:?}"
+                );
+
+                continue;
+            }
+
             let SyncBatch {
                 target,
                 direction,
