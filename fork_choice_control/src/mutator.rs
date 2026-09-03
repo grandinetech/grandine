@@ -90,7 +90,6 @@ use crate::{
         PendingProposerPreferences, ProcessingTimings, ReorgSource, VerifyAggregateAndProofResult,
         VerifyAttestationResult, VerifyPayloadAttestationResult, WaitingForCheckpointState,
     },
-    state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockPayloadAttestationsTask,
@@ -140,7 +139,6 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     // succession would still perform slot processing independently.
     waiting_for_checkpoint_states: HashMap<Checkpoint, WaitingForCheckpointState<P>>,
     sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
-    state_at_slot_cache: Arc<StateAtSlotCache<P>>,
     storage: Arc<Storage<P>>,
     archival_pool: ArchivalPool,
     thread_pool: ThreadPool<P, E, W>,
@@ -179,7 +177,6 @@ where
         event_channels: Arc<EventChannels<P>>,
         execution_engine: E,
         sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
-        state_at_slot_cache: Arc<StateAtSlotCache<P>>,
         storage: Arc<Storage<P>>,
         thread_pool: ThreadPool<P, E, W>,
         metrics: Option<Arc<Metrics>>,
@@ -209,7 +206,6 @@ where
             delayed_until_state: HashMap::new(),
             waiting_for_checkpoint_states: HashMap::new(),
             sidecars_pending_reconstruction,
-            state_at_slot_cache,
             storage,
             archival_pool: ArchivalPool::default(),
             thread_pool,
@@ -5061,7 +5057,6 @@ where
         if let Some(latest_archivable_index) = self.store.latest_archivable_index() {
             debug_with_peers!("archiving finalized blocks and anchor state…");
 
-            let state_at_slot_cache = self.state_at_slot_cache.clone_arc();
             let store = self.owned_store();
             let storage = self.storage.clone_arc();
             let sync_tx = self.sync_tx.clone();
@@ -5078,46 +5073,8 @@ where
 
                 match storage.append(core::iter::empty(), archived.iter(), &store) {
                     Ok(slots) => {
-                        if let Some(chain_link) = archived.back() {
-                            let finalized_block = chain_link.block.clone_arc();
-                            let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
-
-                            for candidate in &archived {
-                                let candidate_slot = candidate.slot();
-                                let candidate_epoch =
-                                    misc::compute_epoch_at_slot::<P>(candidate_slot);
-
-                                let is_last_block =
-                                    candidate_slot.saturating_add(1) == chain_link.slot();
-                                let is_first_block = candidate_epoch
-                                    == anchor_epoch.saturating_sub(1)
-                                    && misc::is_epoch_start::<P>(candidate_slot);
-
-                                // preload first and the last block of previous epoch into state_at_slot_cache
-                                // to handle some of the beacon API use cases
-                                if is_first_block || is_last_block {
-                                    debug_with_peers!(
-                                        "preloading state_at_slot_cache with chain_link: \
-                                            slot: {candidate_slot}, epoch: {candidate_epoch}, \
-                                            is_first_block: {is_first_block}, is_last_block: {is_last_block}",
-                                    );
-
-                                    if let Err(error) = state_at_slot_cache
-                                        .get_or_try_init(candidate.slot(), || {
-                                            Ok(Some(candidate.state(&store)))
-                                        })
-                                    {
-                                        debug_with_peers!(
-                                            "failed to preload state_at_slot_cache with \
-                                                a chainlink: {error:?}",
-                                        );
-                                    }
-                                }
-                            }
-
-                            if finished_loading_from_storage {
-                                SyncMessage::Finalized(finalized_block).send(&sync_tx);
-                            }
+                        if finished_loading_from_storage && let Some(chain_link) = archived.back() {
+                            SyncMessage::Finalized(chain_link.block.clone_arc()).send(&sync_tx);
                         }
 
                         debug_with_peers!(

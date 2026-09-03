@@ -460,5 +460,6 @@ mod tests {
             StateStorageConfig::default(),
             None,
         )
+        .expect("the default state cache sizes are valid")
     }
 }

@@ -111,16 +111,19 @@ where
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let tick = Tick::block_proposal(&anchor_block);
 
-        let storage = Arc::new(Storage::new(
-            chain_config.clone_arc(),
-            pubkey_cache.clone_arc(),
-            database,
-            StorageMode::Standard {
-                custom_data_availability_window: None,
-            },
-            StateStorageConfig::default(),
-            None,
-        ));
+        let storage = Arc::new(
+            Storage::new(
+                chain_config.clone_arc(),
+                pubkey_cache.clone_arc(),
+                database,
+                StorageMode::Standard {
+                    custom_data_availability_window: None,
+                },
+                StateStorageConfig::default(),
+                None,
+            )
+            .expect("the default state cache sizes are valid"),
+        );
 
         let event_channels = Arc::new(EventChannels::default());
 

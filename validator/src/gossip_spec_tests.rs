@@ -121,7 +121,7 @@ impl<P: Preset> Context<P> {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        ));
+        )?);
 
         let event_channels = Arc::new(EventChannels::default());
         let sidecars_construction_started = Arc::new(SccHashMap::new());

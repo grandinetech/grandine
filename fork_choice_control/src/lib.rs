@@ -51,7 +51,6 @@ mod mutator;
 mod queries;
 mod specialized;
 mod spine;
-mod state_at_slot_cache;
 mod state_storage_config;
 mod storage;
 mod storage_back_sync;
