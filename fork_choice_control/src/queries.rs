@@ -349,25 +349,11 @@ where
         self.snapshot().state_at_slot_blocking(slot)
     }
 
-    pub fn state_at_slot_cached_blocking(
+    pub fn state_at_slot_checked_blocking(
         &self,
         slot: Slot,
     ) -> Result<Option<WithStatus<Arc<BeaconState<P>>>>> {
-        let store = self.store_snapshot();
-
-        if slot < store.finalized_slot() {
-            let state_from_cache = self.state_at_slot_cache().get_or_try_init(slot, || {
-                Ok(self
-                    .state_at_slot_blocking(slot)?
-                    .map(|with_status| with_status.value))
-            })?;
-
-            if let Some(state) = state_from_cache {
-                return Ok(Some(WithStatus::valid(state, true)));
-            }
-        }
-
-        let store_epoch = store.current_epoch();
+        let store_epoch = self.store_snapshot().current_epoch();
         let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
         let max_allowed_epoch = store_epoch.saturating_add(P::MinSeedLookahead::U64);
 
@@ -1540,7 +1526,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_state_at_slot_cached_allowed_epoch_boundaries() {
+    fn test_state_at_slot_checked_allowed_epoch_boundaries() {
         let config = Arc::new(Config::minimal());
         let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
             .expect("should build beacon state")
@@ -1550,34 +1536,34 @@ mod tests {
             TestController::quiet(config, genesis_block, genesis_state);
 
         controller
-            .state_at_slot_cached_blocking(0)
+            .state_at_slot_checked_blocking(0)
             .expect("should get state at slot 0");
 
         controller.on_slot(6);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached_blocking(15)
+            .state_at_slot_checked_blocking(15)
             .expect("should get state at slot 15");
-        assert!(controller.state_at_slot_cached_blocking(16).is_err());
+        assert!(controller.state_at_slot_checked_blocking(16).is_err());
 
         controller.on_slot(7);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached_blocking(16)
+            .state_at_slot_checked_blocking(16)
             .expect("should get state at slot 16");
         controller
-            .state_at_slot_cached_blocking(23)
+            .state_at_slot_checked_blocking(23)
             .expect("should get state at slot 23");
-        assert!(controller.state_at_slot_cached_blocking(24).is_err());
+        assert!(controller.state_at_slot_checked_blocking(24).is_err());
 
         controller.on_slot(8);
         controller.wait_for_tasks();
 
         controller
-            .state_at_slot_cached_blocking(23)
+            .state_at_slot_checked_blocking(23)
             .expect("should get state at slot 23");
-        assert!(controller.state_at_slot_cached_blocking(24).is_err());
+        assert!(controller.state_at_slot_checked_blocking(24).is_err());
     }
 }

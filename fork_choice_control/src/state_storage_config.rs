@@ -48,8 +48,7 @@ impl StateStorageConfig {
     }
 
     /// Memory the state caches are expected to take once every layer is full.
-    #[must_use]
-    pub fn estimated_cache_size(&self) -> ByteSize {
+    fn estimated_cache_size(&self) -> ByteSize {
         let cached_states = self
             .cache_sizes
             .iter()
@@ -59,12 +58,15 @@ impl StateStorageConfig {
         ByteSize::b(ESTIMATED_STATE_SIZE.as_u64().saturating_mul(cached_states))
     }
 
+    /// A `total_memory` of zero means `sysinfo` could not probe this platform, which makes the
+    /// share meaningless rather than exceeded.
     const fn exceeds_memory_share(estimated_cache_size: ByteSize, total_memory: ByteSize) -> bool {
-        estimated_cache_size.as_u64()
-            > total_memory
-                .as_u64()
-                .saturating_div(100)
-                .saturating_mul(MEMORY_WARNING_PERCENT)
+        total_memory.as_u64() > 0
+            && estimated_cache_size.as_u64()
+                > total_memory
+                    .as_u64()
+                    .saturating_div(100)
+                    .saturating_mul(MEMORY_WARNING_PERCENT)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -221,6 +223,12 @@ mod tests {
 
         assert!(!StateStorageConfig::exceeds_memory_share(
             ByteSize::b(0),
+            ByteSize::b(0),
+        ));
+
+        // `sysinfo` reports no memory at all on platforms it cannot probe.
+        assert!(!StateStorageConfig::exceeds_memory_share(
+            ByteSize::gib(64),
             ByteSize::b(0),
         ));
     }

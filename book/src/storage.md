@@ -10,6 +10,8 @@ Grandine stores finalized part of the chain in the disk using an embedded key-va
 
 Grandine allows starting the Beacon Node from an earlier stored checkpoint by using `--state-slot` option. In this case, Grandine will try to find and load from the disk the closest stored checkpoint before the specified `--state-slot`.
 
+Writing finalized states to disk normally happens on a pool of archiver threads that grows to at most half the machine's cores and shrinks back to none once its queue drains. The queue is bounded to the same size, and a submission that arrives with the queue already full runs the archival task on the submitting thread instead of enqueueing it. That submitter is the fork choice thread, so a storage backlog turns into backpressure on block processing rather than into a queue that grows with every finalization. Every queued or running archival task owns a snapshot of the store, so peak memory during a long archival pass is capped by those two limits together rather than by how far archival has fallen behind.
+
 ### State hierarchy
 
 Finalized states are not all written as full copies. Instead they are written into a *hierarchy* of layers, configured with `--state-hierarchy` as a comma separated list of slot exponents, sorted descending — shallowest layer first. Each exponent defines how often that layer is written: an exponent of `N` means one state every `2^N` slots. The default is `21,18,16,13,11,9,5` — a state every 2097152 slots in the shallowest layer, down to a state every 32 slots (one epoch) in the deepest one.
@@ -52,6 +54,8 @@ This is not a cosmetic check. Pruning derives the set of states it must retain f
 `--state-cache-sizes` sets how many states are kept in memory per hierarchy layer, so that repeated reads and delta computations do not have to go back to disk. It takes a comma separated list starting from the shallowest layer — the full state snapshot — in the same order `--state-hierarchy` exponents are listed in. The list may be shorter than the hierarchy, in which case it is padded with zeros, and a size of `0` disables caching for that layer, so `--state-cache-sizes 5` caches only the snapshot layer. A list longer than the hierarchy is rejected. When the flag is not given, the sizes default to `5,3,3`, truncated to the number of layers, so changing `--state-hierarchy` alone does not require setting this too.
 
 Shallow layers hold full or near-full states, so raising their sizes costs considerably more memory per cached entry than raising the deeper ones.
+
+There is no upper bound on a cache size. Grandine estimates what the caches will hold once full — a flat 512MB per cached state, which is only accurate to an order of magnitude — and warns on startup when that estimate exceeds 80% of the machine's total memory. The warning does not stop the node, and because the estimate is coarse it can fire on a small machine even with the default `5,3,3`. A size the machine cannot allocate at all is still refused, with an error naming the layer and the size.
 
 Independently of `--state-cache-sizes`, Grandine keeps the hierarchy ancestors of the most recently persisted state in memory — at most one state per layer, seven at the default hierarchy — so that forward sync can delta-encode without reading them back from disk. This is a floor: setting a layer's cache size to `0` disables its read cache but does not drop that state. Adding layers to `--state-hierarchy` therefore also raises baseline memory usage.
 

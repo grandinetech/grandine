@@ -123,7 +123,8 @@ impl<P: Preset> Storage<P> {
         }
     }
 
-    #[must_use]
+    /// Fails when the configured cache sizes cannot be allocated. `StateStorageConfig::validate`
+    /// only warns about them, because what fits is a property of the machine, not of the config.
     pub fn new(
         config: Arc<Config>,
         pubkey_cache: Arc<PubkeyCache>,
@@ -131,7 +132,7 @@ impl<P: Preset> Storage<P> {
         storage_mode: StorageMode,
         state_storage_config: StateStorageConfig,
         metrics: Option<Arc<Metrics>>,
-    ) -> Self {
+    ) -> Result<Self> {
         let StateStorageConfig {
             hierarchy,
             cache_sizes,
@@ -153,7 +154,9 @@ impl<P: Preset> Storage<P> {
             anchor_slot.clone_arc(),
         ));
 
-        Self {
+        let frame_cache = FrameCache::new(cache_sizes)?;
+
+        Ok(Self {
             config,
             pubkey_cache,
             database: Arc::new(database),
@@ -161,12 +164,11 @@ impl<P: Preset> Storage<P> {
             hierarchy,
             compression_level,
             anchor_slot,
-            frame_cache: FrameCache::new(cache_sizes)
-                .expect("unexpected error occurred, while instantiating storage cache"),
+            frame_cache,
             forward_spine,
             checkpoint_head_slot: Arc::new(Mutex::new(None)),
             metrics,
-        }
+        })
     }
 
     #[must_use]
@@ -2471,7 +2473,7 @@ mod tests {
         let hierarchy = Hierarchy::new(exponents)?;
         let cache_sizes = vec![0; hierarchy.depth()];
 
-        Ok(Storage::new(
+        Storage::new(
             Arc::new(Config::mainnet()),
             Arc::new(PubkeyCache::default()),
             database,
@@ -2482,7 +2484,7 @@ mod tests {
                 ..StateStorageConfig::default()
             },
             None,
-        ))
+        )
     }
 
     fn load_anchor(storage: &Storage<Mainnet>, state: Arc<BeaconState<Mainnet>>) -> Result<()> {
@@ -2670,7 +2672,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         // slots 1, 3, 10
         assert_eq!(storage.finalized_block_count()?, 3);
@@ -2745,7 +2748,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         assert_eq!(storage.finalized_block_count()?, 2);
         assert_eq!(storage.unfinalized_block_count()?, 3);
@@ -2816,7 +2820,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let retained_slots = storage.retained_prune_slots(33);
 
@@ -2856,7 +2861,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let validator_source = state_with_slot(0);
         let finalized_validators = validator_source.validators();
@@ -2996,7 +3002,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let blob_id_0 = BlobIdentifier {
             block_root: H256::zero(),
@@ -3059,7 +3066,9 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
+
         let envelope = Arc::new(SignedExecutionPayloadEnvelope::default());
         let block_root = envelope.block_root();
 
@@ -3109,7 +3118,7 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )?;
 
         assert_eq!(storage.load_checkpoint_head_slot()?, None);
 
@@ -3141,7 +3150,7 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )?;
 
         let later = H256::repeat_byte(1);
         let earlier = H256::repeat_byte(2);
@@ -3187,7 +3196,7 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )?;
 
         let stored = H256::repeat_byte(1);
 
@@ -3219,7 +3228,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let anchor_block_root = H256::repeat_byte(1);
         let anchor_state = state_with_slot(0);
@@ -3276,7 +3286,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let state = state_with_slot(32);
         let validators = state.validators();
@@ -3311,7 +3322,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let state = state_with_slot(32);
         let validators = state.validators();
@@ -3368,7 +3380,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         storage.forward_spine().insert(
             0,
@@ -3439,7 +3452,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let spine = storage.forward_spine();
 
@@ -3483,7 +3497,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             metrics,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let validator_source = state_with_slot(0);
         let finalized_validators = validator_source.validators();
@@ -3536,7 +3551,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let validator_source = state_with_slot(0);
         let finalized_validators = validator_source.validators();
@@ -3633,6 +3649,7 @@ mod tests {
             StateStorageConfig::default(),
             None,
         )
+        .expect("state cache sizes in tests are valid")
     }
 
     fn state_with_validators(
@@ -4167,7 +4184,8 @@ mod tests {
                 ..StateStorageConfig::default()
             },
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let validator_source = state_with_slot(0);
         let finalized_validators = validator_source.validators();
@@ -4210,6 +4228,35 @@ mod tests {
     }
 
     #[test]
+    fn a_cache_size_that_cannot_be_allocated_is_reported_rather_than_panicking() {
+        // `StateStorageConfig::validate` only warns about oversized caches, so this is the first
+        // place a size the machine cannot hold is refused.
+        let result = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
+            StorageMode::default(),
+            StateStorageConfig {
+                hierarchy: Hierarchy::new([5]).expect("exponents in tests are valid"),
+                cache_sizes: vec![usize::MAX],
+                ..StateStorageConfig::default()
+            },
+            None,
+        );
+
+        let Err(error) = result else {
+            panic!("a cache of usize::MAX states cannot be allocated")
+        };
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("unable to instantiate a state cache layer of size"),
+            "unexpected error: {error}",
+        );
+    }
+
+    #[test]
     fn an_empty_cache_sizes_list_leaves_every_layer_uncached() -> Result<()> {
         let storage = Storage::<Mainnet>::new(
             Arc::new(Config::mainnet()),
@@ -4221,7 +4268,8 @@ mod tests {
                 ..StateStorageConfig::default()
             },
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         let validator_source = state_with_slot(0);
         let finalized_validators = validator_source.validators();
@@ -4399,7 +4447,8 @@ mod tests {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        );
+        )
+        .expect("state cache sizes in tests are valid");
 
         assert_eq!(storage.block_root_before_or_at_slot(1)?, None);
         assert_eq!(

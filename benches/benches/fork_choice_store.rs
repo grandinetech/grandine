@@ -77,7 +77,7 @@ impl Criterion {
                     StorageMode::default(),
                     StateStorageConfig::default(),
                     None,
-                ));
+                )?);
 
                 let mut store = Store::new(
                     config.clone_arc(),

@@ -145,7 +145,7 @@ impl<P: Preset> Context<P> {
             StorageMode::default(),
             StateStorageConfig::default(),
             None,
-        ));
+        )?);
 
         let state_load_strategy = StateLoadStrategy::Anchor {
             block: anchor_block,
