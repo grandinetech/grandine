@@ -520,11 +520,12 @@ impl<P: Preset> SyncManager<P> {
             // Note: Unlike blobs/columns which use serve_range checks, envelopes are needed
             // for all Gloas slots (similar to blocks) for state transition
             let gloas_start_slot = misc::compute_start_slot_at_epoch::<P>(config.gloas_fork_epoch);
-            if sync_mode.is_default() && start_slot.saturating_add(count) >= gloas_start_slot {
+
+            if sync_mode.is_default() && start_slot.saturating_add(count) > gloas_start_slot {
                 // Adjust range iff `start_slot < gloas_start_slot`,
                 // otherwise stay the same because `offset` gonna be 0.
                 let offset = gloas_start_slot.saturating_sub(start_slot);
-                let count = count.checked_sub(offset).unwrap_or(1);
+                let count = count.saturating_sub(offset);
                 let start_slot = start_slot.max(gloas_start_slot);
 
                 let batch = SyncBatch {
@@ -752,9 +753,12 @@ impl<P: Preset> SyncManager<P> {
                 // This must be checked before serve range checks to ensure envelopes are always requested
                 let gloas_start_slot =
                     misc::compute_start_slot_at_epoch::<P>(config.gloas_fork_epoch);
-                if start_slot.saturating_add(count) >= gloas_start_slot {
+                // A batch ending exactly at `gloas_start_slot` contains no Gloas slots, so it needs
+                // no envelopes. Requesting them anyway yields a batch with a count of 0, which never
+                // completes and blocks all other requests by range.
+                if start_slot.saturating_add(count) > gloas_start_slot {
                     let offset = gloas_start_slot.saturating_sub(start_slot);
-                    let count = count.checked_sub(offset).unwrap_or(1);
+                    let count = count.saturating_sub(offset);
                     let start_slot = start_slot.max(gloas_start_slot);
 
                     sync_batches.push(SyncBatch {
