@@ -906,11 +906,11 @@ impl From<&Validator> for PartialValidator {
     }
 }
 
-#[expect(clippy::too_long_first_doc_paragraph)]
-/// Low-level validator list implementation, containing only in-memory list
-/// representation and methods for correctly operating on it. This allows
-/// consumer to implement their own serialization and hashing, without caring
-/// about list internals.
+/// Low-level validator list implementation.
+///
+/// Contains only the in-memory list representation and methods for correctly operating on it. This
+/// allows consumers to implement their own serialization and hashing, without caring about list
+/// internals.
 #[derive(Clone, Debug, Default, Derivative)]
 #[derivative(PartialEq(bound = ""), Eq(bound = ""))]
 pub struct RawValidatorList {

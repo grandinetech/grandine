@@ -70,14 +70,12 @@ use crate::{
         VerifyAttestationResult,
     },
     mutator::Mutator,
-    state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
     tasks::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask, BlockTask,
         BlockVerifyForGossipTask, DataColumnSidecarTask, ExecutionPayloadBidTask,
         ExecutionPayloadEnvelopeTask, ExecutionPayloadEnvelopeVerifyForGossipTask,
         PayloadAttestationBatchTask, PayloadAttestationTask, ProposerPreferencesTask,
-        StateAtSlotCacheFlushTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -91,7 +89,6 @@ pub struct Controller<P: Preset, E, A, W: Wait> {
     execution_engine: E,
     pubkey_cache: Arc<PubkeyCache>,
     sidecars_pending_reconstruction: SidecarsPendingReconstruction<P>,
-    state_at_slot_cache: Arc<StateAtSlotCache<P>>,
     state_cache: Arc<StateCacheProcessor<P>>,
     storage: Arc<Storage<P>>,
     thread_pool: ThreadPool<P, E, W>,
@@ -169,7 +166,6 @@ where
         ));
 
         let sidecars_pending_reconstruction = Arc::new(SccHashMap::new());
-        let state_at_slot_cache = Arc::new(StateAtSlotCache::build());
 
         let mut mutator = Mutator::new(
             pubkey_cache.clone_arc(),
@@ -179,7 +175,6 @@ where
             event_channels,
             execution_engine.clone(),
             sidecars_pending_reconstruction.clone_arc(),
-            state_at_slot_cache.clone_arc(),
             storage.clone_arc(),
             thread_pool.clone(),
             metrics.clone(),
@@ -212,7 +207,6 @@ where
             execution_engine,
             pubkey_cache,
             sidecars_pending_reconstruction,
-            state_at_slot_cache,
             state_cache,
             storage,
             thread_pool,
@@ -272,14 +266,10 @@ where
         }
         .send(&self.mutator_tx);
 
-        if tick.is_start_of_slot() {
-            self.spawn(StateAtSlotCacheFlushTask {
-                state_at_slot_cache: self.state_at_slot_cache.clone_arc(),
-            });
-
-            if let Some(metrics) = self.metrics.as_ref() {
-                metrics.set_beacon_clock_slot(tick.slot);
-            }
+        if tick.is_start_of_slot()
+            && let Some(metrics) = self.metrics.as_ref()
+        {
+            metrics.set_beacon_clock_slot(tick.slot);
         }
     }
 
@@ -1069,10 +1059,6 @@ where
 
     pub const fn pubkey_cache(&self) -> &Arc<PubkeyCache> {
         &self.pubkey_cache
-    }
-
-    pub(crate) const fn state_at_slot_cache(&self) -> &Arc<StateAtSlotCache<P>> {
-        &self.state_at_slot_cache
     }
 
     pub(crate) const fn state_cache(&self) -> &Arc<StateCacheProcessor<P>> {

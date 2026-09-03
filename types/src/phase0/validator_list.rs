@@ -25,7 +25,7 @@ use typenum::Unsigned;
 use crate::{
     nonstandard::{PartialValidator, PubkeyList, RawValidatorList, ValidatorListIter},
     phase0::{containers::Validator, primitives::Gwei},
-    traits::{SszValidatorList, SszValidatorListMut},
+    traits::SszValidatorList,
 };
 
 #[derive(Clone, Debug, Default, Derivative)]
@@ -207,40 +207,6 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
         self.buf.effective_balance(index)
     }
 
-    fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError> {
-        self.buf.partial_validator(index)
-    }
-
-    fn pubkeys(&self) -> &PubkeyList {
-        self.buf.pubkeys()
-    }
-
-    fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
-        self.buf.partial_validators()
-    }
-
-    fn effective_balances(&self) -> VectorIter<'_, Gwei> {
-        self.buf.effective_balances()
-    }
-
-    fn len_usize(&self) -> usize {
-        self.buf.len_usize()
-    }
-
-    fn len_u64(&self) -> u64 {
-        self.buf.len_u64()
-    }
-
-    fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a> {
-        Box::new(self.into_iter())
-    }
-
-    fn clone_boxed(&self) -> Box<dyn SszValidatorList> {
-        Box::new(self.clone())
-    }
-}
-
-impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
     fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError> {
         self.invalidate_index(
             index
@@ -249,6 +215,10 @@ impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
         );
 
         self.buf.effective_balance_mut(index)
+    }
+
+    fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError> {
+        self.buf.partial_validator(index)
     }
 
     fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError> {
@@ -261,6 +231,41 @@ impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
         self.buf.partial_validator_mut(index)
     }
 
+    fn pubkeys(&self) -> &PubkeyList {
+        self.buf.pubkeys()
+    }
+
+    fn set_pubkeys_from(&mut self, pubkeys: &PubkeyList, first_missing: usize) -> Result<()> {
+        self.buf.set_pubkeys(pubkeys)?;
+
+        let length = self.len_usize();
+
+        match self.cache.as_mut().filter(|_| first_missing > 0) {
+            Some(cache) => {
+                for index in first_missing.min(length)..length {
+                    cache.invalidate(index, length);
+                }
+            }
+            None => self.cache = (length > 0).then(|| CacheNode::build_empty(length)),
+        }
+
+        Ok(())
+    }
+
+    fn clear_pubkeys(&mut self, count: usize) {
+        self.buf.clear_pubkeys(count);
+        let length = self.len_usize();
+        self.cache = (length > 0).then(|| CacheNode::build_empty(length));
+    }
+
+    fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
+        self.buf.partial_validators()
+    }
+
+    fn effective_balances(&self) -> VectorIter<'_, Gwei> {
+        self.buf.effective_balances()
+    }
+
     fn update_effective_balances(
         &mut self,
         updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
@@ -270,21 +275,6 @@ impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
                 cache.invalidate(index, len);
             }
         })
-    }
-
-    fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
-        self.buf.set_pubkeys(pubkeys)?;
-
-        let length = self.len_usize();
-        self.cache = (length > 0).then(|| CacheNode::build_empty(length));
-
-        Ok(())
-    }
-
-    fn clear_pubkeys(&mut self, count: usize) {
-        self.buf.clear_pubkeys(count);
-        let length = self.len_usize();
-        self.cache = (length > 0).then(|| CacheNode::build_empty(length));
     }
 
     fn push(&mut self, validator: Validator) -> Result<(), PushError> {
@@ -302,6 +292,22 @@ impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
         }
 
         Ok(())
+    }
+
+    fn len_usize(&self) -> usize {
+        self.buf.len_usize()
+    }
+
+    fn len_u64(&self) -> u64 {
+        self.buf.len_u64()
+    }
+
+    fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a> {
+        Box::new(self.into_iter())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn SszValidatorList> {
+        Box::new(self.clone())
     }
 }
 

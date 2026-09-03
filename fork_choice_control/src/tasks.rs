@@ -50,7 +50,6 @@ use crate::{
     block_processor::BlockProcessor,
     messages::MutatorMessage,
     misc::{ProcessingTimings, VerifyAggregateAndProofResult},
-    state_at_slot_cache::StateAtSlotCache,
     storage::Storage,
 };
 
@@ -1165,21 +1164,4 @@ fn initialize_preprocessed_state_cache<P: Preset>(
     accessors::get_or_init_total_active_balance(state, false);
 
     Ok(())
-}
-
-pub struct StateAtSlotCacheFlushTask<P: Preset> {
-    pub state_at_slot_cache: Arc<StateAtSlotCache<P>>,
-}
-
-impl<P: Preset> Run for StateAtSlotCacheFlushTask<P> {
-    #[instrument(skip_all, level = "debug", name = "StateAtSlotCacheFlushTask::run")]
-    fn run(self) {
-        let Self {
-            state_at_slot_cache,
-        } = self;
-
-        if let Err(error) = state_at_slot_cache.flush() {
-            warn_with_peers!("failed to flush state at slot cache: {error:?}");
-        }
-    }
 }

@@ -7,7 +7,6 @@ use core::{
     iter::{Flatten, FusedIterator},
     marker::PhantomData,
 };
-use std::sync::Arc;
 
 use arithmetic::NonZeroExt as _;
 use bit_field::BitField as _;
@@ -18,6 +17,7 @@ use serde::{
     de::{Error as _, SeqAccess, Visitor},
 };
 use std_ext::ArcExt as _;
+use triomphe::Arc;
 use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
@@ -56,6 +56,64 @@ impl<T: SszHash> PersistentProgressiveList<T> {
         }
 
         Ok(())
+    }
+}
+
+impl<T> PersistentProgressiveList<T>
+where
+    T: SszHash,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
+    // Returns an existing subtree if it represents exactly the requested source range.
+    fn shared_subtree(
+        &self,
+        start: usize,
+        length: usize,
+    ) -> Option<Arc<Hc<MerkleTreeNode<T, MinimumBundleSize<T>>>>> {
+        let mut partition_start: usize = 0;
+        let mut partition_capacity = MinimumBundleSize::<T>::USIZE;
+        let mut spine = self.root.as_ref()?;
+
+        while partition_start.saturating_add(partition_capacity) <= start {
+            partition_start = partition_start.saturating_add(partition_capacity);
+            partition_capacity = partition_capacity.saturating_mul(4);
+            spine = spine.as_ref().as_ref().right.as_ref()?;
+        }
+
+        let filled = self
+            .length
+            .saturating_sub(partition_start)
+            .min(partition_capacity);
+        let local_start = start.saturating_sub(partition_start);
+
+        MerkleTreeNode::shared_subtree(&spine.as_ref().as_ref().left, filled, local_start, length)
+    }
+
+    // Returns the bundle containing the element at `index`.
+    // Callers must ensure that `index` is within bounds.
+    fn bundle_containing(&self, mut index: usize) -> &[T] {
+        let mut spine = self
+            .root
+            .as_deref()
+            .expect("callers validate index against self.length, so self.root is Some")
+            .as_ref();
+
+        loop {
+            let capacity = MinimumBundleSize::<T>::USIZE << spine.height;
+
+            if let Some(new_index) = index.checked_sub(capacity) {
+                index = new_index;
+                spine = spine
+                    .right
+                    .as_deref()
+                    .expect("the validated index falls within an existing subtree")
+                    .as_ref();
+            } else {
+                break;
+            }
+        }
+
+        MerkleTreeNode::bundle_containing(&spine.left, index)
     }
 }
 
@@ -214,66 +272,8 @@ where
     }
 
     fn get(&self, index: u64) -> Result<&T, IndexError> {
-        let mut index = shared::validate_index(self.length, index)?;
-
-        let mut spine = self
-            .root
-            .as_deref()
-            .expect("the length check in validate_index ensures that self.root is Some")
-            .as_ref();
-
-        loop {
-            let capacity = MinimumBundleSize::<T>::USIZE << spine.height;
-
-            if let Some(new_index) = index.checked_sub(capacity) {
-                index = new_index;
-
-                spine = spine
-                    .right
-                    .as_deref()
-                    .expect("the length check in validate_index ensures that the index falls within an existing subtree")
-                    .as_ref();
-            } else {
-                break;
-            }
-        }
-
-        let mut node = spine.left.as_ref().as_ref();
-
-        let mut height = match node {
-            MerkleTreeNode::Internal { left_height, .. } => left_height.saturating_add(1),
-            MerkleTreeNode::Leaf { .. } => 0,
-        };
-
-        let bundle = loop {
-            match node {
-                MerkleTreeNode::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height
-                        .saturating_add(MinimumBundleSize::<T>::ilog2())
-                        .saturating_sub(1)
-                        .into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right;
-                    } else {
-                        height = *left_height;
-                        node = left;
-                    }
-                }
-                MerkleTreeNode::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
+        let index = shared::validate_index(self.length, index)?;
+        let bundle = self.bundle_containing(index);
 
         Ok(&bundle[MinimumBundleSize::<T>::index_in_bundle(index)])
     }
@@ -363,6 +363,135 @@ where
         };
 
         Ok(&mut bundle[MinimumBundleSize::<T>::index_in_bundle(index)])
+    }
+
+    fn extend(&mut self, elements: &mut dyn Iterator<Item = T>) -> Result<(), PushError>
+    where
+        T: Clone,
+    {
+        let mut elements = elements.fuse().peekable();
+
+        // Elements of `self` held by the subtrees the loop has not reached yet.
+        let mut unvisited = self.length;
+        let mut room = shared::saturating_usize::<PrettyBigU>().saturating_sub(self.length);
+        let mut appended: usize = 0;
+        let mut height: u8 = 0;
+        let mut spine = &mut self.root;
+
+        while room > 0 && elements.peek().is_some() {
+            let capacity = MinimumBundleSize::<T>::USIZE << height;
+            let filled = unvisited.min(capacity);
+
+            let node = spine
+                .get_or_insert_with(|| {
+                    Arc::new(Hc::new(Node {
+                        left: Hc::arc(MerkleTreeNode::leaf([])),
+                        right: None,
+                        height,
+                    }))
+                })
+                .make_mut()
+                .as_mut();
+
+            let (new_filled, _) = MerkleTreeNode::append(
+                &mut node.left,
+                MinimumBundleSize::<T>::depth_of_length(filled),
+                filled,
+                capacity.min(filled.saturating_add(room)),
+                &mut elements,
+            );
+
+            let count = new_filled.saturating_sub(filled);
+
+            room = room.saturating_sub(count);
+            appended = appended.saturating_add(count);
+            unvisited = unvisited.saturating_sub(filled);
+            height = height.saturating_add(2);
+            spine = &mut node.right;
+        }
+
+        self.length = self.length.saturating_add(appended);
+
+        if elements.peek().is_some() {
+            return Err(PushError::ListFull);
+        }
+
+        Ok(())
+    }
+
+    fn retain_range(&mut self, start: u64, end: u64) -> Result<(), IndexError>
+    where
+        T: Clone,
+    {
+        let start =
+            usize::try_from(start).map_err(|_| IndexError::DoesNotFitInUsize { index: start })?;
+        let end = usize::try_from(end).map_err(|_| IndexError::DoesNotFitInUsize { index: end })?;
+
+        assert!(
+            start <= end,
+            "retain_range start ({start}) is greater than retain_range end ({end})",
+        );
+
+        if self.length < end {
+            return Err(IndexError::OutOfBounds {
+                length: self.length,
+                index: end,
+            });
+        }
+
+        let new_length = end.saturating_sub(start);
+
+        if new_length == self.length {
+            return Ok(());
+        }
+
+        if new_length == 0 {
+            *self = Self::default();
+            return Ok(());
+        }
+
+        // Shifting elements requires a new EIP-7916 spine, but aligned Merkle subtrees below it
+        // still represent the same ranges and can be shared.
+        let mut subtrees_with_heights = vec![];
+        let mut remaining = new_length;
+        let mut offset: usize = 0;
+        let mut height: u8 = 0;
+
+        while remaining > 0 {
+            let capacity = MinimumBundleSize::<T>::USIZE << height;
+            let count = remaining.min(capacity);
+
+            subtrees_with_heights.push((
+                MerkleTreeNode::slice_subtree(
+                    start.saturating_add(offset),
+                    count,
+                    &|start, length| self.shared_subtree(start, length),
+                    &|index| self.bundle_containing(index),
+                ),
+                height,
+            ));
+
+            remaining = remaining.saturating_sub(count);
+            offset = offset.saturating_add(count);
+            height = height.saturating_add(2);
+        }
+
+        let mut root = None;
+
+        for (left, height) in subtrees_with_heights.into_iter().rev() {
+            root = Some(Arc::new(Hc::new(Node {
+                left,
+                right: root,
+                height,
+            })));
+        }
+
+        *self = Self {
+            root,
+            length: new_length,
+        };
+
+        Ok(())
     }
 
     fn push(&mut self, element: T) -> Result<(), PushError>
@@ -545,14 +674,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
             (None, None | Some(None)) => None,
             (new_left, new_right) => {
                 let left = match new_left {
-                    // `MerkleTreeNode::update` wraps modified subtrees in `triomphe::Arc`,
-                    // while spine nodes store them in `std::sync::Arc`. The returned `Arc` is
-                    // newly created and thus uniquely owned, so it can be unwrapped for free.
-                    Some(arc) => Arc::new(
-                        triomphe::Arc::try_unwrap(arc)
-                            .ok()
-                            .expect("Arcs returned by MerkleTreeNode::update are uniquely owned"),
-                    ),
+                    Some(arc) => arc,
                     None => self.left.clone_arc(),
                 };
 
@@ -1049,6 +1171,386 @@ mod tests {
 
         assert!(empty.get(0).is_err());
         assert!(empty.get_mut(0).is_err());
+    }
+
+    #[test]
+    fn extend_builds_the_same_tree_as_try_from_iter() {
+        for length in LENGTHS {
+            for split in [0, length / 2, length] {
+                let built =
+                    TestList::try_from_iter(0..length).expect("length is below the maximum");
+
+                let mut extended =
+                    TestList::try_from_iter(0..split).expect("length is below the maximum");
+                extended
+                    .extend(&mut (split..length))
+                    .expect("list is not full");
+
+                assert_eq!(
+                    extended, built,
+                    "tree mismatch at length {length}, split {split}",
+                );
+
+                assert_eq!(
+                    extended.hash_tree_root(),
+                    built.hash_tree_root(),
+                    "hash_tree_root mismatch at length {length}, split {split}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn extend_preserves_structurally_shared_clones() {
+        let mut persistent = TestList::try_from_iter(0..100).expect("length is below the maximum");
+
+        let original = persistent.clone();
+        let original_root = original.hash_tree_root();
+
+        persistent
+            .extend(&mut (100..300))
+            .expect("list is not full");
+
+        assert!(persistent.iter().copied().eq(0..300));
+        assert!(original.iter().copied().eq(0..100));
+        assert_eq!(original.hash_tree_root(), original_root);
+    }
+
+    #[test]
+    fn extend_fills_the_list_before_reporting_it_full() {
+        let maximum = PrettyBigU::U64;
+
+        let mut persistent = TestList::default();
+
+        persistent
+            .extend(&mut (0..maximum + 10))
+            .expect_err("list only has room for maximum elements");
+
+        assert_eq!(persistent.len_u64(), maximum);
+        assert!(persistent.iter().copied().eq(0..maximum));
+
+        persistent
+            .extend(&mut core::iter::once(0))
+            .expect_err("list has no room left");
+
+        assert_eq!(persistent.len_u64(), maximum);
+    }
+
+    #[test]
+    #[should_panic(expected = "retain_range start (3) is greater than retain_range end (1)")]
+    fn retain_range_with_start_greater_than_end_panics() {
+        let mut list = TestList::try_from_iter(0..5).expect("length is below the maximum");
+
+        drop(list.retain_range(3, 1));
+    }
+
+    #[test]
+    fn retain_range_matches_try_from_iter_of_the_same_range() {
+        for length in LENGTHS {
+            for start in [0, length / 2, length] {
+                for end in [start, start + 1, length] {
+                    if end > length {
+                        continue;
+                    }
+
+                    let mut sliced =
+                        TestList::try_from_iter(0..length).expect("length is below the maximum");
+                    sliced
+                        .retain_range(start, end)
+                        .expect("range is within bounds");
+
+                    let built =
+                        TestList::try_from_iter(start..end).expect("length is below the maximum");
+
+                    assert_eq!(
+                        sliced, built,
+                        "tree mismatch at length {length}, range {start}..{end}",
+                    );
+
+                    assert_eq!(
+                        sliced.hash_tree_root(),
+                        built.hash_tree_root(),
+                        "hash_tree_root mismatch at length {length}, range {start}..{end}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retain_range_matches_try_from_iter_for_all_small_ranges() {
+        let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));
+
+        for length in 0..24 {
+            let packed = TestList::try_from_iter(0..length).expect("length is below the maximum");
+            let unpacked = UnpackedList::try_from_iter((0..length).map(element))
+                .expect("length is below the maximum");
+
+            for start in 0..=length {
+                for end in start..=length {
+                    let mut retained_packed = packed.clone();
+                    retained_packed
+                        .retain_range(start, end)
+                        .expect("range is within bounds");
+
+                    let expected_packed =
+                        TestList::try_from_iter(start..end).expect("length is below the maximum");
+
+                    assert_eq!(
+                        retained_packed, expected_packed,
+                        "packed tree mismatch at length {length}, range {start}..{end}",
+                    );
+
+                    let mut retained_unpacked = unpacked.clone();
+                    retained_unpacked
+                        .retain_range(start, end)
+                        .expect("range is within bounds");
+
+                    let expected_unpacked = UnpackedList::try_from_iter((start..end).map(element))
+                        .expect("length is below the maximum");
+
+                    assert_eq!(
+                        retained_unpacked, expected_unpacked,
+                        "unpacked tree mismatch at length {length}, range {start}..{end}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retain_range_preserves_structurally_shared_clones() {
+        let persistent = TestList::try_from_iter(0..300).expect("length is below the maximum");
+        let original_root = persistent.hash_tree_root();
+
+        let mut sliced = persistent.clone();
+        sliced.retain_range(0, 100).expect("range is within bounds");
+
+        *sliced.get_mut(0).expect("index is within bounds") = u64::MAX;
+
+        assert!(persistent.iter().copied().eq(0..300));
+        assert_eq!(persistent.hash_tree_root(), original_root);
+    }
+
+    #[test]
+    fn retain_range_of_full_list_keeps_the_root() {
+        let mut persistent = TestList::try_from_iter(0..100).expect("length is below the maximum");
+        let root = persistent.root.clone().expect("list is not empty");
+
+        persistent
+            .retain_range(0, 100)
+            .expect("range is within bounds");
+
+        assert!(Arc::ptr_eq(
+            &root,
+            persistent.root.as_ref().expect("list is not empty"),
+        ));
+    }
+
+    #[test]
+    fn retain_range_shares_shifted_leaf() {
+        let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));
+        let original =
+            UnpackedList::try_from_iter((0..21).map(element)).expect("length is below the maximum");
+        let second_partition = original
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition");
+        let MerkleTreeNode::Internal {
+            left: first_pair, ..
+        } = second_partition.left.as_ref().as_ref()
+        else {
+            panic!("the full second partition is an internal node")
+        };
+        let MerkleTreeNode::Internal {
+            left: original_leaf,
+            ..
+        } = first_pair.as_ref().as_ref()
+        else {
+            panic!("the first pair in the second partition is an internal node")
+        };
+
+        let mut retained = original.clone();
+        retained
+            .retain_range(1, 21)
+            .expect("range is within bounds");
+
+        let retained_leaf = &retained.root.as_ref().expect("list is not empty").left;
+
+        assert!(Arc::ptr_eq(original_leaf, retained_leaf));
+    }
+
+    #[test]
+    fn retain_range_shares_shifted_full_subtree() {
+        let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));
+        let original =
+            UnpackedList::try_from_iter((0..21).map(element)).expect("length is below the maximum");
+        let third_partition = original
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .right
+            .as_ref()
+            .expect("list reaches the third partition");
+        let MerkleTreeNode::Internal {
+            left: first_half, ..
+        } = third_partition.left.as_ref().as_ref()
+        else {
+            panic!("the full third partition is an internal node")
+        };
+        let MerkleTreeNode::Internal {
+            left: original_subtree,
+            ..
+        } = first_half.as_ref().as_ref()
+        else {
+            panic!("the first half of the third partition is an internal node")
+        };
+
+        let mut retained = original.clone();
+        retained
+            .retain_range(4, 21)
+            .expect("range is within bounds");
+
+        let expected =
+            UnpackedList::try_from_iter((4..21).map(element)).expect("length is below the maximum");
+        assert_eq!(retained, expected);
+
+        let retained_subtree = &retained
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .left;
+
+        assert!(Arc::ptr_eq(original_subtree, retained_subtree));
+    }
+
+    #[test]
+    fn retain_range_shares_shifted_partial_trailing_subtree() {
+        let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));
+        let original =
+            UnpackedList::try_from_iter((0..12).map(element)).expect("length is below the maximum");
+        let third_partition = original
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .right
+            .as_ref()
+            .expect("list reaches the third partition");
+        let MerkleTreeNode::Internal {
+            right: original_subtree,
+            ..
+        } = third_partition.left.as_ref().as_ref()
+        else {
+            panic!("the partial third partition is an internal node")
+        };
+
+        let mut retained = original.clone();
+        retained
+            .retain_range(8, 12)
+            .expect("range is within bounds");
+
+        let expected =
+            UnpackedList::try_from_iter((8..12).map(element)).expect("length is below the maximum");
+        assert_eq!(retained, expected);
+
+        let retained_subtree = &retained
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .left;
+
+        assert!(Arc::ptr_eq(original_subtree, retained_subtree));
+    }
+
+    #[test]
+    fn retain_range_shares_packed_subtrees() {
+        let original = TestList::try_from_iter(0..84).expect("length is below the maximum");
+        let first_partition = &original.root.as_ref().expect("list is not empty").left;
+        let second_partition = &original
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .left;
+
+        let mut prefix = original.clone();
+        prefix.retain_range(0, 36).expect("range is within bounds");
+
+        let prefix_root = prefix.root.as_ref().expect("list is not empty");
+        assert!(Arc::ptr_eq(first_partition, &prefix_root.left));
+        assert!(Arc::ptr_eq(
+            second_partition,
+            &prefix_root
+                .right
+                .as_ref()
+                .expect("list reaches the second partition")
+                .left,
+        ));
+
+        let third_partition = original
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .right
+            .as_ref()
+            .expect("list reaches the third partition");
+        let MerkleTreeNode::Internal {
+            left: first_half, ..
+        } = third_partition.left.as_ref().as_ref()
+        else {
+            panic!("the full third partition is an internal node")
+        };
+        let MerkleTreeNode::Internal {
+            left: original_subtree,
+            ..
+        } = first_half.as_ref().as_ref()
+        else {
+            panic!("the first half of the third partition is an internal node")
+        };
+
+        let mut shifted = original.clone();
+        shifted
+            .retain_range(16, 84)
+            .expect("range is within bounds");
+
+        let retained_subtree = &shifted
+            .root
+            .as_ref()
+            .expect("list is not empty")
+            .right
+            .as_ref()
+            .expect("list reaches the second partition")
+            .left;
+
+        assert!(Arc::ptr_eq(original_subtree, retained_subtree));
+    }
+
+    #[test]
+    fn retain_range_rejects_out_of_bounds_ranges() {
+        let mut persistent = TestList::try_from_iter(0..10).expect("length is below the maximum");
+
+        assert!(persistent.retain_range(0, 11).is_err());
+        assert!(persistent.retain_range(5, 11).is_err());
     }
 
     #[test]
