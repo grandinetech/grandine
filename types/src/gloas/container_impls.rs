@@ -1,7 +1,9 @@
-use core::fmt;
+use core::{fmt, iter};
 use std::sync::Arc;
 
-use ssz::{ByteList, ContiguousList, H256, ProgressiveByteList, ProgressiveList};
+use ssz::{ByteList, ContiguousList, H256, ProgressiveList};
+use try_from_iterator::TryFromIterator as _;
+use typenum::Unsigned;
 
 use crate::{
     capella::containers::Withdrawal,
@@ -21,6 +23,11 @@ use crate::{
     phase0::primitives::Slot,
     preset::Preset,
 };
+
+fn repeat_to_limit<T: Clone>(element: T, limit: usize) -> ProgressiveList<T> {
+    ProgressiveList::try_from_iter(iter::repeat_n(element, limit))
+        .expect("preset limits never exceed the progressive list bound")
+}
 
 impl<P: Preset> From<ElectraAttestation<P>> for Attestation<P> {
     fn from(attestation: ElectraAttestation<P>) -> Self {
@@ -74,31 +81,43 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
         self.message.builder_index
     }
 
+    /// Builds an envelope with every list at its maximum length, except `transactions` and
+    /// `block_access_list`, which stay empty: both are bounded by `MaxBytesPerTransaction`, so one
+    /// full transaction is a gigabyte and a full list of them is a petabyte. Callers that need
+    /// their size add it arithmetically.
     #[must_use]
     pub fn full() -> Self {
         Self {
             message: ExecutionPayloadEnvelope {
                 payload: ExecutionPayload {
                     extra_data: Arc::new(ByteList::from(ContiguousList::full(u8::MAX))),
-                    transactions: Arc::new(ProgressiveList::full(ProgressiveByteList::from(
-                        ByteList::from(
-                            ContiguousList::try_from(vec![u8::MAX; 32])
-                                .expect("should fit in MaxBytesPerTransaction"),
-                        ),
-                    ))),
-                    withdrawals: ProgressiveList::full(Withdrawal::default()),
-                    block_access_list: Arc::new(ProgressiveByteList::from(ByteList::from(
-                        ContiguousList::try_from(vec![u8::MAX; 32])
-                            .expect("should fit in MaxBytesPerTransaction"),
-                    ))),
+                    withdrawals: repeat_to_limit(
+                        Withdrawal::default(),
+                        P::MaxWithdrawalsPerPayload::USIZE,
+                    ),
                     ..Default::default()
                 },
                 execution_requests: ExecutionRequests {
-                    deposits: ProgressiveList::full(DepositRequest::default()),
-                    withdrawals: ProgressiveList::full(WithdrawalRequest::default()),
-                    consolidations: ProgressiveList::full(ConsolidationRequest::default()),
-                    builder_deposits: ProgressiveList::full(BuilderDepositRequest::default()),
-                    builder_exits: ProgressiveList::full(BuilderExitRequest::default()),
+                    deposits: repeat_to_limit(
+                        DepositRequest::default(),
+                        P::GloasDepositRequestsBound::USIZE,
+                    ),
+                    withdrawals: repeat_to_limit(
+                        WithdrawalRequest::default(),
+                        P::MaxWithdrawalRequestsPerPayload::USIZE,
+                    ),
+                    consolidations: repeat_to_limit(
+                        ConsolidationRequest::default(),
+                        P::MaxConsolidationRequestsPerPayload::USIZE,
+                    ),
+                    builder_deposits: repeat_to_limit(
+                        BuilderDepositRequest::default(),
+                        P::MaxBuilderDepositRequestsPerPayload::USIZE,
+                    ),
+                    builder_exits: repeat_to_limit(
+                        BuilderExitRequest::default(),
+                        P::MaxBuilderExitRequestsPerPayload::USIZE,
+                    ),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -112,8 +131,11 @@ impl<P: Preset> DataColumnSidecar<P> {
     #[must_use]
     pub fn full() -> Self {
         Self {
-            column: ProgressiveList::full(Box::default()),
-            kzg_proofs: ProgressiveList::full(KzgProof::repeat_byte(u8::MAX)),
+            column: repeat_to_limit(Box::default(), P::MaxBlobCommitmentsPerBlock::USIZE),
+            kzg_proofs: repeat_to_limit(
+                KzgProof::repeat_byte(u8::MAX),
+                P::MaxBlobCommitmentsPerBlock::USIZE,
+            ),
             ..Default::default()
         }
     }
