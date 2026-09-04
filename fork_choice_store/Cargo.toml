@@ -25,6 +25,7 @@ im = { workspace = true }
 itertools = { workspace = true }
 kzg_utils = { workspace = true }
 logging = { workspace = true }
+parking_lot = { workspace = true }
 prometheus_metrics = { workspace = true }
 pubkey_cache = { workspace = true }
 scc = { workspace = true }

@@ -6090,6 +6090,7 @@ dependencies = [
  "itertools 0.14.0",
  "kzg_utils",
  "logging",
+ "parking_lot",
  "prometheus_metrics",
  "pubkey_cache",
  "scc 3.7.0",

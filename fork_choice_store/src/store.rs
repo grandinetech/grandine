@@ -32,6 +32,7 @@ use helper_functions::{
 use im::{HashSet, OrdMap, Vector, hashmap, hashmap::HashMap, ordmap, vector};
 use itertools::{Either, EitherOrBoth, Itertools as _, izip};
 use logging::{debug_with_peers, error_with_peers, info_with_peers, warn_with_peers};
+use parking_lot::Mutex;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use scc::HashMap as SccHashMap;
@@ -110,6 +111,12 @@ use crate::{
     validations::validate_merge_block,
 };
 
+#[derive(Default)]
+struct SeenGossipAttestations {
+    attesters: BTreeMap<Epoch, BitVec>,
+    aggregators: BTreeMap<Epoch, StdHashSet<ValidatorIndex>>,
+}
+
 /// [`Store`] from the Fork Choice specification.
 ///
 /// [`Store`]: https://github.com/ethereum/consensus-specs/blob/v1.3.0/specs/phase0/fork-choice.md#store
@@ -169,11 +176,11 @@ pub struct Store<P: Preset, S: Storage<P>> {
     // epoch, implementing the spec rule:
     // [IGNORE] No other valid attestation seen for this validator and target epoch.
     // Indexed by target epoch -> BitVec where bit i = validator i has been observed.
-    seen_gossip_attesters: BTreeMap<Epoch, BitVec>,
+    // And
     // Tracks which validators have produced a valid gossip aggregate and proof per target epoch,
     // implementing the spec rule:
     // [IGNORE] This is the first valid aggregate for this aggregator in this epoch.
-    seen_gossip_aggregators: BTreeMap<Epoch, StdHashSet<ValidatorIndex>>,
+    seen_gossip_attestations: Arc<Mutex<SeenGossipAttestations>>,
     block_timeliness: HashMap<H256, BlockTimeliness>,
     // `consensus-specs` doesn't explicitly state it, but `Store.checkpoint_states` is effectively a
     // cache, as its contents can be recomputed at any time using data from other fields.
@@ -365,8 +372,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             justified_active_balances: Self::active_balances(&anchor_state),
             total_active_balance: OnceLock::new(),
             latest_messages,
-            seen_gossip_attesters: BTreeMap::new(),
-            seen_gossip_aggregators: BTreeMap::new(),
+            seen_gossip_attestations: Arc::default(),
             block_timeliness: hashmap! { block_root => BlockTimeliness {
                 before_attestation_due: true,
                 before_payload_attestation_due: true,
@@ -4301,11 +4307,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 self.extend_latest_messages_after_finalization();
             }
 
-            self.seen_gossip_attesters
-                .retain(|&epoch, _| epoch >= previous_epoch);
-
-            self.seen_gossip_aggregators
-                .retain(|&epoch, _| epoch >= previous_epoch);
+            self.prune_seen_gossip_attestations(previous_epoch);
         }
 
         let current_slot_attestations = core::mem::take(&mut self.current_slot_attestations);
@@ -5171,10 +5173,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.apply_balance_differences(differences)
     }
 
-    pub fn observe_gossip_attester(&mut self, validator_index: ValidatorIndex, epoch: Epoch) {
+    pub fn observe_gossip_attester(&self, validator_index: ValidatorIndex, epoch: Epoch) {
         if let Ok(index) = usize::try_from(validator_index) {
-            let bitfield = self
-                .seen_gossip_attesters
+            let mut seen_gossip_attestations = self.seen_gossip_attestations.lock();
+
+            let bitfield = seen_gossip_attestations
+                .attesters
                 .entry(epoch)
                 .or_insert_with(|| BitVec::repeat(false, self.justified_active_balances.len()));
 
@@ -5191,13 +5195,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return false;
         };
 
-        self.seen_gossip_attesters
+        self.seen_gossip_attestations
+            .lock()
+            .attesters
             .get(&epoch)
             .is_some_and(|bitfield| bitfield.get(index).is_some_and(|bit| *bit))
     }
 
-    pub fn observe_gossip_aggregator(&mut self, aggregator_index: ValidatorIndex, epoch: Epoch) {
-        self.seen_gossip_aggregators
+    pub fn observe_gossip_aggregator(&self, aggregator_index: ValidatorIndex, epoch: Epoch) {
+        self.seen_gossip_attestations
+            .lock()
+            .aggregators
             .entry(epoch)
             .or_default()
             .insert(aggregator_index);
@@ -5208,9 +5216,23 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         aggregator_index: ValidatorIndex,
         epoch: Epoch,
     ) -> bool {
-        self.seen_gossip_aggregators
+        self.seen_gossip_attestations
+            .lock()
+            .aggregators
             .get(&epoch)
             .is_some_and(|set| set.contains(&aggregator_index))
+    }
+
+    fn prune_seen_gossip_attestations(&self, oldest_retained_epoch: Epoch) {
+        let mut seen_gossip_attestations = self.seen_gossip_attestations.lock();
+
+        seen_gossip_attestations
+            .attesters
+            .retain(|&epoch, _| epoch >= oldest_retained_epoch);
+
+        seen_gossip_attestations
+            .aggregators
+            .retain(|&epoch, _| epoch >= oldest_retained_epoch);
     }
 
     // `Vector` has no `resize` method as of `im` version 15.1.0.
@@ -6685,24 +6707,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.current_slot_attestations.len(),
         );
 
+        let (seen_gossip_attesters, seen_gossip_aggregators) = {
+            let seen_gossip_attestations = self.seen_gossip_attestations.lock();
+
+            (
+                seen_gossip_attestations
+                    .attesters
+                    .values()
+                    .map(|bitfield| bitfield.count_ones())
+                    .sum(),
+                seen_gossip_attestations
+                    .aggregators
+                    .values()
+                    .map(StdHashSet::len)
+                    .sum(),
+            )
+        };
+
         metrics.set_collection_length(
             module_path!(),
             &type_name,
             "seen_gossip_attesters",
-            self.seen_gossip_attesters
-                .values()
-                .map(|bitfield| bitfield.count_ones())
-                .sum(),
+            seen_gossip_attesters,
         );
 
         metrics.set_collection_length(
             module_path!(),
             &type_name,
             "seen_gossip_aggregators",
-            self.seen_gossip_aggregators
-                .values()
-                .map(StdHashSet::len)
-                .sum(),
+            seen_gossip_aggregators,
         );
 
         metrics.set_collection_length(
