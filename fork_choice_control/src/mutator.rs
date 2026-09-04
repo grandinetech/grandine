@@ -1151,11 +1151,11 @@ where
     }
 
     #[expect(clippy::too_many_lines)]
-    fn handle_aggregate_and_proof(
+    fn accept_aggregate_and_proof(
         &mut self,
         wait_group: &W,
         verify_result: VerifyAggregateAndProofResult<P>,
-    ) -> Result<()> {
+    ) -> Option<ValidAttestation> {
         let VerifyAggregateAndProofResult { result, origin } = verify_result;
 
         match result {
@@ -1207,19 +1207,7 @@ where
                     is_from_block: false,
                 };
 
-                let old_head = self.store_mut().apply_attestation(valid_attestation)?;
-
-                self.update_store_snapshot();
-
-                if let Some(old_head) = old_head {
-                    self.notify_about_reorganization(
-                        wait_group.clone(),
-                        &old_head,
-                        ReorgSource::AggregateAndProof,
-                    );
-
-                    self.spawn_preprocess_head_state_for_next_slot_task();
-                }
+                return Some(valid_attestation);
             }
             Ok(AggregateAndProofAction::Ignore) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1351,7 +1339,20 @@ where
             }
         }
 
-        Ok(())
+        None
+    }
+
+    fn handle_aggregate_and_proof(
+        &mut self,
+        wait_group: &W,
+        verify_result: VerifyAggregateAndProofResult<P>,
+    ) -> Result<()> {
+        let accepted = self
+            .accept_aggregate_and_proof(wait_group, verify_result)
+            .into_iter()
+            .collect_vec();
+
+        self.apply_attestations(wait_group, accepted, ReorgSource::AggregateAndProof)
     }
 
     fn handle_aggregate_and_proof_batch(
@@ -1359,19 +1360,23 @@ where
         wait_group: &W,
         results: Vec<VerifyAggregateAndProofResult<P>>,
     ) -> Result<()> {
+        let mut accepted = Vec::with_capacity(results.len());
+
         for result in results {
-            self.handle_aggregate_and_proof(wait_group, result)?;
+            if let Some(valid_attestation) = self.accept_aggregate_and_proof(wait_group, result) {
+                accepted.push(valid_attestation);
+            }
         }
 
-        Ok(())
+        self.apply_attestations(wait_group, accepted, ReorgSource::AggregateAndProof)
     }
 
     #[expect(clippy::too_many_lines)]
-    fn handle_attestation(
+    fn accept_attestation(
         &mut self,
         wait_group: &W,
         result: VerifyAttestationResult<P>,
-    ) -> Result<()> {
+    ) -> Option<ValidAttestation> {
         match result {
             Ok(AttestationAction::Accept {
                 attestation,
@@ -1434,19 +1439,7 @@ where
                     }
                 }
 
-                let old_head = self.store_mut().apply_attestation(valid_attestation)?;
-
-                self.update_store_snapshot();
-
-                if let Some(old_head) = old_head {
-                    self.notify_about_reorganization(
-                        wait_group.clone(),
-                        &old_head,
-                        ReorgSource::Attestation,
-                    );
-
-                    self.spawn_preprocess_head_state_for_next_slot_task();
-                }
+                return Some(valid_attestation);
             }
             Ok(AttestationAction::Ignore(attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -1528,7 +1521,20 @@ where
             }
         }
 
-        Ok(())
+        None
+    }
+
+    fn handle_attestation(
+        &mut self,
+        wait_group: &W,
+        result: VerifyAttestationResult<P>,
+    ) -> Result<()> {
+        let accepted = self
+            .accept_attestation(wait_group, result)
+            .into_iter()
+            .collect_vec();
+
+        self.apply_attestations(wait_group, accepted, ReorgSource::Attestation)
     }
 
     fn handle_attestation_batch(
@@ -1536,11 +1542,15 @@ where
         wait_group: &W,
         results: Vec<VerifyAttestationResult<P>>,
     ) -> Result<()> {
+        let mut accepted = Vec::with_capacity(results.len());
+
         for result in results {
-            self.handle_attestation(wait_group, result)?;
+            if let Some(valid_attestation) = self.accept_attestation(wait_group, result) {
+                accepted.push(valid_attestation);
+            }
         }
 
-        Ok(())
+        self.apply_attestations(wait_group, accepted, ReorgSource::Attestation)
     }
 
     fn handle_block_attestations(
@@ -1604,21 +1614,7 @@ where
             })
             .collect_vec();
 
-        let old_head = self.store_mut().apply_attestation_batch(accepted)?;
-
-        self.update_store_snapshot();
-
-        if let Some(old_head) = old_head {
-            self.notify_about_reorganization(
-                wait_group.clone(),
-                &old_head,
-                ReorgSource::BlockAttestation,
-            );
-
-            self.spawn_preprocess_head_state_for_next_slot_task();
-        }
-
-        Ok(())
+        self.apply_attestations(wait_group, accepted, ReorgSource::BlockAttestation)
     }
 
     fn handle_block_payload_attestations(
@@ -1653,7 +1649,51 @@ where
             })
             .collect_vec();
 
-        let old_head = self.store_mut().apply_payload_attestation_batch(accepted);
+        self.apply_payload_attestations(wait_group, accepted);
+    }
+
+    // Attestations are applied in bulk because every call to `Store::apply_attestation_batch`
+    // propagates balance differences and recomputes the head across the whole unfinalized chain.
+    // That work is proportional to the number of unfinalized blocks, so doing it once per
+    // attestation instead of once per batch is what makes the mutator fall behind when finality
+    // is delayed.
+    fn apply_attestations(
+        &mut self,
+        wait_group: &W,
+        valid_attestations: Vec<ValidAttestation>,
+        reorg_source: ReorgSource,
+    ) -> Result<()> {
+        if valid_attestations.is_empty() {
+            return Ok(());
+        }
+
+        let old_head = self
+            .store_mut()
+            .apply_attestation_batch(valid_attestations)?;
+
+        self.update_store_snapshot();
+
+        if let Some(old_head) = old_head {
+            self.notify_about_reorganization(wait_group.clone(), &old_head, reorg_source);
+
+            self.spawn_preprocess_head_state_for_next_slot_task();
+        }
+
+        Ok(())
+    }
+
+    fn apply_payload_attestations(
+        &mut self,
+        wait_group: &W,
+        valid_payload_attestations: Vec<ValidPayloadAttestation>,
+    ) {
+        if valid_payload_attestations.is_empty() {
+            return;
+        }
+
+        let old_head = self
+            .store_mut()
+            .apply_payload_attestation_batch(valid_payload_attestations);
 
         self.update_store_snapshot();
 
@@ -2567,11 +2607,11 @@ where
         }
     }
 
-    fn handle_payload_attestation(
+    fn accept_payload_attestation(
         &mut self,
         wait_group: &W,
         result: VerifyPayloadAttestationResult<P>,
-    ) {
+    ) -> Option<ValidPayloadAttestation> {
         match result {
             Ok(PayloadAttestationAction::Accept {
                 payload_attestation,
@@ -2623,21 +2663,7 @@ where
                     is_from_block,
                 };
 
-                let old_head = self
-                    .store_mut()
-                    .apply_payload_attestation(valid_payload_attestation);
-
-                self.update_store_snapshot();
-
-                if let Some(old_head) = old_head {
-                    self.notify_about_reorganization(
-                        wait_group.clone(),
-                        &old_head,
-                        ReorgSource::PayloadAttestation,
-                    );
-
-                    self.spawn_preprocess_head_state_for_next_slot_task();
-                }
+                return Some(valid_payload_attestation);
             }
             Ok(PayloadAttestationAction::Ignore(payload_attestation)) => {
                 if let Some(metrics) = self.metrics.as_ref() {
@@ -2687,6 +2713,21 @@ where
                 reply_to_http_api(sender, Err(anyhow!(source)));
             }
         }
+
+        None
+    }
+
+    fn handle_payload_attestation(
+        &mut self,
+        wait_group: &W,
+        result: VerifyPayloadAttestationResult<P>,
+    ) {
+        let accepted = self
+            .accept_payload_attestation(wait_group, result)
+            .into_iter()
+            .collect_vec();
+
+        self.apply_payload_attestations(wait_group, accepted);
     }
 
     fn handle_payload_attestation_batch(
@@ -2694,9 +2735,17 @@ where
         wait_group: &W,
         results: Vec<VerifyPayloadAttestationResult<P>>,
     ) {
+        let mut accepted = Vec::with_capacity(results.len());
+
         for result in results {
-            self.handle_payload_attestation(wait_group, result);
+            if let Some(valid_payload_attestation) =
+                self.accept_payload_attestation(wait_group, result)
+            {
+                accepted.push(valid_payload_attestation);
+            }
         }
+
+        self.apply_payload_attestations(wait_group, accepted);
     }
 
     fn handle_proposer_preferences(
