@@ -1,4 +1,4 @@
-use core::{convert::Infallible, fmt::Debug, iter};
+use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter};
 use std::sync::Arc;
 #[cfg(target_os = "zkvm")]
 use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};
@@ -763,8 +763,14 @@ impl PubkeyList {
     #[must_use]
     pub fn index_of(&self, pubkey: &PublicKeyBytes) -> Option<ValidatorIndex> {
         let index = self.index_map.get(pubkey).copied()?;
-        let in_bounds = usize::try_from(index).is_ok_and(|index| index < self.keys.len());
-        in_bounds.then_some(index)
+        let key = usize::try_from(index)
+            .ok()
+            .and_then(|index| self.keys.get(index))?;
+
+        // `index_map` may hold entries that no longer agree with `keys`: it is
+        // carried over wholesale in `restore_prefix` and left untouched by
+        // `clear_prefix`. Only answer for the index that actually holds the key.
+        (key == pubkey).then_some(index)
     }
 
     #[must_use]
@@ -795,14 +801,55 @@ impl PubkeyList {
         self.index_map.insert(pubkey, index);
     }
 
-    fn prefix(&self, length: usize) -> Self {
-        let mut keys = self.keys.clone();
-        let keys = keys.slice(0..length);
+    /// Number of leading keys that were zeroed out by [`Self::clear_prefix`].
+    #[must_use]
+    fn cleared_prefix_len(&self) -> usize {
+        self.keys
+            .binary_search_by(|key| {
+                if key.is_zero() {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+            .expect_err("comparator never reports Ordering::Equal")
+    }
 
-        Self {
-            keys,
-            index_map: self.index_map.clone(),
+    /// Replaces the first `count` keys with the ones from `source`, leaving the
+    /// rest of the list as it is.
+    fn restore_prefix(&mut self, source: &Self, count: usize) {
+        if count == 0 {
+            return;
         }
+
+        let length = self.keys.len();
+
+        #[allow(
+            clippy::allow_attributes,
+            unused_mut,
+            reason = "tail needs to be mutable in zkvm environments"
+        )]
+        let mut tail = self.keys.slice(count..length);
+
+        let mut index_map = source.index_map.clone();
+
+        for (key, index) in tail.iter().zip(count..) {
+            let index = ValidatorIndex::try_from(index)
+                .expect("validator count never exceeds ValidatorIndex range");
+
+            index_map.insert(*key, index);
+        }
+
+        let mut source_keys = source.keys.clone();
+        let mut keys = source_keys.slice(0..count);
+
+        #[cfg(not(target_os = "zkvm"))]
+        keys.append(tail);
+        #[cfg(target_os = "zkvm")]
+        keys.append(&mut tail);
+
+        self.keys = keys;
+        self.index_map = index_map;
     }
 
     fn clear_prefix(&mut self, count: usize) {
@@ -1051,16 +1098,18 @@ impl RawValidatorList {
         &self.pubkeys
     }
 
-    pub fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
-        let length = self.len_usize();
+    /// Restores the public keys that were removed by [`Self::clear_pubkeys`].
+    pub fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
+        let cleared = self.pubkeys.cleared_prefix_len();
 
         ensure!(
-            pubkeys.len() >= length,
-            "pubkey list is shorter than validator count (expected at least {length}, got {})",
+            pubkeys.len() >= cleared,
+            "pubkey list is shorter than the cleared prefix \
+                (expected at least {cleared}, got {})",
             pubkeys.len(),
         );
 
-        self.pubkeys = pubkeys.prefix(length);
+        self.pubkeys.restore_prefix(pubkeys, cleared);
 
         Ok(())
     }
@@ -1271,6 +1320,89 @@ mod tests {
     #[test_case(Phase::Phase0 => "phase0")]
     fn phase_display(phase: Phase) -> String {
         phase.to_string()
+    }
+
+    fn test_pubkey(index: u64) -> PublicKeyBytes {
+        // Offset by one so that no test key collides with the zero key that
+        // marks a cleared entry.
+        PublicKeyBytes::from_low_u64_be(index.saturating_add(1))
+    }
+
+    fn test_validators(length: u64) -> RawValidatorList {
+        let mut validators = RawValidatorList::default();
+
+        for index in 0..length {
+            validators.push(Validator {
+                pubkey: test_pubkey(index),
+                ..Validator::default()
+            });
+        }
+
+        validators
+    }
+
+    // `cleared_prefix_len` tells the cleared prefix apart from the rest of the
+    // list by looking for zero keys, which relies on no validator ever holding
+    // one. A validator is only added for a deposit whose signature verifies,
+    // and that requires the public key to decompress.
+    #[test]
+    fn the_zero_public_key_is_not_a_valid_public_key() {
+        bls::PublicKey::try_from(PublicKeyBytes::zero())
+            .expect_err("the zero public key cannot be decompressed");
+    }
+
+    #[test_case(0)]
+    #[test_case(1)]
+    #[test_case(5)]
+    #[test_case(8; "the whole list")]
+    #[test_case(12; "more than the whole list")]
+    fn cleared_prefix_len_matches_clear_pubkeys(count: usize) {
+        let mut validators = test_validators(8);
+
+        validators.clear_pubkeys(count);
+
+        assert_eq!(validators.pubkeys().cleared_prefix_len(), count.min(8));
+    }
+
+    fn test_validators_with(pubkeys: &[PublicKeyBytes]) -> RawValidatorList {
+        let mut validators = RawValidatorList::default();
+
+        for pubkey in pubkeys {
+            validators.push(Validator {
+                pubkey: *pubkey,
+                ..Validator::default()
+            });
+        }
+
+        validators
+    }
+
+    #[test]
+    fn restore_pubkeys_drops_source_only_index_map_entries() {
+        let unfinalized_keys = (0..6).chain(100..104).map(test_pubkey).collect::<Vec<_>>();
+
+        let mut unfinalized = test_validators_with(&unfinalized_keys);
+
+        unfinalized.clear_pubkeys(6);
+
+        let finalized = test_validators_with(&(0..8).map(test_pubkey).collect::<Vec<_>>());
+
+        unfinalized
+            .restore_pubkeys(finalized.pubkeys())
+            .expect("the source is at least as long as the cleared prefix");
+
+        let pubkeys = unfinalized.pubkeys();
+
+        assert_eq!(pubkeys.get(6), Some(&test_pubkey(100)));
+
+        assert_eq!(pubkeys.index_of(&test_pubkey(6)), None);
+        assert!(!pubkeys.contains(&test_pubkey(7)));
+
+        for (index, key) in pubkeys.iter().enumerate() {
+            let index = ValidatorIndex::try_from(index).expect("index fits");
+
+            assert_eq!(pubkeys.index_of(key), Some(index));
+        }
     }
 
     #[test]

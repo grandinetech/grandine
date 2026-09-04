@@ -1108,7 +1108,7 @@ impl<P: Preset> Storage<P> {
             Some(validators) => {
                 state
                     .validators_mut()
-                    .set_pubkeys(validators.pubkeys())
+                    .restore_pubkeys(validators.pubkeys())
                     .context("invalid finalized validators list")?;
             }
             None => {
@@ -1122,7 +1122,7 @@ impl<P: Preset> Storage<P> {
 
                 state
                     .validators_mut()
-                    .set_pubkeys(&pubkeys)
+                    .restore_pubkeys(&pubkeys)
                     .context("invalid finalized validators list loaded from disk")?;
             }
         }
