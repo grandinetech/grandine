@@ -255,6 +255,14 @@ pub enum Error<P: Preset> {
     #[error("execution payload envelope slot mismatch: expected {expected}, actual {actual}")]
     ExecutionPayloadEnvelopeSlotMismatch { expected: Slot, actual: Slot },
     #[error(
+        "execution payload envelope slot does not match the slot of its block: \
+         block slot {block_slot}, envelope slot {envelope_slot}"
+    )]
+    ExecutionPayloadEnvelopeBlockSlotMismatch {
+        block_slot: Slot,
+        envelope_slot: Slot,
+    },
+    #[error(
         "execution payload timestamp mismatch (envelope: {envelope:?}, expected: {expected:?})"
     )]
     ExecutionPayloadTimestampMismatch {
@@ -268,6 +276,8 @@ pub enum Error<P: Preset> {
         envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
         expected: Box<PayloadExpectedWithdrawals>,
     },
+    #[error("execution payload has too many withdrawals: {in_payload} > {maximum}")]
+    ExecutionPayloadTooManyWithdrawals { in_payload: usize, maximum: usize },
     #[error("proposer preferences has invalid proposal slot: {signed_preferences:?}")]
     InvalidProposerPreferencesProposalSlot {
         signed_preferences: Arc<SignedProposerPreferences>,
