@@ -49,7 +49,7 @@ pub struct GrandineConfig {
     pub max_empty_slots: u64,
     pub suggested_fee_recipient: ExecutionAddress,
     pub default_builder_boost_factor: Uint256,
-    pub default_gas_limit: Gas,
+    pub default_gas_limit: Option<Gas>,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
     pub unfinalized_states_in_memory: u64,

@@ -32,7 +32,7 @@ use constant_time_eq::constant_time_eq;
 use directories::Directories;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
-use helper_functions::{accessors, error::Error as HelperError, signing::SignForSingleFork};
+use helper_functions::{accessors, error::Error as HelperError, misc, signing::SignForSingleFork};
 use http_api_utils::{ApiError, ApiMetrics};
 use keymanager::{
     KeyManager, KeymanagerError, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey,
@@ -489,11 +489,14 @@ async fn keymanager_delete_fee_recipient(
 }
 
 /// `GET /eth/v1/validator/{pubkey}/gas_limit`
-async fn keymanager_get_gas_limit(
+async fn keymanager_get_gas_limit<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let gas_limit = keymanager.proposer_configs().gas_limit(pubkey);
+    let epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+    let configured = keymanager.proposer_configs().gas_limit(pubkey);
+    let gas_limit = controller.chain_config().gas_limit(configured, epoch);
 
     let response = ProposerConfigResponse {
         pubkey,
