@@ -1184,7 +1184,7 @@ where
 
                 let message = aggregate_and_proof.message();
 
-                self.store_mut().observe_gossip_aggregator(
+                self.store.observe_gossip_aggregator(
                     message.aggregator_index(),
                     message.aggregate().data().target.epoch,
                 );
@@ -1434,7 +1434,7 @@ where
                     let target_epoch = valid_attestation.data.target.epoch;
 
                     for &validator_index in &valid_attestation.attesting_indices {
-                        self.store_mut()
+                        self.store
                             .observe_gossip_attester(validator_index, target_epoch);
                     }
                 }
