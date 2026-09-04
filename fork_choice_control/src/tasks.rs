@@ -961,7 +961,10 @@ impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
                 .start_timer()
         });
 
-        let envelopes = store_snapshot.unpersisted_envelopes();
+        let envelopes = store_snapshot.unpersisted_envelopes().map(|envelope| {
+            let is_timely = store_snapshot.is_payload_present_timely(envelope.block_root());
+            (envelope, is_timely)
+        });
 
         match storage.append_execution_payload_envelopes(envelopes) {
             Ok(persisted_block_roots) => {

@@ -514,14 +514,16 @@ where
             NullVerifier,
         );
 
-        // TODO: timeliness of a payload is not persisted, so we cannot know if it was seen before
-        // the deadline. We now assume it was, but we should persist that information as well.
+        let seen_before_deadline = self
+            .storage
+            .is_execution_payload_envelope_timely(block_root)?;
+
         self.handle_execution_payload_envelope(
             wait_group.clone(),
             result,
             origin,
             payload_envelope_identifier,
-            true,
+            seen_before_deadline,
             processing_timings,
             tracing::debug_span!("handle_persisted_envelope"),
         );

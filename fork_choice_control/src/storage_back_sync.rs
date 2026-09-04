@@ -179,7 +179,13 @@ impl<P: Preset> Storage<P> {
         &self,
         execution_payload_envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
     ) -> Result<()> {
-        self.append_execution_payload_envelopes(execution_payload_envelopes)?;
+        // Back-synced envelopes were never observed at reveal time, so none of them count as
+        // timely.
+        self.append_execution_payload_envelopes(
+            execution_payload_envelopes
+                .into_iter()
+                .map(|envelope| (envelope, false)),
+        )?;
         Ok(())
     }
 }

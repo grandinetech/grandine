@@ -637,17 +637,24 @@ impl<P: Preset> Storage<P> {
 
     pub(crate) fn append_execution_payload_envelopes(
         &self,
-        envelopes: impl IntoIterator<Item = Arc<SignedExecutionPayloadEnvelope<P>>>,
+        envelopes: impl IntoIterator<Item = (Arc<SignedExecutionPayloadEnvelope<P>>, bool)>,
     ) -> Result<Vec<H256>> {
         let mut batch = vec![];
         let mut persisted_block_roots = vec![];
 
-        for envelope in envelopes {
+        for (envelope, is_timely) in envelopes {
             let block_root = envelope.block_root();
             let slot = envelope.slot();
 
             batch.push(serialize(EnvelopeByBlockRoot(block_root), envelope)?);
             batch.push(serialize(EnvelopeRootBySlot(slot, block_root), block_root)?);
+
+            if is_timely {
+                batch.push(serialize(
+                    TimelyEnvelopeByBlockRoot(block_root),
+                    block_root,
+                )?);
+            }
 
             persisted_block_roots.push(block_root);
         }
@@ -671,6 +678,10 @@ impl<P: Preset> Storage<P> {
         block_root: H256,
     ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
         self.get(EnvelopeByBlockRoot(block_root))
+    }
+
+    pub(crate) fn is_execution_payload_envelope_timely(&self, block_root: H256) -> Result<bool> {
+        self.contains_key(TimelyEnvelopeByBlockRoot(block_root))
     }
 
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
@@ -734,6 +745,7 @@ impl<P: Preset> Storage<P> {
             let block_root = H256::from_ssz_default(value_bytes)?;
 
             keys_to_remove.push(EnvelopeByBlockRoot(block_root).to_string().into());
+            keys_to_remove.push(TimelyEnvelopeByBlockRoot(block_root).to_string().into());
         }
 
         self.database.delete_batch(keys_to_remove)
@@ -1468,6 +1480,14 @@ impl PrefixableKey for EnvelopeRootBySlot {
     fn has_prefix(bytes: &[u8]) -> bool {
         bytes.starts_with(Self::PREFIX.as_bytes())
     }
+}
+
+#[derive(Display)]
+#[display("{}{_0:x}", Self::PREFIX)]
+pub struct TimelyEnvelopeByBlockRoot(pub H256);
+
+impl PrefixableKey for TimelyEnvelopeByBlockRoot {
+    const PREFIX: &'static str = "y";
 }
 
 #[derive(Debug, Error)]
