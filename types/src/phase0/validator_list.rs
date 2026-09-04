@@ -272,8 +272,8 @@ impl<N: Unsigned> SszValidatorListMut for ValidatorList<N> {
         })
     }
 
-    fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
-        self.buf.set_pubkeys(pubkeys)?;
+    fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
+        self.buf.restore_pubkeys(pubkeys)?;
 
         let length = self.len_usize();
         self.cache = (length > 0).then(|| CacheNode::build_empty(length));

@@ -2221,7 +2221,7 @@ pub trait SszValidatorListMut: SszValidatorList {
         updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
     ) -> Result<(), anyhow::Error>;
 
-    fn set_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
+    fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
 
     fn clear_pubkeys(&mut self, count: usize);
 
