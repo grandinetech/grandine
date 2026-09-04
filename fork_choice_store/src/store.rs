@@ -2476,6 +2476,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(ProposerPreferencesAction::Ignore(false));
         }
 
+        // [IGNORE] The proposal epoch is after the Gloas upgrade
+        if proposal_epoch < self.chain_config.gloas_fork_epoch {
+            return Ok(ProposerPreferencesAction::Ignore(false));
+        }
+
         // [IGNORE] proposal_slot has not already passed
         if proposal_slot <= self.slot() {
             return Ok(ProposerPreferencesAction::Ignore(false));
@@ -2491,8 +2496,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let lookahead_epoch = proposal_epoch.saturating_sub(P::MinSeedLookahead::U64);
         let lookahead_start_slot = misc::compute_start_slot_at_epoch::<P>(lookahead_epoch);
 
-        // _[REJECT]_ The slot of the block with root `preferences.dependent_root` is at most
-        // `compute_shuffling_dependent_slot(compute_epoch_at_slot(preferences.proposal_slot))`.
+        // [REJECT] The dependent block's slot is not after the shuffling dependent slot
         ensure!(
             dependent_chain_link.slot()
                 <= misc::compute_shuffling_dependent_slot::<P>(proposal_epoch),
