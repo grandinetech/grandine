@@ -606,17 +606,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
             };
 
-            if let Some(state) = slot_head.beacon_state.post_bellatrix() {
-                let payload = state.latest_execution_payload_header();
-
+            if let Some((parent_block_number, parent_block_hash)) =
+                block_build_context.execution_payload_parent()
+            {
                 self.event_channels.send_payload_attributes_event(
                     slot_head.beacon_state.phase(),
                     slot,
                     proposer_index,
                     slot_head.beacon_block_root,
                     &payload_attributes,
-                    payload.block_number(),
-                    payload.block_hash(),
+                    parent_block_number,
+                    parent_block_hash,
                 );
             }
 
@@ -1162,7 +1162,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .payload_bid()
                     .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD);
 
-                if (slot_head.phase() < Phase::Gloas || self_built)
+                let post_gloas = slot_head.phase() >= Phase::Gloas;
+
+                let import_and_publish_block = |block: &Arc<SignedBeaconBlock<P>>| {
+                    self.controller
+                        .on_own_block(wait_group.clone(), block.clone_arc());
+
+                    ValidatorToP2p::PublishBeaconBlock(block.clone_arc()).send(&self.p2p_tx);
+                };
+
+                if post_gloas {
+                    import_and_publish_block(&block);
+                }
+
+                if (!post_gloas || self_built)
                     && let Some(blobs) = block_blobs
                     && !blobs.is_empty()
                 {
@@ -1170,10 +1183,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         .await?;
                 }
 
-                self.controller
-                    .on_own_block(wait_group.clone(), block.clone_arc());
-
-                ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
+                if !post_gloas {
+                    import_and_publish_block(&block);
+                }
 
                 // If self-building:
                 // Publish the execution payload envelope after the beacon block so PTC members

@@ -96,8 +96,8 @@ use types::{
             ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, H256, Slot, Uint256,
-            ValidatorIndex,
+            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber,
+            H256, Slot, Uint256, ValidatorIndex,
         },
     },
     preset::{Preset, SyncSubcommitteeSize},
@@ -2110,6 +2110,47 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Ok(Some(payload_attributes))
     }
 
+    /// Execution block that the payload prepared for this context will extend.
+    ///
+    /// Post-Gloas this must not be taken from `latest_execution_payload_header`: that accessor is
+    /// aliased to `latest_execution_payload_bid`, whose `block_hash` is only the parent proposer's
+    /// promise and may never be revealed.
+    #[must_use]
+    pub fn execution_payload_parent(
+        &self,
+    ) -> Option<(Option<ExecutionBlockNumber>, ExecutionBlockHash)> {
+        let state = self.beacon_state.as_ref();
+
+        if let Some(state) = state.post_gloas() {
+            return Some((None, self.gloas_payload_parent_hash(state)));
+        }
+
+        let payload = state.post_bellatrix()?.latest_execution_payload_header();
+
+        Some((payload.block_number(), payload.block_hash()))
+    }
+
+    fn gloas_payload_parent_hash(
+        &self,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
+    ) -> ExecutionBlockHash {
+        let parent_bid = state.latest_execution_payload_bid();
+        let parent_slot = state.latest_block_header().slot;
+        let snapshot = self.producer_context.controller.snapshot();
+
+        if snapshot.should_build_on_full(state.slot())
+            || self
+                .producer_context
+                .chain_config
+                .phase_at_slot::<P>(parent_slot)
+                < Phase::Gloas
+        {
+            parent_bid.block_hash
+        } else {
+            parent_bid.parent_block_hash
+        }
+    }
+
     #[instrument(skip_all, level = "debug")]
     pub async fn prepare_execution_payload_for_slot(
         &self,
@@ -2174,17 +2215,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         //
         // See <https://github.com/ethereum/consensus-specs/pull/3350>.
         let parent_hash = if let Some(state) = state.post_gloas() {
-            let parent_bid = state.latest_execution_payload_bid();
-            let parent_slot = state.latest_block_header().slot;
-            let snapshot = self.producer_context.controller.snapshot();
-
-            if snapshot.should_build_on_full(state.slot())
-                || chain_config.phase_at_slot::<P>(parent_slot) < Phase::Gloas
-            {
-                parent_bid.block_hash
-            } else {
-                parent_bid.parent_block_hash
-            }
+            self.gloas_payload_parent_hash(state)
         } else if let Some(state) = state.post_capella() {
             state.latest_execution_payload_header().block_hash()
         } else if let Some(state) = post_merge_state(state) {
