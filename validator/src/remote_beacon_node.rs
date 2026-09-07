@@ -12,12 +12,13 @@ use std::{
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
 use bls::PublicKeyBytes;
 use derive_more::Display;
-use futures::{Stream, StreamExt as _, future};
+use futures::{Stream, StreamExt as _, future, stream};
 use helper_functions::{misc, predicates};
 use http_api_utils::{
     BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
     ValidatorLivenessResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
 };
+use http_body_util::BodyDataStream;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
@@ -27,6 +28,7 @@ use sse_stream::SseStream;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tokio::time::timeout;
 use types::{
     altair::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
@@ -64,12 +66,23 @@ const MIN_TIMEOUT: Duration = Duration::from_secs(1);
 const DEADLINE_ATTEMPTS: NonZeroU64 = NonZeroU64::new(2).expect("the literal is not zero");
 /// A lone serving node has no fallback to leave time for; give it a generous fixed wait.
 const LONE_NODE_TIMEOUT: Duration = Duration::from_secs(4);
+/// Most beacon nodes send keep-alive comments at least every 30 seconds, so a stream this quiet
+/// is a dead connection; one that sends none merely resubscribes after five empty slots.
+const HEAD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Requests off the duty path can afford to wait for a slow node.
 const BACKGROUND_TIMEOUT_QUOTIENT: NonZeroU32 =
     NonZeroU32::new(2).expect("the literal is not zero");
 
 const VALIDATOR_IDS_PER_REQUEST: usize = 1024;
+
+#[derive(Debug, Error)]
+enum HeadStreamError {
+    #[error("no bytes received in {0:?}")]
+    Idle(Duration),
+    #[error(transparent)]
+    Transport(reqwest::Error),
+}
 
 #[derive(Debug, Error)]
 enum Error {
@@ -344,8 +357,22 @@ impl RemoteBeaconNode {
             Err(error) => return Err(error),
         };
 
+        // Timed below the parser, where keep-alive comments still count as traffic, so that
+        // only a dead connection goes quiet this long.
+        let chunks = stream::unfold(
+            BodyDataStream::new(Body::from(response)),
+            |mut chunks| async move {
+                match timeout(HEAD_STREAM_IDLE_TIMEOUT, chunks.next()).await {
+                    Ok(chunk) => {
+                        chunk.map(|chunk| (chunk.map_err(HeadStreamError::Transport), chunks))
+                    }
+                    Err(_) => Some((Err(HeadStreamError::Idle(HEAD_STREAM_IDLE_TIMEOUT)), chunks)),
+                }
+            },
+        );
+
         // An event without data carries no head, as a keep-alive does, and is not a failure.
-        let events = SseStream::new(Body::from(response)).filter_map(|event| {
+        let events = SseStream::from_bytes_stream(chunks).filter_map(|event| {
             let head_update = match event {
                 Ok(event) => match (event.event.as_deref(), event.data) {
                     (Some(HEAD_V2_EVENT | HEAD_EVENT), Some(data)) => {
@@ -365,16 +392,16 @@ impl RemoteBeaconNode {
     async fn subscribe(&self, topic: &str) -> Result<Response> {
         let url = self.endpoint(&format!("/eth/v1/events?topics={topic}"))?;
 
-        let response = self
+        let request = self
             .client
             .get(url.into_url())
-            // Without this some beacon nodes answer with an empty body rather than a stream.
             .header(ACCEPT, "text/event-stream")
-            // The client is built with a request timeout, which would end the stream even while
-            // events are still arriving.
             .timeout(Duration::MAX)
-            .send()
-            .await?;
+            .send();
+
+        // Only the headers are waited for; a node that accepts the connection and never answers
+        // would otherwise hold the follower forever.
+        let response = timeout(self.background_timeout(), request).await??;
 
         self.check_status(response).await
     }
@@ -397,7 +424,7 @@ impl RemoteBeaconNode {
         match self.head_header().await {
             // Recorded at the head's own slot, so that a stale head is cached as stale rather
             // than appearing fresh for another `max_empty_slots` slots.
-            Ok((head_slot, block_root)) => self.chain_head.overwrite(slot, head_slot, block_root),
+            Ok((head_slot, block_root)) => self.chain_head.update(head_slot, block_root),
             Err(error) => {
                 debug_with_peers!("{} did not report its head: {error:?}", self.url);
             }
@@ -408,7 +435,7 @@ impl RemoteBeaconNode {
     pub(crate) async fn fresh_head_block_root(&self, slot: Slot) -> Result<H256> {
         let (head_slot, block_root) = self.head_header().await?;
 
-        self.chain_head.overwrite(slot, head_slot, block_root);
+        self.chain_head.update(head_slot, block_root);
 
         self.chain_head
             .get(slot, self.max_empty_slots)?
@@ -449,12 +476,6 @@ impl RemoteBeaconNode {
 
         if health != previous {
             info_with_peers!("beacon node at {} is now {health:?}", self.url);
-
-            match (previous.can_serve(), health.can_serve()) {
-                (false, true) => _ = self.serving_count.fetch_add(1, Ordering::Relaxed),
-                (true, false) => _ = self.serving_count.fetch_sub(1, Ordering::Relaxed),
-                _ => {}
-            }
         }
 
         self.health.store(health.as_u8(), Ordering::Relaxed);

@@ -123,12 +123,17 @@ impl OwnPTCMembers {
 
         let slots = misc::slots_in_epoch::<P>(epoch)?;
 
-        // Every slot of a fetched epoch is cached, so the first one stands for all of them.
-        if self
-            .get_at_slot(dependent_root, slots.start)
-            .await
-            .is_some()
-        {
+        // The built-in node caches one slot at a time, so only a complete epoch needs no fetch.
+        let mut cached = true;
+
+        for slot in slots.clone() {
+            if self.get_at_slot(dependent_root, slot).await.is_none() {
+                cached = false;
+                break;
+            }
+        }
+
+        if cached {
             return Ok(());
         }
 

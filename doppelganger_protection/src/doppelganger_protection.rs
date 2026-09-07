@@ -50,7 +50,9 @@ impl DoppelgangerProtection {
             .map(|(public_key, added_in_slot)| (*public_key, *added_in_slot))
             .partition(|(public_key, added_in_slot)| {
                 checked.contains_key(public_key)
-                    && added_in_slot.saturating_add(check_duration_in_slots) <= current_slot
+                    && added_in_slot.is_some_and(|added_in_slot| {
+                        added_in_slot.saturating_add(check_duration_in_slots) <= current_slot
+                    })
             });
 
         if validators_to_activate.is_empty() {
@@ -102,12 +104,10 @@ impl DoppelgangerProtection {
             let mut snapshot = snapshot.as_ref().clone();
 
             for public_key in &filtered_public_keys {
-                // The validator index is resolved when the checks run, as a key may be tracked
-                // before its deposit is processed.
                 snapshot
                     .tracked_validators
                     .entry(*public_key)
-                    .or_insert(current_slot);
+                    .or_insert(Some(current_slot));
             }
 
             snapshot
@@ -128,18 +128,38 @@ impl DoppelgangerProtection {
     {
         let mut checked = HashMap::new();
         let mut validator_indices_with_pubkeys = HashMap::new();
+        let mut restamped = HashMap::new();
 
-        for public_key in self.load().tracked_validators.keys() {
+        for (public_key, added_in_slot) in &self.load().tracked_validators {
             match indices_by_pubkey.get(public_key) {
                 Some(validator_index) => {
                     checked.insert(*public_key, *validator_index);
                     validator_indices_with_pubkeys.insert(*validator_index, *public_key);
+
+                    // The checks only cover the key from here on, so the window starts anew.
+                    if added_in_slot.is_none() {
+                        restamped.insert(*public_key, Some(current_slot));
+                    }
                 }
-                None => warn_with_peers!(
-                    "liveness of validator with public key {public_key:?} cannot be checked \
-                     until its index is known; it will not perform duties",
-                ),
+                None => {
+                    warn_with_peers!(
+                        "liveness of validator with public key {public_key:?} cannot be checked \
+                         until its index is known; it will not perform duties",
+                    );
+
+                    if added_in_slot.is_some() {
+                        restamped.insert(*public_key, None);
+                    }
+                }
             }
+        }
+
+        if !restamped.is_empty() {
+            self.update(|snapshot| {
+                let mut snapshot = snapshot.as_ref().clone();
+                snapshot.tracked_validators.extend(&restamped);
+                snapshot
+            });
         }
 
         if !validator_indices_with_pubkeys.is_empty() {
@@ -216,8 +236,9 @@ impl DoppelgangerProtection {
 pub struct Snapshot {
     // Validators that are already active and have passed doppelganger protection checks
     active_validators: HashSet<PublicKeyBytes>,
-    // Validators that are tracked by doppelganger protection, by the slot they were added in
-    tracked_validators: HashMap<PublicKeyBytes, Slot>,
+    // Validators that are tracked by doppelganger protection, by the slot their check window
+    // started in, or `None` while their index is unknown and no check can cover them
+    tracked_validators: HashMap<PublicKeyBytes, Option<Slot>>,
 }
 
 impl Snapshot {
@@ -228,6 +249,8 @@ impl Snapshot {
     pub fn tracking_end_slot<P: Preset>(&self, public_key: PublicKeyBytes) -> Slot {
         self.tracked_validators
             .get(&public_key)
+            .copied()
+            .flatten()
             .map(|added_in_slot| {
                 added_in_slot.saturating_add(
                     DOPPELGANGER_CHECK_DURATION_IN_EPOCHS.saturating_mul(P::SlotsPerEpoch::U64),
@@ -333,7 +356,8 @@ mod tests {
         Ok(())
     }
 
-    // A validator whose index is not resolved yet is neither checked nor activated on time alone.
+    // A validator whose index is not resolved yet is neither checked nor activated on time alone,
+    // and its check window only starts once the index is known.
     #[tokio::test]
     async fn test_validator_with_unknown_index_is_not_activated() -> Result<()> {
         let doppelganger_protection = doppelganger_protection();
@@ -357,8 +381,22 @@ mod tests {
 
         let indices = indices_by_pubkey(&state, [0]);
 
+        let resolved_at_slot = added_at_slot + 17;
+
         doppelganger_protection
-            .detect_doppelgangers::<Minimal, _, _>(added_at_slot + 17, &indices, mock_liveness)
+            .detect_doppelgangers::<Minimal, _, _>(resolved_at_slot, &indices, mock_liveness)
+            .await?;
+
+        assert!(!is_active());
+
+        doppelganger_protection
+            .detect_doppelgangers::<Minimal, _, _>(resolved_at_slot + 15, &indices, mock_liveness)
+            .await?;
+
+        assert!(!is_active());
+
+        doppelganger_protection
+            .detect_doppelgangers::<Minimal, _, _>(resolved_at_slot + 16, &indices, mock_liveness)
             .await?;
 
         assert!(is_active());

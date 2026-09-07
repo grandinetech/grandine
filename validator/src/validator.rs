@@ -964,10 +964,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let local_head = if no_validators || !self.chain_source.uses_local_node() {
             None
         } else {
-            self.slot_head(slot)
-                .await?
-                .map_err(|head_far_behind| warn_with_peers!("{head_far_behind}"))
-                .ok()
+            match self.slot_head(slot).await {
+                Ok(Ok(local_head)) => Some(local_head),
+                Ok(Err(head_far_behind)) => {
+                    warn_with_peers!("{head_far_behind}");
+                    None
+                }
+                // A state cache timeout or a reorg mid-lookup is what the remote nodes are for.
+                Err(error) if self.chain_source.remote_beacon_nodes().is_some() => {
+                    warn_with_peers!(
+                        "failed to obtain the head of the built-in beacon node: {error:?}"
+                    );
+                    None
+                }
+                Err(error) => return Err(error),
+            }
         };
 
         // Fallback if local node has no slot head

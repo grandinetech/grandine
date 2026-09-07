@@ -106,6 +106,21 @@ pub struct GrandineArgs {
     beacon_node_options: BeaconNodeOptions,
 
     #[clap(flatten)]
+    execution_layer_options: ExecutionLayerOptions,
+
+    #[clap(flatten)]
+    sync_options: SyncOptions,
+
+    #[clap(flatten)]
+    storage_options: StorageOptions,
+
+    #[clap(flatten)]
+    custody_options: CustodyOptions,
+
+    #[clap(flatten)]
+    telemetry_options: TelemetryOptions,
+
+    #[clap(flatten)]
     http_api_options: HttpApiOptions,
 
     #[clap(flatten)]
@@ -202,10 +217,6 @@ struct ChainOptions {
     #[clap(long, value_name = "EPOCH")]
     terminal_block_hash_activation_epoch_override: Option<Epoch>,
 
-    /// Start tracking deposit contract from BLOCK_NUMBER
-    #[clap(long, value_name = "BLOCK_NUMBER")]
-    deposit_contract_starting_block: Option<ExecutionBlockNumber>,
-
     /// Load genesis state from SSZ_FILE
     #[clap(long, value_name = "SSZ_FILE")]
     genesis_state_file: Option<PathBuf>,
@@ -216,6 +227,7 @@ struct ChainOptions {
 }
 
 #[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
 struct HttpApiOptions {
     /// Run Grandine without HTTP API server.
     #[clap(long, default_value_t = false)]
@@ -292,37 +304,6 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_MAX_EVENTS)]
     max_events: usize,
 
-    /// Beacon node API URL to load recent finalized checkpoint and sync from it
-    /// [default: None]
-    #[clap(long)]
-    checkpoint_sync_url: Option<RedactingUrl>,
-
-    /// Number of epochs to keep blob or data column sidecars available for peer requests.
-    /// Overrides `Config::min_epochs_for_blob_sidecars_requests` and
-    /// `Config::min_epochs_for_data_column_sidecars_requests`.
-    /// Intended primarily for testing. Use with caution.
-    #[clap(
-        long,
-        conflicts_with("archive_storage"),
-        conflicts_with("prune_storage")
-    )]
-    data_availability_window: Option<u64>,
-
-    /// Force checkpoint sync. Requires --checkpoint-sync-url
-    /// [default: disabled]
-    #[clap(long, requires = "checkpoint_sync_url")]
-    force_checkpoint_sync: bool,
-
-    /// Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync.
-    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases.
-    /// [default: disabled]
-    #[clap(long)]
-    force_reset_beacon_db: bool,
-
-    /// List of Eth1 RPC URLs
-    #[clap(long, num_args = 1..)]
-    eth1_rpc_urls: Vec<RedactingUrl>,
-
     /// Parent directory for application data files
     /// [default: $HOME/.grandine/{network}]
     #[clap(long)]
@@ -333,108 +314,13 @@ struct BeaconNodeOptions {
     #[clap(long)]
     store_directory: Option<PathBuf>,
 
-    /// Directory to store application network files
-    /// [default: {data_dir}/network]
-    #[clap(long)]
-    network_dir: Option<PathBuf>,
-
-    /// Archival epoch interval
-    #[clap(long, default_value_t = DEFAULT_ARCHIVAL_EPOCH_INTERVAL)]
-    archival_epoch_interval: NonZeroU64,
-
-    /// Enable archival storage mode, where all blocks, states (every --archival-epoch-interval epochs) and blobs are stored in the database
-    /// [default: disabled]
-    #[clap(long, conflicts_with("prune_storage"))]
-    archive_storage: bool,
-
-    /// Enable prune storage mode, where only a single checkpoint state and block are stored in the database
-    /// [default: disabled]
-    #[clap(long, conflicts_with("archive_storage"))]
-    prune_storage: bool,
-
-    /// Number of unfinalized states to keep in memory.
-    #[clap(long, default_value_t = StoreConfig::default().unfinalized_states_in_memory)]
-    unfinalized_states_in_memory: u64,
-
-    /// Max size of the Eth2 database
-    #[clap(long, default_value_t = DEFAULT_ETH2_DB_SIZE)]
-    database_size: ByteSize,
-
-    /// Max size of the Eth1 database
-    #[clap(long, default_value_t = DEFAULT_ETH1_DB_SIZE)]
-    eth1_database_size: ByteSize,
-
-    /// Default data column reconstruction delay in milliseconds for nodes serving more than half of the available data columns.
-    #[clap(long, default_value_t = DEFAULT_RECONSTRUCTION_DELAY_MS)]
-    reconstruction_delay: u64,
-
     /// Default global request timeout for various services in milliseconds
     #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
     request_timeout: u64,
 
-    /// Max amount of epochs to retain beacon states in state cache
-    #[clap(long, default_value_t = StoreConfig::default().max_epochs_to_retain_states_in_cache)]
-    max_epochs_to_retain_states_in_cache: u64,
-
-    /// Default state cache lock timeout in milliseconds
-    #[clap(long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
-    state_cache_lock_timeout: u64,
-
-    /// State slot
-    /// [default: None]
-    #[clap(long)]
-    state_slot: Option<Slot>,
-
-    /// Run in semi-supernode mode, subscribing to half of the data column subnets
-    #[clap(
-        long,
-        conflicts_with("supernode"),
-        visible_alias("subscribe-half-data-column-subnets")
-    )]
-    semi_supernode: bool,
-
-    /// Run in supernode mode, subscribing to all data column subnets
-    #[clap(
-        long,
-        conflicts_with("semi_supernode"),
-        visible_alias("subscribe-all-data-column-subnets")
-    )]
-    supernode: bool,
-
-    /// Subscribe to all attestation and sync committee subnets.
-    /// This option does not include data column subnets.
-    #[clap(long)]
-    subscribe_all_subnets: bool,
-
     /// Suggested value for the feeRecipient field of the new payload
     #[clap(long, value_name = "EXECUTION_ADDRESS")]
     suggested_fee_recipient: Option<ExecutionAddress>,
-
-    /// Optional CL unique identifier to send to EL in the JWT token claim
-    /// [default: None]
-    #[clap(long)]
-    jwt_id: Option<String>,
-
-    /// Path to a file containing the hex-encoded 256 bit secret key to be used for verifying/generating JWT tokens
-    #[clap(long)]
-    jwt_secret: Option<PathBuf>,
-
-    /// Optional CL node type/version to send to EL in the JWT token claim
-    /// [default: None]
-    #[clap(long)]
-    jwt_version: Option<String>,
-
-    /// [DEPRECATED] Enable syncing historical data
-    /// [default: disabled]
-    #[clap(long = "back_sync")]
-    back_sync: bool,
-
-    /// Enable syncing historical data.
-    /// When used with --archive-storage, it will back-sync to genesis and reconstruct historical states.
-    /// When used without --archive-storage, it will back-sync blocks to the `Config::min_epochs_for_block_requests` epoch.
-    /// [default: disabled]
-    #[clap(long = "back-sync", conflicts_with("prune_storage"))]
-    back_sync_enabled: bool,
 
     /// Collect Prometheus metrics
     #[clap(long = "metrics")]
@@ -451,23 +337,6 @@ struct BeaconNodeOptions {
     /// Update system metrics every n seconds
     #[clap(long, default_value_t = DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS)]
     metrics_update_interval: u64,
-
-    /// Optional remote metrics (beaconcha.in metrics) URL that Grandine will periodically send metrics to
-    #[clap(long)]
-    remote_metrics_url: Option<RedactingUrl>,
-
-    /// The default tracing level controlling how detailed telemetry output will be.
-    #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
-    telemetry_level: Level,
-
-    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to.
-    /// WARNING: This feature is experimental, unstable, and subject to change. Use with caution.
-    #[clap(long)]
-    telemetry_metrics_url: Option<RedactingUrl>,
-
-    /// Optional OTLP service name.
-    #[clap(long, requires("telemetry_metrics_url"), default_value_t = APPLICATION_NAME.to_string())]
-    telemetry_service_name: String,
 
     /// Enable validator liveness tracking
     /// [default: disabled]
@@ -488,15 +357,36 @@ struct BeaconNodeOptions {
     /// KZG backend
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
+}
 
-    /// A list beacon block roots that beacon node rejects unconditionally
-    #[clap(long)]
-    blacklisted_blocks: Vec<H256>,
+#[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
+struct ExecutionLayerOptions {
+    /// List of Eth1 RPC URLs
+    #[clap(long, num_args = 1..)]
+    eth1_rpc_urls: Vec<RedactingUrl>,
 
-    /// Disable reconstruction while syncing the chain
-    /// [default: disabled]
+    /// Max size of the Eth1 database
+    #[clap(long, default_value_t = DEFAULT_ETH1_DB_SIZE)]
+    eth1_database_size: ByteSize,
+
+    /// Optional CL unique identifier to send to EL in the JWT token claim
+    /// [default: None]
     #[clap(long)]
-    sync_without_reconstruction: bool,
+    jwt_id: Option<String>,
+
+    /// Path to a file containing the hex-encoded 256 bit secret key to be used for verifying/generating JWT tokens
+    #[clap(long)]
+    jwt_secret: Option<PathBuf>,
+
+    /// Optional CL node type/version to send to EL in the JWT token claim
+    /// [default: None]
+    #[clap(long)]
+    jwt_version: Option<String>,
+
+    /// Start tracking deposit contract from BLOCK_NUMBER
+    #[clap(long, value_name = "BLOCK_NUMBER")]
+    deposit_contract_starting_block: Option<ExecutionBlockNumber>,
 }
 
 #[expect(
@@ -504,6 +394,165 @@ struct BeaconNodeOptions {
     reason = "False positive. The `bool`s are independent."
 )]
 #[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
+struct SyncOptions {
+    /// Beacon node API URL to load recent finalized checkpoint and sync from it
+    /// [default: None]
+    #[clap(long)]
+    checkpoint_sync_url: Option<RedactingUrl>,
+
+    /// Force checkpoint sync. Requires --checkpoint-sync-url
+    /// [default: disabled]
+    #[clap(long, requires = "checkpoint_sync_url")]
+    force_checkpoint_sync: bool,
+
+    /// State slot
+    /// [default: None]
+    #[clap(long)]
+    state_slot: Option<Slot>,
+
+    /// [DEPRECATED] Enable syncing historical data
+    /// [default: disabled]
+    #[clap(long = "back_sync")]
+    back_sync: bool,
+
+    /// Enable syncing historical data.
+    /// When used with --archive-storage, it will back-sync to genesis and reconstruct historical states.
+    /// When used without --archive-storage, it will back-sync blocks to the `Config::min_epochs_for_block_requests` epoch.
+    /// [default: disabled]
+    #[clap(long = "back-sync", conflicts_with("prune_storage"))]
+    back_sync_enabled: bool,
+
+    /// Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync.
+    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases.
+    /// [default: disabled]
+    #[clap(long)]
+    force_reset_beacon_db: bool,
+
+    /// Disable reconstruction while syncing the chain
+    /// [default: disabled]
+    #[clap(long)]
+    sync_without_reconstruction: bool,
+
+    /// Default data column reconstruction delay in milliseconds for nodes serving more than half of the available data columns.
+    #[clap(long, default_value_t = DEFAULT_RECONSTRUCTION_DELAY_MS)]
+    reconstruction_delay: u64,
+
+    /// A list beacon block roots that beacon node rejects unconditionally
+    #[clap(long)]
+    blacklisted_blocks: Vec<H256>,
+}
+
+#[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
+struct StorageOptions {
+    /// Directory to store application network files
+    /// [default: {data_dir}/network]
+    #[clap(long)]
+    network_dir: Option<PathBuf>,
+
+    /// Enable archival storage mode, where all blocks, states (every --archival-epoch-interval epochs) and blobs are stored in the database
+    /// [default: disabled]
+    #[clap(long, conflicts_with("prune_storage"))]
+    archive_storage: bool,
+
+    /// Enable prune storage mode, where only a single checkpoint state and block are stored in the database
+    /// [default: disabled]
+    #[clap(long, conflicts_with("archive_storage"))]
+    prune_storage: bool,
+
+    /// Archival epoch interval
+    #[clap(long, default_value_t = DEFAULT_ARCHIVAL_EPOCH_INTERVAL)]
+    archival_epoch_interval: NonZeroU64,
+
+    /// Max size of the Eth2 database
+    #[clap(long, default_value_t = DEFAULT_ETH2_DB_SIZE)]
+    database_size: ByteSize,
+
+    /// Number of unfinalized states to keep in memory.
+    #[clap(long, default_value_t = StoreConfig::default().unfinalized_states_in_memory)]
+    unfinalized_states_in_memory: u64,
+
+    /// Max amount of epochs to retain beacon states in state cache
+    #[clap(long, default_value_t = StoreConfig::default().max_epochs_to_retain_states_in_cache)]
+    max_epochs_to_retain_states_in_cache: u64,
+
+    /// Default state cache lock timeout in milliseconds
+    #[clap(long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
+    state_cache_lock_timeout: u64,
+
+    /// Number of epochs to keep blob or data column sidecars available for peer requests.
+    /// Overrides `Config::min_epochs_for_blob_sidecars_requests` and
+    /// `Config::min_epochs_for_data_column_sidecars_requests`.
+    /// Intended primarily for testing. Use with caution.
+    #[clap(
+        long,
+        conflicts_with("archive_storage"),
+        conflicts_with("prune_storage")
+    )]
+    data_availability_window: Option<u64>,
+}
+
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
+#[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
+struct CustodyOptions {
+    /// Run in supernode mode, subscribing to all data column subnets
+    #[clap(
+        long,
+        conflicts_with("semi_supernode"),
+        visible_alias("subscribe-all-data-column-subnets")
+    )]
+    supernode: bool,
+
+    /// Run in semi-supernode mode, subscribing to half of the data column subnets
+    #[clap(
+        long,
+        conflicts_with("supernode"),
+        visible_alias("subscribe-half-data-column-subnets")
+    )]
+    semi_supernode: bool,
+
+    /// Subscribe to all attestation and sync committee subnets.
+    /// This option does not include data column subnets.
+    #[clap(long)]
+    subscribe_all_subnets: bool,
+
+    /// Backfill custody groups
+    #[clap(long)]
+    no_custody_groups_backfill: bool,
+}
+
+#[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
+struct TelemetryOptions {
+    /// Optional remote metrics (beaconcha.in metrics) URL that Grandine will periodically send metrics to
+    #[clap(long)]
+    remote_metrics_url: Option<RedactingUrl>,
+
+    /// The default tracing level controlling how detailed telemetry output will be.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
+    telemetry_level: Level,
+
+    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to.
+    /// WARNING: This feature is experimental, unstable, and subject to change. Use with caution.
+    #[clap(long)]
+    telemetry_metrics_url: Option<RedactingUrl>,
+
+    /// Optional OTLP service name.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = APPLICATION_NAME.to_string())]
+    telemetry_service_name: String,
+}
+
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
+#[derive(Debug, Args)]
+#[group(conflicts_with = "disable_local_beacon_node")]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
     /// [default: 0.0.0.0, unless --disable-ipv4 is set]
@@ -638,7 +687,7 @@ struct NetworkConfigOptions {
     trusted_peers: Vec<PeerIdSerialized>,
 }
 
-impl BeaconNodeOptions {
+impl TelemetryOptions {
     pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
         if let Some(url) = self.telemetry_metrics_url.clone() {
             return Some(TelemetryConfig {
@@ -944,10 +993,6 @@ struct ValidatorOptions {
     #[clap(long)]
     report_validator_performance: bool,
 
-    /// Backfill custody groups
-    #[clap(long)]
-    no_custody_groups_backfill: bool,
-
     /// Disable additional 1 second wait before attesting for late blocks that are being processed at the start of the attest duty
     #[clap(long)]
     disable_wait_for_late_blocks: bool,
@@ -963,7 +1008,12 @@ struct RemoteValidatorOptions {
     #[clap(
         long,
         requires = "beacon_node_urls",
-        conflicts_with_all = ["http_address", "http_port", "http_allowed_origins", "timeout"],
+        conflicts_with_all = [
+            "max_events",
+            "kzg_backend",
+            "track_liveness",
+            "report_validator_performance",
+        ],
     )]
     disable_local_beacon_node: bool,
 
@@ -1082,6 +1132,11 @@ impl GrandineArgs {
         let Self {
             chain_options,
             beacon_node_options,
+            execution_layer_options,
+            sync_options,
+            storage_options,
+            custody_options,
+            telemetry_options,
             http_api_options,
             mut network_config_options,
             validator_options,
@@ -1109,57 +1164,72 @@ impl GrandineArgs {
             terminal_total_difficulty_override,
             terminal_block_hash_override,
             terminal_block_hash_activation_epoch_override,
-            mut deposit_contract_starting_block,
             mut genesis_state_file,
             genesis_state_download_url,
         } = chain_options;
 
-        let telemetry_config = beacon_node_options.telemetry_config();
+        let telemetry_config = telemetry_options.telemetry_config();
 
         let BeaconNodeOptions {
             max_empty_slots,
             max_events,
-            checkpoint_sync_url,
-            data_availability_window,
-            eth1_rpc_urls,
-            force_checkpoint_sync,
-            force_reset_beacon_db,
             data_dir,
             store_directory,
-            network_dir,
-            database_size,
-            eth1_database_size,
-            archival_epoch_interval,
-            archive_storage,
-            prune_storage,
-            unfinalized_states_in_memory,
-            reconstruction_delay,
             request_timeout,
-            max_epochs_to_retain_states_in_cache,
-            state_cache_lock_timeout,
-            state_slot,
-            semi_supernode,
-            supernode,
-            subscribe_all_subnets,
             suggested_fee_recipient,
-            jwt_id,
-            jwt_secret,
-            jwt_version,
-            back_sync,
-            mut back_sync_enabled,
             metrics_enabled,
             metrics_address,
             metrics_port,
             metrics_update_interval,
-            remote_metrics_url,
             track_liveness,
             detect_doppelgangers,
             in_memory,
             kzg_backend,
-            blacklisted_blocks,
-            sync_without_reconstruction,
-            ..
         } = beacon_node_options;
+
+        let ExecutionLayerOptions {
+            eth1_rpc_urls,
+            eth1_database_size,
+            jwt_id,
+            jwt_secret,
+            jwt_version,
+            mut deposit_contract_starting_block,
+        } = execution_layer_options;
+
+        let SyncOptions {
+            checkpoint_sync_url,
+            force_checkpoint_sync,
+            state_slot,
+            back_sync,
+            mut back_sync_enabled,
+            force_reset_beacon_db,
+            sync_without_reconstruction,
+            reconstruction_delay,
+            blacklisted_blocks,
+        } = sync_options;
+
+        let StorageOptions {
+            network_dir,
+            archive_storage,
+            prune_storage,
+            archival_epoch_interval,
+            database_size,
+            unfinalized_states_in_memory,
+            max_epochs_to_retain_states_in_cache,
+            state_cache_lock_timeout,
+            data_availability_window,
+        } = storage_options;
+
+        let CustodyOptions {
+            supernode,
+            semi_supernode,
+            subscribe_all_subnets,
+            no_custody_groups_backfill,
+        } = custody_options;
+
+        let TelemetryOptions {
+            remote_metrics_url, ..
+        } = telemetry_options;
 
         // let SlasherOptions {
         //     slashing_enabled,
@@ -1189,7 +1259,6 @@ impl GrandineArgs {
             web3signer_urls,
             slashing_protection_history_limit,
             report_validator_performance,
-            no_custody_groups_backfill,
             disable_wait_for_late_blocks,
         } = validator_options;
 
@@ -1709,7 +1778,7 @@ impl GrandineArgs {
 
     #[must_use]
     pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
-        self.beacon_node_options.telemetry_config()
+        self.telemetry_options.telemetry_config()
     }
 }
 
@@ -2079,6 +2148,37 @@ mod tests {
             "9000",
         ])
         .expect_err("--disable-ipv4 conflicts with --enr-tcp-port");
+    }
+
+    // Options the built-in beacon node alone acts on are refused rather than silently dropped.
+    #[test]
+    fn disable_local_beacon_node_conflicts_with_node_only_options() {
+        try_config_from_args([
+            "--disable-local-beacon-node",
+            "--beacon-node-urls",
+            "http://localhost:5052",
+            "--checkpoint-sync-url",
+            "http://localhost:5053",
+        ])
+        .expect_err("--disable-local-beacon-node conflicts with --checkpoint-sync-url");
+
+        try_config_from_args([
+            "--disable-local-beacon-node",
+            "--beacon-node-urls",
+            "http://localhost:5052",
+            "--target-peers",
+            "10",
+        ])
+        .expect_err("--disable-local-beacon-node conflicts with --target-peers");
+
+        try_config_from_args([
+            "--disable-local-beacon-node",
+            "--beacon-node-urls",
+            "http://localhost:5052",
+            "--max-empty-slots",
+            "5",
+        ])
+        .expect("options the validator itself reads stay accepted without the built-in node");
     }
 
     #[test]

@@ -1,4 +1,7 @@
-use core::cmp::Reverse;
+use core::{
+    cmp::Reverse,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -43,12 +46,17 @@ pub enum StartupError {
 
 pub struct RemoteBeaconNodes {
     nodes: Vec<Arc<RemoteBeaconNode>>,
+    /// Shared with every node, which reads it to size its timeouts.
+    serving_count: Arc<AtomicUsize>,
 }
 
 impl RemoteBeaconNodes {
     #[must_use]
-    pub const fn new(nodes: Vec<Arc<RemoteBeaconNode>>) -> Self {
-        Self { nodes }
+    pub const fn new(nodes: Vec<Arc<RemoteBeaconNode>>, serving_count: Arc<AtomicUsize>) -> Self {
+        Self {
+            nodes,
+            serving_count,
+        }
     }
 
     pub fn spawn_head_streams<P: Preset>(&self) {
@@ -151,6 +159,8 @@ impl RemoteBeaconNodes {
 
         let ready = self.count(Health::is_ready);
         let serving = self.count(Health::can_serve);
+
+        self.serving_count.store(serving, Ordering::Relaxed);
 
         (ready, serving)
     }

@@ -591,36 +591,35 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
             return Ok(());
         }
 
+        let operation = "update sync committee subscriptions";
         let subscribe_on = self.serving_nodes();
+        let remote_subscriptions = Arc::new(subscriptions.to_vec());
 
-        if !subscribe_on.is_empty() {
-            let subscriptions = Arc::new(subscriptions.to_vec());
+        // Every node is told, as any of them may be asked to contribute later.
+        let attempt = move |node: Arc<RemoteBeaconNode>| {
+            let subscriptions = remote_subscriptions.clone_arc();
 
-            // Every node is told, as any of them may be asked to contribute later.
-            spawn_broadcast(
-                "update sync committee subscriptions",
-                subscribe_on,
-                move |node| {
-                    let subscriptions = subscriptions.clone_arc();
+            async move {
+                BeaconNodeApi::<P>::subscribe_to_sync_committees(
+                    node.as_ref(),
+                    current_epoch,
+                    &subscriptions,
+                )
+                .await
+            }
+        };
 
-                    async move {
-                        BeaconNodeApi::<P>::subscribe_to_sync_committees(
-                            node.as_ref(),
-                            current_epoch,
-                            &subscriptions,
-                        )
-                        .await
-                    }
-                },
-            );
-        }
-
+        // With a local node this runs on the tick, which must not wait for remote nodes.
         match &self.local_node {
             Some(node) => {
+                if !subscribe_on.is_empty() {
+                    spawn_broadcast(operation, subscribe_on, attempt);
+                }
+
                 node.subscribe_to_sync_committees(current_epoch, subscriptions)
                     .await
             }
-            None => Ok(()),
+            None => broadcast(operation, subscribe_on, attempt).await,
         }
     }
 
@@ -807,27 +806,45 @@ where
     Fut: Future<Output = Result<()>> + Send,
 {
     tokio::spawn(async move {
-        let accepted = remotes
-            .iter()
-            .map(|node| {
-                let attempt = attempt(node.clone_arc());
-
-                async move {
-                    attempt
-                        .await
-                        .inspect_err(|error| {
-                            warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
-                        })
-                        .is_ok()
-                }
-            })
-            .pipe(join_all)
-            .await;
-
-        if !accepted.into_iter().any(identity) {
-            warn_with_peers!("no remote beacon node was able to {operation}");
+        if let Err(error) = broadcast(operation, remotes, attempt).await {
+            warn_with_peers!("{error}");
         }
     });
+}
+
+/// Succeeds when any node accepts, having warned about each one that did not.
+async fn broadcast<F, Fut>(
+    operation: &'static str,
+    remotes: Vec<Arc<RemoteBeaconNode>>,
+    attempt: F,
+) -> Result<()>
+where
+    F: Fn(Arc<RemoteBeaconNode>) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    let accepted = remotes
+        .iter()
+        .map(|node| {
+            let attempt = attempt(node.clone_arc());
+
+            async move {
+                attempt
+                    .await
+                    .inspect_err(|error| {
+                        warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
+                    })
+                    .is_ok()
+            }
+        })
+        .pipe(join_all)
+        .await;
+
+    ensure!(
+        accepted.into_iter().any(identity),
+        "no remote beacon node was able to {operation}",
+    );
+
+    Ok(())
 }
 
 async fn first_success<N: Display, T, F: Future<Output = Result<T>>>(

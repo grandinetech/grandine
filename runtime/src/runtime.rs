@@ -1,6 +1,6 @@
 use core::{
     convert::Infallible as Never, future::Future, net::SocketAddr, panic::AssertUnwindSafe,
-    pin::pin, time::Duration,
+    pin::pin, sync::atomic::AtomicUsize, time::Duration,
 };
 #[cfg(feature = "embed")]
 use std::sync::LazyLock;
@@ -1477,7 +1477,7 @@ impl Context {
             .inspect_err(|error| error!("error occurred while executing command: {error:?}"));
         }
 
-        let serving_count = Arc::new(core::sync::atomic::AtomicUsize::new(beacon_node_urls.len()));
+        let serving_count = Arc::new(AtomicUsize::new(beacon_node_urls.len()));
 
         let remote_beacon_nodes = Arc::new(RemoteBeaconNodes::new(
             beacon_node_urls
@@ -1492,6 +1492,7 @@ impl Context {
                     ))
                 })
                 .collect(),
+            serving_count,
         ));
 
         let anchor_genesis = anchor_checkpoint_provider.as_ref().map(|provider| {

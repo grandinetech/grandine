@@ -1,4 +1,4 @@
-use core::time::Duration;
+use core::{pin::pin, time::Duration};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{Result, ensure};
@@ -124,27 +124,11 @@ impl ChainHead {
     }
 
     pub fn update(&self, slot: Slot, block_root: H256) {
-        let mut head = self
+        // The latest report is the node's head whatever its slot; a reorg can move it back.
+        *self
             .head
             .write()
-            .expect("chain head lock is never poisoned");
-
-        if head.is_none_or(|current| slot >= current.slot) {
-            *head = Some(Head { slot, block_root });
-        }
-    }
-
-    /// [`Self::update`], also replacing a cached head past `at_slot`, which no honest node
-    /// reports.
-    pub fn overwrite(&self, at_slot: Slot, slot: Slot, block_root: H256) {
-        let mut head = self
-            .head
-            .write()
-            .expect("chain head lock is never poisoned");
-
-        if head.is_none_or(|current| slot >= current.slot || current.slot > at_slot) {
-            *head = Some(Head { slot, block_root });
-        }
+            .expect("chain head lock is never poisoned") = Some(Head { slot, block_root });
     }
 
     pub fn can_serve(&self, at_slot: Slot, max_empty_slots: u64) -> bool {
@@ -173,7 +157,9 @@ async fn follow<P: Preset>(node: Arc<RemoteBeaconNode>) {
 
     loop {
         let delivered = match node.head_events::<P>().await {
-            Ok(mut events) => {
+            Ok(events) => {
+                let mut events = pin!(events);
+
                 if subscribed_before {
                     debug_with_peers!("resubscribed to head events from {node}");
                 } else {
@@ -293,7 +279,7 @@ mod tests {
             .get(6, MAX_EMPTY_SLOTS)
             .expect_err("the cached head is past slot 6");
 
-        chain_head.overwrite(6, 5, H256::repeat_byte(2));
+        chain_head.update(5, H256::repeat_byte(2));
 
         assert_eq!(
             chain_head.get(6, MAX_EMPTY_SLOTS)?,
@@ -321,8 +307,9 @@ mod tests {
         assert_eq!(chain_head.dependent_root_for(7), None);
     }
 
+    // A node reorging to a shorter branch reports a lower head, which must not be left behind.
     #[test]
-    fn only_a_later_head_replaces_the_cached_one() -> Result<()> {
+    fn a_reorg_to_a_lower_slot_replaces_the_cached_head() -> Result<()> {
         let chain_head = ChainHead::default();
 
         chain_head.update(6, H256::repeat_byte(1));
@@ -330,14 +317,7 @@ mod tests {
 
         assert_eq!(
             chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(1))
-        );
-
-        chain_head.update(6, H256::repeat_byte(3));
-
-        assert_eq!(
-            chain_head.get(6, MAX_EMPTY_SLOTS)?,
-            Some(H256::repeat_byte(3))
+            Some(H256::repeat_byte(2))
         );
 
         Ok(())

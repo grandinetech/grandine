@@ -253,11 +253,16 @@ impl<P: Preset, W: Wait + Sync> PrefetchSyncCommitteeDutiesTask<P, W> {
             && let Some(subscriptions) = own_sync_committee_members
                 .subscriptions_to_send::<P>(current_epoch)
                 .await
-            && let Err(error) = beacon_nodes
+        {
+            match beacon_nodes
                 .subscribe_to_sync_committees(current_epoch, &subscriptions)
                 .await
-        {
-            warn_with_peers!("failed to update sync committee subscriptions: {error:?}");
+            {
+                Ok(()) => own_sync_committee_members.mark_subscriptions_sent(current_epoch),
+                Err(error) => {
+                    warn_with_peers!("failed to update sync committee subscriptions: {error:?}");
+                }
+            }
         }
 
         drop(wait_group);
@@ -385,17 +390,13 @@ impl OwnSyncCommitteeMembers {
         Ok(())
     }
 
-    /// The subscriptions due at `current_epoch`, once per epoch so that a restarted or newly
-    /// reachable node still learns them.
+    /// The subscriptions due at `current_epoch`, until [`Self::mark_subscriptions_sent`] records
+    /// them as sent, so that a restarted or newly reachable node still learns them each epoch.
     pub async fn subscriptions_to_send<P: Preset>(
         &self,
         current_epoch: Epoch,
     ) -> Option<Vec<SyncCommitteeSubscription>> {
-        if self
-            .subscriptions_sent_at
-            .swap(current_epoch, Ordering::Relaxed)
-            == current_epoch
-        {
+        if self.subscriptions_sent_at.load(Ordering::Relaxed) == current_epoch {
             return None;
         }
 
@@ -415,7 +416,13 @@ impl OwnSyncCommitteeMembers {
             })
             .await;
 
-        Some(subscriptions)
+        // Nothing to send is nothing sent, so a failed duties fetch is retried next slot.
+        (!subscriptions.is_empty()).then_some(subscriptions)
+    }
+
+    pub fn mark_subscriptions_sent(&self, current_epoch: Epoch) {
+        self.subscriptions_sent_at
+            .store(current_epoch, Ordering::Relaxed);
     }
 
     /// The periods worth fetching at `current_epoch`: the one being served and the one after it.
