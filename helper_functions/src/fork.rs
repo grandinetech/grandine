@@ -1,5 +1,5 @@
 use core::ops::BitOrAssign as _;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -52,9 +52,8 @@ use types::{
 };
 
 use crate::{
-    accessors,
-    deposit_signatures::is_valid_deposit_signature_cached,
-    gloas::add_builder_to_registry,
+    accessors, deposit_signatures,
+    gloas::{ReusableBuilderIndices, add_builder_to_registry_reusing},
     misc,
     mutators::{self, builder_balance, increase_balance},
     phase0, predicates,
@@ -987,11 +986,60 @@ fn onboard_builders<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut GloasBeaconState<P>,
 ) -> Result<()> {
-    let validator_pubkeys = state.validators.pubkeys().clone();
+    // Copied out because the loop below mutates `state`.
+    let deposits = state.pending_deposits().iter().copied().collect::<Vec<_>>();
+
+    // Deposits for existing validators are never onboarded and never have their
+    // signature checked. Answered here rather than in the loop below, which would
+    // otherwise have to clone `validators.pubkeys()` along with its index map.
+    let is_for_validator = deposits
+        .iter()
+        .map(|deposit| state.validators.pubkeys().contains(&deposit.pubkey))
+        .collect::<Vec<_>>();
+
+    // Only a deposit for a pubkey that some builder deposit in the queue claims is
+    // ever signature checked, either to onboard that builder or to decide whether a
+    // valid deposit for a new validator with the same pubkey is queued ahead of it.
+    let builder_pubkeys = deposits
+        .iter()
+        .zip(&is_for_validator)
+        .filter(|(deposit, is_for_validator)| {
+            !**is_for_validator
+                && predicates::is_builder_withdrawal_credential(deposit.withdrawal_credentials)
+        })
+        .map(|(deposit, _)| deposit.pubkey)
+        .collect::<HashSet<_>>();
+
+    let checked = (0..deposits.len())
+        .filter(|index| {
+            !is_for_validator[*index] && builder_pubkeys.contains(&deposits[*index].pubkey)
+        })
+        .collect::<Vec<_>>();
+
+    let verified = deposit_signatures::verify_deposit_signatures(
+        config,
+        pubkey_cache,
+        checked.iter().map(|index| &deposits[*index]),
+    );
+
+    // `false` for deposits that are never signature checked. Those are never asked about.
+    let mut signature_is_valid = vec![false; deposits.len()];
+
+    for (index, is_valid) in checked.into_iter().zip(verified) {
+        signature_is_valid[index] = is_valid;
+    }
+
     let mut builder_indices: HashMap<PublicKeyBytes, BuilderIndex> = HashMap::new();
+    let mut reusable_indices = ReusableBuilderIndices::default();
     let mut pending_deposits = vec![];
 
-    for deposit in &*state.pending_deposits().clone_boxed() {
+    // The pubkeys that the spec's `is_pending_validator` would find in `pending_deposits`.
+    // A set, because rescanning the queue for every builder deposit is quadratic.
+    // Pubkeys already in `validators` are left out: a builder deposit for one of those
+    // never reaches the check below.
+    let mut pending_validator_pubkeys = HashSet::new();
+
+    for (index, deposit) in deposits.iter().enumerate() {
         let PendingDeposit {
             pubkey,
             withdrawal_credentials,
@@ -1002,34 +1050,48 @@ fn onboard_builders<P: Preset>(
 
         if let Some(builder_index) = builder_indices.get(&pubkey) {
             increase_balance(builder_balance(state, *builder_index)?, amount)?;
-        } else {
-            let is_not_builder = validator_pubkeys.contains(&pubkey)
-                || !predicates::is_builder_withdrawal_credential(withdrawal_credentials)
-                || predicates::is_pending_validator(
-                    config,
-                    &pending_deposits,
-                    pubkey,
-                    pubkey_cache,
-                );
-
-            if is_not_builder {
-                pending_deposits.push(*deposit);
-            } else if is_valid_deposit_signature_cached(config, pubkey_cache, deposit) {
-                let mut address = ExecutionAddress::zero();
-                address.assign_from_slice(&withdrawal_credentials[12..]);
-
-                add_builder_to_registry(
-                    state,
-                    pubkey,
-                    PAYLOAD_BUILDER_VERSION,
-                    address,
-                    amount,
-                    slot,
-                )?;
-
-                builder_indices.insert(pubkey, builder_indices.len().try_into()?);
-            }
+            continue;
         }
+
+        if is_for_validator[index] {
+            pending_deposits.push(*deposit);
+            continue;
+        }
+
+        if !predicates::is_builder_withdrawal_credential(withdrawal_credentials) {
+            if signature_is_valid[index] {
+                pending_validator_pubkeys.insert(pubkey);
+            }
+
+            pending_deposits.push(*deposit);
+            continue;
+        }
+
+        // A valid deposit for a new validator with this pubkey is queued ahead of this
+        // one, so this one is applied to that validator later instead.
+        if pending_validator_pubkeys.contains(&pubkey) {
+            pending_deposits.push(*deposit);
+            continue;
+        }
+
+        if !signature_is_valid[index] {
+            continue;
+        }
+
+        let mut address = ExecutionAddress::zero();
+        address.assign_from_slice(&withdrawal_credentials[12..]);
+
+        let builder_index = add_builder_to_registry_reusing(
+            state,
+            &mut reusable_indices,
+            pubkey,
+            PAYLOAD_BUILDER_VERSION,
+            address,
+            amount,
+            slot,
+        )?;
+
+        builder_indices.insert(pubkey, builder_index);
     }
 
     state
