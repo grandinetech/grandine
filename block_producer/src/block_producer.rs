@@ -2297,7 +2297,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         let bid = snapshot
-            .selectable_payload_bids(state.slot(), parent_block_hash, self.head_block_root)
+            .selectable_payload_bids(state, state.slot(), parent_block_hash, self.head_block_root)
             .max_by_key(|bid| bid.message.value)?;
 
         // The bid value is what the builder pays the proposer for the slot, so it is comparable to

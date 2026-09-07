@@ -33,7 +33,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
 use crate::{
@@ -1492,14 +1492,19 @@ impl<P: Preset> Snapshot<'_, P> {
         self.store_snapshot.accepted_payload_bids_at_slot(slot)
     }
 
-    pub fn selectable_payload_bids(
-        &self,
+    pub fn selectable_payload_bids<'a>(
+        &'a self,
+        state: &'a (impl PostGloasBeaconState<P> + ?Sized),
         slot: Slot,
         parent_block_hash: ExecutionBlockHash,
         parent_block_root: H256,
-    ) -> impl Iterator<Item = &SignedExecutionPayloadBid<P>> {
-        self.store_snapshot
-            .selectable_payload_bids(slot, parent_block_hash, parent_block_root)
+    ) -> impl Iterator<Item = &'a SignedExecutionPayloadBid<P>> {
+        self.store_snapshot.selectable_payload_bids(
+            state,
+            slot,
+            parent_block_hash,
+            parent_block_root,
+        )
     }
 
     #[must_use]
