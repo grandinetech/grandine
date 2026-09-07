@@ -382,7 +382,7 @@ fn signed_execution_payload_bid<P: Preset>(
         message: ExecutionPayloadBid {
             parent_block_hash: state.latest_block_hash(),
             parent_block_root: state.latest_block_header().hash_tree_root(),
-            block_hash: ExecutionBlockHash::zero(),
+            block_hash: ExecutionBlockHash::from_low_u64_be(state.slot()),
             prev_randao,
             builder_index: BUILDER_INDEX_SELF_BUILD,
             slot: state.slot(),

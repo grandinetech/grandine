@@ -39,6 +39,8 @@ pub enum Error<P: Preset> {
     AttestationWithInvalidPayloadStatus { attestation: Attestation<P> },
     #[error("post-Electra attestation with invalid (non-zero) committee index: {attestation:?}")]
     AttestationWithNonZeroCommitteeIndex { attestation: Attestation<P> },
+    #[error("bid block hash ({block_hash:?}) equals parent block hash")]
+    BidBlockHashEqualsParentBlockHash { block_hash: ExecutionBlockHash },
     #[error("bid at genesis slot")]
     BidSlotAtGenesis,
     #[error("bid slot ({in_bid}) does not match state slot ({in_state})")]

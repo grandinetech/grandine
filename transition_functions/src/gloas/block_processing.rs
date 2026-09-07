@@ -593,6 +593,7 @@ fn validate_execution_payload_bid<P: Preset>(
         builder_index,
         value: amount,
         slot,
+        block_hash,
         parent_block_hash,
         parent_block_root,
         prev_randao,
@@ -672,6 +673,12 @@ fn validate_execution_payload_bid<P: Preset>(
             in_bid: parent_block_hash,
             in_state: state.latest_block_hash(),
         }
+    );
+
+    // > Verify that the bid's block hash differs from its parent block hash
+    ensure!(
+        block_hash != parent_block_hash,
+        Error::<P>::BidBlockHashEqualsParentBlockHash { block_hash }
     );
 
     let parent_beacon_block_root =
