@@ -154,6 +154,7 @@ pub fn custom_process_block<P: Preset>(
     debug_assert_eq!(state.slot, block.slot);
 
     // > [New in Gloas:EIP7732]
+    let parent_slot = state.latest_block_header().slot;
     process_parent_execution_payload(config, pubkey_cache, state, block)?;
 
     unphased::process_block_header(config, state, block)?;
@@ -163,7 +164,7 @@ pub fn custom_process_block<P: Preset>(
 
     // > [New in Gloas:EIP7732]
     // This function must be called after `process_withdrawals`
-    let parent_slot = process_execution_payload_bid(
+    process_execution_payload_bid(
         config,
         pubkey_cache,
         state,
@@ -770,7 +771,7 @@ pub fn apply_parent_execution_payload<P: Preset>(
     process_execution_requests(config, pubkey_cache, state, execution_requests)?;
 
     let parent_bid = state.latest_execution_payload_bid().clone();
-    let parent_slot = parent_bid.slot;
+    let parent_slot = state.latest_block_header().slot;
     let parent_epoch = compute_epoch_at_slot::<P>(parent_slot);
 
     if parent_epoch == get_current_epoch(state) {
@@ -832,7 +833,7 @@ pub fn process_execution_payload_bid<P: Preset>(
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
     signed_bid: &SignedExecutionPayloadBid<P>,
-) -> Result<Slot> {
+) -> Result<()> {
     let ExecutionPayloadBid {
         value: amount,
         builder_index,
@@ -859,13 +860,10 @@ pub fn process_execution_payload_bid<P: Preset>(
             .mod_index_mut(builder_payment_index_for_current_epoch::<P>(slot)?) = pending_payment;
     }
 
-    // > Cache the parent block's slot before overwriting the bid
-    let parent_slot = state.latest_execution_payload_bid().slot;
-
     // > Cache the signed execution payload bid
     *state.latest_execution_payload_bid_mut() = signed_bid.message.clone();
 
-    Ok(parent_slot)
+    Ok(())
 }
 
 fn ensure_operation_count<P: Preset>(
@@ -1520,7 +1518,6 @@ mod spec_tests {
                 state,
                 &execution_payload_bid,
             )
-            .map(|_parent_slot| ())
         },
         "execution_payload_bid",
         "consensus-spec-tests/tests/mainnet/gloas/operations/execution_payload_bid/*/*",
