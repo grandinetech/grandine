@@ -2252,6 +2252,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             Error::<P>::ExecutionPayloadBidOffProtocolPaymentDisallowed { payload_bid }
         );
 
+        // > The bid's block hash is not equal to its parent block hash
+        ensure!(
+            bid.block_hash != bid.parent_block_hash,
+            Error::<P>::ExecutionPayloadBidBlockHashEqualsParent { payload_bid }
+        );
+
         // > the `bid.slot` is the current slot or the next slot
         if bid.slot < self.slot() || bid.slot > self.slot().saturating_add(1) {
             return Ok(ExecutionPayloadBidAction::Ignore(

@@ -172,6 +172,10 @@ pub enum Error<P: Preset> {
     },
     #[error("delayed objects until parent queue is full")]
     DelayedUntilParentQueueFull,
+    #[error("bid's block hash equals its parent block hash: {payload_bid:?}")]
+    ExecutionPayloadBidBlockHashEqualsParent {
+        payload_bid: Arc<SignedExecutionPayloadBid<P>>,
+    },
     #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
     ExecutionPayloadBidBuilderInactive {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
