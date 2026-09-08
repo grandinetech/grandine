@@ -28,6 +28,7 @@ use crate::{
         subnets_from_sync_committee_indices,
     },
     own_beacon_committee_members::OwnBeaconCommitteeMembers,
+    own_proposer_duties::OwnProposerDuties,
     own_ptc_members::OwnPTCMembers,
     own_validator_indices::OwnValidatorIndices,
 };
@@ -36,6 +37,7 @@ pub struct UpdateBeaconCommitteeSubscriptionsTask<P: Preset, W: Wait + Sync> {
     pub chain_config: Arc<ChainConfig>,
     pub source: DutySource<P>,
     pub own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
+    pub own_proposer_duties: Arc<OwnProposerDuties>,
     pub own_ptc_members: Arc<OwnPTCMembers>,
     pub own_validator_indices: Arc<OwnValidatorIndices>,
     pub beacon_nodes: BeaconNodes<P, W>,
@@ -53,6 +55,7 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
             chain_config,
             source,
             own_beacon_committee_members,
+            own_proposer_duties,
             own_ptc_members,
             own_validator_indices,
             beacon_nodes,
@@ -122,6 +125,16 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
                 &validator_indices,
             )
             .await;
+
+            prefetch_proposer_duties(
+                &chain_config,
+                &own_beacon_committee_members,
+                &own_proposer_duties,
+                &beacon_nodes,
+                epoch,
+                &validator_indices,
+            )
+            .await;
         }
 
         for slot in own_members_misc::slots_to_compute_in_advance(current_slot) {
@@ -187,6 +200,39 @@ async fn prefetch_ptc_duties<P: Preset, W: Wait + Sync>(
         .await
     {
         warn_with_peers!("failed to obtain PTC duties for epoch {epoch}: {error:?}");
+    }
+}
+
+/// The epoch whose attester duties share a dependent root with the proposer duties of `epoch`.
+pub fn proposer_dependent_epoch(chain_config: &ChainConfig, epoch: Epoch) -> Epoch {
+    // The Fulu proposer lookahead fixes proposers an epoch earlier than before.
+    if chain_config.phase_at_epoch(epoch) >= Phase::Fulu {
+        epoch
+    } else {
+        epoch.saturating_add(1)
+    }
+}
+
+async fn prefetch_proposer_duties<P: Preset, W: Wait + Sync>(
+    chain_config: &ChainConfig,
+    own_beacon_committee_members: &OwnBeaconCommitteeMembers,
+    own_proposer_duties: &OwnProposerDuties,
+    beacon_nodes: &BeaconNodes<P, W>,
+    epoch: Epoch,
+    validator_indices: &[ValidatorIndex],
+) {
+    let Some(dependent_root) = own_beacon_committee_members
+        .cached_dependent_root(proposer_dependent_epoch(chain_config, epoch))
+        .await
+    else {
+        return;
+    };
+
+    if let Err(error) = own_proposer_duties
+        .init_at_epoch(beacon_nodes, epoch, dependent_root, validator_indices)
+        .await
+    {
+        warn_with_peers!("failed to obtain proposer duties for epoch {epoch}: {error:?}");
     }
 }
 
@@ -475,6 +521,18 @@ mod tests {
         assert_eq!(period_at_slot::<Minimal>(62), 0);
         assert_eq!(period_at_slot::<Minimal>(63), 1);
         assert_eq!(period_at_slot::<Minimal>(64), 1);
+    }
+
+    // Proposer duties depend on the previous epoch's last block until the Fulu lookahead moves
+    // them an epoch back, onto the root attester duties of the same epoch use.
+    #[test]
+    fn proposer_duties_share_the_attester_root_of_the_same_epoch_from_fulu_on() {
+        let config = ChainConfig::mainnet();
+        let fulu = config.fulu_fork_epoch;
+
+        assert_eq!(proposer_dependent_epoch(&config, fulu - 1), fulu);
+        assert_eq!(proposer_dependent_epoch(&config, fulu), fulu);
+        assert_eq!(proposer_dependent_epoch(&config, fulu + 1), fulu + 1);
     }
 
     #[test]

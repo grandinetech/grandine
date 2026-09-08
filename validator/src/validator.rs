@@ -104,12 +104,13 @@ use crate::{
         Aggregator, ChainSource, DutySource, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember,
     },
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
+    own_proposer_duties::OwnProposerDuties,
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     slot_head::SlotHead,
     tasks::{
         OwnSyncCommitteeMembers, PrefetchSyncCommitteeDutiesTask,
-        UpdateBeaconCommitteeSubscriptionsTask,
+        UpdateBeaconCommitteeSubscriptionsTask, proposer_dependent_epoch,
     },
     validator_config::ValidatorConfig,
 };
@@ -217,6 +218,7 @@ pub struct Validator<P: Preset, W: Wait> {
     own_sync_committee_members: Arc<OwnSyncCommitteeMembers>,
     own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions<P>,
     sent_sync_committee_subscriptions_for: Option<Epoch>,
+    own_proposer_duties: Arc<OwnProposerDuties>,
     own_ptc_members: Arc<OwnPTCMembers>,
     own_payload_attestations: OnceCell<Vec<PayloadAttestationMessage>>,
     published_own_sync_committee_messages_for: Option<SlotHead<P>>,
@@ -267,6 +269,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             signer.clone_arc(),
         ));
 
+        let own_proposer_duties = Arc::new(OwnProposerDuties::new(signer.clone_arc()));
         let own_ptc_members = Arc::new(OwnPTCMembers::new(signer.clone_arc()));
 
         Self {
@@ -281,6 +284,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_sync_committee_members: Arc::new(OwnSyncCommitteeMembers::new()),
             own_sync_committee_subscriptions: OwnSyncCommitteeSubscriptions::default(),
             sent_sync_committee_subscriptions_for: None,
+            own_proposer_duties,
             own_ptc_members,
             own_payload_attestations: OnceCell::new(),
             published_own_sync_committee_messages_for: None,
@@ -1218,6 +1222,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
+        if let DutySource::Remote { slot_head } = source {
+            let beacon_nodes = self.beacon_nodes(source, &wait_group);
+
+            if let Some((proposer_index, public_key)) = self
+                .own_proposer_from_duties(&beacon_nodes, slot_head)
+                .await?
+            {
+                warn_with_peers!(
+                    "validator {proposer_index} ({public_key:?}) skipping block proposal in \
+                     slot {}: block production with --beacon-node-urls is not supported yet",
+                    slot_head.slot(),
+                );
+            }
+
+            return Ok(());
+        }
+
         // Blocks are produced by the built-in beacon node alone.
         let (
             Some(controller),
@@ -1508,6 +1529,62 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         Ok(())
+    }
+
+    /// Own proposer of the slot from duties, for a head without a state to compute it from.
+    async fn own_proposer_from_duties(
+        &self,
+        beacon_nodes: &BeaconNodes<P, W>,
+        slot_head: &SlotHead<P>,
+    ) -> Result<Option<(ValidatorIndex, PublicKeyBytes)>> {
+        let slot = slot_head.slot();
+        let epoch = slot_head.current_epoch();
+
+        self.chain_source
+            .own_validator_indices()
+            .update(beacon_nodes, epoch)
+            .await;
+
+        let validator_indices = self.chain_source.own_validator_indices().get().await;
+
+        let Some(first_index) = validator_indices.first().copied() else {
+            return Ok(None);
+        };
+
+        let dependent_epoch = proposer_dependent_epoch(self.chain_source.chain_config(), epoch);
+
+        // The attester cache shares the root, but nodes unreachable at the epoch's start leave it
+        // empty; the head events or a request report it either way.
+        let dependent_root = match self
+            .own_beacon_committee_members
+            .cached_dependent_root(dependent_epoch)
+            .await
+        {
+            Some(dependent_root) => dependent_root,
+            None => {
+                beacon_nodes
+                    .dependent_root(dependent_epoch, Some(first_index))
+                    .await?
+            }
+        };
+
+        if let Some(proposer) = self
+            .own_proposer_duties
+            .get_at_slot(dependent_root, slot)
+            .await
+        {
+            return Ok(Some(proposer));
+        }
+
+        // A no-op once the epoch is fetched under this root; a reorg at the slot boundary is not.
+        self.own_proposer_duties
+            .init_at_epoch(beacon_nodes, epoch, dependent_root, &validator_indices)
+            .await?;
+
+        Ok(self
+            .own_proposer_duties
+            .get_at_slot(dependent_root, slot)
+            .await)
     }
 
     async fn post_blinded_block(
@@ -2955,6 +3032,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     fn spawn_pruning(&self, current_slot: Slot) {
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
         let own_members = self.own_beacon_committee_members.clone_arc();
+        let own_proposer_duties = self.own_proposer_duties.clone_arc();
         let own_ptc_members = self.own_ptc_members.clone_arc();
         let slashing_protector = self.slashing_protector.clone_arc();
 
@@ -2966,6 +3044,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 let up_to_slot = misc::compute_start_slot_at_epoch::<P>(current_epoch);
                 own_members.prune::<P>(up_to_slot).await;
+                own_proposer_duties.prune::<P>(up_to_slot).await;
                 own_ptc_members.prune(up_to_slot).await;
                 Ok::<_, AnyhowError>(())
             })
@@ -2977,6 +3056,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             chain_config: self.chain_source.chain_config().clone_arc(),
             source: source.clone(),
             own_beacon_committee_members: self.own_beacon_committee_members.clone_arc(),
+            own_proposer_duties: self.own_proposer_duties.clone_arc(),
             own_ptc_members: self.own_ptc_members.clone_arc(),
             own_validator_indices: self.chain_source.own_validator_indices().clone_arc(),
             beacon_nodes: self.beacon_nodes(source, &wait_group),
@@ -3521,6 +3601,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .get()
                     .map(Vec::len)
                     .unwrap_or(0),
+            );
+
+            metrics.set_collection_length(
+                module_path!(),
+                &type_name,
+                "own_proposer_duties",
+                self.own_proposer_duties.len(),
             );
 
             metrics.set_collection_length(

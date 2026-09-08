@@ -29,7 +29,7 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi, PtcDuties},
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
     local_beacon_node::LocalBeaconNode,
     misc,
     remote_beacon_node::RemoteBeaconNode,
@@ -701,6 +701,29 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         if let Some(node) = node {
             debug_with_peers!(
                 "{node} beacon node produced {} PTC duties for epoch {epoch} \
+                 under dependent root {:?}",
+                duties.duties.len(),
+                duties.dependent_root,
+            );
+        }
+
+        Ok(duties)
+    }
+
+    async fn proposer_duties(&self, epoch: Epoch) -> Result<ProposerDuties> {
+        let operation = format!("produce proposer duties for epoch {epoch}");
+
+        let (node, duties) = self
+            .local_then_remotes(
+                &operation,
+                |node| node.proposer_duties(epoch),
+                |node| BeaconNodeApi::<P>::proposer_duties(node, epoch),
+            )
+            .await?;
+
+        if let Some(node) = node {
+            debug_with_peers!(
+                "{node} beacon node produced {} proposer duties for epoch {epoch} \
                  under dependent root {:?}",
                 duties.duties.len(),
                 duties.dependent_root,

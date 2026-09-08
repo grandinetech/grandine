@@ -16,7 +16,8 @@ use futures::{Stream, StreamExt as _, future, stream};
 use helper_functions::{misc, predicates};
 use http_api_utils::{
     BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
-    ValidatorLivenessResponse, ValidatorPTCDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorLivenessResponse, ValidatorPTCDutyResponse, ValidatorProposerDutyResponse,
+    ValidatorSyncDutyResponse,
 };
 use http_body_util::BodyDataStream;
 use itertools::Itertools as _;
@@ -52,7 +53,7 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi, PtcDuties},
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
     chain_head::{ChainHead, DependentRoots, HeadUpdate},
     health::Health,
     slot_head::SlotHead,
@@ -1215,6 +1216,49 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         );
 
         Ok(PtcDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    async fn proposer_duties(&self, epoch: Epoch) -> Result<ProposerDuties> {
+        // Only v2 reports the root the Fulu proposer lookahead makes duties depend on.
+        let version = if self.chain_config.phase_at_epoch(epoch) >= Phase::Fulu {
+            "v2"
+        } else {
+            "v1"
+        };
+
+        let url = self.endpoint(&format!("/eth/{version}/validator/duties/proposer/{epoch}"))?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            .timeout(self.background_timeout())
+            .send()
+            .await?;
+
+        let response = self.check_status(response).await?;
+
+        let (duties, dependent_root) = response
+            .json::<EthResponse<Vec<ValidatorProposerDutyResponse>>>()
+            .await?
+            .into_data_and_dependent_root();
+
+        let dependent_root = dependent_root.ok_or_else(|| {
+            AnyhowError::msg(format!(
+                "beacon node at {} did not report a dependent root for proposer duties",
+                self.url,
+            ))
+        })?;
+
+        debug_with_peers!(
+            "{} produced {} proposer duties for epoch {epoch}",
+            self.url,
+            duties.len(),
+        );
+
+        Ok(ProposerDuties {
             dependent_root,
             duties,
         })

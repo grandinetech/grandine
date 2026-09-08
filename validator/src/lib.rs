@@ -18,6 +18,7 @@ mod local_beacon_node;
 mod messages;
 mod misc;
 mod own_beacon_committee_members;
+mod own_proposer_duties;
 mod own_ptc_members;
 mod own_sync_committee_subscriptions;
 mod own_validator_indices;

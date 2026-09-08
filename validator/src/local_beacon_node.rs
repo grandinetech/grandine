@@ -16,7 +16,7 @@ use futures::channel::{mpsc::UnboundedSender, oneshot};
 use helper_functions::{accessors, misc};
 use http_api_utils::{
     ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
-    ValidatorSyncDutyResponse,
+    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
 };
 use itertools::Itertools as _;
 use liveness_tracker::ApiToLiveness;
@@ -49,7 +49,7 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi, PtcDuties},
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
     slot_head::SlotHead,
 };
 
@@ -428,6 +428,38 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         })?;
 
         Ok(PtcDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    async fn proposer_duties(&self, epoch: Epoch) -> Result<ProposerDuties> {
+        let state = self.beacon_state.as_ref();
+
+        // The root proposer duties depend on moved an epoch back with the Fulu lookahead.
+        let dependent_root = if self.slot_head.config.phase_at_epoch(epoch) >= Phase::Fulu {
+            self.dependent_root(epoch, None).await?
+        } else {
+            self.dependent_root(epoch.saturating_add(1), None).await?
+        };
+
+        let duties = misc::slots_in_epoch::<P>(epoch)?
+            .map(|slot| {
+                let validator_index = accessors::get_beacon_proposer_index_at_slot(
+                    &self.slot_head.config,
+                    state,
+                    slot,
+                )?;
+
+                Ok(ValidatorProposerDutyResponse {
+                    pubkey: *accessors::public_key(state, validator_index)?,
+                    validator_index,
+                    slot,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(ProposerDuties {
             dependent_root,
             duties,
         })

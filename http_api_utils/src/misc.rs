@@ -30,6 +30,16 @@ pub struct ValidatorAttesterDutyResponse {
     pub validator_index: ValidatorIndex,
 }
 
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getProposerDutiesV2>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorProposerDutyResponse {
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+}
+
 /// <https://ethereum.github.io/beacon-APIs/#/Validator/getSyncCommitteeDuties>
 #[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct ValidatorSyncDutyResponse {

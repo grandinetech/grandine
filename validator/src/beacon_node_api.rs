@@ -8,7 +8,7 @@ use anyhow::Result;
 use bls::PublicKeyBytes;
 use http_api_utils::{
     ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
-    ValidatorSyncDutyResponse,
+    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
 };
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use types::{
@@ -36,6 +36,11 @@ pub struct AttesterDuties {
 pub struct PtcDuties {
     pub dependent_root: H256,
     pub duties: Vec<ValidatorPTCDutyResponse>,
+}
+
+pub struct ProposerDuties {
+    pub dependent_root: H256,
+    pub duties: Vec<ValidatorProposerDutyResponse>,
 }
 
 /// A beacon node the validator can perform duties against.
@@ -137,6 +142,9 @@ pub trait BeaconNodeApi<P: Preset> {
         epoch: Epoch,
         validator_indices: &[ValidatorIndex],
     ) -> impl Future<Output = Result<PtcDuties>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/getProposerDutiesV2>
+    fn proposer_duties(&self, epoch: Epoch) -> impl Future<Output = Result<ProposerDuties>> + Send;
 
     /// [`None`] when the node has seen no block for `slot`, which is not attested to.
     /// <https://ethereum.github.io/beacon-APIs/#/Validator/producePayloadAttestationData>
