@@ -170,8 +170,8 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
-    #[error("delayed objects until parent queue is full")]
-    DelayedUntilParentQueueFull,
+    #[error("delayed objects until block queue is full")]
+    DelayedUntilBlockQueueFull,
     #[error("execution payload bid's builder is not active at epoch {epoch}: {payload_bid:?}")]
     ExecutionPayloadBidBuilderInactive {
         payload_bid: Arc<SignedExecutionPayloadBid<P>>,
