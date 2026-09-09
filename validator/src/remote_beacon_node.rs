@@ -10,7 +10,9 @@ use std::{
 };
 
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
+use block_producer::ProposerData;
 use bls::PublicKeyBytes;
+use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use derive_more::Display;
 use futures::{Stream, StreamExt as _, future, stream};
 use helper_functions::{misc, predicates};
@@ -40,6 +42,7 @@ use types::{
     electra::containers::Attestation as ElectraAttestation,
     gloas::containers::{
         Attestation as GloasAttestation, PayloadAttestationData, PayloadAttestationMessage,
+        SignedProposerPreferences,
     },
     nonstandard::{ForkInfo, OwnAttestation, Phase},
     phase0::containers::Attestation as Phase0Attestation,
@@ -1323,6 +1326,86 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         debug_with_peers!(
             "published {} payload attestations to {}",
             messages.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn prepare_beacon_proposer(&self, proposers: &[ProposerData]) -> Result<()> {
+        let url = self.endpoint("/eth/v1/validator/prepare_beacon_proposer")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&proposers)
+            .timeout(self.background_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "prepared {} beacon proposers on {}",
+            proposers.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn register_validators(
+        &self,
+        registrations: &[SignedValidatorRegistrationV1],
+    ) -> Result<()> {
+        let url = self.endpoint("/eth/v1/validator/register_validator")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .json(&registrations)
+            .timeout(self.background_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "registered {} validators on {}",
+            registrations.len(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn publish_proposer_preferences(
+        &self,
+        preferences: &[Arc<SignedProposerPreferences>],
+    ) -> Result<()> {
+        let Some(first) = preferences.first() else {
+            return Ok(());
+        };
+
+        let phase = self
+            .chain_config
+            .phase_at_slot::<P>(first.message.proposal_slot);
+        let url = self.endpoint("/eth/v1/validator/proposer_preferences")?;
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref())
+            .json(&preferences)
+            .timeout(self.background_timeout())
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        debug_with_peers!(
+            "published {} proposer preferences to {}",
+            preferences.len(),
             self.url,
         );
 

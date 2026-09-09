@@ -5,7 +5,9 @@ use std::{
 };
 
 use anyhow::{Error as AnyhowError, Result, ensure};
+use block_producer::ProposerData;
 use bls::PublicKeyBytes;
+use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use derive_more::Display;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
@@ -37,7 +39,9 @@ use types::{
     combined::{Attestation, BeaconState, SignedAggregateAndProof},
     gloas::{
         consts::PAYLOAD_STATUS_FULL,
-        containers::{PayloadAttestationData, PayloadAttestationMessage},
+        containers::{
+            PayloadAttestationData, PayloadAttestationMessage, SignedProposerPreferences,
+        },
     },
     nonstandard::{OwnAttestation, Phase, RelativeEpoch, WithStatus},
     phase0::{
@@ -516,6 +520,34 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 messages.iter().map(|message| **message).collect(),
                 beacon_state.clone_arc(),
             );
+        }
+
+        Ok(())
+    }
+
+    async fn prepare_beacon_proposer(&self, _proposers: &[ProposerData]) -> Result<()> {
+        Ok(())
+    }
+
+    async fn register_validators(
+        &self,
+        _registrations: &[SignedValidatorRegistrationV1],
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn publish_proposer_preferences(
+        &self,
+        preferences: &[Arc<SignedProposerPreferences>],
+    ) -> Result<()> {
+        for signed_preferences in preferences {
+            // Pass into own fork-choice store so bids for this slot pass the
+            // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
+            self.controller
+                .on_own_proposer_preferences(signed_preferences.clone_arc());
+
+            ValidatorToP2p::PublishProposerPreferences(signed_preferences.clone_arc())
+                .send(&self.p2p_tx);
         }
 
         Ok(())

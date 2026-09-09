@@ -5,9 +5,11 @@ use core::{
 use std::sync::Arc;
 
 use anyhow::Result;
+use block_producer::ProposerData;
 use fork_choice_control::Wait;
 use helper_functions::misc;
 use itertools::Itertools as _;
+use keymanager::ProposerConfigs;
 use logging::{debug_with_peers, warn_with_peers};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
 use scc::HashMap as SccHashMap;
@@ -40,11 +42,13 @@ pub struct UpdateBeaconCommitteeSubscriptionsTask<P: Preset, W: Wait + Sync> {
     pub own_proposer_duties: Arc<OwnProposerDuties>,
     pub own_ptc_members: Arc<OwnPTCMembers>,
     pub own_validator_indices: Arc<OwnValidatorIndices>,
+    pub proposer_configs: Arc<ProposerConfigs>,
     pub beacon_nodes: BeaconNodes<P, W>,
     pub wait_group: W,
 }
 
 impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
+    #[expect(clippy::too_many_lines)]
     #[instrument(
         skip_all,
         fields(slot = %self.source.slot_head().slot()),
@@ -58,6 +62,7 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
             own_proposer_duties,
             own_ptc_members,
             own_validator_indices,
+            proposer_configs,
             beacon_nodes,
             wait_group,
         } = self;
@@ -74,6 +79,22 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
         let validator_indices = own_validator_indices.get().await;
 
         // Sent every slot, as a restarted beacon node no longer knows about earlier ones.
+        let proposers = own_validator_indices
+            .indices_by_pubkey()
+            .await
+            .into_iter()
+            .filter_map(|(pubkey, validator_index)| {
+                Some(ProposerData {
+                    validator_index,
+                    fee_recipient: proposer_configs.configured_fee_recipient(pubkey)?,
+                })
+            })
+            .collect_vec();
+
+        if let Err(error) = beacon_nodes.prepare_beacon_proposer(&proposers).await {
+            warn_with_peers!("failed to prepare beacon proposers: {error:?}");
+        }
+
         let mut subscriptions = vec![];
 
         let prefetch_slots = beacon_nodes.prefetch_slots(current_slot);

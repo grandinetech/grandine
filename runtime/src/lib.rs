@@ -20,7 +20,6 @@ pub use crate::runtime::shutdown;
 
 pub mod commands;
 mod config_dir;
-mod consts;
 mod db_info;
 pub mod db_stats;
 mod defaults;

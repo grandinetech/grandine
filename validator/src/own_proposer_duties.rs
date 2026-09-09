@@ -119,6 +119,31 @@ impl OwnProposerDuties {
         let _ = self.fetched.insert_async((dependent_root, epoch)).await;
     }
 
+    pub async fn upcoming(&self, slot: Slot) -> Vec<(H256, Slot, ValidatorIndex, PublicKeyBytes)> {
+        let mut proposals = vec![];
+
+        self.proposers
+            .iter_async(
+                |(dependent_root, proposal_slot), (validator_index, pubkey)| {
+                    if *proposal_slot > slot {
+                        proposals.push((
+                            *dependent_root,
+                            *proposal_slot,
+                            *validator_index,
+                            *pubkey,
+                        ));
+                    }
+
+                    true
+                },
+            )
+            .await;
+
+        proposals.sort_unstable();
+
+        proposals
+    }
+
     pub async fn is_fetched(&self, dependent_root: H256, epoch: Epoch) -> bool {
         self.fetched.contains_async(&(dependent_root, epoch)).await
     }
@@ -205,6 +230,30 @@ mod tests {
 
         assert_eq!(own_duties.get_at_slot(H256::repeat_byte(2), 8).await, None);
         assert!(!own_duties.is_fetched(H256::repeat_byte(2), 1).await);
+    }
+
+    // Preferences are signed for proposals still ahead, under every root they are known for.
+    #[tokio::test]
+    async fn upcoming_lists_later_proposals_under_each_root() {
+        let own_duties = own_duties_with_keys([40, 41]);
+        let old_root = H256::repeat_byte(1);
+        let new_root = H256::repeat_byte(2);
+
+        own_duties
+            .record(old_root, 1, vec![duty(40, 8), duty(41, 12)])
+            .await;
+        own_duties
+            .record(new_root, 1, vec![duty(41, 13), duty(7, 14)])
+            .await;
+
+        assert_eq!(
+            own_duties.upcoming(8).await,
+            vec![
+                (old_root, 12, 41, duty(41, 12).pubkey),
+                (new_root, 13, 41, duty(41, 13).pubkey),
+            ],
+        );
+        assert_eq!(own_duties.upcoming(13).await, vec![]);
     }
 
     #[tokio::test]

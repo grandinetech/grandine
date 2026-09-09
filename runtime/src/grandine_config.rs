@@ -47,7 +47,7 @@ pub struct GrandineConfig {
     pub disable_blockprint_graffiti: bool,
     pub graffiti: Vec<H256>,
     pub max_empty_slots: u64,
-    pub suggested_fee_recipient: ExecutionAddress,
+    pub suggested_fee_recipient: Option<ExecutionAddress>,
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Option<Gas>,
     pub network_config: NetworkConfig,
@@ -235,7 +235,7 @@ impl GrandineConfig {
             info!("slasher history limit: {slashing_history_limit}");
         }
 
-        info!("suggested fee recipient: {suggested_fee_recipient}");
+        info!("suggested fee recipient: {suggested_fee_recipient:?}");
         info!("back-sync enabled: {back_sync_enabled}");
 
         if *use_validator_key_cache {

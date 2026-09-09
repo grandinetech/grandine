@@ -5,7 +5,9 @@ use std::{
 };
 
 use anyhow::{Error as AnyhowError, Result, ensure};
+use block_producer::ProposerData;
 use bls::PublicKeyBytes;
+use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use fork_choice_control::Wait;
 use futures::future::join_all;
 use http_api_utils::{ValidatorLivenessResponse, ValidatorSyncDutyResponse};
@@ -19,7 +21,9 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{Attestation, SignedAggregateAndProof},
-    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
+    gloas::containers::{
+        PayloadAttestationData, PayloadAttestationMessage, SignedProposerPreferences,
+    },
     nonstandard::{OwnAttestation, PublishedDuty},
     phase0::{
         containers::AttestationData,
@@ -210,6 +214,29 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
             spawn_broadcast(operation, publish_to, make_attempt());
         } else {
             spawn_publish(operation, publish_to, make_attempt());
+        }
+    }
+
+    async fn publish_to_remotes<F, Fut>(
+        &self,
+        operation: &'static str,
+        duty: PublishedDuty,
+        attempt: F,
+    ) -> Result<()>
+    where
+        F: Fn(Arc<RemoteBeaconNode>) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        let publish_to = self.serving_nodes();
+
+        if publish_to.is_empty() {
+            return Ok(());
+        }
+
+        if should_publish_to_every_node(&self.publish_to_every_node, duty) {
+            broadcast(operation, publish_to, attempt).await
+        } else {
+            publish(operation, publish_to, attempt).await
         }
     }
 }
@@ -804,6 +831,85 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
             None => Ok(()),
         }
     }
+
+    async fn prepare_beacon_proposer(&self, proposers: &[ProposerData]) -> Result<()> {
+        if proposers.is_empty() {
+            return Ok(());
+        }
+
+        let prepare_on = self.serving_nodes();
+
+        if !prepare_on.is_empty() {
+            let proposers = Arc::new(proposers.to_vec());
+
+            spawn_broadcast("prepare beacon proposers", prepare_on, move |node| {
+                let proposers = proposers.clone_arc();
+
+                async move {
+                    BeaconNodeApi::<P>::prepare_beacon_proposer(node.as_ref(), &proposers).await
+                }
+            });
+        }
+
+        match &self.local_node {
+            Some(node) => node.prepare_beacon_proposer(proposers).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn register_validators(
+        &self,
+        registrations: &[SignedValidatorRegistrationV1],
+    ) -> Result<()> {
+        if registrations.is_empty() {
+            return Ok(());
+        }
+
+        let register_on = self.serving_nodes();
+
+        if !register_on.is_empty() {
+            let registrations = Arc::new(registrations.to_vec());
+
+            spawn_broadcast("register validators", register_on, move |node| {
+                let registrations = registrations.clone_arc();
+
+                async move {
+                    BeaconNodeApi::<P>::register_validators(node.as_ref(), &registrations).await
+                }
+            });
+        }
+
+        match &self.local_node {
+            Some(node) => node.register_validators(registrations).await,
+            None => Ok(()),
+        }
+    }
+
+    async fn publish_proposer_preferences(
+        &self,
+        preferences: &[Arc<SignedProposerPreferences>],
+    ) -> Result<()> {
+        let operation = "publish proposer preferences";
+        let duty = PublishedDuty::ProposerPreferences;
+        let owned = Arc::new(preferences.to_vec());
+
+        let attempt = move |node: Arc<RemoteBeaconNode>| {
+            let preferences = owned.clone_arc();
+
+            async move {
+                BeaconNodeApi::<P>::publish_proposer_preferences(node.as_ref(), &preferences).await
+            }
+        };
+
+        // A local node gossips them itself, so the remote outcome only matters without one.
+        match &self.local_node {
+            Some(node) => {
+                self.spawn_publish_to_remotes(operation, duty, || attempt);
+                node.publish_proposer_preferences(preferences).await
+            }
+            None => self.publish_to_remotes(operation, duty, attempt).await,
+        }
+    }
 }
 
 fn spawn_publish<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)
@@ -812,15 +918,32 @@ where
     Fut: Future<Output = Result<()>> + Send,
 {
     tokio::spawn(async move {
-        let attempts = remotes
-            .iter()
-            .map(|node| (node.clone_arc(), attempt(node.clone_arc())))
-            .collect::<Vec<_>>();
-
-        if first_success(operation, attempts).await.is_err() {
-            warn_with_peers!("no remote beacon node was able to {operation}");
+        if let Err(error) = publish(operation, remotes, attempt).await {
+            warn_with_peers!("{error}");
         }
     });
+}
+
+async fn publish<F, Fut>(
+    operation: &'static str,
+    remotes: Vec<Arc<RemoteBeaconNode>>,
+    attempt: F,
+) -> Result<()>
+where
+    F: Fn(Arc<RemoteBeaconNode>) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    let attempts = remotes
+        .iter()
+        .map(|node| (node.clone_arc(), attempt(node.clone_arc())))
+        .collect::<Vec<_>>();
+
+    ensure!(
+        first_success(operation, attempts).await.is_ok(),
+        "no remote beacon node was able to {operation}",
+    );
+
+    Ok(())
 }
 
 fn spawn_broadcast<F, Fut>(operation: &'static str, remotes: Vec<Arc<RemoteBeaconNode>>, attempt: F)

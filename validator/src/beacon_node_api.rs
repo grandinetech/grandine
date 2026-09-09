@@ -5,7 +5,9 @@ use std::{
 };
 
 use anyhow::Result;
+use block_producer::ProposerData;
 use bls::PublicKeyBytes;
+use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use http_api_utils::{
     ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
     ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
@@ -17,7 +19,9 @@ use types::{
         primitives::SubcommitteeIndex,
     },
     combined::{Attestation, SignedAggregateAndProof},
-    gloas::containers::{PayloadAttestationData, PayloadAttestationMessage},
+    gloas::containers::{
+        PayloadAttestationData, PayloadAttestationMessage, SignedProposerPreferences,
+    },
     nonstandard::OwnAttestation,
     phase0::{
         containers::AttestationData,
@@ -157,5 +161,23 @@ pub trait BeaconNodeApi<P: Preset> {
     fn publish_payload_attestations(
         &self,
         messages: &[Arc<PayloadAttestationMessage>],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/prepareBeaconProposer>
+    fn prepare_beacon_proposer(
+        &self,
+        proposers: &[ProposerData],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/registerValidator>
+    fn register_validators(
+        &self,
+        registrations: &[SignedValidatorRegistrationV1],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/submitProposerPreferences>
+    fn publish_proposer_preferences(
+        &self,
+        preferences: &[Arc<SignedProposerPreferences>],
     ) -> impl Future<Output = Result<()>> + Send;
 }

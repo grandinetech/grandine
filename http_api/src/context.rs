@@ -41,7 +41,7 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::{FinalizedCheckpoint, Phase, StorageMode},
-    phase0::primitives::{H256, NodeId},
+    phase0::primitives::{ExecutionAddress, H256, NodeId},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
@@ -237,6 +237,8 @@ impl<P: Preset> Context<P> {
 
         let validator_config = Arc::new(ValidatorConfig {
             disable_blockprint_graffiti: true,
+            // The snapshots were recorded with a fee recipient, without which none are published.
+            suggested_fee_recipient: Some(ExecutionAddress::zero()),
             ..Default::default()
         });
 

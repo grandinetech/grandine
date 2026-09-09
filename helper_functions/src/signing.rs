@@ -530,7 +530,8 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
         misc::compute_epoch_at_slot::<P>(self.proposal_slot)
     }
 
-    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
+    // The domain is that of the proposal epoch, even when signed from a state before the fork.
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
         let epoch = <Self as SignForSingleFork<P>>::epoch(self);
         let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
         let fork_version = config.version_at_epoch(epoch);
@@ -538,7 +539,7 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
             config,
             domain_type,
             Some(fork_version),
-            Some(beacon_state.genesis_validators_root()),
+            Some(fork_info.genesis_validators_root),
         );
         misc::compute_signing_root(self, domain)
     }
@@ -553,7 +554,10 @@ impl SignForAllForks for BuilderDepositMessage {
 #[cfg(test)]
 mod tests {
     use types::{
-        phase0::{containers::Fork, primitives::Version},
+        phase0::{
+            containers::Fork,
+            primitives::{ExecutionAddress, Version},
+        },
         preset::Mainnet,
     };
 
@@ -616,6 +620,49 @@ mod tests {
         assert_ne!(
             SignForSingleFork::<Mainnet>::signing_root_from_fork_info(&exit, &config, bellatrix),
             SignForSingleFork::<Mainnet>::signing_root_from_fork_info(&exit, &config, capella),
+        );
+    }
+
+    // Preferences for the first Gloas epoch are signed an epoch early, from a Fulu fork.
+    #[test]
+    fn proposer_preferences_domain_follows_the_proposal_epoch() {
+        let mut config = Config::mainnet();
+        config.gloas_fork_epoch = 10;
+
+        let preferences = |proposal_slot| ProposerPreferences {
+            dependent_root: H256::repeat_byte(2),
+            proposal_slot,
+            validator_index: 1,
+            fee_recipient: ExecutionAddress::zero(),
+            target_gas_limit: 0,
+        };
+
+        let gloas_slot = misc::compute_start_slot_at_epoch::<Mainnet>(10);
+        let fulu = fork_info(config.electra_fork_version, config.fulu_fork_version);
+        let gloas = fork_info(config.fulu_fork_version, config.gloas_fork_version);
+
+        let root_from_fulu = SignForSingleFork::<Mainnet>::signing_root_from_fork_info(
+            &preferences(gloas_slot),
+            &config,
+            fulu,
+        );
+
+        assert_eq!(
+            root_from_fulu,
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(
+                &preferences(gloas_slot),
+                &config,
+                gloas,
+            ),
+        );
+
+        assert_ne!(
+            root_from_fulu,
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(
+                &preferences(gloas_slot - 1),
+                &config,
+                fulu,
+            ),
         );
     }
 }

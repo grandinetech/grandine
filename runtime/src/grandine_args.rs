@@ -82,7 +82,6 @@ use crate::{
     config_dir::{
         self, CONFIG_FILE, DEPOSIT_CONTRACT_BLOCK_FILE, GENESIS_STATE_FILE, PLAIN_BOOTNODES_FILE,
     },
-    consts::GRANDINE_DONATION_ADDRESS,
     default_network_config,
     defaults::DEFAULT_RECONSTRUCTION_DELAY_MS,
     grandine_config::GrandineConfig,
@@ -1661,7 +1660,7 @@ impl GrandineArgs {
             graffiti,
             disable_blockprint_graffiti,
             max_empty_slots,
-            suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
+            suggested_fee_recipient,
             default_builder_boost_factor,
             default_gas_limit,
             network_config: network_config_options.into_config(

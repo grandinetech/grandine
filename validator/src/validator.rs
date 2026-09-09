@@ -242,7 +242,8 @@ pub struct Validator<P: Preset, W: Wait> {
     dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
     dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     last_proposer_preferences_epoch: Option<Epoch>,
-    published_proposer_preferences: HashSet<(H256, Slot, ValidatorIndex)>,
+    /// Marked once a node accepts, so a failed publish is retried at the next check.
+    published_proposer_preferences: Arc<Mutex<HashSet<(H256, Slot, ValidatorIndex)>>>,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -305,7 +306,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             dedicated_executor_normal_priority,
             dedicated_executor_low_priority,
             last_proposer_preferences_epoch: None,
-            published_proposer_preferences: HashSet::new(),
+            published_proposer_preferences: Arc::default(),
         }
     }
 
@@ -891,7 +892,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
 
         if self.last_registration_epoch != Some(current_epoch) {
-            self.register_validators(current_epoch).await;
+            self.register_validators(slot, current_epoch).await;
         }
 
         let no_validators = self.signer.load().no_keys()
@@ -924,7 +925,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ValidatorToLiveness::Epoch(current_epoch).send(validator_to_liveness_tx);
             }
 
-            self.discard_old_proposer_preferences(current_epoch);
+            self.discard_old_proposer_preferences(current_epoch).await;
             self.discard_old_registered_validators(current_epoch);
             if let Some(block_producer) = self.chain_source.block_producer() {
                 block_producer.discard_old_data(current_epoch).await;
@@ -1053,11 +1054,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         // Only the built-in beacon node has a state, and only it performs these.
-        if let DutySource::Local {
-            slot_head,
-            beacon_state,
-        } = &duty_source
-        {
+        if let DutySource::Local { beacon_state, .. } = &duty_source {
             if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
                 attestation_agg_pool.compute_proposer_indices(beacon_state.clone_arc());
             }
@@ -1067,9 +1064,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     || self.chain_source.chain_config().gloas_fork_epoch
                         == current_epoch.saturating_add(1))
             {
-                self.publish_proposer_preferences(slot_head, beacon_state);
+                self.publish_proposer_preferences(&wait_group, &duty_source)
+                    .await;
                 self.last_proposer_preferences_epoch = Some(current_epoch);
             }
+        }
+
+        // Duties land in the cache asynchronously, so the check runs every slot.
+        if tick.is_start_of_slot() && matches!(duty_source, DutySource::Remote { .. }) {
+            self.publish_proposer_preferences(&wait_group, &duty_source)
+                .await;
         }
 
         match kind {
@@ -3014,10 +3018,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.own_payload_attestations.take();
     }
 
-    fn discard_old_proposer_preferences(&mut self, current_epoch: Epoch) {
+    async fn discard_old_proposer_preferences(&self, current_epoch: Epoch) {
         let current_epoch_start = misc::compute_start_slot_at_epoch::<P>(current_epoch);
 
         self.published_proposer_preferences
+            .lock()
+            .await
             .retain(|(_, proposal_slot, _)| *proposal_slot >= current_epoch_start);
     }
 
@@ -3059,6 +3065,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             own_proposer_duties: self.own_proposer_duties.clone_arc(),
             own_ptc_members: self.own_ptc_members.clone_arc(),
             own_validator_indices: self.chain_source.own_validator_indices().clone_arc(),
+            proposer_configs: self.proposer_configs.clone_arc(),
             beacon_nodes: self.beacon_nodes(source, &wait_group),
             wait_group,
         };
@@ -3309,8 +3316,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    async fn register_validators(&mut self, current_epoch: Epoch) {
+    async fn register_validators(&mut self, slot: Slot, current_epoch: Epoch) {
         if let Some(last_registration_epoch) = self.last_registration_epoch {
             let next_registration_epoch = last_registration_epoch
                 .saturating_add(EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION);
@@ -3322,6 +3330,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let builder_api = self.builder_api.clone();
         let chain_config = self.chain_source.chain_config().clone_arc();
+        // Nodes without a builder reject relayed registrations, so the builder URL opts in.
+        let beacon_nodes = (builder_api.is_some()
+            && self.chain_source.remote_beacon_nodes().is_some()
+            && chain_config.phase_at_epoch(current_epoch) < Phase::Gloas)
+            .then(|| self.remote_beacon_nodes_at(slot));
         let proposer_configs = self.proposer_configs.clone_arc();
         let signer = self.signer.clone_arc();
         let prepared_proposer_indices = match self.chain_source.block_producer() {
@@ -3348,7 +3361,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .send(&subnet_service_tx);
             }
 
-            let Some(builder_api) = builder_api.clone() else {
+            let Some(builder_api) = builder_api else {
                 return Ok(());
             };
 
@@ -3415,6 +3428,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
             // Do not submit requests in parallel. Doing so causes all of them to be timed out.
             for registrations in signed_registrations {
+                if let Some(beacon_nodes) = &beacon_nodes
+                    && let Err(error) = beacon_nodes
+                        .register_validators(registrations.as_ref())
+                        .await
+                {
+                    warn_with_peers!("failed to relay validator batch: {error}");
+                }
+
                 if let Err(error) = builder_api.register_validators::<P>(registrations).await {
                     warn_with_peers!("failed to register validator batch: {error}");
                 }
@@ -3428,28 +3449,150 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
-    fn publish_proposer_preferences(
-        &mut self,
-        slot_head: &SlotHead<P>,
-        beacon_state: &Arc<BeaconState<P>>,
-    ) {
-        let Some(controller) = self.chain_source.controller().map(ArcExt::clone_arc) else {
-            return;
-        };
-
+    async fn publish_proposer_preferences(&self, wait_group: &W, source: &DutySource<P>) {
         let signer_snapshot = self.signer.load().clone_arc();
 
         if signer_snapshot.no_keys() {
             return;
         }
 
-        let beacon_state = beacon_state.clone_arc();
+        let chain_config = self.chain_source.chain_config().clone_arc();
+
+        let proposals = match source {
+            DutySource::Local {
+                slot_head,
+                beacon_state,
+            } => self.upcoming_proposals_from_state(slot_head, beacon_state),
+            DutySource::Remote { slot_head } => {
+                self.own_proposer_duties.upcoming(slot_head.slot()).await
+            }
+        };
+
+        let published = self.published_proposer_preferences.lock().await;
+
+        let preferences = proposals
+            .into_iter()
+            .filter(|(_, proposal_slot, _, _)| {
+                chain_config.phase_at_slot::<P>(*proposal_slot) >= Phase::Gloas
+            })
+            .filter(|(dependent_root, proposal_slot, validator_index, _)| {
+                !published.contains(&(*dependent_root, *proposal_slot, *validator_index))
+            })
+            .filter_map(|(dependent_root, proposal_slot, validator_index, pubkey)| {
+                let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
+
+                let Some(fee_recipient) = self.proposer_configs.configured_fee_recipient(pubkey)
+                else {
+                    debug_with_peers!(
+                        "validator {validator_index} has no fee recipient configured; \
+                         no proposer preferences will be published for slot {proposal_slot}",
+                    );
+                    return None;
+                };
+
+                Some((
+                    pubkey,
+                    ProposerPreferences {
+                        dependent_root,
+                        proposal_slot,
+                        validator_index,
+                        fee_recipient,
+                        target_gas_limit: chain_config
+                            .gas_limit(self.proposer_configs.gas_limit(pubkey), proposal_epoch),
+                    },
+                ))
+            })
+            .collect_vec();
+
+        drop(published);
+
+        if preferences.is_empty() {
+            return;
+        }
+
+        let fork_info = source.slot_head().fork_info;
+        let beacon_nodes = self.beacon_nodes(source, wait_group);
+        let published = self.published_proposer_preferences.clone_arc();
+
+        tokio::spawn(async move {
+            let triples = preferences
+                .iter()
+                .map(|(pubkey, pref)| SigningTriple {
+                    message: SigningMessage::ProposerPreferences(*pref),
+                    signing_root: pref.signing_root_from_fork_info(&chain_config, fork_info),
+                    public_key: *pubkey,
+                })
+                .collect_vec();
+
+            let signatures = match signer_snapshot
+                .sign_triples_without_slashing_protection(triples, Some(fork_info))
+                .await
+            {
+                Ok(signatures) => signatures,
+                Err(error) => {
+                    warn_with_peers!("failed to sign proposer preferences: {error}");
+                    return;
+                }
+            };
+
+            let signed_preferences = preferences
+                .into_iter()
+                .zip(signatures)
+                .map(|((_, pref), signature)| {
+                    debug_with_peers!(
+                        "publishing proposer preferences for (validator: {}, slot: {})",
+                        pref.validator_index,
+                        pref.proposal_slot
+                    );
+
+                    Arc::new(SignedProposerPreferences {
+                        message: pref,
+                        signature: signature.into(),
+                    })
+                })
+                .collect_vec();
+
+            if let Err(error) = beacon_nodes
+                .publish_proposer_preferences(&signed_preferences)
+                .await
+            {
+                warn_with_peers!("failed to publish proposer preferences: {error:?}");
+                return;
+            }
+
+            published
+                .lock()
+                .await
+                .extend(signed_preferences.iter().map(|signed| {
+                    let ProposerPreferences {
+                        dependent_root,
+                        proposal_slot,
+                        validator_index,
+                        ..
+                    } = signed.message;
+
+                    (dependent_root, proposal_slot, validator_index)
+                }));
+        });
+    }
+
+    fn upcoming_proposals_from_state(
+        &self,
+        slot_head: &SlotHead<P>,
+        beacon_state: &Arc<BeaconState<P>>,
+    ) -> Vec<(H256, Slot, ValidatorIndex, PublicKeyBytes)> {
+        let Some(controller) = self.chain_source.controller() else {
+            return vec![];
+        };
+
         let beacon_block_root = slot_head.beacon_block_root;
 
-        let pubkeys_by_index = signer_snapshot
+        let pubkeys_by_index = self
+            .signer
+            .load()
             .keys()
             .filter_map(|pubkey| {
-                let validator_index = accessors::index_of_public_key(&beacon_state, pubkey)?;
+                let validator_index = accessors::index_of_public_key(beacon_state, pubkey)?;
                 Some((validator_index, *pubkey))
             })
             .collect::<HashMap<_, _>>();
@@ -3457,9 +3600,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let validator_indices = pubkeys_by_index.keys().copied().collect::<HashSet<_>>();
         let mut dependent_roots = HashMap::<Epoch, Option<H256>>::new();
 
-        let preferences = accessors::get_upcoming_proposal_slots(
+        accessors::get_upcoming_proposal_slots(
             self.chain_source.chain_config(),
-            &beacon_state,
+            beacon_state,
             &validator_indices,
         )
         .filter_map(|(proposal_slot, validator_index)| {
@@ -3483,93 +3626,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .as_ref()
                 .copied()?;
 
-            if self.published_proposer_preferences.contains(&(
-                dependent_root,
-                proposal_slot,
-                validator_index,
-            )) {
-                return None;
-            }
-
             let pubkey = pubkeys_by_index.get(&validator_index).copied()?;
 
-            Some((
-                pubkey,
-                ProposerPreferences {
-                    dependent_root,
-                    proposal_slot,
-                    validator_index,
-                    fee_recipient: self.proposer_configs.fee_recipient(pubkey),
-                    target_gas_limit: self
-                        .chain_source
-                        .chain_config()
-                        .gas_limit(self.proposer_configs.gas_limit(pubkey), proposal_epoch),
-                },
-            ))
+            Some((dependent_root, proposal_slot, validator_index, pubkey))
         })
-        .collect_vec();
-
-        if preferences.is_empty() {
-            return;
-        }
-
-        self.published_proposer_preferences
-            .extend(preferences.iter().map(|(_, pref)| {
-                (
-                    pref.dependent_root,
-                    pref.proposal_slot,
-                    pref.validator_index,
-                )
-            }));
-
-        let chain_config = self.chain_source.chain_config().clone_arc();
-        let p2p_tx = self.channels.p2p_tx().cloned();
-
-        tokio::spawn(async move {
-            let triples = preferences
-                .iter()
-                .map(|(pubkey, pref)| SigningTriple {
-                    message: SigningMessage::ProposerPreferences(*pref),
-                    signing_root: pref.signing_root(&chain_config, beacon_state.as_ref()),
-                    public_key: *pubkey,
-                })
-                .collect_vec();
-
-            let fork_info = Some(beacon_state.as_ref().into());
-
-            let signatures = match signer_snapshot
-                .sign_triples_without_slashing_protection(triples, fork_info)
-                .await
-            {
-                Ok(signatures) => signatures,
-                Err(error) => {
-                    warn_with_peers!("failed to sign proposer preferences: {error}");
-                    return;
-                }
-            };
-
-            // Publish each signed preference
-            for ((_, pref), signature) in preferences.into_iter().zip(signatures) {
-                debug_with_peers!(
-                    "publishing proposer preferences for (validator: {}, slot: {})",
-                    pref.validator_index,
-                    pref.proposal_slot
-                );
-
-                let signed_preferences = Arc::new(SignedProposerPreferences {
-                    message: pref,
-                    signature: signature.into(),
-                });
-
-                // Pass into own fork-choice store so bids for this slot pass the
-                // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
-                controller.on_own_proposer_preferences(signed_preferences.clone_arc());
-
-                if let Some(p2p_tx) = &p2p_tx {
-                    ValidatorToP2p::PublishProposerPreferences(signed_preferences).send(p2p_tx);
-                }
-            }
-        });
+        .collect_vec()
     }
 
     async fn track_collection_metrics(&self) {
