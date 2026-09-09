@@ -66,9 +66,8 @@ pub fn subnets_from_sync_committee_indices<P: Preset>(
 
 /// Where duties are performed and chain facts are read from.
 ///
-/// The built-in beacon node, the nodes given with `--beacon-node-urls`, or both. With
-/// `--disable-local-beacon-node` the built-in node is never consulted, as its stale state answers
-/// without an error.
+/// The built-in beacon node, the nodes given with `--beacon-node-urls`, or both. Under `vc` the
+/// built-in node is never consulted, as its stale state answers without an error.
 pub enum ChainSource<P: Preset, W: Wait> {
     Local {
         controller: ApiController<P, W>,

@@ -1,11 +1,11 @@
 use std::{
     alloc::{self, Layout},
-    ffi::{CStr, CString, c_char, c_void},
+    ffi::{CStr, CString, OsString, c_char, c_void},
 };
 
 use allocator as _;
 use anyhow::{Context, Result, bail};
-use clap::{Error as ClapError, Parser};
+use clap::Error as ClapError;
 use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
@@ -459,13 +459,15 @@ pub extern "C" fn grandine_shutdown() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn grandine_run(argc: u64, argv: *const *const c_char) -> u64 {
     unsafe fn try_run(argc: u64, argv: *const *const c_char) -> Result<()> {
-        let args = std::iter::once("").chain(unsafe {
-            std::slice::from_raw_parts(argv, argc as usize)
-                .into_iter()
-                .filter_map(|it| CStr::from_ptr(*it).to_str().ok())
-        });
+        let args = std::iter::once("")
+            .chain(unsafe {
+                std::slice::from_raw_parts(argv, argc as usize)
+                    .into_iter()
+                    .filter_map(|it| CStr::from_ptr(*it).to_str().ok())
+            })
+            .map(OsString::from);
 
-        let args = GrandineArgs::try_parse_from(args)?;
+        let args = GrandineArgs::parse_strictly(args)?;
 
         run(args)
     }

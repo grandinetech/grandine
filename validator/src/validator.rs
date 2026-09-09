@@ -388,7 +388,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     pub async fn run(self) -> Result<()> {
         if !self.chain_source.supports_block_production() {
             warn_with_peers!(
-                "--disable-local-beacon-node does not support block production; \
+                "the validator client does not support block production yet; \
                  any such duties will be missed",
             );
         }

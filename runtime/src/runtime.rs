@@ -129,7 +129,7 @@ pub struct RuntimeConfig {
     pub pubkey_cache: Arc<PubkeyCache>,
 }
 
-/// What the built-in beacon node is built from; absent with `--disable-local-beacon-node`.
+/// What the built-in beacon node is built from; absent under `vc`.
 struct LocalNodeConfig<P: Preset> {
     store_config: StoreConfig,
     network_config: NetworkConfig,

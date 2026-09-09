@@ -18,7 +18,8 @@ use bls::PublicKeyBytes;
 use builder_api::{BuilderApiFormat, BuilderConfig};
 use bytesize::ByteSize;
 use clap::{
-    Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum,
+    Arg, ArgGroup, ArgMatches, Args, Command as ClapCommand, CommandFactory as _,
+    Error as ClapError, FromArgMatches as _, Parser, Subcommand, ValueEnum,
     builder::{PossibleValuesParser, TypedValueParser},
     error::ErrorKind,
     parser::ValueSource,
@@ -89,17 +90,57 @@ use crate::{
     validators::Validators,
 };
 
+const BN_COMMAND: &str = "bn";
+const VC_COMMAND: &str = "vc";
+
 /// Grandine Team <info@grandine.io>
 /// High performance Ethereum consensus layer client
 #[derive(Debug, Parser)]
-#[clap(display_name = APPLICATION_NAME, verbatim_doc_comment, version = APPLICATION_VERSION)]
+#[clap(
+    display_name = APPLICATION_NAME,
+    verbatim_doc_comment,
+    version = APPLICATION_VERSION,
+    next_help_heading = "Beacon node",
+)]
 pub struct GrandineArgs {
+    #[clap(flatten)]
+    node_options: NodeOptions,
+
+    #[clap(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Run the beacon node with or without built-in or remote validator client;
+    /// (example: grandine bn --network holesky)
+    #[command(next_help_heading = "Beacon node")]
+    Bn(Box<NodeOptions>),
+
+    /// Run only the validator client against remote beacon nodes
+    /// (example: grandine vc --beacon-node-urls http://localhost:5052)
+    #[command(next_help_heading = "Validator")]
+    Vc(Box<ValidatorClientOptions>),
+
+    #[clap(flatten)]
+    Other(GrandineCommand),
+}
+
+#[derive(Debug, Args)]
+pub struct NodeOptions {
     /// Load command-line options from a YAML file. Keys are long option names (e.g. `http-port`).
     #[clap(long, value_name = "YAML_FILE")]
     args_file: Option<PathBuf>,
 
+    /// List of optional runtime features to enable
+    #[clap(long, value_delimiter = ',')]
+    features: Vec<Feature>,
+
     #[clap(flatten)]
     chain_options: ChainOptions,
+
+    #[clap(flatten)]
+    metrics_options: MetricsOptions,
 
     #[clap(flatten)]
     beacon_node_options: BeaconNodeOptions,
@@ -125,10 +166,7 @@ pub struct GrandineArgs {
     #[clap(flatten)]
     network_config_options: NetworkConfigOptions,
 
-    #[expect(
-        dead_code,
-        reason = "TODO(Grandine Team): The slasher is not working properly and should not be used."
-    )]
+    // TODO(Grandine Team): The slasher is not working properly and should not be used.
     #[clap(skip)]
     slasher_options: SlasherOptions,
 
@@ -140,22 +178,127 @@ pub struct GrandineArgs {
 
     #[clap(flatten)]
     validator_api_options: ValidatorApiOptions,
+}
 
-    /// Default block graffiti. Blockprint graffiti will be appended when sufficient space is available.
-    /// See `--disable-blockprint-graffiti` to disable this behavior.
-    #[clap(long, value_parser = misc::parse_graffiti)]
-    graffiti: Vec<H256>,
+#[derive(Debug, Args)]
+#[command(group(ArgGroup::new("beacon_nodes").args(["beacon_node_urls"]).required(true)))]
+pub struct ValidatorClientOptions {
+    /// Load command-line options from a YAML file. Keys are long option names (e.g. `graffiti`).
+    #[clap(long, value_name = "YAML_FILE")]
+    args_file: Option<PathBuf>,
 
-    /// Disable appending blockprint graffiti. If specified, no blockprint graffiti will be appended.
+    /// Parent directory for application data files
+    /// [default: $HOME/.grandine/{network}]
     #[clap(long)]
-    disable_blockprint_graffiti: bool,
+    data_dir: Option<PathBuf>,
+
+    /// Default global request timeout for various services in milliseconds
+    #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
+    request_timeout: u64,
+
+    /// Enable in-memory mode.
+    /// No data will be stored in data-dir.
+    /// [default: disabled]
+    #[clap(long)]
+    in_memory: bool,
 
     /// List of optional runtime features to enable
     #[clap(long, value_delimiter = ',')]
     features: Vec<Feature>,
 
-    #[clap(subcommand)]
-    command: Option<GrandineCommand>,
+    #[clap(flatten)]
+    chain_options: ChainOptions,
+
+    #[clap(flatten)]
+    metrics_options: MetricsOptions,
+
+    #[clap(flatten)]
+    validator_options: ValidatorOptions,
+
+    #[clap(flatten)]
+    remote_validator_options: RemoteValidatorOptions,
+
+    #[clap(flatten)]
+    validator_api_options: ValidatorApiOptions,
+}
+
+impl ValidatorClientOptions {
+    fn into_node_options(self) -> Result<NodeOptions> {
+        let Self {
+            args_file,
+            data_dir,
+            request_timeout,
+            in_memory,
+            features,
+            chain_options,
+            metrics_options,
+            validator_options,
+            remote_validator_options,
+            validator_api_options,
+        } = self;
+
+        // Node-only options keep clap's defaults, which nothing but a parse can produce.
+        let matches = NodeOptions::augment_args(ClapCommand::new(APPLICATION_NAME))
+            .try_get_matches_from([APPLICATION_NAME])?;
+
+        let NodeOptions {
+            args_file: _,
+            features: _,
+            chain_options: _,
+            metrics_options: _,
+            beacon_node_options,
+            execution_layer_options,
+            sync_options,
+            storage_options,
+            custody_options,
+            telemetry_options,
+            http_api_options,
+            network_config_options,
+            slasher_options,
+            validator_options: _,
+            remote_validator_options: _,
+            validator_api_options: _,
+        } = NodeOptions::from_arg_matches(&matches)?;
+
+        let BeaconNodeOptions {
+            max_events,
+            data_dir: _,
+            store_directory,
+            request_timeout: _,
+            track_liveness,
+            report_validator_performance,
+            in_memory: _,
+            kzg_backend,
+        } = beacon_node_options;
+
+        Ok(NodeOptions {
+            args_file,
+            features,
+            chain_options,
+            metrics_options,
+            beacon_node_options: BeaconNodeOptions {
+                max_events,
+                data_dir,
+                store_directory,
+                request_timeout,
+                track_liveness,
+                report_validator_performance,
+                in_memory,
+                kzg_backend,
+            },
+            execution_layer_options,
+            sync_options,
+            storage_options,
+            custody_options,
+            telemetry_options,
+            http_api_options,
+            network_config_options,
+            slasher_options,
+            validator_options,
+            remote_validator_options,
+            validator_api_options,
+        })
+    }
 }
 
 #[derive(Debug, Args)]
@@ -226,7 +369,6 @@ struct ChainOptions {
 }
 
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct HttpApiOptions {
     /// Run Grandine without HTTP API server.
     #[clap(long, default_value_t = false)]
@@ -289,16 +431,8 @@ impl HttpApiOptions {
     }
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "False positive. The `bool`s are independent."
-)]
 #[derive(Debug, Args)]
 struct BeaconNodeOptions {
-    /// Max empty slots
-    #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
-    max_empty_slots: u64,
-
     /// Max number of events stored in a single channel for HTTP API /events api call
     #[clap(long, default_value_t = DEFAULT_MAX_EVENTS)]
     max_events: usize,
@@ -317,10 +451,28 @@ struct BeaconNodeOptions {
     #[clap(long, default_value_t = DEFAULT_REQUEST_TIMEOUT)]
     request_timeout: u64,
 
-    /// Suggested value for the feeRecipient field of the new payload
-    #[clap(long, value_name = "EXECUTION_ADDRESS")]
-    suggested_fee_recipient: Option<ExecutionAddress>,
+    /// Enable validator liveness tracking
+    /// [default: disabled]
+    #[clap(long)]
+    track_liveness: bool,
 
+    /// Print reports about built-in validator performance
+    #[clap(long)]
+    report_validator_performance: bool,
+
+    /// Enable in-memory mode.
+    /// No data will be stored in data-dir.
+    /// [default: disabled]
+    #[clap(long)]
+    in_memory: bool,
+
+    /// KZG backend
+    #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
+    kzg_backend: KzgBackend,
+}
+
+#[derive(Debug, Args)]
+struct MetricsOptions {
     /// Collect Prometheus metrics
     #[clap(long = "metrics")]
     metrics_enabled: bool,
@@ -336,30 +488,9 @@ struct BeaconNodeOptions {
     /// Update system metrics every n seconds
     #[clap(long, default_value_t = DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS)]
     metrics_update_interval: u64,
-
-    /// Enable validator liveness tracking
-    /// [default: disabled]
-    #[clap(long)]
-    track_liveness: bool,
-
-    /// Enable doppelganger protection (with the built-in beacon node, liveness tracking must be enabled)
-    /// [default: disabled]
-    #[clap(long)]
-    detect_doppelgangers: bool,
-
-    /// Enable in-memory mode.
-    /// No data will be stored in data-dir.
-    /// [default: disabled]
-    #[clap(long)]
-    in_memory: bool,
-
-    /// KZG backend
-    #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
-    kzg_backend: KzgBackend,
 }
 
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct ExecutionLayerOptions {
     /// List of Eth1 RPC URLs
     #[clap(long, num_args = 1..)]
@@ -393,7 +524,6 @@ struct ExecutionLayerOptions {
     reason = "False positive. The `bool`s are independent."
 )]
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct SyncOptions {
     /// Beacon node API URL to load recent finalized checkpoint and sync from it
     /// [default: None]
@@ -443,7 +573,6 @@ struct SyncOptions {
 }
 
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct StorageOptions {
     /// Directory to store application network files
     /// [default: {data_dir}/network]
@@ -497,7 +626,6 @@ struct StorageOptions {
     reason = "False positive. The `bool`s are independent."
 )]
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct CustodyOptions {
     /// Run in supernode mode, subscribing to all data column subnets
     #[clap(
@@ -526,7 +654,6 @@ struct CustodyOptions {
 }
 
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct TelemetryOptions {
     /// Optional remote metrics (beaconcha.in metrics) URL that Grandine will periodically send metrics to
     #[clap(long)]
@@ -551,7 +678,6 @@ struct TelemetryOptions {
     reason = "False positive. The `bool`s are independent."
 )]
 #[derive(Debug, Args)]
-#[group(conflicts_with = "disable_local_beacon_node")]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
     /// [default: 0.0.0.0, unless --disable-ipv4 is set]
@@ -907,7 +1033,30 @@ struct SlasherOptions {
     reason = "False positive. The `bool`s are independent."
 )]
 #[derive(Debug, Args)]
+#[command(next_help_heading = "Validator")]
 struct ValidatorOptions {
+    /// Max empty slots
+    #[clap(long, default_value_t = ValidatorConfig::default().max_empty_slots)]
+    max_empty_slots: u64,
+
+    /// Suggested value for the feeRecipient field of the new payload
+    #[clap(long, value_name = "EXECUTION_ADDRESS")]
+    suggested_fee_recipient: Option<ExecutionAddress>,
+
+    /// Enable doppelganger protection (with the built-in beacon node, liveness tracking must be enabled)
+    /// [default: disabled]
+    #[clap(long)]
+    detect_doppelgangers: bool,
+
+    /// Default block graffiti. Blockprint graffiti will be appended when sufficient space is available.
+    /// See `--disable-blockprint-graffiti` to disable this behavior.
+    #[clap(long, value_parser = misc::parse_graffiti)]
+    graffiti: Vec<H256>,
+
+    /// Disable appending blockprint graffiti. If specified, no blockprint graffiti will be appended.
+    #[clap(long)]
+    disable_blockprint_graffiti: bool,
+
     /// Path to a directory containing EIP-2335 keystore files
     #[clap(long, requires("keystore_password_file"))]
     keystore_dir: Option<PathBuf>,
@@ -988,33 +1137,17 @@ struct ValidatorOptions {
     #[clap(long, default_value_t = DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT)]
     slashing_protection_history_limit: u64,
 
-    /// Print reports about validator performance
-    #[clap(long)]
-    report_validator_performance: bool,
-
     /// Disable additional 1 second wait before attesting for late blocks that are being processed at the start of the attest duty
     #[clap(long)]
     disable_wait_for_late_blocks: bool,
 }
 
 #[derive(Debug, Args)]
+#[command(next_help_heading = "Validator")]
 struct RemoteValidatorOptions {
     /// List of beacon node API URLs to perform validator duties against
     #[clap(long, num_args = 1..)]
     beacon_node_urls: Vec<RedactingUrl>,
-
-    /// Perform validator duties against `--beacon-node-urls` only, without the built-in beacon node
-    #[clap(
-        long,
-        requires = "beacon_node_urls",
-        conflicts_with_all = [
-            "max_events",
-            "kzg_backend",
-            "track_liveness",
-            "report_validator_performance",
-        ],
-    )]
-    disable_local_beacon_node: bool,
 
     /// List of duties to publish to every beacon node rather than the first one; `all` covers
     /// every duty
@@ -1035,6 +1168,7 @@ fn published_duty_parser() -> impl TypedValueParser<Value = PublishedDuty> {
 }
 
 #[derive(Debug, Args)]
+#[command(next_help_heading = "Validator")]
 struct ValidatorApiOptions {
     /// Enable validator API
     #[clap(long)]
@@ -1129,7 +1263,22 @@ impl GrandineArgs {
     #[expect(clippy::too_many_lines)]
     pub fn try_into_config(self) -> Result<GrandineConfig> {
         let Self {
+            node_options,
+            command,
+        } = self;
+
+        let (node_options, command, disable_local_beacon_node) = match command {
+            Some(Command::Bn(node_options)) => (*node_options, None, false),
+            Some(Command::Vc(validator_client_options)) => {
+                (validator_client_options.into_node_options()?, None, true)
+            }
+            Some(Command::Other(command)) => (node_options, Some(command), false),
+            None => (node_options, None, false),
+        };
+
+        let NodeOptions {
             chain_options,
+            metrics_options,
             beacon_node_options,
             execution_layer_options,
             sync_options,
@@ -1141,12 +1290,9 @@ impl GrandineArgs {
             validator_options,
             remote_validator_options,
             validator_api_options,
-            graffiti,
-            disable_blockprint_graffiti,
             mut features,
-            command,
             ..
-        } = self;
+        } = node_options;
 
         let ChainOptions {
             network,
@@ -1170,21 +1316,22 @@ impl GrandineArgs {
         let telemetry_config = telemetry_options.telemetry_config();
 
         let BeaconNodeOptions {
-            max_empty_slots,
             max_events,
             data_dir,
             store_directory,
             request_timeout,
-            suggested_fee_recipient,
+            track_liveness,
+            report_validator_performance,
+            in_memory,
+            kzg_backend,
+        } = beacon_node_options;
+
+        let MetricsOptions {
             metrics_enabled,
             metrics_address,
             metrics_port,
             metrics_update_interval,
-            track_liveness,
-            detect_doppelgangers,
-            in_memory,
-            kzg_backend,
-        } = beacon_node_options;
+        } = metrics_options;
 
         let ExecutionLayerOptions {
             eth1_rpc_urls,
@@ -1239,6 +1386,11 @@ impl GrandineArgs {
         let slashing_history_limit = SlasherConfig::default().slashing_history_limit;
 
         let ValidatorOptions {
+            max_empty_slots,
+            suggested_fee_recipient,
+            detect_doppelgangers,
+            graffiti,
+            disable_blockprint_graffiti,
             keystore_dir,
             keystore_password_dir,
             keystore_password_file,
@@ -1257,13 +1409,11 @@ impl GrandineArgs {
             web3signer_api_urls,
             web3signer_urls,
             slashing_protection_history_limit,
-            report_validator_performance,
             disable_wait_for_late_blocks,
         } = validator_options;
 
         let RemoteValidatorOptions {
             beacon_node_urls,
-            disable_local_beacon_node,
             publish_to_every_node,
         } = remote_validator_options;
 
@@ -1716,7 +1866,8 @@ impl GrandineArgs {
     ///
     /// The command line always wins: any option it set is dropped from the file
     /// (scalars and lists alike), and the remaining file-derived tokens are
-    /// spliced in right after the program name so subcommands are preserved.
+    /// spliced in right after the program name so subcommands are preserved, or
+    /// appended for `bn` and `vc`, whose options the file then holds.
     /// `cli_args` must start with the program name, as `std::env::args_os` does.
     pub fn parse_and_merge_args_file(cli_args: impl IntoIterator<Item = OsString>) -> Result<Self> {
         let cli_args = cli_args.into_iter().collect::<Vec<_>>();
@@ -1732,10 +1883,23 @@ impl GrandineArgs {
             .ignore_errors(true)
             .try_get_matches_from(cli_args.iter().cloned())?;
 
+        // `bn` and `vc` carry their own options, so the file is read and merged at their level.
+        let (command, matches, append) = match matches.subcommand() {
+            Some((name @ (BN_COMMAND | VC_COMMAND), sub_matches)) => {
+                let subcommand = command
+                    .find_subcommand(name)
+                    .expect("subcommand names come from the command itself")
+                    .clone();
+
+                (subcommand, sub_matches.clone(), true)
+            }
+            _ => (command, matches, false),
+        };
+
         let Some(path) = matches.get_one::<PathBuf>("args_file").cloned() else {
             // No file — hand off to the normal strict parse so errors and help
             // are produced exactly as without `--args-file`.
-            return Self::try_parse_from(cli_args).map_err(Into::into);
+            return Self::parse_strictly(cli_args);
         };
 
         let yaml = fs_err::read_to_string(&path).map_err(Self::clap_error)?;
@@ -1744,12 +1908,7 @@ impl GrandineArgs {
         // Long names of options the command line set. The args file may not
         // override these, which gives lists the same override semantics as
         // scalars (the file's value is dropped, not appended).
-        let cli_set_longs = command
-            .get_arguments()
-            .filter(|arg| {
-                matches.value_source(arg.get_id().as_str()) == Some(ValueSource::CommandLine)
-            })
-            .filter_map(Arg::get_long)
+        let cli_set_longs = longs_set_on_command_line(&command, &matches)
             .map(str::to_owned)
             .collect::<HashSet<_>>();
 
@@ -1759,25 +1918,64 @@ impl GrandineArgs {
             .flat_map(|(_, tokens)| tokens)
             .map(OsString::from);
 
-        let mut cli_args = cli_args.into_iter();
-        let program = cli_args
-            .next()
-            .unwrap_or_else(|| APPLICATION_NAME.to_owned().into());
+        let mut cli_args = cli_args;
 
-        let args = core::iter::once(program).chain(file_tokens).chain(cli_args);
+        if cli_args.is_empty() {
+            cli_args.push(APPLICATION_NAME.to_owned().into());
+        }
 
-        Self::try_parse_from(args).map_err(Into::into)
+        let splice_after = if append { cli_args.len() } else { 1 };
+        let rest = cli_args.split_off(splice_after);
+        let args = cli_args.into_iter().chain(file_tokens).chain(rest);
+
+        Self::parse_strictly(args)
+    }
+
+    /// [`Self::parse_and_merge_args_file`] without the file, for callers that never pass one.
+    pub fn parse_strictly(args: impl IntoIterator<Item = OsString>) -> Result<Self> {
+        let command = Self::command();
+        let matches = command.clone().try_get_matches_from(args)?;
+
+        if let Some((name @ (BN_COMMAND | VC_COMMAND), _)) = matches.subcommand()
+            && let Some(option) = longs_set_on_command_line(&command, &matches).next()
+        {
+            // Such an option would be parsed for the bare node and silently dropped.
+            bail!(Self::clap_error(Error::OptionBeforeCommand {
+                option: option.to_owned(),
+                command: name.to_owned(),
+            }));
+        }
+
+        Self::from_arg_matches(&matches).map_err(Into::into)
     }
 
     #[must_use]
     pub fn data_dir(&self) -> Option<PathBuf> {
-        (!self.beacon_node_options.in_memory)
-            .then(|| directories::data_directory(self.beacon_node_options.data_dir.as_ref()))
+        let (data_dir, in_memory) = match &self.command {
+            Some(Command::Bn(node_options)) => (
+                &node_options.beacon_node_options.data_dir,
+                node_options.beacon_node_options.in_memory,
+            ),
+            Some(Command::Vc(validator_client_options)) => (
+                &validator_client_options.data_dir,
+                validator_client_options.in_memory,
+            ),
+            _ => (
+                &self.node_options.beacon_node_options.data_dir,
+                self.node_options.beacon_node_options.in_memory,
+            ),
+        };
+
+        (!in_memory).then(|| directories::data_directory(data_dir.as_ref()))
     }
 
     #[must_use]
     pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
-        self.telemetry_options.telemetry_config()
+        match &self.command {
+            Some(Command::Bn(node_options)) => node_options.telemetry_options.telemetry_config(),
+            Some(Command::Vc(_)) => None,
+            _ => self.node_options.telemetry_options.telemetry_config(),
+        }
     }
 }
 
@@ -1825,6 +2023,18 @@ enum Error {
         service1: &'static str,
         service2: &'static str,
     },
+    #[error("--{option} must be specified after {command}")]
+    OptionBeforeCommand { option: String, command: String },
+}
+
+fn longs_set_on_command_line<'a>(
+    command: &'a ClapCommand,
+    matches: &'a ArgMatches,
+) -> impl Iterator<Item = &'a str> {
+    command
+        .get_arguments()
+        .filter(|arg| matches.value_source(arg.get_id().as_str()) == Some(ValueSource::CommandLine))
+        .filter_map(Arg::get_long)
 }
 
 fn verify_preset<T: DeserializeOwned + Serialize>(
@@ -2151,33 +2361,88 @@ mod tests {
 
     // Options the built-in beacon node alone acts on are refused rather than silently dropped.
     #[test]
-    fn disable_local_beacon_node_conflicts_with_node_only_options() {
+    fn validator_client_refuses_node_only_options() {
         try_config_from_args([
-            "--disable-local-beacon-node",
+            "vc",
             "--beacon-node-urls",
             "http://localhost:5052",
             "--checkpoint-sync-url",
             "http://localhost:5053",
         ])
-        .expect_err("--disable-local-beacon-node conflicts with --checkpoint-sync-url");
+        .expect_err("vc does not accept --checkpoint-sync-url");
 
         try_config_from_args([
-            "--disable-local-beacon-node",
+            "vc",
             "--beacon-node-urls",
             "http://localhost:5052",
             "--target-peers",
             "10",
         ])
-        .expect_err("--disable-local-beacon-node conflicts with --target-peers");
+        .expect_err("vc does not accept --target-peers");
 
         try_config_from_args([
-            "--disable-local-beacon-node",
+            "vc",
+            "--beacon-node-urls",
+            "http://localhost:5052",
+            "--report-validator-performance",
+        ])
+        .expect_err("performance reports come from the built-in node");
+
+        let config = config_from_args([
+            "vc",
             "--beacon-node-urls",
             "http://localhost:5052",
             "--max-empty-slots",
             "5",
+        ]);
+
+        assert!(config.disable_local_beacon_node);
+        assert_eq!(config.max_empty_slots, 5);
+        assert!(config.http_api_config.is_none());
+    }
+
+    #[test]
+    fn validator_client_requires_beacon_node_urls() {
+        try_config_from_args(["vc"]).expect_err("the validator client has no built-in node");
+    }
+
+    // `bn` is the bare command under another name.
+    #[test]
+    fn bn_command_parses_the_node_options() {
+        let config = config_from_args(["bn", "--max-empty-slots", "5", "--target-peers", "10"]);
+
+        assert!(!config.disable_local_beacon_node);
+        assert_eq!(config.max_empty_slots, 5);
+        assert_eq!(config.network_config.target_peers, 10);
+    }
+
+    // An option before the command would be parsed for the bare node and dropped.
+    #[test]
+    fn options_before_bn_or_vc_are_refused() {
+        try_config_from_args(["--max-empty-slots", "5", "bn"])
+            .expect_err("--max-empty-slots was given before bn");
+
+        try_config_from_args([
+            "--max-empty-slots",
+            "5",
+            "vc",
+            "--beacon-node-urls",
+            "http://localhost:5052",
         ])
-        .expect("options the validator itself reads stay accepted without the built-in node");
+        .expect_err("--max-empty-slots was given before vc");
+    }
+
+    #[test]
+    fn args_file_applies_to_the_validator_client() -> Result<()> {
+        let config = try_config_from_args_and_file(
+            ["vc", "--beacon-node-urls", "http://localhost:5052"],
+            "max-empty-slots: 5\n",
+        )?;
+
+        assert!(config.disable_local_beacon_node);
+        assert_eq!(config.max_empty_slots, 5);
+
+        Ok(())
     }
 
     #[test]
@@ -3152,8 +3417,15 @@ mod tests {
             .expect("temporary path should be UTF-8")
             .to_owned();
 
-        let mut argv = vec!["--args-file".to_owned(), path];
-        argv.extend(arguments.into_iter().map(str::to_owned));
+        let mut argv = arguments.into_iter().map(str::to_owned).collect::<Vec<_>>();
+
+        // `bn` and `vc` take the option themselves; the other commands leave it to the root.
+        let position = usize::from(matches!(
+            argv.first().map(String::as_str),
+            Some(BN_COMMAND | VC_COMMAND)
+        ));
+
+        argv.splice(position..position, ["--args-file".to_owned(), path]);
 
         try_config_from_args(argv.iter().map(String::as_str))
     }
