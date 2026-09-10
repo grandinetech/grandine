@@ -677,16 +677,19 @@ impl RemoteBeaconNode {
         )
     }
 
-    /// A block is worthless once attesters have voted, so production must leave time to publish.
+    // A fallback that starts at half the window lands after attesters have voted.
     fn block_timeout(&self, phase: Phase) -> Duration {
-        self.window_timeout(0, self.chain_config.attestation_due_bps_at(phase))
+        self.deadline_timeout(0, self.chain_config.attestation_due_bps_at(phase))
     }
 
     fn block_publish_timeout(&self, phase: Phase) -> Duration {
-        self.window_timeout(
-            self.chain_config.attestation_due_bps_at(phase),
-            SLOT_END_BPS,
-        )
+        let from_bps = self.chain_config.attestation_due_bps_at(phase);
+
+        if self.serving_count.load(Ordering::Relaxed) <= 1 {
+            self.deadline_timeout(from_bps, SLOT_END_BPS)
+        } else {
+            self.window_timeout(from_bps, SLOT_END_BPS)
+        }
     }
 
     /// The vote is cast at the due point, and gossip only accepts it until the slot ends.
@@ -704,6 +707,12 @@ impl RemoteBeaconNode {
         self.slot_fraction_by(BACKGROUND_TIMEOUT_QUOTIENT)
     }
 
+    fn deadline_timeout(&self, from_bps: u64, until_bps: u64) -> Duration {
+        self.chain_config
+            .fraction_of_slot(until_bps.saturating_sub(from_bps))
+            .max(MIN_TIMEOUT)
+    }
+
     /// Half the window between the due points, so a failing node leaves the rest for another.
     fn window_timeout(&self, from_bps: u64, until_bps: u64) -> Duration {
         // With no fallback, giving up early buys nothing.
@@ -711,9 +720,7 @@ impl RemoteBeaconNode {
             return LONE_NODE_TIMEOUT;
         }
 
-        let window = self
-            .chain_config
-            .fraction_of_slot(until_bps.saturating_sub(from_bps));
+        let window = self.deadline_timeout(from_bps, until_bps);
 
         let nanos = u64::try_from(window.as_nanos())
             .expect("windows are far below u64::MAX nanoseconds")
@@ -2362,6 +2369,48 @@ mod tests {
 
         assert_eq!(node.attestation_timeout(Phase::Electra), LONE_NODE_TIMEOUT);
         assert_eq!(node.aggregate_timeout(Phase::Gloas), LONE_NODE_TIMEOUT);
+
+        Ok(())
+    }
+
+    // A fallback started at half the window would finish after attesters have voted.
+    #[test]
+    fn block_production_gets_the_whole_window_to_the_attestation_deadline() -> Result<()> {
+        for serving in [1, 2] {
+            let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/", serving)?;
+
+            assert_eq!(
+                node.block_timeout(Phase::Electra),
+                Duration::from_micros(3_999_600),
+            );
+            assert_eq!(node.block_timeout(Phase::Gloas), Duration::from_secs(3));
+        }
+
+        Ok(())
+    }
+
+    // Cutting off the only node could only lose the block.
+    #[test]
+    fn block_publishing_runs_to_the_end_of_the_slot_on_a_lone_node() -> Result<()> {
+        let with_fallback = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 2)?;
+        let lone = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 1)?;
+
+        assert_eq!(
+            with_fallback.block_publish_timeout(Phase::Electra),
+            Duration::from_micros(4_000_200),
+        );
+        assert_eq!(
+            with_fallback.block_publish_timeout(Phase::Gloas),
+            Duration::from_millis(4500),
+        );
+        assert_eq!(
+            lone.block_publish_timeout(Phase::Electra),
+            Duration::from_micros(8_000_400),
+        );
+        assert_eq!(
+            lone.block_publish_timeout(Phase::Gloas),
+            Duration::from_secs(9)
+        );
 
         Ok(())
     }
