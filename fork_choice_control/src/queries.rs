@@ -1506,6 +1506,16 @@ impl<P: Preset> Snapshot<'_, P> {
     pub fn builder_circuit_breaker_tripped(&self) -> bool {
         self.store_snapshot.builder_circuit_breaker_tripped()
     }
+
+    #[must_use]
+    pub fn is_builder_blacklisted(&self, builder_index: BuilderIndex) -> bool {
+        self.store_snapshot.is_builder_blacklisted(builder_index)
+    }
+
+    #[must_use]
+    pub fn builder_withholding_parent_payload(&self, slot: Slot) -> Option<BuilderIndex> {
+        self.store_snapshot.builder_withholding_parent_payload(slot)
+    }
 }
 
 #[derive(Debug, Error)]

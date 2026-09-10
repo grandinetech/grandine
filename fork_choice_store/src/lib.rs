@@ -76,7 +76,9 @@
 //! [`proto_array`]:            https://github.com/protolambda/lmd-ghost/tree/242f0dced3b34feed0d4e9d2fd0e5e66e448c359#array-based-stateful-dag-proto_array
 
 pub use crate::{
-    builder_circuit_breaker::{BuilderCircuitBreaker, BuilderCircuitBreakerConfig},
+    builder_circuit_breaker::{
+        BuilderCircuitBreaker, BuilderCircuitBreakerConfig, DEFAULT_BUILDER_MAX_BLACKLIST_PERIOD,
+    },
     error::Error,
     misc::{
         AggregateAndProofAction, AggregateAndProofOrigin, ApplyBlockChanges, ApplyTickChanges,

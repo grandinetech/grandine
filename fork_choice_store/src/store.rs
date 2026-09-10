@@ -87,7 +87,7 @@ use unwrap_none::UnwrapNone as _;
 use crate::{
     BlockItem, PayloadAttestationOrigin,
     blob_cache::BlobCache,
-    builder_circuit_breaker::{ATTESTED_PERCENT, BuilderCircuitBreaker, PayloadOutcome, Trip},
+    builder_circuit_breaker::{ATTESTED_PERCENT, BuilderCircuitBreaker, PayloadOutcome},
     data_column_cache::DataColumnCache,
     error::Error,
     execution_payload_envelope_cache::ExecutionPayloadEnvelopeCache,
@@ -504,6 +504,33 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     #[must_use]
     pub const fn builder_circuit_breaker_tripped(&self) -> bool {
         self.builder_circuit_breaker.is_tripped(self.slot())
+    }
+
+    #[must_use]
+    pub fn is_builder_blacklisted(&self, builder_index: BuilderIndex) -> bool {
+        self.builder_circuit_breaker
+            .is_builder_blacklisted(self.slot(), builder_index)
+    }
+
+    #[must_use]
+    pub fn builder_withholding_parent_payload(&self, slot: Slot) -> Option<BuilderIndex> {
+        if !self.builder_circuit_breaker.config().blacklisting_enabled
+            || self.should_build_on_full(slot)
+        {
+            return None;
+        }
+
+        let head = self.head();
+
+        // Older heads were judged by the circuit breaker `is_builder_blacklisted`.
+        if head.slot().saturating_add(1) != slot {
+            return None;
+        }
+
+        head.block
+            .message()
+            .payload_bid()
+            .map(|payload_bid| payload_bid.builder_index)
     }
 
     #[must_use]
@@ -1429,7 +1456,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let config = self.builder_circuit_breaker.config();
 
-        if config.disabled || self.chain_config.phase_at_slot::<P>(current_slot) < Phase::Gloas {
+        if (config.global_disabled && !config.blacklisting_enabled)
+            || self.chain_config.phase_at_slot::<P>(current_slot) < Phase::Gloas
+        {
             return;
         }
 
@@ -1438,11 +1467,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return;
         }
 
-        // Payload delivery can be decided in the next slot after its block was proposed
-        let Some(last_slot) = current_slot.checked_sub(1) else {
-            return;
-        };
+        if config.blacklisting_enabled {
+            self.builder_circuit_breaker.expire_blacklists(current_slot);
+        }
 
+        // Payload delivery can be decided in the next slot after its block was proposed
+        let last_slot = current_slot.saturating_sub(1);
         let earliest_slot = last_slot.saturating_sub(P::SlotsPerEpoch::U64);
 
         if self.builder_circuit_breaker.evaluated_slot() < earliest_slot {
@@ -1455,58 +1485,99 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .saturating_add(1);
 
         if first_slot <= last_slot {
-            self.evaluate_canonical_payloads_in(first_slot..=last_slot);
+            self.evaluate_builders_in(first_slot..=last_slot);
             self.builder_circuit_breaker.set_evaluated_slot(last_slot);
         }
-    }
 
-    /// Judges the canonical block of every slot in `slots`.
-    ///
-    /// A run of failures is only meaningful along a single chain, so blocks that lost the head race
-    /// are not counted.
-    fn evaluate_canonical_payloads_in(&mut self, slots: RangeInclusive<Slot>) {
-        let attested_threshold = self.calculate_committee_fraction(ATTESTED_PERCENT);
-        let current_slot = self.slot();
-
-        for slot in slots {
-            let outcome = self.canonical_payload_outcome(slot, attested_threshold);
-
-            match self.builder_circuit_breaker.record_canonical_outcome::<P>(
-                slot,
-                outcome,
-                current_slot,
-            ) {
-                Some(Trip::ConsecutiveWithheld(withheld_payloads)) => warn_with_peers!(
-                    "builders withheld {withheld_payloads} payloads in a row, \
-                     building payloads locally"
-                ),
-                Some(Trip::WithheldInEpoch(withheld_payloads)) => warn_with_peers!(
-                    "builders withheld {withheld_payloads} payloads in the last epoch, \
-                     building payloads locally"
-                ),
-                None => {}
-            }
+        if misc::is_epoch_start::<P>(current_slot) {
+            self.prune_builder_circuit_breaker();
         }
     }
 
-    /// Whether the builder that won the auction for the canonical block of `slot` revealed its
-    /// payload in time.
-    fn canonical_payload_outcome(&self, slot: Slot, attested_threshold: Gwei) -> PayloadOutcome {
-        let Some(unfinalized_block) = self
-            .unfinalized_block_before_or_at(slot)
-            .filter(|unfinalized_block| unfinalized_block.slot() == slot)
-        else {
-            return PayloadOutcome::Unknown;
-        };
+    /// Judges every block proposed in `slots`, including ones that are not canonical.
+    ///
+    /// A builder that withheld the payload of a well attested block is accountable for it even if
+    /// that block lost the head race. The global tier is fed the canonical blocks only, because a
+    /// run of failures is only meaningful along a single chain.
+    fn evaluate_builders_in(&mut self, slots: RangeInclusive<Slot>) {
+        let attested_threshold = self.calculate_committee_fraction(ATTESTED_PERCENT);
+        let current_slot = self.slot();
+        let config = self.builder_circuit_breaker.config();
 
+        let judgments = self
+            .unfinalized
+            .values()
+            .flat_map(IntoIterator::into_iter)
+            .filter(|unfinalized_block| {
+                unfinalized_block.non_invalid() && slots.contains(&unfinalized_block.slot())
+            })
+            .filter_map(|unfinalized_block| {
+                let (builder_index, outcome) =
+                    self.payload_outcome(unfinalized_block, attested_threshold)?;
+
+                Some((
+                    unfinalized_block.chain_link.block_root,
+                    unfinalized_block.slot(),
+                    builder_index,
+                    outcome,
+                ))
+            })
+            .sorted_unstable_by_key(|&(_, slot, ..)| slot)
+            .collect_vec();
+
+        if config.blacklisting_enabled {
+            for &(block_root, slot, builder_index, outcome) in &judgments {
+                match outcome {
+                    PayloadOutcome::Delivered => {
+                        self.builder_circuit_breaker.record_delivered_payload(
+                            builder_index,
+                            block_root,
+                            slot,
+                        );
+                    }
+                    PayloadOutcome::Withheld => {
+                        self.builder_circuit_breaker.record_withheld_payload::<P>(
+                            current_slot,
+                            builder_index,
+                            block_root,
+                            slot,
+                        );
+                    }
+                    PayloadOutcome::Unknown => {}
+                }
+            }
+        }
+
+        if config.global_disabled {
+            return;
+        }
+
+        for slot in slots {
+            let outcome = self
+                .unfinalized_block_before_or_at(slot)
+                .filter(|unfinalized_block| unfinalized_block.slot() == slot)
+                .and_then(|unfinalized_block| {
+                    judgments.iter().find(|&&(block_root, ..)| {
+                        block_root == unfinalized_block.chain_link.block_root
+                    })
+                })
+                .map_or(PayloadOutcome::Unknown, |&(.., outcome)| outcome);
+
+            self.builder_circuit_breaker
+                .record_canonical_outcome::<P>(current_slot, slot, outcome);
+        }
+    }
+
+    fn payload_outcome(
+        &self,
+        unfinalized_block: &UnfinalizedBlock<P>,
+        attested_threshold: Gwei,
+    ) -> Option<(BuilderIndex, PayloadOutcome)> {
         let chain_link = &unfinalized_block.chain_link;
+        let builder_index = chain_link.block.message().payload_bid()?.builder_index;
 
-        let Some(payload_bid) = chain_link.block.message().payload_bid() else {
-            return PayloadOutcome::Unknown;
-        };
-
-        if payload_bid.builder_index == BUILDER_INDEX_SELF_BUILD {
-            return PayloadOutcome::Unknown;
+        if builder_index == BUILDER_INDEX_SELF_BUILD {
+            return None;
         }
 
         // A PTC majority voting the payload timely stands in for this node's own view: the reveal
@@ -1514,15 +1585,38 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if self.is_payload_present_timely(chain_link.block_root)
             || self.payload_timeliness(chain_link.block_root, true)
         {
-            return PayloadOutcome::Delivered;
+            return Some((builder_index, PayloadOutcome::Delivered));
         }
 
         // The network has attested the block, so we can blame the builder for not revealing it in time.
         if unfinalized_block.attesting_balances.pending >= attested_threshold {
-            return PayloadOutcome::Withheld;
+            return Some((builder_index, PayloadOutcome::Withheld));
         }
 
-        PayloadOutcome::Unknown
+        None
+    }
+
+    fn prune_builder_circuit_breaker(&mut self) {
+        if self.builder_circuit_breaker.is_empty() {
+            return;
+        }
+
+        let head = self.head();
+        let state = head.state(self);
+
+        let Some(state) = state.post_gloas() else {
+            return;
+        };
+
+        let finalized_epoch = state.finalized_checkpoint().epoch;
+
+        self.builder_circuit_breaker
+            .retain_active_builders(|builder_index| {
+                state
+                    .builders()
+                    .get(builder_index)
+                    .is_ok_and(|builder| predicates::is_active_builder(builder, finalized_epoch))
+            });
     }
 
     fn should_apply_proposer_boost(&self) -> bool {
@@ -2284,8 +2378,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             // > this bid is the highest value bid seen for the tuple (bid.slot, bid.parent_block_hash, bid.parent_block_root)
+            //
+            // Blacklisted builders are left out of the comparison, or their bids would suppress the
+            // bids this node is willing to select.
             if let Some(highest_bid) = self
                 .selectable_payload_bids(bid.slot, bid.parent_block_hash, bid.parent_block_root)
+                .filter(|b| !self.is_builder_blacklisted(b.message.builder_index))
                 .max_by_key(|b| b.message.value)
                 && bid.value <= highest_bid.message.value
             {
@@ -4271,6 +4369,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         // > update store time
         self.tick = new_tick;
 
+        // The circuit breaker judges the blocks of earlier slots, so it is evaluated late in the
+        // slot, where the attestations and PTC votes it weight have had the most time to arrive.
+        if new_tick.kind == TickKind::AggregateFourth {
+            self.update_builder_circuit_breaker();
+        }
+
         if new_tick.slot <= old_tick.slot {
             // `new_tick` is a later tick in the same slot.
             return Ok(Some(ApplyTickChanges::TickUpdated));
@@ -4315,10 +4419,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         self.apply_balance_differences(differences)?;
         self.update_head_segment_id();
-
-        // The circuit breaker compares attesting balances against the canonical chain, both of
-        // which are only up to date after `update_head_segment_id`.
-        self.update_builder_circuit_breaker();
 
         // Pruning the state cache requires the head slot, which depends on head_segment_id
         // pointing to the correct head. Therefore, prune state cache after the head_segment_id

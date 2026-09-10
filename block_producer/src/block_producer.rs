@@ -2296,8 +2296,41 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             state.latest_execution_payload_bid().parent_block_hash
         };
 
+        let withholding_builder = snapshot.builder_withholding_parent_payload(state.slot());
+
         let bid = snapshot
             .selectable_payload_bids(state.slot(), parent_block_hash, self.head_block_root)
+            .filter(|bid| {
+                let builder_index = bid.message.builder_index;
+
+                // With no local payload there is nothing to fall back to, so even a bid that may
+                // never be revealed beats missing the slot.
+                if !local_payload_available {
+                    return true;
+                }
+
+                if snapshot.is_builder_blacklisted(builder_index) {
+                    debug_with_peers!(
+                        "not selecting bid of {} Gwei from blacklisted builder {builder_index}",
+                        bid.message.value,
+                    );
+
+                    return false;
+                }
+
+                // the builder withheld payload in previous slot, so their bids should not be considered in this slot as well
+                if withholding_builder == Some(builder_index) {
+                    debug_with_peers!(
+                        "not selecting bid of {} Gwei from builder {builder_index} that did not \
+                         deliver the parent payload",
+                        bid.message.value,
+                    );
+
+                    return false;
+                }
+
+                true
+            })
             .max_by_key(|bid| bid.message.value)?;
 
         // The bid value is what the builder pays the proposer for the slot, so it is comparable to
