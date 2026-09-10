@@ -1,6 +1,9 @@
 use core::{
+    error::Error as StdError,
+    fmt::Write as _,
     marker::PhantomData,
     num::{NonZeroU32, NonZeroU64},
+    str::FromStr,
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
     time::Duration,
 };
@@ -10,25 +13,32 @@ use std::{
 };
 
 use anyhow::{Error as AnyhowError, Result, bail, ensure};
-use block_producer::ProposerData;
-use bls::PublicKeyBytes;
+use block_producer::{ProposerData, ValidatorBlindedBlock};
+use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use derive_more::Display;
 use futures::{Stream, StreamExt as _, future, stream};
 use helper_functions::{misc, predicates};
 use http_api_utils::{
-    BlockHeadersResponse, ETH_CONSENSUS_VERSION, EthResponse, ValidatorAttesterDutyResponse,
-    ValidatorLivenessResponse, ValidatorPTCDutyResponse, ValidatorProposerDutyResponse,
-    ValidatorSyncDutyResponse,
+    BlockHeadersResponse, ETH_BLOB_DATA_INCLUDED, ETH_CONSENSUS_VERSION,
+    ETH_EXECUTION_PAYLOAD_BLINDED, ETH_EXECUTION_PAYLOAD_INCLUDED, EthResponse,
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
 };
 use http_body_util::BodyDataStream;
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use mime::APPLICATION_OCTET_STREAM;
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
-use reqwest::{Body, Client, Response, StatusCode, header::ACCEPT};
+use reqwest::{
+    Body, Client, Response, StatusCode,
+    header::{ACCEPT, CONTENT_TYPE, HeaderMap},
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sse_stream::SseStream;
-use ssz::SszHash as _;
+use ssz::{
+    ContiguousList, Hc, Ssz, SszHash as _, SszRead as _, SszReadDefault as _, SszWrite as _,
+};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::time::timeout;
@@ -37,22 +47,34 @@ use types::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    combined::{Attestation, SignedAggregateAndProof},
+    combined::{
+        Attestation, BeaconBlock, BlindedBeaconBlock, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedBlindedBeaconBlock,
+    },
     config::Config as ChainConfig,
-    electra::containers::Attestation as ElectraAttestation,
+    deneb::{
+        containers::BeaconBlock as DenebBeaconBlock,
+        primitives::{Blob, KzgProof},
+    },
+    electra::containers::{Attestation as ElectraAttestation, BeaconBlock as ElectraBeaconBlock},
+    fulu::containers::BeaconBlock as FuluBeaconBlock,
     gloas::containers::{
-        Attestation as GloasAttestation, PayloadAttestationData, PayloadAttestationMessage,
+        Attestation as GloasAttestation, BeaconBlock as GloasBeaconBlock, ExecutionPayloadEnvelope,
+        PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
         SignedProposerPreferences,
     },
-    nonstandard::{ForkInfo, OwnAttestation, Phase},
+    nonstandard::{ForkInfo, KzgProofs, OwnAttestation, Phase},
     phase0::containers::Attestation as Phase0Attestation,
     phase0::{
         consts::BASIS_POINTS,
         containers::AttestationData,
-        primitives::{CommitteeIndex, Epoch, H256, Slot, UnixSeconds, ValidatorIndex, Version},
+        primitives::{
+            CommitteeIndex, Epoch, Gwei, H256, Slot, Uint256, UnixSeconds, ValidatorIndex, Version,
+        },
     },
     preset::Preset,
     redacting_url::RedactingUrl,
+    traits::SignedBeaconBlock as _,
 };
 
 use crate::{
@@ -136,6 +158,14 @@ enum Error {
     },
     #[error("beacon node reported {reported} data where {expected} was expected")]
     UnexpectedVersion { expected: Phase, reported: Phase },
+    #[error("beacon node at {url} did not report whether the produced block is blinded")]
+    UnknownBlindedStatus { url: String },
+    #[error("beacon node at {url} did not report whether the produced block has its payload")]
+    UnknownPayloadStatus { url: String },
+    #[error(
+        "beacon node at {url} answered with content type {content_type:?} where SSZ was requested"
+    )]
+    UnexpectedContentType { url: String, content_type: String },
     #[error(
         "beacon node produced attestation data with index {index} \
          for committee {committee_index} in {phase}"
@@ -207,6 +237,111 @@ struct HeadV2EventData {
     next_epoch_dependent_root: H256,
     execution_optimistic: bool,
 }
+
+/// The `produceBlockV3` response from Deneb on, in which the blobs travel with the block.
+#[derive(Ssz)]
+#[ssz(derive_hash = false, derive_write = false)]
+struct DenebBlockContents<P: Preset> {
+    block: DenebBeaconBlock<P>,
+    kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+#[derive(Ssz)]
+#[ssz(derive_hash = false, derive_write = false)]
+struct ElectraBlockContents<P: Preset> {
+    block: ElectraBeaconBlock<P>,
+    kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+#[derive(Ssz)]
+#[ssz(derive_hash = false, derive_write = false)]
+struct FuluBlockContents<P: Preset> {
+    block: FuluBeaconBlock<P>,
+    kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+/// The `produceBlockV4` response with the payload included, for a self-built block.
+#[derive(Ssz)]
+#[ssz(derive_hash = false)]
+struct GloasBlockContents<P: Preset> {
+    block: GloasBeaconBlock<P>,
+    execution_payload_envelope: ExecutionPayloadEnvelope<P>,
+    kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+/// The request body of `publishBlockV2` from Deneb on.
+#[derive(Ssz)]
+#[ssz(derive_hash = false, derive_read = false)]
+struct SignedBlockContents<'block, P: Preset> {
+    signed_block: &'block SignedBeaconBlock<P>,
+    kzg_proofs: &'block KzgProofs<P>,
+    blobs: &'block ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+pub struct ProducedBlock<P: Preset> {
+    pub block: ValidatorBlindedBlock<P>,
+    pub kzg_proofs: Option<KzgProofs<P>>,
+    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    /// The payload of a self-built Gloas block, which its proposer reveals after the block.
+    pub envelope_contents: Option<EnvelopeContents<P>>,
+}
+
+impl<P: Preset> ProducedBlock<P> {
+    const fn without_blobs(block: ValidatorBlindedBlock<P>) -> Self {
+        Self {
+            block,
+            kzg_proofs: None,
+            blobs: None,
+            envelope_contents: None,
+        }
+    }
+
+    const fn with_blobs(
+        block: BeaconBlock<P>,
+        kzg_proofs: KzgProofs<P>,
+        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Self {
+        Self {
+            block: ValidatorBlindedBlock::BeaconBlock(block),
+            kzg_proofs: Some(kzg_proofs),
+            blobs: Some(blobs),
+            envelope_contents: None,
+        }
+    }
+}
+
+pub struct EnvelopeContents<P: Preset> {
+    pub envelope: ExecutionPayloadEnvelope<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+/// The request body of `publishExecutionPayloadEnvelope` with the blob data included.
+#[derive(Ssz)]
+#[ssz(derive_hash = false, derive_read = false)]
+struct SignedEnvelopeContents<'envelope, P: Preset> {
+    signed_execution_payload_envelope: &'envelope SignedExecutionPayloadEnvelope<P>,
+    kzg_proofs: &'envelope ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    blobs: &'envelope ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+}
+
+/// The request body of `produceBlockV4`.
+#[derive(Serialize)]
+struct BuilderConfig {
+    #[serde(with = "serde_utils::string_or_native")]
+    min_bid: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    builder_boost_factor: u64,
+    builders: Vec<BuilderEntry>,
+}
+
+/// Bids are only taken over p2p until Builder API entries are supported.
+#[derive(Serialize)]
+enum BuilderEntry {}
 
 const HEAD_EVENT: &str = "head";
 const HEAD_V2_EVENT: &str = "head_v2";
@@ -578,6 +713,18 @@ impl RemoteBeaconNode {
         )
     }
 
+    /// A block is worthless once attesters have voted, so production must leave time to publish.
+    fn block_timeout(&self, phase: Phase) -> Duration {
+        self.window_timeout(0, self.chain_config.attestation_due_bps_at(phase))
+    }
+
+    fn block_publish_timeout(&self, phase: Phase) -> Duration {
+        self.window_timeout(
+            self.chain_config.attestation_due_bps_at(phase),
+            SLOT_END_BPS,
+        )
+    }
+
     /// The vote is cast at the due point, and gossip only accepts it until the slot ends.
     fn payload_attestation_timeout(&self) -> Duration {
         self.window_timeout(self.chain_config.payload_attestation_due_bps, SLOT_END_BPS)
@@ -765,6 +912,347 @@ impl RemoteBeaconNode {
             dependent_root,
             duties,
         })
+    }
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV3> before Gloas and
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV4> from it on.
+    pub async fn produce_block<P: Preset>(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        let phase = self.chain_config.phase_at_slot::<P>(slot);
+
+        if phase >= Phase::Gloas {
+            self.produce_block_v4(phase, slot, randao_reveal, graffiti, builder_boost_factor)
+                .await
+        } else {
+            self.produce_block_v3(phase, slot, randao_reveal, graffiti, builder_boost_factor)
+                .await
+        }
+    }
+
+    async fn produce_block_v3<P: Preset>(
+        &self,
+        phase: Phase,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        let url = self.endpoint(&produce_block_path(
+            slot,
+            randao_reveal,
+            graffiti,
+            saturating_boost_factor(builder_boost_factor),
+        ))?;
+
+        let response = self
+            .client
+            .get(url.into_url())
+            .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
+            .timeout(self.block_timeout(phase))
+            .send()
+            .await?;
+
+        let response = self.check_status(response).await?;
+        let headers = response.headers();
+
+        check_version(phase, parse_header(headers, ETH_CONSENSUS_VERSION)?)?;
+
+        let blinded = parse_header(headers, ETH_EXECUTION_PAYLOAD_BLINDED)?.ok_or_else(|| {
+            Error::UnknownBlindedStatus {
+                url: self.url.to_string(),
+            }
+        })?;
+
+        self.ensure_ssz(headers)?;
+
+        let bytes = response.bytes().await?;
+
+        // Before Bellatrix a blinded block is the block itself.
+        let block = if blinded && phase >= Phase::Bellatrix {
+            ProducedBlock::without_blobs(ValidatorBlindedBlock::BlindedBeaconBlock(
+                BlindedBeaconBlock::from_ssz(&phase, bytes)?,
+            ))
+        } else {
+            match phase {
+                Phase::Deneb => {
+                    let DenebBlockContents {
+                        block,
+                        kzg_proofs,
+                        blobs,
+                    } = DenebBlockContents::from_ssz_default(bytes)?;
+
+                    ProducedBlock::with_blobs(
+                        BeaconBlock::Deneb(Hc::from(block)),
+                        KzgProofs::Deneb(kzg_proofs),
+                        blobs,
+                    )
+                }
+                Phase::Electra => {
+                    let ElectraBlockContents {
+                        block,
+                        kzg_proofs,
+                        blobs,
+                    } = ElectraBlockContents::from_ssz_default(bytes)?;
+
+                    ProducedBlock::with_blobs(
+                        BeaconBlock::Electra(Hc::from(block)),
+                        KzgProofs::Deneb(kzg_proofs),
+                        blobs,
+                    )
+                }
+                Phase::Fulu => {
+                    let FuluBlockContents {
+                        block,
+                        kzg_proofs,
+                        blobs,
+                    } = FuluBlockContents::from_ssz_default(bytes)?;
+
+                    ProducedBlock::with_blobs(
+                        BeaconBlock::Fulu(Hc::from(block)),
+                        KzgProofs::Fulu(kzg_proofs),
+                        blobs,
+                    )
+                }
+                _ => ProducedBlock::without_blobs(ValidatorBlindedBlock::BeaconBlock(
+                    BeaconBlock::from_ssz(&self.chain_config, bytes)?,
+                )),
+            }
+        };
+
+        debug_with_peers!(
+            "{} produced a {} block for slot {slot}",
+            self.url,
+            if blinded { "blinded" } else { "full" },
+        );
+
+        Ok(block)
+    }
+
+    async fn produce_block_v4<P: Preset>(
+        &self,
+        phase: Phase,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        let url = self.endpoint(&produce_block_v4_path(slot, randao_reveal, graffiti))?;
+
+        let builder_config = BuilderConfig {
+            min_bid: 0,
+            builder_boost_factor: saturating_boost_factor(builder_boost_factor),
+            builders: vec![],
+        };
+
+        let response = self
+            .client
+            .post(url.into_url())
+            .header(ACCEPT, APPLICATION_OCTET_STREAM.as_ref())
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref())
+            .json(&builder_config)
+            .timeout(self.block_timeout(phase))
+            .send()
+            .await?;
+
+        let response = self.check_status(response).await?;
+        let headers = response.headers();
+
+        check_version(phase, parse_header(headers, ETH_CONSENSUS_VERSION)?)?;
+
+        let payload_included =
+            parse_header(headers, ETH_EXECUTION_PAYLOAD_INCLUDED)?.ok_or_else(|| {
+                Error::UnknownPayloadStatus {
+                    url: self.url.to_string(),
+                }
+            })?;
+
+        self.ensure_ssz(headers)?;
+
+        let bytes = response.bytes().await?;
+
+        let block = if payload_included {
+            let GloasBlockContents {
+                block,
+                execution_payload_envelope,
+                kzg_proofs,
+                blobs,
+            } = GloasBlockContents::from_ssz_default(bytes)?;
+
+            ProducedBlock {
+                block: ValidatorBlindedBlock::BeaconBlock(BeaconBlock::Gloas(Hc::from(block))),
+                kzg_proofs: None,
+                blobs: None,
+                envelope_contents: Some(EnvelopeContents {
+                    envelope: execution_payload_envelope,
+                    kzg_proofs,
+                    blobs,
+                }),
+            }
+        } else {
+            ProducedBlock::without_blobs(ValidatorBlindedBlock::BeaconBlock(BeaconBlock::from_ssz(
+                &self.chain_config,
+                bytes,
+            )?))
+        };
+
+        debug_with_peers!(
+            "{} produced a block for slot {slot} {} its payload",
+            self.url,
+            if payload_included { "with" } else { "without" },
+        );
+
+        Ok(block)
+    }
+
+    fn ensure_ssz(&self, headers: &HeaderMap) -> Result<()> {
+        let content_type = headers
+            .get(CONTENT_TYPE)
+            .map(|value| value.to_str().map(str::to_owned))
+            .transpose()?
+            .unwrap_or_default();
+
+        ensure!(
+            content_type.starts_with(APPLICATION_OCTET_STREAM.as_ref()),
+            Error::UnexpectedContentType {
+                url: self.url.to_string(),
+                content_type,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishBlockV2>
+    pub async fn publish_block<P: Preset>(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> Result<()> {
+        let phase = signed_block.phase();
+
+        let body = if (Phase::Deneb..Phase::Gloas).contains(&phase) {
+            let empty_proofs = if phase >= Phase::Fulu {
+                KzgProofs::empty_fulu()
+            } else {
+                KzgProofs::empty_deneb()
+            };
+
+            let empty_blobs = ContiguousList::default();
+
+            SignedBlockContents {
+                signed_block: signed_block.as_ref(),
+                kzg_proofs: kzg_proofs.unwrap_or(&empty_proofs),
+                blobs: blobs.unwrap_or(&empty_blobs),
+            }
+            .to_ssz()?
+        } else {
+            signed_block.to_ssz()?
+        };
+
+        self.publish_ssz("/eth/v2/beacon/blocks", phase, &[], body)
+            .await?;
+
+        debug_with_peers!(
+            "published block for slot {} to {}",
+            signed_block.message().slot(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishBlindedBlockV2>
+    pub async fn publish_blinded_block<P: Preset>(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        self.publish_ssz(
+            "/eth/v2/beacon/blinded_blocks",
+            signed_block.phase(),
+            &[],
+            signed_block.to_ssz()?,
+        )
+        .await?;
+
+        debug_with_peers!(
+            "published blinded block for slot {} to {}",
+            signed_block.message().slot(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishExecutionPayloadEnvelope>
+    pub async fn publish_execution_payload_envelope<P: Preset>(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        let envelope = &signed_envelope.message;
+        let phase = self
+            .chain_config
+            .phase_at_slot::<P>(envelope.payload.slot_number);
+
+        let body = SignedEnvelopeContents {
+            signed_execution_payload_envelope: signed_envelope.as_ref(),
+            kzg_proofs,
+            blobs,
+        }
+        .to_ssz()?;
+
+        self.publish_ssz(
+            "/eth/v1/beacon/execution_payload_envelopes",
+            phase,
+            &[(ETH_BLOB_DATA_INCLUDED, "true")],
+            body,
+        )
+        .await?;
+
+        debug_with_peers!(
+            "published execution payload envelope for block {:?} to {}",
+            envelope.beacon_block_root,
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn publish_ssz(
+        &self,
+        path: &str,
+        phase: Phase,
+        extra_headers: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> Result<()> {
+        let url = self.endpoint(path)?;
+
+        let mut request = self
+            .client
+            .post(url.into_url())
+            .header(ETH_CONSENSUS_VERSION, phase.as_ref())
+            .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref());
+
+        for (name, value) in extra_headers {
+            request = request.header(*name, *value);
+        }
+
+        let response = request
+            .body(body)
+            .timeout(self.block_publish_timeout(phase))
+            .send()
+            .await?;
+
+        self.check_status(response).await?;
+
+        Ok(())
     }
 }
 
@@ -1485,6 +1973,56 @@ fn check_version(expected: Phase, reported: Option<Phase>) -> Result<()> {
     Ok(())
 }
 
+fn parse_header<T: FromStr>(headers: &HeaderMap, name: &str) -> Result<Option<T>>
+where
+    T::Err: StdError + Send + Sync + 'static,
+{
+    headers
+        .get(name)
+        .map(|value| value.to_str()?.parse().map_err(AnyhowError::from))
+        .transpose()
+}
+
+/// The factor saturates at the value the spec reserves for preferring builders outright.
+fn saturating_boost_factor(builder_boost_factor: Uint256) -> u64 {
+    u64::try_from(builder_boost_factor.into_raw()).unwrap_or(u64::MAX)
+}
+
+fn produce_block_path(
+    slot: Slot,
+    randao_reveal: SignatureBytes,
+    graffiti: Option<H256>,
+    builder_boost_factor: u64,
+) -> String {
+    let mut path = format!("/eth/v3/validator/blocks/{slot}?randao_reveal={randao_reveal:?}");
+
+    if let Some(graffiti) = graffiti {
+        write!(path, "&graffiti={graffiti:?}").expect("writing to a string cannot fail");
+    }
+
+    write!(path, "&builder_boost_factor={builder_boost_factor}")
+        .expect("writing to a string cannot fail");
+
+    path
+}
+
+/// The payload is always requested, so a self-built block can be published through any node.
+fn produce_block_v4_path(
+    slot: Slot,
+    randao_reveal: SignatureBytes,
+    graffiti: Option<H256>,
+) -> String {
+    let mut path = format!("/eth/v4/validator/blocks/{slot}?randao_reveal={randao_reveal:?}");
+
+    if let Some(graffiti) = graffiti {
+        write!(path, "&graffiti={graffiti:?}").expect("writing to a string cannot fail");
+    }
+
+    path.push_str("&include_payload=true");
+
+    path
+}
+
 fn aggregate_attestation_path(data: AttestationData, committee_index: CommitteeIndex) -> String {
     format!(
         "/eth/v2/validator/aggregate_attestation?attestation_data_root={:?}\
@@ -1514,6 +2052,7 @@ mod tests {
     use ssz::BitVector;
     use types::{
         combined::Attestation,
+        deneb::containers::SignedBeaconBlock as DenebSignedBeaconBlock,
         electra::containers::{
             AggregateAndProof as ElectraAggregateAndProof, Attestation as ElectraAttestation,
             SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
@@ -2034,6 +2573,120 @@ mod tests {
         check_not_optimistic(&url, Some(false))?;
         check_not_optimistic(&url, Some(true)).expect_err("an optimistic head is not verified");
         check_not_optimistic(&url, None).expect_err("an unreported head is not verified");
+
+        Ok(())
+    }
+
+    // The node verifies the reveal, so it and the graffiti must go into the query in full.
+    #[test]
+    fn produce_block_path_spells_out_the_reveal_and_graffiti() {
+        let path = produce_block_path(
+            6,
+            SignatureBytes::default(),
+            Some(H256::repeat_byte(1)),
+            100,
+        );
+
+        assert!(path.starts_with(&format!(
+            "/eth/v3/validator/blocks/6?randao_reveal=0x{}",
+            "00".repeat(96),
+        )));
+        assert!(path.contains(&format!("&graffiti=0x{}", "01".repeat(32))));
+        assert!(path.ends_with("&builder_boost_factor=100"));
+    }
+
+    // Nodes take the factor as a `uint64`, and `prefer_builder_proposals` configures `Uint256::MAX`.
+    #[test]
+    fn boost_factor_saturates_at_u64_max() {
+        assert_eq!(saturating_boost_factor(Uint256::from_u64(100)), 100);
+        assert_eq!(saturating_boost_factor(Uint256::MAX), u64::MAX);
+    }
+
+    // From Gloas on the boost factor travels in the body and the payload is always asked for.
+    #[test]
+    fn produce_block_v4_path_asks_for_the_payload() {
+        let path = produce_block_v4_path(6, SignatureBytes::default(), Some(H256::repeat_byte(1)));
+
+        assert!(path.starts_with(&format!(
+            "/eth/v4/validator/blocks/6?randao_reveal=0x{}",
+            "00".repeat(96),
+        )));
+        assert!(path.contains(&format!("&graffiti=0x{}", "01".repeat(32))));
+        assert!(path.ends_with("&include_payload=true"));
+    }
+
+    // The node decodes the body as JSON with quoted integers, as elsewhere in the Beacon API.
+    #[test]
+    fn serializes_builder_config_request_body() -> Result<()> {
+        let body = serde_json::to_value(BuilderConfig {
+            min_bid: 0,
+            builder_boost_factor: 100,
+            builders: vec![],
+        })?;
+
+        assert_eq!(
+            body,
+            json!({ "min_bid": "0", "builder_boost_factor": "100", "builders": [] }),
+        );
+
+        Ok(())
+    }
+
+    // `produceBlockV4` with the payload puts the block first and the envelope right after it.
+    #[test]
+    fn gloas_block_contents_put_the_block_before_the_envelope() -> Result<()> {
+        let contents = GloasBlockContents::<Mainnet> {
+            block: GloasBeaconBlock::default(),
+            execution_payload_envelope: ExecutionPayloadEnvelope::default(),
+            kzg_proofs: ContiguousList::default(),
+            blobs: ContiguousList::default(),
+        };
+
+        let block_bytes = contents.block.to_ssz()?;
+        let envelope_bytes = contents.execution_payload_envelope.to_ssz()?;
+        let bytes = contents.to_ssz()?;
+
+        // Four offsets precede the block; the empty lists after the envelope add nothing.
+        let block_offset = 16;
+        let envelope_offset = block_offset + block_bytes.len();
+
+        assert_eq!(&bytes[..4], 16_u32.to_le_bytes());
+        assert_eq!(&bytes[block_offset..envelope_offset], block_bytes);
+        assert_eq!(&bytes[envelope_offset..], envelope_bytes);
+
+        let read_back = GloasBlockContents::<Mainnet>::from_ssz_default(bytes)?;
+
+        assert_eq!(read_back.block, contents.block);
+        assert_eq!(
+            read_back.execution_payload_envelope,
+            contents.execution_payload_envelope,
+        );
+
+        Ok(())
+    }
+
+    // `publishBlockV2` from Deneb on takes one container with the block ahead of the blob data.
+    #[test]
+    fn signed_block_contents_put_the_block_first() -> Result<()> {
+        let signed_block = SignedBeaconBlock::<Mainnet>::Deneb(DenebSignedBeaconBlock {
+            message: Hc::from(DenebBeaconBlock::default()),
+            signature: SignatureBytes::default(),
+        });
+
+        let block_bytes = signed_block.to_ssz()?;
+
+        let contents = SignedBlockContents {
+            signed_block: &signed_block,
+            kzg_proofs: &KzgProofs::empty_deneb(),
+            blobs: &ContiguousList::default(),
+        }
+        .to_ssz()?;
+
+        // Three offsets precede the block; the empty lists after it add nothing.
+        let block_offset = 12;
+
+        assert_eq!(&contents[..4], 12_u32.to_le_bytes());
+        assert_eq!(&contents[block_offset..], block_bytes);
 
         Ok(())
     }

@@ -1,18 +1,19 @@
 use core::{convert::identity, fmt::Display, future::Future, ops::Range};
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 use anyhow::{Error as AnyhowError, Result, ensure};
 use block_producer::ProposerData;
-use bls::PublicKeyBytes;
+use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use fork_choice_control::Wait;
 use futures::future::join_all;
 use http_api_utils::{ValidatorLivenessResponse, ValidatorSyncDutyResponse};
 use logging::{debug_with_peers, warn_with_peers};
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
+use ssz::ContiguousList;
 use std_ext::ArcExt;
 use tap::Pipe as _;
 use types::{
@@ -20,14 +21,16 @@ use types::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    combined::{Attestation, SignedAggregateAndProof},
+    combined::{Attestation, SignedAggregateAndProof, SignedBeaconBlock, SignedBlindedBeaconBlock},
+    deneb::primitives::{Blob, KzgProof},
     gloas::containers::{
-        PayloadAttestationData, PayloadAttestationMessage, SignedProposerPreferences,
+        PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
+        SignedProposerPreferences,
     },
-    nonstandard::{OwnAttestation, PublishedDuty},
+    nonstandard::{KzgProofs, OwnAttestation, PublishedDuty},
     phase0::{
         containers::AttestationData,
-        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, Uint256, ValidatorIndex},
     },
     preset::Preset,
 };
@@ -36,7 +39,7 @@ use crate::{
     beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
     local_beacon_node::LocalBeaconNode,
     misc,
-    remote_beacon_node::RemoteBeaconNode,
+    remote_beacon_node::{ProducedBlock, RemoteBeaconNode},
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
 };
@@ -47,6 +50,8 @@ pub struct BeaconNodes<P: Preset, W: Wait> {
     current_slot: Slot,
     max_empty_slots: u64,
     publish_to_every_node: Vec<PublishedDuty>,
+    /// The remote node that produced the block of the slot, which alone holds its payload.
+    producer: OnceLock<Arc<RemoteBeaconNode>>,
 }
 
 impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
@@ -67,6 +72,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
             current_slot,
             max_empty_slots,
             publish_to_every_node,
+            producer: OnceLock::new(),
         }
     }
 
@@ -191,6 +197,93 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
         debug_with_peers!("{node} beacon node reported head block root {root:?}");
 
         Ok(root)
+    }
+
+    /// Produces a block on the first serving remote node that can, which alone holds its payload.
+    pub async fn produce_block(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        let attempts = self.serving_nodes().into_iter().map(|node| {
+            let attempt = node.clone_arc();
+
+            (node, async move {
+                attempt
+                    .produce_block::<P>(slot, randao_reveal, graffiti, builder_boost_factor)
+                    .await
+            })
+        });
+
+        let (producer, block) = first_success("produce a block", attempts).await?;
+
+        self.producer.get_or_init(|| producer);
+
+        Ok(block)
+    }
+
+    pub async fn publish_block(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> Result<()> {
+        self.publish_from_producer("publish a block", |node| async move {
+            node.publish_block(signed_block, kzg_proofs, blobs).await
+        })
+        .await
+    }
+
+    pub async fn publish_blinded_block(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        self.publish_from_producer("publish a blinded block", |node| async move {
+            node.publish_blinded_block(signed_block).await
+        })
+        .await
+    }
+
+    pub async fn publish_execution_payload_envelope(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        self.publish_from_producer("publish an execution payload envelope", |node| async move {
+            node.publish_execution_payload_envelope(signed_envelope, kzg_proofs, blobs)
+                .await
+        })
+        .await
+    }
+
+    /// Publishes to the serving remote nodes, to all of them or the first that accepts as
+    /// `--publish-to-every-node` directs, trying the producing node first as it is known to be
+    /// able to import what it produced.
+    async fn publish_from_producer<F, Fut>(&self, operation: &'static str, attempt: F) -> Result<()>
+    where
+        F: Fn(Arc<RemoteBeaconNode>) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        let producer = self.producer.get();
+
+        let publish_to = producer
+            .map(ArcExt::clone_arc)
+            .into_iter()
+            .chain(
+                self.serving_nodes()
+                    .into_iter()
+                    .filter(|node| producer.is_none_or(|producer| !Arc::ptr_eq(node, producer))),
+            )
+            .collect();
+
+        if should_publish_to_every_node(&self.publish_to_every_node, PublishedDuty::Blocks) {
+            broadcast(operation, publish_to, attempt).await
+        } else {
+            publish(operation, publish_to, attempt).await
+        }
     }
 
     /// Publishes to the serving remote nodes, to all of them or the first that accepts as
@@ -1037,7 +1130,9 @@ mod tests {
         for duty in [
             PublishedDuty::Aggregates,
             PublishedDuty::Attestations,
+            PublishedDuty::Blocks,
             PublishedDuty::PayloadAttestations,
+            PublishedDuty::ProposerPreferences,
             PublishedDuty::SyncCommitteeContributions,
             PublishedDuty::SyncCommitteeMessages,
         ] {

@@ -8,7 +8,10 @@ pub use misc::{
     ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
     ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
 };
-pub use response::{AlwaysJson, ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz};
+pub use response::{
+    AlwaysJson, ETH_BLOB_DATA_INCLUDED, ETH_EXECUTION_PAYLOAD_BLINDED,
+    ETH_EXECUTION_PAYLOAD_INCLUDED, EthResponse, JsonOrSsz,
+};
 pub use state_id::StateId;
 pub use traits::ApiError;
 

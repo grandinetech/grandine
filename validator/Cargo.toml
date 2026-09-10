@@ -38,6 +38,7 @@ itertools = { workspace = true }
 keymanager = { workspace = true }
 liveness_tracker = { workspace = true }
 logging = { workspace = true }
+mime = { workspace = true }
 once_cell = { workspace = true }
 operation_pools = { workspace = true }
 p2p = { workspace = true }

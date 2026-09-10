@@ -247,12 +247,6 @@ impl<P: Preset, W: Wait> ChainSource<P, W> {
     pub const fn uses_local_node(&self) -> bool {
         matches!(self, Self::Local { .. } | Self::Mixed { .. })
     }
-
-    /// Blocks are produced by the built-in beacon node alone.
-    #[must_use]
-    pub const fn supports_block_production(&self) -> bool {
-        self.uses_local_node()
-    }
 }
 
 /// The head duties are performed against in a slot.

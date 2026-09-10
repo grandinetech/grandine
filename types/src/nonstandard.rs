@@ -292,6 +292,7 @@ pub enum PublishedDuty {
     All,
     Aggregates,
     Attestations,
+    Blocks,
     PayloadAttestations,
     ProposerPreferences,
     SyncCommitteeContributions,

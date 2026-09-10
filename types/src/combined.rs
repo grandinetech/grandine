@@ -1344,6 +1344,35 @@ impl<P: Preset> SszSize for BlindedBeaconBlock<P> {
     ]);
 }
 
+impl<P: Preset> SszRead<Phase> for BlindedBeaconBlock<P> {
+    fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
+        let block = match phase {
+            Phase::Phase0 => {
+                return Err(ReadError::Custom {
+                    message: "blinded block has slot in Phase 0",
+                });
+            }
+            Phase::Altair => {
+                return Err(ReadError::Custom {
+                    message: "blinded block has slot in Altair",
+                });
+            }
+            Phase::Bellatrix => Self::Bellatrix(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Capella => Self::Capella(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Deneb => Self::Deneb(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Electra => Self::Electra(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Fulu => Self::Fulu(SszReadDefault::from_ssz_default(bytes)?),
+            Phase::Gloas => {
+                return Err(ReadError::Custom {
+                    message: "blinded block has slot in Gloas",
+                });
+            }
+        };
+
+        Ok(block)
+    }
+}
+
 impl<P: Preset> SszWrite for BlindedBeaconBlock<P> {
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         match self {

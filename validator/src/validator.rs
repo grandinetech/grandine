@@ -50,7 +50,7 @@ use prometheus_metrics::Metrics;
 use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
-use ssz::{BitList, ContiguousList, ReadError};
+use ssz::{BitList, ContiguousList, ReadError, SszHash as _};
 use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt;
 use tap::{Conv as _, Pipe as _};
@@ -88,10 +88,10 @@ use types::{
             ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedVoluntaryExit,
         },
-        primitives::{Epoch, ExecutionBlockHash, H256, Slot, ValidatorIndex},
+        primitives::{Epoch, ExecutionBlockHash, H256, Slot, Uint256, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
 };
 use validator_statistics::ValidatorStatistics;
 
@@ -107,6 +107,7 @@ use crate::{
     own_proposer_duties::OwnProposerDuties,
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
+    remote_beacon_node::{EnvelopeContents, ProducedBlock},
     slot_head::SlotHead,
     tasks::{
         OwnSyncCommitteeMembers, PrefetchSyncCommitteeDutiesTask,
@@ -386,13 +387,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     pub async fn run(self) -> Result<()> {
-        if !self.chain_source.supports_block_production() {
-            warn_with_peers!(
-                "the validator client does not support block production yet; \
-                 any such duties will be missed",
-            );
-        }
-
         if let Some(remote_beacon_nodes) = self.chain_source.remote_beacon_nodes() {
             remote_beacon_nodes
                 .check_on_startup(self.current_slot())
@@ -1227,23 +1221,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         if let DutySource::Remote { slot_head } = source {
-            let beacon_nodes = self.beacon_nodes(source, &wait_group);
-
-            if let Some((proposer_index, public_key)) = self
-                .own_proposer_from_duties(&beacon_nodes, slot_head)
-                .await?
-            {
-                warn_with_peers!(
-                    "validator {proposer_index} ({public_key:?}) skipping block proposal in \
-                     slot {}: block production with --beacon-node-urls is not supported yet",
-                    slot_head.slot(),
-                );
-            }
-
-            return Ok(());
+            return self.propose_with_remote_nodes(slot_head).await;
         }
 
-        // Blocks are produced by the built-in beacon node alone.
+        // With a built-in beacon node, blocks are produced by it alone.
         let (
             Some(controller),
             Some(block_producer),
@@ -1276,23 +1257,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        let doppelganger_protection = self
-            .doppelganger_protection
-            .as_deref()
-            .map(DoppelgangerProtection::load);
-
-        if let Some(doppelganger_protection) = &doppelganger_protection
-            && !doppelganger_protection.is_validator_active(*public_key)
-        {
-            info_with_peers!(
-                "Validator {public_key:?} skipping proposer duty in slot {} \
-                     since not enough time has passed to ensure there are \
-                     no doppelganger validators participating on network. \
-                     Validator will start performing duties on slot {}.",
-                slot_head.slot(),
-                doppelganger_protection.tracking_end_slot::<P>(*public_key),
-            );
-
+        if !self.doppelganger_protection_permits_proposal(slot_head, *public_key) {
             return Ok(());
         }
 
@@ -1328,30 +1293,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
-        let epoch = slot_head.current_epoch();
-
-        let result = signer_snapshot
-            .sign_without_slashing_protection(
-                SigningMessage::RandaoReveal { epoch },
-                RandaoEpoch::from(epoch).signing_root_from_fork_info(
-                    self.chain_source.chain_config(),
-                    slot_head.fork_info,
-                ),
-                Some(slot_head.fork_info),
-                *public_key,
-            )
-            .await;
-
-        let randao_reveal = match result {
-            Ok(signature) => signature.into(),
-            Err(error) => {
-                warn_with_peers!(
-                    "failed to sign RANDAO reveal (epoch: {epoch}, public_key: {public_key}): \
-                    {error:?}",
-                );
-
-                return Ok(());
-            }
+        let Some(randao_reveal) = self
+            .sign_randao_reveal(&signer_snapshot, slot_head, *public_key)
+            .await
+        else {
+            return Ok(());
         };
 
         info_with_peers!(
@@ -1533,6 +1479,275 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         Ok(())
+    }
+
+    #[expect(clippy::too_many_lines)]
+    async fn propose_with_remote_nodes(&mut self, slot_head: &SlotHead<P>) -> Result<()> {
+        // No node produces a block for the genesis slot.
+        if slot_head.slot() == GENESIS_SLOT {
+            return Ok(());
+        }
+
+        let beacon_nodes = self.remote_beacon_nodes_at(slot_head.slot());
+
+        let Some((proposer_index, public_key)) = self
+            .own_proposer_from_duties(&beacon_nodes, slot_head)
+            .await?
+        else {
+            return Ok(());
+        };
+
+        let signer_snapshot = self.signer.load();
+
+        if !signer_snapshot.has_key(public_key) {
+            return Ok(());
+        }
+
+        if !self.doppelganger_protection_permits_proposal(slot_head, public_key) {
+            return Ok(());
+        }
+
+        info_with_peers!(
+            "starting block proposal task for validator {proposer_index} at slot {}",
+            slot_head.slot()
+        );
+
+        let _propose_timer = self
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.validator_propose_times.start_timer());
+
+        let graffiti = self
+            .proposer_configs
+            .graffiti_bytes(public_key)?
+            .or_else(|| self.next_graffiti());
+
+        let Some(randao_reveal) = self
+            .sign_randao_reveal(&signer_snapshot, slot_head, public_key)
+            .await
+        else {
+            return Ok(());
+        };
+
+        // Before Gloas a bid needs a registration, which without a builder never reaches a remote
+        // node, so only local payloads are wanted from one.
+        let builder_boost_factor =
+            if slot_head.phase() >= Phase::Gloas || self.builder_api.is_some() {
+                self.validator_config.builder_boost_factor(public_key)
+            } else {
+                Uint256::ZERO
+            };
+
+        let ProducedBlock {
+            block: validator_blinded_block,
+            kzg_proofs: block_proofs,
+            blobs: block_blobs,
+            envelope_contents,
+        } = match beacon_nodes
+            .produce_block(
+                slot_head.slot(),
+                randao_reveal,
+                graffiti,
+                builder_boost_factor,
+            )
+            .await
+        {
+            Ok(produced) => produced,
+            Err(error) => {
+                warn_with_peers!("failed to produce beacon block: {error}");
+                return Ok(());
+            }
+        };
+
+        let (block_slot, block_proposer_index) = match &validator_blinded_block {
+            ValidatorBlindedBlock::BlindedBeaconBlock(block) => {
+                (block.slot(), block.proposer_index())
+            }
+            ValidatorBlindedBlock::BeaconBlock(block) => (block.slot(), block.proposer_index()),
+        };
+
+        // The head may have changed since the duty was looked up.
+        if (block_slot, block_proposer_index) != (slot_head.slot(), proposer_index) {
+            warn_with_peers!(
+                "beacon node produced a block for slot {block_slot} and proposer \
+                 {block_proposer_index} where slot {} and proposer {proposer_index} were expected",
+                slot_head.slot(),
+            );
+
+            return Ok(());
+        }
+
+        let published = match validator_blinded_block {
+            ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
+                let Some(signature) = slot_head
+                    .sign_beacon_block(
+                        &self.signer,
+                        &blinded_block,
+                        (&blinded_block).into(),
+                        public_key,
+                        self.slashing_protector.clone_arc(),
+                    )
+                    .await
+                else {
+                    return Ok(());
+                };
+
+                info_with_peers!(
+                    "validator {proposer_index} proposing beacon block with root {:?} \
+                     in slot {} using builder",
+                    blinded_block.hash_tree_root(),
+                    slot_head.slot(),
+                );
+
+                beacon_nodes
+                    .publish_blinded_block(&blinded_block.with_signature(signature))
+                    .await
+            }
+            ValidatorBlindedBlock::BeaconBlock(block) => {
+                let Some(signature) = slot_head
+                    .sign_beacon_block(
+                        &self.signer,
+                        &block,
+                        (&block).into(),
+                        public_key,
+                        self.slashing_protector.clone_arc(),
+                    )
+                    .await
+                else {
+                    return Ok(());
+                };
+
+                let block_root = block.hash_tree_root();
+
+                if let Some(payload_bid) = block.payload_bid()
+                    && payload_bid.builder_index != BUILDER_INDEX_SELF_BUILD
+                {
+                    info_with_peers!(
+                        "validator {proposer_index} proposing beacon block with root {block_root:?} \
+                         in slot {} using builder {}",
+                        slot_head.slot(),
+                        payload_bid.builder_index,
+                    );
+                } else {
+                    info_with_peers!(
+                        "validator {proposer_index} proposing beacon block with root {block_root:?} \
+                         in slot {}",
+                        slot_head.slot(),
+                    );
+                }
+
+                let signed_block = Arc::new(block.with_signature(signature));
+
+                debug_with_peers!("beacon block: {signed_block:?}");
+
+                beacon_nodes
+                    .publish_block(&signed_block, block_proofs.as_ref(), block_blobs.as_ref())
+                    .await
+            }
+        };
+
+        if let Err(error) = published {
+            warn_with_peers!("failed to publish beacon block: {error}");
+            return Ok(());
+        }
+
+        // A self-built payload is revealed after the block, so the payload timeliness committee
+        // has seen the bid before the payload arrives.
+        if let Some(EnvelopeContents {
+            envelope,
+            kzg_proofs,
+            blobs,
+        }) = envelope_contents
+        {
+            let Some(signed_envelope) = self
+                .sign_execution_payload_envelope(&signer_snapshot, slot_head, envelope, public_key)
+                .await
+            else {
+                return Ok(());
+            };
+
+            debug_with_peers!(
+                "validator {proposer_index} publishing execution payload envelope for block {:?} \
+                 in slot {}",
+                signed_envelope.message.beacon_block_root,
+                slot_head.slot(),
+            );
+
+            if let Err(error) = beacon_nodes
+                .publish_execution_payload_envelope(&Arc::new(signed_envelope), &kzg_proofs, &blobs)
+                .await
+            {
+                warn_with_peers!("failed to publish execution payload envelope: {error}");
+                return Ok(());
+            }
+        }
+
+        if let Some(metrics) = self.metrics.as_ref() {
+            metrics.validator_propose_successes.inc();
+        }
+
+        Ok(())
+    }
+
+    fn doppelganger_protection_permits_proposal(
+        &self,
+        slot_head: &SlotHead<P>,
+        public_key: PublicKeyBytes,
+    ) -> bool {
+        let doppelganger_protection = self
+            .doppelganger_protection
+            .as_deref()
+            .map(DoppelgangerProtection::load);
+
+        if let Some(doppelganger_protection) = &doppelganger_protection
+            && !doppelganger_protection.is_validator_active(public_key)
+        {
+            info_with_peers!(
+                "Validator {public_key:?} skipping proposer duty in slot {} \
+                     since not enough time has passed to ensure there are \
+                     no doppelganger validators participating on network. \
+                     Validator will start performing duties on slot {}.",
+                slot_head.slot(),
+                doppelganger_protection.tracking_end_slot::<P>(public_key),
+            );
+
+            return false;
+        }
+
+        true
+    }
+
+    async fn sign_randao_reveal(
+        &self,
+        signer_snapshot: &Snapshot,
+        slot_head: &SlotHead<P>,
+        public_key: PublicKeyBytes,
+    ) -> Option<SignatureBytes> {
+        let epoch = slot_head.current_epoch();
+
+        let result = signer_snapshot
+            .sign_without_slashing_protection(
+                SigningMessage::RandaoReveal { epoch },
+                RandaoEpoch::from(epoch).signing_root_from_fork_info(
+                    self.chain_source.chain_config(),
+                    slot_head.fork_info,
+                ),
+                Some(slot_head.fork_info),
+                public_key,
+            )
+            .await;
+
+        match result {
+            Ok(signature) => Some(signature.into()),
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to sign RANDAO reveal (epoch: {epoch}, public_key: {public_key}): \
+                    {error:?}",
+                );
+
+                None
+            }
+        }
     }
 
     /// Own proposer of the slot from duties, for a head without a state to compute it from.
@@ -1742,35 +1957,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         signer_snapshot: &Snapshot,
         public_key: &PublicKeyBytes,
     ) -> Result<()> {
-        // Sign the envelope
-        let envelope_sig = match signer_snapshot
-            .sign_without_slashing_protection(
-                SigningMessage::ExecutionPayloadEnvelope(&envelope),
-                envelope.signing_root_from_fork_info(
-                    self.chain_source.chain_config(),
-                    slot_head.fork_info,
-                ),
-                Some(slot_head.fork_info),
-                *public_key,
-            )
+        let Some(signed_envelope) = self
+            .sign_execution_payload_envelope(signer_snapshot, slot_head, envelope, *public_key)
             .await
-        {
-            Ok(signature) => signature.into(),
-            Err(error) => {
-                warn_with_peers!(
-                    "failed to sign execution payload envelope (slot: {}, public_key: {public_key}): \
-                    {error:?}",
-                    slot_head.slot(),
-                );
-
-                return Ok(());
-            }
+        else {
+            return Ok(());
         };
 
-        let signed_envelope = Arc::new(SignedExecutionPayloadEnvelope {
-            message: envelope,
-            signature: envelope_sig,
-        });
+        let signed_envelope = Arc::new(signed_envelope);
 
         debug_with_peers!(
             "validator {} publishing execution payload envelope for block {:?} in slot {}",
@@ -1787,6 +1981,42 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         ));
 
         Ok(())
+    }
+
+    async fn sign_execution_payload_envelope(
+        &self,
+        signer_snapshot: &Snapshot,
+        slot_head: &SlotHead<P>,
+        envelope: ExecutionPayloadEnvelope<P>,
+        public_key: PublicKeyBytes,
+    ) -> Option<SignedExecutionPayloadEnvelope<P>> {
+        let result = signer_snapshot
+            .sign_without_slashing_protection(
+                SigningMessage::ExecutionPayloadEnvelope(&envelope),
+                envelope.signing_root_from_fork_info(
+                    self.chain_source.chain_config(),
+                    slot_head.fork_info,
+                ),
+                Some(slot_head.fork_info),
+                public_key,
+            )
+            .await;
+
+        match result {
+            Ok(signature) => Some(SignedExecutionPayloadEnvelope {
+                message: envelope,
+                signature: signature.into(),
+            }),
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to sign execution payload envelope (slot: {}, public_key: {public_key}): \
+                    {error:?}",
+                    slot_head.slot(),
+                );
+
+                None
+            }
+        }
     }
 
     /// See:
