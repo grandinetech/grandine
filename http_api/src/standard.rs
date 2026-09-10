@@ -5586,18 +5586,42 @@ async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
     signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     broadcast_validation: BroadcastValidation,
 ) -> Result<StatusCode, Error> {
-    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
-
     if broadcast_validation == BroadcastValidation::Gossip {
+        let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
         controller
             .on_api_execution_payload_envelope_for_gossip(signed_envelope.clone_arc(), sender);
-    } else {
-        controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
+
+        // The gossip checks only answer; publishing and importing are still to be done.
+        match receiver.next().await.transpose() {
+            Ok(Some(ValidationOutcome::Accept)) => {
+                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+                    .send(api_to_p2p_tx);
+            }
+            Ok(Some(ValidationOutcome::Ignore(publishable))) => {
+                if publishable {
+                    ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+                        .send(api_to_p2p_tx);
+                }
+
+                return Ok(StatusCode::ACCEPTED);
+            }
+            Ok(None) => {
+                return Err(Error::InvalidPayloadEnvelope(anyhow!(
+                    "received no envelope validation response",
+                )));
+            }
+            Err(error) => return Err(Error::InvalidPayloadEnvelope(error)),
+        }
     }
+
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => match broadcast_validation {
-            // The envelope was already published by the gossip-checks path above.
+            // Published above once the gossip checks passed.
             BroadcastValidation::Gossip => StatusCode::OK,
             BroadcastValidation::Consensus => {
                 ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
