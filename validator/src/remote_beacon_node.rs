@@ -78,7 +78,9 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
+    beacon_node_api::{
+        AttesterDuties, BeaconNodeApi, EnvelopeContents, ProducedBlock, ProposerDuties, PtcDuties,
+    },
     chain_head::{ChainHead, DependentRoots, HeadUpdate},
     health::Health,
     slot_head::SlotHead,
@@ -280,44 +282,6 @@ struct SignedBlockContents<'block, P: Preset> {
     signed_block: &'block SignedBeaconBlock<P>,
     kzg_proofs: &'block KzgProofs<P>,
     blobs: &'block ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-}
-
-pub struct ProducedBlock<P: Preset> {
-    pub block: ValidatorBlindedBlock<P>,
-    pub kzg_proofs: Option<KzgProofs<P>>,
-    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
-    /// The payload of a self-built Gloas block, which its proposer reveals after the block.
-    pub envelope_contents: Option<EnvelopeContents<P>>,
-}
-
-impl<P: Preset> ProducedBlock<P> {
-    const fn without_blobs(block: ValidatorBlindedBlock<P>) -> Self {
-        Self {
-            block,
-            kzg_proofs: None,
-            blobs: None,
-            envelope_contents: None,
-        }
-    }
-
-    const fn with_blobs(
-        block: BeaconBlock<P>,
-        kzg_proofs: KzgProofs<P>,
-        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-    ) -> Self {
-        Self {
-            block: ValidatorBlindedBlock::BeaconBlock(block),
-            kzg_proofs: Some(kzg_proofs),
-            blobs: Some(blobs),
-            envelope_contents: None,
-        }
-    }
-}
-
-pub struct EnvelopeContents<P: Preset> {
-    pub envelope: ExecutionPayloadEnvelope<P>,
-    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
-    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 /// The request body of `publishExecutionPayloadEnvelope` with the blob data included.
@@ -914,26 +878,6 @@ impl RemoteBeaconNode {
         })
     }
 
-    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV3> before Gloas and
-    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV4> from it on.
-    pub async fn produce_block<P: Preset>(
-        &self,
-        slot: Slot,
-        randao_reveal: SignatureBytes,
-        graffiti: Option<H256>,
-        builder_boost_factor: Uint256,
-    ) -> Result<ProducedBlock<P>> {
-        let phase = self.chain_config.phase_at_slot::<P>(slot);
-
-        if phase >= Phase::Gloas {
-            self.produce_block_v4(phase, slot, randao_reveal, graffiti, builder_boost_factor)
-                .await
-        } else {
-            self.produce_block_v3(phase, slot, randao_reveal, graffiti, builder_boost_factor)
-                .await
-        }
-    }
-
     async fn produce_block_v3<P: Preset>(
         &self,
         phase: Phase,
@@ -1122,104 +1066,6 @@ impl RemoteBeaconNode {
                 url: self.url.to_string(),
                 content_type,
             },
-        );
-
-        Ok(())
-    }
-
-    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishBlockV2>
-    pub async fn publish_block<P: Preset>(
-        &self,
-        signed_block: &Arc<SignedBeaconBlock<P>>,
-        kzg_proofs: Option<&KzgProofs<P>>,
-        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
-    ) -> Result<()> {
-        let phase = signed_block.phase();
-
-        let body = if (Phase::Deneb..Phase::Gloas).contains(&phase) {
-            let empty_proofs = if phase >= Phase::Fulu {
-                KzgProofs::empty_fulu()
-            } else {
-                KzgProofs::empty_deneb()
-            };
-
-            let empty_blobs = ContiguousList::default();
-
-            SignedBlockContents {
-                signed_block: signed_block.as_ref(),
-                kzg_proofs: kzg_proofs.unwrap_or(&empty_proofs),
-                blobs: blobs.unwrap_or(&empty_blobs),
-            }
-            .to_ssz()?
-        } else {
-            signed_block.to_ssz()?
-        };
-
-        self.publish_ssz("/eth/v2/beacon/blocks", phase, &[], body)
-            .await?;
-
-        debug_with_peers!(
-            "published block for slot {} to {}",
-            signed_block.message().slot(),
-            self.url,
-        );
-
-        Ok(())
-    }
-
-    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishBlindedBlockV2>
-    pub async fn publish_blinded_block<P: Preset>(
-        &self,
-        signed_block: &SignedBlindedBeaconBlock<P>,
-    ) -> Result<()> {
-        self.publish_ssz(
-            "/eth/v2/beacon/blinded_blocks",
-            signed_block.phase(),
-            &[],
-            signed_block.to_ssz()?,
-        )
-        .await?;
-
-        debug_with_peers!(
-            "published blinded block for slot {} to {}",
-            signed_block.message().slot(),
-            self.url,
-        );
-
-        Ok(())
-    }
-
-    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishExecutionPayloadEnvelope>
-    pub async fn publish_execution_payload_envelope<P: Preset>(
-        &self,
-        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
-        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
-        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-    ) -> Result<()> {
-        let envelope = &signed_envelope.message;
-        let phase = self
-            .chain_config
-            .phase_at_slot::<P>(envelope.payload.slot_number);
-
-        let body = SignedEnvelopeContents {
-            signed_execution_payload_envelope: signed_envelope.as_ref(),
-            kzg_proofs,
-            blobs,
-        }
-        .to_ssz()?;
-
-        self.publish_ssz(
-            "/eth/v1/beacon/execution_payload_envelopes",
-            phase,
-            &[(ETH_BLOB_DATA_INCLUDED, "true")],
-            body,
-        )
-        .await?;
-
-        debug_with_peers!(
-            "published execution payload envelope for block {:?} to {}",
-            envelope.beacon_block_root,
-            self.url,
         );
 
         Ok(())
@@ -1753,6 +1599,119 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             dependent_root,
             duties,
         })
+    }
+
+    async fn produce_block(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        let phase = self.chain_config.phase_at_slot::<P>(slot);
+
+        if phase >= Phase::Gloas {
+            self.produce_block_v4(phase, slot, randao_reveal, graffiti, builder_boost_factor)
+                .await
+        } else {
+            self.produce_block_v3(phase, slot, randao_reveal, graffiti, builder_boost_factor)
+                .await
+        }
+    }
+
+    async fn publish_block(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> Result<()> {
+        let phase = signed_block.phase();
+
+        let body = if (Phase::Deneb..Phase::Gloas).contains(&phase) {
+            let empty_proofs = if phase >= Phase::Fulu {
+                KzgProofs::empty_fulu()
+            } else {
+                KzgProofs::empty_deneb()
+            };
+
+            let empty_blobs = ContiguousList::default();
+
+            SignedBlockContents {
+                signed_block: signed_block.as_ref(),
+                kzg_proofs: kzg_proofs.unwrap_or(&empty_proofs),
+                blobs: blobs.unwrap_or(&empty_blobs),
+            }
+            .to_ssz()?
+        } else {
+            signed_block.to_ssz()?
+        };
+
+        self.publish_ssz("/eth/v2/beacon/blocks", phase, &[], body)
+            .await?;
+
+        debug_with_peers!(
+            "published block for slot {} to {}",
+            signed_block.message().slot(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn publish_blinded_block(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        self.publish_ssz(
+            "/eth/v2/beacon/blinded_blocks",
+            signed_block.phase(),
+            &[],
+            signed_block.to_ssz()?,
+        )
+        .await?;
+
+        debug_with_peers!(
+            "published blinded block for slot {} to {}",
+            signed_block.message().slot(),
+            self.url,
+        );
+
+        Ok(())
+    }
+
+    async fn publish_execution_payload_envelope(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        let envelope = &signed_envelope.message;
+        let phase = self
+            .chain_config
+            .phase_at_slot::<P>(envelope.payload.slot_number);
+
+        let body = SignedEnvelopeContents {
+            signed_execution_payload_envelope: signed_envelope.as_ref(),
+            kzg_proofs,
+            blobs,
+        }
+        .to_ssz()?;
+
+        self.publish_ssz(
+            "/eth/v1/beacon/execution_payload_envelopes",
+            phase,
+            &[(ETH_BLOB_DATA_INCLUDED, "true")],
+            body,
+        )
+        .await?;
+
+        debug_with_peers!(
+            "published execution payload envelope for block {:?} to {}",
+            envelope.beacon_block_root,
+            self.url,
+        );
+
+        Ok(())
     }
 
     async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {

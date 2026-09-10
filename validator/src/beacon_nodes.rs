@@ -36,10 +36,10 @@ use types::{
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
+    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProducedBlock, ProposerDuties, PtcDuties},
     local_beacon_node::LocalBeaconNode,
     misc,
-    remote_beacon_node::{ProducedBlock, RemoteBeaconNode},
+    remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
 };
@@ -142,7 +142,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
         operation: &str,
         local: impl FnOnce(&'this LocalBeaconNode<P, W>) -> LFut,
         remote: impl Fn(&'this RemoteBeaconNode) -> RFut,
-    ) -> Result<(Option<&'this RemoteBeaconNode>, T)>
+    ) -> Result<(Option<&'this Arc<RemoteBeaconNode>>, T)>
     where
         LFut: Future<Output = Result<T>>,
         RFut: Future<Output = Result<T>>,
@@ -160,7 +160,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
         let mut attempts = Vec::with_capacity(self.remote_nodes.len());
 
         for node in &self.remote_nodes {
-            attempts.push((node.as_ref(), remote(node.as_ref())));
+            attempts.push((node, remote(node.as_ref())));
         }
 
         first_success(operation, attempts)
@@ -197,66 +197,6 @@ impl<P: Preset, W: Wait + Sync> BeaconNodes<P, W> {
         debug_with_peers!("{node} beacon node reported head block root {root:?}");
 
         Ok(root)
-    }
-
-    /// Produces a block on the first serving remote node that can, which alone holds its payload.
-    pub async fn produce_block(
-        &self,
-        slot: Slot,
-        randao_reveal: SignatureBytes,
-        graffiti: Option<H256>,
-        builder_boost_factor: Uint256,
-    ) -> Result<ProducedBlock<P>> {
-        let attempts = self.serving_nodes().into_iter().map(|node| {
-            let attempt = node.clone_arc();
-
-            (node, async move {
-                attempt
-                    .produce_block::<P>(slot, randao_reveal, graffiti, builder_boost_factor)
-                    .await
-            })
-        });
-
-        let (producer, block) = first_success("produce a block", attempts).await?;
-
-        self.producer.get_or_init(|| producer);
-
-        Ok(block)
-    }
-
-    pub async fn publish_block(
-        &self,
-        signed_block: &Arc<SignedBeaconBlock<P>>,
-        kzg_proofs: Option<&KzgProofs<P>>,
-        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
-    ) -> Result<()> {
-        self.publish_from_producer("publish a block", |node| async move {
-            node.publish_block(signed_block, kzg_proofs, blobs).await
-        })
-        .await
-    }
-
-    pub async fn publish_blinded_block(
-        &self,
-        signed_block: &SignedBlindedBeaconBlock<P>,
-    ) -> Result<()> {
-        self.publish_from_producer("publish a blinded block", |node| async move {
-            node.publish_blinded_block(signed_block).await
-        })
-        .await
-    }
-
-    pub async fn publish_execution_payload_envelope(
-        &self,
-        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
-        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
-        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-    ) -> Result<()> {
-        self.publish_from_producer("publish an execution payload envelope", |node| async move {
-            node.publish_execution_payload_envelope(signed_envelope, kzg_proofs, blobs)
-                .await
-        })
-        .await
     }
 
     /// Publishes to the serving remote nodes, to all of them or the first that accepts as
@@ -851,6 +791,97 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for BeaconNodes<P, W> {
         }
 
         Ok(duties)
+    }
+
+    async fn produce_block(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        let (producer, block) = self
+            .local_then_remotes(
+                "produce a block",
+                |node| node.produce_block(slot, randao_reveal, graffiti, builder_boost_factor),
+                |node| {
+                    BeaconNodeApi::<P>::produce_block(
+                        node,
+                        slot,
+                        randao_reveal,
+                        graffiti,
+                        builder_boost_factor,
+                    )
+                },
+            )
+            .await?;
+
+        if let Some(producer) = producer {
+            self.producer.get_or_init(|| producer.clone_arc());
+        }
+
+        Ok(block)
+    }
+
+    async fn publish_block(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> Result<()> {
+        // The built-in node puts the block on gossip itself, which reaches the remote ones too.
+        if let Some(node) = &self.local_node
+            && self.producer.get().is_none()
+        {
+            return node.publish_block(signed_block, kzg_proofs, blobs).await;
+        }
+
+        self.publish_from_producer("publish a block", |node| async move {
+            BeaconNodeApi::<P>::publish_block(node.as_ref(), signed_block, kzg_proofs, blobs).await
+        })
+        .await
+    }
+
+    async fn publish_blinded_block(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        if let Some(node) = &self.local_node
+            && self.producer.get().is_none()
+        {
+            return node.publish_blinded_block(signed_block).await;
+        }
+
+        self.publish_from_producer("publish a blinded block", |node| async move {
+            BeaconNodeApi::<P>::publish_blinded_block(node.as_ref(), signed_block).await
+        })
+        .await
+    }
+
+    async fn publish_execution_payload_envelope(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        if let Some(node) = &self.local_node
+            && self.producer.get().is_none()
+        {
+            return node
+                .publish_execution_payload_envelope(signed_envelope, kzg_proofs, blobs)
+                .await;
+        }
+
+        self.publish_from_producer("publish an execution payload envelope", |node| async move {
+            BeaconNodeApi::<P>::publish_execution_payload_envelope(
+                node.as_ref(),
+                signed_envelope,
+                kzg_proofs,
+                blobs,
+            )
+            .await
+        })
+        .await
     }
 
     async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {

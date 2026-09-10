@@ -10,11 +10,11 @@ use eth1_api::ApiController;
 use fork_choice_control::{EventChannels, Wait};
 use helper_functions::misc::{compute_epoch_at_slot, compute_start_slot_at_epoch};
 use operation_pools::{AttestationAggPool, PayloadAttestationAggPool, SyncCommitteeAggPool};
-use ssz::{BitVector, H256};
+use ssz::BitVector;
 use typenum::{True, U1, U8, Unsigned as _, assert_type, op};
 use types::{
     altair::consts::SyncCommitteeSubnetCount,
-    combined::{BeaconState, SignedBeaconBlock},
+    combined::BeaconState,
     config::Config as ChainConfig,
     phase0::primitives::{Epoch, Slot, UnixSeconds, ValidatorIndex},
     preset::{Preset, SyncSubcommitteeSize},
@@ -294,11 +294,6 @@ pub struct SyncCommitteeMember {
     pub validator_index: ValidatorIndex,
     pub public_key: PublicKeyBytes,
     pub subnets: BitVector<SyncCommitteeSubnetCount>,
-}
-
-pub enum SignedBeaconBlockOrBlockRoot<P: Preset> {
-    Block(Box<SignedBeaconBlock<P>>),
-    Root(H256),
 }
 
 #[cfg(target_pointer_width = "32")]

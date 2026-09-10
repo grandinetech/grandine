@@ -5,27 +5,33 @@ use std::{
 };
 
 use anyhow::Result;
-use block_producer::ProposerData;
-use bls::PublicKeyBytes;
+use block_producer::{ProposerData, ValidatorBlindedBlock};
+use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use http_api_utils::{
     ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
     ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
 };
 use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
+use ssz::ContiguousList;
 use types::{
     altair::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    combined::{Attestation, SignedAggregateAndProof},
-    gloas::containers::{
-        PayloadAttestationData, PayloadAttestationMessage, SignedProposerPreferences,
+    combined::{
+        Attestation, BeaconBlock, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedBlindedBeaconBlock,
     },
-    nonstandard::OwnAttestation,
+    deneb::primitives::{Blob, KzgProof},
+    gloas::containers::{
+        ExecutionPayloadEnvelope, PayloadAttestationData, PayloadAttestationMessage,
+        SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+    },
+    nonstandard::{KzgProofs, OwnAttestation},
     phase0::{
         containers::AttestationData,
-        primitives::{CommitteeIndex, Epoch, H256, Slot, ValidatorIndex},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, Uint256, ValidatorIndex},
     },
     preset::Preset,
 };
@@ -45,6 +51,46 @@ pub struct PtcDuties {
 pub struct ProposerDuties {
     pub dependent_root: H256,
     pub duties: Vec<ValidatorProposerDutyResponse>,
+}
+
+pub struct ProducedBlock<P: Preset> {
+    pub block: ValidatorBlindedBlock<P>,
+    pub kzg_proofs: Option<KzgProofs<P>>,
+    pub blobs: Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    /// The payload of a self-built Gloas block, which its proposer reveals after the block.
+    pub envelope_contents: Option<EnvelopeContents<P>>,
+}
+
+impl<P: Preset> ProducedBlock<P> {
+    #[must_use]
+    pub const fn without_blobs(block: ValidatorBlindedBlock<P>) -> Self {
+        Self {
+            block,
+            kzg_proofs: None,
+            blobs: None,
+            envelope_contents: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_blobs(
+        block: BeaconBlock<P>,
+        kzg_proofs: KzgProofs<P>,
+        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Self {
+        Self {
+            block: ValidatorBlindedBlock::BeaconBlock(block),
+            kzg_proofs: Some(kzg_proofs),
+            blobs: Some(blobs),
+            envelope_contents: None,
+        }
+    }
+}
+
+pub struct EnvelopeContents<P: Preset> {
+    pub envelope: ExecutionPayloadEnvelope<P>,
+    pub kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+    pub blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
 /// A beacon node the validator can perform duties against.
@@ -149,6 +195,38 @@ pub trait BeaconNodeApi<P: Preset> {
 
     /// <https://ethereum.github.io/beacon-APIs/#/Validator/getProposerDutiesV2>
     fn proposer_duties(&self, epoch: Epoch) -> impl Future<Output = Result<ProposerDuties>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV3> before Gloas and
+    /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV4> from it on.
+    fn produce_block(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> impl Future<Output = Result<ProducedBlock<P>>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishBlockV2>
+    fn publish_block(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishBlindedBlockV2>
+    fn publish_blinded_block(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// <https://ethereum.github.io/beacon-APIs/#/Beacon/publishExecutionPayloadEnvelope>
+    fn publish_execution_payload_envelope(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// [`None`] when the node has seen no block for `slot`, which is not attested to.
     /// <https://ethereum.github.io/beacon-APIs/#/Validator/producePayloadAttestationData>

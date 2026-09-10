@@ -4,10 +4,11 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Error as AnyhowError, Result, ensure};
-use block_producer::ProposerData;
-use bls::PublicKeyBytes;
-use builder_api::unphased::containers::SignedValidatorRegistrationV1;
+use anyhow::{Error as AnyhowError, Result, anyhow, bail, ensure};
+use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
+use bls::{PublicKeyBytes, SignatureBytes};
+use builder_api::{BuilderApi, unphased::containers::SignedValidatorRegistrationV1};
+use dedicated_executor::DedicatedExecutor;
 use derive_more::Display;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
@@ -22,6 +23,7 @@ use http_api_utils::{
 };
 use itertools::Itertools as _;
 use liveness_tracker::ApiToLiveness;
+use logging::debug_with_peers;
 use operation_pools::{
     AttestationAggPool, AttestationKey, PayloadAttestationAggPool, SyncCommitteeAggPool,
     convert_to_electra_attestation,
@@ -29,32 +31,44 @@ use operation_pools::{
 use p2p::{
     BeaconCommitteeSubscription, SyncCommitteeSubscription, ToSubnetService, ValidatorToP2p,
 };
+use prometheus_metrics::Metrics;
 use signer::Signer;
+use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
+use tap::Pipe as _;
+use try_from_iterator::TryFromIterator as _;
 use types::{
     altair::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    combined::{Attestation, BeaconState, SignedAggregateAndProof},
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedBlindedBeaconBlock,
+    },
+    deneb::primitives::{Blob, KzgProof},
     gloas::{
-        consts::PAYLOAD_STATUS_FULL,
+        consts::{BUILDER_INDEX_SELF_BUILD, PAYLOAD_STATUS_FULL},
         containers::{
-            PayloadAttestationData, PayloadAttestationMessage, SignedProposerPreferences,
+            PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
+            SignedProposerPreferences,
         },
     },
-    nonstandard::{OwnAttestation, Phase, RelativeEpoch, WithStatus},
+    nonstandard::{KzgProofs, OwnAttestation, Phase, RelativeEpoch, WithBlobsAndMev, WithStatus},
     phase0::{
         containers::{AttestationData, Checkpoint},
-        primitives::{CommitteeIndex, Epoch, H256, Slot, SubnetId, ValidatorIndex},
+        primitives::{CommitteeIndex, Epoch, H256, Slot, SubnetId, Uint256, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostAltairBeaconState},
+    traits::{BeaconBlock as _, BeaconState as _, PostAltairBeaconState},
 };
 
 use crate::{
-    beacon_node_api::{AttesterDuties, BeaconNodeApi, ProposerDuties, PtcDuties},
+    beacon_node_api::{
+        AttesterDuties, BeaconNodeApi, EnvelopeContents, ProducedBlock, ProposerDuties, PtcDuties,
+    },
     slot_head::SlotHead,
+    validator_config::ValidatorConfig,
 };
 
 const NAME: &str = "local";
@@ -68,10 +82,15 @@ pub struct LocalBeaconNode<P: Preset, W: Wait> {
     attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
     sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
     payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
+    block_producer: Arc<BlockProducer<P, W>>,
+    builder_api: Option<Arc<BuilderApi>>,
+    validator_config: Arc<ValidatorConfig>,
     signer: Arc<Signer>,
     p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
     subnet_service_tx: UnboundedSender<ToSubnetService>,
     liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
+    metrics: Option<Arc<Metrics>>,
+    dedicated_executor: Arc<DedicatedExecutor>,
     wait_group: W,
 }
 
@@ -84,10 +103,15 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
         attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
         sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
         payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
+        block_producer: Arc<BlockProducer<P, W>>,
+        builder_api: Option<Arc<BuilderApi>>,
+        validator_config: Arc<ValidatorConfig>,
         signer: Arc<Signer>,
         p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
         subnet_service_tx: UnboundedSender<ToSubnetService>,
         liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
+        metrics: Option<Arc<Metrics>>,
+        dedicated_executor: Arc<DedicatedExecutor>,
         wait_group: W,
     ) -> Self {
         Self {
@@ -97,10 +121,15 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
             attestation_agg_pool,
             sync_committee_agg_pool,
             payload_attestation_agg_pool,
+            block_producer,
+            builder_api,
+            validator_config,
             signer,
             p2p_tx,
             subnet_service_tx,
             liveness_tx,
+            metrics,
+            dedicated_executor,
             wait_group,
         }
     }
@@ -129,6 +158,67 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
 
     pub const fn head_block_root(&self) -> H256 {
         self.slot_head.beacon_block_root
+    }
+
+    async fn publish_blob_data(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+        kzg_proofs: Option<KzgProofs<P>>,
+    ) -> Result<()> {
+        if self.slot_head.phase().is_peerdas_activated() {
+            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+                block.clone_arc().into(),
+                blobs.into_iter(),
+                kzg_proofs
+                    .unwrap_or_else(KzgProofs::empty_fulu)
+                    .into_iter()
+                    .collect_vec(),
+                self.controller.store_config().kzg_backend,
+                self.metrics.clone(),
+                self.dedicated_executor.clone_arc(),
+            )
+            .await?;
+
+            self.publish_data_column_sidecars(data_column_sidecars)
+                .await;
+        } else {
+            for blob_sidecar in misc::construct_blob_sidecars(
+                block,
+                blobs,
+                kzg_proofs.unwrap_or_else(KzgProofs::empty_deneb),
+            )? {
+                let blob_sidecar = Arc::new(blob_sidecar);
+
+                self.controller
+                    .on_own_blob_sidecar(self.wait_group.clone(), blob_sidecar.clone_arc());
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn publish_data_column_sidecars(
+        &self,
+        data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+    ) {
+        for data_column_sidecar in data_column_sidecars {
+            if self
+                .controller
+                .sampling_columns()
+                .into_iter()
+                .contains(&data_column_sidecar.index())
+            {
+                self.controller
+                    .on_own_data_column_sidecar(
+                        self.wait_group.clone(),
+                        data_column_sidecar.clone_arc(),
+                    )
+                    .await;
+            }
+
+            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
+        }
     }
 }
 
@@ -521,6 +611,223 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 beacon_state.clone_arc(),
             );
         }
+
+        Ok(())
+    }
+
+    async fn produce_block(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+    ) -> Result<ProducedBlock<P>> {
+        ensure!(
+            slot == self.slot_head.slot(),
+            "the built-in beacon node produces blocks for slot {} only, not slot {slot}",
+            self.slot_head.slot(),
+        );
+
+        let beacon_state = &self.beacon_state;
+        let proposer_index =
+            tokio::task::block_in_place(|| self.slot_head.proposer_index(beacon_state))?;
+        let public_key = *accessors::public_key(beacon_state.as_ref(), proposer_index)?;
+
+        let block_build_context = self.block_producer.new_build_context(
+            beacon_state.clone_arc(),
+            self.slot_head.beacon_block_root,
+            proposer_index,
+            BlockBuildOptions {
+                graffiti,
+                disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
+                builder_boost_factor,
+                ..BlockBuildOptions::default()
+            },
+        );
+
+        let execution_payload_header_handle =
+            block_build_context.get_execution_payload_header(public_key);
+
+        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
+        let Some((
+            WithBlobsAndMev {
+                value: block,
+                proofs,
+                blobs,
+                ..
+            },
+            _block_rewards,
+        )) = block_build_context
+            .build_blinded_beacon_block(
+                randao_reveal,
+                execution_payload_header_handle,
+                local_execution_payload_handle,
+            )
+            .await?
+        else {
+            bail!("no block could be built for slot {slot}");
+        };
+
+        let envelope_contents = match &block {
+            ValidatorBlindedBlock::BeaconBlock(block)
+                if block
+                    .payload_bid()
+                    .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD) =>
+            {
+                let (envelope, blobs, kzg_proofs) = self
+                    .block_producer
+                    .build_local_execution_payload_envelope_contents(
+                        block.hash_tree_root(),
+                        block.parent_root(),
+                    )
+                    .await
+                    .ok_or_else(|| {
+                        anyhow!("the payload of the self-built block for slot {slot} is missing")
+                    })?;
+
+                Some(EnvelopeContents {
+                    envelope,
+                    kzg_proofs: ContiguousList::try_from_iter(kzg_proofs)?,
+                    blobs,
+                })
+            }
+            _ => None,
+        };
+
+        // The blobs of a self-built payload travel with its envelope rather than the block.
+        Ok(match envelope_contents {
+            Some(_) => ProducedBlock {
+                block,
+                kzg_proofs: None,
+                blobs: None,
+                envelope_contents,
+            },
+            // From Gloas on a block without its own payload commits to a builder's blobs.
+            None if self.slot_head.phase() >= Phase::Gloas => ProducedBlock::without_blobs(block),
+            None => ProducedBlock {
+                block,
+                kzg_proofs: proofs,
+                blobs,
+                envelope_contents: None,
+            },
+        })
+    }
+
+    async fn publish_block(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+    ) -> Result<()> {
+        if let Some(blobs) = blobs
+            && !blobs.is_empty()
+        {
+            self.publish_blob_data(signed_block, blobs.clone(), kzg_proofs.cloned())
+                .await?;
+        }
+
+        self.controller
+            .on_own_block(self.wait_group.clone(), signed_block.clone_arc());
+
+        ValidatorToP2p::PublishBeaconBlock(signed_block.clone_arc()).send(&self.p2p_tx);
+
+        Ok(())
+    }
+
+    async fn publish_blinded_block(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        let Some(builder_api) = &self.builder_api else {
+            bail!("no builder API is configured to submit the blinded block to");
+        };
+
+        let chain_config = self.controller.chain_config();
+        let genesis_time = self.controller.genesis_time();
+
+        if self.slot_head.phase() >= Phase::Fulu
+            && builder_api
+                .post_blinded_block_post_fulu(chain_config, genesis_time, signed_block)
+                .await
+                .is_ok()
+        {
+            debug_with_peers!("submitted blinded block to the builder node");
+
+            return Ok(());
+        }
+
+        let WithBlobsAndMev {
+            value: execution_payload,
+            proofs,
+            blobs,
+            ..
+        } = match builder_api
+            .post_blinded_block(chain_config, genesis_time, signed_block)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                // A builder that times out is expected to publish the block anyway, and nothing
+                // else can be done with it without risking a slashing.
+                if error
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout)
+                {
+                    debug_with_peers!(
+                        "failed to post blinded block to the builder node: {error:?}"
+                    );
+
+                    return Ok(());
+                }
+
+                bail!("failed to post blinded block to the builder node: {error:?}");
+            }
+        };
+
+        debug_with_peers!(
+            "received execution payload from the builder node: {execution_payload:?}"
+        );
+
+        let (message, signature) = signed_block.clone().split();
+
+        let signed_block = message
+            .with_execution_payload(execution_payload)?
+            .with_signature(signature)
+            .pipe(Arc::new);
+
+        self.publish_block(&signed_block, proofs.as_ref(), blobs.as_ref())
+            .await
+    }
+
+    async fn publish_execution_payload_envelope(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        let envelope = &signed_envelope.message;
+
+        if !blobs.is_empty() {
+            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+                (envelope.beacon_block_root, envelope.payload.slot_number).into(),
+                blobs.clone().into_iter(),
+                kzg_proofs.iter().copied().collect_vec(),
+                self.controller.store_config().kzg_backend,
+                self.metrics.clone(),
+                self.dedicated_executor.clone_arc(),
+            )
+            .await?;
+
+            self.publish_data_column_sidecars(data_column_sidecars)
+                .await;
+        }
+
+        self.controller
+            .on_own_execution_payload_envelope(signed_envelope.clone_arc());
+
+        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+            .send(&self.p2p_tx);
 
         Ok(())
     }

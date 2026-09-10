@@ -20,7 +20,6 @@ use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
 use derive_more::Display;
 use doppelganger_protection::{DoppelgangerProtection, Error as DoppelgangerProtectionError};
-use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
 use fork_choice_control::{Event, Topic, ValidatorMessage, Wait};
@@ -64,9 +63,7 @@ use types::{
     },
     combined::{
         AggregateAndProof, Attestation, AttesterSlashing, BeaconState, SignedAggregateAndProof,
-        SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
-    deneb::primitives::Blob,
     electra::containers::{
         AggregateAndProof as ElectraAggregateAndProof,
         SignedAggregateAndProof as ElectraSignedAggregateAndProof, SingleAttestation,
@@ -80,7 +77,7 @@ use types::{
             SignedExecutionPayloadEnvelope, SignedProposerPreferences,
         },
     },
-    nonstandard::{CustodyMode, KzgProofs, OwnAttestation, Phase, WithBlobsAndMev, WithStatus},
+    nonstandard::{CustodyMode, OwnAttestation, Phase, WithStatus},
     phase0::{
         consts::GENESIS_SLOT,
         containers::{
@@ -91,23 +88,20 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, Uint256, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconBlock as _, BeaconState as _, SignedBeaconBlock as _},
+    traits::{BeaconBlock as _, BeaconState as _},
 };
 use validator_statistics::ValidatorStatistics;
 
 use crate::{
-    beacon_node_api::BeaconNodeApi as _,
+    beacon_node_api::{BeaconNodeApi as _, EnvelopeContents, ProducedBlock},
     beacon_nodes::BeaconNodes,
     local_beacon_node::LocalBeaconNode,
     messages::{ApiToValidator, InternalMessage},
-    misc::{
-        Aggregator, ChainSource, DutySource, SignedBeaconBlockOrBlockRoot, SyncCommitteeMember,
-    },
+    misc::{Aggregator, ChainSource, DutySource, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
     own_proposer_duties::OwnProposerDuties,
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
-    remote_beacon_node::{EnvelopeContents, ProducedBlock},
     slot_head::SlotHead,
     tasks::{
         OwnSyncCommitteeMembers, PrefetchSyncCommitteeDutiesTask,
@@ -318,6 +312,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             ChainSource::Local {
                 controller,
                 attestation_agg_pool,
+                block_producer,
                 sync_committee_agg_pool,
                 payload_attestation_agg_pool,
                 ..
@@ -325,6 +320,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             | ChainSource::Mixed {
                 controller,
                 attestation_agg_pool,
+                block_producer,
                 sync_committee_agg_pool,
                 payload_attestation_agg_pool,
                 ..
@@ -340,10 +336,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                         attestation_agg_pool.clone_arc(),
                         sync_committee_agg_pool.clone_arc(),
                         payload_attestation_agg_pool.clone_arc(),
+                        block_producer.clone_arc(),
+                        self.builder_api.clone(),
+                        self.validator_config.clone_arc(),
                         self.signer.clone_arc(),
                         p2p_tx.clone(),
                         subnet_service_tx.clone(),
                         self.channels.api_to_liveness_tx().cloned(),
+                        self.metrics.clone(),
+                        self.dedicated_executor_normal_priority.clone_arc(),
                         wait_group.clone(),
                     )
                 }),
@@ -1220,26 +1221,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         };
 
-        if let DutySource::Remote { slot_head } = source {
-            return self.propose_with_remote_nodes(slot_head).await;
-        }
-
-        // With a built-in beacon node, blocks are produced by it alone.
-        let (
-            Some(controller),
-            Some(block_producer),
-            DutySource::Local {
-                slot_head,
-                beacon_state,
-            },
-        ) = (
-            self.chain_source.controller().map(ArcExt::clone_arc),
-            self.chain_source.block_producer().map(ArcExt::clone_arc),
-            source,
-        )
-        else {
-            return Ok(());
-        };
+        let slot_head = source.slot_head();
 
         if slot_head.slot() == GENESIS_SLOT {
             // All peers should already have the genesis block.
@@ -1247,254 +1229,27 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(());
         }
 
-        let proposer_index =
-            tokio::task::block_in_place(|| slot_head.proposer_index(beacon_state))?;
+        let beacon_nodes = self.beacon_nodes(source, &wait_group);
 
-        let public_key = accessors::public_key(beacon_state.as_ref(), proposer_index)?;
-        let signer_snapshot = self.signer.load();
+        let (proposer_index, public_key) = match source {
+            DutySource::Local { beacon_state, .. } => {
+                let proposer_index =
+                    tokio::task::block_in_place(|| slot_head.proposer_index(beacon_state))?;
 
-        if !signer_snapshot.has_key(*public_key) {
-            return Ok(());
-        }
+                let public_key = accessors::public_key(beacon_state.as_ref(), proposer_index)?;
 
-        if !self.doppelganger_protection_permits_proposal(slot_head, *public_key) {
-            return Ok(());
-        }
-
-        info_with_peers!(
-            "starting block proposal task for validator {proposer_index} at slot {}",
-            slot_head.slot()
-        );
-
-        let _propose_timer = self
-            .metrics
-            .as_ref()
-            .map(|metrics| metrics.validator_propose_times.start_timer());
-
-        let graffiti = self
-            .proposer_configs
-            .graffiti_bytes(*public_key)?
-            .or_else(|| self.next_graffiti());
-
-        let block_build_context = block_producer.new_build_context(
-            beacon_state.clone_arc(),
-            slot_head.beacon_block_root,
-            proposer_index,
-            BlockBuildOptions {
-                graffiti,
-                disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
-                builder_boost_factor: self.validator_config.builder_boost_factor(*public_key),
-                ..BlockBuildOptions::default()
-            },
-        );
-
-        let execution_payload_header_handle =
-            block_build_context.get_execution_payload_header(*public_key);
-
-        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
-
-        let Some(randao_reveal) = self
-            .sign_randao_reveal(&signer_snapshot, slot_head, *public_key)
-            .await
-        else {
-            return Ok(());
-        };
-
-        info_with_peers!(
-            "block producer starting block production task at slot {}",
-            slot_head.slot()
-        );
-
-        let beacon_block_option = match block_build_context
-            .build_blinded_beacon_block(
-                randao_reveal,
-                execution_payload_header_handle,
-                local_execution_payload_handle,
-            )
-            .await
-        {
-            Ok(block_opt) => block_opt,
-            Err(error) => {
-                warn_with_peers!("failed to produce beacon block: {error}");
-                return Ok(());
+                (proposer_index, *public_key)
             }
-        };
-
-        let Some((
-            WithBlobsAndMev {
-                value: validator_blinded_block,
-                proofs: mut block_proofs,
-                blobs: mut block_blobs,
-                ..
-            },
-            _block_rewards,
-        )) = beacon_block_option
-        else {
-            warn_with_peers!(
-                "validator {} skipping beacon block proposal in slot {}",
-                proposer_index,
-                slot_head.slot(),
-            );
-            return Ok(());
-        };
-
-        info_with_peers!(
-            "block producer finished block production task at slot {}",
-            slot_head.slot()
-        );
-
-        let beacon_block_or_root = match validator_blinded_block {
-            ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
-                let Some(signature) = slot_head
-                    .sign_beacon_block(
-                        &self.signer,
-                        &blinded_block,
-                        (&blinded_block).into(),
-                        *public_key,
-                        self.slashing_protector.clone_arc(),
-                    )
-                    .await
+            DutySource::Remote { .. } => {
+                let Some(proposer) = self
+                    .own_proposer_from_duties(&beacon_nodes, slot_head)
+                    .await?
                 else {
                     return Ok(());
                 };
 
-                let signed_blinded_block = blinded_block.with_signature(signature);
-
-                match self
-                    .post_blinded_block(
-                        slot_head,
-                        signed_blinded_block,
-                        &mut block_blobs,
-                        &mut block_proofs,
-                    )
-                    .await?
-                {
-                    Some(signed_block) => signed_block,
-                    None => return Ok(()),
-                }
+                proposer
             }
-            ValidatorBlindedBlock::BeaconBlock(block) => {
-                match slot_head
-                    .sign_beacon_block(
-                        &self.signer,
-                        &block,
-                        (&block).into(),
-                        *public_key,
-                        self.slashing_protector.clone_arc(),
-                    )
-                    .await
-                {
-                    Some(signature) => SignedBeaconBlockOrBlockRoot::Block(Box::new(
-                        block.with_signature(signature),
-                    )),
-                    None => return Ok(()),
-                }
-            }
-        };
-
-        match beacon_block_or_root {
-            SignedBeaconBlockOrBlockRoot::Root(block_root) => info_with_peers!(
-                "validator {} proposing beacon block with root {:?} in slot {} using builder",
-                proposer_index,
-                block_root,
-                slot_head.slot(),
-            ),
-            SignedBeaconBlockOrBlockRoot::Block(beacon_block) => {
-                let beacon_block_root = beacon_block.message().hash_tree_root();
-                let parent_beacon_block_root = beacon_block.message().parent_root();
-
-                if let Some(payload_bid) = beacon_block.payload_bid()
-                    && payload_bid.builder_index != BUILDER_INDEX_SELF_BUILD
-                {
-                    info_with_peers!(
-                        "validator {} proposing beacon block with root {:?} in slot {} using builder {}",
-                        proposer_index,
-                        beacon_block_root,
-                        slot_head.slot(),
-                        payload_bid.builder_index
-                    );
-                } else {
-                    info_with_peers!(
-                        "validator {} proposing beacon block with root {:?} in slot {}",
-                        proposer_index,
-                        beacon_block_root,
-                        slot_head.slot(),
-                    );
-                }
-
-                debug_with_peers!("beacon block: {beacon_block:?}");
-
-                let block = Arc::new(*beacon_block);
-
-                let self_built = block
-                    .payload_bid()
-                    .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD);
-
-                if (slot_head.phase() < Phase::Gloas || self_built)
-                    && let Some(blobs) = block_blobs
-                    && !blobs.is_empty()
-                {
-                    self.publish_blob_data(
-                        &controller,
-                        &wait_group,
-                        slot_head,
-                        &block,
-                        blobs,
-                        block_proofs,
-                    )
-                    .await?;
-                }
-
-                controller.on_own_block(wait_group.clone(), block.clone_arc());
-
-                self.publish(ValidatorToP2p::PublishBeaconBlock(block));
-
-                // If self-building:
-                // Publish the execution payload envelope after the beacon block so PTC members
-                // have seen the block (and its SignedExecutionPayloadBid) before attesting
-                if self_built
-                    && let Some((envelope, ..)) = block_producer
-                        .build_local_execution_payload_envelope_contents(
-                            beacon_block_root,
-                            parent_beacon_block_root,
-                        )
-                        .await
-                {
-                    self.publish_execution_payload_envelope(
-                        &controller,
-                        slot_head,
-                        beacon_block_root,
-                        envelope,
-                        proposer_index,
-                        &signer_snapshot,
-                        public_key,
-                    )
-                    .await?;
-                }
-            }
-        }
-
-        if let Some(metrics) = self.metrics.as_ref() {
-            metrics.validator_propose_successes.inc();
-        }
-
-        Ok(())
-    }
-
-    #[expect(clippy::too_many_lines)]
-    async fn propose_with_remote_nodes(&mut self, slot_head: &SlotHead<P>) -> Result<()> {
-        // No node produces a block for the genesis slot.
-        if slot_head.slot() == GENESIS_SLOT {
-            return Ok(());
-        }
-
-        let beacon_nodes = self.remote_beacon_nodes_at(slot_head.slot());
-
-        let Some((proposer_index, public_key)) = self
-            .own_proposer_from_duties(&beacon_nodes, slot_head)
-            .await?
-        else {
-            return Ok(());
         };
 
         let signer_snapshot = self.signer.load();
@@ -1531,12 +1286,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         // Before Gloas a bid needs a registration, which without a builder never reaches a remote
         // node, so only local payloads are wanted from one.
-        let builder_boost_factor =
-            if slot_head.phase() >= Phase::Gloas || self.builder_api.is_some() {
-                self.validator_config.builder_boost_factor(public_key)
-            } else {
-                Uint256::ZERO
-            };
+        let builder_boost_factor = if slot_head.phase() >= Phase::Gloas
+            || beacon_nodes.has_local_node()
+            || self.builder_api.is_some()
+        {
+            self.validator_config.builder_boost_factor(public_key)
+        } else {
+            Uint256::ZERO
+        };
 
         let ProducedBlock {
             block: validator_blinded_block,
@@ -1804,183 +1561,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .own_proposer_duties
             .get_at_slot(dependent_root, slot)
             .await)
-    }
-
-    async fn post_blinded_block(
-        &self,
-        slot_head: &SlotHead<P>,
-        signed_blinded_block: SignedBlindedBeaconBlock<P>,
-        block_blobs: &mut Option<ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
-        block_proofs: &mut Option<KzgProofs<P>>,
-    ) -> Result<Option<SignedBeaconBlockOrBlockRoot<P>>> {
-        let builder_api = self
-            .builder_api
-            .as_ref()
-            .expect("Builder API should be present as it was used to query ExecutionPayloadHeader");
-
-        let signed_block = if slot_head.phase() >= Phase::Fulu
-            && builder_api
-                .post_blinded_block_post_fulu(
-                    self.chain_source.chain_config(),
-                    self.chain_source.genesis_time(),
-                    &signed_blinded_block,
-                )
-                .await
-                .is_ok()
-        {
-            debug_with_peers!("submitted blinded block to the builder node");
-
-            Some(SignedBeaconBlockOrBlockRoot::Root(
-                signed_blinded_block.message().hash_tree_root(),
-            ))
-        } else {
-            let WithBlobsAndMev {
-                value: execution_payload,
-                proofs,
-                blobs,
-                ..
-            } = match builder_api
-                .post_blinded_block(
-                    self.chain_source.chain_config(),
-                    self.chain_source.genesis_time(),
-                    &signed_blinded_block,
-                )
-                .await
-            {
-                Ok(response) => response,
-                Err(error) => {
-                    if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
-                        if reqwest_error.is_timeout() {
-                            // If posting signed blinded beacon block to builder fails, don't print a warning,
-                            // because builder should publish the block anyway, just cannot respond in a timely
-                            // manner. We cannot do anything else here either, but exit early from propose, due
-                            // to the risk of slashing.
-                            debug_with_peers!(
-                                "failed to post blinded block to the builder node: {error:?}"
-                            );
-                        }
-
-                        return Ok(None);
-                    }
-
-                    warn_with_peers!("failed to post blinded block to the builder node: {error:?}");
-
-                    return Ok(None);
-                }
-            };
-
-            *block_proofs = proofs;
-            *block_blobs = blobs;
-
-            debug_with_peers!(
-                "received execution payload from the builder node: {execution_payload:?}"
-            );
-
-            let (message, signature) = signed_blinded_block.split();
-
-            Some(SignedBeaconBlockOrBlockRoot::Block(Box::new(
-                message
-                    .with_execution_payload(execution_payload)?
-                    .with_signature(signature),
-            )))
-        };
-
-        Ok(signed_block)
-    }
-
-    async fn publish_blob_data(
-        &self,
-        controller: &ApiController<P, W>,
-        wait_group: &W,
-        slot_head: &SlotHead<P>,
-        block: &Arc<SignedBeaconBlock<P>>,
-        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-        block_proofs: Option<KzgProofs<P>>,
-    ) -> Result<()> {
-        if slot_head.phase().is_peerdas_activated() {
-            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
-                block.clone_arc().into(),
-                blobs.into_iter(),
-                block_proofs
-                    .unwrap_or_else(KzgProofs::empty_fulu)
-                    .into_iter()
-                    .collect_vec(),
-                controller.store_config().kzg_backend,
-                self.metrics.clone(),
-                self.dedicated_executor_normal_priority.clone_arc(),
-            )
-            .await?;
-
-            for data_column_sidecar in data_column_sidecars {
-                if controller
-                    .sampling_columns()
-                    .into_iter()
-                    .contains(&data_column_sidecar.index())
-                {
-                    controller
-                        .on_own_data_column_sidecar(
-                            wait_group.clone(),
-                            data_column_sidecar.clone_arc(),
-                        )
-                        .await;
-                }
-
-                self.publish(ValidatorToP2p::PublishDataColumnSidecar(
-                    data_column_sidecar,
-                ));
-            }
-        } else {
-            for blob_sidecar in misc::construct_blob_sidecars(
-                block,
-                blobs,
-                block_proofs.unwrap_or_else(KzgProofs::empty_deneb),
-            )? {
-                let blob_sidecar = Arc::new(blob_sidecar);
-
-                controller.on_own_blob_sidecar(wait_group.clone(), blob_sidecar.clone_arc());
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Create and sign Gloas execution payload envelope for self-build proposers.
-    /// Returns None if envelope data is not available (i.e., not self-building).
-    #[expect(clippy::too_many_arguments)]
-    async fn publish_execution_payload_envelope(
-        &self,
-        controller: &ApiController<P, W>,
-        slot_head: &SlotHead<P>,
-        beacon_block_root: H256,
-        envelope: ExecutionPayloadEnvelope<P>,
-        proposer_index: ValidatorIndex,
-        signer_snapshot: &Snapshot,
-        public_key: &PublicKeyBytes,
-    ) -> Result<()> {
-        let Some(signed_envelope) = self
-            .sign_execution_payload_envelope(signer_snapshot, slot_head, envelope, *public_key)
-            .await
-        else {
-            return Ok(());
-        };
-
-        let signed_envelope = Arc::new(signed_envelope);
-
-        debug_with_peers!(
-            "validator {} publishing execution payload envelope for block {:?} in slot {}",
-            proposer_index,
-            beacon_block_root,
-            slot_head.slot(),
-        );
-
-        // Publish envelope to controller and P2P
-        controller.on_own_execution_payload_envelope(signed_envelope.clone_arc());
-
-        self.publish(ValidatorToP2p::PublishExecutionPayloadEnvelope(
-            signed_envelope,
-        ));
-
-        Ok(())
     }
 
     async fn sign_execution_payload_envelope(
