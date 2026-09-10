@@ -131,7 +131,7 @@ use crate::{
     extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{
-        APIBlock, BlockContents, BroadcastValidation,
+        APIBlock, BlockContents, BroadcastValidation, BuilderConfig,
         PayloadAttestationMessageListPhaseDeserializer, SignedAPIBlock,
         SignedAPIBlockPhaseDeserializer, SignedAggregateAndProofListFromPhaseDeserializer,
         SignedBlindedBeaconPhaseDeserializer, SignedExecutionPayloadBidPhaseDeserializer,
@@ -237,7 +237,6 @@ pub struct ValidatorBlockQueryV4 {
     skip_randao_verification: bool,
     #[serde(default = "serde_aux::field_attributes::bool_true")]
     include_payload: bool,
-    builder_boost_factor: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -3426,6 +3425,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
+            ..BlockBuildOptions::default()
         },
     );
 
@@ -3465,8 +3465,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         .execution_payload_value(mev.unwrap_or_default()))
 }
 
-/// `GET /eth/v4/validator/blocks/{slot}`
-#[expect(clippy::type_complexity)]
+/// `POST /eth/v4/validator/blocks/{slot}`
+#[expect(clippy::too_many_arguments, clippy::type_complexity)]
 #[instrument(skip_all, level = "debug", name = "http_api::validator_block_v4")]
 pub async fn validator_block_v4<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
@@ -3476,17 +3476,32 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV4>,
     headers: HeaderMap,
+    body: Bytes,
 ) -> Result<EthResponse<APIBlock<BeaconBlock<P>, P>, (), JsonOrSsz>, Error> {
     let ValidatorBlockQueryV4 {
         randao_reveal,
         graffiti,
         skip_randao_verification,
         include_payload,
-        builder_boost_factor,
     } = query;
+
+    let BuilderConfig {
+        min_bid,
+        builder_boost_factor,
+        builders,
+    } = deserialize_json_or_ssz(&headers, body)?;
 
     if skip_randao_verification && !randao_reveal.is_empty() {
         return Err(Error::InvalidRandaoReveal);
+    }
+
+    // An entry that yields no bid must not fail the request, and none does until bids are
+    // solicited over the Builder API.
+    if !builders.is_empty() {
+        debug_with_peers!(
+            "ignoring {} builder entries for slot {slot}: Builder API bids are not solicited yet",
+            builders.len(),
+        );
     }
 
     let head_block_root = controller.head().value.block_root;
@@ -3500,10 +3515,6 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
 
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
 
-    let builder_boost_factor = builder_boost_factor
-        .map(Uint256::from_u64)
-        .unwrap_or(validator_config.default_builder_boost_factor);
-
     let block_build_context = block_producer.new_build_context(
         beacon_state.clone_arc(),
         head_block_root,
@@ -3512,7 +3523,8 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
             graffiti,
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
-            builder_boost_factor,
+            builder_boost_factor: Uint256::from_u64(builder_boost_factor),
+            min_bid,
         },
     );
 
@@ -5661,14 +5673,132 @@ mod tests {
         extract::Query,
         http::{Request, header::CONTENT_TYPE},
     };
+    use builder_api::gloas::containers::{RequestAuth, SignedRequestAuth};
     use hex_literal::hex;
-    use mime::APPLICATION_JSON;
+    use http_api_utils::ETH_CONSENSUS_VERSION;
+    use mime::{APPLICATION_JSON, APPLICATION_OCTET_STREAM};
     use serde::de::DeserializeOwned;
     use serde_json::json;
-    use ssz::BitList;
+    use ssz::{BitList, ByteList, SszWrite as _};
     use types::{phase0::containers::Attestation as Phase0Attestation, preset::Mainnet};
 
     use super::*;
+    use crate::misc::BuilderEntry;
+
+    // The body carries quoted integers and the entry URL as a plain string.
+    #[test]
+    fn deserializes_builder_config_from_json() -> Result<()> {
+        let body = json!({
+            "min_bid": "10000000",
+            "builder_boost_factor": "100",
+            "builders": [{
+                "url": "https://builder.example.com",
+                "auth": {
+                    "message": { "data": "0x1234", "slot": "6" },
+                    "signature": SignatureBytes::default(),
+                },
+                "builder_pubkeys": [PublicKeyBytes::zero()],
+                "max_execution_payment": "1000000000",
+                "min_bid": "20000000",
+                "builder_boost_factor": "200",
+            }],
+        });
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, APPLICATION_JSON.as_ref().parse()?);
+
+        let config: BuilderConfig =
+            deserialize_json_or_ssz(&headers, serde_json::to_vec(&body)?.into())?;
+
+        assert_eq!(config.min_bid, 10_000_000);
+        assert_eq!(config.builder_boost_factor, 100);
+        assert_eq!(config.builders.len(), 1);
+
+        let entry = &config.builders[0];
+
+        assert_eq!(entry.url.as_bytes(), b"https://builder.example.com");
+        assert_eq!(entry.auth.message.data.as_bytes(), hex!("1234"));
+        assert_eq!(entry.auth.message.slot, 6);
+        assert_eq!(entry.builder_pubkeys.len(), 1);
+        assert_eq!(entry.max_execution_payment, 1_000_000_000);
+        assert_eq!(entry.min_bid, 20_000_000);
+        assert_eq!(entry.builder_boost_factor, 200);
+
+        Ok(())
+    }
+
+    // The SSZ form of the body is selected by the content type and read without a phase.
+    #[test]
+    fn deserializes_builder_config_from_ssz() -> Result<()> {
+        let entry = BuilderEntry {
+            url: ByteList::try_from(b"https://builder.example.com".to_vec())?,
+            auth: SignedRequestAuth {
+                message: RequestAuth {
+                    data: ByteList::try_from(hex!("1234").to_vec())?,
+                    slot: 6,
+                },
+                signature: SignatureBytes::default(),
+            },
+            builder_pubkeys: ContiguousList::try_from(vec![PublicKeyBytes::zero()])?,
+            max_execution_payment: 1_000_000_000,
+            min_bid: 20_000_000,
+            builder_boost_factor: 200,
+        };
+
+        let bytes = BuilderConfig {
+            min_bid: 10_000_000,
+            builder_boost_factor: 100,
+            builders: ContiguousList::try_from(vec![entry])?,
+        }
+        .to_ssz()?;
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref().parse()?);
+        headers.insert(ETH_CONSENSUS_VERSION, Phase::Gloas.as_ref().parse()?);
+
+        let config: BuilderConfig = deserialize_json_or_ssz(&headers, bytes.into())?;
+
+        assert_eq!(config.min_bid, 10_000_000);
+        assert_eq!(config.builder_boost_factor, 100);
+        assert_eq!(
+            config.builders[0].url.as_bytes(),
+            b"https://builder.example.com"
+        );
+        assert_eq!(config.builders[0].auth.message.slot, 6);
+        assert_eq!(config.builders[0].builder_boost_factor, 200);
+
+        Ok(())
+    }
+
+    // The spec makes the body mandatory, so a request without one must fail with a client error.
+    #[test]
+    fn rejects_produce_block_v4_without_a_body() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            APPLICATION_JSON.as_ref().parse().expect("valid"),
+        );
+
+        let error = deserialize_json_or_ssz::<BuilderConfig>(&headers, Bytes::new())
+            .expect_err("a missing builder config is invalid");
+
+        assert!(matches!(error, Error::InvalidJsonValue(_)));
+    }
+
+    // The boost factor moved into the body, so the query no longer carries it.
+    #[tokio::test]
+    async fn parses_produce_block_v4_query_without_a_boost_factor() -> Result<()> {
+        let query = extract_query::<ValidatorBlockQueryV4>(format!(
+            "randao_reveal={:?}&include_payload=true",
+            SignatureBytes::default(),
+        ))
+        .await?;
+
+        assert!(query.include_payload);
+        assert!(query.graffiti.is_none());
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_deserialize_for_attestation() -> Result<()> {

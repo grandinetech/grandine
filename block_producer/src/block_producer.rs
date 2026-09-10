@@ -96,7 +96,7 @@ use types::{
             ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, H256, Slot, Uint256,
+            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H256, Slot, Uint256,
             ValidatorIndex,
         },
     },
@@ -786,6 +786,8 @@ pub struct BlockBuildOptions {
     pub disable_blockprint_graffiti: bool,
     pub skip_randao_verification: bool,
     pub builder_boost_factor: Uint256,
+    /// The least a p2p bid may pay, in Gwei, for the proposer to consider it.
+    pub min_bid: Gwei,
 }
 
 #[derive(Clone)]
@@ -2298,6 +2300,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let bid = snapshot
             .selectable_payload_bids(state.slot(), parent_block_hash, self.head_block_root)
+            .filter(|bid| {
+                bid.message
+                    .value
+                    .saturating_add(bid.message.execution_payment)
+                    >= self.options.min_bid
+            })
             .max_by_key(|bid| bid.message.value)?;
 
         // The bid value is what the builder pays the proposer for the slot, so it is comparable to
