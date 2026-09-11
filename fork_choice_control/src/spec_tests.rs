@@ -32,7 +32,7 @@ use types::{
     traits::{BeaconState as _, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
-use crate::helpers::Context;
+use crate::{helpers::Context, messages::P2pMessage};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "lowercase", untagged)]
@@ -277,7 +277,8 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
 
                 let block = case.ssz::<_, Arc<SignedBeaconBlock<P>>>(config.as_ref(), block);
 
-                let mut data_column_sidecar_count: usize = 0;
+                let mut accepted_data_column_count: usize = 0;
+
                 if block.phase().is_peerdas_activated() {
                     if let Some(paths) = columns {
                         let data_column_sidecars = paths
@@ -285,8 +286,12 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                             .map(|path| case.ssz::<_, DataColumnSidecar<P>>(config.as_ref(), path));
 
                         for data_column_sidecar in data_column_sidecars {
-                            data_column_sidecar_count = data_column_sidecar_count.saturating_add(1);
-                            context.on_data_column_sidecar(data_column_sidecar).await;
+                            let message = context.on_data_column_sidecar(data_column_sidecar).await;
+
+                            if !matches!(message, Some(P2pMessage::Reject(_, _))) {
+                                accepted_data_column_count =
+                                    accepted_data_column_count.saturating_add(1);
+                            }
                         }
                     }
                 } else {
@@ -334,7 +339,7 @@ async fn run_case<P: Preset>(config: &Arc<Config>, case: Case<'_>) {
                     // If half of data column sidecars are available, we can reconstruct the rest
                     // and consider the block valid
                     if block.phase().is_peerdas_activated()
-                        && data_column_sidecar_count.saturating_mul(2) >= P::NumberOfColumns::USIZE
+                        && accepted_data_column_count.saturating_mul(2) >= P::NumberOfColumns::USIZE
                     {
                         context.on_block_with_reconstructing_data_columns(&block);
                     } else {
