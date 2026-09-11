@@ -3,8 +3,14 @@
 //! The queue is unbounded. `onboard_builders` in [`crate::fork::upgrade_to_gloas`] checks
 //! every entry in it. Doing that at the fork could stall the node. So the results are computed
 //! ahead of time and cached in `PubkeyCache::deposit_signatures`.
+//!
+//! The cache is capped, so a queue longer than it keeps only its own tail. Whatever is
+//! left over is verified at the fork by [`verify_deposit_signatures`], in parallel.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use bls::{PublicKey, PublicKeyBytes, SignatureBytes};
 use pubkey_cache::{DepositSignatureKey, PubkeyCache};
@@ -32,6 +38,7 @@ use crate::{
 /// Small, because one invalid signature forces the whole batch to be verified again.
 const BATCH_SIZE: usize = 8;
 
+#[derive(Clone, Copy)]
 struct Entry {
     key: DepositSignatureKey,
     pubkey: PublicKeyBytes,
@@ -88,6 +95,59 @@ pub fn is_valid_deposit_signature_cached(
     cache.insert(key, is_valid);
 
     is_valid
+}
+
+/// Verifies the signatures of `deposits` in parallel, one result per deposit, in order.
+///
+/// [`is_valid_deposit_signature_cached`] verifies one signature at a time on a miss,
+/// and [`PubkeyCache::deposit_signatures`] holds far fewer results than
+/// `pending_deposits` may grow to, so `onboard_builders` cannot rely on it at the fork.
+#[must_use]
+pub fn verify_deposit_signatures<'deposit>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    deposits: impl IntoIterator<Item = &'deposit PendingDeposit>,
+) -> Vec<bool> {
+    let cache = pubkey_cache.deposit_signatures();
+
+    let entries = deposits
+        .into_iter()
+        .map(|deposit| Entry {
+            key: deposit_signature_key(config, deposit),
+            pubkey: deposit.pubkey,
+        })
+        .collect::<Vec<_>>();
+
+    // Read before verifying anything: caching the results below may evict these.
+    let mut results = entries
+        .iter()
+        .map(|entry| cache.get(&entry.key))
+        .collect::<Vec<_>>();
+
+    let mut seen = HashSet::new();
+
+    let missing = entries
+        .iter()
+        .zip(&results)
+        .filter(|(entry, result)| result.is_none() && seen.insert(entry.key))
+        .map(|(entry, _)| *entry)
+        .collect::<Vec<_>>();
+
+    let verified = verify_batches(pubkey_cache, &missing);
+
+    // Cached as well, in case the fork transition runs more than once.
+    cache.insert_all(verified.iter().copied());
+
+    let verified = verified.into_iter().collect::<HashMap<_, _>>();
+
+    for (result, entry) in results.iter_mut().zip(&entries) {
+        if result.is_none() {
+            // `verify_batches` answers for every entry, so this always fills in.
+            *result = verified.get(&entry.key).copied();
+        }
+    }
+
+    results.into_iter().map(Option::unwrap_or_default).collect()
 }
 
 /// Verifies and caches the signatures of every `pending_deposit` in `state`.
@@ -415,6 +475,75 @@ mod tests {
                 expected,
             );
         }
+    }
+
+    #[test]
+    fn verifies_every_deposit_in_order_including_duplicates() {
+        let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
+
+        let valid = valid_deposit(&config, 0, 0);
+        let invalid = invalid_deposit(&config, 1, 0);
+        let deposits = [valid, invalid, valid];
+
+        assert_eq!(
+            verify_deposit_signatures(&config, &pubkey_cache, &deposits),
+            [true, false, true],
+        );
+
+        // Again, now that every result is cached.
+        assert_eq!(
+            verify_deposit_signatures(&config, &pubkey_cache, &deposits),
+            [true, false, true],
+        );
+    }
+
+    #[test]
+    fn verifies_deposits_evicted_from_the_cache_again() {
+        let config = Config::mainnet();
+        let pubkey_cache = PubkeyCache::default();
+
+        let valid = valid_deposit(&config, 0, 0);
+        let invalid = invalid_deposit(&config, 1, 0);
+        let deposits = [valid, invalid];
+
+        assert_eq!(
+            verify_deposit_signatures(&config, &pubkey_cache, &deposits),
+            [true, false],
+        );
+
+        // Fill the cache with junk until it has dropped both results, the way a
+        // `pending_deposits` queue longer than the cache drops its own head.
+        // Probing for a result would keep promoting it, so this counts entries.
+        let cache = pubkey_cache.deposit_signatures();
+        let mut inserted = 0_u32;
+        let mut capacity = None;
+
+        loop {
+            let mut signing_root = H256::zero();
+            signing_root[..4].copy_from_slice(&inserted.to_le_bytes());
+
+            cache.insert((signing_root, SignatureBytes::default()), true);
+
+            inserted += 1;
+
+            match capacity {
+                // Entries stop accumulating once the cache is full.
+                None if cache.len() < inserted.try_into().expect("u32 fits in usize") => {
+                    capacity = Some(inserted);
+                }
+                // Twice the capacity is enough to turn the whole cache over.
+                Some(capacity) if inserted >= 2 * capacity => break,
+                _ => {}
+            }
+        }
+
+        assert_eq!(cache.get(&deposit_signature_key(&config, &valid)), None);
+
+        assert_eq!(
+            verify_deposit_signatures(&config, &pubkey_cache, &deposits),
+            [true, false],
+        );
     }
 
     #[test]
