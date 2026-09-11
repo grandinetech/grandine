@@ -3,6 +3,8 @@ use core::{
     num::NonZeroU64,
     ops::{Index as _, Rem as _},
 };
+#[cfg(not(target_os = "zkvm"))]
+use std::{num::NonZeroUsize, sync::LazyLock};
 
 use anyhow::Result;
 use bit_field::BitArray as _;
@@ -13,15 +15,68 @@ use types::{phase0::primitives::H256, preset::Preset};
 
 const BITS_PER_HASH: usize = H256::len_bytes() * 8;
 
+#[cfg(not(target_os = "zkvm"))]
+const MIN_CHUNKS_PER_WORKER: usize = 8;
+
+#[cfg(not(target_os = "zkvm"))]
+const MIN_PARALLEL_LEN: usize = 1 << 16;
+
+#[cfg(not(target_os = "zkvm"))]
+static POOL: LazyLock<rayon::ThreadPool> = LazyLock::new(|| {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(shuffle_threadpool_size())
+        .thread_name(|index| format!("shuffle-{index}"))
+        .build()
+        .expect("shuffle thread pool should build with default settings")
+});
+
+#[cfg(not(target_os = "zkvm"))]
+fn shuffle_threadpool_size() -> usize {
+    use std::thread::available_parallelism;
+
+    static SIZE: LazyLock<usize> =
+        LazyLock::new(|| available_parallelism().map_or(1, NonZeroUsize::get));
+
+    *SIZE
+}
+
 // Originally based on:
 // <https://github.com/protolambda/eth2-shuffle/tree/fd840f1036c1f8f6d7625ffe6ff4d9c60f942876>
 // See the following for an explanation of the algorithm:
 // - <https://github.com/protolambda/eth2-docs/tree/de65f38857f1e27ffb6f25107d61e795cf1a5ad7#shuffling>
 // - <https://github.com/protolambda/eth2-impl-design/tree/782b1d2da088e4ebbbea227cfa0a8752399239fb#shuffling>
-pub fn shuffle_slice<P: Preset, T>(slice: &mut [T], seed: H256) -> Result<()> {
+pub fn shuffle_slice<P: Preset, T: Send>(slice: &mut [T], seed: H256) -> Result<()> {
     let Some(length) = slice.len().try_into().map(NonZeroU64::new)? else {
         return Ok(());
     };
+
+    #[cfg(not(target_os = "zkvm"))]
+    if slice.len() >= MIN_PARALLEL_LEN {
+        POOL.install(|| shuffle_rounds::<P, T>(slice, seed, length, true));
+
+        return Ok(());
+    }
+
+    shuffle_rounds::<P, T>(slice, seed, length, false);
+
+    Ok(())
+}
+
+fn shuffle_rounds<P: Preset, T: Send>(
+    slice: &mut [T],
+    seed: H256,
+    length: NonZeroU64,
+    parallel: bool,
+) {
+    let worker_count = parallel
+        .then(|| {
+            #[cfg(not(target_os = "zkvm"))]
+            return shuffle_threadpool_size();
+
+            #[cfg(target_os = "zkvm")]
+            return 1;
+        })
+        .unwrap_or(1);
 
     for round in (0..P::SHUFFLE_ROUND_COUNT).rev() {
         let pivot = compute_pivot(seed, round, length)
@@ -31,20 +86,18 @@ pub fn shuffle_slice<P: Preset, T>(slice: &mut [T], seed: H256) -> Result<()> {
         let midpoint = pivot.saturating_add(1);
         let (low, high) = slice.split_at_mut(midpoint);
 
-        // Naively parallelizing these with Rayon causes deadlocks due to the lock held in
-        // `OnceCell::get_or_init` higher on the stack and the way Rayon runs tasks. See:
-        // - <https://github.com/rayon-rs/rayon/issues/592>
-        // - <https://github.com/rayon-rs/rayon/pull/765>
-        // It could be worked around by spawning a scoped thread and submitting tasks to a
-        // separate thread pool. A proper solution would require changes to Rayon and `once_cell`.
-        swap_around_mirror(seed, round, low, 0);
-        swap_around_mirror(seed, round, high, midpoint);
+        swap_around_mirror(seed, round, low, 0, worker_count);
+        swap_around_mirror(seed, round, high, midpoint, worker_count);
     }
-
-    Ok(())
 }
 
-fn swap_around_mirror<T>(seed: H256, round: u8, slice: &mut [T], offset: usize) {
+fn swap_around_mirror<T: Send>(
+    seed: H256,
+    round: u8,
+    slice: &mut [T],
+    offset: usize,
+    worker_count: usize,
+) {
     // `[T]::chunks_exact_mut` and `[T]::rchunks_exact_mut` are needed for full performance.
     // `[T]::as_chunks_mut` and `[T]::as_rchunks_mut` could simplify this when stabilized.
 
@@ -72,24 +125,60 @@ fn swap_around_mirror<T>(seed: H256, round: u8, slice: &mut [T], offset: usize) 
         swap_using_source(source, bit_indices, low_elements, high_elements);
     }
 
-    for (offset_chunk_index, low_chunk, high_chunk) in izip!(
-        (0..offset_length / BITS_PER_HASH).rev(),
-        low[trailing..].chunks_exact_mut(BITS_PER_HASH),
-        high[..mirror.saturating_sub(trailing)].rchunks_exact_mut(BITS_PER_HASH),
-    ) {
-        let source = compute_source(seed, round, offset_chunk_index);
-        let bit_indices = 0..BITS_PER_HASH;
-        let low_elements = low_chunk.iter_mut().rev();
-        let high_elements = high_chunk;
-
-        swap_using_source(source, bit_indices, low_elements, high_elements);
-    }
-
     if leading > 0 {
         let source = compute_source(seed, round, offset_mirror / BITS_PER_HASH);
         let bit_indices = (0..BITS_PER_HASH).rev();
         let low_elements = low[mirror.saturating_sub(leading)..].iter_mut();
         let high_elements = high[..leading].iter_mut().rev();
+
+        swap_using_source(source, bit_indices, low_elements, high_elements);
+    }
+
+    let chunk_count = mirror.saturating_sub(trailing) / BITS_PER_HASH;
+
+    if chunk_count == 0 {
+        return;
+    }
+
+    let low = &mut low[trailing..mirror.saturating_sub(leading)];
+    let high = &mut high[leading..mirror.saturating_sub(trailing)];
+
+    #[cfg(not(target_os = "zkvm"))]
+    if worker_count.min(chunk_count / MIN_CHUNKS_PER_WORKER) > 1 {
+        let worker_count = worker_count.min(chunk_count / MIN_CHUNKS_PER_WORKER);
+        let part_chunks = chunk_count.div_ceil(worker_count);
+        let part_len = part_chunks.saturating_mul(BITS_PER_HASH);
+
+        let pieces = izip!(
+            (0..=offset_length).rev().step_by(part_len),
+            low.chunks_mut(part_len),
+            high.rchunks_mut(part_len)
+        );
+
+        rayon::scope(|scope| {
+            for (part_offset, low_part, high_part) in pieces {
+                scope.spawn(move |_| {
+                    swap_chunk_range(seed, round, low_part, high_part, part_offset)
+                });
+            }
+        });
+
+        return;
+    }
+
+    swap_chunk_range(seed, round, low, high, offset_length);
+}
+
+fn swap_chunk_range<T>(seed: H256, round: u8, low: &mut [T], high: &mut [T], offset: usize) {
+    for (offset_chunk_index, low_chunk, high_chunk) in izip!(
+        (0..offset / BITS_PER_HASH).rev(),
+        low.chunks_exact_mut(BITS_PER_HASH),
+        high.rchunks_exact_mut(BITS_PER_HASH)
+    ) {
+        let source = compute_source(seed, round, offset_chunk_index);
+        let bit_indices = 0..BITS_PER_HASH;
+        let low_elements = low_chunk.iter_mut().rev();
+        let high_elements = high_chunk;
 
         swap_using_source(source, bit_indices, low_elements, high_elements);
     }
@@ -202,5 +291,23 @@ mod spec_tests {
             .expect("length of mapping fits in u64 because count is u64");
 
         assert_eq!(actual_mapping, mapping);
+    }
+
+    #[test]
+    fn large_parallel_shuffle() {
+        let count: u64 = 100_000;
+        let seed = H256::repeat_byte(0xab);
+        let index_count = NonZeroU64::new(count).expect("count is non-zero");
+
+        let mut shuffled = (0..count).collect_vec();
+        shuffle_slice::<Mainnet, _>(&mut shuffled, seed).expect("count fits in u64");
+
+        for index in 0..count {
+            assert_eq!(
+                shuffled[usize::try_from(index).expect("index fits in usize")],
+                shuffle_single::<Mainnet>(index, index_count, seed),
+                "mismatch at position {index}"
+            )
+        }
     }
 }
