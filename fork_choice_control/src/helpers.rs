@@ -383,6 +383,22 @@ impl<P: Preset> Context<P> {
         ));
     }
 
+    #[must_use]
+    fn on_maybe_valid_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) -> bool {
+        let message = self.on_block(block);
+
+        if matches!(message, Some(P2pMessage::Reject(_, _))) {
+            return false;
+        }
+
+        assert!(matches!(
+            message,
+            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+        ));
+
+        true
+    }
+
     pub fn on_invalid_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
         match self.on_block(block) {
             Some(P2pMessage::PayloadEnvelopeNeeded(actual_root, _)) => {
@@ -487,7 +503,10 @@ impl<P: Preset> Context<P> {
     ) {
         // If an optimistic beacon block is not accepted by the fork choice,
         // then it will not be propagated in gossipsub before it is fully validated (e.g. block arrives before blob).
-        self.on_valid_block(block);
+        if !self.on_maybe_valid_block(block) {
+            // block is invalid and rejected, execution engine is not asked for blobs
+            return;
+        }
 
         let block_root = block.message().hash_tree_root();
 
