@@ -30,6 +30,25 @@ pub trait SszListMut<T>: SszList<T> {
     where
         T: Clone;
 
+    /// Appends `elements` to the list.
+    ///
+    /// Unlike [`SszListMut::push`], this is not atomic: on [`PushError::ListFull`] the list has
+    /// been filled to capacity and the remaining elements are dropped, so a caller that recovers
+    /// from the error must treat the receiver as unusable.
+    fn extend(&mut self, elements: &mut dyn Iterator<Item = T>) -> Result<(), PushError>
+    where
+        T: Clone;
+
+    /// Retains the elements in `start..end`, dropping the rest while keeping the retained elements
+    /// in the same order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `start` is greater than `end`.
+    fn retain_range(&mut self, start: u64, end: u64) -> Result<(), IndexError>
+    where
+        T: Clone;
+
     fn update(&mut self, f: &mut dyn FnMut(&mut T))
     where
         T: Clone + PartialEq;
@@ -54,6 +73,15 @@ pub trait SszBitList: SszHash<PackingFactor = U1> + Send + Sync + Debug {
 }
 
 impl<'a, T> IntoIterator for &'a (dyn SszList<T> + 'a) {
+    type Item = &'a T;
+    type IntoIter = Box<dyn ExactSizeIterator<Item = &'a T> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a (dyn SszListMut<T> + 'a) {
     type Item = &'a T;
     type IntoIter = Box<dyn ExactSizeIterator<Item = &'a T> + 'a>;
 
