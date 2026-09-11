@@ -14543,6 +14543,7 @@ dependencies = [
  "hashing",
  "itertools 0.14.0",
  "nonzero_ext",
+ "rayon",
  "serde",
  "spec_test_utils",
  "tap",

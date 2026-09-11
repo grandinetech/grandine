@@ -3479,6 +3479,7 @@ dependencies = [
  "hashing",
  "itertools 0.14.0",
  "nonzero_ext",
+ "rayon",
  "tap",
  "types",
 ]

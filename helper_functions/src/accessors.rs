@@ -324,7 +324,7 @@ fn shuffle_indices<P: Preset>(ordered: &PackedIndices, seed: H256) -> PackedIndi
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
-    fn shuffle<P: Preset, T: Copy>(ordered: &[T], seed: H256) -> Arc<[T]> {
+    fn shuffle<P: Preset, T: Copy + Send>(ordered: &[T], seed: H256) -> Arc<[T]> {
         let mut shuffled = ArcBox::from(ordered);
 
         shuffling::shuffle_slice::<P, _>(&mut shuffled, seed).expect(
