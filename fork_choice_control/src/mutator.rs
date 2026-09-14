@@ -269,8 +269,9 @@ where
                 } => self.handle_attestation_batch(&wait_group, results)?,
                 MutatorMessage::BlockAttestations {
                     wait_group,
+                    from_test_block,
                     results,
-                } => self.handle_block_attestations(&wait_group, results)?,
+                } => self.handle_block_attestations(&wait_group, from_test_block, results)?,
                 MutatorMessage::BlockPayloadAttestations {
                     wait_group,
                     results,
@@ -1078,6 +1079,11 @@ where
 
                 if slot <= self.store.slot() {
                     self.retry_block(wait_group, pending_block);
+                } else if matches!(pending_block.origin, BlockOrigin::Test(_)) {
+                    // Spec test runners drop blocks from future slots.
+                    // They redeliver them explicitly once the slot arrives.
+                    // Delaying here would import blocks the runner never does.
+                    debug_with_peers!("test block from future slot dropped: {block_root:?}");
                 } else {
                     let pending_block = reply_delayed_block_validation_result(
                         pending_block,
@@ -1462,6 +1468,14 @@ where
                 self.delay_attestation_until_block(wait_group, attestation, block_root);
             }
             Ok(AttestationAction::DelayUntilPayload(attestation, block_root)) => {
+                // Spec test runners drop attestations for payloads that aren't verified yet.
+                // Unlike early messages, they never redeliver them.
+                // Applying them once the payload arrives would count votes the runner never does.
+                if matches!(attestation.origin, AttestationOrigin::Test(_)) {
+                    debug_with_peers!("test attestation for unverified payload dropped");
+                    return None;
+                }
+
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_mutator_attestation(&["delayed_until_payload"]);
                 }
@@ -1556,6 +1570,7 @@ where
     fn handle_block_attestations(
         &mut self,
         wait_group: &W,
+        from_test_block: bool,
         results: Vec<
             Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>,
         >,
@@ -1577,7 +1592,11 @@ where
                     None
                 }
                 Ok(AttestationAction::DelayUntilPayload(attestation, block_root)) => {
-                    self.delay_attestation_until_payload(wait_group, attestation, block_root);
+                    // Spec test runners drop full votes from blocks for unverified payloads.
+                    // Delaying and later processing them would count votes the runner never does.
+                    if !from_test_block {
+                        self.delay_attestation_until_payload(wait_group, attestation, block_root);
+                    }
 
                     None
                 }
@@ -3372,6 +3391,8 @@ where
                 .send_block_event(block_slot, block_root, false);
         }
 
+        let from_test_block = matches!(origin, BlockOrigin::Test(_));
+
         // TODO(Grandine Team): Performing the validation here results in the block being added to the
         //                      fork choice store even though it is already known to be invalid.
         //                      The validation should be in `Store::validate_block`,
@@ -3448,7 +3469,7 @@ where
             reply_block_validation_result_to_http_api(sender, Ok(ValidationOutcome::Accept));
         }
 
-        self.maybe_spawn_block_attestations_task(wait_group, block_root, &block);
+        self.maybe_spawn_block_attestations_task(wait_group, block_root, &block, from_test_block);
         self.maybe_spawn_block_payload_attestations_task(wait_group, block_root, &block);
 
         if changes.is_finalized_checkpoint_updated() {
@@ -4972,6 +4993,7 @@ where
         wait_group: &W,
         block_root: H256,
         block: &Arc<SignedBeaconBlock<P>>,
+        from_test_block: bool,
     ) {
         // `BlockAttestationsTask`s have a surprisingly large amount of overhead.
         // Avoid spawning them if possible.
@@ -4985,6 +5007,7 @@ where
             wait_group: wait_group.clone(),
             block_root,
             block: block.clone_arc(),
+            from_test_block,
             metrics: self.metrics.clone(),
         });
     }

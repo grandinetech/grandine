@@ -364,6 +364,7 @@ pub struct BlockAttestationsTask<P: Preset, W> {
     pub wait_group: W,
     pub block_root: H256,
     pub block: Arc<SignedBeaconBlock<P>>,
+    pub from_test_block: bool,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -376,6 +377,7 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
             wait_group,
             block_root,
             block,
+            from_test_block,
             metrics,
         } = self;
 
@@ -401,6 +403,7 @@ impl<P: Preset, W> Run for BlockAttestationsTask<P, W> {
 
         MutatorMessage::BlockAttestations {
             wait_group,
+            from_test_block,
             results,
         }
         .send(&mutator_tx);
