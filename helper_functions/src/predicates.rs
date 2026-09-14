@@ -6,7 +6,7 @@ use core::{
 use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
-use bls::{PublicKeyBytes, SignatureBytes};
+use bls::SignatureBytes;
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
 use ssz::{SszHash as _, SszList as _};
@@ -42,7 +42,6 @@ use types::{
 
 use crate::{
     accessors,
-    deposit_signatures::is_valid_deposit_signature_cached,
     error::{Error, SignatureKind},
     signing::{SignForAllForks as _, SignForSingleFork as _},
     verifier::Verifier,
@@ -548,20 +547,6 @@ pub fn is_gas_limit_target_compatible(
     let max_gas_limit = parent_gas_limit.saturating_add(max_gas_limit_difference);
 
     gas_limit == target_gas_limit.clamp(min_gas_limit, max_gas_limit)
-}
-
-// > Check if a pending deposit with a valid signature is in the queue for the given pubkey.
-#[must_use]
-pub fn is_pending_validator<'deposit>(
-    config: &Config,
-    pending_deposits: impl IntoIterator<Item = &'deposit PendingDeposit>,
-    pubkey: PublicKeyBytes,
-    pubkey_cache: &PubkeyCache,
-) -> bool {
-    pending_deposits
-        .into_iter()
-        .filter(|deposit| deposit.pubkey == pubkey)
-        .any(|deposit| is_valid_deposit_signature_cached(config, pubkey_cache, deposit))
 }
 
 #[must_use]
