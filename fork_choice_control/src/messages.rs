@@ -111,6 +111,7 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     BlockAttestations {
         wait_group: W,
+        from_test_block: bool,
         results:
             Vec<Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>>>,
     },
