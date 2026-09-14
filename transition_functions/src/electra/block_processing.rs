@@ -712,8 +712,11 @@ pub fn apply_attestation<P: Preset>(
     // > Update epoch participation flags
     let base_reward_per_increment = get_base_reward_per_increment(state)?;
 
-    let attesting_indices_with_base_rewards = get_attesting_indices(state, attestation)?
-        .into_iter()
+    let attesting_indices = get_attesting_indices(state, attestation)?;
+
+    let attesting_indices_with_base_rewards = attesting_indices
+        .iter()
+        .copied()
         .map(|validator_index| {
             let base_reward = get_base_reward(state, validator_index, base_reward_per_increment)?;
             Ok((validator_index, base_reward))
@@ -753,11 +756,7 @@ pub fn apply_attestation<P: Preset>(
     increase_balance(balance(state, proposer_index)?, proposer_reward)?;
 
     slot_report.add_attestation_reward(proposer_reward);
-    slot_report.update_performance(
-        state,
-        attestation.data,
-        get_attesting_indices(state, attestation)?,
-    )?;
+    slot_report.update_performance(state, attestation.data, attesting_indices)?;
 
     Ok(())
 }
