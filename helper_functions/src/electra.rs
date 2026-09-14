@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use anyhow::{Result, ensure};
 use arithmetic::{U64Ext as _, UsizeExt as _};
 use ssz::ContiguousList;
@@ -69,15 +67,14 @@ pub fn get_indexed_attestation<P: Preset>(
     state: &impl BeaconState<P>,
     attestation: &Attestation<P>,
 ) -> Result<IndexedAttestation<P>> {
-    let attesting_indices = get_attesting_indices(state, attestation)?;
+    let mut attesting_indices = get_attesting_indices(state, attestation)?;
 
-    let mut attesting_indices = ContiguousList::try_from_iter(attesting_indices).expect(
+    attesting_indices.sort_unstable();
+
+    let attesting_indices = ContiguousList::try_from_iter(attesting_indices).expect(
         "Attestation.aggregation_bits and IndexedAttestation.attesting_indices \
          have the same maximum length",
     );
-
-    // Sorting a slice is faster than building a `BTreeMap`.
-    attesting_indices.sort_unstable();
 
     Ok(IndexedAttestation {
         attesting_indices,
@@ -87,45 +84,45 @@ pub fn get_indexed_attestation<P: Preset>(
 }
 
 // > Return the set of attesting indices corresponding to ``aggregation_bits`` and ``committee_bits``.
+// The returned indices are distinct but unordered. Committees in a slot are disjoint, so there is
+// nothing to deduplicate. Callers that need them sorted must sort them themselves.
 pub fn get_attesting_indices<P: Preset>(
     state: &impl BeaconState<P>,
     attestation: &impl PostElectraAttestation<P>,
-) -> Result<HashSet<ValidatorIndex>> {
-    let mut output = HashSet::new();
+) -> Result<Vec<ValidatorIndex>> {
+    let aggregation_bits = attestation.aggregation_bits();
+
+    // `count_ones` is an upper bound on the number of attesters, so `output` never reallocates.
+    let mut output = Vec::with_capacity(aggregation_bits.count_ones());
+
+    let mut bits = aggregation_bits.iter_bits();
+
     let committee_indices = get_committee_indices::<P>(attestation.committee_bits());
     let mut committee_offset: usize = 0;
 
     for index in committee_indices {
         let committee = beacon_committee(state, attestation.data().slot, index)?;
-        let mut committee_attesters = vec![];
+        let committee_start = output.len();
 
-        for (i, index) in committee.into_iter().enumerate() {
-            let bit_index = committee_offset.try_add(i)?;
-
-            if attestation
-                .aggregation_bits()
-                .get_bit(bit_index)
-                .is_some_and(|bit| bit)
-            {
-                committee_attesters.push(index);
+        for validator_index in committee {
+            if bits.next().unwrap_or_default() {
+                output.push(validator_index);
             }
         }
 
         ensure!(
-            !committee_attesters.is_empty(),
+            output.len() > committee_start,
             Error::NoCommitteeAttesters { index },
         );
-
-        output.extend(committee_attesters);
 
         committee_offset = committee_offset.try_add(committee.len())?;
     }
 
     // This works the same as `assert len(attestation.aggregation_bits) == committee_offset`
     ensure!(
-        committee_offset == attestation.aggregation_bits().len_usize(),
+        committee_offset == aggregation_bits.len_usize(),
         Error::ParticipantsCountMismatch {
-            aggregation_bitlist_length: attestation.aggregation_bits().len_usize(),
+            aggregation_bitlist_length: aggregation_bits.len_usize(),
             participants_count: committee_offset
         },
     );
