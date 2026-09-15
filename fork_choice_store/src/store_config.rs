@@ -8,7 +8,7 @@ use crate::builder_circuit_breaker::BuilderCircuitBreakerConfig;
 
 pub const DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS: u64 = 1500;
 
-#[derive(Clone, Copy, Derivative)]
+#[derive(Clone, Copy, Debug, Derivative)]
 #[derivative(Default)]
 pub struct StoreConfig {
     #[derivative(Default(value = "32"))]

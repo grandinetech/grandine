@@ -10,10 +10,8 @@ use futures::{StreamExt as _, channel::mpsc::UnboundedReceiver, select};
 use helper_functions::{electra, gloas, misc, phase0};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, warn_with_peers};
-use operation_pools::PoolToLivenessMessage;
 use prometheus_metrics::Metrics;
 use types::{
-    altair::containers::SyncCommitteeMessage,
     combined::{Attestation, BeaconState, SignedBeaconBlock},
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
     phase0::primitives::{Epoch, ValidatorIndex},
@@ -34,7 +32,6 @@ pub struct LivenessTracker<P: Preset, W: Wait> {
     metrics: Option<Arc<Metrics>>,
     too_many_empty_slots_message_shown_at: Option<Instant>,
     api_to_liveness_rx: UnboundedReceiver<ApiToLiveness>,
-    pool_to_liveness_rx: UnboundedReceiver<PoolToLivenessMessage>,
     validator_to_liveness_rx: UnboundedReceiver<ValidatorToLiveness<P>>,
 }
 
@@ -44,7 +41,6 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
         controller: ApiController<P, W>,
         metrics: Option<Arc<Metrics>>,
         api_to_liveness_rx: UnboundedReceiver<ApiToLiveness>,
-        pool_to_liveness_rx: UnboundedReceiver<PoolToLivenessMessage>,
         validator_to_liveness_rx: UnboundedReceiver<ValidatorToLiveness<P>>,
     ) -> Self {
         Self {
@@ -53,7 +49,6 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
             metrics,
             too_many_empty_slots_message_shown_at: None,
             api_to_liveness_rx,
-            pool_to_liveness_rx,
             validator_to_liveness_rx,
         }
     }
@@ -68,16 +63,6 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
                                 warn_with_peers!("unable to send liveness data: {error:?}");
                             }
                         }
-                    }
-                },
-
-                pool_message = self.pool_to_liveness_rx.select_next_some() => {
-                    match pool_message {
-                        PoolToLivenessMessage::SyncCommitteeMessage(sync_committee_message) => {
-                            if let Err(error) = self.process_sync_committee_message(sync_committee_message) {
-                                warn_with_peers!("Error while tracking liveness from sync committee message: {error:?}");
-                            }
-                        },
                     }
                 },
 
@@ -209,25 +194,6 @@ impl<P: Preset, W: Wait> LivenessTracker<P, W> {
             for attestation in block.message().body().combined_attestations() {
                 self.process_attestation(&attestation, state)?;
             }
-        }
-
-        Ok(())
-    }
-
-    fn process_sync_committee_message(
-        &mut self,
-        sync_committee_message: SyncCommitteeMessage,
-    ) -> Result<()> {
-        let SyncCommitteeMessage {
-            slot,
-            validator_index,
-            ..
-        } = sync_committee_message;
-
-        let epoch = misc::compute_epoch_at_slot::<P>(slot);
-
-        if self.is_epoch_allowed(epoch) {
-            self.set(epoch, validator_index)?;
         }
 
         Ok(())

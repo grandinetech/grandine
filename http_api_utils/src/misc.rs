@@ -1,10 +1,80 @@
 use core::time::Duration;
 use std::sync::Arc;
 
+use bls::PublicKeyBytes;
 use parse_display::Display;
 use prometheus_metrics::Metrics;
+use serde::{Deserialize, Serialize};
+use types::phase0::{
+    containers::SignedBeaconBlockHeader,
+    primitives::{CommitteeIndex, H256, Slot, ValidatorIndex},
+};
 
 pub const ETH_CONSENSUS_VERSION: &str = "eth-consensus-version";
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getAttesterDuties>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorAttesterDutyResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committee_index: CommitteeIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committee_length: usize,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub committees_at_slot: u64,
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_committee_index: usize,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getProposerDutiesV2>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorProposerDutyResponse {
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getSyncCommitteeDuties>
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorSyncDutyResponse {
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    pub validator_sync_committee_indices: Vec<usize>,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getPtcDuties>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorPTCDutyResponse {
+    pub pubkey: PublicKeyBytes,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub slot: Slot,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/getLiveness>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct ValidatorLivenessResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub index: ValidatorIndex,
+    pub is_live: bool,
+}
+
+/// <https://ethereum.github.io/beacon-APIs/#/Beacon/getBlockHeader>
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize)]
+pub struct BlockHeadersResponse {
+    pub root: H256,
+    pub canonical: bool,
+    pub header: SignedBeaconBlockHeader,
+}
 
 #[derive(Clone, Copy)]
 enum ApiType {

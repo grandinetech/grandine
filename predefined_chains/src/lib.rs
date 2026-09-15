@@ -13,6 +13,8 @@ use types::{
     preset::Preset,
 };
 
+const MAINNET_GENESIS_STATE: &[u8] = include_bytes!("../assets/mainnet_genesis_state.ssz");
+
 // TODO(Grandine Team): Try refactoring `grandine` to make the type parameter hack unnecessary.
 // The type parameter is needed to make `PredefinedNetwork::anchor_checkpoint_provider` in `grandine` work.
 // Ultimately this is because Medalla uses a different preset.
@@ -20,11 +22,7 @@ use types::{
 // This should not happen as long as all built-in `Config`s have correct values in `preset_base`.
 #[must_use]
 pub fn mainnet<P: Preset>() -> AnchorCheckpointProvider<P> {
-    let state = state_from_ssz(
-        &Config::mainnet(),
-        include_bytes!("../assets/mainnet_genesis_state.ssz"),
-    );
-
+    let state = state_from_ssz(&Config::mainnet(), MAINNET_GENESIS_STATE);
     let block = Arc::new(genesis::beacon_block(&state));
 
     AnchorCheckpointProvider::Predefined(
@@ -33,6 +31,12 @@ pub fn mainnet<P: Preset>() -> AnchorCheckpointProvider<P> {
             "7e76880eb67bbdc86250aa578958e9d0675e64e714337855204fb5abaaf82c2b"
         )),
     )
+}
+
+#[must_use]
+pub fn mainnet_genesis_validators_root() -> H256 {
+    // The field follows the 8-byte `genesis_time`; read directly so that no state is decoded.
+    H256::from_slice(&MAINNET_GENESIS_STATE[8..40])
 }
 
 // Deserialize to the combined `BeaconState` to support testnets that start in later phases.
@@ -70,5 +74,16 @@ mod tests {
         assert!(state.finalized_checkpoint().is_default());
 
         assert_eq!(state.hash_tree_root(), state_root);
+    }
+
+    // Pins the field offset the byte read relies on.
+    #[test]
+    fn genesis_validators_root_is_read_from_the_right_bytes() {
+        let state = mainnet::<Mainnet>().checkpoint().value.state;
+
+        assert_eq!(
+            state.genesis_validators_root(),
+            mainnet_genesis_validators_root(),
+        );
     }
 }

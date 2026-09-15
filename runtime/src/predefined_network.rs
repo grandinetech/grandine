@@ -1,7 +1,7 @@
 use core::time::Duration;
 use std::{io::ErrorKind, path::Path, sync::Arc};
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result, bail, ensure};
 use deposit_tree::DepositTree;
 use genesis::AnchorCheckpointProvider;
 use logging::info_with_peers;
@@ -20,7 +20,6 @@ use types::{
 
 use crate::default_network_config;
 
-#[cfg(any(feature = "network-mainnet", test))]
 use ::{hex_literal::hex, types::phase0::primitives::H256};
 
 #[derive(Clone, Copy, Display)]
@@ -155,6 +154,7 @@ impl PredefinedNetwork {
                         .parse()
                         .expect("hard-coded genesis state download URL should be valid")
                 }),
+                self.genesis_validators_root(),
             )
         };
 
@@ -184,6 +184,26 @@ impl PredefinedNetwork {
             .context("failed to load Hoodi genesis state")?,
         }
         .pipe(Ok)
+    }
+
+    #[must_use]
+    pub fn genesis_validators_root(self) -> H256 {
+        match self {
+            #[cfg(any(feature = "network-mainnet", test))]
+            Self::Mainnet => predefined_chains::mainnet_genesis_validators_root(),
+            #[cfg(any(feature = "network-sepolia", test))]
+            Self::Sepolia => H256(hex!(
+                "d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"
+            )),
+            #[cfg(any(feature = "network-holesky", test))]
+            Self::Holesky => H256(hex!(
+                "9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"
+            )),
+            #[cfg(any(feature = "network-hoodi", test))]
+            Self::Hoodi => H256(hex!(
+                "212f13fc4df078b6cb7db228f1c8307566dcecf900867401a92023d7ba99cb5f"
+            )),
+        }
     }
 
     #[must_use]
@@ -277,6 +297,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
     client: &Client,
     store_directory: impl AsRef<Path> + Send,
     download_url: RedactingUrl,
+    genesis_validators_root: H256,
 ) -> Result<WithOrigin<FinalizedCheckpoint<P>>> {
     let genesis_state_path = store_directory.as_ref().join("genesis_state.ssz");
 
@@ -300,7 +321,7 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
                 .await?;
 
             fs_err::create_dir_all(&store_directory)?;
-            fs_err::tokio::write(genesis_state_path, &bytes).await?;
+            fs_err::tokio::write(genesis_state_path.as_path(), &bytes).await?;
 
             bytes
         }
@@ -309,6 +330,14 @@ async fn load_or_download_genesis_checkpoint<P: Preset>(
 
     let state = Arc::from_ssz(config, ssz_bytes)?;
     let block = Arc::new(genesis::beacon_block(&state));
+
+    ensure!(
+        state.genesis_validators_root() == genesis_validators_root,
+        "genesis state at {} has genesis validators root {:?} where {genesis_validators_root:?} \
+         was expected",
+        genesis_state_path.display(),
+        state.genesis_validators_root(),
+    );
 
     info_with_peers!("genesis state loaded at slot: {}", state.slot());
 

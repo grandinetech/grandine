@@ -535,7 +535,7 @@ impl SszType {
 
             let chunks = stable.active.0.iter().map(|&active| {
                 if active {
-                    let (member, _) = fields.next().expect("active field shoudl be validated");
+                    let (member, _) = fields.next().expect("active field should be validated");
 
                     quote! { #ssz::SszHash::hash_tree_root(&self.#member) }
                 } else {
