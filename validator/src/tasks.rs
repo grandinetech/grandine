@@ -1,95 +1,333 @@
+use core::{
+    marker::PhantomData,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use std::sync::Arc;
 
-use eth1_api::ApiController;
+use anyhow::Result;
+use block_producer::ProposerData;
 use fork_choice_control::Wait;
-use futures::channel::mpsc::UnboundedSender;
+use helper_functions::misc;
+use itertools::Itertools as _;
+use keymanager::ProposerConfigs;
 use logging::{debug_with_peers, warn_with_peers};
-use p2p::ToSubnetService;
+use p2p::{BeaconCommitteeSubscription, SyncCommitteeSubscription};
+use scc::HashMap as SccHashMap;
+use std_ext::ArcExt as _;
 use tracing::instrument;
 use types::{
-    combined::BeaconState, config::Config as ChainConfig, phase0::primitives::Slot, preset::Preset,
-    traits::BeaconState as _,
+    config::Config as ChainConfig,
+    nonstandard::{ForkInfo, Phase},
+    phase0::primitives::{Epoch, Slot, ValidatorIndex},
+    preset::Preset,
 };
 
-use crate::own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers};
+use crate::{
+    beacon_node_api::BeaconNodeApi as _,
+    beacon_nodes::BeaconNodes,
+    misc::{
+        self as own_members_misc, DutySource, SyncCommitteeMember,
+        subnets_from_sync_committee_indices,
+    },
+    own_beacon_committee_members::OwnBeaconCommitteeMembers,
+    own_proposer_duties::OwnProposerDuties,
+    own_ptc_members::OwnPTCMembers,
+    own_validator_indices::OwnValidatorIndices,
+};
 
 pub struct UpdateBeaconCommitteeSubscriptionsTask<P: Preset, W: Wait + Sync> {
     pub chain_config: Arc<ChainConfig>,
-    pub controller: ApiController<P, W>,
-    pub beacon_state: Arc<BeaconState<P>>,
+    pub source: DutySource<P>,
     pub own_beacon_committee_members: Arc<OwnBeaconCommitteeMembers>,
-    pub subnet_service_tx: UnboundedSender<ToSubnetService>,
+    pub own_proposer_duties: Arc<OwnProposerDuties>,
+    pub own_ptc_members: Arc<OwnPTCMembers>,
+    pub own_validator_indices: Arc<OwnValidatorIndices>,
+    pub proposer_configs: Arc<ProposerConfigs>,
+    pub beacon_nodes: BeaconNodes<P, W>,
     pub wait_group: W,
 }
 
 impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
+    #[expect(clippy::too_many_lines)]
     #[instrument(
         skip_all,
-        fields(slot = %self.beacon_state.slot()),
+        fields(slot = %self.source.slot_head().slot()),
         name="UpdateBeaconCommitteeSubscriptionsTask::run",
     )]
     pub async fn run(self) {
         let Self {
             chain_config,
-            controller,
-            mut beacon_state,
+            source,
             own_beacon_committee_members,
-            subnet_service_tx,
+            own_proposer_duties,
+            own_ptc_members,
+            own_validator_indices,
+            proposer_configs,
+            beacon_nodes,
             wait_group,
         } = self;
 
-        let current_slot = beacon_state.slot();
+        let current_slot = source.slot_head().slot();
+        let fork_info = source.slot_head().fork_info;
 
-        for slot in OwnBeaconCommitteeMembers::slots_to_compute_in_advance(current_slot) {
-            let dependent_root = match controller
-                .attestation_committee_dependent_root_for_slot(&beacon_state, slot)
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+
+        own_validator_indices
+            .update(&beacon_nodes, current_epoch)
+            .await;
+
+        let validator_indices = own_validator_indices.get().await;
+
+        // Sent every slot, as a restarted beacon node no longer knows about earlier ones.
+        let proposers = own_validator_indices
+            .indices_by_pubkey()
+            .await
+            .into_iter()
+            .filter_map(|(pubkey, validator_index)| {
+                Some(ProposerData {
+                    validator_index,
+                    fee_recipient: proposer_configs.configured_fee_recipient(pubkey)?,
+                })
+            })
+            .collect_vec();
+
+        if let Err(error) = beacon_nodes.prepare_beacon_proposer(&proposers).await {
+            warn_with_peers!("failed to prepare beacon proposers: {error:?}");
+        }
+
+        let mut subscriptions = vec![];
+
+        let prefetch_slots = beacon_nodes.prefetch_slots(current_slot);
+
+        for (epoch, slots) in own_members_misc::slots_by_epoch::<P>(prefetch_slots) {
+            if validator_indices.is_empty() {
+                continue;
+            }
+
+            let slots = match own_beacon_committee_members
+                .slots_to_compute_at_epoch(&beacon_nodes, epoch, slots, &validator_indices)
+                .await
             {
+                Ok(slots) => slots,
                 Err(error) => {
                     warn_with_peers!(
-                        "unable to find dependent root for slot: {slot} against state with \
-                        slot: {}: {error:?}",
-                        beacon_state.slot(),
+                        "unable to find dependent root for epoch: {epoch} in slot \
+                         {current_slot}: {error:?}",
                     );
 
                     continue;
                 }
-                Ok(dependent_root) => dependent_root,
             };
 
-            if own_beacon_committee_members
-                .needs_to_compute_members_at_slot(dependent_root, slot)
-                .await
-            {
-                let phase_at_slot = chain_config.phase_at_slot::<P>(slot);
+            // Attester duties may be cached from an earlier slot while PTC duties are not yet.
+            if let Some(slots) = slots {
+                debug_with_peers!("updating beacon committee subscriptions {epoch} {current_slot}");
 
-                if chain_config.phase_at_slot::<P>(current_slot) != phase_at_slot {
-                    beacon_state = match controller
-                        .preprocessed_state_at_epoch(chain_config.fork_epoch(phase_at_slot))
-                        .await
-                    {
-                        Ok(with_status) => with_status.value,
-                        Err(error) => {
-                            warn_with_peers!(
-                                "failed to preprocess next fork beacon state for beacon committee \
-                                subscriptions: {error:?}",
-                            );
-                            break;
-                        }
-                    }
-                }
+                let fork_info = fork_info_at_epoch(&chain_config, epoch, fork_info);
 
-                debug_with_peers!("updating beacon committee subscriptions {slot} {current_slot}");
-
-                if let Some(members) = own_beacon_committee_members
-                    .get_or_init_at_slot(&beacon_state, dependent_root, slot)
+                if let Err(error) = own_beacon_committee_members
+                    .init_at_slots(&beacon_nodes, fork_info, slots, &validator_indices)
                     .await
                 {
-                    update_beacon_committee_subscriptions(
-                        current_slot,
-                        &members,
-                        &subnet_service_tx,
-                    )
-                    .await;
+                    warn_with_peers!(
+                        "failed to obtain attester duties for epoch {epoch}: {error:?}"
+                    );
+                    continue;
+                }
+            }
+
+            prefetch_ptc_duties(
+                &chain_config,
+                &own_beacon_committee_members,
+                &own_ptc_members,
+                &beacon_nodes,
+                current_epoch,
+                epoch,
+                &validator_indices,
+            )
+            .await;
+
+            prefetch_proposer_duties(
+                &chain_config,
+                &own_beacon_committee_members,
+                &own_proposer_duties,
+                &beacon_nodes,
+                epoch,
+                &validator_indices,
+            )
+            .await;
+        }
+
+        for slot in own_members_misc::slots_to_compute_in_advance(current_slot) {
+            if let Some(members) = own_beacon_committee_members.get_at_slot::<P>(slot).await {
+                subscriptions.extend(
+                    members
+                        .iter()
+                        .copied()
+                        .map(BeaconCommitteeSubscription::from),
+                );
+            }
+        }
+
+        if let Err(error) = beacon_nodes
+            .subscribe_to_beacon_committees(current_slot, &subscriptions)
+            .await
+        {
+            warn_with_peers!("failed to update beacon committee subscriptions: {error:?}");
+        }
+
+        drop(wait_group);
+    }
+}
+
+fn fork_info_at_epoch<P: Preset>(
+    chain_config: &ChainConfig,
+    epoch: Epoch,
+    current: ForkInfo<P>,
+) -> ForkInfo<P> {
+    // The epoch may lie in the next fork; the genesis validators root never changes.
+    ForkInfo {
+        fork: chain_config.fork_at_epoch(epoch),
+        genesis_validators_root: current.genesis_validators_root,
+        phantom: PhantomData,
+    }
+}
+
+// PTC duties are drawn from the same shuffling as attester duties, so they are refetched with
+// them whenever the dependent root changes.
+async fn prefetch_ptc_duties<P: Preset, W: Wait + Sync>(
+    chain_config: &ChainConfig,
+    own_beacon_committee_members: &OwnBeaconCommitteeMembers,
+    own_ptc_members: &OwnPTCMembers,
+    beacon_nodes: &BeaconNodes<P, W>,
+    current_epoch: Epoch,
+    epoch: Epoch,
+    validator_indices: &[ValidatorIndex],
+) {
+    // No beacon node serves PTC duties from a pre-Gloas state, even for the fork epoch.
+    if chain_config.phase_at_epoch(current_epoch) < Phase::Gloas {
+        return;
+    }
+
+    let Some(dependent_root) = own_beacon_committee_members
+        .cached_dependent_root(epoch)
+        .await
+    else {
+        return;
+    };
+
+    if let Err(error) = own_ptc_members
+        .init_at_epoch(beacon_nodes, epoch, dependent_root, validator_indices)
+        .await
+    {
+        warn_with_peers!("failed to obtain PTC duties for epoch {epoch}: {error:?}");
+    }
+}
+
+/// The epoch whose attester duties share a dependent root with the proposer duties of `epoch`.
+pub fn proposer_dependent_epoch(chain_config: &ChainConfig, epoch: Epoch) -> Epoch {
+    // The Fulu proposer lookahead fixes proposers an epoch earlier than before.
+    if chain_config.phase_at_epoch(epoch) >= Phase::Fulu {
+        epoch
+    } else {
+        epoch.saturating_add(1)
+    }
+}
+
+async fn prefetch_proposer_duties<P: Preset, W: Wait + Sync>(
+    chain_config: &ChainConfig,
+    own_beacon_committee_members: &OwnBeaconCommitteeMembers,
+    own_proposer_duties: &OwnProposerDuties,
+    beacon_nodes: &BeaconNodes<P, W>,
+    epoch: Epoch,
+    validator_indices: &[ValidatorIndex],
+) {
+    let Some(dependent_root) = own_beacon_committee_members
+        .cached_dependent_root(proposer_dependent_epoch(chain_config, epoch))
+        .await
+    else {
+        return;
+    };
+
+    if let Err(error) = own_proposer_duties
+        .init_at_epoch(beacon_nodes, epoch, dependent_root, validator_indices)
+        .await
+    {
+        warn_with_peers!("failed to obtain proposer duties for epoch {epoch}: {error:?}");
+    }
+}
+
+/// Keeps sync committee duties for the periods in flight cached ahead of the deadline.
+pub struct PrefetchSyncCommitteeDutiesTask<P: Preset, W: Wait + Sync> {
+    pub chain_config: Arc<ChainConfig>,
+    pub current_slot: Slot,
+    pub own_sync_committee_members: Arc<OwnSyncCommitteeMembers>,
+    pub own_validator_indices: Arc<OwnValidatorIndices>,
+    pub beacon_nodes: BeaconNodes<P, W>,
+    pub wait_group: W,
+}
+
+impl<P: Preset, W: Wait + Sync> PrefetchSyncCommitteeDutiesTask<P, W> {
+    #[instrument(
+        skip_all,
+        fields(slot = %self.current_slot),
+        name = "PrefetchSyncCommitteeDutiesTask::run",
+    )]
+    pub async fn run(self) {
+        let Self {
+            chain_config,
+            current_slot,
+            own_sync_committee_members,
+            own_validator_indices,
+            beacon_nodes,
+            wait_group,
+        } = self;
+
+        // Sync committees only exist from Altair on.
+        if chain_config.phase_at_slot::<P>(current_slot) < Phase::Altair {
+            drop(wait_group);
+            return;
+        }
+
+        let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
+
+        own_validator_indices
+            .update(&beacon_nodes, current_epoch)
+            .await;
+
+        let validator_indices = own_validator_indices.get().await;
+
+        if validator_indices.is_empty() {
+            drop(wait_group);
+            return;
+        }
+
+        for period in OwnSyncCommitteeMembers::periods_to_prefetch::<P>(current_epoch) {
+            if let Err(error) = own_sync_committee_members
+                .init_at_period(&chain_config, &beacon_nodes, period, &validator_indices)
+                .await
+            {
+                warn_with_peers!(
+                    "failed to obtain sync committee duties for period {period}: {error:?}",
+                );
+            }
+        }
+
+        own_sync_committee_members.prune::<P>(current_epoch).await;
+
+        // With a local node the subscriptions are sent from the state-based path instead.
+        if !beacon_nodes.has_local_node()
+            && let Some(subscriptions) = own_sync_committee_members
+                .subscriptions_to_send::<P>(current_epoch)
+                .await
+        {
+            match beacon_nodes
+                .subscribe_to_sync_committees(current_epoch, &subscriptions)
+                .await
+            {
+                Ok(()) => own_sync_committee_members.mark_subscriptions_sent(current_epoch),
+                Err(error) => {
+                    warn_with_peers!("failed to update sync committee subscriptions: {error:?}");
                 }
             }
         }
@@ -98,24 +336,236 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
     }
 }
 
-#[instrument(level = "debug", fields(slot = current_slot))]
-pub async fn update_beacon_committee_subscriptions(
-    current_slot: Slot,
-    members: &[BeaconCommitteeMember],
-    subnet_service_tx: &UnboundedSender<ToSubnetService>,
-) {
-    if members.is_empty() {
-        return;
+/// Sync committee members of the periods in flight.
+pub struct OwnSyncCommitteeMembers {
+    periods: SccHashMap<u64, PeriodDuties>,
+    /// The epoch subscriptions were last sent in; resent each epoch for restarted nodes.
+    subscriptions_sent_at: AtomicU64,
+}
+
+/// One period's answer from one duties fetch.
+struct PeriodDuties {
+    /// The indices the duties were requested for; a key imported at runtime changes the set.
+    requested: Arc<[ValidatorIndex]>,
+    members: Arc<[SyncCommitteeMember]>,
+    subscriptions: Arc<[SyncCommitteeSubscription]>,
+}
+
+impl OwnSyncCommitteeMembers {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            periods: SccHashMap::new(),
+            subscriptions_sent_at: AtomicU64::new(u64::MAX),
+        }
     }
 
-    let subscriptions = members.iter().copied().map(Into::into).collect();
+    /// The members serving in `slot`.
+    pub async fn get_at_slot<P: Preset>(&self, slot: Slot) -> Option<Arc<[SyncCommitteeMember]>> {
+        let period = period_at_slot::<P>(slot);
 
-    let (sender, receiver) = futures::channel::oneshot::channel();
+        self.periods
+            .get_async(&period)
+            .await
+            .map(|entry| entry.get().members.clone_arc())
+    }
 
-    ToSubnetService::UpdateBeaconCommitteeSubscriptions(current_slot, subscriptions, sender)
-        .send(subnet_service_tx);
+    /// [`Self::get_at_slot`], fetching the members when they were never prefetched.
+    pub async fn get_or_init_at_slot<P: Preset, W: Wait + Sync>(
+        &self,
+        chain_config: &ChainConfig,
+        beacon_nodes: &BeaconNodes<P, W>,
+        slot: Slot,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Option<Arc<[SyncCommitteeMember]>>> {
+        self.init_at_period(
+            chain_config,
+            beacon_nodes,
+            period_at_slot::<P>(slot),
+            validator_indices,
+        )
+        .await?;
 
-    if let Err(error) = receiver.await {
-        warn_with_peers!("failed to update beacon committee subscriptions: {error:?}");
+        Ok(self.get_at_slot::<P>(slot).await)
+    }
+
+    /// Fetches the members of `period` unless they are already known.
+    pub async fn init_at_period<P: Preset, W: Wait + Sync>(
+        &self,
+        chain_config: &ChainConfig,
+        beacon_nodes: &BeaconNodes<P, W>,
+        period: u64,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<()> {
+        let cached = self
+            .periods
+            .get_async(&period)
+            .await
+            .is_some_and(|entry| *entry.get().requested == *validator_indices);
+
+        if cached {
+            return Ok(());
+        }
+
+        // A period reaching back before Altair only has committees from the fork on.
+        let epoch =
+            misc::start_of_sync_committee_period::<P>(period)?.max(chain_config.altair_fork_epoch);
+
+        let duties = beacon_nodes
+            .sync_committee_duties(epoch, validator_indices)
+            .await?;
+
+        let until_epoch = misc::start_of_sync_committee_period::<P>(period.saturating_add(1))?;
+
+        let subscriptions = duties
+            .iter()
+            .map(|duty| SyncCommitteeSubscription {
+                validator_index: duty.validator_index,
+                sync_committee_indices: duty.validator_sync_committee_indices.clone(),
+                until_epoch,
+            })
+            .collect::<Arc<[_]>>();
+
+        let members = duties
+            .into_iter()
+            .map(|duty| {
+                Ok(SyncCommitteeMember {
+                    validator_index: duty.validator_index,
+                    public_key: duty.pubkey,
+                    subnets: subnets_from_sync_committee_indices::<P>(
+                        duty.validator_sync_committee_indices,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .sorted_by_key(|member| member.validator_index)
+            .collect::<Arc<[_]>>();
+
+        // Cached even when empty, so the same question is not asked every slot of the period.
+        self.periods
+            .upsert_async(
+                period,
+                PeriodDuties {
+                    requested: validator_indices.into(),
+                    members,
+                    subscriptions,
+                },
+            )
+            .await;
+
+        Ok(())
+    }
+
+    /// The subscriptions due at `current_epoch`, until [`Self::mark_subscriptions_sent`] records
+    /// them as sent, so that a restarted or newly reachable node still learns them each epoch.
+    pub async fn subscriptions_to_send<P: Preset>(
+        &self,
+        current_epoch: Epoch,
+    ) -> Option<Vec<SyncCommitteeSubscription>> {
+        if self.subscriptions_sent_at.load(Ordering::Relaxed) == current_epoch {
+            return None;
+        }
+
+        let current_period = misc::sync_committee_period::<P>(current_epoch);
+        // The next period's subnets are joined an epoch ahead of its start.
+        let next_epoch_period = misc::sync_committee_period::<P>(current_epoch.saturating_add(1));
+
+        let mut subscriptions = vec![];
+
+        self.periods
+            .iter_async(|period, entry| {
+                if *period == current_period || *period == next_epoch_period {
+                    subscriptions.extend(entry.subscriptions.iter().cloned());
+                }
+
+                true
+            })
+            .await;
+
+        // Nothing to send is nothing sent, so a failed duties fetch is retried next slot.
+        (!subscriptions.is_empty()).then_some(subscriptions)
+    }
+
+    pub fn mark_subscriptions_sent(&self, current_epoch: Epoch) {
+        self.subscriptions_sent_at
+            .store(current_epoch, Ordering::Relaxed);
+    }
+
+    /// The periods worth fetching at `current_epoch`: the one being served and the one after it.
+    #[must_use]
+    pub fn periods_to_prefetch<P: Preset>(current_epoch: Epoch) -> [u64; 2] {
+        let current_period = misc::sync_committee_period::<P>(current_epoch);
+
+        [current_period, current_period.saturating_add(1)]
+    }
+
+    pub async fn prune<P: Preset>(&self, current_epoch: Epoch) {
+        let current_period = misc::sync_committee_period::<P>(current_epoch);
+
+        self.periods
+            .retain_async(|period, _| *period >= current_period)
+            .await;
+    }
+
+    pub fn warn_about_missing_duties(slot: Slot) {
+        warn_with_peers!(
+            "no sync committee duties were prefetched for slot {slot}, so no sync committee \
+             message will be produced; check that the beacon nodes given with --beacon-node-urls \
+             are reachable",
+        );
+    }
+}
+
+impl Default for OwnSyncCommitteeMembers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// A message signed in `slot` is included in a block at `slot + 1` and verified against that
+// block's committee.
+fn period_at_slot<P: Preset>(slot: Slot) -> u64 {
+    misc::sync_committee_period::<P>(misc::compute_epoch_at_slot::<P>(slot.saturating_add(1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use types::preset::Minimal;
+
+    use super::*;
+
+    // `EPOCHS_PER_SYNC_COMMITTEE_PERIOD` is 8 under the minimal preset, with 8 slots per epoch.
+    #[test]
+    fn a_slot_maps_to_the_period_of_the_next_slots_epoch() {
+        assert_eq!(period_at_slot::<Minimal>(0), 0);
+        assert_eq!(period_at_slot::<Minimal>(62), 0);
+        assert_eq!(period_at_slot::<Minimal>(63), 1);
+        assert_eq!(period_at_slot::<Minimal>(64), 1);
+    }
+
+    // Proposer duties depend on the previous epoch's last block until the Fulu lookahead moves
+    // them an epoch back, onto the root attester duties of the same epoch use.
+    #[test]
+    fn proposer_duties_share_the_attester_root_of_the_same_epoch_from_fulu_on() {
+        let config = ChainConfig::mainnet();
+        let fulu = config.fulu_fork_epoch;
+
+        assert_eq!(proposer_dependent_epoch(&config, fulu - 1), fulu);
+        assert_eq!(proposer_dependent_epoch(&config, fulu), fulu);
+        assert_eq!(proposer_dependent_epoch(&config, fulu + 1), fulu + 1);
+    }
+
+    #[test]
+    fn prefetching_covers_the_current_period_and_the_next() {
+        assert_eq!(
+            OwnSyncCommitteeMembers::periods_to_prefetch::<Minimal>(0),
+            [0, 1],
+        );
+
+        assert_eq!(
+            OwnSyncCommitteeMembers::periods_to_prefetch::<Minimal>(8),
+            [1, 2],
+        );
     }
 }

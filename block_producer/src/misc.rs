@@ -30,7 +30,7 @@ impl PayloadIdEntry {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct ProposerData {
     #[serde(with = "serde_utils::string_or_native")]
     pub validator_index: ValidatorIndex,

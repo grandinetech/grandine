@@ -5,7 +5,8 @@ pub use types::bellatrix::primitives::Gas;
 
 pub use crate::{
     proposer_configs::{
-        LegacyMigration, ProposerConfigs, migrate_legacy_database, prune_legacy_database,
+        GRANDINE_DONATION_ADDRESS, LegacyMigration, ProposerConfigs, migrate_legacy_database,
+        prune_legacy_database,
     },
     validator_definitions::{
         BuilderOptions, DefinitionsStorage, KeystorePassword, SigningMethod, ValidatorDefinition,
@@ -44,7 +45,7 @@ impl KeyManager {
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
-        default_fee_recipient: ExecutionAddress,
+        default_fee_recipient: Option<ExecutionAddress>,
         default_gas_limit: Option<Gas>,
         default_graffiti: H256,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
@@ -81,7 +82,7 @@ impl KeyManager {
         validator_directory: PathBuf,
         secrets_directory: PathBuf,
         keystore_storage_password_path: Option<&Path>,
-        default_fee_recipient: ExecutionAddress,
+        default_fee_recipient: Option<ExecutionAddress>,
         default_gas_limit: Option<Gas>,
         default_graffiti: H256,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,

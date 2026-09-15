@@ -21,3 +21,10 @@ ssz-spec-tests/
 
 # exception logs
 exception.log
+
+# Wait for a project-accepted standard
+CLAUDE.md
+AGENTS.md
+
+.zed
+.claude
