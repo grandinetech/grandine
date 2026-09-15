@@ -291,6 +291,7 @@ pub enum ValidatorMessage<P: Preset, W> {
     Tick(W, Tick),
     Head(W, ChainLink<P>),
     PayloadStatusUpdated(W, ChainLink<P>),
+    FinalizedCheckpoint(Checkpoint),
     ValidAttestation(W, Arc<Attestation<P>>),
     ValidPayloadAttestation(W, Arc<PayloadAttestationMessage>),
     PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),
@@ -298,7 +299,7 @@ pub enum ValidatorMessage<P: Preset, W> {
 }
 
 impl<P: Preset, W> ValidatorMessage<P, W> {
-    pub(crate) fn send(self, tx: &impl UnboundedSink<Self>) {
+    pub fn send(self, tx: &impl UnboundedSink<Self>) {
         // Don't log the value because it can contain entire `BeaconState`s.
         if tx.unbounded_send(self).is_err() {
             debug_with_peers!("send to validator failed because the receiver was dropped");

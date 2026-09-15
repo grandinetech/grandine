@@ -11,7 +11,7 @@ use features::Feature;
 use logging::{info_with_peers, warn_with_peers};
 use tracing::Span;
 
-use crate::{ApiError, misc::ApiMetrics};
+use crate::{ApiError, error::Error, misc::ApiMetrics};
 
 // By default, `TraceLayer` emits events at `DEBUG` with the default target.
 // Our application filters them out.
@@ -67,11 +67,19 @@ pub fn log_response<E: ApiError + Send + Sync + 'static>(
                     to ({method} {original_uri} {version:?}) \
                     for {remote} in {latency:?}",
                 ),
-                response.extensions().get::<Arc<E>>(),
+                response
+                    .extensions()
+                    .get::<Arc<E>>()
+                    .map(|error| error.format_sources())
+                    // Responses that fail to build carry this crate's error rather than `E`.
+                    .or_else(|| {
+                        response
+                            .extensions()
+                            .get::<Arc<Error>>()
+                            .map(|error| error.format_sources())
+                    }),
             ) {
-                (shared, Some(error)) => {
-                    info_with_peers!("{shared} (error: {})", error.format_sources())
-                }
+                (shared, Some(error)) => info_with_peers!("{shared} (error: {error})"),
                 (shared, None) => info_with_peers!("{shared}"),
             }
         }

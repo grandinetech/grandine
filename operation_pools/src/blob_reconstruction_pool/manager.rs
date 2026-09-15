@@ -18,8 +18,7 @@ pub type ReconstructionParams<P, W> = (W, H256, Arc<SignedBeaconBlock<P>>, Slot)
 
 pub struct Manager<P: Preset, W: Wait> {
     controller: ApiController<P, W>,
-    dedicated_executor: DedicatedExecutor,
-    low_priority_executor: Arc<DedicatedExecutor>,
+    dedicated_executor: Arc<DedicatedExecutor>,
     metrics: Option<Arc<Metrics>>,
     scheduled_reconstructions: BTreeMap<Instant, Vec<ReconstructionParams<P, W>>>,
 }
@@ -28,16 +27,14 @@ impl<P: Preset, W: Wait> Manager<P, W> {
     #[must_use]
     pub const fn new(
         controller: ApiController<P, W>,
-        dedicated_executor: DedicatedExecutor,
+        dedicated_executor: Arc<DedicatedExecutor>,
         metrics: Option<Arc<Metrics>>,
-        low_priority_executor: Arc<DedicatedExecutor>,
     ) -> Self {
         Self {
             controller,
             dedicated_executor,
             metrics,
             scheduled_reconstructions: BTreeMap::new(),
-            low_priority_executor,
         }
     }
 
@@ -84,7 +81,9 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             block_root,
             block,
             metrics: self.metrics.clone(),
-            dedicated_executor: self.low_priority_executor.clone_arc(),
+            // Recovery is heavy and has no deadline, so it must not share a thread with the
+            // attestation verifier, which runs on the low-priority executor.
+            dedicated_executor: self.dedicated_executor.clone_arc(),
         })
     }
 

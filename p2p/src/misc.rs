@@ -62,7 +62,7 @@ pub enum PeerReportReason {
     ExpiredSyncBatch,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyncCommitteeSubscription {
     #[serde(with = "serde_utils::string_or_native")]
