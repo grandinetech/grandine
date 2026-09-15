@@ -41,11 +41,11 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::{FinalizedCheckpoint, Phase, StorageMode},
-    phase0::primitives::{H256, NodeId},
+    phase0::primitives::{ExecutionAddress, H256, NodeId},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
-use validator::{Validator, ValidatorChannels, ValidatorConfig};
+use validator::{ChainSource, OwnValidatorIndices, Validator, ValidatorChannels, ValidatorConfig};
 
 use crate::{
     http_api_config::HttpApiConfig,
@@ -237,6 +237,8 @@ impl<P: Preset> Context<P> {
 
         let validator_config = Arc::new(ValidatorConfig {
             disable_blockprint_graffiti: true,
+            // The snapshots were recorded with a fee recipient, without which none are published.
+            suggested_fee_recipient: Some(ExecutionAddress::zero()),
             ..Default::default()
         });
 
@@ -311,13 +313,14 @@ impl<P: Preset> Context<P> {
             }),
         ));
 
-        let validator_channels = ValidatorChannels {
+        let validator_channels = ValidatorChannels::Local {
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
             p2p_tx: validator_to_p2p_tx,
             p2p_to_validator_rx,
             slasher_to_validator_rx: None,
             subnet_service_tx: subnet_service_tx.clone(),
+            api_to_liveness_tx: None,
             validator_to_liveness_tx: Some(validator_to_liveness_tx),
             validator_to_slasher_tx: None,
         };
@@ -326,23 +329,27 @@ impl<P: Preset> Context<P> {
         network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
         let network_config = Arc::new(network_config);
 
+        let chain_source = Arc::new(ChainSource::Local {
+            controller: controller.clone_arc(),
+            attestation_agg_pool: attestation_agg_pool.clone_arc(),
+            block_producer: block_producer.clone_arc(),
+            event_channels: event_channels.clone_arc(),
+            own_validator_indices: Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
+            payload_attestation_agg_pool: payload_attestation_agg_pool.clone_arc(),
+            sync_committee_agg_pool: sync_committee_agg_pool.clone_arc(),
+        });
+
         let validator = Validator::new(
             validator_config.clone_arc(),
-            block_producer.clone_arc(),
-            controller.clone_arc(),
-            attestation_agg_pool.clone_arc(),
+            chain_source,
             None,
             None,
-            event_channels.clone_arc(),
             keymanager.proposer_configs().clone_arc(),
-            signer,
+            signer.clone_arc(),
             slashing_protector,
-            payload_attestation_agg_pool.clone_arc(),
-            sync_committee_agg_pool.clone_arc(),
             None,
             None,
             validator_channels,
-            network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
         );

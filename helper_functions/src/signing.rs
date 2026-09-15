@@ -40,6 +40,7 @@ use types::{
             PayloadAttestationData, ProposerPreferences,
         },
     },
+    nonstandard::ForkInfo,
     phase0::{
         consts::{
             DOMAIN_AGGREGATE_AND_PROOF, DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER,
@@ -143,8 +144,18 @@ pub trait SignForSingleFork<P: Preset>: SszHash {
     fn epoch(&self) -> Epoch;
 
     fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
-        let epoch = Some(self.epoch());
-        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, epoch);
+        self.signing_root_from_fork_info(config, beacon_state.into())
+    }
+
+    /// [`Self::signing_root`] for a fork that is already known.
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
+        let domain = accessors::get_domain_from_fork_info(
+            config,
+            fork_info,
+            Self::DOMAIN_TYPE,
+            self.epoch(),
+        );
+
         misc::compute_signing_root(self, domain)
     }
 
@@ -183,8 +194,20 @@ pub trait SignForSingleForkAtSlot<P: Preset>: SszHash {
         beacon_state: &(impl BeaconState<P> + ?Sized),
         slot: Slot,
     ) -> H256 {
+        self.signing_root_from_fork_info(config, beacon_state.into(), slot)
+    }
+
+    /// [`Self::signing_root`] for a fork that is already known.
+    fn signing_root_from_fork_info(
+        &self,
+        config: &Config,
+        fork_info: ForkInfo<P>,
+        slot: Slot,
+    ) -> H256 {
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
-        let domain = accessors::get_domain(config, beacon_state, Self::DOMAIN_TYPE, Some(epoch));
+        let domain =
+            accessors::get_domain_from_fork_info(config, fork_info, Self::DOMAIN_TYPE, epoch);
+
         misc::compute_signing_root(self, domain)
     }
 
@@ -440,9 +463,11 @@ impl<P: Preset> SignForSingleFork<P> for VoluntaryExit {
         self.epoch
     }
 
-    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
+    // Since Deneb the domain is pinned to Capella (EIP-7044); the supplied fork decides,
+    // as it does in `process_voluntary_exit`.
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
         let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
-        let current_fork_version = beacon_state.fork().current_version;
+        let current_fork_version = fork_info.fork.current_version;
 
         let domain = if current_fork_version == config.deneb_fork_version
             || current_fork_version == config.electra_fork_version
@@ -450,11 +475,11 @@ impl<P: Preset> SignForSingleFork<P> for VoluntaryExit {
             || current_fork_version == config.gloas_fork_version
         {
             let fork_version = Some(config.capella_fork_version);
-            let genesis_validators_root = Some(beacon_state.genesis_validators_root());
+            let genesis_validators_root = Some(fork_info.genesis_validators_root);
             misc::compute_domain(config, domain_type, fork_version, genesis_validators_root)
         } else {
             let epoch = <Self as SignForSingleFork<P>>::epoch(self);
-            accessors::get_domain(config, beacon_state, domain_type, Some(epoch))
+            accessors::get_domain_from_fork_info(config, fork_info, domain_type, epoch)
         };
 
         misc::compute_signing_root(self, domain)
@@ -505,7 +530,8 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
         misc::compute_epoch_at_slot::<P>(self.proposal_slot)
     }
 
-    fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
+    // The domain is that of the proposal epoch, even when signed from a state before the fork.
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
         let epoch = <Self as SignForSingleFork<P>>::epoch(self);
         let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
         let fork_version = config.version_at_epoch(epoch);
@@ -513,7 +539,7 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
             config,
             domain_type,
             Some(fork_version),
-            Some(beacon_state.genesis_validators_root()),
+            Some(fork_info.genesis_validators_root),
         );
         misc::compute_signing_root(self, domain)
     }
@@ -523,4 +549,120 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
 impl SignForAllForks for BuilderDepositMessage {
     const DOMAIN_TYPE: DomainType = DOMAIN_BUILDER_DEPOSIT;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::BuilderDeposit;
+}
+
+#[cfg(test)]
+mod tests {
+    use types::{
+        phase0::{
+            containers::Fork,
+            primitives::{ExecutionAddress, Version},
+        },
+        preset::Mainnet,
+    };
+
+    use super::*;
+
+    fn fork_info(previous_version: Version, current_version: Version) -> ForkInfo<Mainnet> {
+        ForkInfo {
+            fork: Fork {
+                previous_version,
+                current_version,
+                epoch: 0,
+            },
+            genesis_validators_root: H256::repeat_byte(1),
+            phantom: core::marker::PhantomData,
+        }
+    }
+
+    #[test]
+    fn voluntary_exit_domain_is_pinned_to_capella_from_deneb_on() {
+        let config = Config::mainnet();
+
+        let exit = VoluntaryExit {
+            epoch: 0,
+            validator_index: 1,
+        };
+
+        let capella = fork_info(config.bellatrix_fork_version, config.capella_fork_version);
+
+        let capella_root =
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(&exit, &config, capella);
+
+        for current_version in [
+            config.deneb_fork_version,
+            config.electra_fork_version,
+            config.fulu_fork_version,
+            config.gloas_fork_version,
+        ] {
+            let later = fork_info(config.capella_fork_version, current_version);
+
+            assert_eq!(
+                SignForSingleFork::<Mainnet>::signing_root_from_fork_info(&exit, &config, later),
+                capella_root,
+                "exit domain under {current_version:?} should be pinned to Capella",
+            );
+        }
+    }
+
+    #[test]
+    fn voluntary_exit_domain_follows_the_fork_before_deneb() {
+        let config = Config::mainnet();
+
+        let exit = VoluntaryExit {
+            epoch: 0,
+            validator_index: 1,
+        };
+
+        let bellatrix = fork_info(config.altair_fork_version, config.bellatrix_fork_version);
+        let capella = fork_info(config.bellatrix_fork_version, config.capella_fork_version);
+
+        assert_ne!(
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(&exit, &config, bellatrix),
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(&exit, &config, capella),
+        );
+    }
+
+    // Preferences for the first Gloas epoch are signed an epoch early, from a Fulu fork.
+    #[test]
+    fn proposer_preferences_domain_follows_the_proposal_epoch() {
+        let mut config = Config::mainnet();
+        config.gloas_fork_epoch = 10;
+
+        let preferences = |proposal_slot| ProposerPreferences {
+            dependent_root: H256::repeat_byte(2),
+            proposal_slot,
+            validator_index: 1,
+            fee_recipient: ExecutionAddress::zero(),
+            target_gas_limit: 0,
+        };
+
+        let gloas_slot = misc::compute_start_slot_at_epoch::<Mainnet>(10);
+        let fulu = fork_info(config.electra_fork_version, config.fulu_fork_version);
+        let gloas = fork_info(config.fulu_fork_version, config.gloas_fork_version);
+
+        let root_from_fulu = SignForSingleFork::<Mainnet>::signing_root_from_fork_info(
+            &preferences(gloas_slot),
+            &config,
+            fulu,
+        );
+
+        assert_eq!(
+            root_from_fulu,
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(
+                &preferences(gloas_slot),
+                &config,
+                gloas,
+            ),
+        );
+
+        assert_ne!(
+            root_from_fulu,
+            SignForSingleFork::<Mainnet>::signing_root_from_fork_info(
+                &preferences(gloas_slot - 1),
+                &config,
+                fulu,
+            ),
+        );
+    }
 }

@@ -2215,7 +2215,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             (justified, finalized)
         };
 
-        let payload_status = Self::initial_payload_status(&state);
+        // A Gloas block carries no payload; until its envelope is verified it is as verified as
+        // the chain it extends.
+        let payload_status = if state.is_post_gloas() {
+            parent.payload_status
+        } else {
+            Self::initial_payload_status(&state)
+        };
 
         let chain_link = ChainLink {
             block_root,
@@ -3034,7 +3040,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             if self.phase() >= Phase::Gloas {
             } else if self.phase() >= Phase::Electra {
                 ensure!(
-                    index == 0,
+                    predicates::is_valid_attestation_data_index(self.phase(), index),
                     Error::AttestationDataIndexNotZero {
                         attestation: attestation.clone_arc()
                     }
@@ -3111,7 +3117,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         if self.phase() >= Phase::Gloas {
             ensure!(
-                index < 2,
+                predicates::is_valid_attestation_data_index(self.phase(), index),
                 Error::AttestationDataInvalidPayloadStatus {
                     attestation: attestation.clone_arc()
                 }

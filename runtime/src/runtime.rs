@@ -1,6 +1,6 @@
 use core::{
     convert::Infallible as Never, future::Future, net::SocketAddr, panic::AssertUnwindSafe,
-    pin::pin, time::Duration,
+    pin::pin, sync::atomic::AtomicUsize, time::Duration,
 };
 #[cfg(feature = "embed")]
 use std::sync::LazyLock;
@@ -17,12 +17,14 @@ use anyhow::{Context as _, Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
+use bls::PublicKeyBytes;
 use builder_api::{BuilderApi, BuilderConfig};
 use bytesize::ByteSize;
 use clock::Tick;
 use data_dumper::DataDumper;
 use database::{Database, DatabaseMode, RestartMessage};
 use dedicated_executor::DedicatedExecutor;
+use directories::Directories;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1::{Eth1Chain, Eth1Config};
 use eth1_api::{
@@ -30,7 +32,9 @@ use eth1_api::{
     ExecutionBlobFetcher, ExecutionService, RealController,
 };
 use features::Feature;
-use fork_choice_control::{Controller, EventChannels, StateLoadStrategy, Storage};
+use fork_choice_control::{
+    Controller, EventChannels, MutatorHandle, StateLoadStrategy, Storage, ValidatorMessage,
+};
 use fork_choice_store::StoreConfig;
 use futures::{
     channel::{
@@ -48,32 +52,39 @@ use grandine_version::{
 use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::{
-    DefinitionsStorage, KeyManager, LegacyMigration, ValidatorDefinitions,
+    DefinitionsStorage, KeyManager, LegacyMigration, ProposerConfigs, ValidatorDefinitions,
     ValidatorDefinitionsWithStorage,
 };
 use liveness_tracker::LivenessTracker;
 use logging::{
     PEER_LOG_METRICS, debug_with_peers, error_with_peers, info_with_peers, warn_with_peers,
 };
-use metrics::{MetricsChannels, MetricsServerConfig, MetricsService, run_metrics_server};
+use metrics::{
+    MetricsChannels, MetricsServerConfig, MetricsService, MetricsServiceConfig, run_metrics_server,
+};
 use operation_pools::{
-    AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool, Manager,
-    PayloadAttestationAggPool, SyncCommitteeAggPool,
+    AttestationAggPool, BlobReconstructionPool, BlsToExecutionChangePool,
+    BlsToExecutionChangePoolService, Manager, PayloadAttestationAggPool, SyncCommitteeAggPool,
 };
 use p2p::{
     BlockSyncService, BlockSyncServiceChannels, Channels, ListenAddr, Network, NetworkConfig,
     SubnetService,
 };
+use prometheus_client::registry::Registry;
+use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
 use reqwest::{Client, ClientBuilder};
 use scc::HashMap as SccHashMap;
-use signer::{KeyOrigin, Signer, Web3SignerClientOptions, build_web3signer_client};
+use signer::{
+    KeyOrigin, Signer, Web3SignerClientOptions, Web3SignerConfig, build_web3signer_client,
+};
 use slasher::{Databases, Slasher, SlasherConfig};
+use slashing_protection::DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT;
 use slashing_protection::{SlashingProtector, interchange_format::InterchangeData};
 use ssz::SszRead as _;
 use std_ext::ArcExt as _;
 use thiserror::Error;
-use tokio::{runtime::Builder, select};
+use tokio::{runtime::Builder, select, time::sleep};
 #[cfg(feature = "embed")]
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -81,14 +92,16 @@ use types::{
     config::Config as ChainConfig,
     phase0::{
         consts::GENESIS_SLOT,
-        primitives::{ExecutionBlockNumber, H256, Slot},
+        primitives::{H256, Slot, UnixSeconds},
     },
     preset::{Preset, PresetName},
     redacting_url::RedactingUrl,
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use validator::{
-    Validator, ValidatorApiConfig, ValidatorChannels, ValidatorConfig, run_validator_api,
+    ChainSource, Genesis, OwnValidatorIndices, RemoteBeaconNode, RemoteBeaconNodes, Validator,
+    ValidatorApiConfig, ValidatorChannels, ValidatorConfig, ValidatorStartupError,
+    run_validator_api,
 };
 use validator_key_cache::ValidatorKeyCache;
 use validator_statistics::ValidatorStatistics;
@@ -97,7 +110,9 @@ use crate::{
     commands::{GrandineCommand, InterchangeCommand},
     db_info, db_stats,
     grandine_args::GrandineArgs,
-    grandine_config::GrandineConfig,
+    grandine_config::{
+        BuiltInNodeConfig, GrandineConfig, RemoteBeaconNodesConfig, ValidatorClientConfig,
+    },
     initialize_schema,
     misc::{MetricsConfig, StorageConfig},
     predefined_network::PredefinedNetwork,
@@ -112,36 +127,21 @@ use types::preset::Minimal;
 #[cfg(all(unix, not(feature = "embed")))]
 use tokio::signal::unix::SignalKind;
 
-#[expect(clippy::struct_excessive_bools)]
 pub struct RuntimeConfig {
-    pub back_sync_enabled: bool,
-    pub detect_doppelgangers: bool,
-    pub max_events: usize,
-    pub reconstruction_delay: Duration,
-    pub slashing_protection_history_limit: u64,
-    pub track_liveness: bool,
-    pub validator_enabled: bool,
+    pub genesis: Genesis,
+    pub pubkey_cache: Arc<PubkeyCache>,
 }
 
-#[expect(clippy::too_many_arguments)]
-#[expect(clippy::too_many_lines)]
-pub async fn run_after_genesis<P: Preset>(
-    chain_config: Arc<ChainConfig>,
-    pubkey_cache: Arc<PubkeyCache>,
-    runtime_config: RuntimeConfig,
+/// What the built-in beacon node is built from; absent under `vc`.
+struct LocalNodeConfig<P: Preset> {
     store_config: StoreConfig,
-    validator_api_config: Option<ValidatorApiConfig>,
-    validator_config: Arc<ValidatorConfig>,
+    storage_config: StorageConfig,
     network_config: NetworkConfig,
     anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     state_load_strategy: StateLoadStrategy<P>,
     eth1_config: Arc<Eth1Config>,
-    storage_config: StorageConfig,
-    builder_config: Option<BuilderConfig>,
-    signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     http_api_config: Option<HttpApiConfig>,
-    metrics_config: MetricsConfig,
     blacklisted_blocks: HashSet<H256>,
     report_validator_performance: bool,
     tracing_handle: Option<TracingHandle>,
@@ -149,22 +149,210 @@ pub async fn run_after_genesis<P: Preset>(
     eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
     restart_tx: UnboundedSender<RestartMessage>,
     restart_rx: UnboundedReceiver<RestartMessage>,
-) -> Result<()> {
-    let RuntimeConfig {
+    back_sync_enabled: bool,
+    max_events: usize,
+    reconstruction_delay: Duration,
+    track_liveness: bool,
+}
+
+/// What duties are performed against: the built-in beacon node to build, or the remote nodes.
+enum NodeSource<P: Preset> {
+    Local(Box<LocalNodeConfig<P>>),
+    Remote(Arc<RemoteBeaconNodes>),
+}
+
+/// What the validator and the built-in beacon node have in common.
+struct Shared<'a> {
+    chain_config: &'a Arc<ChainConfig>,
+    pubkey_cache: &'a Arc<PubkeyCache>,
+    validator_config: &'a Arc<ValidatorConfig>,
+    client: &'a Client,
+    validator_keys: &'a Arc<HashSet<PublicKeyBytes>>,
+    metrics: &'a Option<Arc<Metrics>>,
+    proposer_configs: &'a Arc<ProposerConfigs>,
+    builder_api: &'a Option<Arc<BuilderApi>>,
+    dedicated_executor_normal_priority: &'a Arc<DedicatedExecutor>,
+    dedicated_executor_low_priority: &'a Arc<DedicatedExecutor>,
+    genesis_time: UnixSeconds,
+}
+
+/// The chain the validator performs duties against when the built-in beacon node runs.
+struct LocalChain<P: Preset> {
+    controller: RealController<P>,
+    block_producer: Arc<BlockProducer<P, ()>>,
+    attestation_agg_pool: Arc<AttestationAggPool<P, ()>>,
+    sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, ()>>,
+    payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, ()>>,
+    event_channels: Arc<EventChannels<P>>,
+    validator_statistics: Option<Arc<ValidatorStatistics>>,
+}
+
+impl<P: Preset> LocalChain<P> {
+    fn chain_source(&self, own_validator_indices: Arc<OwnValidatorIndices>) -> ChainSource<P, ()> {
+        ChainSource::Local {
+            controller: self.controller.clone_arc(),
+            attestation_agg_pool: self.attestation_agg_pool.clone_arc(),
+            block_producer: self.block_producer.clone_arc(),
+            event_channels: self.event_channels.clone_arc(),
+            own_validator_indices,
+            payload_attestation_agg_pool: self.payload_attestation_agg_pool.clone_arc(),
+            sync_committee_agg_pool: self.sync_committee_agg_pool.clone_arc(),
+        }
+    }
+}
+
+/// What the clock drives: fork choice when the built-in node runs, otherwise the validator.
+#[derive(Clone)]
+enum ClockTarget<P: Preset> {
+    ForkChoice(RealController<P>),
+    Validator(UnboundedSender<ValidatorMessage<P, ()>>),
+}
+
+impl<P: Preset> ClockTarget<P> {
+    fn on_tick(&self, tick: Tick) {
+        match self {
+            Self::ForkChoice(controller) => controller.on_tick(tick),
+            Self::Validator(validator_tx) => ValidatorMessage::Tick((), tick).send(validator_tx),
+        }
+    }
+
+    fn stop(&self) {
+        match self {
+            Self::ForkChoice(controller) => {
+                controller.stop();
+                info_with_peers!("saving current chain before exit…");
+            }
+            Self::Validator(validator_tx) => ValidatorMessage::Stop.send(validator_tx),
+        }
+    }
+}
+
+/// What the built-in beacon node hands the validator, and the tasks that keep the node going.
+struct LocalServices<P: Preset> {
+    validator_channels: ValidatorChannels<P, ()>,
+    clock_target: ClockTarget<P>,
+    metrics_registry: Option<Registry>,
+    tasks: LocalTasks<P>,
+}
+
+struct LocalTasks<P: Preset> {
+    mutator_handle: MutatorHandle<P, ()>,
+    restart_rx: UnboundedReceiver<RestartMessage>,
+    execution_service: ExecutionService<P, ()>,
+    execution_blob_fetcher: ExecutionBlobFetcher<P, ()>,
+    attestation_verifier: AttestationVerifier<P, ()>,
+    block_sync_service: BlockSyncService<P>,
+    network: Network<P, ()>,
+    bls_to_execution_change_pool_service: BlsToExecutionChangePoolService<P, ()>,
+    pool_manager: Manager<P, ()>,
+    subnet_service: SubnetService<P, ()>,
+    http_api: Option<HttpApi<P, ()>>,
+    slasher: Option<Slasher<P>>,
+    metrics_service: Option<MetricsService<P>>,
+    liveness_tracker: Option<LivenessTracker<P, ()>>,
+}
+
+impl<P: Preset> LocalTasks<P> {
+    async fn run(self) -> Result<()> {
+        let Self {
+            mutator_handle,
+            restart_rx,
+            execution_service,
+            execution_blob_fetcher,
+            attestation_verifier,
+            block_sync_service,
+            network,
+            bls_to_execution_change_pool_service,
+            pool_manager,
+            subnet_service,
+            http_api,
+            slasher,
+            metrics_service,
+            liveness_tracker,
+        } = self;
+
+        let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
+
+        let run_http_api = match http_api {
+            Some(http_api) => Either::Left(http_api.run()),
+            None => Either::Right(core::future::pending()),
+        };
+
+        let run_slasher = match slasher {
+            Some(slasher) => Either::Left(slasher.run()),
+            None => Either::Right(core::future::pending()),
+        };
+
+        let run_metrics_service = match metrics_service {
+            Some(service) => Either::Left(service.run()),
+            None => Either::Right(core::future::pending()),
+        };
+
+        let run_liveness_tracker = match liveness_tracker {
+            Some(service) => Either::Left(service.run()),
+            None => Either::Right(core::future::pending()),
+        };
+
+        select! {
+            result = join_mutator => result,
+            result = spawn_fallible(execution_service.run()) => result,
+            result = spawn_fallible(execution_blob_fetcher.run()) => result,
+            result = spawn_fallible(attestation_verifier.run()) => result,
+            result = spawn_fallible(block_sync_service.run()) => result,
+            result = spawn_fallible(network.run()) => result,
+            result = spawn_fallible(run_http_api) => result,
+            result = spawn_fallible(run_slasher) => result.map(from_never),
+            result = spawn_fallible(bls_to_execution_change_pool_service.run()) => result,
+            result = spawn_fallible(pool_manager.run()) => result,
+            result = spawn_fallible(run_metrics_service) => result,
+            result = spawn_fallible(run_liveness_tracker) => result,
+            result = spawn_fallible(subnet_service.run()) => result,
+            result = wait_for_restart(restart_rx) => result,
+        }
+    }
+}
+
+#[expect(clippy::too_many_lines)]
+async fn build_local_node<P: Preset>(
+    config: LocalNodeConfig<P>,
+    shared: &Shared<'_>,
+    metrics_service_config: Option<MetricsServiceConfig>,
+) -> Result<(LocalChain<P>, LocalServices<P>)> {
+    let LocalNodeConfig {
+        store_config,
+        storage_config,
+        network_config,
+        anchor_checkpoint_provider,
+        state_load_strategy,
+        eth1_config,
+        slasher_config,
+        http_api_config,
+        blacklisted_blocks,
+        report_validator_performance,
+        tracing_handle,
+        eth1_api_to_metrics_tx,
+        eth1_api_to_metrics_rx,
+        restart_tx,
+        restart_rx,
         back_sync_enabled,
-        detect_doppelgangers,
         max_events,
         reconstruction_delay,
-        slashing_protection_history_limit,
         track_liveness,
-        validator_enabled,
-    } = runtime_config;
+    } = config;
 
-    let MetricsConfig {
+    let Shared {
+        chain_config,
+        pubkey_cache,
+        validator_config,
+        client,
+        validator_keys,
         metrics,
-        metrics_server_config,
-        metrics_service_config,
-    } = metrics_config;
+        proposer_configs,
+        builder_api,
+        dedicated_executor_normal_priority,
+        dedicated_executor_low_priority,
+        genesis_time,
+    } = *shared;
 
     let StorageConfig {
         in_memory,
@@ -173,14 +361,6 @@ pub async fn run_after_genesis<P: Preset>(
         storage_mode,
         ..
     } = storage_config;
-
-    let signer_snapshot = signer.load();
-
-    if !signer_snapshot.is_empty() {
-        info_with_peers!("loaded {} validator key(s)", signer_snapshot.keys().len());
-    } else if validator_enabled {
-        warn_with_peers!("failed to load validator keys");
-    }
 
     let (blob_fetcher_to_p2p_tx, blob_fetcher_to_p2p_rx) = mpsc::unbounded();
     let (execution_service_to_blob_fetcher_tx, execution_service_to_blob_fetcher_rx) =
@@ -214,28 +394,12 @@ pub async fn run_after_genesis<P: Preset>(
     let mut validator_to_slasher_tx = None;
     let mut validator_to_liveness_tx = None;
 
-    let num_of_cpus = num_cpus::get();
-
-    let dedicated_executor_low_priority = Arc::new(DedicatedExecutor::new(
-        "de-low",
-        (num_of_cpus / 4).max(1),
-        Some(19),
-        metrics.clone(),
-    ));
-
-    let dedicated_executor_normal_priority = Arc::new(DedicatedExecutor::new(
-        "de-normal",
-        num_of_cpus,
-        None,
-        metrics.clone(),
-    ));
-
     let dedicated_executor_for_reconstruction =
         DedicatedExecutor::new("de-reconstruct", 1, Some(19), metrics.clone());
 
     let eth1_api = Arc::new(Eth1Api::new(
         chain_config.clone_arc(),
-        signer_snapshot.client().clone(),
+        client.clone(),
         eth1_config.eth1_auth.clone_arc(),
         eth1_config.eth1_rpc_urls.clone(),
         eth1_api_to_metrics_tx,
@@ -244,7 +408,7 @@ pub async fn run_after_genesis<P: Preset>(
 
     eth1_api::spawn_exchange_capabilities_and_versions_task(
         eth1_api.clone_arc(),
-        &dedicated_executor_low_priority,
+        dedicated_executor_low_priority,
     );
 
     let execution_engine = Arc::new(Eth1ExecutionEngine::new(
@@ -271,41 +435,12 @@ pub async fn run_after_genesis<P: Preset>(
         storage_mode,
     ));
 
-    let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
-        .load(signer_snapshot.client(), state_load_strategy)
-        .await?;
+    let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) =
+        storage.load(client, state_load_strategy).await?;
 
     let is_anchor_genesis = anchor_block.message().slot() == GENESIS_SLOT;
-
-    let mut slashing_protector = if in_memory {
-        SlashingProtector::in_memory(slashing_protection_history_limit)?
-    } else {
-        let genesis_validators_root = anchor_state.genesis_validators_root();
-
-        SlashingProtector::persistent(
-            directories
-                .store_directory
-                .clone()
-                .unwrap_or_default()
-                .as_path(),
-            directories
-                .validator_dir
-                .clone()
-                .unwrap_or_default()
-                .as_path(),
-            slashing_protection_history_limit,
-            genesis_validators_root,
-        )?
-    };
-
-    slashing_protector.register_validators(signer_snapshot.keys().copied())?;
-
-    let slashing_protector = Arc::new(Mutex::new(slashing_protector));
-
-    let current_tick = Tick::current::<P>(&chain_config, anchor_state.genesis_time())?;
-
+    let current_tick = Tick::current::<P>(chain_config, genesis_time)?;
     let event_channels = Arc::new(EventChannels::new(max_events));
-
     let sidecars_construction_started = Arc::new(SccHashMap::new());
 
     let (controller, mutator_handle) = Controller::new(
@@ -313,7 +448,7 @@ pub async fn run_after_genesis<P: Preset>(
         pubkey_cache.clone_arc(),
         store_config,
         anchor_block,
-        anchor_state.clone_arc(),
+        anchor_state,
         current_tick,
         event_channels.clone_arc(),
         execution_engine.clone_arc(),
@@ -328,7 +463,7 @@ pub async fn run_after_genesis<P: Preset>(
         unfinalized_blocks,
         !back_sync_enabled || is_anchor_genesis,
         blacklisted_blocks,
-        sidecars_construction_started.clone_arc(),
+        sidecars_construction_started,
         None,
     )?;
 
@@ -354,7 +489,7 @@ pub async fn run_after_genesis<P: Preset>(
         dedicated_executor_normal_priority.clone_arc(),
     );
 
-    let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
+    let validator_keys = validator_keys.clone_arc();
 
     let attestation_verifier = AttestationVerifier::new(
         controller.clone_arc(),
@@ -389,60 +524,35 @@ pub async fn run_after_genesis<P: Preset>(
             eth1_metrics,
             metrics
                 .clone()
-                .expect("metrics registry must be present for metrics service"),
+                .expect("metrics must be enabled for the metrics service"),
             slasher_config.is_some(),
             validator_keys.clone_arc(),
             channels,
         )
     });
 
-    let (liveness_tracker, doppelganger_protection) = if track_liveness {
+    let liveness_tracker = track_liveness.then(|| {
         let (api_tx, api_to_liveness_rx) = mpsc::unbounded();
         let (pool_tx, pool_to_liveness_rx) = mpsc::unbounded();
         let (validator_tx, validator_to_liveness_rx) = mpsc::unbounded();
 
-        api_to_liveness_tx = Some(api_tx.clone());
+        api_to_liveness_tx = Some(api_tx);
         pool_to_liveness_tx = Some(pool_tx);
         validator_to_liveness_tx = Some(validator_tx);
 
-        let liveness_tracker = Some(LivenessTracker::new(
+        LivenessTracker::new(
             controller.clone_arc(),
             metrics.clone(),
             api_to_liveness_rx,
             pool_to_liveness_rx,
             validator_to_liveness_rx,
-        ));
-
-        let doppelganger_protection =
-            detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new(api_tx)));
-
-        (liveness_tracker, doppelganger_protection)
-    } else {
-        (None, None)
-    };
-
-    if let Some(doppelganger_protection) = doppelganger_protection.as_ref() {
-        signer.enable_doppelganger_protection(doppelganger_protection);
-
-        signer.update_doppelganger_protection_pubkeys(
-            &controller.head_state().value,
-            controller.slot(),
-        );
-    }
+        )
+    });
 
     let data_dumper = Arc::new(DataDumper::new(&controller.chain_config().config_name)?);
 
     let validator_statistics =
         report_validator_performance.then(|| Arc::new(ValidatorStatistics::new(metrics.clone())));
-
-    let builder_api = builder_config.map(|builder_config| {
-        Arc::new(BuilderApi::new(
-            builder_config,
-            pubkey_cache,
-            signer_snapshot.client().clone(),
-            metrics.clone(),
-        ))
-    });
 
     let slasher = slasher_config
         .map(|slasher_config| -> Result<_> {
@@ -538,43 +648,6 @@ pub async fn run_after_genesis<P: Preset>(
         })
         .transpose()?;
 
-    let graffiti = validator_config
-        .graffiti
-        .first()
-        .copied()
-        .unwrap_or_else(|| {
-            if validator_config.disable_blockprint_graffiti {
-                H256::default()
-            } else {
-                misc::parse_graffiti(APPLICATION_NAME_WITH_VERSION_AND_COMMIT).unwrap_or_default()
-            }
-        });
-
-    let keymanager = if in_memory {
-        Arc::new(KeyManager::new_in_memory(
-            signer.clone_arc(),
-            slashing_protector.clone_arc(),
-            anchor_state.genesis_validators_root(),
-            validator_config.suggested_fee_recipient,
-            validator_config.default_gas_limit,
-            graffiti,
-            validator_config.validator_definitions.clone_arc(),
-        ))
-    } else {
-        Arc::new(KeyManager::new_persistent(
-            signer.clone_arc(),
-            slashing_protector.clone_arc(),
-            anchor_state.genesis_validators_root(),
-            directories.validator_dir.clone().unwrap_or_default(),
-            directories.secrets_dir.clone().unwrap_or_default(),
-            validator_config.keystore_storage_password_file.as_deref(),
-            validator_config.suggested_fee_recipient,
-            validator_config.default_gas_limit,
-            graffiti,
-            validator_config.validator_definitions.clone_arc(),
-        )?)
-    };
-
     let attestation_agg_pool = AttestationAggPool::new(
         controller.clone_arc(),
         dedicated_executor_normal_priority.clone_arc(),
@@ -623,7 +696,7 @@ pub async fn run_after_genesis<P: Preset>(
     );
 
     let block_producer = Arc::new(BlockProducer::new(
-        keymanager.proposer_configs().clone_arc(),
+        proposer_configs.clone_arc(),
         builder_api.clone(),
         controller.clone_arc(),
         dedicated_executor_normal_priority.clone_arc(),
@@ -636,37 +709,17 @@ pub async fn run_after_genesis<P: Preset>(
         None,
     ));
 
-    let validator_channels = ValidatorChannels {
+    let validator_channels = ValidatorChannels::Local {
         api_to_validator_rx,
         fork_choice_rx: fork_choice_to_validator_rx,
         p2p_tx: validator_to_p2p_tx,
         p2p_to_validator_rx,
         slasher_to_validator_rx,
         subnet_service_tx: subnet_service_tx.clone(),
+        api_to_liveness_tx: api_to_liveness_tx.clone(),
         validator_to_liveness_tx,
         validator_to_slasher_tx,
     };
-
-    let validator = Validator::new(
-        validator_config.clone_arc(),
-        block_producer.clone_arc(),
-        controller.clone_arc(),
-        attestation_agg_pool.clone_arc(),
-        builder_api,
-        doppelganger_protection,
-        event_channels.clone_arc(),
-        keymanager.proposer_configs().clone_arc(),
-        signer.clone_arc(),
-        slashing_protector,
-        payload_attestation_agg_pool.clone_arc(),
-        sync_committee_agg_pool.clone_arc(),
-        metrics.clone(),
-        validator_statistics.clone(),
-        validator_channels,
-        network_config.network_dir.as_deref(),
-        dedicated_executor_normal_priority.clone_arc(),
-        dedicated_executor_low_priority.clone_arc(),
-    );
 
     let p2p_channels = Channels {
         api_to_p2p_rx,
@@ -684,8 +737,8 @@ pub async fn run_after_genesis<P: Preset>(
     // Prometheus registry for deep gossipsub protocol metrics.
     // This has to be passed to both `libp2p` to collect metrics
     // and the metrics server to convert collected metrics to an HTTP response for Prometheus.
-    let gossip_registry = prometheus_client::registry::Registry::default();
-    let mut registry = network_config.metrics_enabled.then_some(gossip_registry);
+    let gossip_registry = Registry::default();
+    let mut metrics_registry = network_config.metrics_enabled.then_some(gossip_registry);
     let network_config = Arc::new(network_config);
 
     if let Some(metrics) = metrics.as_ref()
@@ -699,11 +752,11 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         current_tick.slot,
         p2p_channels,
-        dedicated_executor_normal_priority,
+        dedicated_executor_normal_priority.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
         bls_to_execution_change_pool.clone_arc(),
         metrics.clone(),
-        registry.as_mut(),
+        metrics_registry.as_mut(),
         data_dumper.clone_arc(),
         validator_config.backfill_custody_groups,
         validator_config.custody_mode,
@@ -731,11 +784,11 @@ pub async fn run_after_genesis<P: Preset>(
         anchor_checkpoint_provider.clone(),
         controller.clone_arc(),
         metrics.clone(),
-        validator_statistics,
+        validator_statistics.clone(),
         block_sync_service_channels,
         back_sync_enabled,
         loaded_from_remote,
-        storage_config.storage_mode,
+        storage_mode,
         network_config.target_peers,
         received_blob_sidecars,
         received_data_column_sidecars,
@@ -763,134 +816,400 @@ pub async fn run_after_genesis<P: Preset>(
         sync_to_api_rx,
     };
 
-    let run_http_api = match http_api_config {
-        Some(http_api_config) => {
-            let http_api = HttpApi {
-                block_producer,
-                controller: controller.clone_arc(),
-                anchor_checkpoint_provider,
-                eth1_api,
-                event_channels,
-                validator_keys,
-                validator_config,
-                network_config,
-                http_api_config,
-                attestation_agg_pool,
-                sync_committee_agg_pool,
-                bls_to_execution_change_pool,
-                payload_attestation_agg_pool,
-                channels: http_api_channels,
-                metrics: metrics.clone(),
-                tracing_handle,
-                dedicated_executor: dedicated_executor_low_priority,
-            };
+    let http_api = http_api_config.map(|http_api_config| HttpApi {
+        block_producer: block_producer.clone_arc(),
+        controller: controller.clone_arc(),
+        anchor_checkpoint_provider,
+        eth1_api,
+        event_channels: event_channels.clone_arc(),
+        validator_keys,
+        validator_config: validator_config.clone_arc(),
+        network_config,
+        http_api_config,
+        attestation_agg_pool: attestation_agg_pool.clone_arc(),
+        sync_committee_agg_pool: sync_committee_agg_pool.clone_arc(),
+        bls_to_execution_change_pool,
+        payload_attestation_agg_pool: payload_attestation_agg_pool.clone_arc(),
+        channels: http_api_channels,
+        metrics: metrics.clone(),
+        tracing_handle,
+        dedicated_executor: dedicated_executor_low_priority.clone_arc(),
+    });
 
-            Either::Left(http_api.run())
-        }
-        None => Either::Right(core::future::pending()),
+    let tasks = LocalTasks {
+        mutator_handle,
+        restart_rx,
+        execution_service,
+        execution_blob_fetcher,
+        attestation_verifier,
+        block_sync_service,
+        network,
+        bls_to_execution_change_pool_service,
+        pool_manager,
+        subnet_service,
+        http_api,
+        slasher,
+        metrics_service,
+        liveness_tracker,
     };
 
-    let join_mutator = async { tokio::task::spawn_blocking(|| mutator_handle.join()).await? };
-
-    let (stop_clock_tx, stop_clock_rx) = oneshot::channel();
-    let run_clock = run_clock(controller.clone_arc(), stop_clock_rx);
-
-    let run_slasher = match slasher {
-        Some(slasher) => Either::Left(slasher.run()),
-        None => Either::Right(core::future::pending()),
+    let local_services = LocalServices {
+        validator_channels,
+        clock_target: ClockTarget::ForkChoice(controller.clone_arc()),
+        metrics_registry,
+        tasks,
     };
 
-    let run_metrics_server = match metrics_server_config {
-        Some(config) => Either::Left(run_metrics_server(
-            config,
-            registry.take(),
-            metrics
+    let chain = LocalChain {
+        controller,
+        block_producer,
+        attestation_agg_pool,
+        sync_committee_agg_pool,
+        payload_attestation_agg_pool,
+        event_channels,
+        validator_statistics,
+    };
+
+    Ok((chain, local_services))
+}
+
+#[expect(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn run_node<P: Preset>(
+    chain_config: Arc<ChainConfig>,
+    runtime_config: RuntimeConfig,
+    validator_client: Option<ValidatorClientContext>,
+    client: Client,
+    validator_config: Arc<ValidatorConfig>,
+    directories: Arc<Directories>,
+    in_memory: bool,
+    builder_config: Option<BuilderConfig>,
+    metrics_config: MetricsConfig,
+    node_source: NodeSource<P>,
+) -> Result<()> {
+    let RuntimeConfig {
+        genesis,
+        pubkey_cache,
+    } = runtime_config;
+
+    let MetricsConfig {
+        metrics,
+        metrics_server_config,
+        metrics_service_config,
+    } = metrics_config;
+
+    let num_of_cpus = num_cpus::get();
+
+    let dedicated_executor_low_priority = Arc::new(DedicatedExecutor::new(
+        "de-low",
+        (num_of_cpus / 4).max(1),
+        Some(19),
+        metrics.clone(),
+    ));
+
+    let dedicated_executor_normal_priority = Arc::new(DedicatedExecutor::new(
+        "de-normal",
+        num_of_cpus,
+        None,
+        metrics.clone(),
+    ));
+
+    let genesis_validators_root = genesis.genesis_validators_root;
+
+    let graffiti = validator_config
+        .graffiti
+        .first()
+        .copied()
+        .unwrap_or_else(|| {
+            if validator_config.disable_blockprint_graffiti {
+                H256::default()
+            } else {
+                misc::parse_graffiti(APPLICATION_NAME_WITH_VERSION_AND_COMMIT).unwrap_or_default()
+            }
+        });
+
+    let has_validator_client = validator_client.is_some();
+    let mut validator_api = None;
+
+    // The validator service also feeds the node's pools and liveness tracking from gossip and
+    // the API, so without a validator client it still runs, with no keys.
+    let (signer, expects_keys, detect_doppelgangers, slashing_protection_history_limit) =
+        match validator_client {
+            Some(ValidatorClientContext {
+                signer,
+                expects_keys,
+                detect_doppelgangers,
+                slashing_protection_history_limit,
+                report_validator_performance: _,
+                validator_api_config,
+            }) => {
+                validator_api = validator_api_config;
+
+                (
+                    signer,
+                    expects_keys,
+                    detect_doppelgangers,
+                    slashing_protection_history_limit,
+                )
+            }
+            None => (
+                Arc::new(Signer::new(
+                    core::iter::empty(),
+                    client.clone(),
+                    client.clone(),
+                    Web3SignerConfig::default(),
+                    metrics.clone(),
+                )),
+                false,
+                false,
+                DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT,
+            ),
+        };
+
+    let signer_snapshot = signer.load();
+
+    if !signer_snapshot.is_empty() {
+        info_with_peers!("loaded {} validator key(s)", signer_snapshot.keys().len());
+    } else if expects_keys {
+        warn_with_peers!("failed to load validator keys");
+    }
+
+    let mut slashing_protector = if in_memory || !has_validator_client {
+        SlashingProtector::in_memory(slashing_protection_history_limit)?
+    } else {
+        SlashingProtector::persistent(
+            directories
+                .store_directory
                 .clone()
-                .expect("metrics registry must be present for metrics server"),
+                .unwrap_or_default()
+                .as_path(),
+            directories
+                .validator_dir
+                .clone()
+                .unwrap_or_default()
+                .as_path(),
+            slashing_protection_history_limit,
+            genesis_validators_root,
+        )?
+    };
+
+    slashing_protector.register_validators(signer_snapshot.keys().copied())?;
+
+    let slashing_protector = Arc::new(Mutex::new(slashing_protector));
+
+    let keymanager = has_validator_client
+        .then(|| -> Result<_> {
+            if in_memory {
+                Ok(Arc::new(KeyManager::new_in_memory(
+                    signer.clone_arc(),
+                    slashing_protector.clone_arc(),
+                    genesis_validators_root,
+                    validator_config.suggested_fee_recipient,
+                    validator_config.default_gas_limit,
+                    graffiti,
+                    validator_config.validator_definitions.clone_arc(),
+                )))
+            } else {
+                Ok(Arc::new(KeyManager::new_persistent(
+                    signer.clone_arc(),
+                    slashing_protector.clone_arc(),
+                    genesis_validators_root,
+                    directories.validator_dir.clone().unwrap_or_default(),
+                    directories.secrets_dir.clone().unwrap_or_default(),
+                    validator_config.keystore_storage_password_file.as_deref(),
+                    validator_config.suggested_fee_recipient,
+                    validator_config.default_gas_limit,
+                    graffiti,
+                    validator_config.validator_definitions.clone_arc(),
+                )?))
+            }
+        })
+        .transpose()?;
+
+    let doppelganger_protection =
+        detect_doppelgangers.then(|| Arc::new(DoppelgangerProtection::new()));
+
+    if let Some(doppelganger_protection) = doppelganger_protection.as_ref() {
+        signer.enable_doppelganger_protection(doppelganger_protection);
+
+        let current_slot = Tick::current::<P>(&chain_config, genesis.genesis_time)?.slot;
+
+        signer.update_doppelganger_protection_pubkeys(current_slot);
+    }
+
+    // The built-in node produces blocks for remote validator clients without a keymanager.
+    let proposer_configs = match keymanager.as_ref() {
+        Some(keymanager) => keymanager.proposer_configs().clone_arc(),
+        None => Arc::new(ProposerConfigs::new(
+            validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
+            graffiti,
+            validator_config.validator_definitions.clone_arc(),
+        )),
+    };
+
+    let validator_keys = Arc::new(signer_snapshot.keys().copied().collect::<HashSet<_>>());
+
+    let builder_api = builder_config.map(|builder_config| {
+        Arc::new(BuilderApi::new(
+            builder_config,
+            pubkey_cache.clone_arc(),
+            client.clone(),
+            metrics.clone(),
+        ))
+    });
+
+    let shared = Shared {
+        chain_config: &chain_config,
+        pubkey_cache: &pubkey_cache,
+        validator_config: &validator_config,
+        client: &client,
+        validator_keys: &validator_keys,
+        metrics: &metrics,
+        proposer_configs: &proposer_configs,
+        builder_api: &builder_api,
+        dedicated_executor_normal_priority: &dedicated_executor_normal_priority,
+        dedicated_executor_low_priority: &dedicated_executor_low_priority,
+        genesis_time: genesis.genesis_time,
+    };
+
+    // Shared between the validator and the Validator API.
+    let own_validator_indices = Arc::new(OwnValidatorIndices::new(signer.clone_arc()));
+
+    let (chain, local_services, chain_source) = match node_source {
+        NodeSource::Local(config) => {
+            let (chain, services) =
+                build_local_node(*config, &shared, metrics_service_config).await?;
+            let chain_source = chain.chain_source(own_validator_indices);
+
+            (Some(chain), Some(services), chain_source)
+        }
+        NodeSource::Remote(remote_beacon_nodes) => (
+            None,
+            None,
+            ChainSource::Remote {
+                chain_config: chain_config.clone_arc(),
+                genesis_time: genesis.genesis_time,
+                own_validator_indices,
+                remote_beacon_nodes,
+            },
+        ),
+    };
+
+    let chain_source = Arc::new(chain_source);
+
+    let validator_statistics = chain
+        .as_ref()
+        .and_then(|chain| chain.validator_statistics.clone());
+
+    // Without the built-in node's fork choice the validator receives ticks straight from the clock.
+    let (validator_channels, clock_target, metrics_registry, tasks) = match local_services {
+        Some(LocalServices {
+            validator_channels,
+            clock_target,
+            metrics_registry,
+            tasks,
+        }) => (
+            validator_channels,
+            clock_target,
+            metrics_registry,
+            Some(tasks),
+        ),
+        None => {
+            let (runtime_tx, runtime_rx) = mpsc::unbounded();
+
+            (
+                ValidatorChannels::Remote { runtime_rx },
+                ClockTarget::Validator(runtime_tx),
+                None,
+                None,
+            )
+        }
+    };
+
+    let run_local_node = match tasks {
+        Some(tasks) => Either::Left(tasks.run()),
+        None => Either::Right(core::future::pending()),
+    };
+
+    let validator = Validator::new(
+        validator_config,
+        chain_source.clone_arc(),
+        builder_api,
+        doppelganger_protection,
+        proposer_configs,
+        signer.clone_arc(),
+        slashing_protector,
+        metrics.clone(),
+        validator_statistics,
+        validator_channels,
+        dedicated_executor_normal_priority,
+        dedicated_executor_low_priority,
+    );
+
+    let run_validator_api = match keymanager.zip(validator_api) {
+        Some((keymanager, validator_api_config)) => Either::Left(run_validator_api(
+            validator_api_config,
+            chain_source,
+            directories.clone_arc(),
+            keymanager,
+            signer,
+            metrics.clone(),
         )),
         None => Either::Right(core::future::pending()),
     };
 
-    let run_metrics_service = match metrics_service {
-        Some(service) => Either::Left(service.run()),
-        None => Either::Right(core::future::pending()),
-    };
+    let (stop_clock_tx, stop_clock_rx) = oneshot::channel();
 
-    let run_liveness_tracker = match liveness_tracker {
-        Some(service) => Either::Left(service.run()),
-        None => Either::Right(core::future::pending()),
-    };
+    let run_clock = run_clock::<P>(
+        chain_config,
+        genesis.genesis_time.saturating_mul(1000),
+        clock_target.clone(),
+        stop_clock_rx,
+    );
 
-    let run_validator_api = match validator_api_config {
-        Some(validator_api_config) => Either::Left(run_validator_api(
-            validator_api_config,
-            controller.clone_arc(),
-            directories.clone_arc(),
-            keymanager,
-            signer,
-            metrics,
+    let run_metrics_server = match metrics_server_config {
+        Some(config) => Either::Left(run_metrics_server(
+            config,
+            metrics_registry,
+            metrics.expect("metrics must be enabled for the metrics server"),
         )),
         None => Either::Right(core::future::pending()),
     };
 
     select! {
-        result = join_mutator => result,
-        result = spawn_fallible(execution_service.run()) => result,
-        result = spawn_fallible(execution_blob_fetcher.run()) => result,
         result = spawn_fallible(validator.run()) => result,
-        result = spawn_fallible(attestation_verifier.run()) => result,
-        result = spawn_fallible(block_sync_service.run()) => result,
-        result = spawn_fallible(network.run()) => result,
-        result = spawn_fallible(run_http_api) => result,
         result = spawn_fallible(run_clock) => result,
-        result = spawn_fallible(run_slasher) => result.map(from_never),
-        result = spawn_fallible(bls_to_execution_change_pool_service.run()) => result,
-        result = spawn_fallible(pool_manager.run()) => result,
-        result = spawn_fallible(run_metrics_server) => result,
-        result = spawn_fallible(run_metrics_service) => result,
-        result = spawn_fallible(run_liveness_tracker) => result,
         result = spawn_fallible(run_validator_api) => result,
-        result = spawn_fallible(subnet_service.run()) => result,
-        result = wait_for_signal_or_restart(restart_rx) => result,
+        result = spawn_fallible(run_metrics_server) => result,
+        result = spawn_fallible(run_local_node) => result,
+        result = wait_for_signal() => result,
     }?;
 
     if stop_clock_tx.send(()).is_err() {
         warn_with_peers!("failed to send the message to stop the clock");
     }
 
-    controller.stop();
-
-    info_with_peers!("saving current chain before exit…");
+    clock_target.stop();
 
     Ok(())
 }
 
 async fn run_clock<P: Preset>(
-    controller: RealController<P>,
+    chain_config: Arc<ChainConfig>,
+    genesis_time_in_ms: u64,
+    clock_target: ClockTarget<P>,
     mut stop_clock_rx: oneshot::Receiver<()>,
 ) -> Result<()> {
-    let mut ticks =
-        clock::ticks::<P>(controller.chain_config(), controller.genesis_time_in_ms())?.fuse();
+    let mut ticks = clock::ticks::<P>(&chain_config, genesis_time_in_ms)?.fuse();
 
     loop {
         select! {
-            tick = ticks.select_next_some() => {
-                controller.on_tick(tick?);
-            }
-            _ = &mut stop_clock_rx => {
-                break;
-            }
+            tick = ticks.select_next_some() => clock_target.on_tick(tick?),
+            _ = &mut stop_clock_rx => break,
         }
     }
 
     Ok(())
-}
-
-async fn wait_for_signal_or_restart(error_rx: UnboundedReceiver<RestartMessage>) -> Result<()> {
-    select! {
-        result = wait_for_restart(error_rx) => result,
-        result = wait_for_signal() => result,
-    }
 }
 
 async fn wait_for_restart(mut rx: UnboundedReceiver<RestartMessage>) -> Result<()> {
@@ -948,43 +1267,53 @@ const fn from_never<T>(never: Never) -> T {
     match never {}
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "False positive. The `bool`s are independent."
-)]
 #[derive(Clone)]
 struct Context {
     predefined_network: Option<PredefinedNetwork>,
     chain_config: Arc<ChainConfig>,
-    store_config: StoreConfig,
-    deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     genesis_state_file: Option<PathBuf>,
     genesis_state_download_url: Option<RedactingUrl>,
-    validator_api_config: Option<ValidatorApiConfig>,
+    directories: Arc<Directories>,
+    in_memory: bool,
     validator_config: Arc<ValidatorConfig>,
+    validator_client: Option<ValidatorClientContext>,
+    built_in_node: Option<BuiltInNodeContext>,
+    client: Client,
+    command: Option<GrandineCommand>,
+    builder_config: Option<BuilderConfig>,
+    metrics_config: MetricsConfig,
+    tracing_handle: Option<TracingHandle>,
+    remote_beacon_nodes: Option<RemoteBeaconNodesConfig>,
+}
+
+/// The built-in beacon node's settings, absent under `vc`.
+#[derive(Clone)]
+struct BuiltInNodeContext {
+    store_config: StoreConfig,
+    storage_config: StorageConfig,
+    network_config: NetworkConfig,
+    eth1_config: Arc<Eth1Config>,
     checkpoint_sync_url: Option<RedactingUrl>,
     force_checkpoint_sync: bool,
     back_sync_enabled: bool,
-    eth1_rpc_urls: Vec<RedactingUrl>,
-    network_config: NetworkConfig,
-    storage_config: StorageConfig,
-    command: Option<GrandineCommand>,
-    builder_config: Option<BuilderConfig>,
-    signer: Arc<Signer>,
     slasher_config: Option<SlasherConfig>,
     state_slot: Option<Slot>,
-    eth1_auth: Arc<Auth>,
     http_api_config: Option<HttpApiConfig>,
     max_events: usize,
-    metrics_config: MetricsConfig,
     track_liveness: bool,
-    tracing_handle: Option<TracingHandle>,
-    detect_doppelgangers: bool,
-    slashing_protection_history_limit: u64,
-    validator_enabled: bool,
     blacklisted_blocks: HashSet<H256>,
     reconstruction_delay: Duration,
+}
+
+/// The validator client's keys and settings, absent when the node runs without one.
+#[derive(Clone)]
+struct ValidatorClientContext {
+    signer: Arc<Signer>,
+    expects_keys: bool,
+    detect_doppelgangers: bool,
+    slashing_protection_history_limit: u64,
     report_validator_performance: bool,
+    validator_api_config: Option<ValidatorApiConfig>,
 }
 
 impl Context {
@@ -999,14 +1328,17 @@ impl Context {
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                 let mut context = self.clone();
 
-                context.storage_config = context
-                    .storage_config
-                    .with_increased_db_sizes(db_size_modifier);
+                if let Some(node) = context.built_in_node.as_mut() {
+                    node.storage_config = node
+                        .storage_config
+                        .clone()
+                        .with_increased_db_sizes(db_size_modifier);
 
-                if db_size_modifier > 1 {
-                    context.storage_config.print_db_sizes();
-                    // don't reset database on restart
-                    context.storage_config.reset_databases = false;
+                    if db_size_modifier > 1 {
+                        node.storage_config.print_db_sizes();
+                        // don't reset database on restart
+                        node.storage_config.reset_databases = false;
+                    }
                 }
 
                 let run = context.run::<P>();
@@ -1031,7 +1363,8 @@ impl Context {
                     if matches!(
                         error.downcast_ref::<doppelganger_protection::Error>(),
                         Some(&doppelganger_protection::Error::DoppelgangersDetected { .. })
-                    ) {
+                    ) || error.downcast_ref::<ValidatorStartupError>().is_some()
+                    {
                         break Err(error);
                     }
                 }
@@ -1042,41 +1375,32 @@ impl Context {
 
     #[expect(clippy::too_many_lines)]
     async fn run<P: Preset>(self) -> Result<()> {
+        const GENESIS_RETRY_DELAY: Duration = Duration::from_secs(2);
+
         let Self {
             predefined_network,
             chain_config,
-            store_config,
-            mut deposit_contract_starting_block,
             genesis_state_file,
             genesis_state_download_url,
-            validator_api_config,
+            directories,
+            in_memory,
             validator_config,
-            checkpoint_sync_url,
-            force_checkpoint_sync,
-            back_sync_enabled,
-            eth1_rpc_urls,
-            network_config,
-            storage_config,
+            validator_client,
+            built_in_node,
+            client,
             command,
             builder_config,
-            signer,
-            slasher_config,
-            state_slot,
-            eth1_auth,
-            http_api_config,
-            max_events,
             metrics_config,
-            track_liveness,
             tracing_handle,
-            detect_doppelgangers,
-            slashing_protection_history_limit,
-            validator_enabled,
-            blacklisted_blocks,
-            reconstruction_delay,
-            report_validator_performance,
+            remote_beacon_nodes,
         } = self;
 
-        if storage_config.reset_databases {
+        // The databases are the built-in node's; without it there is nothing to remove.
+        if let Some(node) = built_in_node.as_ref()
+            && node.storage_config.reset_databases
+        {
+            let storage_config = &node.storage_config;
+
             match remove_database_dir(storage_config.eth1_database_path().as_path()) {
                 Ok(()) => info!("successfully removed eth1 database"),
                 Err(error) => warn!("failed to remove eth1 database: {error:?}"),
@@ -1099,30 +1423,22 @@ impl Context {
         }
 
         // Load keys early so we can validate `eth1_rpc_urls`.
-        signer.load_keys_from_web3signer().await;
+        if let Some(validator_client) = validator_client.as_ref() {
+            validator_client.signer.load_keys_from_web3signer().await;
+        }
 
-        let signer_snapshot = signer.load();
-
-        if cfg!(not(feature = "embed")) && eth1_rpc_urls.is_empty() {
+        // An execution layer is for the built-in node's blocks; a validator without it has none.
+        if let Some(node) = built_in_node.as_ref()
+            && cfg!(not(feature = "embed"))
+            && node.eth1_config.eth1_rpc_urls.is_empty()
+        {
             ensure!(
-                signer_snapshot.no_keys(),
+                validator_client
+                    .as_ref()
+                    .is_none_or(|validator_client| validator_client.signer.load().no_keys()),
                 Error::MissingEth1RpcUrlsWithValidators,
             );
         }
-
-        let default_deposit_tree = predefined_network.map(PredefinedNetwork::genesis_deposit_tree);
-
-        if let Some(deposit_tree) = default_deposit_tree {
-            deposit_contract_starting_block
-                .get_or_insert_with(|| deposit_tree.last_added_block_number.saturating_add(1));
-        }
-
-        let eth1_config = Arc::new(Eth1Config {
-            eth1_auth,
-            eth1_rpc_urls,
-            deposit_contract_starting_block,
-            default_deposit_tree,
-        });
 
         let (eth1_api_to_metrics_tx, eth1_api_to_metrics_rx) = metrics_config
             .metrics_service_config
@@ -1134,95 +1450,229 @@ impl Context {
 
         let (restart_tx, restart_rx) = mpsc::unbounded();
 
-        let pubkey_cache_database = if storage_config.in_memory {
-            Database::in_memory()
-        } else {
-            storage_config.pubkey_cache_database(
+        // The built-in node's cache; a validator without the node keeps nothing on disk for it.
+        let pubkey_cache_database = match built_in_node.as_ref() {
+            Some(node) if !in_memory => node.storage_config.pubkey_cache_database(
                 None,
                 DatabaseMode::ReadWrite,
                 Some(restart_tx.clone()),
-            )?
+            )?,
+            _ => Database::in_memory(),
         };
 
         let pubkey_cache = Arc::new(PubkeyCache::load(pubkey_cache_database));
 
-        let anchor_checkpoint_provider = genesis_checkpoint_provider::<P>(
-            &chain_config,
-            &eth1_config,
-            &pubkey_cache,
-            &storage_config,
-            genesis_state_file,
-            predefined_network,
-            signer_snapshot.client(),
-            genesis_state_download_url,
-            &metrics_config,
-            eth1_api_to_metrics_tx.as_ref(),
-            &restart_tx,
-        )
-        .await?;
+        // A validator on a custom network with no built-in node has no genesis state to load and
+        // no execution layer to build one from; it asks the remote nodes for genesis instead.
+        let anchor_checkpoint_provider = if built_in_node.is_none()
+            && predefined_network.is_none()
+            && genesis_state_file.is_none()
+        {
+            None
+        } else {
+            Some(
+                genesis_checkpoint_provider::<P>(
+                    &chain_config,
+                    &pubkey_cache,
+                    &directories,
+                    built_in_node
+                        .as_ref()
+                        .map(|node| (&node.storage_config, &node.eth1_config)),
+                    genesis_state_file,
+                    predefined_network,
+                    &client,
+                    genesis_state_download_url,
+                    &metrics_config,
+                    eth1_api_to_metrics_tx.as_ref(),
+                    &restart_tx,
+                )
+                .await?,
+            )
+        };
 
         if let Some(command) = command {
+            let Some((node, anchor_checkpoint_provider)) = built_in_node
+                .as_ref()
+                .zip(anchor_checkpoint_provider.as_ref())
+            else {
+                bail!("commands need a genesis state and the built-in beacon node");
+            };
+
             return handle_command(
                 chain_config,
                 &pubkey_cache,
-                &storage_config,
+                &node.storage_config,
                 command,
-                &anchor_checkpoint_provider,
-                slashing_protection_history_limit,
+                anchor_checkpoint_provider,
+                validator_client.as_ref().map_or(
+                    DEFAULT_SLASHING_PROTECTION_HISTORY_LIMIT,
+                    |validator_client| validator_client.slashing_protection_history_limit,
+                ),
             )
             .inspect_err(|error| error!("error occurred while executing command: {error:?}"));
         }
 
-        let state_load_strategy = if force_checkpoint_sync {
-            StateLoadStrategy::Remote {
-                checkpoint_sync_url: checkpoint_sync_url.expect(
-                    "the requires attribute for force_checkpoint_sync \
-                     ensures checkpoint_sync_url is present",
-                ),
+        let remote_beacon_nodes = remote_beacon_nodes.map(
+            |RemoteBeaconNodesConfig {
+                 beacon_node_urls,
+                 publish_to_every_node,
+             }| {
+                let serving_count = Arc::new(AtomicUsize::new(beacon_node_urls.len()));
+
+                Arc::new(RemoteBeaconNodes::new(
+                    beacon_node_urls
+                        .into_iter()
+                        .map(|url| {
+                            Arc::new(RemoteBeaconNode::new(
+                                chain_config.clone_arc(),
+                                client.clone(),
+                                url,
+                                validator_config.max_empty_slots,
+                                serving_count.clone_arc(),
+                            ))
+                        })
+                        .collect(),
+                    serving_count,
+                    publish_to_every_node,
+                ))
+            },
+        );
+
+        let anchor_genesis = anchor_checkpoint_provider.as_ref().map(|provider| {
+            let genesis_state = provider.checkpoint().value.state;
+
+            Genesis {
+                genesis_time: genesis_state.genesis_time(),
+                genesis_fork_version: chain_config.genesis_fork_version,
+                genesis_validators_root: genesis_state.genesis_validators_root(),
             }
-        } else {
-            StateLoadStrategy::Auto {
-                state_slot,
-                checkpoint_sync_url,
-                anchor_checkpoint_provider: anchor_checkpoint_provider.clone(),
-            }
+        });
+
+        let remote_genesis = match remote_beacon_nodes.as_ref() {
+            Some(remote_beacon_nodes) => loop {
+                match remote_beacon_nodes.agreed_genesis().await? {
+                    Some(genesis) => break Some(genesis),
+                    None if anchor_genesis.is_some() => break None,
+                    // With no genesis of its own the validator waits until a node answers.
+                    None => {
+                        warn_with_peers!(
+                            "no beacon node given with --beacon-node-urls reported genesis; \
+                             retrying in {} s",
+                            GENESIS_RETRY_DELAY.as_secs(),
+                        );
+
+                        sleep(GENESIS_RETRY_DELAY).await;
+                    }
+                }
+            },
+            None => None,
         };
 
-        Feature::DebugAttestationPacker.enable();
-        Feature::LogBlockProcessingTime.enable();
+        let genesis = match (anchor_genesis, remote_genesis) {
+            (Some(anchor), Some(remote)) => {
+                ensure!(
+                    anchor.genesis_validators_root == remote.genesis_validators_root,
+                    ValidatorStartupError::UnexpectedChain {
+                        expected: anchor.genesis_validators_root,
+                        actual: remote.genesis_validators_root,
+                    },
+                );
 
-        run_after_genesis(
+                anchor
+            }
+            (Some(anchor), None) => anchor,
+            (None, Some(remote)) => remote,
+            (None, None) => bail!("no beacon node given with --beacon-node-urls reported genesis"),
+        };
+
+        // Nodes unreachable now are held to the agreed root on their first poll.
+        if let Some(remote_beacon_nodes) = remote_beacon_nodes.as_ref() {
+            remote_beacon_nodes.seed_genesis_validators_root(genesis.genesis_validators_root);
+        }
+
+        // The built-in node runs only when it is enabled and has an anchor to start from.
+        let node_source = match (
+            built_in_node.zip(anchor_checkpoint_provider),
+            remote_beacon_nodes,
+        ) {
+            (Some((node, anchor_checkpoint_provider)), _) => {
+                let BuiltInNodeContext {
+                    store_config,
+                    storage_config,
+                    network_config,
+                    eth1_config,
+                    checkpoint_sync_url,
+                    force_checkpoint_sync,
+                    back_sync_enabled,
+                    slasher_config,
+                    state_slot,
+                    http_api_config,
+                    max_events,
+                    track_liveness,
+                    blacklisted_blocks,
+                    reconstruction_delay,
+                } = node;
+
+                let state_load_strategy = if force_checkpoint_sync {
+                    StateLoadStrategy::Remote {
+                        checkpoint_sync_url: checkpoint_sync_url.expect(
+                            "the requires attribute for force_checkpoint_sync \
+                             ensures checkpoint_sync_url is present",
+                        ),
+                    }
+                } else {
+                    StateLoadStrategy::Auto {
+                        state_slot,
+                        checkpoint_sync_url,
+                        anchor_checkpoint_provider: anchor_checkpoint_provider.clone(),
+                    }
+                };
+
+                Feature::DebugAttestationPacker.enable();
+                Feature::LogBlockProcessingTime.enable();
+
+                NodeSource::Local(Box::new(LocalNodeConfig {
+                    store_config,
+                    storage_config,
+                    network_config,
+                    anchor_checkpoint_provider,
+                    state_load_strategy,
+                    eth1_config,
+                    slasher_config,
+                    http_api_config,
+                    blacklisted_blocks,
+                    report_validator_performance: validator_client.as_ref().is_some_and(
+                        |validator_client| validator_client.report_validator_performance,
+                    ),
+                    tracing_handle,
+                    eth1_api_to_metrics_tx,
+                    eth1_api_to_metrics_rx,
+                    restart_tx,
+                    restart_rx,
+                    back_sync_enabled,
+                    max_events,
+                    reconstruction_delay,
+                    track_liveness,
+                }))
+            }
+            (None, Some(remote_beacon_nodes)) => NodeSource::Remote(remote_beacon_nodes),
+            (None, None) => bail!("no built-in beacon node to run and no --beacon-node-urls given"),
+        };
+
+        run_node(
             chain_config,
-            pubkey_cache,
             RuntimeConfig {
-                back_sync_enabled,
-                detect_doppelgangers,
-                max_events,
-                reconstruction_delay,
-                slashing_protection_history_limit,
-                track_liveness,
-                validator_enabled,
+                genesis,
+                pubkey_cache,
             },
-            store_config,
-            validator_api_config,
+            validator_client,
+            client,
             validator_config,
-            network_config,
-            anchor_checkpoint_provider,
-            state_load_strategy,
-            eth1_config,
-            storage_config,
+            directories,
+            in_memory,
             builder_config,
-            signer,
-            slasher_config,
-            http_api_config,
             metrics_config,
-            blacklisted_blocks,
-            report_validator_performance,
-            tracing_handle,
-            eth1_api_to_metrics_tx,
-            eth1_api_to_metrics_rx,
-            restart_tx,
-            restart_rx,
+            node_source,
         )
         .await
     }
@@ -1273,57 +1723,30 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
     let GrandineConfig {
         predefined_network,
         chain_config,
-        deposit_contract_starting_block,
         genesis_state_file,
         genesis_state_download_url,
-        checkpoint_sync_url,
-        force_checkpoint_sync,
-        back_sync_enabled,
-        eth1_rpc_urls,
         data_dir,
-        validators,
-        keystore_storage_password_file,
+        directories,
+        in_memory,
+        request_timeout,
+        command,
+        metrics_config,
         disable_blockprint_graffiti,
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
         default_builder_boost_factor,
         default_gas_limit,
-        network_config,
-        storage_config,
-        reconstruction_delay,
-        request_timeout,
-        max_epochs_to_retain_states_in_cache,
-        state_cache_lock_timeout,
-        unfinalized_states_in_memory,
-        command,
-        slashing_enabled,
-        slashing_history_limit,
-        state_slot,
-        auth_options,
-        builder_config,
-        builder_circuit_breaker,
-        mut web3signer_config,
-        http_api_config,
-        max_events,
-        metrics_config,
-        track_liveness,
-        detect_doppelgangers,
-        use_validator_key_cache,
-        slashing_protection_history_limit,
-        in_memory,
-        validator_api_config,
-        kzg_backend,
-        blacklisted_blocks,
-        report_validator_performance,
-        backfill_custody_groups,
-        sync_without_reconstruction,
-        custody_mode,
         disable_wait_for_late_blocks,
-        ..
+        builder_config,
+        built_in_node,
+        validator_client,
+        remote_beacon_nodes,
     } = config;
 
-    PEER_LOG_METRICS.set_target_peer_count(network_config.target_peers);
+    if let Some(node) = built_in_node.as_ref() {
+        PEER_LOG_METRICS.set_target_peer_count(node.network_config.target_peers);
+    }
 
     let MetricsConfig {
         metrics,
@@ -1336,10 +1759,15 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
     // The ports could in theory be freed or taken between restarts, but it's not likely.
     if command.is_none() {
         ensure_ports_not_in_use(
-            http_api_config.as_ref().map(|config| config.address),
-            &network_config,
+            built_in_node
+                .as_ref()
+                .and_then(|node| node.http_api_config.as_ref())
+                .map(|config| config.address),
+            built_in_node.as_ref().map(|node| &node.network_config),
             metrics_server_config.as_ref(),
-            validator_api_config.as_ref(),
+            validator_client
+                .as_ref()
+                .and_then(|config| config.validator_api_config.as_ref()),
         )
         .map_err(GrandineArgs::clap_error)?;
     }
@@ -1348,95 +1776,216 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         initialize_schema(data_dir)?;
     }
 
-    // Build the validator definitions: discover keystores, migrate the legacy database, and persist.
-    let validators_config_path = (!in_memory)
-        .then(|| storage_config.directories.validator_dir.clone())
-        .flatten()
-        .map(|validator_dir| ValidatorDefinitions::file_path(&validator_dir));
+    // Creating multiple `reqwest::Client`s seems to leak memory.
+    // See <https://github.com/seanmonstar/reqwest/issues?q=is%3Aissue+memory>.
+    // Create a single one for the whole application.
+    let client = ClientBuilder::new()
+        .timeout(request_timeout)
+        .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
+        .connection_verbose(true)
+        .build()?;
 
-    let mut validator_definitions = match &validators_config_path {
-        Some(path) => ValidatorDefinitions::load_or_default(path)?,
-        None => ValidatorDefinitions::default(),
-    };
+    let keystore_storage_password_file = validator_client
+        .as_ref()
+        .and_then(|config| config.keystore_storage_password_file.clone());
 
-    if let Some(validators) = validators.as_ref() {
-        validators
-            .discover(&mut validator_definitions)
-            .context("unable to discover validator keystores")?;
-    }
+    let (validator_definitions, validator_client) = match validator_client {
+        Some(ValidatorClientConfig {
+            validators,
+            keystore_storage_password_file,
+            mut web3signer_config,
+            detect_doppelgangers,
+            use_validator_key_cache,
+            slashing_protection_history_limit,
+            validator_api_config,
+            report_validator_performance,
+        }) => {
+            // Discover keystores, migrate the legacy database and persist the definitions.
+            let validators_config_path = (!in_memory)
+                .then(|| directories.validator_dir.clone())
+                .flatten()
+                .map(|validator_dir| ValidatorDefinitions::file_path(&validator_dir));
 
-    let keystore_storage = match &keystore_storage_password_file {
-        Some(password_path) => {
-            let password = keymanager::load_key_storage_password(password_path)?;
+            let mut validator_definitions = match &validators_config_path {
+                Some(path) => ValidatorDefinitions::load_or_default(path)?,
+                None => ValidatorDefinitions::default(),
+            };
 
-            keymanager::load_key_storage(
-                &password,
-                storage_config
-                    .directories
-                    .validator_dir
-                    .clone()
-                    .unwrap_or_default(),
-            )?
-        }
-        None => ValidatorKeyCache::default(),
-    };
-
-    validator_definitions
-        .add_storage_keystores(keystore_storage.keypairs().map(|(pubkey, _)| pubkey));
-
-    let legacy_database_dir = (!in_memory)
-        .then(|| storage_config.directories.validator_dir.as_deref())
-        .flatten();
-
-    let legacy_migration = legacy_database_dir
-        .map(|validator_dir| {
-            keymanager::migrate_legacy_database(&mut validator_definitions, validator_dir)
-        })
-        .transpose()?
-        .flatten();
-
-    if let Some(migration) = &legacy_migration {
-        debug_with_peers!("migrated legacy proposer-configs database: {migration:?}");
-    }
-
-    if let Some(path) = &validators_config_path {
-        validator_definitions.save(path)?;
-    }
-
-    // Prune only after the save, so an earlier failure retries the migration instead of losing settings.
-    if let Some(LegacyMigration { migrated, skipped }) = legacy_migration
-        && let Some(validator_dir) = legacy_database_dir
-    {
-        match keymanager::prune_legacy_database(validator_dir, &migrated) {
-            Ok(true) => {
-                info!("successfully migrated legacy proposer configs database");
+            if let Some(validators) = validators.as_ref() {
+                validators
+                    .discover(&mut validator_definitions)
+                    .context("unable to discover validator keystores")?;
             }
-            Ok(false) => warn!(
-                "keeping the legacy proposer configs database: it still holds settings for \
-                 validators with no entry in validators.yml ({skipped:?})",
-            ),
-            Err(error) => warn!("unable to prune legacy proposer configs database: {error}"),
+
+            let keystore_storage = match &keystore_storage_password_file {
+                Some(password_path) => {
+                    let password = keymanager::load_key_storage_password(password_path)?;
+
+                    keymanager::load_key_storage(
+                        &password,
+                        directories.validator_dir.clone().unwrap_or_default(),
+                    )?
+                }
+                None => ValidatorKeyCache::default(),
+            };
+
+            validator_definitions
+                .add_storage_keystores(keystore_storage.keypairs().map(|(pubkey, _)| pubkey));
+
+            let legacy_database_dir = (!in_memory)
+                .then(|| directories.validator_dir.as_deref())
+                .flatten();
+
+            let legacy_migration = legacy_database_dir
+                .map(|validator_dir| {
+                    keymanager::migrate_legacy_database(&mut validator_definitions, validator_dir)
+                })
+                .transpose()?
+                .flatten();
+
+            if let Some(migration) = &legacy_migration {
+                debug_with_peers!("migrated legacy proposer-configs database: {migration:?}");
+            }
+
+            if let Some(path) = &validators_config_path {
+                validator_definitions.save(path)?;
+            }
+
+            // Prune only after the save, so an earlier failure retries the migration instead of
+            // losing settings.
+            if let Some(LegacyMigration { migrated, skipped }) = legacy_migration
+                && let Some(validator_dir) = legacy_database_dir
+            {
+                match keymanager::prune_legacy_database(validator_dir, &migrated) {
+                    Ok(true) => {
+                        info!("successfully migrated legacy proposer configs database");
+                    }
+                    Ok(false) => warn!(
+                        "keeping the legacy proposer configs database: it still holds settings for \
+                         validators with no entry in validators.yml ({skipped:?})",
+                    ),
+                    Err(error) => {
+                        warn!("unable to prune legacy proposer configs database: {error}")
+                    }
+                }
+            }
+
+            // Fold the `web3signer` entries into the per-URL key policy: each requires its key
+            // from its URL.
+            for (url, pubkey) in validator_definitions.web3signer_definitions() {
+                web3signer_config.require_key(url.parse::<RedactingUrl>()?, pubkey);
+            }
+
+            for pubkey in validator_definitions.disabled_pubkeys() {
+                info_with_peers!(
+                    "validator {pubkey:?} is disabled in validators.yml and will not be loaded"
+                );
+            }
+
+            let validator_definitions = Arc::new(ValidatorDefinitionsWithStorage::new(
+                Arc::new(RwLock::new(validator_definitions)),
+                match validators_config_path {
+                    Some(path) => DefinitionsStorage::Persistent(path),
+                    None => DefinitionsStorage::InMemory,
+                },
+            ));
+
+            let mut validator_key_cache = use_validator_key_cache.then(|| {
+                ValidatorKeyCache::new(directories.validator_dir.clone().unwrap_or_default())
+            });
+
+            let expects_keys = validator_api_config.is_some()
+                || validator_key_cache.is_some()
+                || !web3signer_config.is_empty()
+                || !validator_definitions.read().is_empty()
+                || keystore_storage_password_file.is_some();
+
+            if expects_keys {
+                info_with_peers!("started loading validator keys");
+            }
+
+            let mut validator_keys = normalize_definitions(
+                &validator_definitions.read(),
+                directories.validator_dir.as_deref(),
+                validator_key_cache.as_mut(),
+            )
+            .context("unable to load validator keys")?;
+
+            {
+                // Take only the blob keys still declared as `keystore_storage`; anything else is
+                // stale.
+                let definitions = validator_definitions.read();
+
+                validator_keys.extend(
+                    keystore_storage
+                        .keypairs()
+                        .filter(|(public_key, _)| definitions.loads_from_storage(*public_key))
+                        .map(|(public_key, secret_key)| {
+                            (public_key, secret_key, KeyOrigin::Internal)
+                        }),
+                );
+            }
+
+            // A single Web3Signer client, separate from `client` so its TLS material never reaches
+            // other requests. `web3signer_options` hard-errors on conflicting definitions in
+            // `validators.yml`.
+            let web3signer_options = validator_definitions.read().web3signer_options()?;
+
+            let web3signer_client = match web3signer_options {
+                Some(options) => build_web3signer_client(
+                    ClientBuilder::new()
+                        .timeout(request_timeout)
+                        .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
+                        .connection_verbose(true),
+                    &Web3SignerClientOptions {
+                        root_certificate_path: options.root_certificate_path,
+                        request_timeout: options.request_timeout_ms.map(Duration::from_millis),
+                        client_identity_path: options.client_identity_path,
+                        client_identity_password: options
+                            .client_identity_password
+                            .as_ref()
+                            .map(|password| password.as_str().to_owned()),
+                    },
+                )?,
+                None => client.clone(),
+            };
+
+            let signer = Arc::new(Signer::new(
+                validator_keys,
+                client.clone(),
+                web3signer_client,
+                web3signer_config,
+                metrics.clone(),
+            ));
+
+            if let Some(cache) = validator_key_cache
+                && let Err(error) = cache.save()
+            {
+                warn_with_peers!("Unable to save validator key cache: {error:?}");
+            }
+
+            let validator_client = ValidatorClientContext {
+                signer,
+                expects_keys,
+                detect_doppelgangers,
+                slashing_protection_history_limit,
+                report_validator_performance,
+                validator_api_config,
+            };
+
+            (validator_definitions, Some(validator_client))
         }
-    }
+        None => {
+            let validator_definitions = Arc::new(ValidatorDefinitionsWithStorage::new(
+                Arc::new(RwLock::new(ValidatorDefinitions::default())),
+                DefinitionsStorage::InMemory,
+            ));
 
-    // Fold the `web3signer` entries into the per-URL key policy: each requires its key from its URL.
-    for (url, pubkey) in validator_definitions.web3signer_definitions() {
-        web3signer_config.require_key(url.parse::<RedactingUrl>()?, pubkey);
-    }
+            (validator_definitions, None)
+        }
+    };
 
-    for pubkey in validator_definitions.disabled_pubkeys() {
-        info_with_peers!(
-            "validator {pubkey:?} is disabled in validators.yml and will not be loaded"
-        );
-    }
-
-    let validator_definitions = Arc::new(ValidatorDefinitionsWithStorage::new(
-        Arc::new(RwLock::new(validator_definitions)),
-        match validators_config_path {
-            Some(path) => DefinitionsStorage::Persistent(path),
-            None => DefinitionsStorage::InMemory,
-        },
-    ));
+    let custody_defaults = ValidatorConfig::default();
 
     let validator_config = Arc::new(ValidatorConfig {
         disable_blockprint_graffiti,
@@ -1446,145 +1995,107 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         default_builder_boost_factor,
         default_gas_limit,
         keystore_storage_password_file,
-        backfill_custody_groups,
-        custody_mode,
+        backfill_custody_groups: built_in_node
+            .as_ref()
+            .map_or(custody_defaults.backfill_custody_groups, |node| {
+                node.backfill_custody_groups
+            }),
+        custody_mode: built_in_node
+            .as_ref()
+            .map_or(custody_defaults.custody_mode, |node| node.custody_mode),
         disable_wait_for_late_blocks,
         validator_definitions: validator_definitions.clone_arc(),
     });
 
-    let store_config = StoreConfig {
-        max_empty_slots,
-        max_epochs_to_retain_states_in_cache,
-        state_cache_lock_timeout,
-        unfinalized_states_in_memory,
-        kzg_backend,
-        sync_without_reconstruction,
-        builder_circuit_breaker,
-    };
+    let built_in_node = built_in_node
+        .map(|node| -> Result<_> {
+            let BuiltInNodeConfig {
+                deposit_contract_starting_block,
+                checkpoint_sync_url,
+                force_checkpoint_sync,
+                back_sync_enabled,
+                eth1_rpc_urls,
+                auth_options,
+                network_config,
+                storage_config,
+                unfinalized_states_in_memory,
+                max_epochs_to_retain_states_in_cache,
+                state_cache_lock_timeout,
+                reconstruction_delay,
+                sync_without_reconstruction,
+                kzg_backend,
+                builder_circuit_breaker,
+                slashing_enabled,
+                slashing_history_limit,
+                state_slot,
+                http_api_config,
+                max_events,
+                telemetry_config: _,
+                track_liveness,
+                blacklisted_blocks,
+                backfill_custody_groups: _,
+                custody_mode: _,
+            } = node;
 
-    let eth1_auth = Arc::new(Auth::new(auth_options)?);
+            let default_deposit_tree =
+                predefined_network.map(PredefinedNetwork::genesis_deposit_tree);
 
-    // Creating multiple `reqwest::Client`s seems to leak memory.
-    // See <https://github.com/seanmonstar/reqwest/issues?q=is%3Aissue+memory>.
-    // Create a single one for the whole application and reuse it through `Signer::client`.
-    let client = ClientBuilder::new()
-        .timeout(request_timeout)
-        .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
-        .connection_verbose(true)
-        .build()?;
-
-    let mut validator_key_cache = use_validator_key_cache.then(|| {
-        ValidatorKeyCache::new(
-            storage_config
-                .directories
-                .validator_dir
-                .clone()
-                .unwrap_or_default(),
-        )
-    });
-
-    let validator_enabled = validator_api_config.is_some()
-        || validator_key_cache.is_some()
-        || !web3signer_config.is_empty()
-        || !validator_definitions.read().is_empty()
-        || validator_config.keystore_storage_password_file.is_some();
-
-    if validator_enabled {
-        info_with_peers!("started loading validator keys");
-    }
-
-    let mut validator_keys = normalize_definitions(
-        &validator_definitions.read(),
-        storage_config.directories.validator_dir.as_deref(),
-        validator_key_cache.as_mut(),
-    )
-    .context("unable to load validator keys")?;
-
-    {
-        // Take only the blob keys still declared as `keystore_storage`; anything else is stale.
-        let definitions = validator_definitions.read();
-
-        validator_keys.extend(
-            keystore_storage
-                .keypairs()
-                .filter(|(public_key, _)| definitions.loads_from_storage(*public_key))
-                .map(|(public_key, secret_key)| (public_key, secret_key, KeyOrigin::Internal)),
-        );
-    }
-
-    // A single Web3Signer client, separate from `client` so its TLS material never reaches other
-    // requests. `web3signer_options` hard-errors on conflicting definitions in `validators.yml`.
-    let web3signer_options = validator_definitions.read().web3signer_options()?;
-
-    let web3signer_client = match web3signer_options {
-        Some(options) => build_web3signer_client(
-            ClientBuilder::new()
-                .timeout(request_timeout)
-                .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
-                .connection_verbose(true),
-            &Web3SignerClientOptions {
-                root_certificate_path: options.root_certificate_path,
-                request_timeout: options.request_timeout_ms.map(Duration::from_millis),
-                client_identity_path: options.client_identity_path,
-                client_identity_password: options
-                    .client_identity_password
+            let deposit_contract_starting_block = deposit_contract_starting_block.or_else(|| {
+                default_deposit_tree
                     .as_ref()
-                    .map(|password| password.as_str().to_owned()),
-            },
-        )?,
-        None => client.clone(),
-    };
+                    .map(|tree| tree.last_added_block_number.saturating_add(1))
+            });
 
-    let signer = Arc::new(Signer::new(
-        validator_keys,
-        client,
-        web3signer_client,
-        web3signer_config,
-        metrics.clone(),
-    ));
-
-    if let Some(cache) = validator_key_cache
-        && let Err(error) = cache.save()
-    {
-        warn_with_peers!("Unable to save validator key cache: {error:?}");
-    }
-
-    let slasher_config = slashing_enabled.then_some(SlasherConfig {
-        slashing_history_limit,
-    });
+            Ok(BuiltInNodeContext {
+                store_config: StoreConfig {
+                    max_empty_slots,
+                    max_epochs_to_retain_states_in_cache,
+                    state_cache_lock_timeout,
+                    unfinalized_states_in_memory,
+                    kzg_backend,
+                    sync_without_reconstruction,
+                    builder_circuit_breaker,
+                },
+                storage_config,
+                network_config,
+                eth1_config: Arc::new(Eth1Config {
+                    eth1_auth: Arc::new(Auth::new(auth_options)?),
+                    eth1_rpc_urls,
+                    deposit_contract_starting_block,
+                    default_deposit_tree,
+                }),
+                checkpoint_sync_url,
+                force_checkpoint_sync,
+                back_sync_enabled,
+                slasher_config: slashing_enabled.then_some(SlasherConfig {
+                    slashing_history_limit,
+                }),
+                state_slot,
+                http_api_config,
+                max_events,
+                track_liveness,
+                blacklisted_blocks,
+                reconstruction_delay,
+            })
+        })
+        .transpose()?;
 
     let context = Context {
         predefined_network,
         chain_config,
-        store_config,
-        deposit_contract_starting_block,
         genesis_state_file,
         genesis_state_download_url,
-        validator_api_config,
+        directories,
+        in_memory,
         validator_config,
-        checkpoint_sync_url,
-        force_checkpoint_sync,
-        back_sync_enabled,
-        eth1_rpc_urls,
-        network_config,
-        storage_config,
+        validator_client,
+        built_in_node,
+        client,
         command,
         builder_config,
-        signer,
-        slasher_config,
-        state_slot,
-        eth1_auth,
-        http_api_config,
-        max_events,
         metrics_config,
-        track_liveness,
         tracing_handle: Some(log_handle),
-        detect_doppelgangers,
-        slashing_protection_history_limit,
-        validator_enabled,
-        blacklisted_blocks,
-        reconstruction_delay,
-        report_validator_performance,
+        remote_beacon_nodes,
     };
 
     match context.chain_config.preset_base {
@@ -1598,21 +2109,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
 
 // Ports are checked before binding them for actual use.
 // This is a TOCTOU race condition, but the only consequence of it is slightly worse error messages.
-fn ensure_ports_not_in_use(
-    http_address: Option<SocketAddr>,
-    network_config: &NetworkConfig,
-    metrics_server_config: Option<&MetricsServerConfig>,
-    validator_api_config: Option<&ValidatorApiConfig>,
-) -> Result<()> {
-    if let Some(http_address) = http_address {
-        TcpListener::bind(http_address).map_err(|error| Error::PortInUse {
-            port: http_address.port(),
-            service: "HTTP API",
-            option: "--http-port",
-            error: error.into(),
-        })?;
-    }
-
+fn ensure_network_ports_not_in_use(network_config: &NetworkConfig) -> Result<()> {
     if let Some(listen_addr) = network_config.listen_addrs().v4() {
         let ListenAddr {
             addr,
@@ -1682,6 +2179,28 @@ fn ensure_ports_not_in_use(
     }
 
     // Port numbers in ENR fields are not used to open any sockets.
+
+    Ok(())
+}
+
+fn ensure_ports_not_in_use(
+    http_address: Option<SocketAddr>,
+    network_config: Option<&NetworkConfig>,
+    metrics_server_config: Option<&MetricsServerConfig>,
+    validator_api_config: Option<&ValidatorApiConfig>,
+) -> Result<()> {
+    if let Some(network_config) = network_config {
+        ensure_network_ports_not_in_use(network_config)?;
+    }
+
+    if let Some(http_address) = http_address {
+        TcpListener::bind(http_address).map_err(|error| Error::PortInUse {
+            port: http_address.port(),
+            service: "HTTP API",
+            option: "--http-port",
+            error: error.into(),
+        })?;
+    }
 
     if let Some(config) = metrics_server_config {
         let metrics_port = config.metrics_port;
@@ -1845,9 +2364,9 @@ fn handle_command<P: Preset>(
 #[expect(clippy::too_many_arguments)]
 async fn genesis_checkpoint_provider<P: Preset>(
     chain_config: &Arc<ChainConfig>,
-    eth1_config: &Arc<Eth1Config>,
     pubkey_cache: &PubkeyCache,
-    storage_config: &StorageConfig,
+    directories: &Directories,
+    built_in_node: Option<(&StorageConfig, &Arc<Eth1Config>)>,
     genesis_state_file: Option<PathBuf>,
     predefined_network: Option<PredefinedNetwork>,
     client: &Client,
@@ -1862,11 +2381,7 @@ async fn genesis_checkpoint_provider<P: Preset>(
         return Ok(AnchorCheckpointProvider::custom_from_genesis(genesis_state));
     }
 
-    let store_directory = storage_config
-        .directories
-        .store_directory
-        .clone()
-        .unwrap_or_default();
+    let store_directory = directories.store_directory.clone().unwrap_or_default();
 
     if let Some(predefined_network) = predefined_network {
         return predefined_network
@@ -1880,6 +2395,9 @@ async fn genesis_checkpoint_provider<P: Preset>(
 
     // Code that waits for genesis by tracking deposits starts here
     // (may be removed in the future)
+    let Some((storage_config, eth1_config)) = built_in_node else {
+        bail!("waiting for genesis by tracking deposits needs the built-in beacon node");
+    };
 
     let eth1_database = if storage_config.in_memory {
         Database::in_memory()

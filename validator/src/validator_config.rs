@@ -17,7 +17,7 @@ pub struct ValidatorConfig {
     pub graffiti: Vec<H256>,
     #[derivative(Default(value = "32"))]
     pub max_empty_slots: u64,
-    pub suggested_fee_recipient: ExecutionAddress,
+    pub suggested_fee_recipient: Option<ExecutionAddress>,
     #[derivative(Default(value = "Uint256::from_u64(100)"))]
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Option<Gas>,

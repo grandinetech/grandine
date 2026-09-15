@@ -1,31 +1,40 @@
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use bls::PublicKeyBytes;
-use helper_functions::accessors;
+use fork_choice_control::Wait;
+use helper_functions::{accessors, misc};
+use itertools::Itertools as _;
 use logging::warn_with_peers;
 use scc::HashMap as SccHashMap;
 use signer::Signer;
 use ssz::H256;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use tokio::sync::Mutex;
 use tracing::instrument;
 use types::{
     combined::BeaconState,
-    phase0::primitives::{Slot, ValidatorIndex},
+    phase0::primitives::{Epoch, Slot, ValidatorIndex},
     preset::Preset,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use crate::{
+    beacon_node_api::{BeaconNodeApi as _, PtcDuties},
+    beacon_nodes::BeaconNodes,
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PTCMember {
     pub public_key: PublicKeyBytes,
     pub validator_index: ValidatorIndex,
-    pub position_in_committee: usize,
 }
 
 pub struct OwnPTCMembers {
     signer: Arc<Signer>,
     members: SccHashMap<(H256, Slot), Arc<[PTCMember]>>,
+    /// The indices the members were computed for; a key imported at runtime changes the set.
+    requested: Mutex<Arc<[ValidatorIndex]>>,
 }
 
 impl OwnPTCMembers {
@@ -33,7 +42,19 @@ impl OwnPTCMembers {
         Self {
             signer,
             members: SccHashMap::new(),
+            requested: Mutex::new(Arc::from([])),
         }
+    }
+
+    async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
+        let mut requested = self.requested.lock().await;
+
+        if **requested == *validator_indices {
+            return;
+        }
+
+        *requested = validator_indices.into();
+        self.members.clear_async().await;
     }
 
     pub fn len(&self) -> usize {
@@ -47,6 +68,16 @@ impl OwnPTCMembers {
         dependent_root: H256,
         slot: Slot,
     ) -> Option<Arc<[PTCMember]>> {
+        let validator_indices = self
+            .signer
+            .load()
+            .keys()
+            .filter_map(|public_key| accessors::index_of_public_key(state, public_key))
+            .sorted()
+            .collect::<Vec<_>>();
+
+        self.discard_for_other_keys(&validator_indices).await;
+
         if let Some(members) = self.members.get_async(&(dependent_root, slot)).await {
             return Some(members.clone_arc());
         }
@@ -70,6 +101,89 @@ impl OwnPTCMembers {
                 None
             }
         }
+    }
+
+    pub async fn get_at_slot(&self, dependent_root: H256, slot: Slot) -> Option<Arc<[PTCMember]>> {
+        self.members
+            .get_async(&(dependent_root, slot))
+            .await
+            .map(|members| members.clone_arc())
+    }
+
+    /// Fetches the members of `epoch` as duties unless they are already known under
+    /// `dependent_root`, for nodes whose state is not at hand.
+    pub async fn init_at_epoch<P: Preset, W: Wait + Sync>(
+        &self,
+        beacon_nodes: &BeaconNodes<P, W>,
+        epoch: Epoch,
+        dependent_root: H256,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<()> {
+        self.discard_for_other_keys(validator_indices).await;
+
+        let slots = misc::slots_in_epoch::<P>(epoch)?;
+
+        // The built-in node caches one slot at a time, so only a complete epoch needs no fetch.
+        let mut cached = true;
+
+        for slot in slots.clone() {
+            if self.get_at_slot(dependent_root, slot).await.is_none() {
+                cached = false;
+                break;
+            }
+        }
+
+        if cached {
+            return Ok(());
+        }
+
+        let PtcDuties {
+            dependent_root: reported_root,
+            duties,
+        } = beacon_nodes.ptc_duties(epoch, validator_indices).await?;
+
+        // Another root is another shuffling; the duties cannot stand in for the ones asked for.
+        ensure!(
+            reported_root == dependent_root,
+            "PTC duties for epoch {epoch} were reported under dependent root {reported_root:?} \
+             rather than {dependent_root:?}",
+        );
+
+        let signer_snapshot = self.signer.load();
+        let mut members_by_slot = slots
+            .map(|slot| (slot, Vec::<PTCMember>::new()))
+            .collect::<HashMap<_, _>>();
+
+        for duty in duties {
+            // A duty for a key we do not hold would fail the whole signing batch.
+            if !signer_snapshot.has_key(duty.pubkey) {
+                continue;
+            }
+
+            let Some(members) = members_by_slot.get_mut(&duty.slot) else {
+                continue;
+            };
+
+            let member = PTCMember {
+                public_key: duty.pubkey,
+                validator_index: duty.validator_index,
+            };
+
+            // A validator drawn into several positions still sends a single message.
+            if !members.contains(&member) {
+                members.push(member);
+            }
+        }
+
+        for (slot, mut members) in members_by_slot {
+            members.sort_unstable_by_key(|member| member.validator_index);
+
+            self.members
+                .upsert_async((dependent_root, slot), members.into())
+                .await;
+        }
+
+        Ok(())
     }
 
     pub async fn prune(&self, up_to_slot: Slot) {
@@ -101,17 +215,17 @@ impl OwnPTCMembers {
 
         accessors::get_ptc(state, slot)?
             .into_iter()
-            .zip(0..)
-            .filter_map(|(validator_index, position_in_committee)| {
+            .filter_map(|validator_index| {
                 own_public_keys
                     .get(&validator_index)
                     .copied()
                     .map(|public_key| PTCMember {
                         public_key,
                         validator_index,
-                        position_in_committee,
                     })
             })
+            // A validator drawn into several positions still sends a single message.
+            .unique()
             .collect::<Vec<_>>()
             .conv::<Arc<[_]>>()
             .pipe(Some)

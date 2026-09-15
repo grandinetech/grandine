@@ -111,7 +111,7 @@ struct ViableHeadRootAndWeight {
     weight: u64,
 }
 
-// TODO: fix remaning failing compliance tests
+// TODO: fix remaining failing compliance tests
 #[duplicate_item(
     glob                                                                                            function_name                                  preset    phase;
     // TODO: ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/attester_slashing_test/*/*"]   [fulu_minimal_compliance_attester_slashing]    [Minimal] [Fulu];

@@ -24,8 +24,7 @@ use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::instrument;
 use types::{
-    combined::BeaconState,
-    phase0::primitives::{H256, Slot},
+    phase0::primitives::{Epoch, H256, Slot},
     preset::Preset,
     redacting_url::RedactingUrl,
 };
@@ -143,16 +142,12 @@ impl Signer {
         self.snapshot.rcu(f)
     }
 
-    pub fn update_doppelganger_protection_pubkeys<P: Preset>(
-        &self,
-        beacon_state: &BeaconState<P>,
-        current_slot: Slot,
-    ) {
+    pub fn update_doppelganger_protection_pubkeys(&self, current_slot: Slot) {
         let snapshot = self.load();
         let public_keys = snapshot.keys().copied();
 
         if let Some(doppelganger_protection) = &snapshot.doppelganger_protection {
-            doppelganger_protection.add_tracked_validators(public_keys, beacon_state, current_slot);
+            doppelganger_protection.add_tracked_validators(public_keys, current_slot);
         }
     }
 }
@@ -291,7 +286,8 @@ impl Snapshot {
     pub async fn sign_triples<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
-        beacon_state: &BeaconState<P>,
+        fork_info: ForkInfo<P>,
+        current_epoch: Epoch,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
     ) -> Result<impl Iterator<Item = Option<Signature>>> {
         let mut message_indices = vec![];
@@ -303,7 +299,6 @@ impl Snapshot {
         let mut block_proposals = vec![];
         let mut signable_messages = vec![];
 
-        let fork_info = ForkInfo::from(beacon_state);
         let mut signing_triples_count: usize = 0;
 
         let doppelganger_protection = self
@@ -384,7 +379,7 @@ impl Snapshot {
 
         tokio::task::block_in_place(|| {
             let slashing_outcome =
-                protector.validate_and_store_own_attestations(beacon_state, attestations)?;
+                protector.validate_and_store_own_attestations(current_epoch, attestations)?;
 
             for (outcome, data, index) in izip!(
                 slashing_outcome.iter(),

@@ -5,6 +5,8 @@ use core::{
 use std::sync::Arc;
 
 use block_producer::ValidatorBlindedBlock;
+use bls::PublicKeyBytes;
+use builder_api::gloas::containers::SignedRequestAuth;
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use serde::{
@@ -12,9 +14,10 @@ use serde::{
     de::{DeserializeSeed, Error as _},
 };
 use ssz::{
-    ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize, SszWrite,
-    WriteError,
+    ByteList, ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize,
+    SszWrite, WriteError,
 };
+use typenum::{U64, U2048};
 use types::{
     altair::containers::SignedBeaconBlock as AltairSignedBeaconBlock,
     bellatrix::containers::{
@@ -59,7 +62,7 @@ use types::{
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock,
         },
-        primitives::Slot,
+        primitives::{Gwei, Slot},
     },
     preset::{Preset, ProposerLookaheadLength},
 };
@@ -101,6 +104,48 @@ pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
     Option<KzgProofs<P>>,
     Option<ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>>,
 );
+
+type MaxBuilderEntries = U64;
+type MaxBuilderUrlSize = U2048;
+type MaxBuilderPubkeys = U64;
+
+/// The request body of `produceBlockV4`.
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV4>
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
+pub struct BuilderConfig {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub min_bid: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_boost_factor: u64,
+    pub builders: ContiguousList<BuilderEntry, MaxBuilderEntries>,
+}
+
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
+pub struct BuilderEntry {
+    #[serde(deserialize_with = "deserialize_utf8_byte_list")]
+    pub url: ByteList<MaxBuilderUrlSize>,
+    pub auth: SignedRequestAuth,
+    pub builder_pubkeys: ContiguousList<PublicKeyBytes, MaxBuilderPubkeys>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_execution_payment: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub min_bid: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_boost_factor: u64,
+}
+
+// The URL is a plain string in JSON and its UTF-8 bytes in SSZ.
+fn deserialize_utf8_byte_list<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<ByteList<MaxBuilderUrlSize>, D::Error> {
+    let url = String::deserialize(deserializer)?;
+
+    ByteList::try_from(url.into_bytes()).map_err(D::Error::custom)
+}
 
 #[derive(Deserialize, Ssz)]
 #[serde(bound = "")]
