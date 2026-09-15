@@ -356,7 +356,7 @@ pub fn apply_attestation<P: Preset>(
 
     let mut proposer_reward_numerator: Gwei = 0;
 
-    for (validator_index, base_reward) in attesting_indices_with_base_rewards {
+    for &(validator_index, base_reward) in &attesting_indices_with_base_rewards {
         let epoch_participation = epoch_participation.get_mut(validator_index)?;
 
         for (flag_index, weight) in PARTICIPATION_FLAG_WEIGHTS {
@@ -385,7 +385,9 @@ pub fn apply_attestation<P: Preset>(
     slot_report.update_performance(
         state,
         attestation.data,
-        get_attesting_indices(state, data, aggregation_bits)?,
+        attesting_indices_with_base_rewards
+            .iter()
+            .map(|(validator_index, _)| *validator_index),
     )?;
 
     Ok(())
