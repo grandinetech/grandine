@@ -5323,8 +5323,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let finalized_slot = self.finalized_slot();
 
-        self.finalized_attesting_balances =
-            self.finalized_attesting_balances.split_off(&finalized_slot);
+        // Keyed by block slot, not epoch boundary.
+        // The last finalized block can precede the start of the finalized epoch.
+        // Splitting at `finalized_slot` would drop the entry that is still in use.
+        self.finalized_attesting_balances = self
+            .finalized_attesting_balances
+            .split_off(&self.last_finalized().slot());
         self.execution_payload_envelope_cache
             .prune_finalized(finalized_slot);
         self.block_timeliness
@@ -5939,6 +5943,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 let branch_point = PeekMut::pop(branch_point);
                 let parent_position = branch_point.parent.position;
+
+                // The branch hangs off a block past the segment head.
+                // An ancestor of that block lost its payload decision or is invalid.
+                // Nothing in the branch can become the head.
+                if parent_position > segment.head_position() {
+                    continue;
+                }
 
                 let next_position_in_segment = parent_position
                     .next()
