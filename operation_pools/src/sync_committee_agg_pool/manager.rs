@@ -20,7 +20,7 @@ use types::{
 use validator_statistics::ValidatorStatistics;
 
 use crate::{
-    messages::{PoolToLivenessMessage, PoolToP2pMessage},
+    messages::PoolToP2pMessage,
     misc::{Origin, PoolTask},
     sync_committee_agg_pool::{
         pool::Pool,
@@ -57,7 +57,6 @@ pub struct Manager<P: Preset, W: Wait = ()> {
     dedicated_executor: Arc<DedicatedExecutor>,
     controller: ApiController<P, W>,
     pool: Arc<Pool<P>>,
-    pool_to_liveness_tx: Option<UnboundedSender<PoolToLivenessMessage>>,
     pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
     metrics: Option<Arc<Metrics>>,
 }
@@ -67,7 +66,6 @@ impl<P: Preset, W: Wait> Manager<P, W> {
     pub fn new(
         dedicated_executor: Arc<DedicatedExecutor>,
         controller: ApiController<P, W>,
-        pool_to_liveness_tx: Option<UnboundedSender<PoolToLivenessMessage>>,
         pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
         metrics: Option<Arc<Metrics>>,
         validator_statistics: Option<Arc<ValidatorStatistics>>,
@@ -76,7 +74,6 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             dedicated_executor,
             controller,
             pool: Arc::new(Pool::new(validator_statistics)),
-            pool_to_liveness_tx,
             pool_to_p2p_tx,
             metrics,
         })
@@ -182,7 +179,6 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             message,
             subnet_id,
             origin,
-            pool_to_liveness_tx: self.pool_to_liveness_tx.clone(),
             pool_to_p2p_tx: self.pool_to_p2p_tx.clone(),
             metrics: self.metrics.clone(),
         })
@@ -201,7 +197,6 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             message,
             subnet_id,
             origin,
-            pool_to_liveness_tx: self.pool_to_liveness_tx.clone(),
             pool_to_p2p_tx: self.pool_to_p2p_tx.clone(),
             metrics: self.metrics.clone(),
         })

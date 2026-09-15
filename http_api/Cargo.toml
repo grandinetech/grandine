@@ -33,8 +33,6 @@ itertools = { workspace = true }
 kzg_utils = { workspace = true }
 liveness_tracker = { workspace = true }
 logging ={ workspace = true }
-mediatype = { workspace = true }
-mime = { workspace = true }
 operation_pools = { workspace = true }
 p2p = { workspace = true }
 parse-display = { workspace = true }
@@ -77,6 +75,7 @@ fork_choice_store = { workspace = true }
 hex-literal = { workspace = true }
 interop = { workspace = true }
 keymanager = { workspace = true }
+mime = { workspace = true }
 num_cpus = { workspace = true }
 once_cell = { workspace = true }
 predefined_chains = { workspace = true }

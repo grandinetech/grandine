@@ -1,6 +1,6 @@
 use derivative::Derivative;
 
-#[derive(Clone, Copy, Derivative)]
+#[derive(Clone, Copy, Debug, Derivative)]
 #[derivative(Default)]
 pub struct SlasherConfig {
     #[derivative(Default(value = "54000"))]

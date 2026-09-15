@@ -21,7 +21,7 @@ use ssz::{
 };
 use static_assertions::assert_eq_size;
 use std_ext::CopyExt as _;
-use strum::{AsRefStr, Display, EnumString};
+use strum::{AsRefStr, Display, EnumString, VariantNames};
 use try_from_iterator::TryFromIterator;
 
 use crate::{
@@ -30,7 +30,10 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
-    combined::{Attestation, BeaconState, DataColumnSidecar, ExecutionRequests, SignedBeaconBlock},
+    combined::{
+        Attestation, BeaconState as CombinedBeaconState, DataColumnSidecar, ExecutionRequests,
+        SignedBeaconBlock,
+    },
     config::Config,
     deneb::{
         containers::{BlobIdentifier, BlobSidecar},
@@ -38,11 +41,11 @@ use crate::{
     },
     fulu::containers::DataColumnIdentifier,
     phase0::{
-        containers::{SignedBeaconBlockHeader, Validator},
+        containers::{Fork, SignedBeaconBlockHeader, Validator},
         primitives::{Epoch, Gwei, Slot, Uint256, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
+    traits::{BeaconState, BlockBodyWithBlobKzgCommitments, SignedBeaconBlock as _},
 };
 
 pub use smallvec::smallvec;
@@ -260,6 +263,35 @@ pub struct BlockRewards {
     pub sync_aggregate: Gwei,
     pub proposer_slashings: Gwei,
     pub attester_slashings: Gwei,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ForkInfo {
+    pub fork: Fork,
+    pub genesis_validators_root: H256,
+}
+
+impl ForkInfo {
+    #[must_use]
+    pub fn from_state<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Self {
+        Self {
+            fork: state.fork(),
+            genesis_validators_root: state.genesis_validators_root(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Display, EnumString, VariantNames)]
+#[strum(serialize_all = "kebab-case", ascii_case_insensitive)]
+pub enum PublishedDuty {
+    All,
+    Aggregates,
+    Attestations,
+    Blocks,
+    PayloadAttestations,
+    ProposerPreferences,
+    SyncCommitteeContributions,
+    SyncCommitteeMessages,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
@@ -680,7 +712,7 @@ pub struct SystemStats {
 #[derive(Clone)]
 pub struct FinalizedCheckpoint<P: Preset> {
     pub block: Arc<SignedBeaconBlock<P>>,
-    pub state: Arc<BeaconState<P>>,
+    pub state: Arc<CombinedBeaconState<P>>,
 }
 
 #[derive(Clone, Copy)]

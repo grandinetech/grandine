@@ -1,4 +1,5 @@
 use hex_literal::hex;
+use typenum::U4096;
 use types::phase0::primitives::{DomainType, H32};
 
 pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
@@ -12,3 +13,8 @@ pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
 pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
 
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
+
+/// [`MAX_BUILDER_AUTH_DATA_SIZE`] from `builder-specs` (Gloas).
+///
+/// [`MAX_BUILDER_AUTH_DATA_SIZE`]: https://github.com/ethereum/builder-specs/blob/38f11441c194d150386f567b4d7087ec86d4118c/specs/gloas/builder.md#constants
+pub type MaxBuilderAuthDataSize = U4096;

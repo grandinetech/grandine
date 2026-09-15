@@ -35,7 +35,14 @@ const REMOTE_METRICS_UPDATE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct MetricsChannels {
     pub eth1_api_to_metrics_rx: Option<UnboundedReceiver<Eth1ApiToMetrics>>,
-    pub sync_to_metrics_rx: UnboundedReceiver<SyncToMetrics>,
+    pub sync_to_metrics_rx: Option<UnboundedReceiver<SyncToMetrics>>,
+}
+
+/// What only the built-in beacon node can report.
+pub struct NodeMetrics<P: Preset> {
+    pub controller: RealController<P>,
+    pub eth1_metrics: Eth1Metrics,
+    pub slasher_active: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -47,11 +54,9 @@ pub struct MetricsServiceConfig {
 
 pub struct MetricsService<P: Preset> {
     pub(crate) config: MetricsServiceConfig,
-    pub(crate) controller: RealController<P>,
-    pub(crate) metrics: Arc<Metrics>,
-    pub(crate) eth1_metrics: Eth1Metrics,
+    pub(crate) node: Option<NodeMetrics<P>>,
+    pub(crate) metrics: Option<Arc<Metrics>>,
     pub(crate) is_synced: bool,
-    pub(crate) slasher_active: bool,
     // For simplicity's sake assume that validator keys won't change at runtime.
     pub(crate) validator_keys: Arc<HashSet<PublicKeyBytes>>,
     channels: MetricsChannels,
@@ -61,20 +66,16 @@ impl<P: Preset> MetricsService<P> {
     #[must_use]
     pub const fn new(
         config: MetricsServiceConfig,
-        controller: RealController<P>,
-        eth1_metrics: Eth1Metrics,
-        metrics: Arc<Metrics>,
-        slasher_active: bool,
+        node: Option<NodeMetrics<P>>,
+        metrics: Option<Arc<Metrics>>,
         validator_keys: Arc<HashSet<PublicKeyBytes>>,
         channels: MetricsChannels,
     ) -> Self {
         Self {
             config,
-            controller,
-            eth1_metrics,
+            node,
             metrics,
             is_synced: false,
-            slasher_active,
             validator_keys,
             channels,
         }
@@ -114,6 +115,11 @@ impl<P: Preset> MetricsService<P> {
             None => Either::Right(futures::stream::pending()),
         };
 
+        let mut sync_to_metrics_rx = match self.channels.sync_to_metrics_rx.take() {
+            Some(rx) => Either::Left(rx),
+            None => Either::Right(futures::stream::pending()),
+        };
+
         let client = Client::builder()
             .timeout(REMOTE_METRICS_UPDATE_REQUEST_TIMEOUT)
             .connection_verbose(true)
@@ -122,12 +128,17 @@ impl<P: Preset> MetricsService<P> {
         loop {
             select! {
                 _ = system_stats_refresh_interval.select_next_some() => {
+                    // Without --metrics there is no registry, only the remote metrics to send.
+                    let Some(metrics) = &self.metrics else {
+                        continue;
+                    };
+
                     // skip system metrics update if no one is hitting /metrics
-                    if self.metrics.metrics_requests_since_last_update.get() == 0 {
+                    if metrics.metrics_requests_since_last_update.get() == 0 {
                         continue;
                     }
 
-                    self.metrics.metrics_requests_since_last_update.reset();
+                    metrics.metrics_requests_since_last_update.reset();
 
                     tokio::task::block_in_place(|| {
                         refresh_system_stats(&mut system, &mut system_refresh_time, false, grandine_pid);
@@ -138,22 +149,22 @@ impl<P: Preset> MetricsService<P> {
 
                         let (rx_bytes, tx_bytes) = helpers::get_network_bytes();
 
-                        self.metrics.set_cores(system.cpus().len());
-                        self.metrics.set_used_memory(grandine.memory());
-                        self.metrics.set_rx_bytes(rx_bytes);
-                        self.metrics.set_tx_bytes(tx_bytes);
-                        self.metrics.set_total_cpu_percentage(grandine.cpu_usage());
-                        self.metrics.set_system_cpu_percentage(system.global_cpu_usage());
-                        self.metrics.set_system_total_memory(system.total_memory());
-                        self.metrics.set_system_used_memory(system.used_memory());
+                        metrics.set_cores(system.cpus().len());
+                        metrics.set_used_memory(grandine.memory());
+                        metrics.set_rx_bytes(rx_bytes);
+                        metrics.set_tx_bytes(tx_bytes);
+                        metrics.set_total_cpu_percentage(grandine.cpu_usage());
+                        metrics.set_system_cpu_percentage(system.global_cpu_usage());
+                        metrics.set_system_total_memory(system.total_memory());
+                        metrics.set_system_used_memory(system.used_memory());
 
                         let process_metrics = ProcessMetrics::get();
 
-                        self.metrics.set_grandine_thread_count(process_metrics.thread_count);
-                        self.metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
+                        metrics.set_grandine_thread_count(process_metrics.thread_count);
+                        metrics.set_total_cpu_seconds(process_metrics.cpu_process_seconds_total);
 
                         // Update disk usage
-                        self.metrics.set_disk_usage(
+                        metrics.set_disk_usage(
                             directories
                                 .disk_usage()
                                 .map_err(|error| {
@@ -164,13 +175,17 @@ impl<P: Preset> MetricsService<P> {
                         );
 
                         #[cfg(not(target_os = "windows"))]
-                        if let Err(error) = update_jemalloc_metrics(&self.metrics) {
+                        if let Err(error) = update_jemalloc_metrics(metrics) {
                             warn_with_peers!("unable to update jemalloc metrics: {error:?}");
                         }
 
-                        let head_slot = self.controller.head().value.slot();
-                        let store_slot = self.controller.slot();
-                        let max_empty_slots = self.controller.store_config().max_empty_slots;
+                        let Some(NodeMetrics { controller, .. }) = &self.node else {
+                            return;
+                        };
+
+                        let head_slot = controller.head().value.slot();
+                        let store_slot = controller.slot();
+                        let max_empty_slots = controller.store_config().max_empty_slots;
 
                         if head_slot.saturating_add(max_empty_slots) >= store_slot {
                             let epoch = misc::compute_epoch_at_slot::<P>(head_slot);
@@ -183,7 +198,7 @@ impl<P: Preset> MetricsService<P> {
                                 // Take state at last slot in epoch
                                 let slot = misc::compute_start_slot_at_epoch::<P>(epoch).saturating_sub(1);
 
-                                let state_opt = match self.controller.state_at_slot_blocking(slot) {
+                                let state_opt = match controller.state_at_slot_blocking(slot) {
                                     Ok(state_opt) => state_opt,
                                     Err(error) => {
                                         warn_with_peers!("unable to update epoch metrics: {error:?}");
@@ -192,7 +207,7 @@ impl<P: Preset> MetricsService<P> {
                                 };
 
                                 if let Some(state) = state_opt {
-                                    match self.update_epoch_metrics(&state.value) {
+                                    match Self::update_epoch_metrics(metrics, &state.value) {
                                         Ok(()) => epoch_with_metrics = Some(epoch),
                                         Err(error) => warn_with_peers!("unable to update epoch metrics: {error:?}"),
                                     }
@@ -210,13 +225,18 @@ impl<P: Preset> MetricsService<P> {
 
                         let process_metrics = ProcessMetrics::get();
 
+                        let mut payload = vec![
+                            self.validator_metrics(process_metrics),
+                            Self::system_metrics(&system),
+                        ];
+
+                        if let Some(node) = &self.node {
+                            payload.push(self.beacon_node_metrics(node, process_metrics));
+                        }
+
                         let response = client
                             .post(url.into_url())
-                            .json(&[
-                                self.beacon_node_metrics(process_metrics),
-                                self.validator_metrics(process_metrics),
-                                Self::system_metrics(&system),
-                            ])
+                            .json(&payload)
                             .send()
                             .await;
 
@@ -243,11 +263,15 @@ impl<P: Preset> MetricsService<P> {
 
                 eth1_api_message = eth1_api_to_metrics_rx.select_next_some() => {
                     match eth1_api_message {
-                        Eth1ApiToMetrics::Eth1Connection(eth1_connection_data) => self.eth1_metrics.eth1_connection_data = eth1_connection_data,
+                        Eth1ApiToMetrics::Eth1Connection(eth1_connection_data) => {
+                            if let Some(node) = &mut self.node {
+                                node.eth1_metrics.eth1_connection_data = eth1_connection_data;
+                            }
+                        }
                     }
                 },
 
-                sync_message = self.channels.sync_to_metrics_rx.select_next_some() => {
+                sync_message = sync_to_metrics_rx.select_next_some() => {
                     match sync_message {
                         SyncToMetrics::SyncStatus(is_synced) => self.is_synced = is_synced,
                         SyncToMetrics::Stop => break Ok(()),
@@ -259,38 +283,39 @@ impl<P: Preset> MetricsService<P> {
         }
     }
 
-    fn update_epoch_metrics(&self, state: &Arc<BeaconState<P>>) -> Result<()> {
+    fn update_epoch_metrics(metrics: &Metrics, state: &Arc<BeaconState<P>>) -> Result<()> {
         let statistics = transition_functions::combined::statistics(state)?;
 
         if let Some(value) = state.cache().total_active_balance[RelativeEpoch::Previous].get() {
-            self.metrics
-                .set_beacon_participation_prev_epoch_active_gwei_total(value.get());
+            metrics.set_beacon_participation_prev_epoch_active_gwei_total(value.get());
         }
 
         match statistics {
             Statistics::Phase0(statistics) => {
-                self.metrics
-                    .set_beacon_participation_prev_epoch_target_attesting_gwei_total(
-                        statistics.previous_epoch_target_attesting_balance,
-                    );
+                metrics.set_beacon_participation_prev_epoch_target_attesting_gwei_total(
+                    statistics.previous_epoch_target_attesting_balance,
+                );
             }
             Statistics::Altair(statistics) => {
-                self.metrics
-                    .set_beacon_participation_prev_epoch_target_attesting_gwei_total(
-                        statistics.previous_epoch_target_participating_balance,
-                    );
+                metrics.set_beacon_participation_prev_epoch_target_attesting_gwei_total(
+                    statistics.previous_epoch_target_participating_balance,
+                );
             }
         }
 
         Ok(())
     }
 
-    fn beacon_node_metrics(&self, general: ProcessMetrics) -> BeaconChainMetrics {
+    fn beacon_node_metrics(
+        &self,
+        node: &NodeMetrics<P>,
+        general: ProcessMetrics,
+    ) -> BeaconChainMetrics {
         BeaconChainMetrics {
             meta: Meta::new(),
             metrics: MetricsContent::BeaconNode {
                 general,
-                additional: BeaconNodeMetrics::get(self),
+                additional: BeaconNodeMetrics::get(self, node),
             },
         }
     }

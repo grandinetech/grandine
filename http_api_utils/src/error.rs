@@ -20,6 +20,8 @@ pub enum Error {
         uri: Uri,
         source: AnyhowError,
     },
+    #[error("internal error")]
+    Internal(#[from] AnyhowError),
 }
 
 impl ApiError for Error {
@@ -46,6 +48,7 @@ impl Error {
     const fn status_code(&self) -> StatusCode {
         match self {
             Self::InvalidBody { .. } => StatusCode::BAD_REQUEST,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

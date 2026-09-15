@@ -8,7 +8,7 @@ pub use crate::{
         BlsToExecutionChangePool, Service as BlsToExecutionChangePoolService,
     },
     manager::Manager,
-    messages::{PoolToLivenessMessage, PoolToP2pMessage},
+    messages::PoolToP2pMessage,
     misc::{Origin, PoolAdditionOutcome, PoolRejectionReason},
     payload_attestation_agg_pool::Manager as PayloadAttestationAggPool,
     sync_committee_agg_pool::Manager as SyncCommitteeAggPool,

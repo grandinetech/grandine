@@ -33,7 +33,7 @@ use types::{
 };
 
 use crate::{
-    messages::{PoolToLivenessMessage, PoolToP2pMessage},
+    messages::PoolToP2pMessage,
     misc::{Origin, PoolRejectionReason, PoolTask},
     sync_committee_agg_pool::{pool::Pool, types::ContributionData},
 };
@@ -234,7 +234,6 @@ pub struct HandleExternalMessageTask<P: Preset, W: Wait> {
     pub subnet_id: SubnetId,
     pub origin: Origin,
     pub pool_to_p2p_tx: UnboundedSender<PoolToP2pMessage>,
-    pub pool_to_liveness_tx: Option<UnboundedSender<PoolToLivenessMessage>>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
@@ -254,21 +253,13 @@ impl<P: Preset, W: Wait> PoolTask for HandleExternalMessageTask<P, W> {
             message,
             subnet_id,
             origin,
-            ref pool_to_liveness_tx,
             ref pool_to_p2p_tx,
             ..
         } = self;
 
         if let Origin::Gossip(gossip_id) = origin {
             let message = match &result {
-                Ok(ValidationOutcome::Accept) => {
-                    if let Some(pool_to_liveness_tx) = pool_to_liveness_tx {
-                        PoolToLivenessMessage::SyncCommitteeMessage(message)
-                            .send(pool_to_liveness_tx);
-                    }
-
-                    PoolToP2pMessage::Accept(gossip_id)
-                }
+                Ok(ValidationOutcome::Accept) => PoolToP2pMessage::Accept(gossip_id),
                 Ok(ValidationOutcome::Ignore(_)) => PoolToP2pMessage::Ignore(gossip_id),
                 Err(error) => {
                     debug_with_peers!(

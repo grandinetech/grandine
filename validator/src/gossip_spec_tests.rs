@@ -21,7 +21,7 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     lock::Mutex,
 };
-use keymanager::KeyManager;
+use keymanager::{KeyManager, ProposerConfigs};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
 };
@@ -176,13 +176,18 @@ impl<P: Preset> Context<P> {
             ..Default::default()
         });
 
+        let proposer_configs = Arc::new(ProposerConfigs::new(
+            validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
+            H256::default(),
+            validator_config.validator_definitions.clone_arc(),
+        ));
+
         let keymanager = Arc::new(KeyManager::new_in_memory(
             signer.clone_arc(),
             slashing_protector.clone_arc(),
             genesis_validators_root,
-            validator_config.suggested_fee_recipient,
-            validator_config.default_gas_limit,
-            H256::default(),
+            proposer_configs,
             validator_config.validator_definitions.clone_arc(),
         ));
 
@@ -239,6 +244,8 @@ impl<P: Preset> Context<P> {
         ));
 
         let validator_channels = ValidatorChannels {
+            api_to_liveness_tx: None,
+            direct_tick_rx: None,
             api_to_validator_rx,
             fork_choice_rx: fc_to_validator_rx,
             p2p_tx: validator_to_p2p_tx,

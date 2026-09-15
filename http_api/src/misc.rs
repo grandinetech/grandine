@@ -5,6 +5,8 @@ use core::{
 use std::sync::Arc;
 
 use block_producer::ValidatorBlindedBlock;
+use bls::PublicKeyBytes;
+use builder_api::gloas::containers::SignedBuilderRequestAuth;
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use serde::{
@@ -12,9 +14,10 @@ use serde::{
     de::{DeserializeSeed, Error as _},
 };
 use ssz::{
-    ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize, SszWrite,
-    WriteError,
+    ByteList, ContiguousList, ReadError, Size, Ssz, SszHash, SszRead, SszReadDefault, SszSize,
+    SszWrite, WriteError,
 };
+use typenum::{U64, U2048};
 use types::{
     altair::containers::SignedBeaconBlock as AltairSignedBeaconBlock,
     bellatrix::containers::{
@@ -53,13 +56,12 @@ use types::{
     },
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
-        consts::TargetAggregatorsPerCommittee,
         containers::{
             Attestation as Phase0Attestation,
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedBeaconBlock as Phase0SignedBeaconBlock,
         },
-        primitives::Slot,
+        primitives::{Gwei, Slot},
     },
     preset::{Preset, ProposerLookaheadLength},
 };
@@ -101,6 +103,48 @@ pub type SignedBeaconBlockWithBlobsAndProofs<P> = (
     Option<KzgProofs<P>>,
     Option<ContiguousList<Blob<P>, <P as Preset>::MaxBlobCommitmentsPerBlock>>,
 );
+
+type MaxBuilderEntries = U64;
+type MaxBuilderUrlSize = U2048;
+type MaxBuilderPubkeys = U64;
+
+/// The request body of `produceBlockV4`.
+/// <https://ethereum.github.io/beacon-APIs/#/Validator/produceBlockV4>
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
+pub struct BuilderConfig {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub min_bid: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_boost_factor: u64,
+    pub builders: ContiguousList<BuilderEntry, MaxBuilderEntries>,
+}
+
+#[derive(Debug, Deserialize, Ssz)]
+#[serde(deny_unknown_fields)]
+#[ssz(derive_hash = false)]
+pub struct BuilderEntry {
+    #[serde(deserialize_with = "deserialize_utf8_byte_list")]
+    pub url: ByteList<MaxBuilderUrlSize>,
+    pub auth: SignedBuilderRequestAuth,
+    pub builder_pubkeys: ContiguousList<PublicKeyBytes, MaxBuilderPubkeys>,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_execution_payment: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub min_bid: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub builder_boost_factor: u64,
+}
+
+fn deserialize_utf8_byte_list<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<ByteList<MaxBuilderUrlSize>, D::Error> {
+    // JSON carries the URL as a plain string and SSZ as its UTF-8 bytes.
+    let url = String::deserialize(deserializer)?;
+
+    ByteList::try_from(url.into_bytes()).map_err(D::Error::custom)
+}
 
 #[derive(Deserialize, Ssz)]
 #[serde(bound = "")]
@@ -256,6 +300,9 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
     }
 }
 
+pub type SignedAggregateAndProofs<P> =
+    ContiguousList<Arc<SignedAggregateAndProof<P>>, <P as Preset>::MaxAggregatesPerSlot>;
+
 pub struct SignedAggregateAndProofListFromPhaseDeserializer<P: Preset> {
     phase: Phase,
     phantom: PhantomData<P>,
@@ -271,7 +318,7 @@ impl<P: Preset> From<Phase> for SignedAggregateAndProofListFromPhaseDeserializer
 }
 
 impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPhaseDeserializer<P> {
-    type Value = ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>;
+    type Value = SignedAggregateAndProofs<P>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -285,19 +332,19 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPha
                 | Phase::Capella
                 | Phase::Deneb => ContiguousList::<
                     Phase0SignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
+                    P::MaxAggregatesPerSlot,
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
                 Phase::Electra | Phase::Fulu => ContiguousList::<
                     ElectraSignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
+                    P::MaxAggregatesPerSlot,
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
                 Phase::Gloas => ContiguousList::<
                     GloasSignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
+                    P::MaxAggregatesPerSlot,
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
@@ -677,4 +724,47 @@ pub enum BroadcastValidation {
     Gossip,
     Consensus,
     ConsensusAndEquivocation,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+    use types::preset::Minimal;
+
+    use super::*;
+
+    #[test]
+    fn aggregate_request_may_hold_more_than_one_committee_of_aggregators()
+    -> Result<(), serde_json::Error> {
+        let root = format!("0x{}", "00".repeat(32));
+        let signature = format!("0x{}", "00".repeat(96));
+        let checkpoint = json!({ "epoch": "0", "root": root });
+
+        let aggregate_and_proof = json!({
+            "message": {
+                "aggregator_index": "0",
+                "aggregate": {
+                    "aggregation_bits": "0x01",
+                    "data": {
+                        "slot": "0",
+                        "index": "0",
+                        "beacon_block_root": root,
+                        "source": checkpoint,
+                        "target": checkpoint,
+                    },
+                    "signature": signature,
+                },
+                "selection_proof": signature,
+            },
+            "signature": signature,
+        });
+
+        let aggregates =
+            SignedAggregateAndProofListFromPhaseDeserializer::<Minimal>::from(Phase::Phase0)
+                .deserialize(Value::Array(vec![aggregate_and_proof; 17]))?;
+
+        assert_eq!(aggregates.len(), 17);
+
+        Ok(())
+    }
 }

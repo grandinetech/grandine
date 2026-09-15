@@ -3787,6 +3787,7 @@ where
         );
 
         self.send_to_p2p(P2pMessage::FinalizedCheckpoint(finalized_checkpoint));
+        self.send_to_validator(ValidatorMessage::FinalizedCheckpoint(finalized_checkpoint));
 
         if let Some(metrics) = self.metrics.as_ref() {
             let state = head.state(&self.store);

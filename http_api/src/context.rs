@@ -21,7 +21,7 @@ use fork_choice_control::{
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
 use genesis::AnchorCheckpointProvider;
-use keymanager::KeyManager;
+use keymanager::{KeyManager, ProposerConfigs};
 use liveness_tracker::LivenessTracker;
 use once_cell::sync::OnceCell;
 use operation_pools::{
@@ -41,11 +41,14 @@ use types::{
     combined::{BeaconState, SignedBeaconBlock},
     config::Config as ChainConfig,
     nonstandard::{FinalizedCheckpoint, Phase, StorageMode},
-    phase0::primitives::{H256, NodeId},
+    phase0::primitives::{ExecutionAddress, H256, NodeId},
     preset::{Mainnet, Minimal, Preset},
     traits::BeaconState as _,
 };
-use validator::{Validator, ValidatorChannels, ValidatorConfig};
+use validator::{
+    Chain, ChainSource, LocalChain, LocalValidatorChannels, OwnValidatorIndices, Validator,
+    ValidatorChannels, ValidatorConfig,
+};
 
 use crate::{
     http_api_config::HttpApiConfig,
@@ -100,7 +103,6 @@ impl<P: Preset> Context<P> {
         let (fc_to_sync_tx, fc_to_sync_rx) = futures::channel::mpsc::unbounded();
         let (fc_to_validator_tx, fc_to_validator_rx) = futures::channel::mpsc::unbounded();
         let (_, p2p_to_validator_rx) = futures::channel::mpsc::unbounded();
-        let (pool_to_liveness_tx, pool_to_liveness_rx) = futures::channel::mpsc::unbounded();
         let (pool_to_p2p_tx, pool_to_p2p_rx) = futures::channel::mpsc::unbounded();
         let (subnet_service_to_p2p_tx, _subnet_service_to_p2p_rx) =
             futures::channel::mpsc::unbounded();
@@ -237,16 +239,23 @@ impl<P: Preset> Context<P> {
 
         let validator_config = Arc::new(ValidatorConfig {
             disable_blockprint_graffiti: true,
+            // The snapshots were recorded with a fee recipient, without which none are published.
+            suggested_fee_recipient: Some(ExecutionAddress::zero()),
             ..Default::default()
         });
+
+        let proposer_configs = Arc::new(ProposerConfigs::new(
+            validator_config.suggested_fee_recipient,
+            validator_config.default_gas_limit,
+            H256::default(),
+            validator_config.validator_definitions.clone_arc(),
+        ));
 
         let keymanager = Arc::new(KeyManager::new_in_memory(
             signer.clone_arc(),
             slashing_protector.clone_arc(),
             anchor_state.genesis_validators_root(),
-            validator_config.suggested_fee_recipient,
-            validator_config.default_gas_limit,
-            H256::default(),
+            proposer_configs,
             validator_config.validator_definitions.clone_arc(),
         ));
 
@@ -267,7 +276,6 @@ impl<P: Preset> Context<P> {
         let sync_committee_agg_pool = SyncCommitteeAggPool::new(
             dedicated_executor.clone_arc(),
             controller.clone_arc(),
-            Some(pool_to_liveness_tx),
             pool_to_p2p_tx.clone(),
             None,
             None,
@@ -291,7 +299,6 @@ impl<P: Preset> Context<P> {
             controller.clone_arc(),
             None,
             api_to_liveness_rx,
-            pool_to_liveness_rx,
             validator_to_liveness_rx,
         );
 
@@ -312,37 +319,49 @@ impl<P: Preset> Context<P> {
         ));
 
         let validator_channels = ValidatorChannels {
-            api_to_validator_rx,
-            fork_choice_rx: fc_to_validator_rx,
-            p2p_tx: validator_to_p2p_tx,
-            p2p_to_validator_rx,
-            slasher_to_validator_rx: None,
-            subnet_service_tx: subnet_service_tx.clone(),
-            validator_to_liveness_tx: Some(validator_to_liveness_tx),
-            validator_to_slasher_tx: None,
+            validator_rx: fc_to_validator_rx,
+            local: Some(LocalValidatorChannels {
+                api_to_validator_rx,
+                p2p_tx: validator_to_p2p_tx,
+                p2p_to_validator_rx,
+                slasher_to_validator_rx: None,
+                subnet_service_tx: subnet_service_tx.clone(),
+                api_to_liveness_tx: None,
+                validator_to_liveness_tx: Some(validator_to_liveness_tx),
+                validator_to_slasher_tx: None,
+            }),
         };
 
         let mut network_config = NetworkConfig::default();
         network_config.identify_agent_version = Some(IDENTIFY_AGENT_VERSION.to_owned());
         let network_config = Arc::new(network_config);
 
+        let chain_source = Arc::new(ChainSource {
+            chain_config: controller.chain_config().clone_arc(),
+            genesis_time: controller.genesis_time(),
+            genesis_validators_root: anchor_state.genesis_validators_root(),
+            own_validator_indices: Arc::new(OwnValidatorIndices::new(signer.clone_arc())),
+            chain: Chain::Local(Arc::new(LocalChain {
+                controller: controller.clone_arc(),
+                block_producer: block_producer.clone_arc(),
+                attestation_agg_pool: attestation_agg_pool.clone_arc(),
+                sync_committee_agg_pool: sync_committee_agg_pool.clone_arc(),
+                payload_attestation_agg_pool: payload_attestation_agg_pool.clone_arc(),
+                event_channels: event_channels.clone_arc(),
+                builder_api: None,
+            })),
+        });
+
         let validator = Validator::new(
             validator_config.clone_arc(),
-            block_producer.clone_arc(),
-            controller.clone_arc(),
-            attestation_agg_pool.clone_arc(),
+            chain_source,
             None,
-            None,
-            event_channels.clone_arc(),
             keymanager.proposer_configs().clone_arc(),
-            signer,
+            signer.clone_arc(),
             slashing_protector,
-            payload_attestation_agg_pool.clone_arc(),
-            sync_committee_agg_pool.clone_arc(),
             None,
             None,
             validator_channels,
-            network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
         );

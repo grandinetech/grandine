@@ -20,7 +20,8 @@ use crate::{
     gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
     nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
-        consts::{AttestationSubnetCount, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        consts::{AttestationSubnetCount, BASIS_POINTS, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
+        containers::Fork,
         primitives::{
             ChainId, DomainType, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H32, H160,
             H256, NetworkId, Slot, UnixSeconds, Version,
@@ -980,6 +981,67 @@ impl Config {
         self.version(phase)
     }
 
+    #[must_use]
+    pub fn fork_at_epoch(&self, epoch: Epoch) -> Fork {
+        let phase = self.phase_at_epoch(epoch);
+
+        Fork {
+            previous_version: self.version(phase.previous().unwrap_or(phase)),
+            current_version: self.version(phase),
+            epoch: self.fork_epoch(phase),
+        }
+    }
+
+    #[must_use]
+    pub fn attestation_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.attestation_due_bps
+        } else {
+            self.attestation_due_bps_gloas
+        }
+    }
+
+    #[must_use]
+    pub fn aggregate_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.aggregate_due_bps
+        } else {
+            self.aggregate_due_bps_gloas
+        }
+    }
+
+    #[must_use]
+    pub fn sync_message_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.sync_message_due_bps
+        } else {
+            self.sync_message_due_bps_gloas
+        }
+    }
+
+    #[must_use]
+    pub fn contribution_due_bps_at(&self, phase: Phase) -> u64 {
+        if phase < Phase::Gloas {
+            self.contribution_due_bps
+        } else {
+            self.contribution_due_bps_gloas
+        }
+    }
+
+    /// <https://github.com/ethereum/consensus-specs/blob/v1.7.0-beta.0/specs/phase0/fork-choice.md#get_slot_component_duration_ms>
+    #[must_use]
+    pub fn slot_component_duration(&self, bps: u64) -> Duration {
+        let nanos = self
+            .slot_duration_ms
+            .as_nanos()
+            .saturating_mul(bps.into())
+            .checked_div(BASIS_POINTS.into())
+            .and_then(|nanos| nanos.try_into().ok())
+            .unwrap_or(u64::MAX);
+
+        Duration::from_nanos(nanos)
+    }
+
     #[inline]
     #[must_use]
     pub const fn fork_epoch(&self, phase: Phase) -> Epoch {
@@ -1381,5 +1443,110 @@ mod tests {
         config.gas_limit_schedule = vec![GasLimitScheduleEntry::new(100, 75_000_000)];
 
         config.gas_limit(configured, epoch)
+    }
+
+    #[test_case(Config::mainnet())]
+    #[test_case(Config::minimal())]
+    #[test_case(Config::medalla())]
+    #[test_case(Config::goerli())]
+    #[test_case(Config::sepolia())]
+    #[test_case(Config::holesky())]
+    #[test_case(Config::holesky_devnet())]
+    fn config_fork_at_epoch_agrees_with_version_at_epoch(config: Config) {
+        let boundaries = config
+            .fork_epochs()
+            .map(|(_, fork_epoch)| fork_epoch)
+            .filter(|fork_epoch| *fork_epoch != FAR_FUTURE_EPOCH)
+            .flat_map(|fork_epoch| {
+                [
+                    fork_epoch.saturating_sub(1),
+                    fork_epoch,
+                    fork_epoch.saturating_add(1),
+                ]
+            })
+            .chain([GENESIS_EPOCH])
+            .collect_vec();
+
+        for epoch in boundaries {
+            assert_eq!(
+                config.fork_at_epoch(epoch).current_version,
+                config.version_at_epoch(epoch),
+                "fork at epoch {epoch} names the wrong current version",
+            );
+        }
+    }
+
+    fn fork_schedule() -> Config {
+        Config {
+            altair_fork_epoch: 2,
+            bellatrix_fork_epoch: 4,
+            // Never scheduled, so nothing may fall back to their versions.
+            capella_fork_epoch: FAR_FUTURE_EPOCH,
+            deneb_fork_epoch: FAR_FUTURE_EPOCH,
+            electra_fork_epoch: FAR_FUTURE_EPOCH,
+            fulu_fork_epoch: FAR_FUTURE_EPOCH,
+            gloas_fork_epoch: FAR_FUTURE_EPOCH,
+            ..Config::mainnet()
+        }
+    }
+
+    #[test]
+    fn config_fork_at_epoch_is_genesis_before_the_first_fork() {
+        let config = fork_schedule();
+
+        for epoch in [GENESIS_EPOCH, 1] {
+            let fork = config.fork_at_epoch(epoch);
+
+            assert_eq!(fork.previous_version, config.genesis_fork_version);
+            assert_eq!(fork.current_version, config.genesis_fork_version);
+            assert_eq!(fork.epoch, GENESIS_EPOCH);
+        }
+    }
+
+    #[test]
+    fn config_fork_at_epoch_switches_in_the_epoch_of_the_fork() {
+        let config = fork_schedule();
+        let fork = config.fork_at_epoch(2);
+
+        assert_eq!(fork.previous_version, config.genesis_fork_version);
+        assert_eq!(fork.current_version, config.altair_fork_version);
+        assert_eq!(fork.epoch, 2);
+    }
+
+    #[test]
+    fn config_fork_at_epoch_carries_the_version_of_the_fork_before() {
+        let config = fork_schedule();
+        let fork = config.fork_at_epoch(4);
+
+        assert_eq!(fork.previous_version, config.altair_fork_version);
+        assert_eq!(fork.current_version, config.bellatrix_fork_version);
+        assert_eq!(fork.epoch, 4);
+    }
+
+    // `phase_at_epoch` stops at the first phase that is not scheduled, so the one before the
+    // current phase is always scheduled too.
+    #[test]
+    fn config_fork_at_epoch_ignores_phases_that_are_never_scheduled() {
+        let config = fork_schedule();
+        let fork = config.fork_at_epoch(FAR_FUTURE_EPOCH - 1);
+
+        assert_eq!(fork.previous_version, config.altair_fork_version);
+        assert_eq!(fork.current_version, config.bellatrix_fork_version);
+        assert_eq!(fork.epoch, 4);
+    }
+
+    // A custom config's slot duration or bps saturates the duration rather than panicking.
+    #[test_case(Duration::from_secs(12), 2_500 => Duration::from_secs(3))]
+    #[test_case(Duration::MAX, BASIS_POINTS => Duration::from_nanos(u64::MAX))]
+    #[test_case(Duration::from_secs(12), u64::MAX => Duration::from_nanos(u64::MAX))]
+    fn slot_component_duration_scales_and_saturates(
+        slot_duration_ms: Duration,
+        bps: u64,
+    ) -> Duration {
+        Config {
+            slot_duration_ms,
+            ..Config::mainnet()
+        }
+        .slot_component_duration(bps)
     }
 }

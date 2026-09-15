@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{Local, SecondsFormat};
+use core::{error::Error, fmt::Debug};
 use fs_err as fs;
 use logging::{debug_with_peers, exception};
 use logroller::{Compression, LogRollerBuilder, Rotation, RotationSize};
@@ -12,12 +13,20 @@ use std::{
     sync::{Arc, OnceLock},
 };
 use tokio::runtime::Runtime;
-use tracing::Level;
+use tracing::{
+    Level,
+    field::{Field, Visit},
+};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{
     EnvFilter, Registry,
+    field::{MakeVisitor as _, RecordFields, VisitOutput as _},
     filter::LevelFilter,
-    fmt::{self, format::Writer, time::FormatTime},
+    fmt::{
+        self,
+        format::{DefaultFields, DefaultVisitor, FormatFields, Writer},
+        time::FormatTime,
+    },
     prelude::*,
     reload::{self, Handle},
 };
@@ -25,7 +34,7 @@ use types::redacting_url::RedactingUrl;
 
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TelemetryConfig {
     pub url: RedactingUrl,
     pub service_name: String,
@@ -80,6 +89,7 @@ pub fn initialize_tracing_logger(
     data_dir: Option<&Path>,
     telemetry_config: Option<TelemetryConfig>,
     always_write_style: bool,
+    with_peers: bool,
 ) -> Result<TracingHandle> {
     let mut filter = EnvFilter::default()
         .add_directive(LevelFilter::OFF.into())
@@ -132,6 +142,7 @@ pub fn initialize_tracing_logger(
     let enable_ansi = always_write_style || io::stdout().is_terminal();
 
     let stdout_layer = fmt::layer::<Registry>()
+        .fmt_fields(Fields { with_peers })
         .compact()
         .with_thread_ids(false)
         .with_target(true)
@@ -313,6 +324,80 @@ pub fn initialize_rayon() -> Result<()> {
         .map_err(Into::into)
 }
 
+/// The default field format, minus the peer counts of a process without a network.
+struct Fields {
+    with_peers: bool,
+}
+
+impl<'writer> FormatFields<'writer> for Fields {
+    fn format_fields<R: RecordFields>(
+        &self,
+        writer: Writer<'writer>,
+        fields: R,
+    ) -> core::fmt::Result {
+        let mut visitor = DefaultFields::new().make_visitor(writer);
+
+        if self.with_peers {
+            fields.record(&mut visitor);
+        } else {
+            fields.record(&mut WithoutPeers(&mut visitor));
+        }
+
+        visitor.finish()
+    }
+}
+
+// The `*_with_peers!` macros always add a `peers` field, and `tracing` offers no way to drop a
+// field short of the visitor that writes it. The validator client has no peers to report.
+struct WithoutPeers<'visitor, 'writer>(&'visitor mut DefaultVisitor<'writer>);
+
+// Forwards every method, not only the ones `DefaultVisitor` overrides today, so a future
+// override in `tracing-subscriber` is not silently bypassed here.
+impl Visit for WithoutPeers<'_, '_> {
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        self.0.record_f64(field, value);
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.0.record_i64(field, value);
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.0.record_u64(field, value);
+    }
+
+    fn record_i128(&mut self, field: &Field, value: i128) {
+        self.0.record_i128(field, value);
+    }
+
+    fn record_u128(&mut self, field: &Field, value: u128) {
+        self.0.record_u128(field, value);
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.0.record_bool(field, value);
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.record_str(field, value);
+    }
+
+    fn record_bytes(&mut self, field: &Field, value: &[u8]) {
+        self.0.record_bytes(field, value);
+    }
+
+    fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
+        self.0.record_error(field, value);
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+        // The macros record the counts through `Display`, which arrives here.
+        if field.name() != "peers" {
+            self.0.record_debug(field, value);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{LazyLock, Mutex};
@@ -334,7 +419,7 @@ mod tests {
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
             let handle =
-                initialize_tracing_logger(module_path!(), Some(data_dir.path()), None, false)
+                initialize_tracing_logger(module_path!(), Some(data_dir.path()), None, false, true)
                     .expect("Failed to initialize tracing logger");
 
             *lock = Some(LoggerWithTempDir {

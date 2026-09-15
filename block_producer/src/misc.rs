@@ -30,7 +30,7 @@ impl PayloadIdEntry {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct ProposerData {
     #[serde(with = "serde_utils::string_or_native")]
     pub validator_index: ValidatorIndex,
@@ -100,6 +100,14 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
     #[must_use]
     pub const fn is_blinded(&self) -> bool {
         matches!(self, Self::BlindedBeaconBlock(_))
+    }
+
+    #[must_use]
+    pub fn parent_root(&self) -> H256 {
+        match self {
+            Self::BlindedBeaconBlock(block) => block.parent_root(),
+            Self::BeaconBlock(block) => block.parent_root(),
+        }
     }
 }
 

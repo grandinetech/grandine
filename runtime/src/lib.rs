@@ -11,7 +11,7 @@ pub use crate::{
         DEFAULT_TARGET_SUBNET_PEERS, DEFAULT_TIMEOUT, default_network_config,
     },
     misc::{MetricsConfig, StorageConfig},
-    runtime::{RuntimeConfig, run, run_after_genesis},
+    runtime::run,
     schema::initialize as initialize_schema,
 };
 
@@ -20,7 +20,6 @@ pub use crate::runtime::shutdown;
 
 pub mod commands;
 mod config_dir;
-mod consts;
 mod db_info;
 pub mod db_stats;
 mod defaults;
