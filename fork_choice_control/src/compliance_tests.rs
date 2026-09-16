@@ -112,6 +112,11 @@ struct ViableHeadRootAndWeight {
 }
 
 // TODO: fix remaning failing compliance tests
+const SKIPPED_CASES: &[&str] = &[
+    "minimal/gloas/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_3_884359208_1",
+    "minimal/gloas/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_723232228_31",
+];
+
 #[duplicate_item(
     glob                                                                                            function_name                                  preset    phase;
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/attester_slashing_test/*/*"]   [fulu_minimal_compliance_attester_slashing]    [Minimal] [Fulu];
@@ -122,13 +127,20 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/shuffling_test/*/*"]           [fulu_minimal_compliance_shuffling]            [Minimal] [Fulu];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/attester_slashing_test/*/*"]  [gloas_minimal_compliance_attester_slashing]   [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_cover_test/*/*"]        [gloas_minimal_compliance_block_cover]         [Minimal] [Gloas];
-    // TODO: ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_tree_test/*/*"]         [gloas_minimal_compliance_block_tree]          [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_tree_test/*/*"]         [gloas_minimal_compliance_block_tree]          [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_weight_test/*/*"]       [gloas_minimal_compliance_block_weight]        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/invalid_message_test/*/*"]    [gloas_minimal_compliance_invalid_message]     [Minimal] [Gloas];
-    // TODO: ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/shuffling_test/*/*"]          [gloas_minimal_compliance_shuffling]           [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/shuffling_test/*/*"]          [gloas_minimal_compliance_shuffling]           [Minimal] [Gloas];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case<'_>) {
+    if SKIPPED_CASES
+        .iter()
+        .any(|skipped| case.case_path_relative_to_workspace_root.contains(skipped))
+    {
+        return;
+    }
+
     let rt = tokio::runtime::Runtime::new().expect("Tokio runtime starts successfully in tests");
     let config = Arc::new(preset::default_config().start_and_stay_in(Phase::phase));
 
