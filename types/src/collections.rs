@@ -11,6 +11,7 @@ use ssz::{
     ContiguousVector, IncompletePersistentVector, PersistentList, PersistentProgressiveList,
     PersistentVector, UnhashedBundleSize,
 };
+use typenum::U64;
 
 use crate::{
     altair::primitives::ParticipationFlags,
@@ -45,8 +46,7 @@ pub type Validators<P> = ValidatorList<<P as Preset>::ValidatorRegistryLimit>;
 // (EIP-7688). Pre-Gloas forks keep the bounded `PersistentList` versions above.
 pub type ProgressiveValidators = ProgressiveValidatorList;
 
-pub type Balances<P> =
-    PersistentList<Gwei, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<Gwei>>;
+pub type Balances<P> = PersistentList<Gwei, <P as Preset>::ValidatorRegistryLimit, U64>;
 
 pub type ProgressiveBalances = PersistentProgressiveList<Gwei>;
 
@@ -66,8 +66,7 @@ pub type EpochParticipation<P> = PersistentList<
 
 pub type ProgressiveEpochParticipation = PersistentProgressiveList<ParticipationFlags>;
 
-pub type InactivityScores<P> =
-    PersistentList<u64, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<u64>>;
+pub type InactivityScores<P> = PersistentList<u64, <P as Preset>::ValidatorRegistryLimit, U64>;
 
 pub type ProgressiveInactivityScores = PersistentProgressiveList<u64>;
 
