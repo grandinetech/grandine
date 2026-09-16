@@ -1,5 +1,6 @@
 use core::{
     cell::OnceCell,
+    cmp::Ordering::{Equal, Greater, Less},
     ops::{Bound, RangeInclusive},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -1685,9 +1686,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let parent_payload_verified = self.is_payload_verified(parent.block_root);
 
                 match parent_payload_presence {
-                    PayloadPresence::Empty => parent.attesting_balances.empty,
+                    PayloadPresence::Empty => {
+                        let (parent_empty, _) = self.payload_weights(parent, proposer_boost);
+                        parent_empty
+                    }
                     PayloadPresence::Full if parent_payload_verified => {
-                        parent.attesting_balances.full
+                        let (_, parent_full) = self.payload_weights(parent, proposer_boost);
+                        parent_full
                     }
                     PayloadPresence::Full | PayloadPresence::Pending => 0,
                 }
@@ -5323,8 +5328,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let finalized_slot = self.finalized_slot();
 
-        self.finalized_attesting_balances =
-            self.finalized_attesting_balances.split_off(&finalized_slot);
+        // Keyed by block slot, not epoch boundary.
+        // The last finalized block can precede the start of the finalized epoch.
+        // Splitting at `finalized_slot` would drop the entry that is still in use.
+        self.finalized_attesting_balances = self
+            .finalized_attesting_balances
+            .split_off(&self.last_finalized().slot());
         self.execution_payload_envelope_cache
             .prune_finalized(finalized_slot);
         self.block_timeliness
@@ -5842,17 +5851,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 _ => false,
             }
         } else {
-            let parent_empty = parent_balances.empty();
-            let parent_full = parent_balances.full();
-            let parent_payload_verified = self.payloads.contains(&parent_balances.block_root);
+            // If parent does not have a payload presence (pre-Gloas block)
+            // then a child is never ignored based on parent's payload presence
+            if matches!(parent_payload_presence, PayloadPresence::Pending) {
+                return false;
+            }
 
-            let proposer_boost = if self.proposer_boost_root != H256::zero()
-                && self.is_ancestor_of_boosted_block(block)
-            {
-                proposer_boost
-            } else {
-                0
-            };
+            let (parent_empty, parent_full) = self.payload_weights(parent_balances, proposer_boost);
+            let parent_payload_verified = self.payloads.contains(&parent_balances.block_root);
 
             // Only proceed selecting the child block if:
             // - it's indicating that it is the child of parent with no payload
@@ -5863,19 +5869,84 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
             match parent_payload_presence {
                 PayloadPresence::Empty
-                    if parent_payload_verified
-                        && parent_empty.saturating_add(proposer_boost) <= parent_full =>
+                    if parent_payload_verified && parent_empty <= parent_full =>
                 {
                     true
                 }
-                PayloadPresence::Full
-                    if parent_empty > parent_full.saturating_add(proposer_boost) =>
-                {
-                    true
-                }
+                PayloadPresence::Full if parent_empty > parent_full => true,
                 _ => false,
             }
         }
+    }
+
+    fn payload_weights(&self, parent: BlockBalances, proposer_boost: Gwei) -> (Gwei, Gwei) {
+        let (empty_boost, full_boost) = if proposer_boost == 0 {
+            (0, 0)
+        } else {
+            match self.boosted_payload_presence(parent.block_root) {
+                Some(PayloadPresence::Empty) => (proposer_boost, 0),
+                Some(PayloadPresence::Full) => (0, proposer_boost),
+                Some(PayloadPresence::Pending) | None => (0, 0),
+            }
+        };
+
+        (
+            parent.empty().saturating_add(empty_boost),
+            parent.full().saturating_add(full_boost),
+        )
+    }
+
+    // Payload status of `parent_root` that the boosted block builds on.
+    // `None` if the boosted block doesn't descend from `parent_root`.
+    // Walks segments rather than blocks to stay cheap in long forks.
+    fn boosted_payload_presence(&self, parent_root: H256) -> Option<PayloadPresence> {
+        let boosted_location = self.unfinalized_locations.get(&self.proposer_boost_root)?;
+        let boosted_segment = &self.unfinalized[&boosted_location.segment_id];
+        let parent = self
+            .unfinalized_locations
+            .get(&parent_root)
+            .map(|location| {
+                let first_root = self.unfinalized[&location.segment_id]
+                    .first_block()
+                    .block_root();
+                (location.position, first_root)
+            });
+
+        // First block of the segment visited before the current one.
+        // It's the boosted chain's child of `parent_root` if the chain leaves the current segment there.
+        let mut child_presence = None;
+
+        for (segment, last_position) in
+            self.segments_ending_with(boosted_segment, boosted_location.position)
+        {
+            // Every segment starts with a distinct block, so its root identifies the segment.
+            if let Some((parent_position, parent_segment_first_root)) = parent
+                && segment.first_block().block_root() == parent_segment_first_root
+            {
+                // It found the segment with containing the parent block
+                return match parent_position.cmp(&last_position) {
+                    // Get the parent's payload presence info from the child
+                    Less => {
+                        let child_position = parent_position.next().ok()?;
+                        Some(segment[child_position].parent_payload_presence())
+                    }
+                    // If the parent is the at the branch point of the segment, then previous segment's first block's
+                    // payload presence is its parent's payload presence.
+                    Equal => child_presence,
+                    // The parent in segment containing parent block should not have
+                    // its location greater then the location of the branch point in the segment, like, never ever.
+                    // This should be unreachable.
+                    Greater => None,
+                };
+            }
+
+            child_presence = Some(segment.first_block().parent_payload_presence());
+        }
+
+        // Root segments build on the last finalized block.
+        (parent_root == self.last_finalized().block_root)
+            .then_some(child_presence)
+            .flatten()
     }
 
     fn update_segment_head(&mut self, segment_id: SegmentId, proposer_boost: Gwei) {
@@ -5939,6 +6010,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 let branch_point = PeekMut::pop(branch_point);
                 let parent_position = branch_point.parent.position;
+
+                // The branch hangs off a block past the segment head.
+                // An ancestor of that block lost its payload decision or is invalid.
+                // Nothing in the branch can become the head.
+                if parent_position > segment.head_position() {
+                    continue;
+                }
 
                 let next_position_in_segment = parent_position
                     .next()
