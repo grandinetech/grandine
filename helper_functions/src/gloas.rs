@@ -27,15 +27,14 @@ pub fn get_indexed_attestation<P: Preset>(
     state: &impl BeaconState<P>,
     attestation: &Attestation<P>,
 ) -> Result<IndexedAttestation<P>> {
-    let attesting_indices = get_attesting_indices(state, attestation)?;
+    let mut attesting_indices = get_attesting_indices(state, attestation)?;
 
-    let mut attesting_indices = ProgressiveList::try_from_iter(attesting_indices).expect(
+    attesting_indices.sort_unstable();
+
+    let attesting_indices = ProgressiveList::try_from_iter(attesting_indices).expect(
         "Attestation.aggregation_bits and IndexedAttestation.attesting_indices \
          have the same maximum length",
     );
-
-    // Sorting a slice is faster than building a `BTreeMap`.
-    attesting_indices.sort_unstable();
 
     Ok(IndexedAttestation {
         attesting_indices,
