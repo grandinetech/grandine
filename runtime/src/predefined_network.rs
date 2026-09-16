@@ -38,7 +38,7 @@ pub enum PredefinedNetwork {
 }
 
 impl PredefinedNetwork {
-    /// [Mainnet bootnode ENRs](https://github.com/eth-clients/mainnet/blob/b3fc01ff2bac624880f2e6dbafbf67532760f611/metadata/bootstrap_nodes.yaml)
+    /// [Mainnet bootnode ENRs](https://github.com/eth-clients/mainnet/blob/858a24808915672eb23760a34f16203652aeb35a/metadata/bootstrap_nodes.yaml)
     #[cfg(any(feature = "network-mainnet", test))]
     pub const MAINNET_BOOTNODES: &'static [&'static str] = &[
         // > Teku team's bootnodes
@@ -67,7 +67,7 @@ impl PredefinedNetwork {
         "enr:-KG4QPUf8-g_jU-KrwzG42AGt0wWM1BTnQxgZXlvCEIfTQ5hSmptkmgmMbRkpOqv6kzb33SlhPHJp7x4rLWWiVq5lSECgmlkgnY0gmlwhFPlR9KDaXA2kCoGxcAJAAAVAAAAAAAAABCJc2VjcDI1NmsxoQLdUv9Eo9sxCt0tc_CheLOWnX59yHJtkBSOL7kpxdJ6GYN1ZHCCIyiEdWRwNoIjKA",
     ];
 
-    /// [Sepolia bootnode ENRs](https://github.com/eth-clients/sepolia/blob/2bae9336a2d13998faf4c9f5574ccb2d15718721/metadata/bootstrap_nodes.yaml)
+    /// [Sepolia bootnode ENRs](https://github.com/eth-clients/sepolia/blob/cebec463df2bb85fe72581e89d8ca9efab348b18/metadata/bootstrap_nodes.yaml)
     #[cfg(any(feature = "network-sepolia", test))]
     const SEPOLIA_BOOTNODES: &'static [&'static str] = &[
         // > EF
@@ -101,7 +101,7 @@ impl PredefinedNetwork {
         "enr:-KG4QC9Wm32mtzB5Fbj2ri2TEKglHmIWgvwTQCvNHBopuwpNAi1X6qOsBg_Z1-Bee-kfSrhzUQZSgDUyfH5outUprtoBgmlkgnY0gmlwhHEel3eDaXA2kP6AAAAAAAAAAlBW__4Srr-Jc2VjcDI1NmsxoQO7KE63Z4eSI55S1Yn7q9_xFkJ1Wt-a3LgiXuKGs19s0YN1ZHCCIyiEdWRwNoIjKA",
     ];
 
-    /// [Hoodi bootnode ENRs](https://github.com/eth-clients/hoodi/blob/a130c03daa6dbb1ae9a1a722544570b6b8035aee/metadata/bootstrap_nodes.yaml)
+    /// [Hoodi bootnode ENRs](https://github.com/eth-clients/hoodi/blob/09a170c90a31785977bd3c5a25ac0b376c05ffd0/metadata/bootstrap_nodes.yaml)
     #[cfg(any(feature = "network-hoodi", test))]
     const HOODI_BOOTNODES: &'static [&'static str] = &[
         // EF
