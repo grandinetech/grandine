@@ -1,7 +1,7 @@
 use core::{pin::pin, time::Duration};
 use std::sync::{Arc, RwLock};
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use futures::{StreamExt as _, future::join_all};
 use logging::{debug_with_peers, info_with_peers};
 use tap::Pipe as _;
@@ -48,6 +48,19 @@ pub struct HeadUpdate {
     pub dependent_roots: DependentRoots,
 }
 
+/// What a cached head is worth at a slot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HeadStatus {
+    /// Nothing has been reported yet.
+    Unknown,
+    /// The head to sign for.
+    Usable(H256),
+    /// Older than the empty slot limit allows.
+    Stale { head_slot: Slot },
+    /// Past the slot, which asking a node would not fix.
+    Future { head_slot: Slot },
+}
+
 /// The head a beacon node last reported, over the event stream or when asked.
 #[derive(Default)]
 pub struct ChainHead {
@@ -82,45 +95,58 @@ impl ChainHead {
     }
 
     pub fn record_dependent_roots(&self, roots: DependentRoots) {
-        let mut current = self
+        *self
             .dependent_roots
             .write()
-            .expect("dependent roots lock is never poisoned");
+            .expect("dependent roots lock is never poisoned") = Some(roots);
+    }
 
-        if current.is_none_or(|current| roots.epoch >= current.epoch) {
-            *current = Some(roots);
+    pub fn status(&self, at_slot: Slot, max_empty_slots: u64) -> HeadStatus {
+        let Some(head) = *self.head.read().expect("chain head lock is never poisoned") else {
+            return HeadStatus::Unknown;
+        };
+
+        if head.slot > at_slot {
+            return HeadStatus::Future {
+                head_slot: head.slot,
+            };
         }
+
+        // A head that predates a run of missed slots is still the one to vote for, held to the
+        // same limit as the head of the built-in beacon node.
+        if at_slot.saturating_sub(head.slot) > max_empty_slots {
+            return HeadStatus::Stale {
+                head_slot: head.slot,
+            };
+        }
+
+        HeadStatus::Usable(head.block_root)
     }
 
     /// [`None`] when nothing usable is cached and a beacon node has to be asked instead, and an
     /// error when the cached head is past `at_slot`, which asking would not fix.
     pub fn get(&self, at_slot: Slot, max_empty_slots: u64) -> Result<Option<H256>> {
-        let cached = *self.head.read().expect("chain head lock is never poisoned");
+        match self.status(at_slot, max_empty_slots) {
+            HeadStatus::Usable(block_root) => Ok(Some(block_root)),
+            HeadStatus::Unknown => Ok(None),
+            HeadStatus::Stale { head_slot } => {
+                debug_with_peers!(
+                    "cached head at slot {head_slot} is too old to sign for slot {at_slot}",
+                );
 
-        let Some(head) = cached else {
-            return Ok(None);
-        };
-
-        ensure!(
-            head.slot <= at_slot,
-            Error::BeyondSlot {
-                head_slot: head.slot,
-                at_slot,
-            },
-        );
-
-        // A head that predates a run of missed slots is still the one to vote for, held to the
-        // same limit as the head of the built-in beacon node.
-        if at_slot.saturating_sub(head.slot) > max_empty_slots {
-            debug_with_peers!(
-                "cached head at slot {} is too old to sign for slot {at_slot}",
-                head.slot,
-            );
-
-            return Ok(None);
+                Ok(None)
+            }
+            HeadStatus::Future { head_slot } => {
+                Err(Error::BeyondSlot { head_slot, at_slot }.into())
+            }
         }
+    }
 
-        Ok(Some(head.block_root))
+    pub fn cached(&self) -> Option<(Slot, H256)> {
+        self.head
+            .read()
+            .expect("chain head lock is never poisoned")
+            .map(|head| (head.slot, head.block_root))
     }
 
     pub fn update(&self, slot: Slot, block_root: H256) {
@@ -129,21 +155,6 @@ impl ChainHead {
             .head
             .write()
             .expect("chain head lock is never poisoned") = Some(Head { slot, block_root });
-    }
-
-    pub fn can_serve(&self, at_slot: Slot, max_empty_slots: u64) -> bool {
-        self.get(at_slot, max_empty_slots)
-            .is_ok_and(|block_root| block_root.is_some())
-    }
-
-    /// Whether a known head lags `at_slot` by more than `max_empty_slots`. An empty cache is not
-    /// stale: nothing is known about the node's head yet.
-    pub fn is_stale(&self, at_slot: Slot, max_empty_slots: u64) -> bool {
-        let cached = *self.head.read().expect("chain head lock is never poisoned");
-
-        cached.is_some_and(|head| {
-            head.slot <= at_slot && at_slot.saturating_sub(head.slot) > max_empty_slots
-        })
     }
 }
 
@@ -307,6 +318,29 @@ mod tests {
         assert_eq!(chain_head.dependent_root_for(7), None);
     }
 
+    // A reorg into the previous epoch replaces the orphaned branch's roots, so the latest report
+    // wins even when it is for an earlier epoch.
+    #[test]
+    fn the_latest_dependent_roots_win_regardless_of_epoch() {
+        let chain_head = ChainHead::default();
+
+        chain_head.record_dependent_roots(DependentRoots {
+            epoch: 5,
+            current: H256::repeat_byte(1),
+            next: H256::repeat_byte(2),
+        });
+
+        chain_head.record_dependent_roots(DependentRoots {
+            epoch: 4,
+            current: H256::repeat_byte(3),
+            next: H256::repeat_byte(4),
+        });
+
+        assert_eq!(chain_head.dependent_root_for(4), Some(H256::repeat_byte(3)));
+        assert_eq!(chain_head.dependent_root_for(5), Some(H256::repeat_byte(4)));
+        assert_eq!(chain_head.dependent_root_for(6), None);
+    }
+
     // A node reorging to a shorter branch reports a lower head, which must not be left behind.
     #[test]
     fn a_reorg_to_a_lower_slot_replaces_the_cached_head() -> Result<()> {
@@ -325,7 +359,7 @@ mod tests {
 
     #[test]
     fn an_empty_cache_is_unknown_rather_than_stale() {
-        assert!(!ChainHead::new().is_stale(100, 5));
+        assert_eq!(ChainHead::new().status(100, 5), HeadStatus::Unknown);
     }
 
     #[test]
@@ -333,7 +367,10 @@ mod tests {
         let chain_head = ChainHead::new();
         chain_head.update(95, H256::repeat_byte(1));
 
-        assert!(!chain_head.is_stale(100, 5));
+        assert_eq!(
+            chain_head.status(100, 5),
+            HeadStatus::Usable(H256::repeat_byte(1))
+        );
     }
 
     #[test]
@@ -341,6 +378,9 @@ mod tests {
         let chain_head = ChainHead::new();
         chain_head.update(61, H256::repeat_byte(1));
 
-        assert!(chain_head.is_stale(143, 32));
+        assert_eq!(
+            chain_head.status(143, 32),
+            HeadStatus::Stale { head_slot: 61 }
+        );
     }
 }

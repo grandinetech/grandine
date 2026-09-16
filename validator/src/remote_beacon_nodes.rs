@@ -1,8 +1,5 @@
-use core::{
-    cmp::Reverse,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-use std::sync::Arc;
+use core::cmp::Reverse;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Result, bail, ensure};
 use bls::PublicKeyBytes;
@@ -47,8 +44,6 @@ pub enum StartupError {
 
 pub struct RemoteBeaconNodes {
     nodes: Vec<Arc<RemoteBeaconNode>>,
-    /// Shared with every node, which reads it to size its timeouts.
-    serving_count: Arc<AtomicUsize>,
     publish_to_every_node: Vec<PublishedDuty>,
 }
 
@@ -56,12 +51,10 @@ impl RemoteBeaconNodes {
     #[must_use]
     pub const fn new(
         nodes: Vec<Arc<RemoteBeaconNode>>,
-        serving_count: Arc<AtomicUsize>,
         publish_to_every_node: Vec<PublishedDuty>,
     ) -> Self {
         Self {
             nodes,
-            serving_count,
             publish_to_every_node,
         }
     }
@@ -117,13 +110,6 @@ impl RemoteBeaconNodes {
         }
     }
 
-    /// The genesis validators root any serving node has reported.
-    #[must_use]
-    pub fn genesis_validators_root(&self) -> Option<H256> {
-        self.serving()
-            .find_map(|node| node.genesis_validators_root())
-    }
-
     /// Resolves `pubkey` on the first serving node that answers; [`None`] when no node knows it.
     pub async fn validator_index<P: Preset>(
         &self,
@@ -156,44 +142,37 @@ impl RemoteBeaconNodes {
             .filter(|node| node.health().can_serve())
             .collect::<Vec<_>>();
 
-        nodes.sort_by_key(|node| Reverse(node.health()));
+        // A head most nodes hold outranks one node that is ahead, as a lone node may have accepted
+        // a block the others rejected; a newer head breaks ties, then the configured order.
+        let mut holders = HashMap::<H256, usize>::new();
+
+        for (_, block_root) in nodes.iter().filter_map(|node| node.chain_head().cached()) {
+            let held_by = holders.entry(block_root).or_default();
+            *held_by = held_by.saturating_add(1);
+        }
+
+        nodes.sort_by_cached_key(|node| {
+            let head = node.chain_head().cached();
+            let held_by = head.map_or(0, |(_, block_root)| {
+                holders.get(&block_root).copied().unwrap_or_default()
+            });
+            let head_slot = head.map_or(0, |(slot, _)| slot);
+
+            Reverse((node.health(), held_by, head_slot))
+        });
+
         nodes.into_iter()
     }
 
-    async fn refresh(&self, slot: Slot) -> (usize, usize) {
+    pub async fn refresh(&self, slot: Slot) {
         join_all(self.nodes.iter().map(|node| node.refresh_health(slot))).await;
         join_all(self.nodes.iter().map(|node| node.refresh_head(slot))).await;
 
-        let ready = self.count(Health::is_ready);
-        let serving = self.count(Health::can_serve);
-
-        self.serving_count.store(serving, Ordering::Relaxed);
-
-        (ready, serving)
-    }
-
-    fn count(&self, predicate: fn(Health) -> bool) -> usize {
-        self.nodes
-            .iter()
-            .filter(|node| predicate(node.health()))
-            .count()
-    }
-
-    #[must_use]
-    pub fn incompatible(&self) -> Option<&Arc<RemoteBeaconNode>> {
-        self.nodes
-            .iter()
-            .find(|node| node.health() == Health::Incompatible)
-    }
-
-    pub async fn check_status(&self, slot: Slot) {
-        let (ready, serving) = self.refresh(slot).await;
-
-        if ready > 0 {
+        if self.nodes.iter().any(|node| node.health().is_ready()) {
             return;
         }
 
-        if serving > 0 {
+        if self.nodes.iter().any(|node| node.health().can_serve()) {
             warn_with_peers!("no remote beacon node is fully synced");
         } else {
             warn_with_peers!("no remote beacon node can serve duties");
@@ -203,14 +182,82 @@ impl RemoteBeaconNodes {
     pub async fn check_on_startup(&self, slot: Slot) -> Result<()> {
         info_with_peers!("checking remote beacon nodes");
 
-        self.check_status(slot).await;
+        self.refresh(slot).await;
 
         // Only a wrong network is fatal; anything else may be fine by the next poll.
-        if let Some(node) = self.incompatible() {
+        if let Some(node) = self
+            .nodes
+            .iter()
+            .find(|node| node.health() == Health::Incompatible)
+        {
             bail!(StartupError::DifferentNetwork {
                 node: node.to_string(),
             });
         }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reqwest::Client;
+    use types::config::Config as ChainConfig;
+
+    use super::*;
+
+    fn node(url: &str) -> Result<Arc<RemoteBeaconNode>> {
+        Ok(Arc::new(RemoteBeaconNode::new(
+            Arc::new(ChainConfig::mainnet()),
+            Client::new(),
+            url.parse()?,
+            32,
+        )))
+    }
+
+    fn order(nodes: &RemoteBeaconNodes) -> Vec<Arc<RemoteBeaconNode>> {
+        nodes.serving().map(ArcExt::clone_arc).collect()
+    }
+
+    // A lone node that is ahead may have accepted a block the others rejected.
+    #[test]
+    fn the_head_most_nodes_hold_outranks_a_lone_newer_one() -> Result<()> {
+        let ahead = node("http://ahead")?;
+        let first = node("http://first")?;
+        let second = node("http://second")?;
+
+        ahead.chain_head().update(11, H256::repeat_byte(1));
+        first.chain_head().update(10, H256::repeat_byte(2));
+        second.chain_head().update(10, H256::repeat_byte(2));
+
+        let nodes = RemoteBeaconNodes::new(
+            vec![ahead.clone_arc(), first.clone_arc(), second.clone_arc()],
+            vec![],
+        );
+
+        let order = order(&nodes);
+
+        assert!(Arc::ptr_eq(&order[0], &first));
+        assert!(Arc::ptr_eq(&order[1], &second));
+        assert!(Arc::ptr_eq(&order[2], &ahead));
+
+        Ok(())
+    }
+
+    // Without a majority the newer head wins over the configured order.
+    #[test]
+    fn a_newer_head_breaks_a_tie() -> Result<()> {
+        let behind = node("http://behind")?;
+        let ahead = node("http://ahead")?;
+
+        behind.chain_head().update(10, H256::repeat_byte(1));
+        ahead.chain_head().update(11, H256::repeat_byte(2));
+
+        let nodes = RemoteBeaconNodes::new(vec![behind.clone_arc(), ahead.clone_arc()], vec![]);
+        let order = order(&nodes);
+
+        assert!(Arc::ptr_eq(&order[0], &ahead));
+        assert!(Arc::ptr_eq(&order[1], &behind));
 
         Ok(())
     }

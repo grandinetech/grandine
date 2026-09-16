@@ -11,7 +11,6 @@ use signer::Signer;
 use ssz::H256;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
-use tokio::sync::Mutex;
 use tracing::instrument;
 use types::{
     combined::BeaconState,
@@ -22,6 +21,7 @@ use types::{
 use crate::{
     beacon_node_api::{BeaconNodeApi as _, PtcDuties},
     beacon_nodes::BeaconNodes,
+    misc::RequestedIndices,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -33,8 +33,7 @@ pub struct PTCMember {
 pub struct OwnPTCMembers {
     signer: Arc<Signer>,
     members: SccHashMap<(H256, Slot), Arc<[PTCMember]>>,
-    /// The indices the members were computed for; a key imported at runtime changes the set.
-    requested: Mutex<Arc<[ValidatorIndex]>>,
+    requested: RequestedIndices,
 }
 
 impl OwnPTCMembers {
@@ -42,19 +41,14 @@ impl OwnPTCMembers {
         Self {
             signer,
             members: SccHashMap::new(),
-            requested: Mutex::new(Arc::from([])),
+            requested: RequestedIndices::default(),
         }
     }
 
     async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
-        let mut requested = self.requested.lock().await;
-
-        if **requested == *validator_indices {
-            return;
+        if self.requested.changed(validator_indices).await {
+            self.members.clear_async().await;
         }
-
-        *requested = validator_indices.into();
-        self.members.clear_async().await;
     }
 
     pub fn len(&self) -> usize {
@@ -68,13 +62,18 @@ impl OwnPTCMembers {
         dependent_root: H256,
         slot: Slot,
     ) -> Option<Arc<[PTCMember]>> {
-        let validator_indices = self
+        let own_public_keys = self
             .signer
             .load()
             .keys()
-            .filter_map(|public_key| accessors::index_of_public_key(state, public_key))
-            .sorted()
-            .collect::<Vec<_>>();
+            .copied()
+            .filter_map(|public_key| {
+                let validator_index = accessors::index_of_public_key(state, &public_key)?;
+                Some((validator_index, public_key))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let validator_indices = own_public_keys.keys().copied().sorted().collect::<Vec<_>>();
 
         self.discard_for_other_keys(&validator_indices).await;
 
@@ -82,7 +81,7 @@ impl OwnPTCMembers {
             return Some(members.clone_arc());
         }
 
-        match self.compute_members_at_slot(state, slot) {
+        match Self::compute_members_at_slot(state, slot, &own_public_keys) {
             Ok(members) => {
                 if let Some(members) = members {
                     self.members
@@ -95,9 +94,7 @@ impl OwnPTCMembers {
                 }
             }
             Err(error) => {
-                warn_with_peers!(
-                    "failed to compute own beacon committee members at slot {slot}: {error:?}"
-                );
+                warn_with_peers!("failed to compute own PTC members at slot {slot}: {error:?}");
                 None
             }
         }
@@ -194,21 +191,10 @@ impl OwnPTCMembers {
 
     #[instrument(skip_all, level = "debug", fields(slot = slot))]
     fn compute_members_at_slot<P: Preset>(
-        &self,
         state: &BeaconState<P>,
         slot: Slot,
+        own_public_keys: &HashMap<ValidatorIndex, PublicKeyBytes>,
     ) -> Result<Option<Arc<[PTCMember]>>> {
-        let signer_snapshot = self.signer.load();
-
-        let own_public_keys = signer_snapshot
-            .keys()
-            .copied()
-            .filter_map(|public_key| {
-                let validator_index = accessors::index_of_public_key(state, &public_key)?;
-                Some((validator_index, public_key))
-            })
-            .collect::<HashMap<_, _>>();
-
         if own_public_keys.is_empty() {
             return Ok(None);
         }

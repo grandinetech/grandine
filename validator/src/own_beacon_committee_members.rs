@@ -8,7 +8,7 @@ use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
-use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork as _};
+use helper_functions::{accessors, misc, predicates, signing::SignForSingleFork};
 use http_api_utils::ValidatorAttesterDutyResponse;
 use itertools::Itertools as _;
 use logging::warn_with_peers;
@@ -17,7 +17,6 @@ use scc::{HashMap as SccHashMap, hash_map::Entry};
 use signer::{Signer, SigningMessage, SigningTriple};
 use ssz::H256;
 use std_ext::ArcExt;
-use tokio::sync::Mutex;
 use tracing::instrument;
 use types::{
     combined::BeaconState,
@@ -31,7 +30,7 @@ use crate::{
     beacon_node_api::{AttesterDuties, BeaconNodeApi as _},
     beacon_nodes::BeaconNodes,
     local_beacon_node::duties_at_slot,
-    misc::slots_by_epoch,
+    misc::{RequestedIndices, slots_by_epoch},
 };
 
 type MembersBySlot = BTreeMap<Slot, Arc<[BeaconCommitteeMember]>>;
@@ -74,8 +73,7 @@ pub struct OwnBeaconCommitteeMembers {
     config: Arc<ChainConfig>,
     signer: Arc<Signer>,
     members: SccHashMap<Epoch, (H256, MembersBySlot)>,
-    /// The indices the members were computed for; a key imported at runtime changes the set.
-    requested: Mutex<Arc<[ValidatorIndex]>>,
+    requested: RequestedIndices,
 }
 
 impl OwnBeaconCommitteeMembers {
@@ -84,19 +82,14 @@ impl OwnBeaconCommitteeMembers {
             config,
             signer,
             members: SccHashMap::new(),
-            requested: Mutex::new(Arc::from([])),
+            requested: RequestedIndices::default(),
         }
     }
 
     async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
-        let mut requested = self.requested.lock().await;
-
-        if **requested == *validator_indices {
-            return;
+        if self.requested.changed(validator_indices).await {
+            self.members.clear_async().await;
         }
-
-        *requested = validator_indices.into();
-        self.members.clear_async().await;
     }
 
     pub fn len(&self) -> usize {
@@ -110,10 +103,13 @@ impl OwnBeaconCommitteeMembers {
         beacon_state: Option<&Arc<BeaconState<P>>>,
         slot: Slot,
     ) -> Result<Option<(Arc<[BeaconCommitteeMember]>, bool)>> {
-        let dependent_root = match controller.zip(beacon_state) {
-            Some((controller, state)) => {
-                self.discard_for_other_keys(&self.own_validator_indices(state))
-                    .await;
+        let local = controller
+            .zip(beacon_state)
+            .map(|(controller, state)| (controller, state, self.own_validator_indices(state)));
+
+        let dependent_root = match &local {
+            Some((controller, state, own_validator_indices)) => {
+                self.discard_for_other_keys(own_validator_indices).await;
 
                 controller.attestation_committee_dependent_root_for_slot(state, slot)?
             }
@@ -142,8 +138,9 @@ impl OwnBeaconCommitteeMembers {
             .needs_to_compute_members_at_slot::<P>(dependent_root, slot)
             .await;
 
-        if needs_to_compute && let Some(state) = beacon_state {
-            self.init_at_slot(state, dependent_root, slot).await?;
+        if needs_to_compute && let Some((_, state, own_validator_indices)) = &local {
+            self.init_at_slot(state, dependent_root, slot, own_validator_indices)
+                .await?;
         }
 
         // A concurrent computation under another root may have replaced the epoch's entry since
@@ -164,16 +161,17 @@ impl OwnBeaconCommitteeMembers {
         state: &BeaconState<P>,
         dependent_root: H256,
         slot: Slot,
+        own_validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
-        let indices = self
-            .own_validator_indices(state)
-            .into_iter()
+        let indices = own_validator_indices
+            .iter()
+            .copied()
             .collect::<HashSet<_>>();
 
         let duties = tokio::task::block_in_place(|| duties_at_slot(state, slot, &indices))?;
 
-        self.init_from_duties(
-            state.into(),
+        self.init_from_duties::<P>(
+            ForkInfo::from_state(state),
             dependent_root,
             slot..slot.saturating_add(1),
             duties,
@@ -197,7 +195,7 @@ impl OwnBeaconCommitteeMembers {
     pub async fn init_at_slots<P: Preset, W: Wait + Sync>(
         &self,
         beacon_nodes: &BeaconNodes<P, W>,
-        fork_info: ForkInfo<P>,
+        fork_info: ForkInfo,
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
@@ -212,7 +210,7 @@ impl OwnBeaconCommitteeMembers {
                 .attester_duties_at_slots(slots.clone(), validator_indices)
                 .await?;
 
-            self.init_from_duties(fork_info, dependent_root, slots, duties)
+            self.init_from_duties::<P>(fork_info, dependent_root, slots, duties)
                 .await?;
         }
 
@@ -280,9 +278,7 @@ impl OwnBeaconCommitteeMembers {
             return Ok(None);
         };
 
-        let dependent_root = beacon_nodes
-            .dependent_root(epoch, Some(validator_index))
-            .await?;
+        let dependent_root = beacon_nodes.dependent_root(epoch, validator_index).await?;
 
         Ok(self.slots_to_compute::<P>(dependent_root, slots).await)
     }
@@ -298,7 +294,7 @@ impl OwnBeaconCommitteeMembers {
     #[instrument(skip_all, level = "debug", fields(dependent_root = ?dependent_root))]
     async fn init_from_duties<P: Preset>(
         &self,
-        fork_info: ForkInfo<P>,
+        fork_info: ForkInfo,
         dependent_root: H256,
         slots: Range<Slot>,
         duties: Vec<ValidatorAttesterDutyResponse>,
@@ -346,9 +342,11 @@ impl OwnBeaconCommitteeMembers {
             .iter()
             .map(|duty| SigningTriple::<P> {
                 message: SigningMessage::AggregationSlot { slot: duty.slot },
-                signing_root: duty
-                    .slot
-                    .signing_root_from_fork_info(&self.config, fork_info),
+                signing_root: SignForSingleFork::<P>::signing_root_from_fork_info(
+                    &duty.slot,
+                    &self.config,
+                    fork_info,
+                ),
                 public_key: duty.pubkey,
             })
             .collect::<Vec<_>>();
@@ -477,7 +475,7 @@ mod tests {
         // Deliberately out of order, to check that members come back committee-major.
         own_members
             .init_from_duties::<Minimal>(
-                state.as_ref().into(),
+                ForkInfo::from_state(state.as_ref()),
                 dependent_root,
                 misc::slots_in_epoch::<Minimal>(0)?,
                 vec![
@@ -567,7 +565,7 @@ mod tests {
         for (dependent_root, slot) in [(old_root, 1), (new_root, 2)] {
             own_members
                 .init_from_duties::<Minimal>(
-                    state.as_ref().into(),
+                    ForkInfo::from_state(state.as_ref()),
                     dependent_root,
                     slot..slot.saturating_add(1),
                     vec![duty(public_key, 41, 0, 0, slot)],

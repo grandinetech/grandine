@@ -38,20 +38,15 @@ use types::{
 
 use crate::slot_head::SlotHead;
 
-pub struct AttesterDuties {
+/// Duties of an epoch with the root they depend on, which a reorg can change.
+pub struct Duties<T> {
     pub dependent_root: H256,
-    pub duties: Vec<ValidatorAttesterDutyResponse>,
+    pub duties: Vec<T>,
 }
 
-pub struct PtcDuties {
-    pub dependent_root: H256,
-    pub duties: Vec<ValidatorPTCDutyResponse>,
-}
-
-pub struct ProposerDuties {
-    pub dependent_root: H256,
-    pub duties: Vec<ValidatorProposerDutyResponse>,
-}
+pub type AttesterDuties = Duties<ValidatorAttesterDutyResponse>;
+pub type PtcDuties = Duties<ValidatorPTCDutyResponse>;
+pub type ProposerDuties = Duties<ValidatorProposerDutyResponse>;
 
 pub struct ProducedBlock<P: Preset> {
     pub block: ValidatorBlindedBlock<P>,
@@ -111,7 +106,7 @@ pub trait BeaconNodeApi<P: Preset> {
     fn dependent_root(
         &self,
         epoch: Epoch,
-        validator_index: Option<ValidatorIndex>,
+        validator_index: ValidatorIndex,
     ) -> impl Future<Output = Result<H256>> + Send;
 
     /// <https://ethereum.github.io/beacon-APIs/#/Validator/produceAttestationData>

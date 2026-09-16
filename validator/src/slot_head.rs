@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::{fmt::Debug, marker::PhantomData};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -8,7 +8,7 @@ use fork_choice_control::Wait;
 use futures::lock::Mutex;
 use helper_functions::{
     accessors, misc, predicates,
-    signing::{SignForSingleFork, SignForSingleForkAtSlot as _},
+    signing::{SignForSingleFork, SignForSingleForkAtSlot},
 };
 use itertools::Itertools as _;
 use logging::warn_with_peers;
@@ -33,11 +33,31 @@ pub struct SlotHead<P: Preset> {
     pub slot: Slot,
     pub beacon_block_root: H256,
     /// All of a state that signing needs, so that it does not depend on holding one.
-    pub fork_info: ForkInfo<P>,
+    pub fork_info: ForkInfo,
     pub optimistic: bool,
+    /// The preset the slot's epoch and phase are computed with; no field depends on it.
+    pub phantom: PhantomData<P>,
 }
 
 impl<P: Preset> SlotHead<P> {
+    #[must_use]
+    pub fn from_state(
+        config: Arc<Config>,
+        slot: Slot,
+        beacon_block_root: H256,
+        state: &BeaconState<P>,
+        optimistic: bool,
+    ) -> Self {
+        Self {
+            config,
+            slot,
+            beacon_block_root,
+            fork_info: ForkInfo::from_state(state),
+            optimistic,
+            phantom: PhantomData,
+        }
+    }
+
     #[must_use]
     pub const fn slot(&self) -> Slot {
         self.slot
@@ -98,12 +118,13 @@ impl<P: Preset> SlotHead<P> {
         let (triples, validator_indices): (Vec<_>, Vec<_>) = validator_indices_with_pubkeys
             .into_iter()
             .map(|(validator_index, public_key)| {
-                let triple = SigningTriple {
+                let triple = SigningTriple::<P> {
                     message: SigningMessage::SyncCommitteeMessage {
                         beacon_block_root,
                         slot,
                     },
-                    signing_root: beacon_block_root.signing_root_from_fork_info(
+                    signing_root: SignForSingleForkAtSlot::<P>::signing_root_from_fork_info(
+                        &beacon_block_root,
                         &self.config,
                         self.fork_info,
                         self.slot(),
@@ -145,10 +166,13 @@ impl<P: Preset> SlotHead<P> {
                 subcommittee_index,
             };
 
-            SigningTriple {
+            SigningTriple::<P> {
                 message: SigningMessage::SyncAggregatorSelectionData(selection_data),
-                signing_root: selection_data
-                    .signing_root_from_fork_info(&self.config, self.fork_info),
+                signing_root: SignForSingleFork::<P>::signing_root_from_fork_info(
+                    &selection_data,
+                    &self.config,
+                    self.fork_info,
+                ),
                 public_key,
             }
         });

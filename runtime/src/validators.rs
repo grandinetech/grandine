@@ -16,7 +16,7 @@ use tap::{Pipe as _, TryConv as _};
 use validator_key_cache::ValidatorKeyCache;
 use zeroize::Zeroizing;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 #[cfg_attr(test, derive(PartialEq, Eq, Debug))]
 pub struct Validators {
     pub keystore_dir: PathBuf,

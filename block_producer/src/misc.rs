@@ -101,6 +101,14 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
     pub const fn is_blinded(&self) -> bool {
         matches!(self, Self::BlindedBeaconBlock(_))
     }
+
+    #[must_use]
+    pub fn parent_root(&self) -> H256 {
+        match self {
+            Self::BlindedBeaconBlock(block) => block.parent_root(),
+            Self::BeaconBlock(block) => block.parent_root(),
+        }
+    }
 }
 
 pub fn build_graffiti(

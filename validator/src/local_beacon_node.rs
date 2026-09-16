@@ -4,13 +4,12 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Error as AnyhowError, Result, anyhow, bail, ensure};
-use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
+use anyhow::{Result, anyhow, bail, ensure};
+use block_producer::{BlockBuildOptions, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::{BuilderApi, unphased::containers::SignedValidatorRegistrationV1};
 use dedicated_executor::DedicatedExecutor;
 use derive_more::Display;
-use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -24,10 +23,7 @@ use http_api_utils::{
 use itertools::Itertools as _;
 use liveness_tracker::ApiToLiveness;
 use logging::debug_with_peers;
-use operation_pools::{
-    AttestationAggPool, AttestationKey, PayloadAttestationAggPool, SyncCommitteeAggPool,
-    convert_to_electra_attestation,
-};
+use operation_pools::{AttestationKey, convert_to_electra_attestation};
 use p2p::{
     BeaconCommitteeSubscription, SyncCommitteeSubscription, ToSubnetService, ValidatorToP2p,
 };
@@ -67,74 +63,62 @@ use crate::{
     beacon_node_api::{
         AttesterDuties, BeaconNodeApi, EnvelopeContents, ProducedBlock, ProposerDuties, PtcDuties,
     },
+    misc::LocalChain,
     slot_head::SlotHead,
+    tasks::proposer_dependent_epoch,
     validator_config::ValidatorConfig,
 };
 
 const NAME: &str = "local";
 
-#[derive(Display)]
+/// What duties against the built-in beacon node are performed with, the same in every slot.
+pub struct LocalContext<P: Preset, W: Wait> {
+    pub chain: Arc<LocalChain<P, W>>,
+    pub builder_api: Option<Arc<BuilderApi>>,
+    pub validator_config: Arc<ValidatorConfig>,
+    pub signer: Arc<Signer>,
+    pub p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
+    pub subnet_service_tx: UnboundedSender<ToSubnetService>,
+    pub liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
+    pub metrics: Option<Arc<Metrics>>,
+    pub dedicated_executor: Arc<DedicatedExecutor>,
+}
+
+#[derive(Clone, Display)]
 #[display("{NAME}")]
 pub struct LocalBeaconNode<P: Preset, W: Wait> {
-    controller: ApiController<P, W>,
+    context: Arc<LocalContext<P, W>>,
     slot_head: SlotHead<P>,
     beacon_state: Arc<BeaconState<P>>,
-    attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
-    sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
-    payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
-    block_producer: Arc<BlockProducer<P, W>>,
-    builder_api: Option<Arc<BuilderApi>>,
-    validator_config: Arc<ValidatorConfig>,
-    signer: Arc<Signer>,
-    p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
-    subnet_service_tx: UnboundedSender<ToSubnetService>,
-    liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
-    metrics: Option<Arc<Metrics>>,
-    dedicated_executor: Arc<DedicatedExecutor>,
     wait_group: W,
 }
 
 impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
-    #[expect(clippy::too_many_arguments)]
+    #[must_use]
+    pub const fn head(&self) -> &SlotHead<P> {
+        &self.slot_head
+    }
+
+    #[must_use]
+    pub const fn state(&self) -> &Arc<BeaconState<P>> {
+        &self.beacon_state
+    }
+
     pub const fn new(
-        controller: ApiController<P, W>,
+        context: Arc<LocalContext<P, W>>,
         slot_head: SlotHead<P>,
         beacon_state: Arc<BeaconState<P>>,
-        attestation_agg_pool: Arc<AttestationAggPool<P, W>>,
-        sync_committee_agg_pool: Arc<SyncCommitteeAggPool<P, W>>,
-        payload_attestation_agg_pool: Arc<PayloadAttestationAggPool<P, W>>,
-        block_producer: Arc<BlockProducer<P, W>>,
-        builder_api: Option<Arc<BuilderApi>>,
-        validator_config: Arc<ValidatorConfig>,
-        signer: Arc<Signer>,
-        p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
-        subnet_service_tx: UnboundedSender<ToSubnetService>,
-        liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
-        metrics: Option<Arc<Metrics>>,
-        dedicated_executor: Arc<DedicatedExecutor>,
         wait_group: W,
     ) -> Self {
         Self {
-            controller,
+            context,
             slot_head,
             beacon_state,
-            attestation_agg_pool,
-            sync_committee_agg_pool,
-            payload_attestation_agg_pool,
-            block_producer,
-            builder_api,
-            validator_config,
-            signer,
-            p2p_tx,
-            subnet_service_tx,
-            liveness_tx,
-            metrics,
-            dedicated_executor,
             wait_group,
         }
     }
 
-    pub async fn attester_duties_at_slots(
+    pub fn attester_duties_at_slots(
         &self,
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
@@ -142,7 +126,7 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
         let state = self.beacon_state.as_ref();
         // `slots` must lie within one epoch, as the duties carry a single dependent root.
         let epoch = misc::compute_epoch_at_slot::<P>(slots.start);
-        let dependent_root = self.dependent_root(epoch, None).await?;
+        let dependent_root = self.dependent_root_at(epoch)?;
         let indices = validator_indices.iter().copied().collect::<HashSet<_>>();
 
         let duties = slots
@@ -174,9 +158,9 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
                     .unwrap_or_else(KzgProofs::empty_fulu)
                     .into_iter()
                     .collect_vec(),
-                self.controller.store_config().kzg_backend,
-                self.metrics.clone(),
-                self.dedicated_executor.clone_arc(),
+                self.context.chain.controller.store_config().kzg_backend,
+                self.context.metrics.clone(),
+                self.context.dedicated_executor.clone_arc(),
             )
             .await?;
 
@@ -190,7 +174,9 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
             )? {
                 let blob_sidecar = Arc::new(blob_sidecar);
 
-                self.controller
+                self.context
+                    .chain
+                    .controller
                     .on_own_blob_sidecar(self.wait_group.clone(), blob_sidecar.clone_arc());
             }
         }
@@ -204,12 +190,16 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
     ) {
         for data_column_sidecar in data_column_sidecars {
             if self
+                .context
+                .chain
                 .controller
                 .sampling_columns()
                 .into_iter()
                 .contains(&data_column_sidecar.index())
             {
-                self.controller
+                self.context
+                    .chain
+                    .controller
                     .on_own_data_column_sidecar(
                         self.wait_group.clone(),
                         data_column_sidecar.clone_arc(),
@@ -217,8 +207,16 @@ impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
                     .await;
             }
 
-            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar).send(&self.p2p_tx);
+            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                .send(&self.context.p2p_tx);
         }
+    }
+
+    fn dependent_root_at(&self, epoch: Epoch) -> Result<H256> {
+        self.context
+            .chain
+            .controller
+            .dependent_root(&self.beacon_state, misc::previous_epoch(epoch))
     }
 }
 
@@ -228,8 +226,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         epoch: Epoch,
         validator_indices: &[ValidatorIndex],
     ) -> Result<Vec<ValidatorLivenessResponse>> {
-        let liveness_tx = self.liveness_tx.as_ref().ok_or_else(|| {
-            AnyhowError::msg("liveness tracking is disabled; enable it with --track-liveness")
+        let liveness_tx = self.context.liveness_tx.as_ref().ok_or_else(|| {
+            anyhow!("liveness tracking is disabled; enable it with --track-liveness")
         })?;
 
         let (sender, receiver) = oneshot::channel();
@@ -244,13 +242,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             .collect())
     }
 
-    async fn dependent_root(
-        &self,
-        epoch: Epoch,
-        _validator_index: Option<ValidatorIndex>,
-    ) -> Result<H256> {
-        self.controller
-            .dependent_root(&self.beacon_state, misc::previous_epoch(epoch))
+    async fn dependent_root(&self, epoch: Epoch, _validator_index: ValidatorIndex) -> Result<H256> {
+        self.dependent_root_at(epoch)
     }
 
     async fn attestation_data(
@@ -267,7 +260,11 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             if self.beacon_state.latest_block_header().slot == slot_head.slot() {
                 0
             } else {
-                let (head_root, payload_status) = self.controller.head_root_with_payload_status();
+                let (head_root, payload_status) = self
+                    .context
+                    .chain
+                    .controller
+                    .head_root_with_payload_status();
 
                 // The status belongs to fork choice's head, which may have moved since
                 // `slot_head` was taken. Signalling a payload the attestation does not point at
@@ -306,6 +303,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         committee_index: CommitteeIndex,
     ) -> Result<Attestation<P>> {
         let aggregate = self
+            .context
+            .chain
             .attestation_agg_pool
             .best_aggregate_attestation(AttestationKey {
                 data,
@@ -313,10 +312,10 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             })
             .await
             .ok_or_else(|| {
-                AnyhowError::msg(format!(
+                anyhow!(
                     "no aggregate attestation for committee {committee_index} in slot {}",
                     data.slot,
-                ))
+                )
             })?;
 
         let phase = self.slot_head.config.phase_at_slot::<P>(data.slot);
@@ -347,7 +346,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             let subnet_id =
                 subnet_id::<P>(&self.beacon_state, attestation.data().slot, committee_index)?;
 
-            self.controller.on_singular_attestation(
+            self.context.chain.controller.on_singular_attestation(
                 self.wait_group.clone(),
                 AttestationItem::unverified(
                     attestation.clone_arc(),
@@ -356,9 +355,9 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             );
 
             ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
-                .send(&self.p2p_tx);
+                .send(&self.context.p2p_tx);
 
-            self.attestation_agg_pool.insert_attestation(
+            self.context.chain.attestation_agg_pool.insert_attestation(
                 self.wait_group.clone(),
                 attestation,
                 Some(*validator_index),
@@ -375,14 +374,14 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         for aggregate_and_proof in aggregates_and_proofs {
             let attestation = Arc::new(aggregate_and_proof.aggregate());
 
-            self.attestation_agg_pool.insert_attestation(
+            self.context.chain.attestation_agg_pool.insert_attestation(
                 self.wait_group.clone(),
                 attestation,
                 None,
             );
 
             ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof.clone_arc())
-                .send(&self.p2p_tx);
+                .send(&self.context.p2p_tx);
         }
 
         Ok(())
@@ -400,7 +399,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             subscriptions.to_vec(),
             sender,
         )
-        .send(&self.subnet_service_tx);
+        .send(&self.context.subnet_service_tx);
 
         receiver.await?
     }
@@ -432,7 +431,13 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         let Some(state) = self.beacon_state.post_altair() else {
             // Erring rather than answering with no duties keeps the answer out of the cache.
             ensure!(
-                epoch < self.controller.chain_config().altair_fork_epoch,
+                epoch
+                    < self
+                        .context
+                        .chain
+                        .controller
+                        .chain_config()
+                        .altair_fork_epoch,
                 "sync committee duties for epoch {epoch} are not known to a pre-Altair state",
             );
 
@@ -454,15 +459,18 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                     *subcommittee_index,
                     *message,
                 )))
-                .send(&self.p2p_tx);
+                .send(&self.context.p2p_tx);
             }
 
-            self.sync_committee_agg_pool.aggregate_own_messages(
-                self.wait_group.clone(),
-                messages.clone(),
-                *subcommittee_index,
-                self.beacon_state.clone_arc(),
-            );
+            self.context
+                .chain
+                .sync_committee_agg_pool
+                .aggregate_own_messages(
+                    self.wait_group.clone(),
+                    messages.clone(),
+                    *subcommittee_index,
+                    self.beacon_state.clone_arc(),
+                );
         }
 
         Ok(())
@@ -474,7 +482,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         subscriptions: &[SyncCommitteeSubscription],
     ) -> Result<()> {
         ToSubnetService::UpdateSyncCommitteeSubscriptions(current_epoch, subscriptions.to_vec())
-            .send(&self.subnet_service_tx);
+            .send(&self.context.subnet_service_tx);
 
         Ok(())
     }
@@ -486,6 +494,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         beacon_block_root: H256,
     ) -> Result<SyncCommitteeContribution<P>> {
         Ok(self
+            .context
+            .chain
             .sync_committee_agg_pool
             .best_subcommittee_contribution(slot, beacon_block_root, subcommittee_index)
             .await)
@@ -497,13 +507,16 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
     ) -> Result<()> {
         for contribution_and_proof in contributions_and_proofs {
             ValidatorToP2p::PublishContributionAndProof(Box::new(*contribution_and_proof))
-                .send(&self.p2p_tx);
+                .send(&self.context.p2p_tx);
 
-            self.sync_committee_agg_pool.add_own_contribution(
-                contribution_and_proof.message.aggregator_index,
-                contribution_and_proof.message.contribution,
-                self.beacon_state.clone_arc(),
-            );
+            self.context
+                .chain
+                .sync_committee_agg_pool
+                .add_own_contribution(
+                    contribution_and_proof.message.aggregator_index,
+                    contribution_and_proof.message.contribution,
+                    self.beacon_state.clone_arc(),
+                );
         }
 
         Ok(())
@@ -514,7 +527,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         epoch: Epoch,
         validator_indices: &[ValidatorIndex],
     ) -> Result<PtcDuties> {
-        let dependent_root = self.dependent_root(epoch, None).await?;
+        let dependent_root = self.dependent_root_at(epoch)?;
         let indices = validator_indices.iter().copied().collect::<HashSet<_>>();
 
         let duties = tokio::task::block_in_place(|| {
@@ -530,12 +543,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
     async fn proposer_duties(&self, epoch: Epoch) -> Result<ProposerDuties> {
         let state = self.beacon_state.as_ref();
 
-        // The root proposer duties depend on moved an epoch back with the Fulu lookahead.
-        let dependent_root = if self.slot_head.config.phase_at_epoch(epoch) >= Phase::Fulu {
-            self.dependent_root(epoch, None).await?
-        } else {
-            self.dependent_root(epoch.saturating_add(1), None).await?
-        };
+        let dependent_root =
+            self.dependent_root_at(proposer_dependent_epoch(&self.slot_head.config, epoch))?;
 
         let duties = misc::slots_in_epoch::<P>(epoch)?
             .map(|slot| {
@@ -560,7 +569,12 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
     }
 
     async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
-        let Some(block_with_root) = self.controller.block_by_slot(slot)?.map(WithStatus::value)
+        let Some(block_with_root) = self
+            .context
+            .chain
+            .controller
+            .block_by_slot(slot)?
+            .map(WithStatus::value)
         else {
             return Ok(None);
         };
@@ -568,6 +582,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         let beacon_block_root = block_with_root.root;
 
         let blob_data_available = self
+            .context
+            .chain
             .controller
             .indices_of_missing_data_columns(&block_with_root.block)
             .is_empty();
@@ -575,7 +591,11 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         Ok(Some(PayloadAttestationData {
             beacon_block_root,
             slot,
-            payload_present: self.controller.is_payload_present_timely(beacon_block_root),
+            payload_present: self
+                .context
+                .chain
+                .controller
+                .is_payload_present_timely(beacon_block_root),
             blob_data_available,
         }))
     }
@@ -585,7 +605,7 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         messages: &[Arc<PayloadAttestationMessage>],
     ) -> Result<()> {
         for message in messages {
-            self.controller.on_payload_attestation(
+            self.context.chain.controller.on_payload_attestation(
                 self.wait_group.clone(),
                 PayloadAttestationItem::unverified(
                     Arc::new(message.clone_arc().into()),
@@ -593,7 +613,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 ),
             );
 
-            ValidatorToP2p::PublishPayloadAttestation(message.clone_arc()).send(&self.p2p_tx);
+            ValidatorToP2p::PublishPayloadAttestation(message.clone_arc())
+                .send(&self.context.p2p_tx);
         }
 
         let beacon_state = &self.beacon_state;
@@ -604,12 +625,15 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         let public_key = accessors::public_key(beacon_state.as_ref(), next_proposer_index)?;
 
         // The messages are only aggregated when an own validator proposes next.
-        if self.signer.load().has_key(*public_key) {
-            self.payload_attestation_agg_pool.aggregate_own_messages(
-                self.wait_group.clone(),
-                messages.iter().map(|message| **message).collect(),
-                beacon_state.clone_arc(),
-            );
+        if self.context.signer.load().has_key(*public_key) {
+            self.context
+                .chain
+                .payload_attestation_agg_pool
+                .aggregate_own_messages(
+                    self.wait_group.clone(),
+                    messages.iter().map(|message| **message).collect(),
+                    beacon_state.clone_arc(),
+                );
         }
 
         Ok(())
@@ -633,13 +657,16 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
             tokio::task::block_in_place(|| self.slot_head.proposer_index(beacon_state))?;
         let public_key = *accessors::public_key(beacon_state.as_ref(), proposer_index)?;
 
-        let block_build_context = self.block_producer.new_build_context(
+        let block_build_context = self.context.chain.block_producer.new_build_context(
             beacon_state.clone_arc(),
             self.slot_head.beacon_block_root,
             proposer_index,
             BlockBuildOptions {
                 graffiti,
-                disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
+                disable_blockprint_graffiti: self
+                    .context
+                    .validator_config
+                    .disable_blockprint_graffiti,
                 builder_boost_factor,
                 ..BlockBuildOptions::default()
             },
@@ -676,6 +703,8 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                     .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD) =>
             {
                 let (envelope, blobs, kzg_proofs) = self
+                    .context
+                    .chain
                     .block_producer
                     .build_local_execution_payload_envelope_contents(
                         block.hash_tree_root(),
@@ -727,10 +756,12 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 .await?;
         }
 
-        self.controller
+        self.context
+            .chain
+            .controller
             .on_own_block(self.wait_group.clone(), signed_block.clone_arc());
 
-        ValidatorToP2p::PublishBeaconBlock(signed_block.clone_arc()).send(&self.p2p_tx);
+        ValidatorToP2p::PublishBeaconBlock(signed_block.clone_arc()).send(&self.context.p2p_tx);
 
         Ok(())
     }
@@ -739,12 +770,12 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         &self,
         signed_block: &SignedBlindedBeaconBlock<P>,
     ) -> Result<()> {
-        let Some(builder_api) = &self.builder_api else {
+        let Some(builder_api) = &self.context.builder_api else {
             bail!("no builder API is configured to submit the blinded block to");
         };
 
-        let chain_config = self.controller.chain_config();
-        let genesis_time = self.controller.genesis_time();
+        let chain_config = self.context.chain.controller.chain_config();
+        let genesis_time = self.context.chain.controller.genesis_time();
 
         if self.slot_head.phase() >= Phase::Fulu
             && builder_api
@@ -813,9 +844,9 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 (envelope.beacon_block_root, envelope.payload.slot_number).into(),
                 blobs.clone().into_iter(),
                 kzg_proofs.iter().copied().collect_vec(),
-                self.controller.store_config().kzg_backend,
-                self.metrics.clone(),
-                self.dedicated_executor.clone_arc(),
+                self.context.chain.controller.store_config().kzg_backend,
+                self.context.metrics.clone(),
+                self.context.dedicated_executor.clone_arc(),
             )
             .await?;
 
@@ -823,11 +854,13 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
                 .await;
         }
 
-        self.controller
+        self.context
+            .chain
+            .controller
             .on_own_execution_payload_envelope(signed_envelope.clone_arc());
 
         ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
-            .send(&self.p2p_tx);
+            .send(&self.context.p2p_tx);
 
         Ok(())
     }
@@ -850,24 +883,25 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         for signed_preferences in preferences {
             // Pass into own fork-choice store so bids for this slot pass the
             // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
-            self.controller
+            self.context
+                .chain
+                .controller
                 .on_own_proposer_preferences(signed_preferences.clone_arc());
 
             ValidatorToP2p::PublishProposerPreferences(signed_preferences.clone_arc())
-                .send(&self.p2p_tx);
+                .send(&self.context.p2p_tx);
         }
 
         Ok(())
     }
 }
 
-// The payload timeliness committees of `epoch`, which the state carries for the previous epoch
-// through the seed lookahead.
 pub fn ptc_duties_at_epoch<P: Preset>(
     state: &BeaconState<P>,
     epoch: Epoch,
     indices: &HashSet<ValidatorIndex>,
 ) -> Result<Vec<ValidatorPTCDutyResponse>> {
+    // The state carries the committees an epoch ahead through the seed lookahead.
     misc::slots_in_epoch::<P>(epoch)?
         .map(|slot| {
             accessors::get_ptc(state, slot)?
@@ -888,7 +922,6 @@ pub fn ptc_duties_at_epoch<P: Preset>(
         .try_collect()
 }
 
-// The sync committee of `epoch`, which the state carries only for the current period and the next.
 pub fn sync_duties_at_epoch<P: Preset>(
     state: &(impl PostAltairBeaconState<P> + ?Sized),
     epoch: Epoch,
@@ -897,14 +930,15 @@ pub fn sync_duties_at_epoch<P: Preset>(
     let period = misc::sync_committee_period::<P>(epoch);
     let current_period = misc::sync_committee_period::<P>(accessors::get_current_epoch(state));
 
+    // The state carries only the current period's committee and the next.
     let committee = if period == current_period {
         state.current_sync_committee()
     } else if period == current_period.saturating_add(1) {
         state.next_sync_committee()
     } else {
-        return Err(AnyhowError::msg(format!(
+        return Err(anyhow!(
             "sync committee of period {period} is not known to a state in period {current_period}",
-        )));
+        ));
     };
 
     let mut duties = BTreeMap::<ValidatorIndex, (PublicKeyBytes, Vec<usize>)>::new();

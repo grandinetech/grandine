@@ -23,8 +23,8 @@ use bls::PublicKeyBytes;
 use builder_api::{BuilderApiFormat, BuilderConfig};
 use bytesize::ByteSize;
 use clap::{
-    Arg, ArgGroup, ArgMatches, Args, Command as ClapCommand, CommandFactory as _,
-    Error as ClapError, FromArgMatches as _, Parser, Subcommand, ValueEnum,
+    Arg, ArgMatches, Args, Command as ClapCommand, CommandFactory as _, Error as ClapError,
+    FromArgMatches as _, Parser, Subcommand, ValueEnum,
     builder::{PossibleValuesParser, TypedValueParser},
     error::ErrorKind,
     parser::ValueSource,
@@ -90,9 +90,7 @@ use crate::{
     },
     default_network_config,
     defaults::DEFAULT_RECONSTRUCTION_DELAY_MS,
-    grandine_config::{
-        BuiltInNodeConfig, GrandineConfig, RemoteBeaconNodesConfig, ValidatorClientConfig,
-    },
+    grandine_config::{BeaconNodeConfig, GrandineConfig, Mode, ValidatorClientConfig},
     predefined_network::PredefinedNetwork,
     validators::Validators,
 };
@@ -107,9 +105,11 @@ const VC_COMMAND: &str = "vc";
     display_name = APPLICATION_NAME,
     verbatim_doc_comment,
     version = APPLICATION_VERSION,
-    next_help_heading = "Beacon node",
 )]
 pub struct GrandineArgs {
+    #[clap(flatten)]
+    common_options: CommonOptions,
+
     #[clap(flatten)]
     beacon_node_options: BeaconNodeOptions,
 
@@ -120,36 +120,47 @@ pub struct GrandineArgs {
     command: Option<Command>,
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Parsed once and consumed at once; boxing would only add indirection."
+)]
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run only the beacon node, without a validator client
     /// (example: grandine bn --network holesky)
-    #[command(next_help_heading = "Beacon node")]
-    Bn(Box<BeaconNodeOptions>),
+    Bn {
+        #[command(flatten)]
+        common_options: CommonOptions,
+
+        #[command(flatten)]
+        beacon_node_options: BeaconNodeOptions,
+    },
 
     /// Run only the validator client against remote beacon nodes
     /// (example: grandine vc --beacon-node-urls http://localhost:5052)
-    #[command(next_help_heading = "Validator")]
-    Vc(Box<ValidatorClientOptions>),
+    Vc {
+        #[command(flatten)]
+        common_options: CommonOptions,
+
+        #[command(flatten)]
+        validator_options: ValidatorOptions,
+
+        #[command(flatten)]
+        remote_validator_options: RemoteValidatorOptions,
+    },
 
     #[clap(flatten)]
     Other(GrandineCommand),
 }
 
-/// Options of `bn`: the beacon node alone.
-#[derive(Debug, Args)]
-pub struct BeaconNodeOptions {
-    #[clap(flatten)]
-    common_options: CommonOptions,
-
-    #[clap(flatten)]
-    built_in_node_options: BuiltInNodeOptions,
-}
-
 /// Options of the built-in beacon node, which `vc` runs without.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "False positive. The `bool`s are independent."
+)]
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Beacon node")]
-pub struct BuiltInNodeOptions {
+pub struct BeaconNodeOptions {
     /// Enable validator liveness tracking
     /// [default: disabled]
     #[clap(long)]
@@ -159,20 +170,166 @@ pub struct BuiltInNodeOptions {
     #[clap(long, default_value_t = DEFAULT_KZG_BACKEND)]
     kzg_backend: KzgBackend,
 
-    #[clap(flatten)]
-    execution_layer_options: ExecutionLayerOptions,
+    /// List of Eth1 RPC URLs
+    #[clap(long, num_args = 1..)]
+    eth1_rpc_urls: Vec<RedactingUrl>,
 
-    #[clap(flatten)]
-    sync_options: SyncOptions,
+    /// Max size of the Eth1 database
+    #[clap(help_heading = "Storage", long, default_value_t = DEFAULT_ETH1_DB_SIZE)]
+    eth1_database_size: ByteSize,
 
-    #[clap(flatten)]
-    storage_options: StorageOptions,
+    /// Optional CL unique identifier to send to EL in the JWT token claim
+    /// [default: None]
+    #[clap(long)]
+    jwt_id: Option<String>,
 
-    #[clap(flatten)]
-    custody_options: CustodyOptions,
+    /// Path to a file containing the hex-encoded 256 bit secret key to be used for verifying/generating JWT tokens
+    #[clap(long)]
+    jwt_secret: Option<PathBuf>,
 
-    #[clap(flatten)]
-    telemetry_options: TelemetryOptions,
+    /// Optional CL node type/version to send to EL in the JWT token claim
+    /// [default: None]
+    #[clap(long)]
+    jwt_version: Option<String>,
+
+    /// Start tracking deposit contract from BLOCK_NUMBER
+    #[clap(long, value_name = "BLOCK_NUMBER")]
+    deposit_contract_starting_block: Option<ExecutionBlockNumber>,
+
+    /// Beacon node API URL to load recent finalized checkpoint and sync from it
+    /// [default: None]
+    #[clap(long)]
+    checkpoint_sync_url: Option<RedactingUrl>,
+
+    /// Force checkpoint sync. Requires --checkpoint-sync-url
+    /// [default: disabled]
+    #[clap(long, requires = "checkpoint_sync_url")]
+    force_checkpoint_sync: bool,
+
+    /// State slot
+    /// [default: None]
+    #[clap(long)]
+    state_slot: Option<Slot>,
+
+    /// [DEPRECATED] Enable syncing historical data
+    /// [default: disabled]
+    #[clap(long = "back_sync")]
+    back_sync: bool,
+
+    /// Enable syncing historical data.
+    /// When used with --archive-storage, it will back-sync to genesis and reconstruct historical states.
+    /// When used without --archive-storage, it will back-sync blocks to the `Config::min_epochs_for_block_requests` epoch.
+    /// [default: disabled]
+    #[clap(long = "back-sync", conflicts_with("prune_storage"))]
+    back_sync_enabled: bool,
+
+    /// Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync.
+    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases.
+    /// [default: disabled]
+    #[clap(help_heading = "Storage", long)]
+    force_reset_beacon_db: bool,
+
+    /// Disable reconstruction while syncing the chain
+    /// [default: disabled]
+    #[clap(long)]
+    sync_without_reconstruction: bool,
+
+    /// Default data column reconstruction delay in milliseconds for nodes serving more than half of the available data columns.
+    #[clap(long, default_value_t = DEFAULT_RECONSTRUCTION_DELAY_MS)]
+    reconstruction_delay: u64,
+
+    /// A list beacon block roots that beacon node rejects unconditionally
+    #[clap(long)]
+    blacklisted_blocks: Vec<H256>,
+
+    /// Always use specified external block builder without checking for circuit breaker conditions
+    #[clap(help_heading = "Block production", long)]
+    builder_disable_checks: bool,
+
+    /// Max allowed consecutive missing blocks (missing payloads post-Gloas) to trigger circuit breaker condition and switch to local execution engine for payload construction
+    #[clap(help_heading = "Block production", long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS)]
+    builder_max_skipped_slots: u64,
+
+    /// Max allowed missing blocks (missing payloads post-Gloas) in the last rolling epoch to trigger circuit breaker condition and switch to local execution engine for payload construction
+    #[clap(help_heading = "Block production", long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
+    builder_max_skipped_slots_per_epoch: u64,
+
+    /// Directory to store application data files
+    /// [default: {data_dir}/beacon]
+    #[clap(help_heading = "Storage", long)]
+    store_directory: Option<PathBuf>,
+
+    /// Directory to store application network files
+    /// [default: {data_dir}/network]
+    #[clap(help_heading = "Storage", long)]
+    network_dir: Option<PathBuf>,
+
+    /// Enable archival storage mode, where all blocks, states (every --archival-epoch-interval epochs) and blobs are stored in the database
+    /// [default: disabled]
+    #[clap(help_heading = "Storage", long, conflicts_with("prune_storage"))]
+    archive_storage: bool,
+
+    /// Enable prune storage mode, where only a single checkpoint state and block are stored in the database
+    /// [default: disabled]
+    #[clap(help_heading = "Storage", long, conflicts_with("archive_storage"))]
+    prune_storage: bool,
+
+    /// Archival epoch interval
+    #[clap(help_heading = "Storage", long, default_value_t = DEFAULT_ARCHIVAL_EPOCH_INTERVAL)]
+    archival_epoch_interval: NonZeroU64,
+
+    /// Max size of the Eth2 database
+    #[clap(help_heading = "Storage", long, default_value_t = DEFAULT_ETH2_DB_SIZE)]
+    database_size: ByteSize,
+
+    /// Number of unfinalized states to keep in memory.
+    #[clap(help_heading = "Storage", long, default_value_t = StoreConfig::default().unfinalized_states_in_memory)]
+    unfinalized_states_in_memory: u64,
+
+    /// Max amount of epochs to retain beacon states in state cache
+    #[clap(help_heading = "Storage", long, default_value_t = StoreConfig::default().max_epochs_to_retain_states_in_cache)]
+    max_epochs_to_retain_states_in_cache: u64,
+
+    /// Default state cache lock timeout in milliseconds
+    #[clap(help_heading = "Storage", long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
+    state_cache_lock_timeout: u64,
+
+    /// Number of epochs to keep blob or data column sidecars available for peer requests.
+    /// Overrides `Config::min_epochs_for_blob_sidecars_requests` and
+    /// `Config::min_epochs_for_data_column_sidecars_requests`.
+    /// Intended primarily for testing. Use with caution.
+    #[clap(
+        help_heading = "Storage",
+        long,
+        conflicts_with("archive_storage"),
+        conflicts_with("prune_storage")
+    )]
+    data_availability_window: Option<u64>,
+
+    /// Run in supernode mode, subscribing to all data column subnets
+    #[clap(
+        long,
+        conflicts_with("semi_supernode"),
+        visible_alias("subscribe-all-data-column-subnets")
+    )]
+    supernode: bool,
+
+    /// Run in semi-supernode mode, subscribing to half of the data column subnets
+    #[clap(
+        long,
+        conflicts_with("supernode"),
+        visible_alias("subscribe-half-data-column-subnets")
+    )]
+    semi_supernode: bool,
+
+    /// Subscribe to all attestation and sync committee subnets.
+    /// This option does not include data column subnets.
+    #[clap(long)]
+    subscribe_all_subnets: bool,
+
+    /// Backfill custody groups
+    #[clap(long)]
+    no_custody_groups_backfill: bool,
 
     #[clap(flatten)]
     http_api_options: HttpApiOptions,
@@ -185,7 +342,16 @@ pub struct BuiltInNodeOptions {
     slasher_options: SlasherOptions,
 }
 
-impl BuiltInNodeOptions {
+impl BeaconNodeOptions {
+    #[must_use]
+    const fn builder_circuit_breaker(&self) -> BuilderCircuitBreakerConfig {
+        BuilderCircuitBreakerConfig {
+            disabled: self.builder_disable_checks,
+            max_skipped_slots: self.builder_max_skipped_slots,
+            max_skipped_slots_per_epoch: self.builder_max_skipped_slots_per_epoch,
+        }
+    }
+
     #[expect(clippy::too_many_arguments, clippy::too_many_lines)]
     fn into_config(
         self,
@@ -197,31 +363,19 @@ impl BuiltInNodeOptions {
         genesis_state_file_given: bool,
         metrics_enabled: bool,
         in_memory: bool,
-        builder_circuit_breaker: BuilderCircuitBreakerConfig,
-    ) -> Result<BuiltInNodeConfig> {
+        max_empty_slots: u64,
+    ) -> Result<BeaconNodeConfig> {
+        let builder_circuit_breaker = self.builder_circuit_breaker();
+
         let Self {
             track_liveness,
             kzg_backend,
-            execution_layer_options,
-            sync_options,
-            storage_options,
-            custody_options,
-            telemetry_options,
-            http_api_options,
-            mut network_config_options,
-            slasher_options,
-        } = self;
-
-        let ExecutionLayerOptions {
             eth1_rpc_urls,
             eth1_database_size,
             jwt_id,
             jwt_secret,
             jwt_version,
             mut deposit_contract_starting_block,
-        } = execution_layer_options;
-
-        let SyncOptions {
             checkpoint_sync_url,
             force_checkpoint_sync,
             state_slot,
@@ -231,9 +385,9 @@ impl BuiltInNodeOptions {
             sync_without_reconstruction,
             reconstruction_delay,
             blacklisted_blocks,
-        } = sync_options;
-
-        let StorageOptions {
+            builder_disable_checks: _,
+            builder_max_skipped_slots: _,
+            builder_max_skipped_slots_per_epoch: _,
             store_directory: _,
             network_dir: _,
             archive_storage,
@@ -244,14 +398,14 @@ impl BuiltInNodeOptions {
             max_epochs_to_retain_states_in_cache,
             state_cache_lock_timeout,
             data_availability_window,
-        } = storage_options;
-
-        let CustodyOptions {
             supernode,
             semi_supernode,
             subscribe_all_subnets,
             no_custody_groups_backfill,
-        } = custody_options;
+            http_api_options,
+            mut network_config_options,
+            slasher_options,
+        } = self;
 
         // `clap(skip)` on the field keeps these at their defaults.
         let SlasherOptions {
@@ -356,7 +510,15 @@ impl BuiltInNodeOptions {
 
         let max_events = http_api_options.max_events;
 
-        Ok(BuiltInNodeConfig {
+        let default_deposit_tree = predefined_network.map(PredefinedNetwork::genesis_deposit_tree);
+
+        let deposit_contract_starting_block = deposit_contract_starting_block.or_else(|| {
+            default_deposit_tree
+                .as_ref()
+                .map(|tree| tree.last_added_block_number.saturating_add(1))
+        });
+
+        Ok(BeaconNodeConfig {
             deposit_contract_starting_block,
             checkpoint_sync_url,
             force_checkpoint_sync,
@@ -370,19 +532,22 @@ impl BuiltInNodeOptions {
                 in_memory,
             ),
             storage_config,
-            unfinalized_states_in_memory,
-            max_epochs_to_retain_states_in_cache,
-            state_cache_lock_timeout: Duration::from_millis(state_cache_lock_timeout),
+            store_config: StoreConfig {
+                max_empty_slots,
+                max_epochs_to_retain_states_in_cache,
+                state_cache_lock_timeout: Duration::from_millis(state_cache_lock_timeout),
+                unfinalized_states_in_memory,
+                kzg_backend,
+                sync_without_reconstruction,
+                builder_circuit_breaker,
+            },
             reconstruction_delay: Duration::from_millis(reconstruction_delay),
-            sync_without_reconstruction,
-            kzg_backend,
-            builder_circuit_breaker,
-            slashing_enabled,
-            slashing_history_limit,
+            slasher_config: slashing_enabled.then_some(SlasherConfig {
+                slashing_history_limit,
+            }),
             state_slot,
             http_api_config: Option::<HttpApiConfig>::from(http_api_options),
             max_events,
-            telemetry_config: telemetry_options.telemetry_config(),
             track_liveness,
             blacklisted_blocks: blacklisted_blocks.into_iter().collect(),
             backfill_custody_groups: !no_custody_groups_backfill,
@@ -391,21 +556,39 @@ impl BuiltInNodeOptions {
     }
 }
 
-/// Options of `vc`: the validator client against remote beacon nodes.
-#[derive(Debug, Args)]
-#[command(group(ArgGroup::new("beacon_nodes").args(["beacon_node_urls"]).required(true)))]
-pub struct ValidatorClientOptions {
-    #[clap(flatten)]
-    common_options: CommonOptions,
+/// The parsed options sorted by the process they configure: the built-in beacon node, with the
+/// validator client unless `bn` was given, or under `vc` the validator client alone. Each variant
+/// becomes the matching [`Mode`].
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Built once and consumed at once; boxing would only add indirection."
+)]
+enum ModeOptions {
+    Local {
+        beacon_node_options: BeaconNodeOptions,
+        validator_options: Option<ValidatorOptions>,
+        command: Option<GrandineCommand>,
+    },
+    Remote {
+        validator_options: ValidatorOptions,
+        remote_validator_options: RemoteValidatorOptions,
+    },
+}
 
-    #[clap(flatten)]
-    validator_options: ValidatorOptions,
-
-    #[clap(flatten)]
-    remote_validator_options: RemoteValidatorOptions,
+impl ModeOptions {
+    const fn beacon_node_options(&self) -> Option<&BeaconNodeOptions> {
+        match self {
+            Self::Local {
+                beacon_node_options,
+                ..
+            } => Some(beacon_node_options),
+            Self::Remote { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
+#[command(next_help_heading = "Chain")]
 struct ChainOptions {
     /// Name of the Eth2 network to connect to
     #[clap(long, value_enum, default_value_t = Network::default())]
@@ -473,6 +656,7 @@ struct ChainOptions {
 }
 
 #[derive(Debug, Args)]
+#[command(next_help_heading = "HTTP API")]
 struct HttpApiOptions {
     /// Run Grandine without HTTP API server.
     #[clap(long, default_value_t = false)]
@@ -542,6 +726,7 @@ impl HttpApiOptions {
 
 /// Options shared by the beacon node and the validator client, so by every command.
 #[derive(Debug, Args)]
+#[command(next_help_heading = "General")]
 struct CommonOptions {
     /// Load command-line options from a YAML file. Keys are long option names (e.g. `network`).
     #[clap(long, value_name = "YAML_FILE")]
@@ -571,6 +756,9 @@ struct CommonOptions {
 
     #[clap(flatten)]
     metrics_options: MetricsOptions,
+
+    #[clap(flatten)]
+    telemetry_options: TelemetryOptions,
 
     #[clap(flatten)]
     block_production_options: BlockProductionOptions,
@@ -609,18 +797,6 @@ struct BlockProductionOptions {
     #[clap(long)]
     builder_url: Option<RedactingUrl>,
 
-    /// Always use specified external block builder without checking for circuit breaker conditions
-    #[clap(long)]
-    builder_disable_checks: bool,
-
-    /// Max allowed consecutive missing blocks (missing payloads post-Gloas) to trigger circuit breaker condition and switch to local execution engine for payload construction
-    #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS)]
-    builder_max_skipped_slots: u64,
-
-    /// Max allowed missing blocks (missing payloads post-Gloas) in the last rolling epoch to trigger circuit breaker condition and switch to local execution engine for payload construction
-    #[clap(long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH)]
-    builder_max_skipped_slots_per_epoch: u64,
-
     /// Percentage multiplier to apply to the builder's payload value when choosing between a builder payload header and payload from the paired execution node
     #[clap(long, default_value_t = ValidatorConfig::default().default_builder_boost_factor)]
     default_builder_boost_factor: Uint256,
@@ -635,6 +811,39 @@ struct BlockProductionOptions {
 }
 
 #[derive(Debug, Args)]
+#[command(next_help_heading = "Telemetry")]
+struct TelemetryOptions {
+    /// The default tracing level controlling how detailed telemetry output will be.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
+    telemetry_level: Level,
+
+    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to.
+    /// WARNING: This feature is experimental, unstable, and subject to change. Use with caution.
+    #[clap(long)]
+    telemetry_metrics_url: Option<RedactingUrl>,
+
+    /// Optional OTLP service name.
+    #[clap(long, requires("telemetry_metrics_url"), default_value_t = APPLICATION_NAME.to_string())]
+    telemetry_service_name: String,
+}
+
+impl TelemetryOptions {
+    #[must_use]
+    fn telemetry_config(&self) -> Option<TelemetryConfig> {
+        if let Some(url) = self.telemetry_metrics_url.clone() {
+            return Some(TelemetryConfig {
+                url,
+                service_name: self.telemetry_service_name.clone(),
+                trace_level: self.telemetry_level,
+            });
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Metrics")]
 struct MetricsOptions {
     /// Collect Prometheus metrics
     #[clap(long = "metrics")]
@@ -651,194 +860,10 @@ struct MetricsOptions {
     /// Update system metrics every n seconds
     #[clap(long, default_value_t = DEFAULT_METRICS_UPDATE_INTERVAL_SECONDS)]
     metrics_update_interval: u64,
-}
 
-#[derive(Debug, Args)]
-struct ExecutionLayerOptions {
-    /// List of Eth1 RPC URLs
-    #[clap(long, num_args = 1..)]
-    eth1_rpc_urls: Vec<RedactingUrl>,
-
-    /// Max size of the Eth1 database
-    #[clap(long, default_value_t = DEFAULT_ETH1_DB_SIZE)]
-    eth1_database_size: ByteSize,
-
-    /// Optional CL unique identifier to send to EL in the JWT token claim
-    /// [default: None]
-    #[clap(long)]
-    jwt_id: Option<String>,
-
-    /// Path to a file containing the hex-encoded 256 bit secret key to be used for verifying/generating JWT tokens
-    #[clap(long)]
-    jwt_secret: Option<PathBuf>,
-
-    /// Optional CL node type/version to send to EL in the JWT token claim
-    /// [default: None]
-    #[clap(long)]
-    jwt_version: Option<String>,
-
-    /// Start tracking deposit contract from BLOCK_NUMBER
-    #[clap(long, value_name = "BLOCK_NUMBER")]
-    deposit_contract_starting_block: Option<ExecutionBlockNumber>,
-}
-
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "False positive. The `bool`s are independent."
-)]
-#[derive(Debug, Args)]
-struct SyncOptions {
-    /// Beacon node API URL to load recent finalized checkpoint and sync from it
-    /// [default: None]
-    #[clap(long)]
-    checkpoint_sync_url: Option<RedactingUrl>,
-
-    /// Force checkpoint sync. Requires --checkpoint-sync-url
-    /// [default: disabled]
-    #[clap(long, requires = "checkpoint_sync_url")]
-    force_checkpoint_sync: bool,
-
-    /// State slot
-    /// [default: None]
-    #[clap(long)]
-    state_slot: Option<Slot>,
-
-    /// [DEPRECATED] Enable syncing historical data
-    /// [default: disabled]
-    #[clap(long = "back_sync")]
-    back_sync: bool,
-
-    /// Enable syncing historical data.
-    /// When used with --archive-storage, it will back-sync to genesis and reconstruct historical states.
-    /// When used without --archive-storage, it will back-sync blocks to the `Config::min_epochs_for_block_requests` epoch.
-    /// [default: disabled]
-    #[clap(long = "back-sync", conflicts_with("prune_storage"))]
-    back_sync_enabled: bool,
-
-    /// Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync.
-    /// WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases.
-    /// [default: disabled]
-    #[clap(long)]
-    force_reset_beacon_db: bool,
-
-    /// Disable reconstruction while syncing the chain
-    /// [default: disabled]
-    #[clap(long)]
-    sync_without_reconstruction: bool,
-
-    /// Default data column reconstruction delay in milliseconds for nodes serving more than half of the available data columns.
-    #[clap(long, default_value_t = DEFAULT_RECONSTRUCTION_DELAY_MS)]
-    reconstruction_delay: u64,
-
-    /// A list beacon block roots that beacon node rejects unconditionally
-    #[clap(long)]
-    blacklisted_blocks: Vec<H256>,
-}
-
-#[derive(Debug, Args)]
-struct StorageOptions {
-    /// Directory to store application data files
-    /// [default: {data_dir}/beacon]
-    #[clap(long)]
-    store_directory: Option<PathBuf>,
-
-    /// Directory to store application network files
-    /// [default: {data_dir}/network]
-    #[clap(long)]
-    network_dir: Option<PathBuf>,
-
-    /// Enable archival storage mode, where all blocks, states (every --archival-epoch-interval epochs) and blobs are stored in the database
-    /// [default: disabled]
-    #[clap(long, conflicts_with("prune_storage"))]
-    archive_storage: bool,
-
-    /// Enable prune storage mode, where only a single checkpoint state and block are stored in the database
-    /// [default: disabled]
-    #[clap(long, conflicts_with("archive_storage"))]
-    prune_storage: bool,
-
-    /// Archival epoch interval
-    #[clap(long, default_value_t = DEFAULT_ARCHIVAL_EPOCH_INTERVAL)]
-    archival_epoch_interval: NonZeroU64,
-
-    /// Max size of the Eth2 database
-    #[clap(long, default_value_t = DEFAULT_ETH2_DB_SIZE)]
-    database_size: ByteSize,
-
-    /// Number of unfinalized states to keep in memory.
-    #[clap(long, default_value_t = StoreConfig::default().unfinalized_states_in_memory)]
-    unfinalized_states_in_memory: u64,
-
-    /// Max amount of epochs to retain beacon states in state cache
-    #[clap(long, default_value_t = StoreConfig::default().max_epochs_to_retain_states_in_cache)]
-    max_epochs_to_retain_states_in_cache: u64,
-
-    /// Default state cache lock timeout in milliseconds
-    #[clap(long, default_value_t = DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS)]
-    state_cache_lock_timeout: u64,
-
-    /// Number of epochs to keep blob or data column sidecars available for peer requests.
-    /// Overrides `Config::min_epochs_for_blob_sidecars_requests` and
-    /// `Config::min_epochs_for_data_column_sidecars_requests`.
-    /// Intended primarily for testing. Use with caution.
-    #[clap(
-        long,
-        conflicts_with("archive_storage"),
-        conflicts_with("prune_storage")
-    )]
-    data_availability_window: Option<u64>,
-}
-
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "False positive. The `bool`s are independent."
-)]
-#[derive(Debug, Args)]
-struct CustodyOptions {
-    /// Run in supernode mode, subscribing to all data column subnets
-    #[clap(
-        long,
-        conflicts_with("semi_supernode"),
-        visible_alias("subscribe-all-data-column-subnets")
-    )]
-    supernode: bool,
-
-    /// Run in semi-supernode mode, subscribing to half of the data column subnets
-    #[clap(
-        long,
-        conflicts_with("supernode"),
-        visible_alias("subscribe-half-data-column-subnets")
-    )]
-    semi_supernode: bool,
-
-    /// Subscribe to all attestation and sync committee subnets.
-    /// This option does not include data column subnets.
-    #[clap(long)]
-    subscribe_all_subnets: bool,
-
-    /// Backfill custody groups
-    #[clap(long)]
-    no_custody_groups_backfill: bool,
-}
-
-#[derive(Debug, Args)]
-struct TelemetryOptions {
     /// Optional remote metrics (beaconcha.in metrics) URL that Grandine will periodically send metrics to
     #[clap(long)]
     remote_metrics_url: Option<RedactingUrl>,
-
-    /// The default tracing level controlling how detailed telemetry output will be.
-    #[clap(long, requires("telemetry_metrics_url"), default_value_t = Level::INFO)]
-    telemetry_level: Level,
-
-    /// Optional OTLP metrics gRPC URL that Grandine will submit tracing and span data to.
-    /// WARNING: This feature is experimental, unstable, and subject to change. Use with caution.
-    #[clap(long)]
-    telemetry_metrics_url: Option<RedactingUrl>,
-
-    /// Optional OTLP service name.
-    #[clap(long, requires("telemetry_metrics_url"), default_value_t = APPLICATION_NAME.to_string())]
-    telemetry_service_name: String,
 }
 
 #[expect(
@@ -846,6 +871,7 @@ struct TelemetryOptions {
     reason = "False positive. The `bool`s are independent."
 )]
 #[derive(Debug, Args)]
+#[command(next_help_heading = "Networking")]
 struct NetworkConfigOptions {
     /// Listen IPv4 address
     /// [default: 0.0.0.0, unless --disable-ipv4 is set]
@@ -978,20 +1004,6 @@ struct NetworkConfigOptions {
     /// List of trusted peers
     #[clap(long, value_delimiter = ',')]
     trusted_peers: Vec<PeerIdSerialized>,
-}
-
-impl TelemetryOptions {
-    pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
-        if let Some(url) = self.telemetry_metrics_url.clone() {
-            return Some(TelemetryConfig {
-                url,
-                service_name: self.telemetry_service_name.clone(),
-                trace_level: self.telemetry_level,
-            });
-        }
-
-        None
-    }
 }
 
 impl NetworkConfigOptions {
@@ -1213,11 +1225,16 @@ struct ValidatorOptions {
     report_validator_performance: bool,
 
     /// Path to a directory containing EIP-2335 keystore files
-    #[clap(long, requires("keystore_password_file"))]
+    #[clap(
+        help_heading = "Validator keys",
+        long,
+        requires("keystore_password_file")
+    )]
     keystore_dir: Option<PathBuf>,
 
     /// Path to a directory containing passwords for keystore files
     #[clap(
+        help_heading = "Validator keys",
         long,
         requires("keystore_dir"),
         conflicts_with("keystore_password_file")
@@ -1226,6 +1243,7 @@ struct ValidatorOptions {
 
     /// Path to a file containing password for keystore files
     #[clap(
+        help_heading = "Validator keys",
         long,
         requires("keystore_dir"),
         conflicts_with("keystore_password_dir")
@@ -1233,27 +1251,27 @@ struct ValidatorOptions {
     keystore_password_file: Option<PathBuf>,
 
     /// Path to a file containing password for decrypting imported keystores from API
-    #[clap(long)]
+    #[clap(help_heading = "Validator keys", long)]
     keystore_storage_password_file: Option<PathBuf>,
 
     /// List of public keys to use from Web3Signer
-    #[clap(long, num_args = 1.., value_delimiter = ',')]
+    #[clap(help_heading = "Validator keys", long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
 
     /// Refetches keys from Web3Signer once every epoch. This overwrites changes done via Keymanager API for remote keys
-    #[clap(long)]
+    #[clap(help_heading = "Validator keys", long)]
     web3signer_refresh_keys_every_epoch: bool,
 
     /// [DEPRECATED] List of Web3Signer API URLs
-    #[clap(long, num_args = 1..)]
+    #[clap(help_heading = "Validator keys", long, num_args = 1..)]
     web3signer_api_urls: Vec<RedactingUrl>,
 
     /// List of Web3Signer URLs
-    #[clap(long, num_args = 1..)]
+    #[clap(help_heading = "Validator keys", long, num_args = 1..)]
     web3signer_urls: Vec<RedactingUrl>,
 
     /// Use validator key cache for faster startup
-    #[clap(long)]
+    #[clap(help_heading = "Validator keys", long)]
     use_validator_key_cache: bool,
 
     /// Number of epochs to keep slashing protection data for
@@ -1267,8 +1285,7 @@ struct ValidatorOptions {
 impl ValidatorOptions {
     fn into_config(
         self,
-        built_in_beacon_node: bool,
-        track_liveness: bool,
+        beacon_node_options: Option<&BeaconNodeOptions>,
     ) -> Result<ValidatorClientConfig> {
         let Self {
             detect_doppelgangers,
@@ -1287,14 +1304,14 @@ impl ValidatorOptions {
         } = self;
 
         // Without the built-in node liveness comes from the remote beacon nodes.
-        if detect_doppelgangers && built_in_beacon_node {
+        if detect_doppelgangers && let Some(options) = beacon_node_options {
             ensure!(
-                track_liveness,
+                options.track_liveness,
                 Error::DoppelgangerDetectionRequiresLivenessTracking,
             );
         }
 
-        if !built_in_beacon_node {
+        if beacon_node_options.is_none() {
             ensure!(
                 !report_validator_performance,
                 Error::PerformanceReportsRequireBuiltInNode,
@@ -1355,15 +1372,23 @@ impl ValidatorOptions {
 }
 
 #[derive(Debug, Args)]
-#[command(next_help_heading = "Validator")]
+#[command(next_help_heading = "Beacon nodes")]
 struct RemoteValidatorOptions {
-    /// List of beacon node API URLs to perform validator duties against
-    #[clap(long, num_args = 1..)]
+    /// List of beacon node API URLs to perform validator duties against.
+    /// Among the healthiest nodes, duties go to the one whose head most of the nodes share, then
+    /// to the one with the newest head, then to the first listed.
+    #[clap(long, num_args = 1.., required = true)]
     beacon_node_urls: Vec<RedactingUrl>,
 
     /// List of duties to publish to every beacon node rather than the first one; `all` covers
-    /// every duty
-    #[clap(long, value_delimiter = ',', value_parser = published_duty_parser())]
+    /// every duty, and the flag given without a value publishes everything to the first node only
+    #[clap(
+        long,
+        num_args = 0..,
+        value_delimiter = ',',
+        default_value = "all",
+        value_parser = published_duty_parser()
+    )]
     publish_to_every_node: Vec<PublishedDuty>,
 }
 
@@ -1375,7 +1400,7 @@ fn published_duty_parser() -> impl TypedValueParser<Value = PublishedDuty> {
 }
 
 #[derive(Debug, Args)]
-#[command(next_help_heading = "Validator")]
+#[command(next_help_heading = "Validator API")]
 struct ValidatorApiOptions {
     /// Enable validator API
     #[clap(long)]
@@ -1470,67 +1495,49 @@ impl GrandineArgs {
     #[expect(clippy::too_many_lines)]
     pub fn try_into_config(self) -> Result<GrandineConfig> {
         let Self {
+            common_options,
             beacon_node_options,
             validator_options,
             command,
         } = self;
 
-        let base_node = |command| {
-            let BeaconNodeOptions {
-                common_options,
-                built_in_node_options,
-            } = beacon_node_options;
-
+        let local = |command| {
             (
                 common_options,
-                Some(built_in_node_options),
-                Some(validator_options),
-                None,
-                command,
+                ModeOptions::Local {
+                    beacon_node_options,
+                    validator_options: Some(validator_options),
+                    command,
+                },
             )
         };
 
-        let (
-            common_options,
-            built_in_node_options,
-            validator_options,
-            remote_validator_options,
-            command,
-        ) = match command {
-            Some(Command::Bn(beacon_node_options)) => {
-                let BeaconNodeOptions {
-                    common_options,
-                    built_in_node_options,
-                } = *beacon_node_options;
-
-                (
-                    common_options,
-                    Some(built_in_node_options),
-                    None,
-                    None,
-                    None,
-                )
-            }
-            Some(Command::Vc(validator_client_options)) => {
-                let ValidatorClientOptions {
-                    common_options,
+        let (common_options, mode_options) = match command {
+            Some(Command::Bn {
+                common_options,
+                beacon_node_options,
+            }) => (
+                common_options,
+                ModeOptions::Local {
+                    beacon_node_options,
+                    validator_options: None,
+                    command: None,
+                },
+            ),
+            Some(Command::Vc {
+                common_options,
+                validator_options,
+                remote_validator_options,
+            }) => (
+                common_options,
+                ModeOptions::Remote {
                     validator_options,
                     remote_validator_options,
-                } = *validator_client_options;
-
-                (
-                    common_options,
-                    None,
-                    Some(validator_options),
-                    Some(remote_validator_options),
-                    None,
-                )
-            }
-            Some(Command::Other(command)) => base_node(Some(command)),
-            None => base_node(None),
+                },
+            ),
+            Some(Command::Other(command)) => local(Some(command)),
+            None => local(None),
         };
-
-        let built_in_beacon_node = built_in_node_options.is_some();
 
         let CommonOptions {
             mut features,
@@ -1539,6 +1546,7 @@ impl GrandineArgs {
             in_memory,
             chain_options,
             metrics_options,
+            telemetry_options,
             block_production_options,
             ..
         } = common_options;
@@ -1567,6 +1575,7 @@ impl GrandineArgs {
             metrics_address,
             metrics_port,
             metrics_update_interval,
+            remote_metrics_url,
         } = metrics_options;
 
         let BlockProductionOptions {
@@ -1577,33 +1586,10 @@ impl GrandineArgs {
             builder_api_format,
             builder_api_url,
             builder_url,
-            builder_disable_checks,
-            builder_max_skipped_slots,
-            builder_max_skipped_slots_per_epoch,
             default_builder_boost_factor,
             default_gas_limit,
             disable_wait_for_late_blocks,
         } = block_production_options;
-
-        let track_liveness = built_in_node_options
-            .as_ref()
-            .is_some_and(|options| options.track_liveness);
-
-        let validator_client = validator_options
-            .map(|validator_options| {
-                validator_options.into_config(built_in_beacon_node, track_liveness)
-            })
-            .transpose()?;
-
-        let remote_beacon_nodes = remote_validator_options.map(
-            |RemoteValidatorOptions {
-                 beacon_node_urls,
-                 publish_to_every_node,
-             }| RemoteBeaconNodesConfig {
-                beacon_node_urls,
-                publish_to_every_node,
-            },
-        );
 
         if in_memory {
             warn_with_peers!(
@@ -1617,10 +1603,6 @@ impl GrandineArgs {
         if configuration_file.is_some() && verify_configuration_file.is_some() {
             warn_with_peers!("both --configuration-file and --verify-configuration-file specified");
         }
-
-        let remote_metrics_url = built_in_node_options
-            .as_ref()
-            .and_then(|options| options.telemetry_options.remote_metrics_url.clone());
 
         if remote_metrics_url.is_some() && !metrics_enabled {
             warn_with_peers!(
@@ -1740,12 +1722,12 @@ impl GrandineArgs {
         let directories = Arc::new(
             Directories {
                 data_dir,
-                store_directory: built_in_node_options
-                    .as_ref()
-                    .and_then(|options| options.storage_options.store_directory.clone()),
-                network_dir: built_in_node_options
-                    .as_ref()
-                    .and_then(|options| options.storage_options.network_dir.clone()),
+                store_directory: mode_options
+                    .beacon_node_options()
+                    .and_then(|options| options.store_directory.clone()),
+                network_dir: mode_options
+                    .beacon_node_options()
+                    .and_then(|options| options.network_dir.clone()),
                 validator_dir: None,
                 secrets_dir: None,
             }
@@ -1787,64 +1769,20 @@ impl GrandineArgs {
             builder_url
         };
 
+        // The circuit breaker is the built-in node's; a validator client never trips it.
+        let builder_circuit_breaker = mode_options.beacon_node_options().map_or_else(
+            BuilderCircuitBreakerConfig::default,
+            BeaconNodeOptions::builder_circuit_breaker,
+        );
+
         let builder_config = builder_url.map(|url| BuilderConfig {
             builder_api_format,
             builder_api_url: url,
-            builder_disable_checks,
-            builder_max_skipped_slots,
-            builder_max_skipped_slots_per_epoch,
+            builder_disable_checks: builder_circuit_breaker.disabled,
+            builder_max_skipped_slots: builder_circuit_breaker.max_skipped_slots,
+            builder_max_skipped_slots_per_epoch: builder_circuit_breaker
+                .max_skipped_slots_per_epoch,
         });
-
-        let builder_circuit_breaker = BuilderCircuitBreakerConfig {
-            disabled: builder_disable_checks,
-            max_skipped_slots: builder_max_skipped_slots,
-            max_skipped_slots_per_epoch: builder_max_skipped_slots_per_epoch,
-        };
-
-        let built_in_node = built_in_node_options
-            .map(|options| {
-                options.into_config(
-                    network,
-                    configuration_directory.as_deref(),
-                    &chain_config,
-                    &directories,
-                    predefined_network,
-                    genesis_state_file.is_some(),
-                    metrics_enabled,
-                    in_memory,
-                    builder_circuit_breaker,
-                )
-            })
-            .transpose()?;
-
-        let mut services = vec![];
-
-        if let Some(http_api_config) = built_in_node
-            .as_ref()
-            .and_then(|node| node.http_api_config.as_ref())
-        {
-            services.push((http_api_config.address, "HTTP API"));
-        }
-
-        if let Some(metrics_server_config) = metrics_server_config.as_ref() {
-            services.push((SocketAddr::from(metrics_server_config), "Metrics API"));
-        }
-
-        if let Some(validator_api_config) = validator_client
-            .as_ref()
-            .and_then(|config| config.validator_api_config.as_ref())
-        {
-            services.push((validator_api_config.address, "Validator API"));
-        }
-
-        for ((address1, service1), (address2, service2)) in
-            services.into_iter().tuple_combinations()
-        {
-            ensure!(
-                address1 != address2,
-                Error::IdenticalAddresses { service1, service2 },
-            );
-        }
 
         let metrics = if metrics_enabled {
             let metrics = Metrics::new()?;
@@ -1862,16 +1800,59 @@ impl GrandineArgs {
             metrics_service_config,
         };
 
-        Ok(GrandineConfig {
+        let chain_config = Arc::new(chain_config);
+
+        let mode = match mode_options {
+            ModeOptions::Local {
+                beacon_node_options,
+                validator_options,
+                command,
+            } => {
+                let validator_client_config = validator_options
+                    .map(|options| options.into_config(Some(&beacon_node_options)))
+                    .transpose()?;
+
+                let beacon_node_config = beacon_node_options.into_config(
+                    network,
+                    configuration_directory.as_deref(),
+                    &chain_config,
+                    &directories,
+                    predefined_network,
+                    genesis_state_file.is_some(),
+                    metrics_enabled,
+                    in_memory,
+                    max_empty_slots,
+                )?;
+
+                Mode::Local {
+                    beacon_node_config,
+                    validator_client_config,
+                    command,
+                }
+            }
+            ModeOptions::Remote {
+                validator_options,
+                remote_validator_options:
+                    RemoteValidatorOptions {
+                        beacon_node_urls,
+                        publish_to_every_node,
+                    },
+            } => Mode::Remote {
+                validator_client_config: validator_options.into_config(None)?,
+                beacon_node_urls,
+                publish_to_every_node,
+            },
+        };
+
+        let config = GrandineConfig {
             predefined_network,
-            chain_config: Arc::new(chain_config),
+            chain_config,
             genesis_state_file,
             genesis_state_download_url,
             data_dir: directories.data_dir.clone().unwrap_or_default(),
             directories,
             in_memory,
             request_timeout: Duration::from_millis(request_timeout),
-            command,
             metrics_config,
             disable_blockprint_graffiti,
             graffiti,
@@ -1881,10 +1862,40 @@ impl GrandineArgs {
             default_gas_limit,
             disable_wait_for_late_blocks,
             builder_config,
-            built_in_node,
-            validator_client,
-            remote_beacon_nodes,
-        })
+            telemetry_config: telemetry_options.telemetry_config(),
+            mode,
+        };
+
+        let mut services = vec![];
+
+        if let Some(http_api_config) = config
+            .beacon_node_config()
+            .and_then(|node| node.http_api_config.as_ref())
+        {
+            services.push((http_api_config.address, "HTTP API"));
+        }
+
+        if let Some(metrics_server_config) = config.metrics_config.metrics_server_config.as_ref() {
+            services.push((SocketAddr::from(metrics_server_config), "Metrics API"));
+        }
+
+        if let Some(validator_api_config) = config
+            .validator_client_config()
+            .and_then(|validator_client| validator_client.validator_api_config.as_ref())
+        {
+            services.push((validator_api_config.address, "Validator API"));
+        }
+
+        for ((address1, service1), (address2, service2)) in
+            services.into_iter().tuple_combinations()
+        {
+            ensure!(
+                address1 != address2,
+                Error::IdenticalAddresses { service1, service2 },
+            );
+        }
+
+        Ok(config)
     }
 
     #[must_use]
@@ -1962,7 +1973,6 @@ impl GrandineArgs {
         Self::parse_strictly(args)
     }
 
-    /// [`Self::parse_and_merge_args_file`] without the file, for callers that never pass one.
     pub fn parse_strictly(args: impl IntoIterator<Item = OsString>) -> Result<Self> {
         let command = Self::command();
         let matches = command.clone().try_get_matches_from(args)?;
@@ -1993,25 +2003,20 @@ impl GrandineArgs {
 
     const fn common_options(&self) -> &CommonOptions {
         match &self.command {
-            Some(Command::Bn(beacon_node_options)) => &beacon_node_options.common_options,
-            Some(Command::Vc(validator_client_options)) => &validator_client_options.common_options,
-            _ => &self.beacon_node_options.common_options,
+            Some(Command::Bn { common_options, .. } | Command::Vc { common_options, .. }) => {
+                common_options
+            }
+            _ => &self.common_options,
         }
     }
 
     #[must_use]
     pub fn telemetry_config(&self) -> Option<TelemetryConfig> {
         match &self.command {
-            Some(Command::Bn(beacon_node_options)) => beacon_node_options
-                .built_in_node_options
-                .telemetry_options
-                .telemetry_config(),
-            Some(Command::Vc(_)) => None,
-            _ => self
-                .beacon_node_options
-                .built_in_node_options
-                .telemetry_options
-                .telemetry_config(),
+            Some(Command::Bn { common_options, .. } | Command::Vc { common_options, .. }) => {
+                common_options.telemetry_options.telemetry_config()
+            }
+            _ => self.common_options.telemetry_options.telemetry_config(),
         }
     }
 }
@@ -2274,7 +2279,7 @@ mod tests {
     #[test]
     fn network_config_options() {
         let config = config_from_args(["--discovery-port", "8888"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(node.network_config.libp2p_nodes, []);
         assert_eq!(
@@ -2305,7 +2310,7 @@ mod tests {
     #[test]
     fn listen_address_defaults_to_unspecified_ipv4() {
         let config = config_from_args([]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         let listen_addrs = node.network_config.listen_addrs();
 
         assert_eq!(
@@ -2319,7 +2324,7 @@ mod tests {
     #[test]
     fn listen_address_ipv4_only_uses_given_address() {
         let config = config_from_args(["--listen-address", "127.0.0.1"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         let listen_addrs = node.network_config.listen_addrs();
 
         let v4 = listen_addrs
@@ -2336,7 +2341,7 @@ mod tests {
     #[test]
     fn listen_address_ipv6_defaults_to_dual_stack() {
         let config = config_from_args(["--listen-address-ipv6", "::1"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         let listen_addrs = node.network_config.listen_addrs();
 
         assert_eq!(
@@ -2353,7 +2358,7 @@ mod tests {
     #[test]
     fn disable_ipv4_produces_ipv6_only() {
         let config = config_from_args(["--disable-ipv4", "--listen-address-ipv6", "::1"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         let listen_addrs = node.network_config.listen_addrs();
 
         assert_eq!(listen_addrs.v4().map(|addr| addr.addr), None);
@@ -2430,6 +2435,14 @@ mod tests {
         ])
         .expect_err("performance reports come from the built-in node");
 
+        try_config_from_args([
+            "vc",
+            "--beacon-node-urls",
+            "http://localhost:5052",
+            "--builder-disable-checks",
+        ])
+        .expect_err("the builder circuit breaker is the built-in node's");
+
         let config = config_from_args([
             "vc",
             "--beacon-node-urls",
@@ -2438,9 +2451,8 @@ mod tests {
             "5",
         ]);
 
-        assert!(config.remote_beacon_nodes.is_some());
+        assert!(matches!(config.mode, Mode::Remote { .. }));
         assert_eq!(config.max_empty_slots, 5);
-        assert!(config.built_in_node.is_none());
     }
 
     // Remote beacon nodes are the validator client's concern.
@@ -2452,6 +2464,28 @@ mod tests {
             .expect_err("publishing to every node is only given to vc");
     }
 
+    // Publishing everywhere is the safe default; a single node is what the flag alone selects.
+    #[test]
+    fn every_duty_is_published_to_every_node_by_default() {
+        let vc = ["vc", "--beacon-node-urls", "http://localhost:5052"];
+
+        let published =
+            |arguments: &[&str]| match config_from_args(vc.iter().chain(arguments).copied()).mode {
+                Mode::Remote {
+                    publish_to_every_node,
+                    ..
+                } => publish_to_every_node,
+                Mode::Local { .. } => unreachable!("vc runs against remote nodes"),
+            };
+
+        assert_eq!(published(&[]), [PublishedDuty::All]);
+        assert_eq!(published(&["--publish-to-every-node"]), []);
+        assert_eq!(
+            published(&["--publish-to-every-node", "attestations,blocks"]),
+            [PublishedDuty::Attestations, PublishedDuty::Blocks],
+        );
+    }
+
     #[test]
     fn validator_client_requires_beacon_node_urls() {
         try_config_from_args(["vc"]).expect_err("the validator client has no built-in node");
@@ -2461,12 +2495,16 @@ mod tests {
     #[test]
     fn bn_command_refuses_validator_options() {
         let config = config_from_args(["bn", "--target-peers", "10"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
-        assert!(config.remote_beacon_nodes.is_none());
         assert_eq!(node.network_config.target_peers, 10);
-
-        assert!(config.validator_client.is_none());
+        assert!(matches!(
+            config.mode,
+            Mode::Local {
+                validator_client_config: None,
+                ..
+            }
+        ));
 
         try_config_from_args([
             "bn",
@@ -2507,7 +2545,7 @@ mod tests {
             "max-empty-slots: 5\n",
         )?;
 
-        assert!(config.remote_beacon_nodes.is_some());
+        assert!(matches!(config.mode, Mode::Remote { .. }));
         assert_eq!(config.max_empty_slots, 5);
 
         Ok(())
@@ -2521,7 +2559,7 @@ mod tests {
             "--listen-address-ipv6",
             "::1",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         let listen_addrs = node.network_config.listen_addrs();
 
@@ -2539,17 +2577,17 @@ mod tests {
     #[test]
     fn back_sync_disabled_by_default() {
         let config = config_from_args([]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         assert!(!node.back_sync_enabled);
     }
 
     #[test]
     fn default_builder_circuit_breaker_settings() {
         let config = config_from_args([]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
-            node.builder_circuit_breaker,
+            node.store_config.builder_circuit_breaker,
             BuilderCircuitBreakerConfig::default(),
         );
     }
@@ -2557,9 +2595,9 @@ mod tests {
     #[test]
     fn builder_disable_checks_disables_the_gloas_circuit_breaker() {
         let config = config_from_args(["--builder-disable-checks"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
-        assert!(node.builder_circuit_breaker.disabled);
+        assert!(node.store_config.builder_circuit_breaker.disabled);
     }
 
     #[test]
@@ -2570,10 +2608,18 @@ mod tests {
             "--builder-max-skipped-slots-per-epoch",
             "9",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
-        assert_eq!(node.builder_circuit_breaker.max_skipped_slots, 5);
-        assert_eq!(node.builder_circuit_breaker.max_skipped_slots_per_epoch, 9,);
+        assert_eq!(
+            node.store_config.builder_circuit_breaker.max_skipped_slots,
+            5
+        );
+        assert_eq!(
+            node.store_config
+                .builder_circuit_breaker
+                .max_skipped_slots_per_epoch,
+            9,
+        );
     }
 
     #[test]
@@ -2616,21 +2662,21 @@ mod tests {
     #[test]
     fn supports_back_sync_flag() {
         let config = config_from_args(["--back-sync"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         assert!(node.back_sync_enabled);
     }
 
     #[test]
     fn supports_deprecated_back_sync_flag() {
         let config = config_from_args(["--back_sync"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         assert!(node.back_sync_enabled);
     }
 
     #[test]
     fn eth1_rpc_urls_single_value() {
         let config = config_from_args(["--eth1-rpc-urls", "http://localhost:8545"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         itertools::assert_equal(
             node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
@@ -2645,7 +2691,7 @@ mod tests {
             "http://localhost:8545",
             "http://example.com:8545",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         itertools::assert_equal(
             node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
@@ -2661,7 +2707,7 @@ mod tests {
             "--eth1-rpc-urls",
             "http://example.com:8545",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         itertools::assert_equal(
             node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
@@ -2681,7 +2727,7 @@ mod tests {
     #[test]
     fn default_store_directory() {
         let config = config_from_args([]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
             node.storage_config.directories.store_directory,
@@ -2696,7 +2742,7 @@ mod tests {
     #[test]
     fn data_dir_option() {
         let config = config_from_args(["--data-dir", "/tmp"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
             node.storage_config.directories.store_directory,
@@ -2719,14 +2765,14 @@ mod tests {
     #[test]
     fn http_api_disabled() {
         let config = config_from_args(["--http-port", "1234", "--disable-http-api"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
         assert!(node.http_api_config.is_none());
     }
 
     #[test]
     fn http_port_option() {
         let config = config_from_args(["--http-port", "1234"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
             node.http_api_config.as_ref().map(|config| config.address),
@@ -2737,7 +2783,7 @@ mod tests {
     #[test]
     fn http_allowed_origins_default() {
         let config = config_from_args([]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
@@ -2754,7 +2800,7 @@ mod tests {
     #[test]
     fn http_allowed_origins_option_single_occurrence() {
         let config = config_from_args(["--http-allowed-origins", "*"]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
@@ -2776,7 +2822,7 @@ mod tests {
             "--http-allowed-origins",
             "http://example.com",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
@@ -2800,7 +2846,7 @@ mod tests {
             "--http-allowed-origins",
             "*",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         // `Debug` is the only way to inspect the contents of `AllowOrigin`.
         assert_eq!(
@@ -2817,15 +2863,13 @@ mod tests {
     #[test]
     fn telemetry_config_disabled_by_default() {
         let config = config_from_args([]);
-        let node = built_in_node(&config);
-        assert!(node.telemetry_config.is_none());
+        assert!(config.telemetry_config.is_none());
     }
 
     #[test]
     fn telemetry_config_options() {
         let config = config_from_args(["--telemetry-metrics-url", "http://localhost:4317"]);
-        let node = built_in_node(&config);
-        let telemetry_config = &node.telemetry_config;
+        let telemetry_config = &config.telemetry_config;
 
         assert_eq!(
             telemetry_config
@@ -2857,9 +2901,7 @@ mod tests {
             "--telemetry-level",
             "debug",
         ]);
-        let node = built_in_node(&config);
-
-        let telemetry_config = &node.telemetry_config;
+        let telemetry_config = &config.telemetry_config;
 
         assert_eq!(
             telemetry_config
@@ -2879,6 +2921,20 @@ mod tests {
                 .map(|config| config.service_name.clone()),
             Some("grandine-bn".to_owned()),
         );
+    }
+
+    // The exporter is the process's, so the validator client can use it as the node does.
+    #[test]
+    fn telemetry_config_applies_to_the_validator_client() {
+        let config = config_from_args([
+            "vc",
+            "--beacon-node-urls",
+            "http://localhost:5052",
+            "--telemetry-metrics-url",
+            "http://localhost:4317",
+        ]);
+
+        assert!(config.telemetry_config.is_some());
     }
 
     #[test]
@@ -2906,8 +2962,7 @@ mod tests {
 
         assert_eq!(
             config
-                .validator_client
-                .as_ref()
+                .validator_client_config()
                 .and_then(|config| config.validator_api_config.as_ref())
                 .map(|config| config.address),
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 1234)),
@@ -2925,25 +2980,22 @@ mod tests {
 
         assert_eq!(
             config
-                .validator_client
-                .as_ref()
+                .validator_client_config()
                 .and_then(|config| config.validator_api_config.as_ref())
                 .map(|config| config.address),
             None,
         );
     }
 
-    fn built_in_node(config: &GrandineConfig) -> &BuiltInNodeConfig {
+    fn beacon_node(config: &GrandineConfig) -> &BeaconNodeConfig {
         config
-            .built_in_node
-            .as_ref()
+            .beacon_node_config()
             .expect("the built-in beacon node is enabled")
     }
 
     fn validators(config: &GrandineConfig) -> Option<&Validators> {
         config
-            .validator_client
-            .as_ref()
+            .validator_client_config()
             .and_then(|config| config.validators.as_ref())
     }
 
@@ -3014,7 +3066,7 @@ mod tests {
             "--genesis-state-file",
             "custom.ssz",
         ]);
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(config.predefined_network, Some(PredefinedNetwork::Sepolia));
         assert_eq!(node.deposit_contract_starting_block, Some(0));
@@ -3128,8 +3180,8 @@ mod tests {
         let config = config_from_args(["interchange", "import", "test.json"]);
 
         assert_eq!(
-            config.command,
-            Some(GrandineCommand::Interchange(InterchangeCommand::Import {
+            config.command(),
+            Some(&GrandineCommand::Interchange(InterchangeCommand::Import {
                 file_path: PathBuf::from("test.json"),
             })),
         );
@@ -3140,8 +3192,8 @@ mod tests {
         let config = config_from_args(["interchange", "export", "test.json"]);
 
         assert_eq!(
-            config.command,
-            Some(GrandineCommand::Interchange(InterchangeCommand::Export {
+            config.command(),
+            Some(&GrandineCommand::Interchange(InterchangeCommand::Export {
                 file_path: PathBuf::from("test.json"),
             })),
         );
@@ -3160,8 +3212,8 @@ mod tests {
         ]);
 
         assert_eq!(
-            config.command,
-            Some(GrandineCommand::Export {
+            config.command(),
+            Some(&GrandineCommand::Export {
                 from: 0,
                 to: 20,
                 output_dir: Some(PathBuf::from("export")),
@@ -3175,8 +3227,8 @@ mod tests {
             config_from_args(["replay", "--from", "0", "--to", "20", "--input-dir", "data"]);
 
         assert_eq!(
-            config.command,
-            Some(GrandineCommand::Replay {
+            config.command(),
+            Some(&GrandineCommand::Replay {
                 from: 0,
                 to: 20,
                 input_dir: Some(PathBuf::from("data")),
@@ -3287,7 +3339,7 @@ mod tests {
             ",
         )
         .expect("config should be built from --args-file");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
             node.network_config
@@ -3332,7 +3384,7 @@ mod tests {
             "checkpoint-sync-url: https://checkpoint.example\n",
         )
         .expect("a requirement split across the command line and args file should be satisfied");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert!(node.force_checkpoint_sync);
 
@@ -3346,7 +3398,7 @@ mod tests {
     fn args_file_empty_sequence_keeps_default() {
         let config = try_config_from_args_file("eth1-rpc-urls: []")
             .expect("an empty sequence should be treated as unset");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert!(node.eth1_rpc_urls.is_empty());
     }
@@ -3357,7 +3409,7 @@ mod tests {
             "libp2p-nodes: /ip4/127.0.0.1/tcp/9000,/ip4/127.0.0.2/tcp/9001",
         )
         .expect("a comma-delimited scalar should split into multiple values");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         itertools::assert_equal(
             node.network_config
@@ -3392,7 +3444,7 @@ mod tests {
             ",
         )
         .expect("a full node configuration should be built from --args-file");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(config.predefined_network, Some(PredefinedNetwork::Sepolia));
         assert_eq!(
@@ -3440,8 +3492,7 @@ mod tests {
         assert!(node.track_liveness);
         assert!(
             config
-                .validator_client
-                .as_ref()
+                .validator_client_config()
                 .is_some_and(|config| config.detect_doppelgangers)
         );
     }
@@ -3451,7 +3502,7 @@ mod tests {
         let config =
             try_config_from_args_and_file(["--discovery-port", "7000"], "discovery-port: 8888")
                 .expect("a command-line scalar should override the args file");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
             node.network_config
@@ -3472,7 +3523,7 @@ mod tests {
             ",
         )
         .expect("a command-line list should override the args file list");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         itertools::assert_equal(
             node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
@@ -3490,7 +3541,7 @@ mod tests {
             ",
         )
         .expect("the args file list should be used when the command line omits it");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         itertools::assert_equal(
             node.eth1_rpc_urls.iter().map(RedactingUrl::to_string),
@@ -3505,11 +3556,11 @@ mod tests {
             "back-sync: true",
         )
         .expect("a subcommand should survive args file merging");
-        let node = built_in_node(&config);
+        let node = beacon_node(&config);
 
         assert_eq!(
-            config.command,
-            Some(GrandineCommand::Export {
+            config.command(),
+            Some(&GrandineCommand::Export {
                 from: 0,
                 to: 20,
                 output_dir: None,

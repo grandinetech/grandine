@@ -7,7 +7,6 @@ use http_api_utils::ValidatorProposerDutyResponse;
 use scc::{HashMap as SccHashMap, HashSet as SccHashSet};
 use signer::Signer;
 use ssz::H256;
-use tokio::sync::Mutex;
 use types::{
     phase0::primitives::{Epoch, Slot, ValidatorIndex},
     preset::Preset,
@@ -16,6 +15,7 @@ use types::{
 use crate::{
     beacon_node_api::{BeaconNodeApi as _, ProposerDuties},
     beacon_nodes::BeaconNodes,
+    misc::RequestedIndices,
 };
 
 /// Own proposals of the epochs in flight, from duties.
@@ -24,8 +24,7 @@ pub struct OwnProposerDuties {
     proposers: SccHashMap<(H256, Slot), (ValidatorIndex, PublicKeyBytes)>,
     /// Most slots have no entry, so a fetched epoch has to be recorded on its own.
     fetched: SccHashSet<(H256, Epoch)>,
-    /// The indices the duties were fetched for; a key imported at runtime changes the set.
-    requested: Mutex<Arc<[ValidatorIndex]>>,
+    requested: RequestedIndices,
 }
 
 impl OwnProposerDuties {
@@ -34,20 +33,15 @@ impl OwnProposerDuties {
             signer,
             proposers: SccHashMap::new(),
             fetched: SccHashSet::new(),
-            requested: Mutex::new(Arc::from([])),
+            requested: RequestedIndices::default(),
         }
     }
 
     async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
-        let mut requested = self.requested.lock().await;
-
-        if **requested == *validator_indices {
-            return;
+        if self.requested.changed(validator_indices).await {
+            self.proposers.clear_async().await;
+            self.fetched.clear_async().await;
         }
-
-        *requested = validator_indices.into();
-        self.proposers.clear_async().await;
-        self.fetched.clear_async().await;
     }
 
     pub fn len(&self) -> usize {

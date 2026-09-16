@@ -5,12 +5,13 @@ use binary_utils::TelemetryConfig;
 use builder_api::BuilderConfig;
 use directories::Directories;
 use eth1_api::AuthOptions;
-use fork_choice_store::BuilderCircuitBreakerConfig;
+use fork_choice_store::StoreConfig;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
-use kzg_utils::KzgBackend;
+use keymanager::{ValidatorDefinitions, ValidatorDefinitionsWithStorage};
 use p2p::NetworkConfig;
 use signer::Web3SignerConfig;
+use slasher::SlasherConfig;
 use ssz::Uint256;
 use tracing::info;
 use types::{
@@ -20,13 +21,36 @@ use types::{
     phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, H256, Slot},
     redacting_url::RedactingUrl,
 };
-use validator::ValidatorApiConfig;
+use validator::{ValidatorApiConfig, ValidatorConfig};
 
 use crate::{
     MetricsConfig, StorageConfig, commands::GrandineCommand, predefined_network::PredefinedNetwork,
     validators::Validators,
 };
 
+/// Where duties are performed: the built-in beacon node, or under `vc` remote beacon nodes.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Built once and consumed at once; boxing would only add indirection."
+)]
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
+pub enum Mode {
+    /// The built-in beacon node, with the validator client unless `bn` was given.
+    Local {
+        beacon_node_config: BeaconNodeConfig,
+        validator_client_config: Option<ValidatorClientConfig>,
+        command: Option<GrandineCommand>,
+    },
+    /// The validator client alone, against the nodes given with `--beacon-node-urls`.
+    Remote {
+        validator_client_config: ValidatorClientConfig,
+        beacon_node_urls: Vec<RedactingUrl>,
+        publish_to_every_node: Vec<PublishedDuty>,
+    },
+}
+
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct GrandineConfig {
     pub predefined_network: Option<PredefinedNetwork>,
@@ -37,7 +61,6 @@ pub struct GrandineConfig {
     pub directories: Arc<Directories>,
     pub in_memory: bool,
     pub request_timeout: Duration,
-    pub command: Option<GrandineCommand>,
     pub metrics_config: MetricsConfig,
     pub disable_blockprint_graffiti: bool,
     pub graffiti: Vec<H256>,
@@ -47,17 +70,8 @@ pub struct GrandineConfig {
     pub default_gas_limit: Option<Gas>,
     pub disable_wait_for_late_blocks: bool,
     pub builder_config: Option<BuilderConfig>,
-    pub built_in_node: Option<BuiltInNodeConfig>,
-    pub validator_client: Option<ValidatorClientConfig>,
-    pub remote_beacon_nodes: Option<RemoteBeaconNodesConfig>,
-}
-
-/// The nodes `vc` performs duties against; the built-in beacon node has none.
-#[derive(Clone)]
-#[cfg_attr(test, derive(Debug))]
-pub struct RemoteBeaconNodesConfig {
-    pub beacon_node_urls: Vec<RedactingUrl>,
-    pub publish_to_every_node: Vec<PublishedDuty>,
+    pub telemetry_config: Option<TelemetryConfig>,
+    pub mode: Mode,
 }
 
 /// What only the built-in beacon node needs; `vc` has none.
@@ -65,8 +79,9 @@ pub struct RemoteBeaconNodesConfig {
     clippy::struct_excessive_bools,
     reason = "False positive. The `bool`s are independent."
 )]
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
-pub struct BuiltInNodeConfig {
+pub struct BeaconNodeConfig {
     pub deposit_contract_starting_block: Option<ExecutionBlockNumber>,
     pub checkpoint_sync_url: Option<RedactingUrl>,
     pub force_checkpoint_sync: bool,
@@ -75,19 +90,12 @@ pub struct BuiltInNodeConfig {
     pub auth_options: AuthOptions,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
-    pub unfinalized_states_in_memory: u64,
-    pub max_epochs_to_retain_states_in_cache: u64,
-    pub state_cache_lock_timeout: Duration,
+    pub store_config: StoreConfig,
     pub reconstruction_delay: Duration,
-    pub sync_without_reconstruction: bool,
-    pub kzg_backend: KzgBackend,
-    pub builder_circuit_breaker: BuilderCircuitBreakerConfig,
-    pub slashing_enabled: bool,
-    pub slashing_history_limit: u64,
+    pub slasher_config: Option<SlasherConfig>,
     pub state_slot: Option<Slot>,
     pub http_api_config: Option<HttpApiConfig>,
     pub max_events: usize,
-    pub telemetry_config: Option<TelemetryConfig>,
     pub track_liveness: bool,
     pub blacklisted_blocks: HashSet<H256>,
     pub backfill_custody_groups: bool,
@@ -95,6 +103,7 @@ pub struct BuiltInNodeConfig {
 }
 
 /// What only a running validator client needs; `bn` has none.
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct ValidatorClientConfig {
     pub validators: Option<Validators>,
@@ -107,7 +116,93 @@ pub struct ValidatorClientConfig {
     pub report_validator_performance: bool,
 }
 
+impl ValidatorClientConfig {
+    #[must_use]
+    pub fn expects_keys(&self, validator_definitions: &ValidatorDefinitions) -> bool {
+        self.validator_api_config.is_some()
+            || self.use_validator_key_cache
+            || !self.web3signer_config.is_empty()
+            || !validator_definitions.is_empty()
+            || self.keystore_storage_password_file.is_some()
+    }
+}
+
 impl GrandineConfig {
+    #[must_use]
+    pub const fn beacon_node_config(&self) -> Option<&BeaconNodeConfig> {
+        match &self.mode {
+            Mode::Local {
+                beacon_node_config, ..
+            } => Some(beacon_node_config),
+            Mode::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn beacon_node_config_mut(&mut self) -> Option<&mut BeaconNodeConfig> {
+        match &mut self.mode {
+            Mode::Local {
+                beacon_node_config, ..
+            } => Some(beacon_node_config),
+            Mode::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn validator_client_config(&self) -> Option<&ValidatorClientConfig> {
+        match &self.mode {
+            Mode::Local {
+                validator_client_config,
+                ..
+            } => validator_client_config.as_ref(),
+            Mode::Remote {
+                validator_client_config,
+                ..
+            } => Some(validator_client_config),
+        }
+    }
+
+    #[must_use]
+    pub const fn command(&self) -> Option<&GrandineCommand> {
+        match &self.mode {
+            Mode::Local { command, .. } => command.as_ref(),
+            Mode::Remote { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub fn validator_config(
+        &self,
+        validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
+    ) -> ValidatorConfig {
+        let Self {
+            disable_blockprint_graffiti,
+            graffiti,
+            max_empty_slots,
+            suggested_fee_recipient,
+            default_builder_boost_factor,
+            default_gas_limit,
+            disable_wait_for_late_blocks,
+            ..
+        } = self;
+
+        let custody_mode = self
+            .beacon_node_config()
+            .map_or_else(CustodyMode::default, |node| node.custody_mode);
+
+        ValidatorConfig {
+            disable_blockprint_graffiti: *disable_blockprint_graffiti,
+            graffiti: graffiti.clone(),
+            max_empty_slots: *max_empty_slots,
+            suggested_fee_recipient: *suggested_fee_recipient,
+            default_builder_boost_factor: *default_builder_boost_factor,
+            default_gas_limit: *default_gas_limit,
+            custody_mode,
+            disable_wait_for_late_blocks: *disable_wait_for_late_blocks,
+            validator_definitions,
+        }
+    }
+
     pub fn report(&self) {
         let Self {
             predefined_network,
@@ -119,9 +214,7 @@ impl GrandineConfig {
             suggested_fee_recipient,
             default_builder_boost_factor,
             builder_config,
-            built_in_node,
-            validator_client,
-            remote_beacon_nodes,
+            telemetry_config,
             ..
         } = self;
 
@@ -135,7 +228,11 @@ impl GrandineConfig {
 
         info!("data directory: {}", data_dir.display());
 
-        match built_in_node {
+        if let Some(config) = telemetry_config {
+            info!("telemetry export configured with: {config:?}");
+        }
+
+        match self.beacon_node_config() {
             Some(node) => node.report(chain_config),
             None => info!("built-in beacon node disabled"),
         }
@@ -160,8 +257,8 @@ impl GrandineConfig {
             );
         }
 
-        match validator_client
-            .as_ref()
+        match self
+            .validator_client_config()
             .map(|config| config.validator_api_config.as_ref())
         {
             Some(Some(validator_api_config)) => {
@@ -179,10 +276,11 @@ impl GrandineConfig {
             );
         }
 
-        if let Some(RemoteBeaconNodesConfig {
+        if let Mode::Remote {
             beacon_node_urls,
             publish_to_every_node,
-        }) = remote_beacon_nodes
+            ..
+        } = &self.mode
         {
             info!(
                 "performing validator duties against remote beacon nodes without the built-in \
@@ -198,7 +296,7 @@ impl GrandineConfig {
             }
         }
 
-        if let Some(validator_client) = validator_client {
+        if let Some(validator_client) = self.validator_client_config() {
             if !validator_client.web3signer_config.urls.is_empty() {
                 info!(
                     "using Web3Signer API to sign validator messages (API URLs: [{}])",
@@ -215,7 +313,7 @@ impl GrandineConfig {
     }
 }
 
-impl BuiltInNodeConfig {
+impl BeaconNodeConfig {
     fn report(&self, chain_config: &ChainConfig) {
         let Self {
             checkpoint_sync_url,
@@ -223,12 +321,10 @@ impl BuiltInNodeConfig {
             eth1_rpc_urls,
             network_config,
             storage_config,
-            sync_without_reconstruction,
-            slashing_enabled,
-            slashing_history_limit,
+            store_config,
+            slasher_config,
             state_slot,
             http_api_config,
-            telemetry_config,
             custody_mode,
             ..
         } = self;
@@ -245,17 +341,11 @@ impl BuiltInNodeConfig {
             info!("HTTP API disabled");
         }
 
-        if let Some(config) = telemetry_config {
-            info!("telemetry export configured with: {config:?}");
-        } else {
-            info!("telemetry metrics data export disabled");
-        }
-
         info!(
             "archival interval: {} epochs",
             storage_config.archival_epoch_interval
         );
-        info!("slasher enabled: {slashing_enabled}");
+        info!("slasher enabled: {}", slasher_config.is_some());
 
         if let Some(client_version) = &network_config.identify_agent_version {
             info!("client version: {client_version}");
@@ -273,13 +363,16 @@ impl BuiltInNodeConfig {
             info!("checkpoint sync url: {checkpoint_sync_url}");
         }
 
-        if *slashing_enabled {
-            info!("slasher history limit: {slashing_history_limit}");
+        if let Some(slasher_config) = slasher_config {
+            info!(
+                "slasher history limit: {}",
+                slasher_config.slashing_history_limit
+            );
         }
 
         info!("back-sync enabled: {back_sync_enabled}");
 
-        if *sync_without_reconstruction {
+        if store_config.sync_without_reconstruction {
             info!("sync with reconstruction disabled");
         }
 

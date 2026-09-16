@@ -144,11 +144,11 @@ pub trait SignForSingleFork<P: Preset>: SszHash {
     fn epoch(&self) -> Epoch;
 
     fn signing_root(&self, config: &Config, beacon_state: &(impl BeaconState<P> + ?Sized)) -> H256 {
-        self.signing_root_from_fork_info(config, beacon_state.into())
+        self.signing_root_from_fork_info(config, ForkInfo::from_state(beacon_state))
     }
 
     /// [`Self::signing_root`] for a fork that is already known.
-    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo) -> H256 {
         let domain = accessors::get_domain_from_fork_info(
             config,
             fork_info,
@@ -194,14 +194,14 @@ pub trait SignForSingleForkAtSlot<P: Preset>: SszHash {
         beacon_state: &(impl BeaconState<P> + ?Sized),
         slot: Slot,
     ) -> H256 {
-        self.signing_root_from_fork_info(config, beacon_state.into(), slot)
+        self.signing_root_from_fork_info(config, ForkInfo::from_state(beacon_state), slot)
     }
 
     /// [`Self::signing_root`] for a fork that is already known.
     fn signing_root_from_fork_info(
         &self,
         config: &Config,
-        fork_info: ForkInfo<P>,
+        fork_info: ForkInfo,
         slot: Slot,
     ) -> H256 {
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
@@ -465,7 +465,7 @@ impl<P: Preset> SignForSingleFork<P> for VoluntaryExit {
 
     // Since Deneb the domain is pinned to Capella (EIP-7044); the supplied fork decides,
     // as it does in `process_voluntary_exit`.
-    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo) -> H256 {
         let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
         let current_fork_version = fork_info.fork.current_version;
 
@@ -531,7 +531,7 @@ impl<P: Preset> SignForSingleFork<P> for ProposerPreferences {
     }
 
     // The domain is that of the proposal epoch, even when signed from a state before the fork.
-    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo<P>) -> H256 {
+    fn signing_root_from_fork_info(&self, config: &Config, fork_info: ForkInfo) -> H256 {
         let epoch = <Self as SignForSingleFork<P>>::epoch(self);
         let domain_type = <Self as SignForSingleFork<P>>::DOMAIN_TYPE;
         let fork_version = config.version_at_epoch(epoch);
@@ -563,7 +563,7 @@ mod tests {
 
     use super::*;
 
-    fn fork_info(previous_version: Version, current_version: Version) -> ForkInfo<Mainnet> {
+    fn fork_info(previous_version: Version, current_version: Version) -> ForkInfo {
         ForkInfo {
             fork: Fork {
                 previous_version,
@@ -571,7 +571,6 @@ mod tests {
                 epoch: 0,
             },
             genesis_validators_root: H256::repeat_byte(1),
-            phantom: core::marker::PhantomData,
         }
     }
 

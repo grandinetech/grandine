@@ -558,21 +558,20 @@ pub fn get_domain<P: Preset>(
 ) -> H256 {
     let epoch = epoch.unwrap_or_else(|| get_current_epoch(state));
 
-    get_domain_from_fork_info(config, state.into(), domain_type, epoch)
+    get_domain_from_fork_info(config, ForkInfo::from_state(state), domain_type, epoch)
 }
 
 /// [`get_domain`] for a fork that is already known, as it is to a validator without a state.
 #[must_use]
-pub fn get_domain_from_fork_info<P: Preset>(
+pub fn get_domain_from_fork_info(
     config: &Config,
-    fork_info: ForkInfo<P>,
+    fork_info: ForkInfo,
     domain_type: DomainType,
     epoch: Epoch,
 ) -> H256 {
     let ForkInfo {
         fork,
         genesis_validators_root,
-        ..
     } = fork_info;
 
     let fork_version = if epoch < fork.epoch {

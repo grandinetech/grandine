@@ -1,4 +1,4 @@
-use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter, marker::PhantomData};
+use core::{cmp::Ordering, convert::Infallible, fmt::Debug, iter};
 use std::sync::Arc;
 #[cfg(target_os = "zkvm")]
 use std::{collections::HashMap, slice::Iter as VectorIter, vec::Vec as Vector};
@@ -266,22 +266,17 @@ pub struct BlockRewards {
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
-pub struct ForkInfo<P: Preset> {
+pub struct ForkInfo {
     pub fork: Fork,
     pub genesis_validators_root: H256,
-    // Neither field depends on the preset. `P` is carried so that `From<&BS>` constrains it, and
-    // so that a type like `SlotHead`, whose only preset-dependent field is a `ForkInfo`, needs no
-    // `PhantomData` of its own.
-    #[serde(skip)]
-    pub phantom: PhantomData<P>,
 }
 
-impl<P: Preset, BS: BeaconState<P> + ?Sized> From<&BS> for ForkInfo<P> {
-    fn from(state: &BS) -> Self {
+impl ForkInfo {
+    #[must_use]
+    pub fn from_state<P: Preset>(state: &(impl BeaconState<P> + ?Sized)) -> Self {
         Self {
             fork: state.fork(),
             genesis_validators_root: state.genesis_validators_root(),
-            phantom: PhantomData,
         }
     }
 }

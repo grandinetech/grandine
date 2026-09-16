@@ -240,10 +240,12 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    #[must_use]
     pub fn is_validator_active(&self, public_key: PublicKeyBytes) -> bool {
         self.active_validators.contains(&public_key)
     }
 
+    #[must_use]
     pub fn tracking_end_slot<P: Preset>(&self, public_key: PublicKeyBytes) -> Slot {
         self.tracked_validators
             .get(&public_key)

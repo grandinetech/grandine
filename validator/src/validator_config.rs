@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use bls::PublicKeyBytes;
 use derivative::Derivative;
@@ -21,9 +21,6 @@ pub struct ValidatorConfig {
     #[derivative(Default(value = "Uint256::from_u64(100)"))]
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Option<Gas>,
-    pub keystore_storage_password_file: Option<PathBuf>,
-    #[derivative(Default(value = "true"))]
-    pub backfill_custody_groups: bool,
     pub custody_mode: CustodyMode,
     pub disable_wait_for_late_blocks: bool,
     /// The `validators.yml` definitions, shared with the Keymanager API so runtime settings changes

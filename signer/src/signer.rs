@@ -266,7 +266,7 @@ impl Snapshot {
         &self,
         message: SigningMessage<'_, P>,
         signing_root: H256,
-        fork_info: Option<ForkInfo<P>>,
+        fork_info: Option<ForkInfo>,
         public_key: PublicKeyBytes,
     ) -> Result<Signature> {
         let signature = match self.sign_method(public_key)? {
@@ -286,7 +286,7 @@ impl Snapshot {
     pub async fn sign_triples<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
-        fork_info: ForkInfo<P>,
+        fork_info: ForkInfo,
         current_epoch: Epoch,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
     ) -> Result<impl Iterator<Item = Option<Signature>>> {
@@ -439,7 +439,7 @@ impl Snapshot {
     pub async fn sign_triples_without_slashing_protection<P: Preset>(
         &self,
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
-        fork_info: Option<ForkInfo<P>>,
+        fork_info: Option<ForkInfo>,
     ) -> Result<impl Iterator<Item = Signature>> {
         let mut sign_locally = vec![];
         let mut sign_remotely = vec![];

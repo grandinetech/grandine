@@ -59,7 +59,7 @@ use types::{
 
 use zeroize::Zeroizing;
 
-use crate::misc::ChainSource;
+use crate::misc::{Chain, ChainSource};
 
 const VALIDATOR_API_TOKEN_PATH: &str = "api-token.txt";
 const VALIDATOR_API_DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -114,8 +114,6 @@ enum Error {
     ValidatorNotFound { pubkey: PublicKeyBytes },
     #[error("validator {pubkey:?} is not managed by validator client")]
     ValidatorNotOwned { pubkey: PublicKeyBytes },
-    #[error("no beacon node has reported the genesis yet")]
-    GenesisNotKnown,
 }
 
 impl Serialize for Error {
@@ -162,7 +160,6 @@ impl Error {
                 StatusCode::NOT_FOUND
             }
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::GenesisNotKnown => StatusCode::SERVICE_UNAVAILABLE,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
         }
     }
@@ -501,9 +498,9 @@ async fn keymanager_get_gas_limit<P: Preset, W: Wait>(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let epoch = misc::compute_epoch_at_slot::<P>(chain_source.slot());
+    let epoch = misc::compute_epoch_at_slot::<P>(chain_source.slot()?);
     let configured = keymanager.proposer_configs().gas_limit(pubkey);
-    let gas_limit = chain_source.chain_config().gas_limit(configured, epoch);
+    let gas_limit = chain_source.chain_config.gas_limit(configured, epoch);
 
     let response = ProposerConfigResponse {
         pubkey,
@@ -676,11 +673,14 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
         return Err(Error::ValidatorNotOwned { pubkey });
     }
 
-    let chain_config = chain_source.chain_config();
+    let chain_config = &chain_source.chain_config;
 
-    let (epoch, validator_index, fork_info) = match chain_source.as_ref() {
-        ChainSource::Local { controller, .. } => {
-            let state = controller.preprocessed_state_at_current_slot().await?;
+    let (epoch, validator_index, fork_info) = match &chain_source.chain {
+        Chain::Local(local) => {
+            let state = local
+                .controller
+                .preprocessed_state_at_current_slot()
+                .await?;
             let epoch = query
                 .epoch
                 .unwrap_or_else(|| accessors::get_current_epoch(&state));
@@ -688,19 +688,19 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
             let validator_index = accessors::index_of_public_key(&state, &pubkey)
                 .ok_or(Error::ValidatorNotFound { pubkey })?;
 
-            (epoch, validator_index, state.as_ref().into())
+            (epoch, validator_index, ForkInfo::from_state(state.as_ref()))
         }
-        ChainSource::Remote {
-            chain_config,
-            genesis_time,
-            own_validator_indices,
-            remote_beacon_nodes,
-        } => {
-            let current_epoch = Tick::current::<P>(chain_config, *genesis_time)?.epoch::<P>();
+        Chain::Remote(remote_beacon_nodes) => {
+            let current_epoch =
+                Tick::current::<P>(chain_config, chain_source.genesis_time)?.epoch::<P>();
             let epoch = query.epoch.unwrap_or(current_epoch);
 
             // A key the duty loop has not resolved yet, such as one just imported, is asked about.
-            let validator_index = match own_validator_indices.indices_by_pubkey().await.get(&pubkey)
+            let validator_index = match chain_source
+                .own_validator_indices
+                .indices_by_pubkey()
+                .await
+                .get(&pubkey)
             {
                 Some(validator_index) => *validator_index,
                 None => remote_beacon_nodes
@@ -709,15 +709,10 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
                     .ok_or(Error::ValidatorNotFound { pubkey })?,
             };
 
-            let genesis_validators_root = remote_beacon_nodes
-                .genesis_validators_root()
-                .ok_or(Error::GenesisNotKnown)?;
-
             // Verifiers use the state's fork, not the exit's epoch.
             let fork_info = ForkInfo {
                 fork: chain_config.fork_at_epoch(current_epoch),
-                genesis_validators_root,
-                phantom: core::marker::PhantomData,
+                genesis_validators_root: chain_source.genesis_validators_root,
             };
 
             (epoch, validator_index, fork_info)
@@ -731,8 +726,12 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
 
     let signature = signer_snapshot
         .sign_without_slashing_protection(
-            SigningMessage::VoluntaryExit(voluntary_exit),
-            voluntary_exit.signing_root_from_fork_info(chain_config, fork_info),
+            SigningMessage::<P>::VoluntaryExit(voluntary_exit),
+            SignForSingleFork::<P>::signing_root_from_fork_info(
+                &voluntary_exit,
+                chain_config,
+                fork_info,
+            ),
             Some(fork_info),
             pubkey,
         )
@@ -914,7 +913,7 @@ impl ApiToken {
                     Ok(auth) => Ok(auth),
                     Err(error) => {
                         debug_with_peers!(
-                            "unable to read Validator API token from default path: {error:?}"
+                            "unable to read Validator API token from default path: {error}"
                         );
 
                         let token = Self::new();

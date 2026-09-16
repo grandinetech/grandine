@@ -25,7 +25,7 @@ use types::redacting_url::RedactingUrl;
 
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct TelemetryConfig {
     pub url: RedactingUrl,
     pub service_name: String,

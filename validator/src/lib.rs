@@ -1,11 +1,13 @@
 pub use crate::{
     api::{ValidatorApiConfig, run_validator_api},
     messages::ApiToValidator,
-    misc::ChainSource,
+    misc::{Chain, ChainSource, LocalChain},
     own_validator_indices::OwnValidatorIndices,
     remote_beacon_node::{Genesis, RemoteBeaconNode},
     remote_beacon_nodes::{RemoteBeaconNodes, StartupError as ValidatorStartupError},
-    validator::{Channels as ValidatorChannels, Validator},
+    validator::{
+        Channels as ValidatorChannels, LocalChannels as LocalValidatorChannels, Validator,
+    },
     validator_config::ValidatorConfig,
 };
 
@@ -20,6 +22,7 @@ mod misc;
 mod own_beacon_committee_members;
 mod own_proposer_duties;
 mod own_ptc_members;
+mod own_sync_committee_members;
 mod own_sync_committee_subscriptions;
 mod own_validator_indices;
 mod remote_beacon_node;

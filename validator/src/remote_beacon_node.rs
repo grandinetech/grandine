@@ -2,9 +2,8 @@ use core::{
     error::Error as StdError,
     fmt::Write as _,
     marker::PhantomData,
-    num::{NonZeroU32, NonZeroU64},
     str::FromStr,
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
     time::Duration,
 };
 use std::{
@@ -12,7 +11,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use anyhow::{Error as AnyhowError, Result, bail, ensure};
+use anyhow::{Error as AnyhowError, Result, anyhow, bail, ensure};
 use block_producer::{ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
@@ -22,8 +21,7 @@ use helper_functions::{misc, predicates};
 use http_api_utils::{
     BlockHeadersResponse, ETH_BLOB_DATA_INCLUDED, ETH_CONSENSUS_VERSION,
     ETH_EXECUTION_PAYLOAD_BLINDED, ETH_EXECUTION_PAYLOAD_INCLUDED, EthResponse,
-    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
-    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
+    ValidatorLivenessResponse, ValidatorSyncDutyResponse,
 };
 use http_body_util::BodyDataStream;
 use itertools::Itertools as _;
@@ -34,14 +32,15 @@ use reqwest::{
     Body, Client, Response, StatusCode,
     header::{ACCEPT, CONTENT_TYPE, HeaderMap},
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, Serializer, de::DeserializeOwned};
 use sse_stream::SseStream;
 use ssz::{
-    ContiguousList, Hc, Ssz, SszHash as _, SszRead as _, SszReadDefault as _, SszWrite as _,
+    ContiguousList, Hc, Ssz, SszHash as _, SszRead, SszReadDefault as _, SszSize, SszWrite as _,
 };
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tokio::time::timeout;
+use typenum::Unsigned;
 use types::{
     altair::{
         containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
@@ -79,9 +78,10 @@ use types::{
 
 use crate::{
     beacon_node_api::{
-        AttesterDuties, BeaconNodeApi, EnvelopeContents, ProducedBlock, ProposerDuties, PtcDuties,
+        AttesterDuties, BeaconNodeApi, Duties, EnvelopeContents, ProducedBlock, ProposerDuties,
+        PtcDuties,
     },
-    chain_head::{ChainHead, DependentRoots, HeadUpdate},
+    chain_head::{ChainHead, DependentRoots, HeadStatus, HeadUpdate},
     health::Health,
     slot_head::SlotHead,
 };
@@ -90,24 +90,16 @@ use crate::{
 const SLOT_END_BPS: u64 = BASIS_POINTS;
 /// No timeout falls below this; short slots must not shrink requests below real network latency.
 const MIN_TIMEOUT: Duration = Duration::from_secs(1);
-/// A deadline-bound request may use half its window, leaving the rest for another node.
-const DEADLINE_ATTEMPTS: NonZeroU64 = NonZeroU64::new(2).expect("the literal is not zero");
-/// A lone serving node has no fallback to leave time for; give it a generous fixed wait.
-const LONE_NODE_TIMEOUT: Duration = Duration::from_secs(4);
 /// Most beacon nodes send keep-alive comments at least every 30 seconds, so a stream this quiet
 /// is a dead connection; one that sends none merely resubscribes after five empty slots.
 const HEAD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_mins(1);
-
-/// Requests off the duty path can afford to wait for a slow node.
-const BACKGROUND_TIMEOUT_QUOTIENT: NonZeroU32 =
-    NonZeroU32::new(2).expect("the literal is not zero");
 
 const VALIDATOR_IDS_PER_REQUEST: usize = 1024;
 
 #[derive(Debug, Error)]
 enum HeadStreamError {
-    #[error("no bytes received in {0:?}")]
-    Idle(Duration),
+    #[error("no bytes received in {HEAD_STREAM_IDLE_TIMEOUT:?}")]
+    Idle,
     #[error(transparent)]
     Transport(reqwest::Error),
 }
@@ -137,11 +129,6 @@ enum Error {
     #[error("beacon node at {url} did not report whether its head is optimistic")]
     UnknownOptimisticStatus { url: String },
     #[error(
-        "beacon node at {url} returned a sync committee contribution \
-         that does not match the request"
-    )]
-    UnexpectedContribution { url: String },
-    #[error(
         "beacon node at {url} returned payload attestation data for slot {actual} \
          where slot {expected} was requested"
     )]
@@ -150,16 +137,6 @@ enum Error {
         expected: Slot,
         actual: Slot,
     },
-    #[error(
-        "beacon node returned an aggregate covering committees {actual:?} \
-         where only committee {expected} was requested"
-    )]
-    UnexpectedCommittees {
-        expected: CommitteeIndex,
-        actual: Vec<CommitteeIndex>,
-    },
-    #[error("beacon node reported {reported} data where {expected} was expected")]
-    UnexpectedVersion { expected: Phase, reported: Phase },
     #[error("beacon node at {url} did not report whether the produced block is blinded")]
     UnknownBlindedStatus { url: String },
     #[error("beacon node at {url} did not report whether the produced block has its payload")]
@@ -241,29 +218,27 @@ struct HeadV2EventData {
 }
 
 /// The `produceBlockV3` response from Deneb on, in which the blobs travel with the block.
+/// Fulu raises the proof bound from one per blob to one per cell.
 #[derive(Ssz)]
-#[ssz(derive_hash = false, derive_write = false)]
-struct DenebBlockContents<P: Preset> {
-    block: DenebBeaconBlock<P>,
-    kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
+#[ssz(
+    derive_hash = false,
+    derive_write = false,
+    bound_for_read = "B: SszRead<C>"
+)]
+struct BlockContents<B: SszSize, N: Unsigned, P: Preset> {
+    block: B,
+    kzg_proofs: ContiguousList<KzgProof, N>,
     blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
 }
 
-#[derive(Ssz)]
-#[ssz(derive_hash = false, derive_write = false)]
-struct ElectraBlockContents<P: Preset> {
-    block: ElectraBeaconBlock<P>,
-    kzg_proofs: ContiguousList<KzgProof, P::MaxBlobCommitmentsPerBlock>,
-    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-}
+type DenebBlockContents<P> =
+    BlockContents<DenebBeaconBlock<P>, <P as Preset>::MaxBlobCommitmentsPerBlock, P>;
 
-#[derive(Ssz)]
-#[ssz(derive_hash = false, derive_write = false)]
-struct FuluBlockContents<P: Preset> {
-    block: FuluBeaconBlock<P>,
-    kzg_proofs: ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
-    blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
-}
+type ElectraBlockContents<P> =
+    BlockContents<ElectraBeaconBlock<P>, <P as Preset>::MaxBlobCommitmentsPerBlock, P>;
+
+type FuluBlockContents<P> =
+    BlockContents<FuluBeaconBlock<P>, <P as Preset>::MaxCellProofsPerBlock, P>;
 
 /// The `produceBlockV4` response with the payload included, for a self-built block.
 #[derive(Ssz)]
@@ -357,12 +332,14 @@ impl AnyHeadEvent {
     }
 }
 
-/// The request body of `getAttesterDuties`, whose indices are quoted in JSON.
-#[derive(Serialize)]
-#[serde(transparent)]
-struct ValidatorIndices(
-    #[serde(with = "serde_utils::string_or_native_sequence")] Vec<ValidatorIndex>,
-);
+/// The request body of the duty and liveness endpoints, whose indices are quoted in JSON.
+struct ValidatorIndices<'indices>(&'indices [ValidatorIndex]);
+
+impl Serialize for ValidatorIndices<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde_utils::string_or_native_sequence::serialize(self.0, serializer)
+    }
+}
 
 // `head_slot` and `sync_distance` are ignored: neither separates a node that has fallen behind
 // from a chain with missed slots.
@@ -373,12 +350,6 @@ struct SyncingStatus {
     is_optimistic: bool,
     #[serde(default)]
     el_offline: bool,
-}
-
-pub enum NetworkCheck {
-    Matches,
-    Mismatch(AnyhowError),
-    Unreachable(AnyhowError),
 }
 
 /// A beacon node reached over <https://ethereum.github.io/beacon-APIs/>.
@@ -392,11 +363,8 @@ pub struct RemoteBeaconNode {
     /// A [`Health`] discriminant. Atomic because it is read on the duty path.
     health: AtomicU8,
     chain_head: ChainHead,
-    /// Seeded at startup or learned from the genesis check, and unchanging thereafter.
+    /// Seeded at startup, before the node is polled.
     genesis_validators_root: OnceLock<H256>,
-    /// How many nodes of the fleet can serve, shared between them; a lone node is not held to
-    /// timeouts that reserve time for a fallback.
-    serving_count: Arc<AtomicUsize>,
 }
 
 impl RemoteBeaconNode {
@@ -406,7 +374,6 @@ impl RemoteBeaconNode {
         client: Client,
         url: RedactingUrl,
         max_empty_slots: u64,
-        serving_count: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             chain_config,
@@ -416,7 +383,6 @@ impl RemoteBeaconNode {
             health: AtomicU8::new(Health::Unknown.as_u8()),
             chain_head: ChainHead::new(),
             genesis_validators_root: OnceLock::new(),
-            serving_count,
         }
     }
 
@@ -430,10 +396,11 @@ impl RemoteBeaconNode {
         let _ = self.genesis_validators_root.set(genesis_validators_root);
     }
 
-    /// Seeded or learned from the genesis check; [`None`] until the node has been reached.
-    #[must_use]
-    pub fn genesis_validators_root(&self) -> Option<H256> {
-        self.genesis_validators_root.get().copied()
+    fn genesis_validators_root(&self) -> Result<H256> {
+        self.genesis_validators_root
+            .get()
+            .copied()
+            .ok_or_else(|| anyhow!("the genesis validators root has not been seeded"))
     }
 
     #[must_use]
@@ -469,7 +436,7 @@ impl RemoteBeaconNode {
                     Ok(chunk) => {
                         chunk.map(|chunk| (chunk.map_err(HeadStreamError::Transport), chunks))
                     }
-                    Err(_) => Some((Err(HeadStreamError::Idle(HEAD_STREAM_IDLE_TIMEOUT)), chunks)),
+                    Err(_) => Some((Err(HeadStreamError::Idle), chunks)),
                 }
             },
         );
@@ -518,9 +485,9 @@ impl RemoteBeaconNode {
             return;
         }
 
-        // Polled whenever the head is not from the previous slot, as the stream may be silently
-        // dead; a healthy stream keeps this a no-op.
-        if self.chain_head.can_serve(slot, 1) {
+        // Polled whenever the head is not from this slot, as the stream may be silently dead; a
+        // healthy stream keeps this a no-op except in a slot whose block is late or missed.
+        if matches!(self.chain_head.status(slot, 0), HeadStatus::Usable(_)) {
             return;
         }
 
@@ -543,10 +510,10 @@ impl RemoteBeaconNode {
         self.chain_head
             .get(slot, self.max_empty_slots)?
             .ok_or_else(|| {
-                AnyhowError::msg(format!(
+                anyhow!(
                     "head of beacon node at {} is too old to sign for slot {slot}",
                     self.url,
-                ))
+                )
             })
     }
 
@@ -585,9 +552,16 @@ impl RemoteBeaconNode {
     }
 
     async fn poll_health(&self, slot: Slot) -> Health {
-        match self.check_network().await {
-            NetworkCheck::Matches => {}
-            NetworkCheck::Mismatch(error) => {
+        match self.ensure_same_network().await {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.downcast_ref(),
+                    Some(
+                        Error::NetworkMismatch { .. } | Error::GenesisValidatorsRootMismatch { .. }
+                    )
+                ) =>
+            {
                 warn_with_peers!(
                     "beacon node at {} is on a different network: {error:?}",
                     self.url,
@@ -595,10 +569,10 @@ impl RemoteBeaconNode {
 
                 return Health::Incompatible;
             }
-            NetworkCheck::Unreachable(error) => {
+            Err(error) => {
                 debug_with_peers!(
                     "beacon node at {} could not be reached: {error:?}",
-                    self.url,
+                    self.url
                 );
 
                 return Health::Unreachable;
@@ -623,7 +597,12 @@ impl RemoteBeaconNode {
 
         // A node that has fallen behind keeps serving stale duty data while calling itself
         // synced; its own head, held to the wall clock, shows what its sync status cannot.
-        if health == Health::Ready && self.chain_head.is_stale(slot, self.max_empty_slots) {
+        if health == Health::Ready
+            && matches!(
+                self.chain_head.status(slot, self.max_empty_slots),
+                HeadStatus::Stale { .. }
+            )
+        {
             debug_with_peers!(
                 "beacon node at {} reports itself synced but its head is stale",
                 self.url,
@@ -677,19 +656,15 @@ impl RemoteBeaconNode {
         )
     }
 
-    // A fallback that starts at half the window lands after attesters have voted.
     fn block_timeout(&self, phase: Phase) -> Duration {
-        self.deadline_timeout(0, self.chain_config.attestation_due_bps_at(phase))
+        self.window_timeout(0, self.chain_config.attestation_due_bps_at(phase))
     }
 
     fn block_publish_timeout(&self, phase: Phase) -> Duration {
-        let from_bps = self.chain_config.attestation_due_bps_at(phase);
-
-        if self.serving_count.load(Ordering::Relaxed) <= 1 {
-            self.deadline_timeout(from_bps, SLOT_END_BPS)
-        } else {
-            self.window_timeout(from_bps, SLOT_END_BPS)
-        }
+        self.window_timeout(
+            self.chain_config.attestation_due_bps_at(phase),
+            SLOT_END_BPS,
+        )
     }
 
     /// The vote is cast at the due point, and gossip only accepts it until the slot ends.
@@ -704,55 +679,14 @@ impl RemoteBeaconNode {
     }
 
     fn background_timeout(&self) -> Duration {
-        self.slot_fraction_by(BACKGROUND_TIMEOUT_QUOTIENT)
+        self.window_timeout(BASIS_POINTS / 2, SLOT_END_BPS)
     }
 
-    fn deadline_timeout(&self, from_bps: u64, until_bps: u64) -> Duration {
+    /// The window between the due points, which a fallback node shares with the first.
+    fn window_timeout(&self, from_bps: u64, until_bps: u64) -> Duration {
         self.chain_config
             .fraction_of_slot(until_bps.saturating_sub(from_bps))
             .max(MIN_TIMEOUT)
-    }
-
-    /// Half the window between the due points, so a failing node leaves the rest for another.
-    fn window_timeout(&self, from_bps: u64, until_bps: u64) -> Duration {
-        // With no fallback, giving up early buys nothing.
-        if self.serving_count.load(Ordering::Relaxed) <= 1 {
-            return LONE_NODE_TIMEOUT;
-        }
-
-        let window = self.deadline_timeout(from_bps, until_bps);
-
-        let nanos = u64::try_from(window.as_nanos())
-            .expect("windows are far below u64::MAX nanoseconds")
-            / DEADLINE_ATTEMPTS;
-
-        Duration::from_nanos(nanos).max(MIN_TIMEOUT)
-    }
-
-    fn slot_fraction_by(&self, quotient: NonZeroU32) -> Duration {
-        let nanos = u64::try_from(self.chain_config.slot_duration_ms.as_nanos())
-            .expect("slot durations are far below u64::MAX nanoseconds")
-            / NonZeroU64::from(quotient);
-
-        Duration::from_nanos(nanos).max(MIN_TIMEOUT)
-    }
-
-    pub async fn check_network(&self) -> NetworkCheck {
-        match self.ensure_same_network().await {
-            Ok(()) => NetworkCheck::Matches,
-            Err(error) => {
-                if matches!(
-                    error.downcast_ref(),
-                    Some(
-                        Error::NetworkMismatch { .. } | Error::GenesisValidatorsRootMismatch { .. }
-                    )
-                ) {
-                    NetworkCheck::Mismatch(error)
-                } else {
-                    NetworkCheck::Unreachable(error)
-                }
-            }
-        }
     }
 
     fn endpoint(&self, path: &str) -> Result<RedactingUrl> {
@@ -786,21 +720,16 @@ impl RemoteBeaconNode {
             },
         );
 
-        match self.genesis_validators_root.get() {
-            Some(expected) => ensure!(
-                *expected == genesis.genesis_validators_root,
-                Error::GenesisValidatorsRootMismatch {
-                    url: self.url.to_string(),
-                    expected: *expected,
-                    actual: genesis.genesis_validators_root,
-                },
-            ),
-            None => {
-                let _ = self
-                    .genesis_validators_root
-                    .set(genesis.genesis_validators_root);
-            }
-        }
+        let expected = self.genesis_validators_root()?;
+
+        ensure!(
+            expected == genesis.genesis_validators_root,
+            Error::GenesisValidatorsRootMismatch {
+                url: self.url.to_string(),
+                expected,
+                actual: genesis.genesis_validators_root,
+            },
+        );
 
         Ok(())
     }
@@ -810,21 +739,36 @@ impl RemoteBeaconNode {
         Ok(response.json::<EthResponse<T>>().await?.into_data())
     }
 
-    async fn parse_versioned_data<T: DeserializeOwned>(
+    async fn parse_duties<T: DeserializeOwned>(
         &self,
         response: Response,
-        expected: Phase,
-    ) -> Result<T> {
+        epoch: Epoch,
+        kind: &str,
+    ) -> Result<Duties<T>> {
         let response = self.check_status(response).await?;
 
-        let (data, reported) = response
-            .json::<EthResponse<T>>()
+        let (duties, dependent_root) = response
+            .json::<EthResponse<Vec<T>>>()
             .await?
-            .into_data_and_version();
+            .into_data_and_dependent_root();
 
-        check_version(expected, reported)?;
+        let dependent_root = dependent_root.ok_or_else(|| {
+            anyhow!(
+                "beacon node at {} did not report a dependent root for {kind} duties",
+                self.url,
+            )
+        })?;
 
-        Ok(data)
+        debug_with_peers!(
+            "{} produced {} {kind} duties for epoch {epoch}",
+            self.url,
+            duties.len(),
+        );
+
+        Ok(Duties {
+            dependent_root,
+            duties,
+        })
     }
 
     async fn check_status(&self, response: Response) -> Result<Response> {
@@ -854,35 +798,12 @@ impl RemoteBeaconNode {
         let response = self
             .client
             .post(url.into_url())
-            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .json(&ValidatorIndices(validator_indices))
             .timeout(self.background_timeout())
             .send()
             .await?;
 
-        let response = self.check_status(response).await?;
-
-        let (duties, dependent_root) = response
-            .json::<EthResponse<Vec<ValidatorAttesterDutyResponse>>>()
-            .await?
-            .into_data_and_dependent_root();
-
-        let dependent_root = dependent_root.ok_or_else(|| {
-            AnyhowError::msg(format!(
-                "beacon node at {} did not report a dependent root for attester duties",
-                self.url,
-            ))
-        })?;
-
-        debug_with_peers!(
-            "{} produced {} attester duties for epoch {epoch}",
-            self.url,
-            duties.len(),
-        );
-
-        Ok(AttesterDuties {
-            dependent_root,
-            duties,
-        })
+        self.parse_duties(response, epoch, "attester").await
     }
 
     async fn produce_block_v3<P: Preset>(
@@ -910,8 +831,6 @@ impl RemoteBeaconNode {
 
         let response = self.check_status(response).await?;
         let headers = response.headers();
-
-        check_version(phase, parse_header(headers, ETH_CONSENSUS_VERSION)?)?;
 
         let blinded = parse_header(headers, ETH_EXECUTION_PAYLOAD_BLINDED)?.ok_or_else(|| {
             Error::UnknownBlindedStatus {
@@ -1012,8 +931,6 @@ impl RemoteBeaconNode {
 
         let response = self.check_status(response).await?;
         let headers = response.headers();
-
-        check_version(phase, parse_header(headers, ETH_CONSENSUS_VERSION)?)?;
 
         let payload_included =
             parse_header(headers, ETH_EXECUTION_PAYLOAD_INCLUDED)?.ok_or_else(|| {
@@ -1120,7 +1037,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         let response = self
             .client
             .post(url.into_url())
-            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .json(&ValidatorIndices(validator_indices))
             .timeout(self.background_timeout())
             .send()
             .await?;
@@ -1128,12 +1045,8 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         self.parse_data(response).await
     }
 
-    async fn dependent_root(
-        &self,
-        epoch: Epoch,
-        validator_index: Option<ValidatorIndex>,
-    ) -> Result<H256> {
-        self.attester_duties(epoch, validator_index.as_slice())
+    async fn dependent_root(&self, epoch: Epoch, validator_index: ValidatorIndex) -> Result<H256> {
+        self.attester_duties(epoch, &[validator_index])
             .await
             .map(|duties| duties.dependent_root)
     }
@@ -1184,20 +1097,18 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         // Electra and Gloas attestations have the same fields, so untagged deserialization would
         // always read a Gloas one as Electra.
         let attestation = if phase < Phase::Electra {
-            self.parse_versioned_data::<Phase0Attestation<P>>(response, phase)
+            self.parse_data::<Phase0Attestation<P>>(response)
                 .await
                 .map(Attestation::Phase0)?
         } else if phase < Phase::Gloas {
-            self.parse_versioned_data::<ElectraAttestation<P>>(response, phase)
+            self.parse_data::<ElectraAttestation<P>>(response)
                 .await
                 .map(Attestation::Electra)?
         } else {
-            self.parse_versioned_data::<GloasAttestation<P>>(response, phase)
+            self.parse_data::<GloasAttestation<P>>(response)
                 .await
                 .map(Attestation::Gloas)?
         };
-
-        ensure_requested_committee(&attestation, committee_index)?;
 
         Ok(attestation)
     }
@@ -1339,10 +1250,6 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             return Ok(None);
         };
 
-        let Some(genesis_validators_root) = self.genesis_validators_root.get().copied() else {
-            return Ok(None);
-        };
-
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
         let slot_head = SlotHead {
@@ -1351,11 +1258,11 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             beacon_block_root,
             fork_info: ForkInfo {
                 fork: self.chain_config.fork_at_epoch(epoch),
-                genesis_validators_root,
-                phantom: PhantomData,
+                genesis_validators_root: self.genesis_validators_root()?,
             },
             // Optimistic heads never reach the cache.
             optimistic: false,
+            phantom: PhantomData,
         };
 
         Ok(Some(slot_head))
@@ -1371,7 +1278,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         let response = self
             .client
             .post(url.into_url())
-            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .json(&ValidatorIndices(validator_indices))
             .timeout(self.background_timeout())
             .send()
             .await?;
@@ -1478,16 +1385,6 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .parse_data::<SyncCommitteeContribution<P>>(response)
             .await?;
 
-        // Signing a mismatched answer would produce a self-inconsistent contribution and proof.
-        ensure!(
-            contribution.slot == slot
-                && contribution.subcommittee_index == subcommittee_index
-                && contribution.beacon_block_root == beacon_block_root,
-            Error::UnexpectedContribution {
-                url: self.url.to_string(),
-            },
-        );
-
         Ok(contribution)
     }
 
@@ -1534,35 +1431,12 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         let response = self
             .client
             .post(url.into_url())
-            .json(&ValidatorIndices(validator_indices.to_vec()))
+            .json(&ValidatorIndices(validator_indices))
             .timeout(self.background_timeout())
             .send()
             .await?;
 
-        let response = self.check_status(response).await?;
-
-        let (duties, dependent_root) = response
-            .json::<EthResponse<Vec<ValidatorPTCDutyResponse>>>()
-            .await?
-            .into_data_and_dependent_root();
-
-        let dependent_root = dependent_root.ok_or_else(|| {
-            AnyhowError::msg(format!(
-                "beacon node at {} did not report a dependent root for PTC duties",
-                self.url,
-            ))
-        })?;
-
-        debug_with_peers!(
-            "{} produced {} PTC duties for epoch {epoch}",
-            self.url,
-            duties.len(),
-        );
-
-        Ok(PtcDuties {
-            dependent_root,
-            duties,
-        })
+        self.parse_duties(response, epoch, "PTC").await
     }
 
     async fn proposer_duties(&self, epoch: Epoch) -> Result<ProposerDuties> {
@@ -1582,30 +1456,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             .send()
             .await?;
 
-        let response = self.check_status(response).await?;
-
-        let (duties, dependent_root) = response
-            .json::<EthResponse<Vec<ValidatorProposerDutyResponse>>>()
-            .await?
-            .into_data_and_dependent_root();
-
-        let dependent_root = dependent_root.ok_or_else(|| {
-            AnyhowError::msg(format!(
-                "beacon node at {} did not report a dependent root for proposer duties",
-                self.url,
-            ))
-        })?;
-
-        debug_with_peers!(
-            "{} produced {} proposer duties for epoch {epoch}",
-            self.url,
-            duties.len(),
-        );
-
-        Ok(ProposerDuties {
-            dependent_root,
-            duties,
-        })
+        self.parse_duties(response, epoch, "proposer").await
     }
 
     async fn produce_block(
@@ -1722,7 +1573,6 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
     }
 
     async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
-        let phase = self.chain_config.phase_at_slot::<P>(slot);
         let url = self.endpoint(&format!(
             "/eth/v1/validator/payload_attestation_data?slot={slot}"
         ))?;
@@ -1739,9 +1589,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
             return Ok(None);
         }
 
-        let data = self
-            .parse_versioned_data::<PayloadAttestationData>(response, phase)
-            .await?;
+        let data = self.parse_data::<PayloadAttestationData>(response).await?;
 
         ensure!(
             data.slot == slot,
@@ -1891,29 +1739,6 @@ fn check_attestation_index(
     Ok(())
 }
 
-fn ensure_requested_committee<P: Preset>(
-    attestation: &Attestation<P>,
-    committee_index: CommitteeIndex,
-) -> Result<()> {
-    let Some(committee_bits) = attestation.committee_bits() else {
-        return Ok(());
-    };
-
-    // Aggregation bits from Electra on span every committee in `committee_bits`, so a position
-    // in the requested committee only indexes them when that is the sole committee covered.
-    let actual = misc::get_committee_indices::<P>(committee_bits).collect::<Vec<_>>();
-
-    ensure!(
-        actual == [committee_index],
-        Error::UnexpectedCommittees {
-            expected: committee_index,
-            actual,
-        },
-    );
-
-    Ok(())
-}
-
 fn check_not_optimistic(url: &RedactingUrl, execution_optimistic: Option<bool>) -> Result<()> {
     match execution_optimistic {
         Some(false) => Ok(()),
@@ -1926,17 +1751,6 @@ fn check_not_optimistic(url: &RedactingUrl, execution_optimistic: Option<bool>) 
             url: url.to_string(),
         }),
     }
-}
-
-fn check_version(expected: Phase, reported: Option<Phase>) -> Result<()> {
-    if let Some(reported) = reported {
-        ensure!(
-            reported == expected,
-            Error::UnexpectedVersion { expected, reported },
-        );
-    }
-
-    Ok(())
 }
 
 fn parse_header<T: FromStr>(headers: &HeaderMap, name: &str) -> Result<Option<T>>
@@ -2014,8 +1828,8 @@ mod tests {
     use bls::{
         AggregateSignatureBytes, PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _,
     };
+    use http_api_utils::{ValidatorAttesterDutyResponse, ValidatorPTCDutyResponse};
     use serde_json::json;
-    use ssz::BitVector;
     use types::{
         combined::Attestation,
         deneb::containers::SignedBeaconBlock as DenebSignedBeaconBlock,
@@ -2029,10 +1843,10 @@ mod tests {
 
     use super::*;
 
-    // The endpoint takes a bare array of quoted validator indices.
+    // The duty and liveness endpoints take a bare array of quoted validator indices.
     #[test]
-    fn serializes_attester_duties_request_body() -> Result<()> {
-        let body = serde_json::to_value(ValidatorIndices(vec![1, 2]))?;
+    fn serializes_validator_indices_request_body() -> Result<()> {
+        let body = serde_json::to_value(ValidatorIndices(&[1, 2]))?;
 
         assert_eq!(body, json!(["1", "2"]));
 
@@ -2293,17 +2107,12 @@ mod tests {
         Ok(())
     }
 
-    fn test_node(
-        chain_config: ChainConfig,
-        url: &str,
-        serving_count: usize,
-    ) -> Result<RemoteBeaconNode> {
+    fn test_node(chain_config: ChainConfig, url: &str) -> Result<RemoteBeaconNode> {
         Ok(RemoteBeaconNode::new(
             Arc::new(chain_config),
             Client::new(),
             url.parse()?,
             32,
-            Arc::new(AtomicUsize::new(serving_count)),
         ))
     }
 
@@ -2313,7 +2122,6 @@ mod tests {
         let node = test_node(
             ChainConfig::mainnet(),
             "http://user:password@localhost:5052/",
-            1,
         )?;
 
         assert_eq!(node.to_string(), "http://*:*@localhost:5052/");
@@ -2321,26 +2129,26 @@ mod tests {
         Ok(())
     }
 
-    // A deadline-bound request may use half its window, leaving the rest for another node.
+    // A request may use the whole window between the duty's due points.
     #[test]
     fn timeouts_follow_the_due_points_of_the_phase() -> Result<()> {
-        let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 2)?;
+        let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/")?;
 
         // The pre-Gloas windows of the mainnet configuration are 3334 and 3333 basis points.
         assert_eq!(
             node.attestation_timeout(Phase::Electra),
-            Duration::from_micros(2_000_400),
+            Duration::from_micros(4_000_800),
         );
         assert_eq!(
             node.aggregate_timeout(Phase::Electra),
-            Duration::from_micros(1_999_800),
+            Duration::from_micros(3_999_600),
         );
         assert_eq!(
             node.attestation_timeout(Phase::Gloas),
-            Duration::from_millis(1500),
+            Duration::from_secs(3)
         );
-        assert_eq!(node.aggregate_timeout(Phase::Gloas), Duration::from_secs(3));
-        assert_eq!(node.head_timeout(), Duration::from_millis(1500));
+        assert_eq!(node.aggregate_timeout(Phase::Gloas), Duration::from_secs(6));
+        assert_eq!(node.head_timeout(), Duration::from_secs(3));
         assert_eq!(node.background_timeout(), Duration::from_secs(6));
 
         Ok(())
@@ -2354,7 +2162,7 @@ mod tests {
             ..ChainConfig::mainnet()
         };
 
-        let node = test_node(config, "http://localhost:5052/", 2)?;
+        let node = test_node(config, "http://localhost:5052/")?;
 
         assert_eq!(node.attestation_timeout(Phase::Electra), MIN_TIMEOUT);
         assert_eq!(node.background_timeout(), MIN_TIMEOUT);
@@ -2362,53 +2170,22 @@ mod tests {
         Ok(())
     }
 
-    // With no fallback there is no reason to give up early.
+    // A block is produced until attesters vote and published until the slot ends.
     #[test]
-    fn a_lone_serving_node_gets_the_generous_timeout() -> Result<()> {
-        let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 1)?;
-
-        assert_eq!(node.attestation_timeout(Phase::Electra), LONE_NODE_TIMEOUT);
-        assert_eq!(node.aggregate_timeout(Phase::Gloas), LONE_NODE_TIMEOUT);
-
-        Ok(())
-    }
-
-    // A fallback started at half the window would finish after attesters have voted.
-    #[test]
-    fn block_production_gets_the_whole_window_to_the_attestation_deadline() -> Result<()> {
-        for serving in [1, 2] {
-            let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/", serving)?;
-
-            assert_eq!(
-                node.block_timeout(Phase::Electra),
-                Duration::from_micros(3_999_600),
-            );
-            assert_eq!(node.block_timeout(Phase::Gloas), Duration::from_secs(3));
-        }
-
-        Ok(())
-    }
-
-    // Cutting off the only node could only lose the block.
-    #[test]
-    fn block_publishing_runs_to_the_end_of_the_slot_on_a_lone_node() -> Result<()> {
-        let with_fallback = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 2)?;
-        let lone = test_node(ChainConfig::mainnet(), "http://localhost:5052/", 1)?;
+    fn block_production_and_publishing_split_the_slot_at_the_attestation_deadline() -> Result<()> {
+        let node = test_node(ChainConfig::mainnet(), "http://localhost:5052/")?;
 
         assert_eq!(
-            with_fallback.block_publish_timeout(Phase::Electra),
-            Duration::from_micros(4_000_200),
+            node.block_timeout(Phase::Electra),
+            Duration::from_micros(3_999_600),
         );
+        assert_eq!(node.block_timeout(Phase::Gloas), Duration::from_secs(3));
         assert_eq!(
-            with_fallback.block_publish_timeout(Phase::Gloas),
-            Duration::from_millis(4500),
-        );
-        assert_eq!(
-            lone.block_publish_timeout(Phase::Electra),
+            node.block_publish_timeout(Phase::Electra),
             Duration::from_micros(8_000_400),
         );
         assert_eq!(
-            lone.block_publish_timeout(Phase::Gloas),
+            node.block_publish_timeout(Phase::Gloas),
             Duration::from_secs(9)
         );
 
@@ -2518,57 +2295,6 @@ mod tests {
 
         serde_json::from_value::<Phase0Attestation<Mainnet>>(body)
             .expect_err("committee bits should not fit a phase 0 attestation");
-
-        Ok(())
-    }
-
-    // Reading a position in the requested committee against bits covering other committees would
-    // silently pick the wrong validator.
-    #[test]
-    fn rejects_an_aggregate_covering_other_committees() -> Result<()> {
-        let aggregate = |indices: &[usize]| {
-            let mut committee_bits = BitVector::default();
-
-            for index in indices {
-                committee_bits.set(*index, true);
-            }
-
-            Attestation::<Mainnet>::Electra(ElectraAttestation {
-                committee_bits,
-                ..ElectraAttestation::default()
-            })
-        };
-
-        ensure_requested_committee(&aggregate(&[3]), 3)?;
-
-        ensure_requested_committee(&aggregate(&[2]), 3)
-            .expect_err("an aggregate for another committee should be rejected");
-
-        ensure_requested_committee(&aggregate(&[2, 3]), 3)
-            .expect_err("an aggregate covering several committees should be rejected");
-
-        ensure_requested_committee(&aggregate(&[]), 3)
-            .expect_err("an aggregate covering no committee should be rejected");
-
-        Ok(())
-    }
-
-    // A phase 0 aggregate has no committee bits; its committee is fixed by the data root.
-    #[test]
-    fn accepts_a_phase0_aggregate() -> Result<()> {
-        let aggregate = Attestation::<Mainnet>::Phase0(Phase0Attestation::default());
-
-        ensure_requested_committee(&aggregate, 3)
-    }
-
-    // A node that reports no version is taken at its word; one that disagrees is not.
-    #[test]
-    fn check_version_rejects_only_a_disagreeing_node() -> Result<()> {
-        check_version(Phase::Electra, None)?;
-        check_version(Phase::Electra, Some(Phase::Electra))?;
-
-        check_version(Phase::Electra, Some(Phase::Gloas))
-            .expect_err("a node reporting another phase should be rejected");
 
         Ok(())
     }
