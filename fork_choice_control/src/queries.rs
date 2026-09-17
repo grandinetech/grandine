@@ -8,7 +8,7 @@ use execution_engine::ExecutionEngine;
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeAction,
-    ExecutionPayloadEnvelopeOrigin, StateCacheProcessor, Store,
+    ExecutionPayloadEnvelopeOrigin, PayloadPresence, StateCacheProcessor, Store,
 };
 use futures::Future;
 use helper_functions::{accessors, misc};
@@ -24,6 +24,7 @@ use types::{
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
+        consts::PAYLOAD_STATUS_FULL,
         containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
@@ -608,11 +609,7 @@ where
         &self,
         range: Range<Slot>,
     ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        let canonical_chain_blocks = self.blocks_by_range(range)?;
-
-        let block_roots = canonical_chain_blocks
-            .into_iter()
-            .map(|BlockWithRoot { root, .. }| root);
+        let block_roots = self.snapshot().canonical_payload_block_roots(range)?;
 
         self.execution_payload_envelopes_by_roots(block_roots)
     }
@@ -1214,6 +1211,21 @@ pub struct BlockWithRoot<P: Preset> {
     pub root: H256,
 }
 
+impl<P: Preset> From<&ChainLink<P>> for BlockWithRoot<P> {
+    fn from(chain_link: &ChainLink<P>) -> Self {
+        Self {
+            block: chain_link.block.clone_arc(),
+            root: chain_link.block_root,
+        }
+    }
+}
+
+impl<P: Preset> From<(Arc<SignedBeaconBlock<P>>, H256)> for BlockWithRoot<P> {
+    fn from((block, root): (Arc<SignedBeaconBlock<P>>, H256)) -> Self {
+        Self { block, root }
+    }
+}
+
 /// A snapshot of the fork choice store that can also look up values in the database.
 ///
 /// Note that the contents of the database are not snapshotted.
@@ -1434,10 +1446,7 @@ impl<P: Preset> Snapshot<'_, P> {
             .canonical_chain()
             .skip_while(|chain_link| end <= chain_link.slot())
             .take_while(|chain_link| start <= chain_link.slot())
-            .map(|chain_link| BlockWithRoot {
-                block: chain_link.block.clone_arc(),
-                root: chain_link.block_root,
-            })
+            .map(BlockWithRoot::from)
             .collect_vec();
 
         // Load missing blocks from storage.
@@ -1452,13 +1461,65 @@ impl<P: Preset> Snapshot<'_, P> {
                 .map(|slot| self.storage.finalized_block_by_slot(slot))
                 .filter_map(Result::transpose),
             |options| {
-                blocks.extend(options.map(|(block, root)| BlockWithRoot { block, root }));
+                blocks.extend(options.map(Into::into));
             },
         )?;
 
         blocks.reverse();
 
         Ok(blocks)
+    }
+
+    pub fn canonical_payload_block_roots(&self, range: Range<Slot>) -> Result<Vec<H256>> {
+        let blocks = self.blocks_by_range(range)?;
+
+        let Some(last_block) = blocks.last() else {
+            return Ok(vec![]);
+        };
+
+        // Get child block of the last block in range to check if child build on full or empty branch
+        let successor = self.canonical_block_after_slot(last_block.block.message().slot())?;
+
+        let mut block_roots = blocks
+            .iter()
+            .chain(successor.as_ref())
+            .tuple_windows()
+            .filter_map(|(current, child)| {
+                PayloadPresence::of_parent(&child.block, &current.block)
+                    .is_full()
+                    .then_some(current.root)
+            })
+            .collect_vec();
+
+        // the head block has no child to compare the payload presence, so fork choice decides.
+        if successor.is_none() {
+            let (head_root, head_payload_status) =
+                self.store_snapshot.head_root_with_payload_status();
+
+            if last_block.root == head_root && head_payload_status == PAYLOAD_STATUS_FULL {
+                block_roots.push(last_block.root);
+            }
+        }
+
+        Ok(block_roots)
+    }
+
+    fn canonical_block_after_slot(&self, slot: Slot) -> Result<Option<BlockWithRoot<P>>> {
+        // The store only keeps the most recent finalized blocks. It has the successor as long
+        // as it reaches back to `slot` itself.
+        if self.store_snapshot.chain_link_before_or_at(slot).is_some() {
+            return Ok(self
+                .store_snapshot
+                .canonical_chain()
+                .take_while(|chain_link| chain_link.slot() > slot)
+                .last()
+                .map(Into::into));
+        }
+
+        Ok(self
+            .storage
+            .finalized_block_after_slot(slot)?
+            .map(Into::into))
     }
 
     #[must_use]

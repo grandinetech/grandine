@@ -149,6 +149,26 @@ impl From<RawPayloadPresence> for PayloadPresence {
 
 impl PayloadPresence {
     #[must_use]
+    pub fn of_parent<P: Preset>(
+        block: &SignedBeaconBlock<P>,
+        parent: &SignedBeaconBlock<P>,
+    ) -> Self {
+        let Some(block_payload_bid) = block.payload_bid() else {
+            return Self::Pending;
+        };
+
+        let Some(parent_payload_bid) = parent.payload_bid() else {
+            return Self::Pending;
+        };
+
+        if block_payload_bid.parent_block_hash == parent_payload_bid.block_hash {
+            Self::Full
+        } else {
+            Self::Empty
+        }
+    }
+
+    #[must_use]
     pub const fn is_full(self) -> bool {
         matches!(self, Self::Full)
     }
