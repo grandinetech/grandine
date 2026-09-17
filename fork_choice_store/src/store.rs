@@ -1069,7 +1069,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             if let Some(parent) = self.chain_link(boosted_block.parent_root())
-                && Self::parent_payload_presence(&boosted_block.block, &parent.block).is_full()
+                && PayloadPresence::of_parent(&boosted_block.block, &parent.block).is_full()
             {
                 return true;
             }
@@ -1765,28 +1765,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.ancestor(root, misc::compute_shuffling_dependent_slot::<P>(epoch))
     }
 
-    fn parent_payload_presence(
-        block: &SignedBeaconBlock<P>,
-        parent: &SignedBeaconBlock<P>,
-    ) -> PayloadPresence {
-        let Some(block_payload_bid) = block.payload_bid() else {
-            return PayloadPresence::Pending;
-        };
-
-        let Some(parent_payload_bid) = parent.payload_bid() else {
-            return PayloadPresence::Pending;
-        };
-
-        let parent_block_hash = block_payload_bid.parent_block_hash;
-        let message_block_hash = parent_payload_bid.block_hash;
-
-        if parent_block_hash == message_block_hash {
-            PayloadPresence::Full
-        } else {
-            PayloadPresence::Empty
-        }
-    }
-
     #[must_use]
     pub fn common_ancestor(&self, a_root: H256, b_root: H256) -> Option<&ChainLink<P>> {
         itertools::merge_join_by(
@@ -2113,7 +2091,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(BlockAction::DelayUntilParent(block));
         };
 
-        let parent_payload_presence = Self::parent_payload_presence(&block.item, &parent.block);
+        let parent_payload_presence = PayloadPresence::of_parent(&block.item, &parent.block);
 
         // > If this block builds on the parent's full payload, that payload must
         // > have been verified by on_execution_payload_envelope
