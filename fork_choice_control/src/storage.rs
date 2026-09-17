@@ -819,6 +819,37 @@ impl<P: Preset> Storage<P> {
         .map_err(Into::into)
     }
 
+    pub(crate) fn block_root_after_slot(&self, slot: Slot) -> Result<Option<H256>> {
+        let results = self
+            .database
+            .iterator_ascending(BlockRootBySlot(slot.saturating_add(1)).to_string()..)?;
+
+        itertools::process_results(results, |pairs| {
+            pairs
+                .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
+                .map(|(_, value_bytes)| H256::from_ssz_default(value_bytes))
+                .next()
+                .transpose()
+        })?
+        .map_err(Into::into)
+    }
+
+    /// The first finalized block after `slot`.
+    pub(crate) fn finalized_block_after_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<(Arc<SignedBeaconBlock<P>>, H256)>> {
+        let Some(block_root) = self.block_root_after_slot(slot)? else {
+            return Ok(None);
+        };
+
+        let Some(block) = self.finalized_block_by_root(block_root)? else {
+            return Ok(None);
+        };
+
+        Ok(Some((block, block_root)))
+    }
+
     pub(crate) fn finalized_block_by_slot(
         &self,
         slot: Slot,
