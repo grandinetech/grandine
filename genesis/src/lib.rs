@@ -48,7 +48,7 @@ use types::{
         beacon_state::BeaconState as GloasBeaconState,
         containers::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayloadBid, SignedExecutionPayloadBid,
+            ExecutionPayloadBid, ExecutionRequests, SignedExecutionPayloadBid,
         },
     },
     nonstandard::{FinalizedCheckpoint, Phase, RelativeEpoch, WithOrigin},
@@ -85,6 +85,11 @@ impl<'config, P: Preset> Incremental<'config, P> {
             epoch: GENESIS_EPOCH,
         };
 
+        let gloas_execution_payload_bid = ExecutionPayloadBid::<P> {
+            execution_requests_root: ExecutionRequests::<P>::default().hash_tree_root(),
+            ..ExecutionPayloadBid::default()
+        };
+
         let body_root = match phase {
             Phase::Phase0 => Phase0BeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Altair => AltairBeaconBlockBody::<P>::default().hash_tree_root(),
@@ -93,7 +98,14 @@ impl<'config, P: Preset> Incremental<'config, P> {
             Phase::Deneb => DenebBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Electra => ElectraBeaconBlockBody::<P>::default().hash_tree_root(),
             Phase::Fulu => FuluBeaconBlockBody::<P>::default().hash_tree_root(),
-            Phase::Gloas => GloasBeaconBlockBody::<P>::default().hash_tree_root(),
+            Phase::Gloas => GloasBeaconBlockBody::<P> {
+                signed_execution_payload_bid: SignedExecutionPayloadBid {
+                    message: gloas_execution_payload_bid.clone(),
+                    ..SignedExecutionPayloadBid::default()
+                },
+                ..GloasBeaconBlockBody::default()
+            }
+            .hash_tree_root(),
         };
 
         let latest_block_header = BeaconBlockHeader {
@@ -159,6 +171,7 @@ impl<'config, P: Preset> Incremental<'config, P> {
                 fork,
                 latest_block_header,
                 deposit_requests_start_index: UNSET_DEPOSIT_REQUESTS_START_INDEX,
+                latest_execution_payload_bid: gloas_execution_payload_bid,
                 ..GloasBeaconState::default()
             }
             .into(),

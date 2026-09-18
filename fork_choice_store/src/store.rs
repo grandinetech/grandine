@@ -334,6 +334,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             root: block_root,
         };
 
+        let initial_payload_presence = Self::initial_payload_presence(&anchor_state);
+
         let anchor = ChainLink {
             block_root,
             block: anchor_block,
@@ -343,7 +345,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
             payload_status: Self::initial_payload_status(&anchor_state),
-            parent_payload_presence: PayloadPresence::default(),
+            parent_payload_presence: initial_payload_presence,
         };
 
         let anchor_slot = anchor_state.slot();
@@ -378,8 +380,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 before_payload_attestation_due: true,
             } },
             checkpoint_states: HashMap::unit(checkpoint, anchor_state),
-            payloads: HashSet::new(),
-            timely_payloads: HashSet::new(),
+            payloads: initial_payload_presence
+                .is_full()
+                .then(|| HashSet::unit(block_root))
+                .unwrap_or_default(),
+            timely_payloads: initial_payload_presence
+                .is_full()
+                .then(|| HashSet::unit(block_root))
+                .unwrap_or_default(),
             payload_vote: HashMap::new(),
             payload_timeliness_vote: HashMap::new(),
             payload_data_availability_vote: HashMap::new(),
@@ -3876,8 +3884,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [REJECT] block passes validation.
+        // A block whose payload chain is already known invalid must not reach the execution engine.
         ensure!(
-            !self.rejected_block_roots.contains(&beacon_block_root),
+            !self.rejected_block_roots.contains(&beacon_block_root)
+                && !self
+                    .chain_link(beacon_block_root)
+                    .is_some_and(ChainLink::is_invalid),
             Error::<P>::PayloadEnvelopeInvalidBlock {
                 payload_envelope: envelope
             },
@@ -6037,6 +6049,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     fn epoch_at_slot(slot: Slot) -> Epoch {
         misc::compute_epoch_at_slot::<P>(slot)
+    }
+
+    fn initial_payload_presence(state: &BeaconState<P>) -> PayloadPresence {
+        let Some(state) = state.post_gloas() else {
+            return PayloadPresence::default();
+        };
+
+        if state.latest_block_hash() == state.latest_execution_payload_bid().block_hash {
+            PayloadPresence::Full
+        } else {
+            PayloadPresence::Empty
+        }
     }
 
     fn initial_payload_status(state: &BeaconState<P>) -> PayloadStatus {
