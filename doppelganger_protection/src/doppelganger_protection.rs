@@ -117,7 +117,7 @@ impl DoppelgangerProtection {
     pub async fn detect_doppelgangers<P: Preset, F, Fut>(
         &self,
         current_slot: Slot,
-        indices_by_pubkey: &HashMap<PublicKeyBytes, ValidatorIndex>,
+        indices_by_pubkey: &HashMap<PublicKeyBytes, Option<ValidatorIndex>>,
         check_liveness: F,
     ) -> Result<()>
     where
@@ -129,10 +129,10 @@ impl DoppelgangerProtection {
         let mut restamped = HashMap::new();
 
         for (public_key, added_in_slot) in &self.load().tracked_validators {
-            match indices_by_pubkey.get(public_key) {
+            match indices_by_pubkey.get(public_key).copied().flatten() {
                 Some(validator_index) => {
-                    checked.insert(*public_key, *validator_index);
-                    validator_indices_with_pubkeys.insert(*validator_index, *public_key);
+                    checked.insert(*public_key, validator_index);
+                    validator_indices_with_pubkeys.insert(validator_index, *public_key);
 
                     // The checks only cover the key from here on, so the window starts anew.
                     if added_in_slot.is_none() {
@@ -287,10 +287,15 @@ mod tests {
     fn indices_by_pubkey(
         state: &BeaconState<Minimal>,
         validator_indices: impl IntoIterator<Item = ValidatorIndex>,
-    ) -> HashMap<PublicKeyBytes, ValidatorIndex> {
+    ) -> HashMap<PublicKeyBytes, Option<ValidatorIndex>> {
         validator_indices
             .into_iter()
-            .map(|validator_index| (validator_pubkey(state, validator_index), validator_index))
+            .map(|validator_index| {
+                (
+                    validator_pubkey(state, validator_index),
+                    Some(validator_index),
+                )
+            })
             .collect()
     }
 

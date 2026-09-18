@@ -1,24 +1,32 @@
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{collections::HashMap, sync::Arc};
 
+use arc_swap::{ArcSwap, Guard};
 use bls::PublicKeyBytes;
 use fork_choice_control::Wait;
 use itertools::Itertools as _;
-use scc::HashMap as SccHashMap;
+use logging::{debug_with_peers, warn_with_peers};
 use signer::Signer;
+use tokio::sync::Mutex;
 use types::{
     phase0::primitives::{Epoch, ValidatorIndex},
     preset::Preset,
 };
 
-use crate::{beacon_node_api::BeaconNodeApi as _, beacon_nodes::BeaconNodes};
+use crate::misc::ChainSource;
 
 /// Validator indices of the configured keys.
 pub struct OwnValidatorIndices {
     signer: Arc<Signer>,
-    indices: SccHashMap<PublicKeyBytes, ValidatorIndex>,
-    // A key no beacon node knows is retried once an epoch rather than every slot, as a validator
-    // only becomes known by being deposited for.
-    retry_at_epoch: SccHashMap<PublicKeyBytes, Epoch>,
+    // Every key the signer holds, with `None` until its index is known. Swapped out whole, as the
+    // duty paths read it every slot and a client may hold tens of thousands of keys.
+    indices: ArcSwap<HashMap<PublicKeyBytes, Option<ValidatorIndex>>>,
+    // Every node reports each finalization, and one request per finalization is enough.
+    finalized_epoch: AtomicU64,
+    // A failed request is retried every slot; an answered one waits for a finalization.
+    last_resolve_failed: AtomicBool,
+    // Triggers land together, and a resolve that waits for another finds nothing left to ask.
+    resolving: Mutex<()>,
 }
 
 impl OwnValidatorIndices {
@@ -26,108 +34,113 @@ impl OwnValidatorIndices {
     pub fn new(signer: Arc<Signer>) -> Self {
         Self {
             signer,
-            indices: SccHashMap::new(),
-            retry_at_epoch: SccHashMap::new(),
+            indices: ArcSwap::from_pointee(HashMap::new()),
+            finalized_epoch: AtomicU64::new(0),
+            last_resolve_failed: AtomicBool::new(false),
+            resolving: Mutex::new(()),
         }
     }
 
-    /// Resolves the keys whose indices are not known yet.
-    ///
-    /// An index never changes, so a resolved key is never asked about again.
-    pub async fn update<P: Preset, W: Wait + Sync>(
-        &self,
-        beacon_nodes: &BeaconNodes<P, W>,
-        current_epoch: Epoch,
-    ) {
-        let public_keys = self.keys_to_resolve(current_epoch).await;
+    #[must_use]
+    pub fn load(&self) -> Guard<Arc<HashMap<PublicKeyBytes, Option<ValidatorIndex>>>> {
+        self.indices.load()
+    }
 
-        if public_keys.is_empty() {
+    #[must_use]
+    pub fn last_resolve_failed(&self) -> bool {
+        self.last_resolve_failed.load(Ordering::Relaxed)
+    }
+
+    /// The known indices, ascending so that caches keyed by the list see the same list each slot.
+    #[must_use]
+    pub fn sorted(&self) -> Vec<ValidatorIndex> {
+        self.load()
+            .values()
+            .flatten()
+            .copied()
+            .sorted()
+            .collect_vec()
+    }
+
+    /// Follows the signer's keys: new ones enter unresolved, removed ones drop out.
+    pub async fn sync_keys<P: Preset, W: Wait + Sync>(&self, chain_source: &ChainSource<P, W>) {
+        // Loaded inside, so a swap that lost the race rebuilds from the keys the signer has now.
+        self.indices.rcu(|indices| {
+            self.signer
+                .load()
+                .keys()
+                .map(|public_key| (*public_key, indices.get(public_key).copied().flatten()))
+                .collect::<HashMap<_, _>>()
+        });
+
+        self.resolve(chain_source).await;
+    }
+
+    /// Asked on a finalization, as only a finalization can make a deposit's validator appear.
+    pub async fn resolve_at_finalized_epoch<P: Preset, W: Wait + Sync>(
+        &self,
+        chain_source: &ChainSource<P, W>,
+        finalized_epoch: Epoch,
+    ) {
+        if self
+            .finalized_epoch
+            .fetch_max(finalized_epoch, Ordering::Relaxed)
+            >= finalized_epoch
+        {
             return;
         }
 
-        // Nothing is recorded when the request fails, so keys the beacon nodes could not be asked
-        // about are tried again in the same epoch rather than waiting for the next one.
-        let Ok(resolved) = beacon_nodes.validator_indices(&public_keys).await else {
+        self.resolve(chain_source).await;
+    }
+
+    /// Asks about the keys whose index is not known yet.
+    ///
+    /// Indices come from the finalized state, so a resolved key is never asked about again.
+    pub async fn resolve<P: Preset, W: Wait + Sync>(&self, chain_source: &ChainSource<P, W>) {
+        let _resolving = self.resolving.lock().await;
+
+        let to_resolve = self
+            .load()
+            .iter()
+            .filter(|(_, validator_index)| validator_index.is_none())
+            .map(|(public_key, _)| *public_key)
+            .collect_vec();
+
+        // Cleared first, so a key resolved by another trigger also ends the per-slot retries.
+        self.last_resolve_failed.store(false, Ordering::Relaxed);
+
+        if to_resolve.is_empty() {
             return;
+        }
+
+        let resolved = match chain_source.validator_indices(&to_resolve).await {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                warn_with_peers!("failed to resolve validator indices: {error:?}");
+                self.last_resolve_failed.store(true, Ordering::Relaxed);
+                return;
+            }
         };
 
-        for public_key in public_keys {
-            match resolved.get(&public_key) {
-                Some(validator_index) => {
-                    self.indices
-                        .upsert_async(public_key, *validator_index)
-                        .await;
-
-                    self.retry_at_epoch.remove_async(&public_key).await;
-                }
-                None => {
-                    self.retry_at_epoch
-                        .upsert_async(public_key, current_epoch.saturating_add(1))
-                        .await;
-                }
-            }
-        }
-    }
-
-    /// The indices resolved so far, ascending so that the same validator is asked about every time.
-    ///
-    /// Keys removed at runtime are filtered out rather than evicted, as an index that was resolved
-    /// once stays correct if the key is imported again.
-    pub async fn get(&self) -> Vec<ValidatorIndex> {
-        let signer_snapshot = self.signer.load();
-        let mut indices = vec![];
-
-        self.indices
-            .iter_async(|public_key, validator_index| {
-                if signer_snapshot.has_key(*public_key) {
-                    indices.push(*validator_index);
-                }
-
-                true
-            })
-            .await;
-
-        indices.into_iter().sorted().collect()
-    }
-
-    /// [`Self::get`], keyed by public key, for callers that match keys to indices.
-    pub async fn indices_by_pubkey(&self) -> HashMap<PublicKeyBytes, ValidatorIndex> {
-        let signer_snapshot = self.signer.load();
-        let mut indices = HashMap::new();
-
-        self.indices
-            .iter_async(|public_key, validator_index| {
-                if signer_snapshot.has_key(*public_key) {
-                    indices.insert(*public_key, *validator_index);
-                }
-
-                true
-            })
-            .await;
-
-        indices
-    }
-
-    async fn keys_to_resolve(&self, current_epoch: Epoch) -> Vec<PublicKeyBytes> {
-        let public_keys = self.signer.load().keys().copied().collect_vec();
-        let mut to_resolve = vec![];
-
-        for public_key in public_keys {
-            if self.indices.contains_async(&public_key).await {
-                continue;
-            }
-
-            let due = self
-                .retry_at_epoch
-                .get_async(&public_key)
-                .await
-                .is_none_or(|entry| current_epoch >= *entry.get());
-
-            if due {
-                to_resolve.push(public_key);
-            }
+        if resolved.is_empty() {
+            return;
         }
 
-        to_resolve
+        for (public_key, validator_index) in &resolved {
+            debug_with_peers!("resolved validator {public_key:?} to index {validator_index}");
+        }
+
+        // Only keys still held take an index; a key removed meanwhile stays out.
+        self.indices.rcu(|indices| {
+            let mut indices = (**indices).clone();
+
+            for (public_key, validator_index) in &resolved {
+                if let Some(entry) = indices.get_mut(public_key) {
+                    *entry = Some(*validator_index);
+                }
+            }
+
+            indices
+        });
     }
 }

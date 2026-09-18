@@ -14,7 +14,7 @@ pub use crate::{
 mod api;
 mod beacon_node_api;
 mod beacon_nodes;
-mod chain_head;
+mod chain_events;
 mod health;
 mod local_beacon_node;
 mod messages;

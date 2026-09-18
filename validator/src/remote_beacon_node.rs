@@ -81,7 +81,7 @@ use crate::{
         AttesterDuties, BeaconNodeApi, Duties, EnvelopeContents, ProducedBlock, ProposerDuties,
         PtcDuties,
     },
-    chain_head::{ChainHead, DependentRoots, HeadStatus, HeadUpdate},
+    chain_events::{ChainHead, DependentRoots, HeadStatus, HeadUpdate, StreamEvent},
     health::Health,
     slot_head::SlotHead,
 };
@@ -92,13 +92,13 @@ const SLOT_END_BPS: u64 = BASIS_POINTS;
 const MIN_TIMEOUT: Duration = Duration::from_secs(1);
 /// Most beacon nodes send keep-alive comments at least every 30 seconds, so a stream this quiet
 /// is a dead connection; one that sends none merely resubscribes after five empty slots.
-const HEAD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_mins(1);
+const EVENT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_mins(1);
 
 const VALIDATOR_IDS_PER_REQUEST: usize = 1024;
 
 #[derive(Debug, Error)]
-enum HeadStreamError {
-    #[error("no bytes received in {HEAD_STREAM_IDLE_TIMEOUT:?}")]
+enum EventStreamError {
+    #[error("no bytes received in {EVENT_STREAM_IDLE_TIMEOUT:?}")]
     Idle,
     #[error(transparent)]
     Transport(reqwest::Error),
@@ -169,6 +169,13 @@ pub struct Genesis {
     pub genesis_time: UnixSeconds,
     pub genesis_fork_version: Version,
     pub genesis_validators_root: H256,
+}
+
+/// The part of a `finalized_checkpoint` event the validator client uses.
+#[derive(Deserialize)]
+struct FinalizedCheckpointEvent {
+    #[serde(with = "serde_utils::string_or_native")]
+    epoch: Epoch,
 }
 
 /// The request body of `postStateValidators`.
@@ -284,6 +291,7 @@ enum BuilderEntry {}
 
 const HEAD_EVENT: &str = "head";
 const HEAD_V2_EVENT: &str = "head_v2";
+const FINALIZED_CHECKPOINT_EVENT: &str = "finalized_checkpoint";
 
 /// A `head` or `head_v2` event, told apart by shape: only `head_v2` nests under `data`.
 #[derive(Deserialize)]
@@ -408,12 +416,15 @@ impl RemoteBeaconNode {
         Health::from_u8(self.health.load(Ordering::Relaxed))
     }
 
-    pub async fn head_events<P: Preset>(
+    pub async fn events<P: Preset>(
         &self,
-    ) -> Result<impl Stream<Item = Result<HeadUpdate>> + Send + use<P>> {
+    ) -> Result<impl Stream<Item = Result<StreamEvent>> + Send + use<P>> {
         // Older nodes reject an unknown topic outright rather than streaming nothing; a node
         // that cannot be reached at all is no more reachable on the old topic.
-        let response = match self.subscribe(HEAD_V2_EVENT).await {
+        let response = match self
+            .subscribe(&format!("{HEAD_V2_EVENT},{FINALIZED_CHECKPOINT_EVENT}"))
+            .await
+        {
             Ok(response) => response,
             Err(error) if error.downcast_ref::<Error>().is_some() => {
                 debug_with_peers!(
@@ -422,7 +433,8 @@ impl RemoteBeaconNode {
                     self.url,
                 );
 
-                self.subscribe(HEAD_EVENT).await?
+                self.subscribe(&format!("{HEAD_EVENT},{FINALIZED_CHECKPOINT_EVENT}"))
+                    .await?
             }
             Err(error) => return Err(error),
         };
@@ -432,28 +444,33 @@ impl RemoteBeaconNode {
         let chunks = stream::unfold(
             BodyDataStream::new(Body::from(response)),
             |mut chunks| async move {
-                match timeout(HEAD_STREAM_IDLE_TIMEOUT, chunks.next()).await {
+                match timeout(EVENT_STREAM_IDLE_TIMEOUT, chunks.next()).await {
                     Ok(chunk) => {
-                        chunk.map(|chunk| (chunk.map_err(HeadStreamError::Transport), chunks))
+                        chunk.map(|chunk| (chunk.map_err(EventStreamError::Transport), chunks))
                     }
-                    Err(_) => Some((Err(HeadStreamError::Idle), chunks)),
+                    Err(_) => Some((Err(EventStreamError::Idle), chunks)),
                 }
             },
         );
 
         // An event without data carries no head, as a keep-alive does, and is not a failure.
         let events = SseStream::from_bytes_stream(chunks).filter_map(|event| {
-            let head_update = match event {
+            let stream_event = match event {
                 Ok(event) => match (event.event.as_deref(), event.data) {
                     (Some(HEAD_V2_EVENT | HEAD_EVENT), Some(data)) => {
-                        Some(AnyHeadEvent::parse::<P>(&data))
+                        Some(AnyHeadEvent::parse::<P>(&data).map(StreamEvent::Head))
                     }
+                    (Some(FINALIZED_CHECKPOINT_EVENT), Some(data)) => Some(
+                        serde_json::from_str::<FinalizedCheckpointEvent>(&data)
+                            .map(|event| StreamEvent::Finalized(event.epoch))
+                            .map_err(Into::into),
+                    ),
                     _ => None,
                 },
                 Err(error) => Some(Err(error.into())),
             };
 
-            future::ready(head_update)
+            future::ready(stream_event)
         });
 
         Ok(events)
@@ -1216,7 +1233,10 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
         // Split up because the whole key set of a large validator client does not belong in a
         // single request body.
         for keys in public_keys.chunks(VALIDATOR_IDS_PER_REQUEST) {
-            let url = self.endpoint("/eth/v1/beacon/states/head/validators")?;
+            // A reorg can move a validator whose deposit is not final yet, and no validator is
+            // activated before its deposit is, so the finalized state has every index that matters
+            // and none that can change.
+            let url = self.endpoint("/eth/v1/beacon/states/finalized/validators")?;
 
             let response = self
                 .client
@@ -2022,6 +2042,23 @@ mod tests {
                 next: H256::repeat_byte(4),
             },
         );
+
+        Ok(())
+    }
+
+    // The epoch arrives as a string, and a number-only parse would drop every finalization.
+    #[test]
+    fn parses_finalized_checkpoint_event() -> Result<()> {
+        let data = json!({
+            "block": "0x0101010101010101010101010101010101010101010101010101010101010101",
+            "state": "0x0202020202020202020202020202020202020202020202020202020202020202",
+            "epoch": "2",
+            "execution_optimistic": false,
+        });
+
+        let event = serde_json::from_str::<FinalizedCheckpointEvent>(&data.to_string())?;
+
+        assert_eq!(event.epoch, 2);
 
         Ok(())
     }

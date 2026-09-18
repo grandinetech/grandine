@@ -22,6 +22,7 @@ use reqwest::Client;
 use slashing_protection::{Attestation, BlockProposal, SlashingProtector};
 use std_ext::ArcExt as _;
 use thiserror::Error;
+use tokio::sync::Notify;
 use tracing::instrument;
 use types::{
     phase0::primitives::{Epoch, H256, Slot},
@@ -60,6 +61,7 @@ enum SignMethod {
 
 pub struct Signer {
     snapshot: ArcSwap<Snapshot>,
+    keys_changed: Notify,
 }
 
 impl Signer {
@@ -84,7 +86,10 @@ impl Signer {
             doppelganger_protection: None,
         });
 
-        Self { snapshot }
+        Self {
+            snapshot,
+            keys_changed: Notify::new(),
+        }
     }
 
     pub fn enable_doppelganger_protection(
@@ -139,7 +144,26 @@ impl Signer {
         F: FnMut(&Arc<Snapshot>) -> R,
         R: Into<Arc<Snapshot>>,
     {
-        self.snapshot.rcu(f)
+        let previous = self.snapshot.rcu(f);
+        let current = self.snapshot.load();
+
+        let keys_changed = previous.sign_methods.len() != current.sign_methods.len()
+            || previous
+                .sign_methods
+                .keys()
+                .any(|public_key| !current.sign_methods.contains_key(public_key));
+
+        if keys_changed {
+            self.keys_changed.notify_one();
+        }
+
+        previous
+    }
+
+    /// Notified whenever the set of keys changes, with a permit kept for a waiter that comes later.
+    #[must_use]
+    pub const fn keys_changed(&self) -> &Notify {
+        &self.keys_changed
     }
 
     pub fn update_doppelganger_protection_pubkeys(&self, current_slot: Slot) {
@@ -504,5 +528,58 @@ impl Snapshot {
             .get(&public_key)
             .ok_or(Error::MissingCredentials { public_key })
             .map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bls::SecretKeyBytes;
+    use futures::FutureExt as _;
+    use hex_literal::hex;
+    use std_ext::ArcExt;
+
+    use super::*;
+
+    const PUBLIC_KEY: PublicKeyBytes = PublicKeyBytes(hex!(
+        "b301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81"
+    ));
+
+    const SECRET_KEY: [u8; 32] =
+        hex!("47b8192d77bf871b62e87859d653922725724a5c031afeabc60bcef5ff665138");
+
+    // The index resolver waits on the notification, so it must fire on a key change and only then.
+    #[test]
+    fn update_notifies_only_when_the_key_set_changes() -> Result<()> {
+        let signer = Signer::new(
+            [],
+            Client::new(),
+            Client::new(),
+            Web3SignerConfig::default(),
+            None,
+        );
+
+        let secret_key: Arc<SecretKey> = Arc::new(SecretKeyBytes::from(SECRET_KEY).try_into()?);
+
+        signer.update(ArcExt::clone_arc);
+        assert!(signer.keys_changed().notified().now_or_never().is_none());
+
+        signer.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
+            snapshot.append_keys([(PUBLIC_KEY, secret_key.clone_arc())]);
+            snapshot
+        });
+        assert!(signer.keys_changed().notified().now_or_never().is_some());
+
+        signer.update(ArcExt::clone_arc);
+        assert!(signer.keys_changed().notified().now_or_never().is_none());
+
+        signer.update(|snapshot| {
+            let mut snapshot = snapshot.as_ref().clone();
+            snapshot.delete_key(PUBLIC_KEY);
+            snapshot
+        });
+        assert!(signer.keys_changed().notified().now_or_never().is_some());
+
+        Ok(())
     }
 }

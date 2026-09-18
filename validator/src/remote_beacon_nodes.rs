@@ -1,9 +1,9 @@
 use core::cmp::Reverse;
 use std::{collections::HashMap, sync::Arc};
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use bls::PublicKeyBytes;
-use futures::future::join_all;
+use futures::{channel::mpsc::UnboundedSender, future::join_all};
 use logging::{info_with_peers, warn_with_peers};
 use std_ext::ArcExt;
 use thiserror::Error;
@@ -15,8 +15,9 @@ use types::{
 
 use crate::{
     beacon_node_api::BeaconNodeApi,
-    chain_head::stream_head_events,
+    chain_events::stream_events,
     health::Health,
+    messages::InternalMessage,
     remote_beacon_node::{Genesis, RemoteBeaconNode},
 };
 
@@ -64,9 +65,10 @@ impl RemoteBeaconNodes {
         &self.publish_to_every_node
     }
 
-    pub fn spawn_head_streams<P: Preset>(&self) {
-        tokio::spawn(stream_head_events::<P>(
+    pub fn spawn_event_streams<P: Preset>(&self, internal_tx: UnboundedSender<InternalMessage>) {
+        tokio::spawn(stream_events::<P>(
             self.nodes.iter().map(ArcExt::clone_arc).collect(),
+            internal_tx,
         ));
     }
 
@@ -110,29 +112,26 @@ impl RemoteBeaconNodes {
         }
     }
 
-    /// Resolves `pubkey` on the first serving node that answers; [`None`] when no node knows it.
-    pub async fn validator_index<P: Preset>(
+    /// Resolves `public_keys` on the first serving node that answers; unknown keys are absent.
+    pub async fn validator_indices<P: Preset>(
         &self,
-        pubkey: PublicKeyBytes,
-    ) -> Result<Option<ValidatorIndex>> {
+        public_keys: &[PublicKeyBytes],
+    ) -> Result<HashMap<PublicKeyBytes, ValidatorIndex>> {
         let mut last_error = None;
 
         for node in self.serving() {
-            match BeaconNodeApi::<P>::validator_indices(node.as_ref(), &[pubkey]).await {
-                Ok(indices) => return Ok(indices.get(&pubkey).copied()),
+            match BeaconNodeApi::<P>::validator_indices(node.as_ref(), public_keys).await {
+                Ok(indices) => return Ok(indices),
                 Err(error) => {
                     warn_with_peers!(
-                        "{node} beacon node failed to resolve a validator index: {error:?}"
+                        "{node} beacon node failed to resolve validator indices: {error:?}"
                     );
                     last_error = Some(error);
                 }
             }
         }
 
-        match last_error {
-            Some(error) => Err(error),
-            None => Ok(None),
-        }
+        Err(last_error.unwrap_or_else(|| anyhow!("no remote beacon node can serve requests")))
     }
 
     pub fn serving(&self) -> impl Iterator<Item = &Arc<RemoteBeaconNode>> {

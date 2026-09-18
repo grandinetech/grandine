@@ -289,6 +289,7 @@ impl<P: Preset, W> PoolMessage<P, W> {
 pub enum ValidatorMessage<P: Preset, W> {
     Tick(W, Tick),
     Head(W, ChainLink<P>),
+    FinalizedCheckpoint(Checkpoint),
     ValidAttestation(W, Arc<Attestation<P>>),
     ValidPayloadAttestation(W, Arc<PayloadAttestationMessage>),
     PrepareExecutionPayload(Slot, ExecutionBlockHash, ExecutionBlockHash),

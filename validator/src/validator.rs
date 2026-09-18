@@ -27,6 +27,7 @@ use features::Feature;
 use fork_choice_control::{Event, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{ChainLink, StateCacheError};
 use futures::{
+    FutureExt as _,
     channel::{
         mpsc::{UnboundedReceiver, UnboundedSender},
         oneshot::Sender,
@@ -105,6 +106,7 @@ use crate::{
     own_ptc_members::{OwnPTCMembers, PTCMember},
     own_sync_committee_members::OwnSyncCommitteeMembers,
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
+    own_validator_indices::OwnValidatorIndices,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
     tasks::{
@@ -333,10 +335,27 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .check_on_startup(self.current_slot()?)
                 .await?;
 
-            remote_beacon_nodes.spawn_head_streams::<P>();
+            remote_beacon_nodes.spawn_event_streams::<P>(self.internal_tx.clone());
         }
 
+        // Awaited so that the first tick already has the indices of the keys loaded at startup.
+        self.own_duties
+            .validator_indices
+            .sync_keys(&self.chain_source)
+            .await;
+
         self.run_internal().await
+    }
+
+    fn spawn_own_validator_index_resolution<F, Fut>(&self, resolve: F)
+    where
+        F: FnOnce(Arc<OwnValidatorIndices>, Arc<ChainSource<P, W>>) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let indices = self.own_duties.validator_indices.clone_arc();
+        let chain_source = self.chain_source.clone_arc();
+
+        tokio::spawn(resolve(indices, chain_source));
     }
 
     #[expect(clippy::too_many_lines)]
@@ -369,7 +388,22 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     health_check.check();
                 },
 
+                () = self.signer.keys_changed().notified().fuse() => {
+                    self.spawn_own_validator_index_resolution(|indices, chain_source| async move {
+                        indices.sync_keys(&chain_source).await;
+                    });
+                }
+
                 message = self.internal_rx.select_next_some() => match message {
+                    InternalMessage::FinalizedCheckpoint(finalized_epoch) => {
+                        self.spawn_own_validator_index_resolution(
+                            move |indices, chain_source| async move {
+                                indices
+                                    .resolve_at_finalized_epoch(&chain_source, finalized_epoch)
+                                    .await;
+                            },
+                        );
+                    }
                     InternalMessage::DoppelgangerProtectionResult(result) => {
                         if let Err(error) = result {
                             // The typed error must reach the application restart loop intact:
@@ -392,6 +426,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::Head(wait_group, head) => {
                         self.handle_head_message(wait_group, head).await
+                    }
+                    ValidatorMessage::FinalizedCheckpoint(finalized_checkpoint) => {
+                        InternalMessage::FinalizedCheckpoint(finalized_checkpoint.epoch)
+                            .send(&self.internal_tx);
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         if let Some(attestation_agg_pool) = self.chain_source.attestation_agg_pool() {
@@ -660,7 +698,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
     #[instrument(parent = None, level = "debug", fields(service = "validator"), skip_all)]
     async fn handle_head_message(&mut self, wait_group: W, head: ChainLink<P>) {
-        // The built-in node's head drives nothing when duties are performed elsewhere.
+        // Only the built-in node's fork choice sends heads.
         let Some(controller) = self.chain_source.controller() else {
             return;
         };
@@ -934,6 +972,17 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             self.refresh_signer_keys(slot);
         }
 
+        // The fallback for a stream that is not delivering finalizations; it costs nothing while
+        // every key is known.
+        if tick.is_start_of_slot()
+            && (misc::is_epoch_start::<P>(slot)
+                || self.own_duties.validator_indices.last_resolve_failed())
+        {
+            self.spawn_own_validator_index_resolution(|indices, chain_source| async move {
+                indices.resolve(&chain_source).await;
+            });
+        }
+
         if tick.is_start_of_slot() {
             self.discard_previous_slot_attestations();
             self.discard_previous_slot_payload_attestations();
@@ -952,30 +1001,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let own_validator_indices = self.own_duties.validator_indices.clone_arc();
 
             tokio::spawn(async move {
-                own_validator_indices
-                    .update(&beacon_nodes, misc::compute_epoch_at_slot::<P>(slot))
-                    .await;
-
-                let indices_by_pubkey = own_validator_indices.indices_by_pubkey().await;
+                let indices = own_validator_indices.load().clone_arc();
 
                 let result = doppelganger_protection
-                    .detect_doppelgangers::<P, _, _>(
-                        slot,
-                        &indices_by_pubkey,
-                        |epoch, validator_indices| {
-                            let beacon_nodes = &beacon_nodes;
+                    .detect_doppelgangers::<P, _, _>(slot, &indices, |epoch, validator_indices| {
+                        let beacon_nodes = &beacon_nodes;
 
-                            async move {
-                                let liveness =
-                                    beacon_nodes.liveness(epoch, &validator_indices).await?;
+                        async move {
+                            let liveness = beacon_nodes.liveness(epoch, &validator_indices).await?;
 
-                                Ok(liveness
-                                    .into_iter()
-                                    .map(|response| (response.index, response.is_live))
-                                    .collect())
-                            }
-                        },
-                    )
+                            Ok(liveness
+                                .into_iter()
+                                .map(|response| (response.index, response.is_live))
+                                .collect())
+                        }
+                    })
                     .await;
 
                 InternalMessage::DoppelgangerProtectionResult(result).send(&internal_tx);
@@ -1406,12 +1446,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let slot = slot_head.slot();
         let epoch = slot_head.current_epoch();
 
-        self.own_duties
-            .validator_indices
-            .update(beacon_nodes, epoch)
-            .await;
-
-        let validator_indices = self.own_duties.validator_indices.get().await;
+        let validator_indices = self.own_duties.validator_indices.sorted();
 
         let Some(first_index) = validator_indices.first().copied() else {
             return Ok(None);
@@ -1918,14 +1953,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return None;
         }
 
-        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
-
-        self.own_duties
-            .validator_indices
-            .update(beacon_nodes, current_epoch)
-            .await;
-
-        let validator_indices = self.own_duties.validator_indices.get().await;
+        let validator_indices = self.own_duties.validator_indices.sorted();
 
         match self
             .own_duties
@@ -2123,12 +2151,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(Some(members));
         }
 
-        self.own_duties
-            .validator_indices
-            .update(beacon_nodes, epoch)
-            .await;
-
-        let validator_indices = self.own_duties.validator_indices.get().await;
+        let validator_indices = self.own_duties.validator_indices.sorted();
 
         if validator_indices.is_empty() {
             return Ok(None);

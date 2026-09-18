@@ -1,5 +1,5 @@
 use core::ops::Range;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Result, ensure};
 use arithmetic::UsizeExt as _;
@@ -8,7 +8,10 @@ use bls::{PublicKeyBytes, SignatureBytes};
 use clock::Tick;
 use eth1_api::ApiController;
 use fork_choice_control::{EventChannels, Wait};
-use helper_functions::misc::{compute_epoch_at_slot, compute_start_slot_at_epoch};
+use helper_functions::{
+    accessors,
+    misc::{compute_epoch_at_slot, compute_start_slot_at_epoch},
+};
 use operation_pools::{AttestationAggPool, PayloadAttestationAggPool, SyncCommitteeAggPool};
 use ssz::BitVector;
 use tokio::sync::Mutex;
@@ -120,6 +123,31 @@ pub struct LocalChain<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> ChainSource<P, W> {
+    /// Indices of `public_keys` in the finalized state, which a reorg cannot change.
+    pub async fn validator_indices(
+        &self,
+        public_keys: &[PublicKeyBytes],
+    ) -> Result<HashMap<PublicKeyBytes, ValidatorIndex>> {
+        match &self.chain {
+            Chain::Local(local) => {
+                let state = local.controller.last_finalized_state().value;
+
+                Ok(public_keys
+                    .iter()
+                    .filter_map(|public_key| {
+                        let validator_index = accessors::index_of_public_key(&state, public_key)?;
+                        Some((*public_key, validator_index))
+                    })
+                    .collect())
+            }
+            Chain::Remote(remote_beacon_nodes) => {
+                remote_beacon_nodes
+                    .validator_indices::<P>(public_keys)
+                    .await
+            }
+        }
+    }
+
     pub fn slot(&self) -> Result<Slot> {
         match &self.chain {
             Chain::Local(local) => Ok(local.controller.slot()),

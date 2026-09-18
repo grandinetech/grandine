@@ -62,21 +62,16 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
-        own_validator_indices
-            .update(&beacon_nodes, current_epoch)
-            .await;
-
-        let validator_indices = own_validator_indices.get().await;
+        let validator_indices = own_validator_indices.sorted();
 
         // Sent every slot, as a restarted beacon node no longer knows about earlier ones.
         let proposers = own_validator_indices
-            .indices_by_pubkey()
-            .await
-            .into_iter()
+            .load()
+            .iter()
             .filter_map(|(pubkey, validator_index)| {
                 Some(ProposerData {
-                    validator_index,
-                    fee_recipient: proposer_configs.configured_fee_recipient(pubkey)?,
+                    validator_index: (*validator_index)?,
+                    fee_recipient: proposer_configs.configured_fee_recipient(*pubkey)?,
                 })
             })
             .collect_vec();
@@ -279,11 +274,7 @@ impl<P: Preset, W: Wait + Sync> PrefetchSyncCommitteeDutiesTask<P, W> {
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
 
-        own_validator_indices
-            .update(&beacon_nodes, current_epoch)
-            .await;
-
-        let validator_indices = own_validator_indices.get().await;
+        let validator_indices = own_validator_indices.sorted();
 
         if validator_indices.is_empty() {
             drop(wait_group);

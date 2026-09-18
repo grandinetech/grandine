@@ -2,8 +2,8 @@ use core::{pin::pin, time::Duration};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
-use futures::{StreamExt as _, future::join_all};
-use logging::{debug_with_peers, info_with_peers};
+use futures::{StreamExt as _, channel::mpsc::UnboundedSender, future::join_all};
+use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use tap::Pipe as _;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -12,7 +12,7 @@ use types::{
     preset::Preset,
 };
 
-use crate::{health::Health, remote_beacon_node::RemoteBeaconNode};
+use crate::{health::Health, messages::InternalMessage, remote_beacon_node::RemoteBeaconNode};
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
@@ -46,6 +46,12 @@ pub struct HeadUpdate {
     pub block: H256,
     pub execution_optimistic: bool,
     pub dependent_roots: DependentRoots,
+}
+
+/// What the event stream of a node delivers.
+pub enum StreamEvent {
+    Head(HeadUpdate),
+    Finalized(Epoch),
 }
 
 /// What a cached head is worth at a slot.
@@ -158,23 +164,33 @@ impl ChainHead {
     }
 }
 
-pub async fn stream_head_events<P: Preset>(nodes: Vec<Arc<RemoteBeaconNode>>) {
-    nodes.into_iter().map(follow::<P>).pipe(join_all).await;
+pub async fn stream_events<P: Preset>(
+    nodes: Vec<Arc<RemoteBeaconNode>>,
+    internal_tx: UnboundedSender<InternalMessage>,
+) {
+    nodes
+        .into_iter()
+        .map(|node| follow::<P>(node, internal_tx.clone()))
+        .pipe(join_all)
+        .await;
 }
 
-async fn follow<P: Preset>(node: Arc<RemoteBeaconNode>) {
+async fn follow<P: Preset>(
+    node: Arc<RemoteBeaconNode>,
+    internal_tx: UnboundedSender<InternalMessage>,
+) {
     let mut delay = RECONNECT_DELAY;
     let mut subscribed_before = false;
 
     loop {
-        let delivered = match node.head_events::<P>().await {
+        let delivered = match node.events::<P>().await {
             Ok(events) => {
                 let mut events = pin!(events);
 
                 if subscribed_before {
-                    debug_with_peers!("resubscribed to head events from {node}");
+                    info_with_peers!("resubscribed to events from {node}");
                 } else {
-                    info_with_peers!("subscribed to head events from {node}");
+                    info_with_peers!("subscribed to events from {node}");
                     subscribed_before = true;
                 }
 
@@ -184,10 +200,28 @@ async fn follow<P: Preset>(node: Arc<RemoteBeaconNode>) {
                     match event {
                         Ok(event) => {
                             delivered = true;
-                            accept(&node, event);
+
+                            // A node on a different network would otherwise report a head from
+                            // another chain.
+                            if node.health() == Health::Incompatible {
+                                warn_with_peers!(
+                                    "received an event from an incompatible node: {node}"
+                                );
+
+                                continue;
+                            }
+
+                            match event {
+                                StreamEvent::Head(update) => {
+                                    accept(&node, update);
+                                }
+                                StreamEvent::Finalized(epoch) => {
+                                    InternalMessage::FinalizedCheckpoint(epoch).send(&internal_tx);
+                                }
+                            }
                         }
                         Err(error) => {
-                            debug_with_peers!("head event stream from {node} failed: {error:?}");
+                            warn_with_peers!("event stream from {node} failed: {error:?}");
                             break;
                         }
                     }
@@ -196,13 +230,13 @@ async fn follow<P: Preset>(node: Arc<RemoteBeaconNode>) {
                 // Answering without streaming anything is indistinguishable from never
                 // having been asked.
                 if !delivered {
-                    debug_with_peers!("head event stream from {node} ended without any event");
+                    warn_with_peers!("event stream from {node} ended without any event");
                 }
 
                 delivered
             }
             Err(error) => {
-                debug_with_peers!("unable to stream head events from {node}: {error:?}");
+                warn_with_peers!("unable to stream events from {node}: {error:?}");
                 false
             }
         };

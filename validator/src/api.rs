@@ -694,18 +694,21 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
             let current_epoch =
                 Tick::current::<P>(chain_config, chain_source.genesis_time)?.epoch::<P>();
             let epoch = query.epoch.unwrap_or(current_epoch);
+            let known_index = chain_source
+                .own_validator_indices
+                .load()
+                .get(&pubkey)
+                .copied()
+                .flatten();
 
             // A key the duty loop has not resolved yet, such as one just imported, is asked about.
-            let validator_index = match chain_source
-                .own_validator_indices
-                .indices_by_pubkey()
-                .await
-                .get(&pubkey)
-            {
-                Some(validator_index) => *validator_index,
+            let validator_index = match known_index {
+                Some(validator_index) => validator_index,
                 None => remote_beacon_nodes
-                    .validator_index::<P>(pubkey)
+                    .validator_indices::<P>(&[pubkey])
                     .await?
+                    .get(&pubkey)
+                    .copied()
                     .ok_or(Error::ValidatorNotFound { pubkey })?,
             };
 
