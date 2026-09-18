@@ -2522,3 +2522,17 @@ fn reorganizing_due_to_invalidation_sends_notifications_if_common_ancestor_is_un
         unfinalized_block_count_total: 1,
     });
 }
+
+#[test]
+fn gloas_genesis_accepts_blocks_built_on_it() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+
+    context.on_slot(block_2.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+}

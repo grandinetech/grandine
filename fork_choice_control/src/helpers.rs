@@ -1203,6 +1203,12 @@ impl Context<Minimal> {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Bellatrix))
             .expect("minimal configuration modified to start in Bellatrix is valid")
     }
+
+    #[must_use]
+    pub fn gloas_minimal() -> Self {
+        Self::with_config(Config::minimal().start_and_stay_in(Phase::Gloas))
+            .expect("minimal configuration modified to start in Gloas is valid")
+    }
 }
 
 #[derive(Clone, Copy)]

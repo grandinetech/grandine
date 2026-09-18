@@ -448,6 +448,19 @@ impl<P: Preset> BeaconState<P> {
         }
     }
 
+    pub fn post_gloas_mut(&mut self) -> Option<&mut dyn PostGloasBeaconState<P>> {
+        match self {
+            Self::Phase0(_)
+            | Self::Altair(_)
+            | Self::Bellatrix(_)
+            | Self::Capella(_)
+            | Self::Deneb(_)
+            | Self::Electra(_)
+            | Self::Fulu(_) => None,
+            Self::Gloas(state) => Some(state),
+        }
+    }
+
     pub fn set_cached_root(&self, root: H256) {
         match self {
             Self::Phase0(state) => state.set_cached_root(root),
