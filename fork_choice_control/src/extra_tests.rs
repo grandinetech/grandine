@@ -2522,3 +2522,18 @@ fn reorganizing_due_to_invalidation_sends_notifications_if_common_ancestor_is_un
         unfinalized_block_count_total: 1,
     });
 }
+
+#[test]
+fn gloas_invalid_payload_sets_invalid_payload_status() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, _) = context.empty_block(&state_0, 1, H256::default());
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+}

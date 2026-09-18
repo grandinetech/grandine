@@ -3876,8 +3876,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
 
         // [REJECT] block passes validation.
+        // A block whose payload chain is already known invalid must not reach the execution engine.
         ensure!(
-            !self.rejected_block_roots.contains(&beacon_block_root),
+            !self.rejected_block_roots.contains(&beacon_block_root)
+                && !self
+                    .chain_link(beacon_block_root)
+                    .is_some_and(ChainLink::is_invalid),
             Error::<P>::PayloadEnvelopeInvalidBlock {
                 payload_envelope: envelope
             },
