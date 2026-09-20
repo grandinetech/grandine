@@ -80,22 +80,21 @@ fn get_or_download(path: impl AsRef<Path>, url: impl IntoUrl, decode_xz: bool) -
                 .get(url)
                 .send()?
                 .error_for_status()?;
-            let mut file = File::create(path)?;
 
-            if decode_xz {
+            let buf = if decode_xz {
                 let mut decoder = XzDecoder::new(Vec::new());
                 response.copy_to(&mut decoder)?;
-                let buf = decoder.finish()?;
-
-                file.write_all(&buf)?;
-
-                Ok(buf)
+                decoder.finish()?
             } else {
-                let bytes = response.bytes()?;
-                file.write_all(&bytes)?;
+                response.bytes()?.to_vec()
+            };
 
-                Ok(bytes.to_vec())
-            }
+            // Do not create the cache file until the complete response has been
+            // downloaded and, when requested, successfully decompressed.
+            let mut file = File::create(path)?;
+            file.write_all(&buf)?;
+
+            Ok(buf)
         })
 }
 
