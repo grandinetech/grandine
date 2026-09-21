@@ -232,7 +232,6 @@ pub struct ValidatorBlockQueryV4 {
     graffiti: Option<H256>,
     #[serde(default, with = "serde_utils::bool_as_empty_string")]
     skip_randao_verification: bool,
-    #[serde(default = "serde_aux::field_attributes::bool_true")]
     include_payload: bool,
     builder_boost_factor: Option<u64>,
 }
@@ -1938,29 +1937,24 @@ pub async fn publish_execution_payload_envelope<P: Preset, W: Wait>(
 
     let signed_envelope = Arc::new(signed_execution_payload_envelope);
 
-    if !blobs.is_empty() {
-        let beacon_block_root = signed_envelope.message.beacon_block_root;
-        let slot = signed_envelope.message.payload.slot_number;
-
-        publish_gloas_data_column_sidecars(
-            &controller,
-            &api_to_p2p_tx,
-            metrics,
-            dedicated_executor,
-            beacon_block_root,
-            slot,
-            blobs,
-            kzg_proofs.into_iter().collect_vec(),
-        )
-        .await?;
-    }
+    let data_column_sidecars = construct_and_submit_gloas_data_column_sidecars(
+        &controller,
+        metrics,
+        dedicated_executor,
+        signed_envelope.message.beacon_block_root,
+        signed_envelope.message.payload.slot_number,
+        blobs,
+        kzg_proofs.into_iter().collect_vec(),
+    )
+    .await?;
 
     let broadcast_validation = query.broadcast_validation.unwrap_or_default();
 
-    publish_signed_execution_payload_envelope(
+    publish_signed_execution_payload_envelopew_with_data_column_sidecars(
         &controller,
         &api_to_p2p_tx,
         signed_envelope,
+        data_column_sidecars,
         broadcast_validation,
     )
     .await
@@ -3908,8 +3902,7 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
 )]
 pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    EthPath(slot): EthPath<Slot>,
-    EthPath(builder_index): EthPath<BuilderIndex>,
+    EthPath((slot, builder_index)): EthPath<(Slot, BuilderIndex)>,
     headers: HeaderMap,
 ) -> Result<EthResponse<ExecutionPayloadBid<P>, (), JsonOrSsz>, Error> {
     let current_slot = controller.slot();
@@ -5584,17 +5577,15 @@ async fn resolve_execution_payload_envelope_contents<P: Preset, W: Wait>(
     })
 }
 
-#[expect(clippy::too_many_arguments)]
-async fn publish_gloas_data_column_sidecars<P: Preset, W: Wait>(
+async fn construct_and_submit_gloas_data_column_sidecars<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
-    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
     metrics: Option<Arc<Metrics>>,
     dedicated_executor: Arc<DedicatedExecutor>,
     beacon_block_root: H256,
     slot: Slot,
     blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
     kzg_proofs: Vec<KzgProof>,
-) -> Result<(), Error> {
+) -> Result<Vec<Arc<DataColumnSidecar<P>>>, Error> {
     let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
         (beacon_block_root, slot).into(),
         blobs.into_iter(),
@@ -5606,37 +5597,104 @@ async fn publish_gloas_data_column_sidecars<P: Preset, W: Wait>(
     .await
     .map_err(Error::InvalidDataColumnSidecar)?;
 
-    submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars.clone()).await?;
+    submit_data_column_sidecars(controller.clone_arc(), data_column_sidecars).await
+}
 
+fn publish_signed_execution_payload_envelope_with_data_column_sidecars_to_network<P: Preset>(
+    signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+) {
     for data_column_sidecar in data_column_sidecars {
-        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar).send(api_to_p2p_tx);
+        ApiToP2p::PublishDataColumnSidecar(data_column_sidecar.clone_arc()).send(api_to_p2p_tx);
     }
 
-    Ok(())
+    ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+}
+
+async fn publish_signed_execution_payload_envelope_with_gossip_checks<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    data_column_sidecars: &[Arc<DataColumnSidecar<P>>],
+    api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
+) -> Result<Option<StatusCode>, Error> {
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_execution_payload_envelope_for_gossip(signed_envelope.clone_arc(), sender);
+
+    match receiver.next().await.transpose() {
+        Ok(Some(ValidationOutcome::Accept)) => {
+            publish_signed_execution_payload_envelope_with_data_column_sidecars_to_network(
+                signed_envelope,
+                data_column_sidecars,
+                api_to_p2p_tx,
+            );
+        }
+        Ok(Some(ValidationOutcome::Ignore(publishable))) => {
+            if publishable {
+                publish_signed_execution_payload_envelope_with_data_column_sidecars_to_network(
+                    signed_envelope,
+                    data_column_sidecars,
+                    api_to_p2p_tx,
+                );
+            }
+
+            return Ok(Some(StatusCode::ACCEPTED));
+        }
+        Ok(None) => {
+            warn_with_peers!(
+                "received no envelope validation response for gossip validation via HTTP API \
+                 (envelope: {signed_envelope:?})"
+            );
+
+            return Err(Error::InvalidPayloadEnvelope(anyhow!(
+                "received no envelope validation response",
+            )));
+        }
+        Err(error) => return Err(Error::InvalidPayloadEnvelope(error)),
+    }
+
+    Ok(None)
 }
 
 #[instrument(skip_all, level = "debug")]
-async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
+async fn publish_signed_execution_payload_envelopew_with_data_column_sidecars<
+    P: Preset,
+    W: Wait,
+>(
     controller: &ApiController<P, W>,
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
     signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
+    data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
     broadcast_validation: BroadcastValidation,
 ) -> Result<StatusCode, Error> {
+    if broadcast_validation == BroadcastValidation::Gossip
+        && let Some(status_code) = publish_signed_execution_payload_envelope_with_gossip_checks(
+            controller,
+            signed_envelope.clone_arc(),
+            &data_column_sidecars,
+            api_to_p2p_tx,
+        )
+        .await?
+    {
+        return Ok(status_code);
+    }
+
     let (sender, mut receiver) = futures::channel::mpsc::channel(1);
 
-    if broadcast_validation == BroadcastValidation::Gossip {
-        controller
-            .on_api_execution_payload_envelope_for_gossip(signed_envelope.clone_arc(), sender);
-    } else {
-        controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
-    }
+    controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => match broadcast_validation {
             // The envelope was already published by the gossip-checks path above.
             BroadcastValidation::Gossip => StatusCode::OK,
             BroadcastValidation::Consensus => {
-                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+                publish_signed_execution_payload_envelope_with_data_column_sidecars_to_network(
+                    signed_envelope,
+                    &data_column_sidecars,
+                    api_to_p2p_tx,
+                );
+
                 StatusCode::OK
             }
             BroadcastValidation::ConsensusAndEquivocation => {
@@ -5647,13 +5705,22 @@ async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
                     )));
                 }
 
-                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+                publish_signed_execution_payload_envelope_with_data_column_sidecars_to_network(
+                    signed_envelope,
+                    &data_column_sidecars,
+                    api_to_p2p_tx,
+                );
+
                 StatusCode::OK
             }
         },
         Ok(Some(ValidationOutcome::Ignore(publishable))) => {
             if broadcast_validation != BroadcastValidation::Gossip && publishable {
-                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
+                publish_signed_execution_payload_envelope_with_data_column_sidecars_to_network(
+                    signed_envelope,
+                    &data_column_sidecars,
+                    api_to_p2p_tx,
+                );
             }
 
             StatusCode::ACCEPTED

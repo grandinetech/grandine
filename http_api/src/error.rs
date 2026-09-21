@@ -107,6 +107,8 @@ pub enum Error {
     InvalidBlockRoot(#[source] AnyhowError),
     #[error("builder index {0} does not correspond to a registered builder")]
     InvalidBuilderIndex(BuilderIndex),
+    #[error("invalid builder index")]
+    InvalidBuilderIndexValue(#[source] AnyhowError),
     #[error("invalid bytes body")]
     InvalidBytesBody(#[source] BytesRejection),
     #[error("invalid data column sidecar")]
@@ -298,6 +300,7 @@ impl Error {
             | Self::InvalidBlockId(_)
             | Self::InvalidBlockRoot(_)
             | Self::InvalidBuilderIndex(_)
+            | Self::InvalidBuilderIndexValue(_)
             | Self::InvalidColumnIndex(_)
             | Self::InvalidDataColumnSidecar(_)
             | Self::InvalidRequestConsensusHeader(_)

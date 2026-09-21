@@ -32,6 +32,7 @@ use types::{
     altair::containers::SignedContributionAndProof,
     combined::{Attestation, AttesterSlashing, SignedAggregateAndProof},
     config::Config,
+    gloas::primitives::BuilderIndex,
     nonstandard::Phase,
     phase0::{
         containers::{
@@ -146,6 +147,29 @@ impl<S: Sync> FromRequestParts<S> for EthPath<(StateId, ValidatorId)> {
             .map_err(Error::InvalidValidatorId)?;
 
         Ok(Self((state_id, validator_id)))
+    }
+}
+
+impl<S: Sync> FromRequestParts<S> for EthPath<(Slot, BuilderIndex)> {
+    type Rejection = Error;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let Path((slot, builder_index)) = parts
+            .extract::<Path<(String, String)>>()
+            .await
+            .map_err(AnyhowError::new)?;
+
+        let slot = slot
+            .parse()
+            .map_err(AnyhowError::new)
+            .map_err(Error::InvalidSlot)?;
+
+        let builder_index = builder_index
+            .parse()
+            .map_err(AnyhowError::new)
+            .map_err(Error::InvalidBuilderIndexValue)?;
+
+        Ok(Self((slot, builder_index)))
     }
 }
 

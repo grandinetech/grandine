@@ -323,6 +323,10 @@ fn get_data_column_sidecars_post_gloas<P: Preset>(
 ) -> Result<Vec<Arc<DataColumnSidecar<P>>>> {
     let blob_count = cells_and_kzg_proofs.len();
 
+    if blob_count == 0 {
+        return Ok(vec![]);
+    }
+
     let mut sidecars = vec![];
     for column_index in 0..P::NumberOfColumns::USIZE {
         let column = ProgressiveList::try_from_iter(
