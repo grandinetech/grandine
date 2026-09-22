@@ -24,7 +24,7 @@ use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{Event, EventChannels, Topic, ValidatorMessage, Wait};
+use fork_choice_control::{BlockWithRoot, Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
     PayloadAttestationOrigin, StateCacheError,
@@ -324,6 +324,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     }
                     ValidatorMessage::Head(wait_group, head) => {
                         self.handle_head_message(wait_group, head).await
+                    }
+                    ValidatorMessage::PayloadStatusUpdated(wait_group, head) => {
+                        self.attest_payload_early(&wait_group, head).await
                     }
                     ValidatorMessage::ValidAttestation(wait_group, attestation) => {
                         self.attestation_agg_pool
@@ -862,7 +865,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
                 let slot_head = Some(slot_head);
 
-                if let Err(error) = self.attest_payload(&wait_group, slot_head.as_ref()).await {
+                if let Err(error) = self
+                    .attest_payload(&wait_group, slot_head.as_ref(), false)
+                    .await
+                {
                     error_with_peers!(
                         "failed to produce and publish own payload attestations: {error:?}"
                     );
@@ -1849,7 +1855,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     }
 
     #[instrument(level = "debug", skip_all)]
-    async fn attest_payload(&self, wait_group: &W, slot_head: Option<&SlotHead<P>>) -> Result<()> {
+    async fn attest_payload(
+        &self,
+        wait_group: &W,
+        slot_head: Option<&SlotHead<P>>,
+        early: bool,
+    ) -> Result<()> {
         let Some(slot_head) = slot_head else {
             warn_with_peers!(
                 "validator cannot participate in payload attestation because \
@@ -1861,6 +1872,26 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         // Skip attesting if validators already attested at slot
         if self.payload_attested_in_current_slot() {
+            return Ok(());
+        }
+
+        // Skip attesting if validators has not seen any beacon block for the assigned slot
+        let Some(block_with_root) = self
+            .controller
+            .block_by_slot(slot_head.slot())?
+            .map(WithStatus::value)
+        else {
+            return Ok(());
+        };
+
+        // Before the deadline the vote is only cast once both the envelope and the blob data have been seen.
+        if early
+            && !(self.controller.is_payload_verified(block_with_root.root)
+                && self
+                    .controller
+                    .indices_of_missing_data_columns(&block_with_root.block)
+                    .is_empty())
+        {
             return Ok(());
         }
 
@@ -1885,7 +1916,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         let own_payload_attestations = self
-            .own_payload_attestations(slot_head, &own_members)
+            .own_payload_attestations(slot_head, &block_with_root, &own_members)
             .await?;
 
         if own_payload_attestations.is_empty() {
@@ -1929,6 +1960,35 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         Ok(())
+    }
+
+    #[instrument(level = "debug", skip_all)]
+    async fn attest_payload_early(&self, wait_group: &W, head: ChainLink<P>) {
+        let Some(last_tick) = self.last_tick else {
+            return;
+        };
+
+        if !(last_tick.slot == head.slot() && last_tick.is_before_payload_attesting_interval()) {
+            return;
+        }
+
+        if self.payload_attested_in_current_slot() {
+            return;
+        }
+
+        let slot_head = SlotHead {
+            config: self.chain_config.clone_arc(),
+            beacon_block_root: head.block_root,
+            beacon_state: self.controller.state_by_chain_link(&head),
+            optimistic: false,
+        };
+
+        if let Err(error) = self
+            .attest_payload(wait_group, Some(&slot_head), true)
+            .await
+        {
+            error_with_peers!("failed to produce and publish own payload attestations: {error:?}");
+        }
     }
 
     #[instrument(level = "debug", skip_all)]
@@ -2305,17 +2365,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn own_payload_attestations(
         &self,
         slot_head: &SlotHead<P>,
+        block_with_root: &BlockWithRoot<P>,
         own_members: &[PTCMember],
     ) -> Result<&[PayloadAttestationMessage]> {
-        // Skip attesting if validators has not seen any beacon block for the assigned slot
-        let Some(block_with_root) = self
-            .controller
-            .block_by_slot(slot_head.slot())?
-            .map(WithStatus::value)
-        else {
-            return Ok(&[]);
-        };
-
         let beacon_block_root = block_with_root.root;
 
         if let Some(own_payload_attestations) = self.own_payload_attestations.get() {
@@ -2342,8 +2394,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .as_deref()
                 .map(DoppelgangerProtection::load);
 
+            // A validator may hold several PTC positions. `Pool::aggregate_messages` already duplicate one
+            // message into every position that validator holds, so sign only once per validator.
             own_members
                 .iter()
+                .unique_by(|member| member.validator_index)
                 .filter_map(|member| {
                     if let Some(doppelganger_protection) = &doppelganger_protection
                         && !doppelganger_protection.is_validator_active(member.public_key)

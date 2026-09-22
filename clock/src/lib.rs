@@ -170,6 +170,11 @@ impl Tick {
     }
 
     #[must_use]
+    pub fn is_before_payload_attesting_interval(self) -> bool {
+        self.kind < TickKind::PayloadAttest
+    }
+
+    #[must_use]
     pub const fn is_start_of_slot(self) -> bool {
         matches!(self.kind, TickKind::Propose)
     }
