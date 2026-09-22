@@ -3651,6 +3651,11 @@ where
             self.prepare_execution_payload_for_head(beacon_block_root);
         }
 
+        self.send_to_validator(ValidatorMessage::PayloadStatusUpdated(
+            wait_group.clone(),
+            self.store.head().clone(),
+        ));
+
         if let Some(delayed) = self.take_delayed_until_envelope(beacon_block_root) {
             self.retry_delayed(delayed, wait_group);
         }

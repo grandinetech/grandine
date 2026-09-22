@@ -20,7 +20,6 @@ use types::{
 pub struct PTCMember {
     pub public_key: PublicKeyBytes,
     pub validator_index: ValidatorIndex,
-    pub position_in_committee: usize,
 }
 
 pub struct OwnPTCMembers {
@@ -101,15 +100,13 @@ impl OwnPTCMembers {
 
         accessors::get_ptc(state, slot)?
             .into_iter()
-            .zip(0..)
-            .filter_map(|(validator_index, position_in_committee)| {
+            .filter_map(|validator_index| {
                 own_public_keys
                     .get(&validator_index)
                     .copied()
                     .map(|public_key| PTCMember {
                         public_key,
                         validator_index,
-                        position_in_committee,
                     })
             })
             .collect::<Vec<_>>()
