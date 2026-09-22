@@ -170,6 +170,8 @@ pub enum Error<P: Preset> {
         data_column_sidecar: Arc<DataColumnSidecar<P>>,
         computed: ValidatorIndex,
     },
+    #[error("delayed until block queue is full")]
+    DelayedUntilBlockQueueFull,
     #[error("delayed objects until parent queue is full")]
     DelayedUntilParentQueueFull,
     #[error("bid's block hash equals its parent block hash: {payload_bid:?}")]

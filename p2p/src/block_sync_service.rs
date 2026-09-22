@@ -678,7 +678,7 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::DataColumnSidecarRejected(data_column_identifier) | P2pToSync::DataColumnSidecarNotConsidered(data_column_identifier) => {
                             self.received_data_column_sidecars.remove_async(&data_column_identifier).await;
                         }
-                        P2pToSync::PayloadEnvelopeRejected(payload_envelope_identifier) => {
+                        P2pToSync::PayloadEnvelopeRejected(payload_envelope_identifier) | P2pToSync::PayloadEnvelopeNotConsidered(payload_envelope_identifier) => {
                             self.received_envelopes.remove(&payload_envelope_identifier);
                         }
                         P2pToSync::PeerCgcUpdated(peer_id) => {
