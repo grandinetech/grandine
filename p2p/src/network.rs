@@ -502,6 +502,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                                     P2pToSync::DataColumnSidecarNotConsidered(data_column_identifier)
                                         .send(&self.channels.p2p_to_sync_tx)
                                 },
+                                MutatorIgnoreReason::ExecutionPayloadEnvelopeQueueFull { payload_envelope_identifier } => {
+                                    P2pToSync::PayloadEnvelopeNotConsidered(payload_envelope_identifier)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                },
                             }
                         },
                         P2pMessage::PublishDataColumnSidecar(data_column_sidecar) => {

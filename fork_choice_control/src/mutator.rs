@@ -2325,11 +2325,27 @@ where
                     Ok(ValidationOutcome::Ignore(false)),
                 );
 
-                self.delay_execution_payload_envelope_until_block(
+                let gossip_id = pending_envelope.origin.gossip_id_ref().cloned();
+
+                if let Err(error) = self.try_delay_execution_payload_envelope_until_block(
                     wait_group,
                     pending_envelope,
                     beacon_block_root,
-                );
+                ) {
+                    debug_with_peers!(
+                        "unable to delay execution payload envelope until block \
+                         (beacon_block_root: {beacon_block_root:?}): {error:?}"
+                    );
+
+                    if let Some(gossip_id) = gossip_id {
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::ExecutionPayloadEnvelopeQueueFull {
+                                payload_envelope_identifier,
+                            },
+                        ));
+                    }
+                }
             }
             Ok(ExecutionPayloadEnvelopeAction::DelayUntilState(
                 execution_payload_envelope,
@@ -4064,32 +4080,52 @@ where
         }
     }
 
-    fn delay_execution_payload_envelope_until_block(
+    fn total_delayed_execution_payload_envelopes_until_block(&self) -> usize {
+        self.delayed_until_block
+            .values()
+            .map(|delayed| delayed.execution_payload_envelopes.len())
+            .sum::<usize>()
+    }
+
+    fn try_delay_execution_payload_envelope_until_block(
         &mut self,
         wait_group: W,
         pending_execution_payload_envelope: PendingExecutionPayloadEnvelope<P>,
         beacon_block_root: H256,
-    ) {
+    ) -> Result<()> {
         if self.store.contains_block(beacon_block_root) {
             self.retry_execution_payload_envelope(wait_group, pending_execution_payload_envelope);
-        } else {
-            trace_with_peers!(
-                "execution payload envelope delayed until block \
-                 (beacon_block_root: {beacon_block_root:?})",
-            );
-
-            let peer_id = pending_execution_payload_envelope
-                .origin
-                .gossip_id_ref()
-                .map(|gossip_id| gossip_id.source);
-            self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
-
-            self.delayed_until_block
-                .entry(beacon_block_root)
-                .or_default()
-                .execution_payload_envelopes
-                .push(pending_execution_payload_envelope);
+            return Ok(());
         }
+
+        // Envelopes produced by the application itself should never be dropped.
+        if !matches!(
+            pending_execution_payload_envelope.origin,
+            ExecutionPayloadEnvelopeOrigin::Own,
+        ) && self.total_delayed_execution_payload_envelopes_until_block()
+            >= MAX_DELAYED_BLOCKS_UNTIL_PARENT
+        {
+            return Err(Error::<P>::DelayedUntilBlockQueueFull.into());
+        }
+
+        trace_with_peers!(
+            "execution payload envelope delayed until block \
+             (beacon_block_root: {beacon_block_root:?})",
+        );
+
+        let peer_id = pending_execution_payload_envelope
+            .origin
+            .gossip_id_ref()
+            .map(|gossip_id| gossip_id.source);
+        self.send_to_p2p(P2pMessage::BlockNeeded(beacon_block_root, peer_id));
+
+        self.delayed_until_block
+            .entry(beacon_block_root)
+            .or_default()
+            .execution_payload_envelopes
+            .push(pending_execution_payload_envelope);
+
+        Ok(())
     }
 
     fn delay_execution_payload_envelope_until_data(

@@ -228,6 +228,10 @@ pub enum MutatorIgnoreReason {
     DataColumnQueueFull {
         data_column_identifier: DataColumnIdentifier,
     },
+    #[strum(serialize = "execution_payload_envelope_queue_full")]
+    ExecutionPayloadEnvelopeQueueFull {
+        payload_envelope_identifier: PayloadEnvelopeIdentifier,
+    },
 }
 
 #[expect(clippy::enum_variant_names)]
