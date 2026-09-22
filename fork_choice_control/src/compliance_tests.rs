@@ -111,26 +111,64 @@ struct ViableHeadRootAndWeight {
     weight: u64,
 }
 
-// TODO: fix remaning failing compliance tests
+// TODO: fix remaining failing compliance tests
 const SKIPPED_CASES: &[&str] = &[
+    "minimal/altair/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
+    "minimal/altair/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
+    "minimal/bellatrix/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
+    "minimal/bellatrix/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
+    "minimal/capella/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
+    "minimal/capella/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
+    "minimal/deneb/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
+    "minimal/deneb/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
     "minimal/gloas/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_3_884359208_1",
     "minimal/gloas/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_723232228_31",
 ];
 
 #[duplicate_item(
-    glob                                                                                            function_name                                  preset    phase;
-    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/attester_slashing_test/*/*"]   [fulu_minimal_compliance_attester_slashing]    [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/block_cover_test/*/*"]         [fulu_minimal_compliance_block_cover]          [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/block_tree_test/*/*"]          [fulu_minimal_compliance_block_tree]           [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/block_weight_test/*/*"]        [fulu_minimal_compliance_block_weight]         [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/invalid_message_test/*/*"]     [fulu_minimal_compliance_invalid_message]      [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/shuffling_test/*/*"]           [fulu_minimal_compliance_shuffling]            [Minimal] [Fulu];
-    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/attester_slashing_test/*/*"]  [gloas_minimal_compliance_attester_slashing]   [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_cover_test/*/*"]        [gloas_minimal_compliance_block_cover]         [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_tree_test/*/*"]         [gloas_minimal_compliance_block_tree]          [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_weight_test/*/*"]       [gloas_minimal_compliance_block_weight]        [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/invalid_message_test/*/*"]    [gloas_minimal_compliance_invalid_message]     [Minimal] [Gloas];
-    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/shuffling_test/*/*"]          [gloas_minimal_compliance_shuffling]           [Minimal] [Gloas];
+    glob                                                                                                function_name                                  preset    phase;
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/attester_slashing_test/*/*"]    [altair_minimal_compliance_attester_slashing]    [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/block_cover_test/*/*"]          [altair_minimal_compliance_block_cover]          [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/block_tree_test/*/*"]           [altair_minimal_compliance_block_tree]           [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/block_weight_test/*/*"]         [altair_minimal_compliance_block_weight]         [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/invalid_message_test/*/*"]      [altair_minimal_compliance_invalid_message]      [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/shuffling_test/*/*"]            [altair_minimal_compliance_shuffling]            [Minimal] [Altair];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice_compliance/attester_slashing_test/*/*"] [bellatrix_minimal_compliance_attester_slashing] [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice_compliance/block_cover_test/*/*"]       [bellatrix_minimal_compliance_block_cover]       [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice_compliance/block_tree_test/*/*"]        [bellatrix_minimal_compliance_block_tree]        [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice_compliance/block_weight_test/*/*"]      [bellatrix_minimal_compliance_block_weight]      [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice_compliance/invalid_message_test/*/*"]   [bellatrix_minimal_compliance_invalid_message]   [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/bellatrix/fork_choice_compliance/shuffling_test/*/*"]         [bellatrix_minimal_compliance_shuffling]         [Minimal] [Bellatrix];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice_compliance/attester_slashing_test/*/*"]   [capella_minimal_compliance_attester_slashing]   [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice_compliance/block_cover_test/*/*"]         [capella_minimal_compliance_block_cover]         [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice_compliance/block_tree_test/*/*"]          [capella_minimal_compliance_block_tree]          [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice_compliance/block_weight_test/*/*"]        [capella_minimal_compliance_block_weight]        [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice_compliance/invalid_message_test/*/*"]     [capella_minimal_compliance_invalid_message]     [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/capella/fork_choice_compliance/shuffling_test/*/*"]           [capella_minimal_compliance_shuffling]           [Minimal] [Capella];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice_compliance/attester_slashing_test/*/*"]     [deneb_minimal_compliance_attester_slashing]     [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice_compliance/block_cover_test/*/*"]           [deneb_minimal_compliance_block_cover]           [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice_compliance/block_tree_test/*/*"]            [deneb_minimal_compliance_block_tree]            [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice_compliance/block_weight_test/*/*"]          [deneb_minimal_compliance_block_weight]          [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice_compliance/invalid_message_test/*/*"]       [deneb_minimal_compliance_invalid_message]       [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/deneb/fork_choice_compliance/shuffling_test/*/*"]             [deneb_minimal_compliance_shuffling]             [Minimal] [Deneb];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice_compliance/attester_slashing_test/*/*"]   [electra_minimal_compliance_attester_slashing]   [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice_compliance/block_cover_test/*/*"]         [electra_minimal_compliance_block_cover]         [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice_compliance/block_tree_test/*/*"]          [electra_minimal_compliance_block_tree]          [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice_compliance/block_weight_test/*/*"]        [electra_minimal_compliance_block_weight]        [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice_compliance/invalid_message_test/*/*"]     [electra_minimal_compliance_invalid_message]     [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/electra/fork_choice_compliance/shuffling_test/*/*"]           [electra_minimal_compliance_shuffling]           [Minimal] [Electra];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/attester_slashing_test/*/*"]      [fulu_minimal_compliance_attester_slashing]      [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/block_cover_test/*/*"]            [fulu_minimal_compliance_block_cover]            [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/block_tree_test/*/*"]             [fulu_minimal_compliance_block_tree]             [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/block_weight_test/*/*"]           [fulu_minimal_compliance_block_weight]           [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/invalid_message_test/*/*"]        [fulu_minimal_compliance_invalid_message]        [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/fulu/fork_choice_compliance/shuffling_test/*/*"]              [fulu_minimal_compliance_shuffling]              [Minimal] [Fulu];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/attester_slashing_test/*/*"]     [gloas_minimal_compliance_attester_slashing]     [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_cover_test/*/*"]           [gloas_minimal_compliance_block_cover]           [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_tree_test/*/*"]            [gloas_minimal_compliance_block_tree]            [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/block_weight_test/*/*"]          [gloas_minimal_compliance_block_weight]          [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/invalid_message_test/*/*"]       [gloas_minimal_compliance_invalid_message]       [Minimal] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice_compliance/shuffling_test/*/*"]             [gloas_minimal_compliance_shuffling]             [Minimal] [Gloas];
 )]
 #[test_resources(glob)]
 fn function_name(case: Case<'_>) {

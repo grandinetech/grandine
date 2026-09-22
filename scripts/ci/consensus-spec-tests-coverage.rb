@@ -12,7 +12,6 @@ CONSENSUS_IGNORED_GLOBS = %w[
   **/*.py
   **/*.typed
   tests/generators/**/*
-  tests/*/*/fork_choice_compliance/*/*/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/single_merkle_proof/*/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
