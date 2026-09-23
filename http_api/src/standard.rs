@@ -2977,7 +2977,7 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
 
     let response = misc::slots_in_epoch::<P>(epoch)?
         .map(|slot| {
-            accessors::get_ptc(&state, slot)?
+            accessors::get_ptc(controller.chain_config(), &state, slot)?
                 .into_iter()
                 .filter(|validator_index| indices.contains(validator_index))
                 .map(|validator_index| {
@@ -5169,7 +5169,7 @@ fn build_payload_attestation_item<P: Preset, W: Wait>(
         Error::PayloadAttestationNotForCurrentSlot
     );
 
-    let ptc = accessors::get_ptc(state, slot)?;
+    let ptc = accessors::get_ptc(controller.chain_config(), state, slot)?;
     ensure!(
         ptc.contains(&validator_index),
         Error::ValidatorNotInPTC { validator_index }

@@ -4145,6 +4145,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>> {
         let data = payload_attestation.data();
         let block_root = data.beacon_block_root;
+        let epoch = misc::compute_epoch_at_slot::<P>(data.slot);
+
+        // [REJECT] The payload attestation's slot is at or after the Gloas fork
+        if epoch < self.chain_config.gloas_fork_epoch {
+            return Err(
+                PayloadAttestationValidationError::PayloadAttestationForPreGloas {
+                    payload_attestation: Box::new(payload_attestation),
+                },
+            );
+        }
 
         if !payload_attestation.origin.is_from_block() {
             // [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. data.slot == current_slot
@@ -4263,8 +4273,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let attesting_indices = match payload_attestation {
             CombinedPayloadAttestation::Attestation(payload_attestation) => {
-                let indexed_payload_attestation =
-                    accessors::get_indexed_payload_attestation(state, payload_attestation)?;
+                let indexed_payload_attestation = accessors::get_indexed_payload_attestation(
+                    &self.chain_config,
+                    state,
+                    payload_attestation,
+                )?;
                 let attesting_indices = indexed_payload_attestation.attesting_indices.to_vec();
 
                 if validate_signature {
@@ -4296,7 +4309,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         };
 
-        let ptc_members = accessors::get_ptc(state, data.slot)?;
+        let ptc_members = accessors::get_ptc(&self.chain_config, state, data.slot)?;
 
         attesting_indices
             .into_iter()

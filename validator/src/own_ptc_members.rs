@@ -12,6 +12,7 @@ use tap::{Conv as _, Pipe as _};
 use tracing::instrument;
 use types::{
     combined::BeaconState,
+    config::Config,
     phase0::primitives::{Slot, ValidatorIndex},
     preset::Preset,
 };
@@ -42,6 +43,7 @@ impl OwnPTCMembers {
     #[instrument(skip_all, level = "debug", fields(slot = slot, dependent_root = ?dependent_root))]
     pub async fn get_or_init_at_slot<P: Preset>(
         &self,
+        config: &Config,
         state: &BeaconState<P>,
         dependent_root: H256,
         slot: Slot,
@@ -50,7 +52,7 @@ impl OwnPTCMembers {
             return Some(members.clone_arc());
         }
 
-        match self.compute_members_at_slot(state, slot) {
+        match self.compute_members_at_slot(config, state, slot) {
             Ok(members) => {
                 if let Some(members) = members {
                     self.members
@@ -80,6 +82,7 @@ impl OwnPTCMembers {
     #[instrument(skip_all, level = "debug", fields(slot = slot))]
     fn compute_members_at_slot<P: Preset>(
         &self,
+        config: &Config,
         state: &BeaconState<P>,
         slot: Slot,
     ) -> Result<Option<Arc<[PTCMember]>>> {
@@ -98,7 +101,7 @@ impl OwnPTCMembers {
             return Ok(None);
         }
 
-        accessors::get_ptc(state, slot)?
+        accessors::get_ptc(config, state, slot)?
             .into_iter()
             .filter_map(|validator_index| {
                 own_public_keys

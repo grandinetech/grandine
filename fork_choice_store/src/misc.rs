@@ -1739,6 +1739,10 @@ pub enum PayloadAttestationValidationError<P: Preset> {
         block_root: H256,
         payload_attestation: Box<PayloadAttestationItem<P>>,
     },
+    #[error("payload attestation's slot is pre-gloas")]
+    PayloadAttestationForPreGloas {
+        payload_attestation: Box<PayloadAttestationItem<P>>,
+    },
     #[error("payload attestation's block is invalid: {payload_attestation:?}")]
     PayloadAttestationInvalidBlock {
         payload_attestation: Box<PayloadAttestationItem<P>>,
@@ -1765,6 +1769,9 @@ impl<P: Preset> PayloadAttestationValidationError<P> {
             | Self::BlockPayloadAttestationMismatchParentRoot {
                 payload_attestation,
                 ..
+            }
+            | Self::PayloadAttestationForPreGloas {
+                payload_attestation,
             }
             | Self::PayloadAttestationInvalidBlock {
                 payload_attestation,

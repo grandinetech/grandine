@@ -66,6 +66,8 @@ pub enum Error {
     },
     #[error("permutated prefix maximum overflowed")]
     PermutatedPrefixMaximumOverflow,
+    #[error("slot {slot} is before the Gloas fork")]
+    PreGloasSlot { slot: Slot },
     #[error("{0} is invalid")]
     SignatureInvalid(SignatureKind),
     #[error("slot is out of range")]
