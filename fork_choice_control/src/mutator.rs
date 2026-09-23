@@ -1026,12 +1026,10 @@ where
                     if let Err(error) = self.try_delay_block_until_parent(pending_block) {
                         debug_with_peers!("unable to delay block until parent: {error:?}");
 
-                        if let Some(gossip_id) = gossip_id {
-                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                                gossip_id,
-                                MutatorIgnoreReason::BlockQueueFull { block_root },
-                            ));
-                        }
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::BlockQueueFull { block_root },
+                        ));
                     } else {
                         debug_with_peers!("block delayed until parent: {block_root:?}");
                     }
@@ -1095,12 +1093,10 @@ where
                     if let Err(error) = self.try_delay_block_until_slot(pending_block) {
                         debug_with_peers!("failed to delay block until slot: {error}");
 
-                        if let Some(gossip_id) = gossip_id {
-                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                                gossip_id,
-                                MutatorIgnoreReason::BlockQueueFull { block_root },
-                            ));
-                        }
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::BlockQueueFull { block_root },
+                        ));
                     } else {
                         debug_with_peers!("block delayed until slot: {block_root:?}");
                         trace_with_peers!("block delayed until slot");
@@ -1867,12 +1863,10 @@ where
                             "unable to delay blob sidecar until block parent: {parent_root:?} {error:?}"
                         );
 
-                        if let Some(gossip_id) = gossip_id {
-                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                                gossip_id,
-                                MutatorIgnoreReason::BlobQueueFull { blob_identifier },
-                            ));
-                        }
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::BlobQueueFull { blob_identifier },
+                        ));
                     } else {
                         debug_with_peers!(
                             "blob sidecar delayed until block parent: {parent_root:?}"
@@ -1904,12 +1898,10 @@ where
                     {
                         debug_with_peers!("failed to delay blob sidecar until slot: {error}");
 
-                        if let Some(gossip_id) = gossip_id {
-                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                                gossip_id,
-                                MutatorIgnoreReason::BlobQueueFull { blob_identifier },
-                            ));
-                        }
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::BlobQueueFull { blob_identifier },
+                        ));
                     } else {
                         debug_with_peers!("blob sidecar delayed until slot: {slot}");
                     }
@@ -2106,14 +2098,12 @@ where
                             "failed to delay data column sidecar until parent: {error}"
                         );
 
-                        if let Some(gossip_id) = gossip_id {
-                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                                gossip_id,
-                                MutatorIgnoreReason::DataColumnQueueFull {
-                                    data_column_identifier,
-                                },
-                            ));
-                        }
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::DataColumnQueueFull {
+                                data_column_identifier,
+                            },
+                        ));
                     } else {
                         debug_with_peers!(
                             "data column sidecar delayed until block parent: \
@@ -2153,14 +2143,12 @@ where
                             "failed to delay data column sidecar until slot: {error}"
                         );
 
-                        if let Some(gossip_id) = gossip_id {
-                            self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                                gossip_id,
-                                MutatorIgnoreReason::DataColumnQueueFull {
-                                    data_column_identifier,
-                                },
-                            ));
-                        }
+                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                            gossip_id,
+                            MutatorIgnoreReason::DataColumnQueueFull {
+                                data_column_identifier,
+                            },
+                        ));
                     } else {
                         debug_with_peers!("data column sidecar delayed until slot: {slot}");
                     }
@@ -2337,14 +2325,12 @@ where
                          (beacon_block_root: {beacon_block_root:?}): {error:?}"
                     );
 
-                    if let Some(gossip_id) = gossip_id {
-                        self.send_to_p2p(P2pMessage::IgnoreWithReason(
-                            gossip_id,
-                            MutatorIgnoreReason::ExecutionPayloadEnvelopeQueueFull {
-                                payload_envelope_identifier,
-                            },
-                        ));
-                    }
+                    self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                        gossip_id,
+                        MutatorIgnoreReason::ExecutionPayloadEnvelopeQueueFull {
+                            payload_envelope_identifier,
+                        },
+                    ));
                 }
             }
             Ok(ExecutionPayloadEnvelopeAction::DelayUntilState(

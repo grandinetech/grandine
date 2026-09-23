@@ -3892,14 +3892,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let beacon_block_root = envelope.block_root();
         let builder_index = envelope.builder_index();
 
-        if slot
-            > self
-                .slot()
-                .saturating_add(self.chain_config.max_gossip_future_slots())
-        {
-            return Some(ExecutionPayloadEnvelopeAction::Ignore(false));
-        }
-
         // [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
         // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
         if !origin.is_from_back_sync() && slot < self.finalized_slot() {
@@ -3955,6 +3947,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 beacon_block_root,
             ));
         };
+
+        if slot
+            > self
+                .slot()
+                .saturating_add(self.chain_config.max_gossip_future_slots())
+        {
+            return Ok(ExecutionPayloadEnvelopeAction::Ignore(false));
+        }
 
         let Some(bid) = block
             .message()
