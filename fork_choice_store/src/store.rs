@@ -344,7 +344,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             finalized_checkpoint: checkpoint,
             unrealized_justified_checkpoint: checkpoint,
             unrealized_finalized_checkpoint: checkpoint,
-            payload_status: Self::initial_payload_status(&anchor_state),
+            payload_status: Self::initial_payload_status(
+                &anchor_state,
+                None,
+                PayloadPresence::default(),
+                false,
+            ),
             parent_payload_presence: PayloadPresence::default(),
         };
 
@@ -811,7 +816,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .find_map(|(segment, position)| {
                 segment
                     .block_before_or_at(slot, position)
-                    .filter(|block| block.non_invalid())
+                    .filter(|block| block.non_invalid() || block.is_post_gloas())
             })
     }
 
@@ -988,6 +993,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 PAYLOAD_STATUS_EMPTY
             }
         } else if self.is_payload_verified(block_root)
+            && !chain_link.is_invalid()
             && attesting_balances.full >= attesting_balances.empty
         {
             PAYLOAD_STATUS_FULL
@@ -1051,6 +1057,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn should_extend_payload(&self, block_root: H256) -> bool {
+        // A payload the execution engine rejected is not something to build on.
+        if self.is_payload_invalid(block_root) {
+            return false;
+        }
+
         if !self.is_payload_verified(block_root) {
             return false;
         }
@@ -1084,6 +1095,31 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     // > ``on_execution_payload_envelope``.
     pub fn is_payload_verified(&self, block_root: H256) -> bool {
         self.payloads.contains(&block_root)
+    }
+
+    // > Return whether the execution payload envelope for the beacon block with
+    // > root ``root`` was rejected by execution engine
+    pub fn is_payload_invalid(&self, block_root: H256) -> bool {
+        self.chain_link(block_root)
+            .is_some_and(ChainLink::is_invalid)
+    }
+
+    // Whether the block itself is dead, not just its payload.
+    //
+    // Post-Gloas invalid payload status covers two cases:
+    // - the block's own payload was rejected. The block is fine.
+    // - the block descends from a rejected payload. The block is dead.
+    fn is_block_invalid(&self, block_root: H256) -> bool {
+        let Some(location) = self.unfinalized_locations.get(&block_root) else {
+            return false;
+        };
+
+        let segment = &self.unfinalized[&location.segment_id];
+
+        self.unfinalized_chain_ending_with(segment, location.position)
+            .tuple_windows()
+            .take_while(|(child, _)| child.is_invalid())
+            .any(|(child, parent)| !child.parent_payload_presence.is_empty() && parent.is_invalid())
     }
 
     // > Return whether the execution payload envelope for the beacon block with
@@ -1182,15 +1218,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     #[must_use]
     pub fn unfinalized_head(&self) -> Option<&UnfinalizedBlock<P>> {
-        let last_block = self.head_segment()?.last_non_invalid_block()?;
+        let head_segment = self.head_segment()?;
+        let segment_head = head_segment.head();
 
-        if self.phase() < Phase::Gloas {
-            return Some(last_block);
+        // If head position is not set (i.e. pre-Gloas phase), segment head is first block of the segment
+        if segment_head.is_post_gloas() {
+            return Some(segment_head);
         }
 
-        let head_segment = self.head_segment()?;
-
-        Some(head_segment.head())
+        head_segment.last_non_invalid_block()
     }
 
     fn head_segment(&self) -> Option<&Segment<P>> {
@@ -1206,7 +1242,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     pub fn unfinalized_canonical_chain(&self) -> impl Iterator<Item = &ChainLink<P>> {
         self.canonical_chain_segments()
             .flat_map(|(segment, position)| segment.chain_ending_at(position))
-            .skip_while(|chain_link| chain_link.is_invalid())
+            .skip_while(|chain_link| chain_link.is_invalid() && !chain_link.is_post_gloas())
     }
 
     pub fn canonical_chain_segments(&self) -> impl Iterator<Item = (&Segment<P>, Position)> {
@@ -1295,7 +1331,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .values()
             .map(Segment::last_block)
             .filter(|block| self.is_block_viable(block))
-            .all(UnfinalizedBlock::is_invalid)
+            .all(|block| block.is_invalid() && !block.is_post_gloas())
     }
 
     #[must_use]
@@ -1306,6 +1342,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if self.phase() >= Phase::Gloas && parent_root == self.last_finalized().block_root {
             let parent_payload_presence = first_block.parent_payload_presence();
             let last_finalized = self.last_finalized();
+
+            // The segment starts by extending a payload the execution engine rejected.
+            if parent_payload_presence.is_full() && self.is_payload_invalid(parent_root) {
+                return false;
+            }
 
             if self
                 .is_previous_slot_payload_decision(last_finalized.slot(), parent_payload_presence)
@@ -1320,9 +1361,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
         }
 
-        segment
-            .last_non_invalid_block()
-            .is_some_and(|block| self.is_block_viable(block))
+        // Pre-Gloas a rejected payload takes the whole block out of contention.
+        // Post-Gloas it does not, so the segment head is whatever the in-segment walk settled on.
+        let last_usable_block = if segment.head().is_post_gloas() {
+            Some(segment.head())
+        } else {
+            segment.last_non_invalid_block()
+        };
+
+        last_usable_block.is_some_and(|block| self.is_block_viable(block))
     }
 
     // If the anchor is a non-genesis block, no blocks will be viable for at least 2/3 of an epoch.
@@ -1683,7 +1730,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     _ => 0,
                 }
             } else {
-                let parent_payload_verified = self.is_payload_verified(parent.block_root);
+                let parent_payload_verified = self.is_payload_verified(parent.block_root)
+                    && !self.is_payload_invalid(parent.block_root);
 
                 match parent_payload_presence {
                     PayloadPresence::Empty => {
@@ -2198,7 +2246,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             (justified, finalized)
         };
 
-        let payload_status = Self::initial_payload_status(&state);
+        let payload_status = Self::initial_payload_status(
+            &state,
+            Some(parent),
+            parent_payload_presence,
+            self.is_block_invalid(parent.block_root),
+        );
 
         let chain_link = ChainLink {
             block_root,
@@ -3892,6 +3945,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let beacon_block_root = envelope.block_root();
         let builder_index = envelope.builder_index();
 
+        if slot
+            > self
+                .slot()
+                .saturating_add(self.chain_config.max_gossip_future_slots())
+        {
+            return Some(ExecutionPayloadEnvelopeAction::Ignore(false));
+        }
+
         // [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
         // Spec: envelope.slot >= compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
         if !origin.is_from_back_sync() && slot < self.finalized_slot() {
@@ -3947,14 +4008,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 beacon_block_root,
             ));
         };
-
-        if slot
-            > self
-                .slot()
-                .saturating_add(self.chain_config.max_gossip_future_slots())
-        {
-            return Ok(ExecutionPayloadEnvelopeAction::Ignore(false));
-        }
 
         let Some(bid) = block
             .message()
@@ -4941,8 +4994,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let new_block_location;
 
         if let Some(parent) = self.unfinalized_locations.get(&parent_root).copied() {
-            let parent_is_invalid =
-                self.unfinalized[&parent.segment_id][parent.position].is_invalid();
+            // Post-Gloas the rejection applies to the parent's payload, not to the parent.
+            // A block that builds on the parent's empty node leaves that payload behind.
+            // Unless the parent itself is dead. Then nothing built on it survives.
+            let parent_is_invalid = self.unfinalized[&parent.segment_id][parent.position]
+                .is_invalid()
+                && (!chain_link.parent_payload_presence.is_empty()
+                    || self.is_block_invalid(parent_root));
 
             let payload_status = if parent_is_invalid {
                 PayloadStatus::Invalid
@@ -5835,11 +5893,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         parent_balances: BlockBalances,
         proposer_boost: Gwei,
     ) -> bool {
-        if block.is_invalid() {
+        // Pre-Gloas the payload rides along in the block, so a rejected payload takes the block with it.
+        if block.is_invalid() && !block.is_post_gloas() {
             return true;
         }
 
         let parent_payload_presence = block.parent_payload_presence();
+
+        // Post-Gloas this child extends a payload the execution engine rejected, so it goes with it.
+        if parent_payload_presence.is_full() && self.is_payload_invalid(parent_balances.block_root)
+        {
+            return true;
+        }
 
         if self.is_previous_slot_payload_decision(parent_balances.slot, parent_payload_presence) {
             let should_extend_payload = self.should_extend_payload(parent_balances.block_root);
@@ -5857,7 +5922,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             let (parent_empty, parent_full) = self.payload_weights(parent_balances, proposer_boost);
-            let parent_payload_verified = self.payloads.contains(&parent_balances.block_root);
+            let parent_payload_verified = self.is_payload_verified(parent_balances.block_root)
+                && !self.is_payload_invalid(parent_balances.block_root);
 
             // Only proceed selecting the child block if:
             // - it's indicating that it is the child of parent with no payload
@@ -5956,7 +6022,9 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let parent = segment.first_block();
 
-        if parent.is_invalid() {
+        // Post-Gloas the block survives its rejected payload as an empty node.
+        // Only children that build on the full node go down with it, which `ignore_child` handles.
+        if parent.is_invalid() && !parent.is_post_gloas() {
             return;
         }
 
@@ -6025,14 +6093,14 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let sibling = &segment[next_position_in_segment];
                 let first_branch_block = self.unfinalized[&branch_point.segment_id].first_block();
 
+                // The branch starts with a block that cannot be in the chain.
+                // Neither can the rest of the branch.
+                if self.ignore_child(first_branch_block, common_parent_balances, proposer_boost) {
+                    continue;
+                }
+
                 if best_descendant_of_segment.is_none() || segment.head().slot() < sibling.slot() {
-                    if !self.ignore_child(
-                        first_branch_block,
-                        common_parent_balances,
-                        proposer_boost,
-                    ) {
-                        best_descendant_of_segment = Some(branch_point.best_descendant);
-                    }
+                    best_descendant_of_segment = Some(branch_point.best_descendant);
 
                     continue;
                 }
@@ -6045,7 +6113,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 let sibling_score =
                     self.score(sibling, Some(common_parent_balances), proposer_boost);
 
-                if (sibling_score < branch_point_score || sibling.is_invalid())
+                // Post-Gloas a rejected payload does not disqualify the sibling.
+                // It only costs the sibling its full node, which `ignore_child` accounts for.
+                let sibling_ignored =
+                    self.ignore_child(sibling, common_parent_balances, proposer_boost);
+
+                if (sibling_score < branch_point_score || sibling_ignored)
                     && best_branch_score.is_none_or(|score| score < branch_point_score)
                 {
                     best_branch_score = Some(branch_point_score);
@@ -6188,16 +6261,40 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         misc::compute_epoch_at_slot::<P>(slot)
     }
 
-    fn initial_payload_status(state: &BeaconState<P>) -> PayloadStatus {
+    fn initial_payload_status(
+        state: &BeaconState<P>,
+        parent: Option<&ChainLink<P>>,
+        parent_payload_presence: PayloadPresence,
+        parent_block_invalid: bool,
+    ) -> PayloadStatus {
         let is_post_merge = state
             .post_bellatrix()
             .is_some_and(predicates::is_merge_transition_complete);
 
-        if is_post_merge && state.slot() != GENESIS_SLOT {
-            return PayloadStatus::Optimistic;
+        // Pre-merge block cannot be optimistic
+        if !is_post_merge || state.slot() == GENESIS_SLOT {
+            return PayloadStatus::Valid;
         }
 
-        PayloadStatus::Valid
+        // Assume anchor has a valid payload
+        let Some(parent) = parent else {
+            return PayloadStatus::Valid;
+        };
+
+        if state.is_post_gloas() {
+            // Building on the parent's empty node leaves the parent's rejected payload behind,
+            // so the rejection does not carry over.
+            // A dead parent is different: its empty node is dead too.
+            if parent.is_invalid() && parent_payload_presence.is_empty() && !parent_block_invalid {
+                return PayloadStatus::Valid;
+            }
+
+            // Newly imported post-Gloas block inherits its parent's payload status
+            parent.payload_status
+        } else {
+            // Newly imported post-merge pre-Gloas block is optimistic until its payload is validated
+            PayloadStatus::Optimistic
+        }
     }
 
     pub fn load_beacon_state(
@@ -6358,9 +6455,16 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             let segment = &self.unfinalized[segment_id];
 
+            // Walked as (child, parent) pairs, from the block with `block_hash` downwards.
+            //
+            // Post-Gloas a child that builds on its parent's empty node leaves the parent's
+            // payload out of this execution chain, so the verdict says nothing about it.
+            // Deeper ancestors can still be in the chain, so the walk goes on past it.
+            // Pre-Gloas every presence is `Pending`, so nothing is left out.
             self.unfinalized_chain_ending_with(segment, *position)
-                .skip(1)
-                .map_while(ChainLink::execution_block_hash)
+                .tuple_windows()
+                .filter(|(child, _)| !child.parent_payload_presence.is_empty())
+                .map_while(|(_, parent)| parent.execution_block_hash())
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .for_each(|hash| {
@@ -6416,20 +6520,43 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         vec![]
     }
 
-    pub fn invalidate_block_and_descendant_payloads(&mut self, block_root: H256) {
+    pub fn invalidate_payload_and_descendant_payloads(&mut self, block_root: H256) {
         let invalidate_blocks_with_roots = self
             .unfinalized
             .values()
             .filter_map(|segment| {
-                let chain_block_roots = self
+                // Ordered from the tip of the chain down to `block_root`.
+                let chain_links = self
                     .unfinalized_chain_ending_with(segment, segment.last_position())
-                    .map(|chain_link| chain_link.block_root)
-                    .take_while_inclusive(|root| *root != block_root)
-                    .collect::<HashSet<H256>>();
+                    .take_while_inclusive(|chain_link| chain_link.block_root != block_root)
+                    .collect_vec();
 
-                chain_block_roots
-                    .contains(&block_root)
-                    .then_some(chain_block_roots)
+                let (block, descendants) = chain_links.split_last()?;
+
+                if block.block_root != block_root {
+                    return None;
+                }
+
+                // Post-Gloas the rejection condemns the payload, not the block.
+                // Only the child decides what happens to this chain.
+                // Child builds on the empty node: the rejected payload is left behind, nothing else goes.
+                // Child builds on the payload: the child is dead, and so is everything built on it.
+                // Grandchildren building on the child's empty node are still built on a dead block.
+                // Pre-Gloas every presence is `Pending`, so the whole chain goes.
+                let child_builds_on_payload = descendants
+                    .last()
+                    .is_some_and(|child| !child.parent_payload_presence.is_empty());
+
+                let invalidated_descendants = descendants
+                    .iter()
+                    .filter(|_| child_builds_on_payload)
+                    .map(|chain_link| chain_link.block_root);
+
+                Some(
+                    core::iter::once(block_root)
+                        .chain(invalidated_descendants)
+                        .collect_vec(),
+                )
             })
             .flatten()
             .collect::<HashSet<H256>>();
