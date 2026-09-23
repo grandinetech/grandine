@@ -487,7 +487,9 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             self.report_outcome(gossip_id, MessageAcceptance::Ignore);
                         }
                         P2pMessage::IgnoreWithReason(gossip_id, mutator_ignore_reason) => {
-                            self.report_outcome(gossip_id.clone(), MessageAcceptance::Ignore);
+                            if let Some(gossip_id) = gossip_id {
+                                self.report_outcome(gossip_id, MessageAcceptance::Ignore);
+                            }
 
                             match mutator_ignore_reason {
                                 MutatorIgnoreReason::BlockQueueFull { block_root } => {

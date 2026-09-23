@@ -246,7 +246,7 @@ pub enum P2pMessage<P: Preset> {
     Slot(Slot),
     Accept(GossipId),
     Ignore(GossipId),
-    IgnoreWithReason(GossipId, MutatorIgnoreReason),
+    IgnoreWithReason(Option<GossipId>, MutatorIgnoreReason),
     PublishDataColumnSidecar(Arc<DataColumnSidecar<P>>),
     PenalizePeer(PeerId, MutatorRejectionReason),
     Reject(Option<GossipId>, MutatorRejectionReason),
