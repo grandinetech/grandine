@@ -46,6 +46,7 @@ pub struct Meta {
 
     // Present in some metadata files but not used in our test runners.
     pub description: IgnoredAny,
+    pub fork: IgnoredAny,
     pub reveal_deadlines_setting: IgnoredAny,
 }
 

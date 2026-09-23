@@ -102,6 +102,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             pool: self.pool.clone_arc(),
             data: message.data,
             messages,
+            config: self.config().clone_arc(),
             beacon_state,
             metrics: self.metrics.clone(),
         });

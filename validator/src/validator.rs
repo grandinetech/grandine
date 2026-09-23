@@ -1909,7 +1909,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let Some(own_members) = self
             .own_ptc_members
-            .get_or_init_at_slot(&slot_head.beacon_state, dependent_root, slot_head.slot())
+            .get_or_init_at_slot(
+                self.controller.chain_config(),
+                &slot_head.beacon_state,
+                dependent_root,
+                slot_head.slot(),
+            )
             .await
         else {
             return Ok(());

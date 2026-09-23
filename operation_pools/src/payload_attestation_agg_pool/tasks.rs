@@ -8,6 +8,7 @@ use prometheus_metrics::Metrics;
 use ssz::ContiguousList;
 use types::{
     combined::BeaconState,
+    config::Config,
     gloas::containers::{PayloadAttestation, PayloadAttestationData, PayloadAttestationMessage},
     phase0::primitives::{H256, Slot},
     preset::Preset,
@@ -76,7 +77,12 @@ impl<P: Preset, W: Wait> PoolTask for InsertPayloadAttestationTask<P, W> {
         let data = payload_attestation.data;
 
         if let Err(error) = pool
-            .aggregate_messages(data, vec![*payload_attestation], beacon_state)
+            .aggregate_messages(
+                controller.chain_config(),
+                data,
+                vec![*payload_attestation],
+                beacon_state,
+            )
             .await
         {
             warn_with_peers!(
@@ -99,6 +105,7 @@ pub struct AggregateOwnMessagesTask<P: Preset, W> {
     pub pool: Arc<Pool<P>>,
     pub data: PayloadAttestationData,
     pub messages: Vec<PayloadAttestationMessage>,
+    pub config: Arc<Config>,
     pub beacon_state: Arc<BeaconState<P>>,
     pub metrics: Option<Arc<Metrics>>,
 }
@@ -112,6 +119,7 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
             pool,
             data,
             messages,
+            config,
             beacon_state,
             metrics,
         } = self;
@@ -123,7 +131,7 @@ impl<P: Preset, W: Send + 'static> PoolTask for AggregateOwnMessagesTask<P, W> {
         });
 
         if let Err(error) = pool
-            .aggregate_messages(data, messages.iter().copied(), beacon_state)
+            .aggregate_messages(&config, data, messages.iter().copied(), beacon_state)
             .await
         {
             warn_with_peers!("failed to aggregate own payload attestaton messages: {error}",);

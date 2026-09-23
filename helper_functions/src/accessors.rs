@@ -1163,10 +1163,18 @@ fn ptc_from_committee_members<P: Preset>(
     Ptc::<P>::try_from_iter(selection).map_err(Into::into)
 }
 
-pub fn get_ptc<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<Ptc<P>> {
+pub fn get_ptc<P: Preset>(
+    config: &Config,
+    state: &impl BeaconState<P>,
+    slot: Slot,
+) -> Result<Ptc<P>> {
     let epoch = misc::compute_epoch_at_slot::<P>(slot);
     let state_epoch = get_current_epoch(state);
 
+    ensure!(
+        epoch >= config.gloas_fork_epoch,
+        Error::PreGloasSlot { slot }
+    );
     ensure!(
         (state_epoch.saturating_sub(1)..=state_epoch.try_add(P::MinSeedLookahead::U64)?)
             .contains(&epoch),
@@ -1189,10 +1197,11 @@ pub fn get_ptc<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Result<Ptc
 }
 
 pub fn get_indexed_payload_attestation<P: Preset>(
+    config: &Config,
     state: &impl BeaconState<P>,
     payload_attestation: &PayloadAttestation<P>,
 ) -> Result<IndexedPayloadAttestation<P>> {
-    let ptc = get_ptc(state, payload_attestation.data.slot)?;
+    let ptc = get_ptc(config, state, payload_attestation.data.slot)?;
     let mut attesting_indices =
         ContiguousList::try_from_iter(ptc.into_iter().zip(0..).filter_map(|(index, i)| {
             payload_attestation

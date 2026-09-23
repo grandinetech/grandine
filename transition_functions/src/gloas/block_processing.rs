@@ -1251,7 +1251,8 @@ pub fn process_payload_attestation<P: Preset>(
     );
 
     // > Verify signature
-    let indexed_payload_attestation = get_indexed_payload_attestation(state, payload_attestation)?;
+    let indexed_payload_attestation =
+        get_indexed_payload_attestation(config, state, payload_attestation)?;
 
     validate_constructed_indexed_payload_attestation(
         config,
@@ -1324,6 +1325,7 @@ mod spec_tests {
     use test_generator::test_resources;
     use types::{
         gloas::containers::AttesterSlashing,
+        nonstandard::Phase,
         preset::{Mainnet, Minimal},
     };
 
@@ -1599,6 +1601,10 @@ mod spec_tests {
         run_withdrawals_case::<Minimal>(case);
     }
 
+    fn config<P: Preset>(state: &GloasBeaconState<P>) -> Config {
+        P::default_config().upgrade_once(Phase::Gloas, state.fork.epoch)
+    }
+
     fn run_processing_case<P: Preset, O: SszReadDefault>(
         case: Case,
         operation_name: &str,
@@ -1615,15 +1621,10 @@ mod spec_tests {
         let operation = case.ssz_default(operation_name);
         let post_option = case.try_ssz_default("post");
         let meta = case.meta();
+        let config = config(&state);
 
-        let result = processing_function(
-            &P::default_config(),
-            &pubkey_cache,
-            &mut state,
-            operation,
-            &meta,
-        )
-        .map(|()| state);
+        let result = processing_function(&config, &pubkey_cache, &mut state, operation, &meta)
+            .map(|()| state);
 
         if let Some(expected_post) = post_option {
             let actual_post = result.expect("operation processing should succeed");
@@ -1647,9 +1648,9 @@ mod spec_tests {
         let mut state = case.ssz_default("pre");
         let operation = case.ssz_default(operation_name);
         let post_exists = case.exists("post");
+        let config = config(&state);
 
-        let result =
-            validation_function(&P::default_config(), &pubkey_cache, &mut state, operation);
+        let result = validation_function(&config, &pubkey_cache, &mut state, operation);
 
         if post_exists {
             result.expect("validation should succeed");

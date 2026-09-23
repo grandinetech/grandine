@@ -15,6 +15,7 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     combined::BeaconState,
+    config::Config,
     gloas::containers::{PayloadAttestation, PayloadAttestationData, PayloadAttestationMessage},
     phase0::primitives::{H256, Slot},
     preset::Preset,
@@ -84,11 +85,12 @@ impl<P: Preset> Pool<P> {
 
     pub async fn aggregate_messages(
         &self,
+        config: &Config,
         data: PayloadAttestationData,
         messages: impl IntoIterator<Item = PayloadAttestationMessage> + Send,
         beacon_state: Arc<BeaconState<P>>,
     ) -> Result<()> {
-        let ptc_members = accessors::get_ptc(&beacon_state, data.slot)?;
+        let ptc_members = accessors::get_ptc(config, &beacon_state, data.slot)?;
 
         let pool_aggregate = self.pool_aggregate(data).await;
         let mut pool_aggregate = pool_aggregate.write().await;
