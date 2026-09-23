@@ -172,6 +172,11 @@ impl PayloadPresence {
     pub const fn is_full(self) -> bool {
         matches!(self, Self::Full)
     }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        matches!(self, Self::Empty)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -286,6 +291,11 @@ impl<P: Preset> UnfinalizedBlock<P> {
     #[must_use]
     pub const fn is_optimistic(&self) -> bool {
         self.chain_link.is_optimistic()
+    }
+
+    #[must_use]
+    pub fn is_post_gloas(&self) -> bool {
+        self.chain_link.is_post_gloas()
     }
 
     #[must_use]

@@ -3070,12 +3070,8 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            if let Some(chain_link) = self.store.chain_link(beacon_block_root)
-                && chain_link.block.phase() < Phase::Gloas
-            {
-                self.store_mut()
-                    .invalidate_block_and_descendant_payloads(beacon_block_root);
-            }
+            self.store_mut()
+                .invalidate_payload_and_descendant_payloads(beacon_block_root);
         } else {
             return;
         }
