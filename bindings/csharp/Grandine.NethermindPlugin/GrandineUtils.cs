@@ -291,9 +291,7 @@ public static class GrandineUtils
             Withdrawals = WithdrawalsFromNative(attr.value.withdrawals),
             ParentBeaconBlockRoot = attr.value.parent_beacon_block_root.ToHash256(),
             SlotNumber = attr.value.slot_number,
-
-            // TODO: The target gas limit must be passed, but nethermind currently doesn't have field for it.
-            // TargetGasLimit = attr.value.target_gas_limit,
+            TargetGasLimit = attr.value.target_gas_limit,
         };
     }
 
