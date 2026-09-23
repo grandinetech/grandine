@@ -113,16 +113,16 @@ struct ViableHeadRootAndWeight {
 
 // TODO: fix remaining failing compliance tests
 const SKIPPED_CASES: &[&str] = &[
-    "minimal/altair/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
-    "minimal/altair/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
-    "minimal/bellatrix/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
-    "minimal/bellatrix/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
-    "minimal/capella/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
-    "minimal/capella/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
-    "minimal/deneb/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_0",
-    "minimal/deneb/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_15_974590099_1",
-    "minimal/gloas/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_3_884359208_1",
-    "minimal/gloas/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_723232228_31",
+    "minimal/altair/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
+    "minimal/bellatrix/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
+    "minimal/capella/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
+    "minimal/deneb/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
+    "minimal/electra/fork_choice_compliance/attester_slashing_test/pyspec_tests/attester_slashing_test_0_536686244_2",
+    "minimal/electra/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_73_149206934_1",
+    "minimal/fulu/fork_choice_compliance/attester_slashing_test/pyspec_tests/attester_slashing_test_1_930324755_3",
+    "minimal/fulu/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_73_149206934_1",
+    "minimal/gloas/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_101_886189127_1",
+    "minimal/gloas/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_0_6673355_20",
 ];
 
 #[duplicate_item(
