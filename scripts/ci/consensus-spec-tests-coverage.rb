@@ -16,6 +16,7 @@ CONSENSUS_IGNORED_GLOBS = %w[
   tests/*/*/light_client/sync/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/update_ranking/pyspec_tests/*/*.{ssz_snappy,yaml}
   tests/*/*/light_client/data_collection/pyspec_tests/*/*.{ssz_snappy,yaml}
+  tests/*/*/ssz_static/NewPayloadRequest/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnGroupID/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnHeader/*/*/*.{ssz_snappy,yaml}
   tests/*/*/ssz_static/PartialDataColumnPartsMetadata/*/*/*.{ssz_snappy,yaml}
