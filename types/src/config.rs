@@ -17,6 +17,7 @@ use typenum::Unsigned as _;
 use crate::{
     bellatrix::primitives::{Difficulty, Gas},
     fulu::containers::DataColumnsByRootIdentifier,
+    gloas::containers::DataColumnSidecar as GloasDataColumnSidecar,
     nonstandard::{CustodyMode, Phase, Toption},
     phase0::{
         consts::{AttestationSubnetCount, FAR_FUTURE_EPOCH, GENESIS_EPOCH},
@@ -231,6 +232,8 @@ pub struct Config {
     // Derived
     #[serde(skip)]
     pub max_data_columns_by_root_request: OnceCell<usize>,
+    #[serde(skip)]
+    pub max_data_column_sidecar_size: OnceCell<usize>,
 
     // Later phases and other unknown variables
     //
@@ -364,6 +367,7 @@ impl Default for Config {
             blacklisted_blocks: vec![],
 
             max_data_columns_by_root_request: OnceCell::new(),
+            max_data_column_sidecar_size: OnceCell::new(),
 
             // Later phases and other unknown variables
             unknown: BTreeMap::new(),
@@ -1217,6 +1221,25 @@ impl Config {
             .to_ssz()
             .expect("Unable to get DataColumnSidecarsByRoot full length")
             .len()
+        })
+    }
+
+    pub fn max_blobs(&self) -> usize {
+        self.blob_schedule
+            .iter()
+            .map(|entry| entry.max_blobs_per_block)
+            .fold(self.max_blobs_per_block_electra, core::cmp::max)
+    }
+
+    #[must_use]
+    pub fn max_data_column_sidecar_size<P: Preset>(&self) -> usize {
+        *self.max_data_column_sidecar_size.get_or_init(|| {
+            let max_blobs = self.max_blobs();
+
+            GloasDataColumnSidecar::<P>::with_max_blobs(max_blobs)
+                .to_ssz()
+                .expect("Unable to get DataColumnSidecar max length")
+                .len()
         })
     }
 
