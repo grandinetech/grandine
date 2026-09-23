@@ -351,8 +351,6 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
     // Gloas type-specific SSZ bounds
     const MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE: u64 = 16_829;
     const MAX_ATTESTER_SLASHING_SIZE: u64 = 2_097_616;
-    const MAX_DATA_COLUMN_SIDECAR_SIZE: u64 = 8_585_272;
-    const MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE: u64 = 8_585_741;
     const MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE: u64 = 196_932;
 
     /// Returns the default configuration associated with a preset.
@@ -1172,10 +1170,6 @@ pub struct GloasPreset {
     #[serde(with = "serde_utils::string_or_native")]
     max_attester_slashing_size: u64,
     #[serde(with = "serde_utils::string_or_native")]
-    max_data_column_sidecar_size: u64,
-    #[serde(with = "serde_utils::string_or_native")]
-    max_partial_data_column_sidecar_size: u64,
-    #[serde(with = "serde_utils::string_or_native")]
     max_signed_execution_payload_bid_size: u64,
 }
 
@@ -1192,8 +1186,6 @@ impl GloasPreset {
             max_builder_exit_requests_per_payload: P::MaxBuilderExitRequestsPerPayload::U64,
             max_signed_aggregate_and_proof_size: P::MAX_SIGNED_AGGREGATE_AND_PROOF_SIZE,
             max_attester_slashing_size: P::MAX_ATTESTER_SLASHING_SIZE,
-            max_data_column_sidecar_size: P::MAX_DATA_COLUMN_SIDECAR_SIZE,
-            max_partial_data_column_sidecar_size: P::MAX_PARTIAL_DATA_COLUMN_SIDECAR_SIZE,
             max_signed_execution_payload_bid_size: P::MAX_SIGNED_EXECUTION_PAYLOAD_BID_SIZE,
         }
     }

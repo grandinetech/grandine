@@ -129,13 +129,10 @@ impl<P: Preset> SignedExecutionPayloadEnvelope<P> {
 
 impl<P: Preset> DataColumnSidecar<P> {
     #[must_use]
-    pub fn full() -> Self {
+    pub fn with_max_blobs(max_blobs: usize) -> Self {
         Self {
-            column: repeat_to_limit(Box::default(), P::MaxBlobCommitmentsPerBlock::USIZE),
-            kzg_proofs: repeat_to_limit(
-                KzgProof::repeat_byte(u8::MAX),
-                P::MaxBlobCommitmentsPerBlock::USIZE,
-            ),
+            column: repeat_to_limit(Box::default(), max_blobs),
+            kzg_proofs: repeat_to_limit(KzgProof::default(), max_blobs),
             ..Default::default()
         }
     }
