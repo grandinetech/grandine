@@ -107,6 +107,10 @@ use crate::{
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
 const MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT: usize = 16;
 const MAX_DELAYED_BLOCKS_UNTIL_PARENT: usize = 64;
+// Room for requested envelopes waiting for their blocks.
+// Forward sync runs many 32-slot batches ahead of the head.
+// 64 was too small: envelopes near the head got dropped and sync stalled.
+const MAX_DELAYED_REQUESTED_ENVELOPES_UNTIL_BLOCK_IN_EPOCHS: usize = 16;
 
 #[expect(clippy::struct_field_names)]
 pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
@@ -4071,13 +4075,6 @@ where
         }
     }
 
-    fn total_delayed_execution_payload_envelopes_until_block(&self) -> usize {
-        self.delayed_until_block
-            .values()
-            .map(|delayed| delayed.execution_payload_envelopes.len())
-            .sum::<usize>()
-    }
-
     fn try_delay_execution_payload_envelope_until_block(
         &mut self,
         wait_group: W,
@@ -4089,14 +4086,29 @@ where
             return Ok(());
         }
 
-        // Envelopes produced by the application itself should never be dropped.
-        if !matches!(
-            pending_execution_payload_envelope.origin,
-            ExecutionPayloadEnvelopeOrigin::Own,
-        ) && self.total_delayed_execution_payload_envelopes_until_block()
-            >= MAX_DELAYED_BLOCKS_UNTIL_PARENT
-        {
-            return Err(Error::<P>::DelayedUntilBlockQueueFull.into());
+        let evicted = make_room_for_delayed_execution_payload_envelope(
+            &mut self.delayed_until_block,
+            &pending_execution_payload_envelope,
+        )?;
+
+        if let Some((evicted_block_root, evicted)) = evicted {
+            let evicted_slot = evicted.execution_payload_envelope.slot();
+            let slot = pending_execution_payload_envelope
+                .execution_payload_envelope
+                .slot();
+
+            debug_with_peers!(
+                "evicted execution payload envelope delayed until block \
+                 (beacon_block_root: {evicted_block_root:?}, slot: {evicted_slot}) \
+                 to make room for envelope at slot {slot}"
+            );
+
+            self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                evicted.origin.gossip_id(),
+                MutatorIgnoreReason::ExecutionPayloadEnvelopeQueueFull {
+                    payload_envelope_identifier: evicted.execution_payload_envelope.as_ref().into(),
+                },
+            ));
         }
 
         trace_with_peers!(
@@ -5841,6 +5853,99 @@ fn reply_delayed_block_validation_result<P: Preset>(
     }
 }
 
+const fn is_requested_envelope<P: Preset>(pending: &PendingExecutionPayloadEnvelope<P>) -> bool {
+    matches!(pending.origin, ExecutionPayloadEnvelopeOrigin::Requested(_))
+}
+
+// Requested (sync) and other envelopes have separate limits.
+// So a sync backlog can't crowd out gossip, and the other way round.
+const fn delayed_execution_payload_envelopes_until_block_limit<P: Preset>(
+    requested: bool,
+) -> usize {
+    if requested {
+        MAX_DELAYED_REQUESTED_ENVELOPES_UNTIL_BLOCK_IN_EPOCHS
+            .saturating_mul(P::SlotsPerEpoch::USIZE)
+    } else {
+        MAX_DELAYED_BLOCKS_UNTIL_PARENT
+    }
+}
+
+fn count_delayed_execution_payload_envelopes_until_block<P: Preset>(
+    delayed_until_block: &HashMap<H256, Delayed<P>>,
+    requested: bool,
+) -> usize {
+    delayed_until_block
+        .values()
+        .flat_map(|delayed| &delayed.execution_payload_envelopes)
+        .filter(|pending| is_requested_envelope(pending) == requested)
+        .count()
+}
+
+// Makes room for `pending` in the delayed until block queue.
+// Returns the envelope evicted to make room, if any.
+// Fails if the queue is full and nothing can be evicted.
+fn make_room_for_delayed_execution_payload_envelope<P: Preset>(
+    delayed_until_block: &mut HashMap<H256, Delayed<P>>,
+    pending: &PendingExecutionPayloadEnvelope<P>,
+) -> Result<Option<(H256, PendingExecutionPayloadEnvelope<P>)>> {
+    // Envelopes produced by the application itself should never be dropped.
+    if matches!(pending.origin, ExecutionPayloadEnvelopeOrigin::Own) {
+        return Ok(None);
+    }
+
+    let requested = is_requested_envelope(pending);
+
+    if count_delayed_execution_payload_envelopes_until_block(delayed_until_block, requested)
+        < delayed_execution_payload_envelopes_until_block_limit::<P>(requested)
+    {
+        return Ok(None);
+    }
+
+    let slot = pending.execution_payload_envelope.slot();
+
+    evict_delayed_execution_payload_envelope_until_block(delayed_until_block, requested, slot)
+        .map(Some)
+        .ok_or_else(|| Error::<P>::DelayedUntilBlockQueueFull.into())
+}
+
+// Frees a queue slot by dropping the highest-slot envelope.
+// Only drops it if it is above `slot`.
+// The head needs the lowest slots first, so those are kept.
+// Own envelopes are never dropped.
+fn evict_delayed_execution_payload_envelope_until_block<P: Preset>(
+    delayed_until_block: &mut HashMap<H256, Delayed<P>>,
+    requested: bool,
+    slot: Slot,
+) -> Option<(H256, PendingExecutionPayloadEnvelope<P>)> {
+    let (block_root, index, _) = delayed_until_block
+        .iter()
+        .flat_map(|(block_root, delayed)| {
+            delayed
+                .execution_payload_envelopes
+                .iter()
+                .enumerate()
+                .map(move |(index, pending)| (*block_root, index, pending))
+        })
+        .filter(|(_, _, pending)| {
+            is_requested_envelope(pending) == requested
+                && !matches!(pending.origin, ExecutionPayloadEnvelopeOrigin::Own)
+        })
+        .map(|(block_root, index, pending)| {
+            (block_root, index, pending.execution_payload_envelope.slot())
+        })
+        .filter(|(_, _, evicted_slot)| *evicted_slot > slot)
+        .max_by_key(|(_, _, evicted_slot)| *evicted_slot)?;
+
+    let delayed = delayed_until_block.get_mut(&block_root)?;
+    let evicted = delayed.execution_payload_envelopes.swap_remove(index);
+
+    if delayed.is_empty() {
+        delayed_until_block.remove(&block_root);
+    }
+
+    Some((block_root, evicted))
+}
+
 fn reply_delayed_payload_envelope_validation_result<P: Preset>(
     pending_envelope: PendingExecutionPayloadEnvelope<P>,
     reply: Result<ValidationOutcome>,
@@ -5931,5 +6036,330 @@ fn reply_delayed_data_column_sidecar_validation_result<P: Preset>(
             origin,
             submission_time,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eth2_libp2p::PeerId;
+    use types::preset::Minimal;
+
+    use super::*;
+
+    type Queue = HashMap<H256, Delayed<Minimal>>;
+
+    fn requested_envelope() -> ExecutionPayloadEnvelopeOrigin {
+        ExecutionPayloadEnvelopeOrigin::Requested(PeerId::random())
+    }
+
+    fn gossip_envelope() -> ExecutionPayloadEnvelopeOrigin {
+        ExecutionPayloadEnvelopeOrigin::Gossip(GossipId::default())
+    }
+
+    fn requested_envelope_limit() -> usize {
+        delayed_execution_payload_envelopes_until_block_limit::<Minimal>(true)
+    }
+
+    fn gossip_envelope_limit() -> usize {
+        delayed_execution_payload_envelopes_until_block_limit::<Minimal>(false)
+    }
+
+    fn pending_envelope(
+        origin: ExecutionPayloadEnvelopeOrigin,
+        slot: Slot,
+    ) -> PendingExecutionPayloadEnvelope<Minimal> {
+        let mut envelope = SignedExecutionPayloadEnvelope::<Minimal>::default();
+        envelope.message.payload.slot_number = slot;
+
+        PendingExecutionPayloadEnvelope {
+            execution_payload_envelope: Arc::new(envelope),
+            origin,
+            seen_before_deadline: false,
+            processing_timings: ProcessingTimings::new(),
+            tracing_span: Span::none(),
+        }
+    }
+
+    // One block root per slot, like forward sync.
+    fn root(slot: Slot) -> H256 {
+        H256::from_low_u64_be(slot)
+    }
+
+    fn insert_into_queue(queue: &mut Queue, pending: PendingExecutionPayloadEnvelope<Minimal>) {
+        let slot = pending.execution_payload_envelope.slot();
+
+        queue
+            .entry(root(slot))
+            .or_default()
+            .execution_payload_envelopes
+            .push(pending);
+    }
+
+    // Fills `count` envelopes at slots `first_slot..first_slot + count`.
+    fn fill_queue(
+        queue: &mut Queue,
+        origin: impl Fn() -> ExecutionPayloadEnvelopeOrigin,
+        first_slot: Slot,
+        count: usize,
+    ) {
+        for slot in (first_slot..).take(count) {
+            insert_into_queue(queue, pending_envelope(origin(), slot));
+        }
+    }
+
+    fn assert_queue_full(result: Result<Option<(H256, PendingExecutionPayloadEnvelope<Minimal>)>>) {
+        let error = result.expect_err("envelope should be rejected");
+
+        assert!(matches!(
+            error.downcast_ref(),
+            Some(Error::<Minimal>::DelayedUntilBlockQueueFull),
+        ));
+    }
+
+    fn queued_slots(queue: &Queue) -> Vec<Slot> {
+        let mut slots = queue
+            .values()
+            .flat_map(|delayed| &delayed.execution_payload_envelopes)
+            .map(|pending| pending.execution_payload_envelope.slot())
+            .collect_vec();
+
+        slots.sort_unstable();
+        slots
+    }
+
+    #[test]
+    fn requested_limit_covers_many_sync_batches() {
+        // 16 epochs, well above the old shared limit of 64 on mainnet.
+        assert_eq!(requested_envelope_limit(), 16 * 8);
+        assert_eq!(gossip_envelope_limit(), MAX_DELAYED_BLOCKS_UNTIL_PARENT);
+    }
+
+    #[test]
+    fn admits_envelope_below_limit() -> Result<()> {
+        let mut queue = Queue::new();
+
+        fill_queue(
+            &mut queue,
+            requested_envelope,
+            100,
+            requested_envelope_limit() - 1,
+        );
+
+        let evicted = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(requested_envelope(), 1),
+        )?;
+
+        assert!(evicted.is_none());
+        assert_eq!(queued_slots(&queue).len(), requested_envelope_limit() - 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn evicts_highest_slot_when_full() -> Result<()> {
+        let mut queue = Queue::new();
+        let limit = requested_envelope_limit() as Slot;
+
+        fill_queue(
+            &mut queue,
+            requested_envelope,
+            100,
+            requested_envelope_limit(),
+        );
+
+        let (evicted_root, evicted) = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(requested_envelope(), 50),
+        )?
+        .expect("an envelope should be evicted");
+
+        let highest_slot = 100 + limit - 1;
+
+        assert_eq!(evicted.execution_payload_envelope.slot(), highest_slot);
+        assert_eq!(evicted_root, root(highest_slot));
+
+        // Emptied entries are removed.
+        assert!(!queue.contains_key(&root(highest_slot)));
+        assert_eq!(queued_slots(&queue), (100..highest_slot).collect_vec());
+
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_envelope_above_all_queued_when_full() {
+        let mut queue = Queue::new();
+
+        fill_queue(
+            &mut queue,
+            requested_envelope,
+            100,
+            requested_envelope_limit(),
+        );
+
+        let before = queued_slots(&queue);
+        let result = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(requested_envelope(), 10_000),
+        );
+
+        assert_queue_full(result);
+        assert_eq!(queued_slots(&queue), before);
+    }
+
+    #[test]
+    fn rejects_envelope_at_same_slot_as_highest_when_full() {
+        let mut queue = Queue::new();
+        let highest_slot = 100 + requested_envelope_limit() as Slot - 1;
+
+        fill_queue(
+            &mut queue,
+            requested_envelope,
+            100,
+            requested_envelope_limit(),
+        );
+
+        let result = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(requested_envelope(), highest_slot),
+        );
+
+        assert_queue_full(result);
+    }
+
+    #[test]
+    fn full_requested_queue_does_not_block_gossip() -> Result<()> {
+        let mut queue = Queue::new();
+
+        fill_queue(
+            &mut queue,
+            requested_envelope,
+            100,
+            requested_envelope_limit(),
+        );
+
+        let evicted = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(gossip_envelope(), 10_000),
+        )?;
+
+        assert!(evicted.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn full_gossip_queue_does_not_block_requested() -> Result<()> {
+        let mut queue = Queue::new();
+
+        fill_queue(&mut queue, gossip_envelope, 100, gossip_envelope_limit());
+
+        let evicted = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(requested_envelope(), 10_000),
+        )?;
+
+        assert!(evicted.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn evicts_only_from_same_class() -> Result<()> {
+        let mut queue = Queue::new();
+
+        fill_queue(&mut queue, gossip_envelope, 100, gossip_envelope_limit());
+
+        // Higher than every gossip envelope, but in the other class.
+        insert_into_queue(&mut queue, pending_envelope(requested_envelope(), 10_000));
+
+        let (_, evicted) = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(gossip_envelope(), 50),
+        )?
+        .expect("an envelope should be evicted");
+
+        assert_eq!(
+            evicted.execution_payload_envelope.slot(),
+            100 + gossip_envelope_limit() as Slot - 1,
+        );
+        assert!(queue.contains_key(&root(10_000)));
+
+        Ok(())
+    }
+
+    #[test]
+    fn never_evicts_own_envelopes() {
+        let mut queue = Queue::new();
+
+        fill_queue(
+            &mut queue,
+            || ExecutionPayloadEnvelopeOrigin::Own,
+            100,
+            gossip_envelope_limit(),
+        );
+
+        let before = queued_slots(&queue);
+        let result = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(gossip_envelope(), 1),
+        );
+
+        assert_queue_full(result);
+        assert_eq!(queued_slots(&queue), before);
+    }
+
+    #[test]
+    fn always_admits_own_envelopes() -> Result<()> {
+        let mut queue = Queue::new();
+
+        fill_queue(&mut queue, gossip_envelope, 100, gossip_envelope_limit());
+
+        let evicted = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(ExecutionPayloadEnvelopeOrigin::Own, 10_000),
+        )?;
+
+        assert!(evicted.is_none());
+        assert_eq!(queued_slots(&queue).len(), gossip_envelope_limit());
+
+        Ok(())
+    }
+
+    #[test]
+    fn keeps_entry_that_still_has_objects() -> Result<()> {
+        let mut queue = Queue::new();
+
+        fill_queue(
+            &mut queue,
+            requested_envelope,
+            100,
+            requested_envelope_limit() - 1,
+        );
+
+        // Two envelopes for the same block, e.g. from different peers.
+        let shared_slot = 1_000;
+        insert_into_queue(
+            &mut queue,
+            pending_envelope(requested_envelope(), shared_slot),
+        );
+        insert_into_queue(
+            &mut queue,
+            pending_envelope(requested_envelope(), shared_slot),
+        );
+
+        let (evicted_root, _) = make_room_for_delayed_execution_payload_envelope(
+            &mut queue,
+            &pending_envelope(requested_envelope(), 50),
+        )?
+        .expect("an envelope should be evicted");
+
+        assert_eq!(evicted_root, root(shared_slot));
+        assert_eq!(
+            queue[&root(shared_slot)].execution_payload_envelopes.len(),
+            1,
+        );
+
+        Ok(())
     }
 }
