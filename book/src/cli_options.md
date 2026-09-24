@@ -150,7 +150,7 @@ The list of command line options:
       --use-validator-key-cache
           Use validator key cache for faster startup
       --graffiti <GRAFFITI>
-          
+          Custom graffiti to include in proposed blocks
       --features <FEATURES>
           List of optional runtime features to enable
   -h, --help
