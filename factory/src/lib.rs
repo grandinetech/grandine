@@ -49,7 +49,9 @@ use types::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             BeaconBlock as GloasBeaconBlock, BeaconBlockBody as GloasBeaconBlockBody,
-            ExecutionPayloadBid, ExecutionRequests, SignedExecutionPayloadBid,
+            ExecutionPayload as GloasExecutionPayload, ExecutionPayloadBid,
+            ExecutionPayloadEnvelope, ExecutionRequests, SignedExecutionPayloadBid,
+            SignedExecutionPayloadEnvelope,
         },
     },
     nonstandard::{AttestationEpoch, Phase, RelativeEpoch},
@@ -62,7 +64,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostGloasBeaconState},
+    traits::{BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
 type BlockWithState<P> = (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>);
@@ -250,6 +252,92 @@ pub fn block_with_payload<P: Preset>(
     )
 }
 
+// Post-Gloas only.
+// The block builds on the full node of its parent, i.e. on the parent's execution payload.
+// The payload itself travels in an envelope. See `execution_payload_envelope`.
+pub fn empty_block_extending_parent_payload<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    pre_state: Arc<BeaconState<P>>,
+    slot: Slot,
+    graffiti: H256,
+) -> Result<BlockWithState<P>> {
+    let advanced_state = advance_state(config, pubkey_cache, pre_state, slot)?;
+    let eth1_data = advanced_state.eth1_data();
+    let attestations = core::iter::empty();
+    let deposits = ContiguousList::default();
+    let sync_aggregate = SyncAggregate::empty();
+    let execution_payload = None;
+
+    block_with_parent_payload(
+        config,
+        pubkey_cache,
+        advanced_state,
+        eth1_data,
+        graffiti,
+        attestations,
+        deposits,
+        sync_aggregate,
+        execution_payload,
+        true,
+    )
+}
+
+// Post-Gloas only.
+// `state` must be the post-state of `block`.
+pub fn execution_payload_envelope<P: Preset>(
+    config: &Config,
+    block: &SignedBeaconBlock<P>,
+    state: &BeaconState<P>,
+) -> Result<Arc<SignedExecutionPayloadEnvelope<P>>> {
+    let Some(post_gloas_state) = state.post_gloas() else {
+        bail!("state should be post-Gloas");
+    };
+
+    let Some(bid) = block
+        .message()
+        .body()
+        .with_payload_bid()
+        .map(|body| &body.signed_execution_payload_bid().message)
+    else {
+        bail!("block should be post-Gloas");
+    };
+
+    let slot = block.message().slot();
+
+    let payload = GloasExecutionPayload {
+        parent_hash: post_gloas_state.latest_block_hash(),
+        prev_randao: bid.prev_randao,
+        gas_limit: bid.gas_limit,
+        timestamp: misc::compute_timestamp_at_slot(config, state, slot)?,
+        block_hash: bid.block_hash,
+        withdrawals: post_gloas_state
+            .payload_expected_withdrawals()
+            .into_iter()
+            .copied()
+            .collect::<Vec<_>>()
+            .try_into()?,
+        slot_number: slot,
+        ..GloasExecutionPayload::default()
+    };
+
+    let message = ExecutionPayloadEnvelope {
+        payload,
+        execution_requests: ExecutionRequests::default(),
+        builder_index: BUILDER_INDEX_SELF_BUILD,
+        beacon_block_root: block.message().hash_tree_root(),
+        parent_beacon_block_root: block.message().parent_root(),
+    };
+
+    let secret_key = interop::secret_key(block.message().proposer_index());
+    let signature = message.sign(config, state, &secret_key).into();
+
+    Ok(Arc::new(SignedExecutionPayloadEnvelope {
+        message,
+        signature,
+    }))
+}
+
 pub fn full_blocks_up_to_epoch<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -375,12 +463,21 @@ pub fn singular_attestation<P: Preset>(
 
 fn signed_execution_payload_bid<P: Preset>(
     state: &(impl PostGloasBeaconState<P> + ?Sized),
+    extend_parent_payload: bool,
 ) -> SignedExecutionPayloadBid<P> {
     let prev_randao = accessors::get_randao_mix(state, accessors::get_current_epoch(state));
 
+    // The parent's bid names the hash its payload would have.
+    // Pointing at it builds on the full node. Pointing at the latest hash builds on the empty one.
+    let parent_block_hash = if extend_parent_payload {
+        state.latest_execution_payload_bid().block_hash
+    } else {
+        state.latest_block_hash()
+    };
+
     SignedExecutionPayloadBid {
         message: ExecutionPayloadBid {
-            parent_block_hash: state.latest_block_hash(),
+            parent_block_hash,
             parent_block_root: state.latest_block_header().hash_tree_root(),
             block_hash: ExecutionBlockHash::from_low_u64_be(state.slot()),
             prev_randao,
@@ -454,7 +551,6 @@ pub fn execution_payload<P: Preset>(
 }
 
 #[expect(clippy::too_many_arguments)]
-#[expect(clippy::too_many_lines)]
 fn block<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -464,7 +560,37 @@ fn block<P: Preset>(
     attestations: impl IntoIterator<Item = Attestation<P>>,
     deposits: ContiguousList<Deposit, P::MaxDeposits>,
     sync_aggregate: SyncAggregate<P>,
+    execution_payload: Option<ExecutionPayload<P>>,
+) -> Result<BlockWithState<P>> {
+    block_with_parent_payload(
+        config,
+        pubkey_cache,
+        advanced_state,
+        eth1_data,
+        graffiti,
+        attestations,
+        deposits,
+        sync_aggregate,
+        execution_payload,
+        false,
+    )
+}
+
+// `extend_parent_payload` only matters post-Gloas.
+// It picks which node of the parent the block builds on: full (`true`) or empty (`false`).
+#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_lines)]
+fn block_with_parent_payload<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    advanced_state: Arc<BeaconState<P>>,
+    eth1_data: Eth1Data,
+    graffiti: H256,
+    attestations: impl IntoIterator<Item = Attestation<P>>,
+    deposits: ContiguousList<Deposit, P::MaxDeposits>,
+    sync_aggregate: SyncAggregate<P>,
     mut execution_payload: Option<ExecutionPayload<P>>,
+    extend_parent_payload: bool,
 ) -> Result<BlockWithState<P>> {
     let slot = advanced_state.slot();
     let proposer_index = accessors::get_beacon_proposer_index(config, &advanced_state)?;
@@ -519,7 +645,7 @@ fn block<P: Preset>(
 
     let signed_execution_payload_bid = advanced_state
         .post_gloas()
-        .map(signed_execution_payload_bid);
+        .map(|state| signed_execution_payload_bid(state, extend_parent_payload));
 
     let without_state_root = match advanced_state.phase() {
         Phase::Phase0 => BeaconBlock::from(Hc::new(Phase0BeaconBlock {
