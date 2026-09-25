@@ -217,6 +217,35 @@ impl<P: Preset> Context<P> {
         .expect("block should be constructed successfully")
     }
 
+    // Post-Gloas only. The block builds on its parent's payload (the full node).
+    #[must_use]
+    pub fn empty_block_extending_parent_payload(
+        &self,
+        pre_state: &Arc<BeaconState<P>>,
+        slot: Slot,
+        graffiti: H256,
+    ) -> (Arc<SignedBeaconBlock<P>>, Arc<BeaconState<P>>) {
+        factory::empty_block_extending_parent_payload(
+            self.config(),
+            &self.pubkey_cache,
+            pre_state.clone_arc(),
+            slot,
+            graffiti,
+        )
+        .expect("block should be constructed successfully")
+    }
+
+    // Post-Gloas only. `state` must be the post-state of `block`.
+    #[must_use]
+    pub fn execution_payload_envelope(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        state: &BeaconState<P>,
+    ) -> Arc<SignedExecutionPayloadEnvelope<P>> {
+        factory::execution_payload_envelope(self.config(), block, state)
+            .expect("execution payload envelope should be constructed successfully")
+    }
+
     #[must_use]
     pub fn block_justifying_previous_epoch(
         &self,
@@ -591,6 +620,17 @@ impl<P: Preset> Context<P> {
         assert!(matches!(
             self.on_execution_payload(envelope, bls_setting),
             Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+        ));
+    }
+
+    pub fn on_ignorable_execution_payload(
+        &mut self,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        bls_setting: BlsSetting,
+    ) {
+        assert!(matches!(
+            self.on_execution_payload(envelope, bls_setting),
+            Some(P2pMessage::Ignore(_)),
         ));
     }
 

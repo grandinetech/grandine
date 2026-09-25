@@ -19,11 +19,13 @@ use eth2_cache_utils::medalla;
 #[cfg(feature = "eth2-cache")]
 use eth2_libp2p::GossipId;
 use helper_functions::misc;
+use spec_test_utils::BlsSetting;
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
 #[cfg(feature = "eth2-cache")]
 use types::{config::Config, preset::Medalla};
 use types::{
+    gloas::consts::PAYLOAD_STATUS_EMPTY,
     nonstandard::PayloadStatus,
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
@@ -2535,4 +2537,174 @@ fn gloas_genesis_accepts_blocks_built_on_it() {
 
     context.on_acceptable_block(&block_1);
     context.on_acceptable_block(&block_2);
+}
+
+// Post-Gloas the execution engine judges a block's payload, not the block.
+// The tests below check that a rejected payload only takes down what builds on it.
+//
+// Notation in the diagrams:
+// - `-e-` child builds on the parent's empty node (skips the payload).
+// - `-f-` child builds on the parent's full node (extends the payload).
+
+// ```text
+// 0 -e- 1 -e- 2
+// ```
+//
+// Payload of 1 is rejected.
+// 1 survives as an empty node. 2 never touched the payload, so it survives too.
+#[test]
+fn gloas_invalid_payload_spares_block_and_children_on_empty_node() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_2.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(2, block_2.message().hash_tree_root());
+
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Valid));
+    context.assert_head(2, block_2.message().hash_tree_root());
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -e- 3
+// ```
+//
+// Payload of 1 is rejected.
+// 2 extends that payload, so 2 is dead.
+// 3 skips 2's payload but still builds on dead 2, so 3 is dead too.
+// Head falls back to 1, and it has to be the empty node.
+#[test]
+fn gloas_invalid_payload_kills_children_on_full_node_and_their_descendants() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_2, 3, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_3.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    context.assert_head(3, block_3.message().hash_tree_root());
+
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_head(1, block_1.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+}
+
+// ```text
+//       f- 2
+//      /
+// 0 -e- 1
+//      \
+//       e- 3
+// ```
+//
+// Payload of 1 is rejected.
+// The branch on the full node dies. The branch on the empty node takes over.
+#[test]
+fn gloas_invalid_payload_switches_head_to_sibling_on_empty_node() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_1, 3, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_3.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
+    context.assert_head(3, block_3.message().hash_tree_root());
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -e- 4
+//       |
+//       e- 3
+// ```
+//
+// Payload of 1 is rejected before 2, 3 and 4 arrive.
+// Late blocks must get the same verdict as if they had been there all along.
+// Dead ones are stored but ignored on gossip, same as pre-Gloas.
+#[test]
+fn gloas_new_descendants_of_invalid_payload_inherit_the_right_status() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_1, 3, H256::default());
+    let (block_4, _) = context.empty_block(&state_2, 4, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_4.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+
+    context.on_ignorable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+    context.on_ignorable_block(&block_4);
+
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_4, Some(PayloadStatus::Invalid));
+    context.assert_head(3, block_3.message().hash_tree_root());
+}
+
+// An envelope from too far in the future is ignored right away.
+// Even if its block is unknown. No point asking peers for that block.
+#[test]
+fn gloas_envelope_from_far_future_is_ignored_before_looking_up_its_block() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_10, state_10) = context.empty_block(&state_1, 10, H256::default());
+
+    let envelope_10 = context.execution_payload_envelope(&block_10, &state_10);
+
+    context.on_slot(block_1.message().slot());
+
+    context.on_ignorable_execution_payload(&envelope_10, BlsSetting::Required);
 }
