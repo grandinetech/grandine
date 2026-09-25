@@ -555,7 +555,7 @@ impl Config {
         }
     }
 
-    /// [Sepolia configuration](https://github.com/eth-clients/sepolia/blob/56f0bff41cecab6c661251d72b73ceecc52c5701/metadata/config.yaml)
+    /// [Sepolia configuration](https://github.com/eth-clients/sepolia/blob/237ad0dcfa4b93921fbfb178b2317b52d3c3e767/metadata/config.yaml)
     #[must_use]
     pub fn sepolia() -> Self {
         Self {
@@ -581,6 +581,8 @@ impl Config {
             electra_fork_version: H32(hex!("90000074")),
             fulu_fork_epoch: 272_640,
             fulu_fork_version: H32(hex!("90000075")),
+            gloas_fork_epoch: 353_024,
+            gloas_fork_version: H32(hex!("90000076")),
 
             // Deposit contract
             deposit_chain_id: 11_155_111,
@@ -601,6 +603,10 @@ impl Config {
                     max_blobs_per_block: 21,
                 },
             ],
+            gas_limit_schedule: vec![GasLimitScheduleEntry {
+                epoch: 353_024,
+                gas_limit: 200_000_000,
+            }],
 
             ..Self::default()
         }
