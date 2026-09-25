@@ -692,23 +692,6 @@ impl<P: Preset> BlockSyncService<P> {
                                 warn_with_peers!("failed to start data column backfill: {error}");
                             }
                         }
-                        P2pToSync::GossipExecutionPayload(execution_payload_envelope, peer_id, gossip_id) => {
-                            let block_slot = execution_payload_envelope.slot();
-                            let beacon_block_root = execution_payload_envelope.block_root();
-                            let identifier = execution_payload_envelope.as_ref().into();
-
-                            if self.register_new_received_envelope(identifier, block_slot) {
-                                debug_with_peers!(
-                                    "received execution payload as gossip (slot: {block_slot}, \
-                                    beacon_block_root: {beacon_block_root:?}, peer_id: {peer_id})"
-                                );
-
-                                self.controller.on_gossip_execution_payload(
-                                    execution_payload_envelope,
-                                    gossip_id,
-                                );
-                            }
-                        }
                         P2pToSync::Stop => {
                             SyncToApi::Stop.send(&self.sync_to_api_tx);
 

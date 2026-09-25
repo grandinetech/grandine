@@ -2572,6 +2572,21 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         Origin::Gossip(GossipId { source, message_id }),
                     );
             }
+            PubsubMessage::ExecutionPayload(execution_payload_envelope) => {
+                if let Some(metrics) = self.metrics.as_ref() {
+                    metrics.register_gossip_object(&["execution_payload_envelope"]);
+                }
+
+                trace_with_peers!(
+                    "received execution payload envelope as gossip: \
+                    {execution_payload_envelope:?} from {source}"
+                );
+
+                let gossip_id = GossipId { source, message_id };
+
+                self.controller
+                    .on_gossip_execution_payload(execution_payload_envelope, gossip_id);
+            }
             PubsubMessage::ExecutionPayloadBid(payload_bid) => {
                 if let Some(metrics) = self.metrics.as_ref() {
                     metrics.register_gossip_object(&["execution_payload_bid"]);
@@ -2620,23 +2635,6 @@ impl<P: Preset, W: Wait> Network<P, W> {
             }
             PubsubMessage::LightClientOptimisticUpdate(_) => {
                 debug_with_peers!("received light client optimistic update as gossip");
-            }
-            PubsubMessage::ExecutionPayload(execution_payload_envelope) => {
-                if let Some(metrics) = self.metrics.as_ref() {
-                    metrics.register_gossip_object(&["execution_payload_envelope"]);
-                }
-
-                trace_with_peers!(
-                    "received execution payload envelope as gossip: \
-                    {execution_payload_envelope:?} from {source}"
-                );
-
-                P2pToSync::GossipExecutionPayload(
-                    execution_payload_envelope,
-                    source,
-                    GossipId { source, message_id },
-                )
-                .send(&self.channels.p2p_to_sync_tx);
             }
         }
     }
