@@ -31,7 +31,7 @@ use types::{
         primitives::{DepositIndex, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconBlock, SszValidatorList as _, SszValidatorListMut as _},
+    traits::{BeaconBlock, SszValidatorList as _},
 };
 
 use crate::unphased::{self, CombinedDeposit, Error};

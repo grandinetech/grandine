@@ -351,7 +351,7 @@ impl<T, N, B: BundleSize<T>> PersistentVector<T, N, B> {
         Ok(&bundle[B::index_in_bundle(index)])
     }
 
-    fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
+    pub fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
     where
         T: Clone,
         N: Unsigned + NonZero,

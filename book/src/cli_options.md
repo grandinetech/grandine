@@ -35,6 +35,8 @@ The list of command line options:
           Beacon node API URL to load recent finalized checkpoint and sync from it [default: None]
       --force-checkpoint-sync
           Force checkpoint sync. Requires --checkpoint-sync-url [default: disabled]
+      --force-reset-beacon-db
+          Forcefully deletes the existing local beacon node databases on startup, allowing a fresh sync. WARNING: This is destructive and will remove local eth1, beacon_fork_choice, sync, pubkey_cache databases. [default: disabled]
       --eth1-rpc-urls <ETH1_RPC_URLS>...
           List of Eth1 RPC URLs
       --data-dir <DATA_DIR>
@@ -44,9 +46,17 @@ The list of command line options:
       --network-dir <NETWORK_DIR>
           Directory to store application network files [default: {data_dir}/network]
       --archival-epoch-interval <ARCHIVAL_EPOCH_INTERVAL>
-          [default: 32]
+          [DEPRECATED] Archival epoch interval. Ignored; use --state-hierarchy instead.
+      --archive-storage
+          Enable archival storage mode, where all blocks, states (at the frequency defined by --state-hierarchy) and blobs are stored in the database [default: disabled]
       --prune-storage
-          Enable prune mode where only single checkpoint state & block are stored in the DB [default: disabled]
+          Enable prune storage mode, where only a single checkpoint state and block are stored in the database [default: disabled]
+      --state-hierarchy <STATE_HIERARCHY>
+          Hierarchy of state storage, defined as a comma separated list of slot exponents, starting from the shallowest layer. The list must be non-empty, strictly decreasing, and every exponent at most 63. Full states are written at the frequency of the first exponent, all other layers are stored as deltas [default: 21,18,16,13,11,9,5]
+      --state-cache-sizes <STATE_CACHE_SIZES>...
+          Number of states to keep in memory for every state storage hierarchy layer, as a comma separated list starting from the shallowest one - the full state snapshot, in the same order --state-hierarchy exponents are listed in. May be shorter than --state-hierarchy, in which case the remaining layers are not cached [default: 5,3,3]
+      --state-compression-level <STATE_COMPRESSION_LEVEL>
+          zstd compression level used for states stored in the database [default: 3]
       --unfinalized-states-in-memory <UNFINALIZED_STATES_IN_MEMORY>
           Number of unfinalized states to keep in memory. Specifying this number enables unfinalized state pruning. By default all unfinalized states are kept in memory. [default: None]
       --database-size <DATABASE_SIZE>

@@ -141,7 +141,7 @@ impl SszWrite for PubkeyCache {
             .map(|v| {
                 v.and_then(|(key, value)| {
                     Ok(CacheKeyPair {
-                        key: key.to_vec().try_into()?,
+                        key: key.try_into()?,
                         value: value.try_into()?,
                     })
                 })

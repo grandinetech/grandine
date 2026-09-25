@@ -25,7 +25,7 @@ pub fn state<P: Preset, W: Wait>(
         StateId::Finalized => Some(controller.last_finalized_state()),
         StateId::Justified => Some(controller.justified_state()?),
         StateId::Slot(slot) => {
-            tokio::task::block_in_place(|| controller.state_at_slot_cached_blocking(*slot))?
+            tokio::task::block_in_place(|| controller.state_at_slot_checked_blocking(*slot))?
         }
         StateId::Root(root) => controller.state_by_state_root(*root)?,
     }

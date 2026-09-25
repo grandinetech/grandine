@@ -13,7 +13,7 @@ use eth1_api::{ApiController, Eth1Api, Eth1ExecutionEngine};
 use eth2_libp2p::{GossipId, NetworkConfig};
 use features::Feature;
 use fork_choice_control::{
-    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, P2pMessage, Storage,
+    Controller, EventChannels, P2pMessage, StateStorageConfig, Storage,
     controller::MutatorHandle,
 };
 use fork_choice_store::StoreConfig;
@@ -118,9 +118,10 @@ impl<P: Preset> Context<P> {
             chain_config.clone_arc(),
             pubkey_cache.clone_arc(),
             Database::in_memory(),
-            DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::default(),
-        ));
+            StateStorageConfig::default(),
+            None,
+        )?);
 
         let event_channels = Arc::new(EventChannels::default());
         let sidecars_construction_started = Arc::new(SccHashMap::new());

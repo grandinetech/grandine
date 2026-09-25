@@ -4,6 +4,10 @@
 
 Grandine provides a set of Beacon Node metrics that are suitable to be consumed by [Prometheus](https://github.com/prometheus/prometheus) and visualized via [Grafana](https://github.com/grafana/grafana) dashboards. 
 
+### State storage metrics
+
+The delta state store reports `STATE_PATCH_SIZES` (compressed byte size of every state written) and `STATE_PATCH_COMPUTE_TIMES` (time spent computing a delta). Both are labelled by `layer`, the number of deltas needed to reconstruct the state - see [Storage](storage.md#metrics).
+
 ### Remote Metrics 
 
 Grandine can to push metrics to a remote endpoint every 60 seconds. This option is useful for services such as [beaconcha.in](https://kb.beaconcha.in/beaconcha.in-explorer/mobile-app-less-than-greater-than-beacon-node).

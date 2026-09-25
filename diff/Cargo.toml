@@ -1,0 +1,47 @@
+[package]
+name = 'diff'
+edition = { workspace = true }
+authors = ["Grandine <info@grandine.io>"]
+
+[lints]
+workspace = true
+
+[dependencies]
+bitvec = { workspace = true }
+bls = { workspace = true }
+ssz = { workspace = true }
+strum = { workspace = true }
+thiserror = { workspace = true }
+try_from_iterator = { workspace = true }
+typenum = { workspace = true }
+types = { workspace = true }
+unsigned-varint = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+bytesize = { workspace = true }
+criterion = { workspace = true }
+fs-err = { workspace = true }
+reqwest = { workspace = true, features = ['blocking'] }
+std_ext = { workspace = true }
+tabled = { workspace = true }
+
+# These are used only by the `comparison` benchmark, so they aren't defined in
+# the root workspace - only here directly.
+# This is binary diffing algorithm by galadd, that is purposefully optimized for beacon chain usage.
+eth-state-diff = { version = '0.2' }
+# This is binary diffing algorithm, that produced smallest deltas, but slowly.
+qbsdiff = { version = '1.4' }
+# `eth-state-diff` deltas are serialized with this.
+rkyv = { workspace = true }
+# This is what lighthouse uses for their deltas.
+xdelta3 = { git = "https://github.com/sigp/xdelta3-rs", rev = "fe3906605c87b6c0515bd7c8fc671f47875e3ccc" }
+
+# This is the benchmark target, that compares our diffing engine against alternatives
+[[bench]]
+name = 'comparison'
+harness = false
+
+[[bench]]
+name = 'beacon_state'
+harness = false

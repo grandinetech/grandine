@@ -23,6 +23,15 @@ pub fn start_timer_vec(histogram_vec: &HistogramVec, label: &str) -> Option<Hist
     }
 }
 
+pub fn observe_vec(histogram_vec: &HistogramVec, label: &str, value: f64) {
+    match histogram_vec.get_metric_with_label_values(&[label]) {
+        Ok(histogram) => histogram.observe(value),
+        Err(error) => warn_with_peers!(
+            "unable to observe {label} metric for histogram_vec ({histogram_vec:?}): {error}",
+        ),
+    }
+}
+
 pub fn stop_and_record(timer: Option<HistogramTimer>) {
     if let Some(timer) = timer {
         timer.stop_and_record();
