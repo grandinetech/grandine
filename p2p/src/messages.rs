@@ -91,7 +91,6 @@ pub enum P2pToSync<P: Preset> {
     DataColumnSidecarRejected(DataColumnIdentifier),
     PayloadEnvelopeNotConsidered(PayloadEnvelopeIdentifier),
     PayloadEnvelopeRejected(PayloadEnvelopeIdentifier),
-    GossipExecutionPayload(Arc<SignedExecutionPayloadEnvelope<P>>, PeerId, GossipId),
     DataColumnSidecarNotConsidered(DataColumnIdentifier),
     PeerCgcUpdated(PeerId),
     RequestCustodyGroupBackfill(HashSet<u64>, Slot),
