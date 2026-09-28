@@ -14,7 +14,7 @@ use types::{
         primitives::{Gwei, ValidatorIndex},
     },
     preset::Preset,
-    traits::{BeaconState, SszValidatorList as _, SszValidatorListMut as _},
+    traits::{BeaconState, SszValidatorList as _},
 };
 
 use crate::{

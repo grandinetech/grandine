@@ -123,9 +123,18 @@ impl<T> Hc<T> {
         self.value
     }
 
+    /// Caches `root` as the hash tree root of this value.
+    ///
+    /// Setting the same root twice is allowed: a state read back from the delta store may already
+    /// carry the root cached by whoever wrote it. A *conflicting* root means the value and the
+    /// root disagree, so it is rejected rather than silently ignored.
     pub fn set_cached_root(&self, root: H256) {
-        if let Err(old_root) = self.cached_root.set(Box::new(root)) {
-            panic!("cached_root already set (old_root: {old_root:?}, root: {root:?})");
+        if let Err(new_root) = self.cached_root.set(Box::new(root)) {
+            assert_eq!(
+                self.cached_root.get(),
+                Some(&*new_root),
+                "cached_root was already set to a different root",
+            );
         }
     }
 
@@ -164,4 +173,41 @@ fn initialized_once_box<T: Debug>(value: T) -> OnceBox<T> {
 // older versions.
 fn fmt_once_box_as_option(once_box: &OnceBox<impl Debug>, formatter: &mut Formatter) -> FmtResult {
     once_box.get().fmt(formatter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_cached_root_serves_the_root_without_hashing_the_value() {
+        let hc = Hc::new(1_u64);
+        let root = H256::repeat_byte(1);
+
+        hc.set_cached_root(root);
+
+        assert_eq!(hc.hash_tree_root(), root);
+    }
+
+    #[test]
+    fn set_cached_root_is_idempotent() {
+        // A state read back from the delta store may already carry the root cached by whoever
+        // wrote it, so setting the same root again has to be allowed.
+        let hc = Hc::new(1_u64);
+        let root = H256::repeat_byte(1);
+
+        hc.set_cached_root(root);
+        hc.set_cached_root(root);
+
+        assert_eq!(hc.hash_tree_root(), root);
+    }
+
+    #[test]
+    #[should_panic(expected = "cached_root was already set to a different root")]
+    fn set_cached_root_rejects_a_conflicting_root() {
+        let hc = Hc::new(1_u64);
+
+        hc.set_cached_root(H256::repeat_byte(1));
+        hc.set_cached_root(H256::repeat_byte(2));
+    }
 }
