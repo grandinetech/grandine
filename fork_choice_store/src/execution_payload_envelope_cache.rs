@@ -16,11 +16,12 @@ impl<P: Preset> ExecutionPayloadEnvelopeCache<P> {
         Some(&self.envelopes.get(&block_root)?.0)
     }
 
-    pub fn insert(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>) {
+    pub fn insert(&mut self, envelope: Arc<SignedExecutionPayloadEnvelope<P>>, persisted: bool) {
         let slot = envelope.slot();
         let block_root = envelope.block_root();
 
-        self.envelopes.insert(block_root, (envelope, slot, false));
+        self.envelopes
+            .insert(block_root, (envelope, slot, persisted));
     }
 
     pub fn prune_finalized(&mut self, finalized_slot: Slot) {

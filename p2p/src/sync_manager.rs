@@ -1259,7 +1259,9 @@ impl<P: Preset> SyncManager<P> {
         );
     }
 
-    pub fn find_available_custodial_peers(&self) -> Vec<PeerId> {
+    pub fn find_available_custodial_peers(&mut self) -> Vec<PeerId> {
+        self.refresh_unknown_peer_custody_columns();
+
         let busy_peers = self.busy_peers();
 
         self.peers_custodial
@@ -1269,6 +1271,8 @@ impl<P: Preset> SyncManager<P> {
     }
 
     fn find_peers_to_sync(&mut self, use_black_list: bool) -> Option<Vec<PeerId>> {
+        self.refresh_unknown_peer_custody_columns();
+
         self.find_chain_to_sync(use_black_list).map(|chain_id| {
             let peers_to_sync = self.chain_peers_shuffled(&chain_id, use_black_list);
 
@@ -1387,12 +1391,7 @@ impl<P: Preset> SyncManager<P> {
     }
 
     fn update_peer_columns_custody(&mut self, peer_id: PeerId) {
-        let custody_columns = (0..P::NumberOfColumns::U64)
-            .filter(|column_index| {
-                self.network_globals
-                    .is_custody_peer_of(*column_index, &peer_id)
-            })
-            .collect();
+        let custody_columns = self.peer_custody_columns(peer_id);
 
         self.log(
             Level::Debug,
@@ -1400,6 +1399,41 @@ impl<P: Preset> SyncManager<P> {
         );
 
         self.peers_custodial.insert(peer_id, custody_columns);
+    }
+
+    fn peer_custody_columns(&self, peer_id: PeerId) -> HashSet<ColumnIndex> {
+        (0..P::NumberOfColumns::U64)
+            .filter(|column_index| {
+                self.network_globals
+                    .is_custody_peer_of(*column_index, &peer_id)
+            })
+            .collect()
+    }
+
+    fn refresh_unknown_peer_custody_columns(&mut self) {
+        let peers_with_unknown_custody = self
+            .peers_custodial
+            .iter()
+            .filter(|(_, custody_columns)| custody_columns.is_empty())
+            .map(|(peer_id, _)| *peer_id)
+            .collect_vec();
+
+        for peer_id in peers_with_unknown_custody {
+            let custody_columns = self.peer_custody_columns(peer_id);
+
+            if custody_columns.is_empty() {
+                continue;
+            }
+
+            self.log(
+                Level::Debug,
+                format_args!(
+                    "peer custody columns (peer: {peer_id}, columns: {custody_columns:?})"
+                ),
+            );
+
+            self.peers_custodial.insert(peer_id, custody_columns);
+        }
     }
 
     pub async fn missing_column_indices_by_root(
