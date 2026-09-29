@@ -795,36 +795,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
         fork_context: &Arc<ForkContext>,
         slot: Slot,
     ) -> EnrForkId {
-        let chain_config = controller.chain_config().as_ref();
-
-        let next_fork_version;
-
-        let next_fork_epoch = if let Some(next_phase) = chain_config.next_phase_at_slot::<P>(slot) {
-            next_fork_version = chain_config.version(next_phase);
-            chain_config.fork_epoch(next_phase)
-        } else {
-            // > If no future fork is planned,
-            // > set `next_fork_version = current_fork_version` to signal this fact
-            //
-            // > `current_fork_version` is the fork version at the node's current epoch defined \
-            // > by the wall-clock time (not necessarily the epoch to which the node is sync)
-            next_fork_version = chain_config.version(chain_config.phase_at_slot::<P>(slot));
-            // > Furthermore, the existing `next_fork_epoch` field under the `eth2` entry MUST be
-            // > set to the epoch of the next fork, whether a regular fork, _or a BPO fork_.
-            //
-            // > If no future fork is planned,
-            // > set `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact
-            fork_context
-                .next_fork()
-                .map(|(_, _, fork_epoch)| fork_epoch)
-                .unwrap_or(FAR_FUTURE_EPOCH)
-        };
-
-        EnrForkId {
-            fork_digest: fork_context.current_fork_digest(),
-            next_fork_version,
-            next_fork_epoch,
-        }
+        compute_enr_fork_id::<P>(controller.chain_config(), fork_context, slot)
     }
 
     #[must_use]
@@ -3060,6 +3031,65 @@ impl MessageDebugInfoHandler for Option<MessageDebugInfo> {
     }
 }
 
+// See <https://github.com/ethereum/consensus-specs/blob/82b6e507dc31f6f7052e79b16ecfe3778c1b38f6/specs/fulu/p2p-interface.md#eth2-field>.
+fn compute_enr_fork_id<P: Preset>(
+    chain_config: &Config,
+    fork_context: &ForkContext,
+    slot: Slot,
+) -> EnrForkId {
+    // > `next_fork_version` is the fork version corresponding to the next planned fork
+    // > at a future epoch. The fork version will only change for regular forks, _not BPO forks_.
+    // > [...] If no future fork is planned, set `next_fork_version = current_fork_version`
+    // > to signal this fact.
+    //
+    // > `next_fork_epoch` is the epoch at which the next fork (whether a regular fork
+    // > _or a BPO fork_) is planned. If no future fork is planned, set
+    // > `next_fork_epoch = FAR_FUTURE_EPOCH` to signal this fact.
+    //
+    // > `current_fork_version` is the fork version at the node's current epoch defined \
+    // > by the wall-clock time (not necessarily the epoch to which the node is sync)
+    let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let current_fork_version = chain_config.version(chain_config.phase_at_slot::<P>(slot));
+
+    let next_regular_fork = chain_config
+        .next_phase_at_slot::<P>(slot)
+        .map(|next_phase| {
+            (
+                chain_config.version(next_phase),
+                chain_config.fork_epoch(next_phase),
+            )
+        });
+
+    // Like `compute_fork_digest`, count blob entries only once PeerDAS is active.
+    let next_bpo_fork_epoch = chain_config
+        .blob_schedule
+        .iter()
+        .map(|entry| entry.epoch)
+        .filter(|epoch| {
+            *epoch > current_epoch
+                && *epoch >= chain_config.fulu_fork_epoch
+                && *epoch != FAR_FUTURE_EPOCH
+        })
+        .min();
+
+    let (next_fork_version, next_fork_epoch) = match (next_regular_fork, next_bpo_fork_epoch) {
+        (Some((_, regular_fork_epoch)), Some(bpo_fork_epoch))
+            if bpo_fork_epoch < regular_fork_epoch =>
+        {
+            (current_fork_version, bpo_fork_epoch)
+        }
+        (Some(next_regular_fork), _) => next_regular_fork,
+        (None, Some(bpo_fork_epoch)) => (current_fork_version, bpo_fork_epoch),
+        (None, None) => (current_fork_version, FAR_FUTURE_EPOCH),
+    };
+
+    EnrForkId {
+        fork_digest: fork_context.current_fork_digest(),
+        next_fork_version,
+        next_fork_epoch,
+    }
+}
+
 fn message_debug_info(message: &(impl core::fmt::Debug + ?Sized)) -> Option<MessageDebugInfo> {
     if !Feature::DebugP2pMessages.is_enabled() {
         return None;
@@ -3200,13 +3230,71 @@ fn run_network_service<P: Preset>(
 
 #[cfg(test)]
 mod tests {
-    use crate::network::MAX_FOR_DOS_PREVENTION;
+    use std::sync::Arc;
 
-    use types::{config::Config, nonstandard::Phase};
+    use eth2_libp2p::types::ForkContext;
+    use helper_functions::misc;
+    use test_case::test_case;
+    use types::{
+        config::{BlobScheduleEntry, Config},
+        nonstandard::Phase,
+        phase0::{
+            consts::FAR_FUTURE_EPOCH,
+            primitives::{Epoch, H256},
+        },
+        preset::Mainnet,
+    };
+
+    use crate::network::{MAX_FOR_DOS_PREVENTION, compute_enr_fork_id};
 
     #[test]
     fn ensure_constant_sanity() {
         assert!(MAX_FOR_DOS_PREVENTION < Config::mainnet().max_request_blocks(Phase::Phase0));
         assert!(MAX_FOR_DOS_PREVENTION < Config::mainnet().max_request_blocks(Phase::Deneb));
+    }
+
+    // `rapid_upgrade` puts Electra at epoch 5.
+    #[test_case(6, 6, &[10], 20, Phase::Fulu, 10; "bpo before regular fork")]
+    #[test_case(6, 6, &[20], 20, Phase::Gloas, 20; "bpo at regular fork")]
+    #[test_case(6, 6, &[20], 10, Phase::Gloas, 10; "regular fork before bpo")]
+    #[test_case(6, 6, &[10], FAR_FUTURE_EPOCH, Phase::Fulu, 10; "bpo only")]
+    #[test_case(6, 6, &[], FAR_FUTURE_EPOCH, Phase::Fulu, FAR_FUTURE_EPOCH; "nothing scheduled")]
+    #[test_case(5, 6, &[10], FAR_FUTURE_EPOCH, Phase::Fulu, 6; "pre fulu")]
+    #[test_case(5, 6, &[6], FAR_FUTURE_EPOCH, Phase::Fulu, 6; "bpo at fulu")]
+    #[test_case(5, 20, &[10], FAR_FUTURE_EPOCH, Phase::Fulu, 20; "blob entry before fulu")]
+    #[test_case(6, 6, &[FAR_FUTURE_EPOCH], FAR_FUTURE_EPOCH, Phase::Fulu, FAR_FUTURE_EPOCH; "far future bpo")]
+    #[test_case(12, 6, &[10], 20, Phase::Gloas, 20; "past bpo")]
+    #[test_case(6, FAR_FUTURE_EPOCH, &[], 20, Phase::Gloas, 20; "gloas without fulu")]
+    fn enr_fork_id_next_fork(
+        current_epoch: Epoch,
+        fulu_fork_epoch: Epoch,
+        bpo_epochs: &[Epoch],
+        gloas_fork_epoch: Epoch,
+        expected_version_phase: Phase,
+        expected_next_fork_epoch: Epoch,
+    ) {
+        let mut chain_config = Config::mainnet().rapid_upgrade();
+        chain_config.fulu_fork_epoch = fulu_fork_epoch;
+        chain_config.gloas_fork_epoch = gloas_fork_epoch;
+        chain_config.blob_schedule = bpo_epochs
+            .iter()
+            .map(|epoch| BlobScheduleEntry::new(*epoch, 12))
+            .collect();
+        let chain_config = Arc::new(chain_config);
+
+        let slot = misc::compute_start_slot_at_epoch::<Mainnet>(current_epoch);
+        let fork_context = ForkContext::new::<Mainnet>(&chain_config, slot, H256::zero());
+
+        let enr_fork_id = compute_enr_fork_id::<Mainnet>(&chain_config, &fork_context, slot);
+
+        assert_eq!(
+            enr_fork_id.fork_digest,
+            misc::compute_fork_digest(&chain_config, H256::zero(), current_epoch),
+        );
+        assert_eq!(
+            enr_fork_id.next_fork_version,
+            chain_config.version(expected_version_phase),
+        );
+        assert_eq!(enr_fork_id.next_fork_epoch, expected_next_fork_epoch);
     }
 }
