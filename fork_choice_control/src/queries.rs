@@ -329,6 +329,11 @@ where
     }
 
     #[must_use]
+    pub fn finished_initial_forward_sync(&self) -> bool {
+        self.store_snapshot().finished_initial_forward_sync()
+    }
+
+    #[must_use]
     pub fn is_last_slot_of_epoch(&self) -> bool {
         let store = self.store_snapshot();
 

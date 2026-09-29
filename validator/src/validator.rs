@@ -1,6 +1,6 @@
 //! <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md>
 
-use core::{error::Error as StdError, time::Duration};
+use core::time::Duration;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
@@ -19,7 +19,6 @@ use builder_api::{
 use clock::{Tick, TickKind};
 use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
-use derive_more::Display;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
@@ -59,9 +58,9 @@ use signer::{Signer, SigningMessage, SigningTriple, Snapshot};
 use slasher::{SlasherToValidator, ValidatorToSlasher};
 use slashing_protection::SlashingProtector;
 use ssz::{BitList, ContiguousList, ReadError};
-use static_assertions::assert_not_impl_any;
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
+use thiserror::Error;
 use tokio::time::timeout;
 use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
@@ -128,17 +127,25 @@ const EPOCHS_TO_KEEP_REGISTERED_VALIDATORS: u64 = 2;
 // which happens to be the default timeout for validator registration requests in `mev-boost`.
 const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
 
-#[derive(Display)]
-#[display("too many empty slots after head: {head_slot} + {max_empty_slots} < {slot}")]
-struct HeadFarBehind {
-    head_slot: Slot,
-    max_empty_slots: u64,
-    slot: Slot,
+#[derive(Debug, Error)]
+enum HeadFarBehind {
+    #[error(
+        "validator client cannot perform duties: beacon node is syncing (head slot: {head_slot}, current slot: {slot}, max allowed distance: {max_empty_slots})"
+    )]
+    Syncing {
+        head_slot: Slot,
+        max_empty_slots: u64,
+        slot: Slot,
+    },
+    #[error(
+        "validator client cannot perform duties: beacon node is out of sync (head slot: {head_slot}, current slot: {slot}, max allowed distance: {max_empty_slots})"
+    )]
+    OutOfSync {
+        head_slot: Slot,
+        max_empty_slots: u64,
+        slot: Slot,
+    },
 }
-
-// Prevent `HeadFarBehind` from being converted into an `AnyhowError`.
-// See <https://sled.rs/errors.html>.
-assert_not_impl_any!(HeadFarBehind: StdError);
 
 pub struct Channels<P: Preset, W> {
     pub api_to_validator_rx: UnboundedReceiver<ApiToValidator<P>>,
@@ -911,11 +918,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let max_empty_slots = self.validator_config.max_empty_slots;
 
         if head_slot.saturating_add(max_empty_slots) < slot {
-            return Ok(Err(HeadFarBehind {
-                head_slot,
-                max_empty_slots,
-                slot,
-            }));
+            let error = if self.controller.finished_initial_forward_sync() {
+                HeadFarBehind::OutOfSync {
+                    head_slot,
+                    max_empty_slots,
+                    slot,
+                }
+            } else {
+                HeadFarBehind::Syncing {
+                    head_slot,
+                    max_empty_slots,
+                    slot,
+                }
+            };
+
+            return Ok(Err(error));
         }
 
         let beacon_state = if state.slot() < slot {

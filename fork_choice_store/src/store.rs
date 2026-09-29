@@ -6412,6 +6412,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub const fn finished_initial_forward_sync(&self) -> bool {
+        self.finished_initial_forward_sync
+    }
+
+    #[must_use]
     pub const fn is_back_synced(&self) -> bool {
         self.finished_back_sync
     }
