@@ -18,7 +18,6 @@ constant_time_eq = { workspace = true }
 debug_info = { workspace = true }
 dedicated_executor = { workspace = true }
 derivative = { workspace = true }
-derive_more = { workspace = true }
 directories = { workspace = true }
 doppelganger_protection = { workspace = true }
 eip_7594 = { workspace = true }
@@ -50,7 +49,6 @@ signer = { workspace = true }
 slasher = { workspace = true }
 slashing_protection = { workspace = true }
 ssz = { workspace = true }
-static_assertions = { workspace = true }
 std_ext = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
