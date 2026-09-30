@@ -82,7 +82,10 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
     },
     preset::{DataAvailabilityTimelyThreshold, PayloadTimelyThreshold, Preset},
-    traits::{BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _, SszValidatorList},
+    traits::{
+        self, BeaconBlock as _, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _,
+        SszValidatorList,
+    },
 };
 use unwrap_none::UnwrapNone as _;
 
@@ -3354,7 +3357,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         blob_sidecar: Arc<BlobSidecar<P>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
-        parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        parent_info: impl FnOnce() -> Option<(Slot, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         let block_header = blob_sidecar.signed_block_header.message;
@@ -3452,7 +3455,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources)
         // (a client MAY queue sidecars for processing once the parent block is retrieved).
-        let Some((parent, parent_payload_status)) = parent_info() else {
+        let Some((parent_slot, parent_payload_status)) = parent_info() else {
             return Ok(BlobSidecarAction::DelayUntilParent(blob_sidecar));
         };
 
@@ -3464,8 +3467,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         );
 
         // [REJECT] The sidecar is from a higher slot than the sidecar's block's parent (defined by block_header.parent_root).
-        let parent_slot = parent.message().slot();
-
         ensure!(
             block_header.slot > parent_slot,
             Error::BlobSidecarNotNewerThanBlockParent {
@@ -3539,7 +3540,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
         let parent_info = || {
             self.chain_link(block_header.parent_root)
-                .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+                .map(|chain_link| (chain_link.slot(), chain_link.payload_status))
         };
 
         if let Some(state) = state {
@@ -3576,7 +3577,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         validate_block_presence: bool,
-        parent_info: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        parent_info: impl FnOnce() -> Option<(Slot, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
         metrics: Option<&Arc<Metrics>>,
     ) -> Result<DataColumnSidecarAction<P>> {
@@ -3727,7 +3728,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
             // [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources)
             // (a client MAY queue sidecars for processing once the parent block is retrieved).
-            let Some((parent, parent_payload_status)) = parent_info() else {
+            let Some((parent_slot, parent_payload_status)) = parent_info() else {
                 return Ok(DataColumnSidecarAction::DelayUntilParent(
                     data_column_sidecar,
                 ));
@@ -3743,8 +3744,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             );
 
             // [REJECT] The sidecar is from a higher slot than the sidecar's block's parent (defined by block_header.parent_root).
-            let parent_slot = parent.message().slot();
-
             ensure!(
                 block_header.slot > parent_slot,
                 Error::DataColumnSidecarNotNewerThanBlockParent {
@@ -3852,7 +3851,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let parent_info = || {
             block_header_opt.and_then(|block_header| {
                 self.chain_link(block_header.parent_root)
-                    .map(|chain_link| (chain_link.block.clone_arc(), chain_link.payload_status))
+                    .map(|chain_link| (chain_link.slot(), chain_link.payload_status))
             })
         };
 
@@ -6395,7 +6394,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .last_finalized()
             .state
             .as_ref()
-            .map(types::traits::BeaconState::validators);
+            .map(traits::BeaconState::validators);
 
         self.storage
             .stored_state_by_block_root(block_root, finalized_validators)
@@ -6644,10 +6643,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
     pub fn indices_of_missing_data_columns(
         &self,
-        block: &SignedBeaconBlock<P>,
+        block: &impl traits::SignedBeaconBlock<P>,
     ) -> Vec<ColumnIndex> {
-        let phase = block.phase();
         let block = block.message();
+        let phase = self.chain_config().phase_at_slot::<P>(block.slot());
 
         // `block.phase` has already been checked
         let Some(body) = block.body().with_blob_kzg_commitments() else {
