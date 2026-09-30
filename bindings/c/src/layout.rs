@@ -4,7 +4,10 @@ use anyhow::Result;
 
 use crate::{
     arrays::{CH256, CH384},
-    containers::{CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CTransaction, CWithdrawalV1},
+    containers::{
+        CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CExecutionPayloadBodyV1,
+        CExecutionPayloadBodyV2, CTransaction, CWithdrawalV1,
+    },
     generic::{CGrandineString, COption, CVec},
 };
 
@@ -63,6 +66,16 @@ pub extern "C" fn grandine_layout_h384() -> CLayout {
 #[unsafe(no_mangle)]
 pub extern "C" fn grandine_layout_vec_u8() -> CLayout {
     CLayout::new(Layout::new::<CVec<u8>>())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn grandine_layout_option_execution_payload_body_v1() -> CLayout {
+    CLayout::new(Layout::new::<COption<CExecutionPayloadBodyV1>>())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn grandine_layout_option_execution_payload_body_v2() -> CLayout {
+    CLayout::new(Layout::new::<COption<CExecutionPayloadBodyV2>>())
 }
 
 #[unsafe(no_mangle)]

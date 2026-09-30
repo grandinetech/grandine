@@ -166,6 +166,24 @@ public static class GrandineUtils
         return result;
     }
 
+    public static Hash256[] ConvertHashes(in CVec_CH256 hashes)
+    {
+        var span = hashes.AsSpan();
+        if (span.Length == 0)
+        {
+            return Array.Empty<Hash256>();
+        }
+
+        var result = new Hash256[span.Length];
+
+        for (int i = 0; i < span.Length; ++i)
+        {
+            result[i] = span[i].ToHash256();
+        }
+
+        return result;
+    }
+
     /// <summary>
     /// Starting from Nethermind 1.39.0, some methods (like engine_newPayloadV3)
     /// accept not `byte[][]` as converted hashes, but `Hash256?[]`.

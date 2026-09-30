@@ -12,7 +12,7 @@ use futures::{
     StreamExt as _,
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
 };
-use logging::warn_with_peers;
+use logging::{debug_with_peers, warn_with_peers};
 use std_ext::ArcExt as _;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
@@ -36,6 +36,7 @@ pub struct ExecutionService<P: Preset, W: Wait> {
 }
 
 impl<P: Preset, W: Wait> ExecutionService<P, W> {
+    #[expect(clippy::too_many_lines)]
     pub async fn run(mut self) -> Result<()> {
         while let Some(message) = self.rx.next().await {
             match message {
@@ -54,6 +55,25 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     // `Mutator` to `ExecutionBlobFetcher`, as fetching must occur only after
                     // the execution payload is validated with the `engine_newPayload` call.
                     Eth1ApiToBlobFetcher::GetBlobs(params).send(&self.blob_fetcher_tx);
+                }
+                ExecutionServiceMessage::GetPayloadBodiesByHash {
+                    block_hashes,
+                    sender,
+                } => {
+                    let api = self.api.clone_arc();
+
+                    self.dedicated_executor
+                        .spawn(async move {
+                            let response = api.get_payload_bodies_by_hash(block_hashes).await;
+
+                            if sender.send(response).is_err() {
+                                debug_with_peers!(
+                                    "sending engine_getPayloadBodiesByHash result \
+                                        failed because the receiver was dropped"
+                                );
+                            }
+                        })
+                        .detach();
                 }
                 ExecutionServiceMessage::NotifyForkchoiceUpdated {
                     head_eth1_block_hash,

@@ -34,6 +34,10 @@ public interface IGrandineEngineApi
 
     CResult_CEngineGetPayloadV6Response EngineGetPayloadV6(CH64 payloadId);
 
+    unsafe CResult_CVec_COption_CExecutionPayloadBodyV1 EngineGetPayloadBodiesByHashV1(CVec_CH256* blockHashes);
+
+    unsafe CResult_CVec_COption_CExecutionPayloadBodyV2 EngineGetPayloadBodiesByHashV2(CVec_CH256* blockHashes);
+
     unsafe CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1(CVec_CH256* versionedHashes);
 
     unsafe CResult_COption_CVec_CBlobAndProofV2 EngineGetBlobsV2(CVec_CH256* versionedHashes);
