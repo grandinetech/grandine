@@ -130,20 +130,22 @@ const MAX_VALIDATORS_PER_REGISTRATION: usize = 500;
 #[derive(Debug, Error)]
 enum HeadFarBehind {
     #[error(
-        "validator client cannot perform duties: beacon node is syncing (head slot: {head_slot}, current slot: {slot}, max allowed distance: {max_empty_slots})"
+        "validator client cannot perform duties: beacon node is syncing (head slot: {head_slot}, head epoch: {head_epoch}, current slot: {slot}, current epoch: {current_epoch})"
     )]
     Syncing {
         head_slot: Slot,
-        max_empty_slots: u64,
+        head_epoch: Epoch,
         slot: Slot,
+        current_epoch: Epoch,
     },
     #[error(
-        "validator client cannot perform duties: beacon node is out of sync (head slot: {head_slot}, current slot: {slot}, max allowed distance: {max_empty_slots})"
+        "validator client cannot perform duties: beacon node is out of sync (head slot: {head_slot}, head epoch: {head_epoch}, current slot: {slot}, current epoch: {current_epoch})"
     )]
     OutOfSync {
         head_slot: Slot,
-        max_empty_slots: u64,
+        head_epoch: Epoch,
         slot: Slot,
+        current_epoch: Epoch,
     },
 }
 
@@ -909,20 +911,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let block_root = head.block_root;
         let state = self.controller.state_by_chain_link(&head);
         let head_slot = head.slot();
-        let max_empty_slots = self.validator_config.max_empty_slots;
+        let head_epoch = misc::compute_epoch_at_slot::<P>(head_slot);
+        let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-        if head_slot.saturating_add(max_empty_slots) < slot {
+        if head_epoch.saturating_add(1) < current_epoch {
             let error = if self.controller.finished_initial_forward_sync() {
                 HeadFarBehind::OutOfSync {
                     head_slot,
-                    max_empty_slots,
+                    head_epoch,
                     slot,
+                    current_epoch,
                 }
             } else {
                 HeadFarBehind::Syncing {
                     head_slot,
-                    max_empty_slots,
+                    head_epoch,
                     slot,
+                    current_epoch,
                 }
             };
 
