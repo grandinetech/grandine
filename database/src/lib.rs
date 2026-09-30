@@ -532,6 +532,16 @@ impl Database {
         &self,
         range: RangeToInclusive<impl AsRef<[u8]>>,
     ) -> Result<impl Iterator<Item = Result<(Vec<u8>, Vec<u8>)>>> {
+        self.iterator_descending_raw(range)
+            .map(|iterator| iterator.map(|result| decompress_pair(result?)))
+    }
+
+    /// Like [`Database::iterator_descending`], but yields values as present in the database,
+    /// without decompressing them.
+    pub fn iterator_descending_raw(
+        &self,
+        range: RangeToInclusive<impl AsRef<[u8]>>,
+    ) -> Result<impl Iterator<Item = Result<(Vec<u8>, Vec<u8>)>>> {
         let end = range.end.as_ref();
 
         match self.kind() {
@@ -559,7 +569,7 @@ impl Database {
                     .transpose()
                     .into_iter()
                     .chain(core::iter::from_fn(move || cursor.prev().transpose()))
-                    .map(|result| decompress_pair(result?))
+                    .map(|result| result.map_err(Into::into))
                     .pipe(Either::Left)
             }
             DatabaseKind::InMemory { map } => {
@@ -576,7 +586,7 @@ impl Database {
                 let it = below
                     .into_iter()
                     .rev()
-                    .map(|(key, value)| Ok((key.to_vec(), decompress(value.as_ref())?)));
+                    .map(|(key, value)| Ok((key.to_vec(), value.to_vec())));
 
                 #[cfg(not(target_os = "zkvm"))]
                 {

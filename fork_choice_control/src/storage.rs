@@ -1,8 +1,8 @@
-use core::{cell::OnceCell, marker::PhantomData, num::NonZeroU64};
+use core::{cell::OnceCell, fmt, marker::PhantomData, num::NonZeroU64};
 use std::{borrow::Cow, sync::Arc, thread::Builder};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
-use database::{Database, PrefixableKey};
+use database::{Database, PrefixableKey, decompress};
 use derive_more::Display;
 use fork_choice_store::{ChainLink, Store};
 use genesis::AnchorCheckpointProvider;
@@ -271,7 +271,7 @@ impl<P: Preset> Storage<P> {
 
         self.append_finalized_validator_pubkeys_to_batch(&mut batch, anchor_validators)?;
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         let state_storage = (anchor_state, anchor_block, unfinalized_blocks);
 
@@ -415,7 +415,7 @@ impl<P: Preset> Storage<P> {
             self.append_finalized_validator_pubkeys_to_batch(&mut batch, &*finalized_validators)?;
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         Ok(slots)
     }
@@ -447,7 +447,7 @@ impl<P: Preset> Storage<P> {
             persisted_blob_ids.push(blob_id);
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         Ok(persisted_blob_ids)
     }
@@ -479,7 +479,7 @@ impl<P: Preset> Storage<P> {
             self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         Ok(slots)
     }
@@ -496,7 +496,7 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn prune_old_blob_sidecars(&self, up_to_slot: Slot) -> Result<()> {
         let results = self
             .database
-            .iterator_descending(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
+            .iterator_descending_raw(..=SlotBlobId(up_to_slot, H256::zero(), 0).to_string())?;
 
         let (mut keys_to_remove, blobs_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
@@ -506,7 +506,7 @@ impl<P: Preset> Storage<P> {
 
         for blob_bytes in blobs_to_remove {
             let BlobIdentifier { block_root, index } =
-                BlobIdentifier::from_ssz_default(blob_bytes)?;
+                BlobIdentifier::from_ssz_default(decompress(&blob_bytes)?)?;
 
             keys_to_remove.push(BlobSidecarByBlobId(block_root, index).to_string().into());
         }
@@ -515,9 +515,9 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
-        let results = self
-            .database
-            .iterator_descending(..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string())?;
+        let results = self.database.iterator_descending_raw(
+            ..=BlockRootBySlot(up_to_slot.saturating_sub(1)).to_string(),
+        )?;
 
         let (mut keys_to_remove, block_roots_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
@@ -526,7 +526,7 @@ impl<P: Preset> Storage<P> {
             })?;
 
         for block_root_bytes in block_roots_to_remove {
-            let block_root = H256::from_ssz_default(block_root_bytes)?;
+            let block_root = H256::from_ssz_default(decompress(&block_root_bytes)?)?;
 
             keys_to_remove.push(FinalizedBlockByRoot(block_root).to_string().into());
             keys_to_remove.push(StateByBlockRoot(block_root).to_string().into());
@@ -540,7 +540,7 @@ impl<P: Preset> Storage<P> {
 
         let results = self
             .database
-            .iterator_ascending(SlotByStateRoot(H256::zero()).to_string()..)?;
+            .iterator_ascending_raw(SlotByStateRoot(H256::zero()).to_string()..)?;
 
         let results = itertools::process_results(results, |iter| {
             iter.take_while(|(key_bytes, _)| SlotByStateRoot::has_prefix(key_bytes))
@@ -548,7 +548,7 @@ impl<P: Preset> Storage<P> {
         })?;
 
         for (key_bytes, value_bytes) in results {
-            let slot = Slot::from_ssz_default(value_bytes)?;
+            let slot = Slot::from_ssz_default(decompress(&value_bytes)?)?;
 
             if slot < up_to_slot {
                 keys_to_remove.push(key_bytes);
@@ -564,7 +564,7 @@ impl<P: Preset> Storage<P> {
 
         let results = self
             .database
-            .iterator_ascending(serialize_key(UnfinalizedBlockByRoot(H256::zero()))..)?;
+            .iterator_ascending_raw(serialize_key(UnfinalizedBlockByRoot(H256::zero()))..)?;
 
         let results = itertools::process_results(results, |iter| {
             iter.take_while(|(key_bytes, _)| UnfinalizedBlockByRoot::has_prefix(key_bytes))
@@ -572,7 +572,8 @@ impl<P: Preset> Storage<P> {
         })?;
 
         for (key_bytes, value_bytes) in results {
-            let unfinalized_block = SignedBeaconBlock::<P>::from_ssz(&self.config, value_bytes)?;
+            let unfinalized_block =
+                SignedBeaconBlock::<P>::from_ssz(&self.config, decompress(&value_bytes)?)?;
             let block_slot = unfinalized_block.message().slot();
 
             if block_slot <= last_finalized_slot {
@@ -626,7 +627,7 @@ impl<P: Preset> Storage<P> {
             persisted_data_column_ids.push(data_column_id);
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         Ok(persisted_data_column_ids)
     }
@@ -648,7 +649,7 @@ impl<P: Preset> Storage<P> {
             persisted_block_roots.push(block_root);
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         Ok(persisted_block_roots)
     }
@@ -672,7 +673,7 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn prune_old_data_column_sidecars(&self, up_to_slot: Slot) -> Result<()> {
         let results = self
             .database
-            .iterator_descending(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
+            .iterator_descending_raw(..=SlotColumnId(up_to_slot, H256::zero(), 0).to_string())?;
 
         let (mut keys_to_remove, columns_to_remove): (Vec<_>, Vec<_>) =
             itertools::process_results(results, |iter| {
@@ -688,7 +689,7 @@ impl<P: Preset> Storage<P> {
 
         for column_bytes in columns_to_remove {
             let DataColumnIdentifier { block_root, index } =
-                DataColumnIdentifier::from_ssz_default(column_bytes)?;
+                DataColumnIdentifier::from_ssz_default(decompress(&column_bytes)?)?;
 
             keys_to_remove.push(
                 DataColumnSidecarByColumnId(block_root, index)
@@ -801,31 +802,33 @@ impl<P: Preset> Storage<P> {
     pub(crate) fn block_root_before_or_at_slot(&self, slot: Slot) -> Result<Option<H256>> {
         let results = self
             .database
-            .iterator_descending(..=BlockRootBySlot(slot).to_string())?;
+            .iterator_descending_raw(..=BlockRootBySlot(slot).to_string())?;
 
         itertools::process_results(results, |pairs| {
             pairs
                 .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                .map(|(_, value_bytes)| H256::from_ssz_default(value_bytes))
+                .map(|(_, value_bytes)| -> Result<H256> {
+                    Ok(H256::from_ssz_default(decompress(&value_bytes)?)?)
+                })
                 .next()
                 .transpose()
         })?
-        .map_err(Into::into)
     }
 
     pub(crate) fn block_root_after_slot(&self, slot: Slot) -> Result<Option<H256>> {
         let results = self
             .database
-            .iterator_ascending(BlockRootBySlot(slot.saturating_add(1)).to_string()..)?;
+            .iterator_ascending_raw(BlockRootBySlot(slot.saturating_add(1)).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
                 .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                .map(|(_, value_bytes)| H256::from_ssz_default(value_bytes))
+                .map(|(_, value_bytes)| -> Result<H256> {
+                    Ok(H256::from_ssz_default(decompress(&value_bytes)?)?)
+                })
                 .next()
                 .transpose()
         })?
-        .map_err(Into::into)
     }
 
     /// The first finalized block after `slot`.
@@ -999,14 +1002,16 @@ impl<P: Preset> Storage<P> {
                 Error::PersistedSlotCannotContainAnchor { slot: state.slot() },
             );
 
-            let results = self.database.iterator_ascending(
+            let results = self.database.iterator_ascending_raw(
                 BlockRootBySlot(state.slot().saturating_add(1)).to_string()..,
             )?;
 
             let block_roots = itertools::process_results(results, |pairs| {
                 pairs
                     .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                    .map(|(_, value_bytes)| H256::from_ssz_default(value_bytes))
+                    .map(|(_, value_bytes)| -> Result<H256> {
+                        Ok(H256::from_ssz_default(decompress(&value_bytes)?)?)
+                    })
                     .try_collect()
             })??;
 
@@ -1025,7 +1030,7 @@ impl<P: Preset> Storage<P> {
     ) -> Result<OptionalStateStorage<'_, P>> {
         let results = self
             .database
-            .iterator_descending(..=BlockRootBySlot(start_from_slot).to_string())?;
+            .iterator_descending_raw(..=BlockRootBySlot(start_from_slot).to_string())?;
 
         let mut block_roots = vec![];
 
@@ -1036,7 +1041,7 @@ impl<P: Preset> Storage<P> {
                 break;
             }
 
-            let block_root = H256::from_ssz_default(value_bytes)?;
+            let block_root = H256::from_ssz_default(decompress(&value_bytes)?)?;
 
             if self.contains_key(StateByBlockRoot(block_root))? {
                 let Some(block) = self.finalized_block_by_root(block_root)? else {
@@ -1089,13 +1094,13 @@ impl<P: Preset> Storage<P> {
         Ok(Some(checkpoint))
     }
 
-    fn contains_key(&self, key: impl core::fmt::Display) -> Result<bool> {
+    fn contains_key(&self, key: impl fmt::Display) -> Result<bool> {
         let key_string = key.to_string();
 
         self.database.contains_key(key_string)
     }
 
-    fn get<V: SszRead<Config>>(&self, key: impl core::fmt::Display) -> Result<Option<V>> {
+    fn get<V: SszRead<Config>>(&self, key: impl fmt::Display) -> Result<Option<V>> {
         let key_string = key.to_string();
 
         if let Some(value_bytes) = self.database.get(key_string)? {
@@ -1180,7 +1185,7 @@ impl<P: Preset> Storage<P> {
     pub fn block_root_by_slot_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending(BlockRootBySlot(0).to_string()..)?;
+            .iterator_ascending_raw(BlockRootBySlot(0).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -1205,7 +1210,7 @@ impl<P: Preset> Storage<P> {
     pub fn unfinalized_block_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending(UnfinalizedBlockByRoot(H256::zero()).to_string()..)?;
+            .iterator_ascending_raw(UnfinalizedBlockByRoot(H256::zero()).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -1217,7 +1222,7 @@ impl<P: Preset> Storage<P> {
     pub fn slot_by_state_root_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending(SlotByStateRoot(H256::zero()).to_string()..)?;
+            .iterator_ascending_raw(SlotByStateRoot(H256::zero()).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -1229,7 +1234,7 @@ impl<P: Preset> Storage<P> {
     pub fn slot_by_blob_id_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending(SlotBlobId(0, H256::zero(), 0).to_string()..)?;
+            .iterator_ascending_raw(SlotBlobId(0, H256::zero(), 0).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -1241,7 +1246,7 @@ impl<P: Preset> Storage<P> {
     pub fn state_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending(StateByBlockRoot(H256::zero()).to_string()..)?;
+            .iterator_ascending_raw(StateByBlockRoot(H256::zero()).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -1253,7 +1258,7 @@ impl<P: Preset> Storage<P> {
     pub fn blob_sidecar_by_blob_id_count(&self) -> Result<usize> {
         let results = self
             .database
-            .iterator_ascending(BlobSidecarByBlobId(H256::zero(), 0).to_string()..)?;
+            .iterator_ascending_raw(BlobSidecarByBlobId(H256::zero(), 0).to_string()..)?;
 
         itertools::process_results(results, |pairs| {
             pairs
@@ -1518,14 +1523,11 @@ pub enum Error {
     IncorrectPrefix { bytes: Vec<u8> },
 }
 
-pub fn save(database: &Database, key: impl core::fmt::Display, value: impl SszWrite) -> Result<()> {
+pub fn save(database: &Database, key: impl fmt::Display, value: impl SszWrite) -> Result<()> {
     database.put(serialize_key(key), serialize_value(value)?)
 }
 
-pub fn get<V: SszReadDefault>(
-    database: &Database,
-    key: impl core::fmt::Display,
-) -> Result<Option<V>> {
+pub fn get<V: SszReadDefault>(database: &Database, key: impl fmt::Display) -> Result<Option<V>> {
     database
         .get(serialize_key(key))?
         .map(V::from_ssz_default)
@@ -1533,7 +1535,7 @@ pub fn get<V: SszReadDefault>(
         .map_err(Into::into)
 }
 
-fn serialize_key(key: impl core::fmt::Display) -> String {
+fn serialize_key(key: impl fmt::Display) -> String {
     key.to_string()
 }
 
@@ -1541,8 +1543,11 @@ fn serialize_value(value: impl SszWrite) -> Result<Vec<u8>> {
     value.to_ssz().map_err(Into::into)
 }
 
-pub fn serialize(key: impl core::fmt::Display, value: impl SszWrite) -> Result<(String, Vec<u8>)> {
-    Ok((serialize_key(key), serialize_value(value)?))
+pub fn serialize(key: impl fmt::Display, value: impl SszWrite) -> Result<(String, Vec<u8>)> {
+    let value = serialize_value(value)?;
+    let compressed = snap::raw::Encoder::new().compress_vec(&value)?;
+
+    Ok((serialize_key(key), compressed))
 }
 
 // Add more info when needed
@@ -1550,14 +1555,14 @@ pub fn print_beacon_database_info(database: &Database) -> Result<()> {
     info!("beacon_fork_choice database info:");
 
     match database
-        .iterator_ascending(SlotColumnId(0, H256::zero(), 0).to_string()..)?
+        .iterator_ascending_raw(SlotColumnId(0, H256::zero(), 0).to_string()..)?
         .next()
         .transpose()?
     {
         Some((key_bytes, value_bytes)) if SlotColumnId::has_prefix(&key_bytes) => {
             info!(
                 "oldest data column entry: {:?}",
-                DataColumnIdentifier::from_ssz_default(value_bytes)?,
+                DataColumnIdentifier::from_ssz_default(decompress(&value_bytes)?)?,
             );
         }
         _ => info!("no data column entries found"),
@@ -1623,7 +1628,7 @@ mod tests {
         let block_6 = block_with_slot(6);
         let block_10 = block_with_slot(10);
 
-        database.put_batch(vec![
+        database.put_batch_raw(vec![
             // Slot 1
             serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
             serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block_1)?,
@@ -1689,7 +1694,7 @@ mod tests {
 
         let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
 
-        database.put_batch(vec![
+        database.put_batch_raw(vec![
             // Slot 1
             serialize(BlockRootBySlot(1), H256::repeat_byte(1))?,
             serialize(FinalizedBlockByRoot(H256::repeat_byte(1)), &block)?,
@@ -1817,7 +1822,7 @@ mod tests {
     fn test_block_root_before_or_at_slot() -> Result<()> {
         let database = Database::in_memory();
 
-        database.put_batch(vec![
+        database.put_batch_raw(vec![
             serialize(BlockRootBySlot(2), H256::repeat_byte(2))?,
             serialize(BlockRootBySlot(6), H256::repeat_byte(6))?,
         ])?;
