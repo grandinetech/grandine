@@ -22,8 +22,7 @@ use types::{
 use crate::{
     Storage,
     storage::{
-        BlockRootBySlot, Error, FinalizedBlockByRoot, SlotByStateRoot, StateByBlockRoot, get,
-        serialize,
+        BlockRootBySlot, Error, SlotByStateRoot, StateByBlockRoot, StoredBlock, get, serialize,
     },
 };
 
@@ -93,12 +92,21 @@ impl<P: Preset> Storage<P> {
             }
 
             if let Some((block, _)) = self.finalized_block_by_slot(slot)? {
-                combined::untrusted_state_transition(
-                    self.config(),
-                    &self.pubkey_cache,
-                    state.make_mut(),
-                    &block,
-                )?;
+                match &block {
+                    StoredBlock::Full(block) => combined::untrusted_state_transition(
+                        self.config(),
+                        &self.pubkey_cache,
+                        state.make_mut(),
+                        block,
+                    )?,
+                    StoredBlock::Blinded(block) => combined::untrusted_blinded_state_transition(
+                        self.config(),
+                        &self.pubkey_cache,
+                        state.make_mut(),
+                        block,
+                    )?,
+                }
+
                 previous_block = Some(block);
             } else {
                 combined::process_slots(self.config(), &self.pubkey_cache, state.make_mut(), slot)?;
@@ -169,7 +177,7 @@ impl<P: Preset> Storage<P> {
             let block_root = block.message().hash_tree_root();
 
             batch.push(serialize(BlockRootBySlot(slot), block_root)?);
-            batch.push(serialize(FinalizedBlockByRoot(block_root), block)?);
+            self.append_finalized_block_to_batch(&mut batch, block_root, &block, false)?;
         }
 
         self.database.put_batch_raw(batch)
@@ -200,6 +208,8 @@ mod tests {
     use pubkey_cache::PubkeyCache;
     use types::traits::BeaconState as _;
     use types::{nonstandard::StorageMode, phase0::consts::GENESIS_SLOT};
+
+    use crate::storage::DEFAULT_ZSTD_COMPRESSION_LEVEL;
 
     use super::*;
 
@@ -294,6 +304,8 @@ mod tests {
             Database::in_memory(),
             NonZeroU64::MIN,
             StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
         )
     }
 }

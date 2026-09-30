@@ -16,7 +16,8 @@ use eth1_api::{Eth1Api, Eth1ExecutionEngine, ExecutionService};
 use eth2_cache_utils::mainnet;
 use features::Feature;
 use fork_choice_control::{
-    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, StateLoadStrategy, Storage,
+    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, EventChannels,
+    StateLoadStrategy, Storage,
 };
 use fork_choice_store::StoreConfig;
 use futures::{future::FutureExt as _, lock::Mutex, select_biased};
@@ -144,6 +145,8 @@ impl<P: Preset> Context<P> {
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
         ));
 
         let state_load_strategy = StateLoadStrategy::Anchor {

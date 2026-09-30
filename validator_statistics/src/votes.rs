@@ -88,7 +88,8 @@ impl ValidatorVotes {
         let end_slot = misc::compute_start_slot_at_epoch::<P>(epoch.saturating_add(1));
 
         // We assume that stored blocks from previous epoch do reflect canonical chain
-        let canonical_blocks_with_roots = controller.blocks_by_range(start_slot..end_slot)?;
+        let canonical_blocks_with_roots =
+            controller.stored_blocks_by_range(start_slot..end_slot)?;
 
         let root_to_block_map = canonical_blocks_with_roots
             .iter()

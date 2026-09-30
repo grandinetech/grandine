@@ -1264,7 +1264,7 @@ impl<P: Preset> BlockSyncService<P> {
 
         let no_blocks = self
             .controller
-            .blocks_by_range(
+            .stored_blocks_by_range(
                 low.slot.saturating_sub(P::SlotsPerEpoch::U64)..low.slot.saturating_add(1),
             )?
             .is_empty();

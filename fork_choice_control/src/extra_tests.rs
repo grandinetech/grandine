@@ -35,7 +35,10 @@ use types::{
     traits::SignedBeaconBlock as _,
 };
 
-use crate::helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch};
+use crate::{
+    helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch},
+    storage::StoredBlock,
+};
 
 #[cfg(feature = "eth2-cache")]
 use crate::specialized::TestController;
@@ -1941,10 +1944,13 @@ fn controller_blocks_by_range_can_access_all_blocks_in_a_segment() {
     let expected_blocks = [block_0, block_1];
 
     let actual_blocks = context
-        .blocks_by_range(GENESIS_SLOT..u64::MAX)
-        .expect("arguments passed to blocks_by_range are valid")
+        .stored_blocks_by_range(GENESIS_SLOT..u64::MAX)
+        .expect("arguments passed to stored_blocks_by_range are valid")
         .into_iter()
-        .map(|block_with_root| block_with_root.block);
+        .map(|block_with_root| match block_with_root.block {
+            StoredBlock::Full(block) => block,
+            StoredBlock::Blinded(_) => panic!("blocks in the fork choice store are never blinded"),
+        });
 
     itertools::assert_equal(actual_blocks, expected_blocks);
 }

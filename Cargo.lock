@@ -6015,6 +6015,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "bls",
  "bytesize",
  "cached",
  "clock",
@@ -6068,6 +6069,7 @@ dependencies = [
  "typenum",
  "types",
  "unwrap_none",
+ "zstd 0.13.3",
 ]
 
 [[package]]
@@ -13288,6 +13290,7 @@ dependencies = [
  "validator_key_cache",
  "validator_statistics",
  "zeroize",
+ "zstd 0.13.3",
 ]
 
 [[package]]

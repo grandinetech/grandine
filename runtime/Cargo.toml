@@ -81,6 +81,7 @@ validator = { workspace = true }
 validator_statistics = { workspace = true }
 validator_key_cache = { workspace = true }
 zeroize = { workspace = true }
+zstd = { workspace = true }
 
 [dev-dependencies]
 dirs = { workspace = true }

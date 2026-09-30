@@ -5,8 +5,8 @@ use bytesize::ByteSize;
 use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
-    FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId, StateByBlockRoot,
-    StateCheckpoint, UnfinalizedBlockByRoot,
+    ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId,
+    StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
 use tracing::{info, warn};
 use types::preset::Preset;
@@ -65,6 +65,7 @@ pub fn print<P: Preset>(
     let mut total_size: usize = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");
     let mut unfinalized_block_root_entries = EntriesInfo::new("unfinalized_block_roots");
+    let mut execution_payload_entries = EntriesInfo::new("execution_payloads_by_slot_and_root");
     let mut state_by_block_root_entries = EntriesInfo::new("states_by_block_root");
     let mut slot_by_state_root_entries = EntriesInfo::new("slots_by_state_root");
     let mut slot_by_blob_id_entries = EntriesInfo::new("slots_by_blob_id");
@@ -85,6 +86,8 @@ pub fn print<P: Preset>(
             unfinalized_block_root_entries.track(&key, length);
         } else if FinalizedBlockByRoot::has_prefix(&key) {
             finalized_block_root_entries.track(&key, length);
+        } else if ExecutionPayloadBySlotAndRoot::has_prefix(&key) {
+            execution_payload_entries.track(&key, length);
         } else if StateByBlockRoot::has_prefix(&key) {
             state_by_block_root_entries.track(&key, length);
         } else if SlotByStateRoot::has_prefix(&key) {
@@ -115,6 +118,7 @@ pub fn print<P: Preset>(
         block_root_by_slot_entries,
         finalized_block_root_entries,
         unfinalized_block_root_entries,
+        execution_payload_entries,
         state_by_block_root_entries,
         slot_by_state_root_entries,
         slot_by_blob_id_entries,

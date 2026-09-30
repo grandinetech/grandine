@@ -171,6 +171,8 @@ pub async fn run_after_genesis<P: Preset>(
         ref directories,
         archival_epoch_interval,
         storage_mode,
+        store_execution_payloads,
+        zstd_compression_level,
         ..
     } = storage_config;
 
@@ -269,6 +271,8 @@ pub async fn run_after_genesis<P: Preset>(
         storage_database,
         archival_epoch_interval,
         storage_mode,
+        store_execution_payloads,
+        zstd_compression_level,
     ));
 
     let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) = storage
@@ -1720,6 +1724,8 @@ fn handle_command<P: Preset>(
     let StorageConfig {
         archival_epoch_interval,
         storage_mode,
+        store_execution_payloads,
+        zstd_compression_level,
         ..
     } = storage_config;
 
@@ -1742,6 +1748,8 @@ fn handle_command<P: Preset>(
                 storage_database,
                 *archival_epoch_interval,
                 *storage_mode,
+                *store_execution_payloads,
+                *zstd_compression_level,
             );
 
             let output_dir = output_dir.unwrap_or(std::env::current_dir()?);
