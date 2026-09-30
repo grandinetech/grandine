@@ -3,6 +3,7 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
+use builder_api::{BuilderApiFormat, PayloadBuilderApi};
 use clock::{Tick, TickKind};
 use crossbeam_utils::sync::WaitGroup;
 use database::Database;
@@ -225,6 +226,12 @@ impl<P: Preset> Context<P> {
         let block_producer = Arc::new(BlockProducer::new(
             keymanager.proposer_configs().clone_arc(),
             None,
+            Arc::new(PayloadBuilderApi::new(
+                BuilderApiFormat::default(),
+                controller.pubkey_cache().clone_arc(),
+                Client::new(),
+                None,
+            )),
             controller.clone_arc(),
             dedicated_executor.clone_arc(),
             execution_engine,

@@ -63,7 +63,7 @@ use types::{
         DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH, Phase, StorageMode,
     },
     phase0::primitives::{
-        Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, H256, Slot,
+        Epoch, ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot,
     },
     preset::PresetName,
     redacting_url::RedactingUrl,
@@ -910,6 +910,10 @@ struct ValidatorOptions {
     #[clap(long)]
     default_gas_limit: Option<Gas>,
 
+    /// Minimum total payment in Gwei that proposer are willing to accept from a builder
+    #[clap(long, default_value_t = ValidatorConfig::default().default_builder_min_bid)]
+    default_builder_min_bid: Gwei,
+
     /// List of public keys to use from Web3Signer
     #[clap(long, num_args = 1.., value_delimiter = ',')]
     web3signer_public_keys: Vec<PublicKeyBytes>,
@@ -1142,6 +1146,7 @@ impl GrandineArgs {
             builder_max_skipped_slots,
             builder_max_skipped_slots_per_epoch,
             default_builder_boost_factor,
+            default_builder_min_bid,
             default_gas_limit,
             use_validator_key_cache,
             web3signer_public_keys,
@@ -1531,6 +1536,7 @@ impl GrandineArgs {
             max_empty_slots,
             suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
             default_builder_boost_factor,
+            default_builder_min_bid,
             default_gas_limit,
             network_config: network_config_options.into_config(
                 network,

@@ -9,6 +9,7 @@ use axum::{
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
+use builder_api::PayloadBuilderApi;
 use dedicated_executor::DedicatedExecutor;
 use eth1_api::{ApiController, Eth1Api};
 use features::Feature;
@@ -80,6 +81,7 @@ use crate::{misc::SpyReceiver, test_endpoints};
 pub struct NormalState<P: Preset, W: Wait> {
     pub chain_config: Arc<ChainConfig>,
     pub block_producer: Arc<BlockProducer<P, W>>,
+    pub payload_builder_api: Arc<PayloadBuilderApi>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub eth1_api: Arc<Eth1Api>,
@@ -124,6 +126,12 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<BlockProducer<P, W>>
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for ApiController<P, W> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.controller.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<PayloadBuilderApi> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.payload_builder_api.clone_arc()
     }
 }
 
