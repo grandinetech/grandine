@@ -34,7 +34,7 @@ use types::{
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds},
     },
     preset::Preset,
-    traits::{BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
+    traits::{self, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
 };
 
 use crate::{
@@ -652,7 +652,7 @@ where
 
     pub fn indices_of_missing_data_columns(
         &self,
-        block: &SignedBeaconBlock<P>,
+        block: &impl traits::SignedBeaconBlock<P>,
     ) -> Vec<ColumnIndex> {
         self.store_snapshot().indices_of_missing_data_columns(block)
     }
@@ -1006,7 +1006,7 @@ where
         blob_sidecar: Arc<BlobSidecar<P>>,
         block_seen: bool,
         origin: &BlobSidecarOrigin,
-        parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        parent_fn: impl FnOnce() -> Option<(Slot, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<BlobSidecarAction<P>> {
         self.store_snapshot().validate_blob_sidecar_with_state(
@@ -1025,7 +1025,7 @@ where
         block_seen: bool,
         origin: &DataColumnSidecarOrigin,
         validate_block_presence: bool,
-        parent_fn: impl FnOnce() -> Option<(Arc<SignedBeaconBlock<P>>, PayloadStatus)>,
+        parent_fn: impl FnOnce() -> Option<(Slot, PayloadStatus)>,
         state_fn: impl FnOnce() -> Option<Arc<BeaconState<P>>>,
     ) -> Result<DataColumnSidecarAction<P>> {
         self.store_snapshot()
