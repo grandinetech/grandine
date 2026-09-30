@@ -3533,8 +3533,8 @@ pub async fn validator_block<P: Preset, W: Wait>(
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
-    let (beacon_block, _) = block_build_context
-        .build_beacon_block(randao_reveal, local_execution_payload_handle)
+    let (beacon_block, _, _) = block_build_context
+        .build_beacon_block(randao_reveal, local_execution_payload_handle, None)
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -3601,6 +3601,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
+            ..BlockBuildOptions::default()
         },
     );
 
@@ -3609,7 +3610,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
-    let (validator_block, block_rewards) = block_build_context
+    let (validator_block, block_rewards, _) = block_build_context
         .build_blinded_beacon_block(
             randao_reveal,
             execution_payload_header_handle,
@@ -3644,6 +3645,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 
 /// `POST /eth/v4/validator/blocks/{slot}`
 #[expect(clippy::type_complexity)]
+#[expect(clippy::too_many_arguments)]
+#[expect(clippy::too_many_lines)]
 #[instrument(skip_all, level = "debug", name = "http_api::validator_block_v4")]
 pub async fn validator_block_v4<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
@@ -3675,11 +3678,10 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         });
     }
 
-    // TODO: request bids from `builders` over the builder API.
     let GloasBuilderConfig {
-        min_bid: _,
+        min_bid,
         builder_boost_factor,
-        builders: _,
+        builders,
     } = builder_config;
 
     if skip_randao_verification && !randao_reveal.is_empty() {
@@ -3706,13 +3708,20 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor: Uint256::from_u64(builder_boost_factor),
+            min_bid,
         },
     );
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
-    let (validator_block, block_rewards) = block_build_context
-        .build_beacon_block(randao_reveal, local_execution_payload_handle)
+    let builder_api_bids_handle = block_build_context.get_builder_api_bids(builders);
+
+    let (validator_block, block_rewards, builder_url) = block_build_context
+        .build_beacon_block(
+            randao_reveal,
+            local_execution_payload_handle,
+            builder_api_bids_handle,
+        )
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -3764,13 +3773,12 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         validator_block.into()
     };
 
-    // TODO: missing `Eth-Builder-Url` response header as beacon node does not
-    // request any bid from given builders yet
     Ok(EthResponse::json_or_ssz(api_block, &headers)?
         .version(version)
         .consensus_block_value(consensus_block_value)
         .execution_payload_value(mev.unwrap_or_default())
-        .execution_payload_included(payload_included))
+        .execution_payload_included(payload_included)
+        .builder_url(builder_url))
 }
 
 /// `GET /eth/v1/validator/attestation_data`

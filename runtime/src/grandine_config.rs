@@ -16,7 +16,7 @@ use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
     nonstandard::CustodyMode,
-    phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, H256, Slot},
+    phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Gwei, H256, Slot},
     redacting_url::RedactingUrl,
 };
 use validator::ValidatorApiConfig;
@@ -50,6 +50,7 @@ pub struct GrandineConfig {
     pub suggested_fee_recipient: ExecutionAddress,
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Option<Gas>,
+    pub default_builder_min_bid: Gwei,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
     pub unfinalized_states_in_memory: u64,

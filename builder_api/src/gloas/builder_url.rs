@@ -8,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use ssz::{ByteList, ReadError, Size, SszHash, SszRead, SszSize, SszWrite, WriteError};
 use thiserror::Error;
 use typenum::{U1, Unsigned as _};
+use types::redacting_url::RedactingUrl;
 
 use crate::consts::MaxBuilderUrlSize;
 
@@ -19,6 +20,10 @@ pub enum BuilderUrlError {
     NotUtf8,
     #[error("builder URL is longer than {} bytes", MaxBuilderUrlSize::USIZE)]
     TooLong,
+    #[error("builder URL is not a valid URL")]
+    Invalid,
+    #[error("builder URL scheme is not http or https")]
+    NotHttp,
 }
 
 /// A string in JSON and `ByteList[MAX_BUILDER_URL_SIZE]` of its UTF-8 bytes in SSZ.
@@ -31,6 +36,26 @@ impl BuilderUrl {
     #[must_use]
     pub fn as_str(&self) -> &str {
         str::from_utf8(self.0.as_bytes()).expect("BuilderUrl is validated to be UTF-8")
+    }
+
+    // The beacon node must only reach builders over http(s).
+    pub fn http_url(&self) -> Result<RedactingUrl, BuilderUrlError> {
+        let url = self
+            .as_str()
+            .parse::<RedactingUrl>()
+            .map_err(|_| BuilderUrlError::Invalid)?;
+
+        if !matches!(url.clone().into_url().scheme(), "http" | "https") {
+            return Err(BuilderUrlError::NotHttp);
+        }
+
+        Ok(url)
+    }
+
+    fn origin(&self) -> Option<String> {
+        let url = self.http_url().ok()?.into_url();
+
+        Some(url.origin().ascii_serialization())
     }
 }
 
@@ -58,15 +83,22 @@ impl FromStr for BuilderUrl {
     }
 }
 
+// Only the origin is shown, since credentials may be anywhere else in the URL.
 impl Debug for BuilderUrl {
     fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-        Debug::fmt(self.as_str(), formatter)
+        match self.origin() {
+            Some(origin) => Debug::fmt(&origin, formatter),
+            None => formatter.write_str("non-HTTP URL"),
+        }
     }
 }
 
 impl Display for BuilderUrl {
     fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
-        formatter.write_str(self.as_str())
+        match self.origin() {
+            Some(origin) => formatter.write_str(&origin),
+            None => formatter.write_str("non-HTTP URL"),
+        }
     }
 }
 

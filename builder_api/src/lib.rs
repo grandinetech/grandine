@@ -1,6 +1,7 @@
 pub use crate::{
     api::Api as BuilderApi,
     config::{BuilderApiFormat, Config as BuilderConfig},
+    gloas::api::Api as PayloadBuilderApi,
 };
 
 pub mod combined;
@@ -32,6 +33,8 @@ mod fulu {
 
 pub mod gloas {
     mod builder_url;
+
+    pub mod api;
     pub mod containers;
 }
 

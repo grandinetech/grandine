@@ -6,6 +6,7 @@ use axum::Router;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
+use builder_api::PayloadBuilderApi;
 use dedicated_executor::DedicatedExecutor;
 use eth1_api::{ApiController, Eth1Api};
 use fork_choice_control::{EventChannels, Wait};
@@ -47,6 +48,7 @@ pub struct Channels<P: Preset> {
 #[expect(clippy::struct_field_names)]
 pub struct HttpApi<P: Preset, W: Wait> {
     pub block_producer: Arc<BlockProducer<P, W>>,
+    pub payload_builder_api: Arc<PayloadBuilderApi>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub eth1_api: Arc<Eth1Api>,
@@ -82,6 +84,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
     ) -> Result<()> {
         let Self {
             block_producer,
+            payload_builder_api,
             controller,
             anchor_checkpoint_provider,
             eth1_api,
@@ -119,6 +122,7 @@ impl<P: Preset, W: Wait> HttpApi<P, W> {
         let state = NormalState {
             chain_config: controller.chain_config().clone_arc(),
             block_producer,
+            payload_builder_api,
             controller,
             anchor_checkpoint_provider,
             eth1_api,

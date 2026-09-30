@@ -9,7 +9,12 @@ use bls::{
     AggregateSignature, PublicKeyBytes, SignatureBytes,
     traits::{Signature as _, SignatureBytes as _},
 };
-use builder_api::{BuilderApi, combined::SignedBuilderBid};
+use builder_api::{
+    BuilderApi, PayloadBuilderApi,
+    combined::SignedBuilderBid,
+    consts::{BUILDER_BID_REQUEST_TIMEOUT, MaxBuilderEntries},
+    gloas::containers::{BuilderEntry, BuilderUrl},
+};
 use cached::{Cached as _, SizedCache};
 use dedicated_executor::{DedicatedExecutor, Job};
 use eth1_api::{ApiController, ClientVersions, Eth1ExecutionEngine, WithClientVersions};
@@ -18,10 +23,10 @@ use execution_engine::{
     PayloadAttributesV3, PayloadAttributesV4, PayloadId,
 };
 use features::Feature;
-use fork_choice_control::Wait;
+use fork_choice_control::{Snapshot, Wait};
 use futures::{
     lock::Mutex,
-    stream::{FuturesOrdered, StreamExt as _},
+    stream::{FuturesOrdered, FuturesUnordered, StreamExt as _},
 };
 use helper_functions::{accessors, misc, predicates};
 use itertools::{Either, Itertools as _};
@@ -33,7 +38,7 @@ use operation_pools::{
 };
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use ssz::{BitList, BitVector, ContiguousList, Hc, ProgressiveList, SszHash};
+use ssz::{BitList, BitVector, ContiguousList, Hc, ProgressiveList, SszHash, SszList as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
@@ -96,7 +101,7 @@ use types::{
             ProposerSlashing, SignedVoluntaryExit,
         },
         primitives::{
-            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, H256, Slot, Uint256,
+            CommitteeIndex, Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, H256, Slot, Uint256,
             ValidatorIndex,
         },
     },
@@ -110,6 +115,7 @@ const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
 
 pub type ExecutionPayloadHeaderJoinHandle<P> = JoinHandle<Result<Option<SignedBuilderBid<P>>>>;
+pub type BuilderApiBidsJoinHandle<P> = JoinHandle<Vec<BuilderApiBid<P>>>;
 pub type LocalExecutionPayloadJoinHandle<P> =
     JoinHandle<Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>>;
 
@@ -130,6 +136,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     pub fn new(
         proposer_configs: Arc<ProposerConfigs>,
         builder_api: Option<Arc<BuilderApi>>,
+        payload_builder_api: Arc<PayloadBuilderApi>,
         controller: ApiController<P, W>,
         dedicated_executor: Arc<DedicatedExecutor>,
         execution_engine: Arc<Eth1ExecutionEngine<P>>,
@@ -149,6 +156,7 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             pubkey_cache: controller.pubkey_cache().clone_arc(),
             proposer_configs,
             builder_api,
+            payload_builder_api,
             controller,
             dedicated_executor,
             execution_engine,
@@ -757,6 +765,7 @@ struct ProducerContext<P: Preset, W: Wait> {
     pubkey_cache: Arc<PubkeyCache>,
     proposer_configs: Arc<ProposerConfigs>,
     builder_api: Option<Arc<BuilderApi>>,
+    payload_builder_api: Arc<PayloadBuilderApi>,
     controller: ApiController<P, W>,
     dedicated_executor: Arc<DedicatedExecutor>,
     execution_engine: Arc<Eth1ExecutionEngine<P>>,
@@ -786,6 +795,30 @@ pub struct BlockBuildOptions {
     pub disable_blockprint_graffiti: bool,
     pub skip_randao_verification: bool,
     pub builder_boost_factor: Uint256,
+    pub min_bid: Gwei,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BidWeighting {
+    pub max_execution_payment: Gwei,
+    pub min_bid: Gwei,
+    pub builder_boost_factor: Uint256,
+}
+
+impl From<&BuilderEntry> for BidWeighting {
+    fn from(entry: &BuilderEntry) -> Self {
+        Self {
+            max_execution_payment: entry.max_execution_payment,
+            min_bid: entry.min_bid,
+            builder_boost_factor: Uint256::from_u64(entry.builder_boost_factor),
+        }
+    }
+}
+
+pub struct BuilderApiBid<P: Preset> {
+    pub url: BuilderUrl,
+    pub bid: SignedExecutionPayloadBid<P>,
+    pub weighting: BidWeighting,
 }
 
 #[derive(Clone)]
@@ -802,7 +835,14 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         randao_reveal: SignatureBytes,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
+        builder_api_bids_handle: Option<BuilderApiBidsJoinHandle<P>>,
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<BeaconBlock<P>, P>,
+            Option<BlockRewards>,
+            Option<BuilderUrl>,
+        )>,
+    > {
         let _block_timer = self
             .producer_context
             .metrics
@@ -819,7 +859,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         let produce_beacon_block_join_handle = self.spawn_job(|build_context| async move {
             build_context
-                .produce_beacon_block(block_without_state_root, local_execution_payload_handle)
+                .produce_beacon_block(
+                    block_without_state_root,
+                    local_execution_payload_handle,
+                    builder_api_bids_handle,
+                )
                 .await
         });
 
@@ -839,6 +883,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Option<(
             WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
             Option<BlockRewards>,
+            Option<BuilderUrl>,
         )>,
     > {
         let block_without_state_root =
@@ -857,7 +902,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             info_with_peers!("block producer starting to build local option");
 
             build_context
-                .produce_beacon_block(block, local_execution_payload_handle)
+                .produce_beacon_block(block, local_execution_payload_handle, None)
                 .await
         });
 
@@ -888,7 +933,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         match (beacon_block_opt, blinded_block_opt) {
             (
-                Some((beacon_block, beacon_block_rewards)),
+                Some((beacon_block, beacon_block_rewards, builder_url)),
                 Some((blinded_block, blinded_block_rewards, builder_mev)),
             ) => {
                 if let Some(local_mev) = beacon_block.mev {
@@ -908,6 +953,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         return Ok(Some((
                             beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
                             beacon_block_rewards,
+                            builder_url,
                         )));
                     }
                 }
@@ -917,11 +963,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 Ok(Some((
                     WithBlobsAndMev::new(block, None, None, None, Some(builder_mev), None),
                     blinded_block_rewards,
+                    None,
                 )))
             }
-            (Some((beacon_block, beacon_block_rewards)), None) => Ok(Some((
+            (Some((beacon_block, beacon_block_rewards, builder_url)), None) => Ok(Some((
                 beacon_block.map(ValidatorBlindedBlock::BeaconBlock),
                 beacon_block_rewards,
+                builder_url,
             ))),
             _ => Ok(None),
         }
@@ -1365,13 +1413,28 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         &self,
         block_without_state_root: BeaconBlock<P>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
-    ) -> Result<Option<(WithBlobsAndMev<BeaconBlock<P>, P>, Option<BlockRewards>)>> {
+        builder_api_bids_handle: Option<BuilderApiBidsJoinHandle<P>>,
+    ) -> Result<
+        Option<(
+            WithBlobsAndMev<BeaconBlock<P>, P>,
+            Option<BlockRewards>,
+            Option<BuilderUrl>,
+        )>,
+    > {
         let mut payload_with_data = None;
         if let Some(handle) = local_execution_payload_handle {
             payload_with_data = handle
                 .await?
                 .map(|value| value.map(|value| value.map(Some)))
         }
+
+        let builder_api_bids = match builder_api_bids_handle {
+            Some(handle) => handle.await.unwrap_or_else(|error| {
+                warn_with_peers!("builder API bid requests failed: {error:?}");
+                vec![]
+            }),
+            None => vec![],
+        };
 
         let WithClientVersions {
             client_versions,
@@ -1404,15 +1467,23 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         };
 
         let has_local_payload = execution_payload.is_some();
+        let mut builder_url = None;
 
         let mut without_state_root_with_payload = if let Some(state) =
             self.beacon_state.post_gloas()
         {
-            let builder_bid = self.select_best_builder_bid(state, block_mev, has_local_payload);
+            let builder_bid = self.select_best_builder_bid(
+                state,
+                &block_without_state_root,
+                &builder_api_bids,
+                block_mev,
+                has_local_payload,
+            );
 
-            let signed_payload_bid = if let Some(bid) = builder_bid {
+            let signed_payload_bid = if let Some((bid, url)) = builder_bid {
                 // Set block_mev value to the in-protocol builder bid value
                 block_mev = Some(Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI));
+                builder_url = url;
 
                 Some(bid)
             } else {
@@ -1453,6 +1524,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         None,
                     ),
                     block_rewards,
+                    builder_url,
                 )
             })
             .pipe(Ok)
@@ -2271,6 +2343,38 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         None
     }
 
+    pub fn get_builder_api_bids(
+        &self,
+        builders: ContiguousList<BuilderEntry, MaxBuilderEntries>,
+    ) -> Option<BuilderApiBidsJoinHandle<P>> {
+        if builders.is_empty() {
+            return None;
+        }
+
+        let state = self.beacon_state.post_gloas()?;
+        let parent_block_hash =
+            bid_parent_block_hash(&self.producer_context.controller.snapshot(), state);
+
+        let proposer_pubkey = match accessors::public_key(state, self.proposer_index) {
+            Ok(pubkey) => *pubkey,
+            Err(error) => {
+                warn_with_peers!("unable to request builder API bids: {error:?}");
+                return None;
+            }
+        };
+
+        let handle = tokio::spawn(request_builder_api_bids(
+            self.producer_context.payload_builder_api.clone_arc(),
+            self.beacon_state.clone_arc(),
+            self.head_block_root,
+            parent_block_hash,
+            proposer_pubkey,
+            builders,
+        ));
+
+        Some(handle)
+    }
+
     /// Returns the most valuable bid that the node is willing to propose on top of the head block.
     ///
     /// [`None`] means the node should build the payload itself, either because there is no bid
@@ -2279,9 +2383,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     fn select_best_builder_bid(
         &self,
         state: &(impl PostGloasBeaconState<P> + ?Sized),
+        block_without_state_root: &BeaconBlock<P>,
+        builder_api_bids: &[BuilderApiBid<P>],
         local_mev: Option<Uint256>,
         local_payload_available: bool,
-    ) -> Option<SignedExecutionPayloadBid<P>> {
+    ) -> Option<(SignedExecutionPayloadBid<P>, Option<BuilderUrl>)> {
         let snapshot = self.producer_context.controller.snapshot();
 
         if local_payload_available && snapshot.builder_circuit_breaker_tripped() {
@@ -2290,40 +2396,111 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             return None;
         }
 
-        let parent_block_hash = if snapshot.should_build_on_full(state.slot()) {
-            state.latest_execution_payload_bid().block_hash
-        } else {
-            state.latest_execution_payload_bid().parent_block_hash
+        let parent_block_hash = bid_parent_block_hash(&snapshot, state);
+
+        let BlockBuildOptions {
+            builder_boost_factor,
+            min_bid,
+            ..
+        } = self.options;
+
+        // no cap on `max_execution_payment` for p2p bids
+        let p2p_weighting = BidWeighting {
+            max_execution_payment: Gwei::MAX,
+            min_bid,
+            builder_boost_factor,
         };
 
-        let bid = snapshot
+        let candidates = snapshot
             .selectable_payload_bids(state, state.slot(), parent_block_hash, self.head_block_root)
-            .max_by_key(|bid| bid.message.value)?;
+            .map(|bid| (bid, p2p_weighting, None))
+            .chain(self.valid_builder_api_bids(
+                block_without_state_root,
+                builder_api_bids,
+                parent_block_hash,
+            ));
 
-        // The bid value is what the builder pays the proposer for the slot, so it is comparable to
-        // the MEV of a locally built payload. `builder_boost_factor` biases the comparison the same
-        // way it does for the pre-Gloas builder API.
-        if let Some(local_mev) = local_mev {
-            let builder_boost_factor = self.options.builder_boost_factor;
-            let builder_mev = Uint256::from_u64(bid.message.value).saturating_mul(WEI_IN_GWEI);
+        let (bid, url) = select_weighted_bid(candidates, local_mev)?;
 
-            let boosted_builder_mev = builder_mev
-                .div(Uint256::from_u64(100))
-                .saturating_mul(builder_boost_factor);
+        Some((bid.clone(), url.cloned()))
+    }
 
-            if local_mev >= boosted_builder_mev {
-                info_with_peers!(
-                    "using more profitable local payload: \
-                     local MEV: {local_mev}, builder MEV: {builder_mev}, \
-                     boosted builder MEV: {boosted_builder_mev}, \
-                     builder_boost_factor: {builder_boost_factor}",
-                );
+    fn valid_builder_api_bids<'bids>(
+        &self,
+        block_without_state_root: &BeaconBlock<P>,
+        builder_api_bids: &'bids [BuilderApiBid<P>],
+        parent_block_hash: ExecutionBlockHash,
+    ) -> Vec<(
+        &'bids SignedExecutionPayloadBid<P>,
+        BidWeighting,
+        Option<&'bids BuilderUrl>,
+    )> {
+        let bids = builder_api_bids
+            .iter()
+            .filter(|BuilderApiBid { bid, .. }| {
+                let builds_on_parent = bid.message.parent_block_hash == parent_block_hash
+                    && bid.message.parent_block_root == self.head_block_root;
 
-                return None;
-            }
+                if !builds_on_parent {
+                    warn_with_peers!(
+                        "rejected builder API bid from builder {} building on another parent \
+                         (parent_block_hash: {:?}, parent_block_root: {:?})",
+                        bid.message.builder_index,
+                        bid.message.parent_block_hash,
+                        bid.message.parent_block_root,
+                    );
+                }
+
+                builds_on_parent
+            })
+            .map(
+                |BuilderApiBid {
+                     url,
+                     bid,
+                     weighting,
+                 }| (bid, *weighting, Some(url)),
+            )
+            .collect_vec();
+
+        if bids.is_empty() {
+            return vec![];
         }
 
-        Some(bid.clone())
+        let (BeaconState::Gloas(state), BeaconBlock::Gloas(block)) =
+            (&*self.beacon_state, block_without_state_root)
+        else {
+            return vec![];
+        };
+
+        let chain_config = &self.producer_context.chain_config;
+        let pubkey_cache = &self.producer_context.pubkey_cache;
+        let mut state = state.clone();
+
+        // advance state by processing parent payload envelope and withdrawals, so that bids can be
+        // validated against the correct state
+        if let Err(error) = prepare_state_for_execution_payload_bid(
+            chain_config,
+            pubkey_cache,
+            &mut state,
+            parent_block_hash,
+            &block.body.parent_execution_requests,
+        ) {
+            warn_with_peers!("unable to validate builder API bids: {error:?}");
+            return vec![];
+        }
+
+        bids.into_iter()
+            .filter(|(bid, _, _)| {
+                gloas::validate_execution_payload_bid(chain_config, pubkey_cache, &state, bid)
+                    .inspect_err(|error| {
+                        warn_with_peers!(
+                            "rejected builder API bid from builder {}: {error:?}",
+                            bid.message.builder_index,
+                        );
+                    })
+                    .is_ok()
+            })
+            .collect()
     }
 
     pub fn get_local_execution_payload(&self) -> Option<LocalExecutionPayloadJoinHandle<P>> {
@@ -2573,4 +2750,192 @@ async fn wait_for_result<T: Send>(job: Job<Result<T>>) -> Result<T> {
     job.await
         .map_err(AnyhowError::msg)
         .context("block producer task failed")?
+}
+
+async fn request_builder_api_bids<P: Preset>(
+    payload_builder_api: Arc<PayloadBuilderApi>,
+    state: Arc<BeaconState<P>>,
+    parent_root: H256,
+    parent_hash: ExecutionBlockHash,
+    proposer_pubkey: PublicKeyBytes,
+    builders: ContiguousList<BuilderEntry, MaxBuilderEntries>,
+) -> Vec<BuilderApiBid<P>> {
+    let Some(state) = state.post_gloas() else {
+        return vec![];
+    };
+
+    let payload_builder_api = &payload_builder_api;
+    let slot = state.slot();
+    let mut requested = HashSet::new();
+
+    let responses = builders
+        .iter()
+        .filter(|&entry| {
+            let BuilderEntry { url, auth, .. } = entry;
+
+            if auth.message.slot != slot {
+                warn_with_peers!(
+                    "skipping builder entry for {url} authorized for slot {} instead of {slot}",
+                    auth.message.slot,
+                );
+
+                return false;
+            }
+
+            if !requested.insert((url.as_str(), auth.message.data.as_bytes())) {
+                warn_with_peers!("skipping duplicate builder entry for {url}");
+
+                return false;
+            }
+
+            true
+        })
+        .map(|entry| async move {
+            let response = payload_builder_api
+                .get_execution_payload_bid::<P>(
+                    &entry.url,
+                    &entry.auth,
+                    slot,
+                    parent_hash,
+                    parent_root,
+                    proposer_pubkey,
+                )
+                .await;
+
+            (entry, response)
+        })
+        .collect::<FuturesUnordered<_>>()
+        .take_until(tokio::time::sleep(BUILDER_BID_REQUEST_TIMEOUT))
+        .collect::<Vec<_>>()
+        .await;
+
+    let unanswered = requested.len().saturating_sub(responses.len());
+
+    if unanswered > 0 {
+        warn_with_peers!(
+            "{unanswered} builders did not answer within {BUILDER_BID_REQUEST_TIMEOUT:?}",
+        );
+    }
+
+    responses
+        .into_iter()
+        .filter_map(|(entry, response)| {
+            let url = &entry.url;
+
+            let bid = match response {
+                Ok(Some(bid)) => bid,
+                Ok(None) => {
+                    debug_with_peers!("builder {url} has no bid for slot {slot}");
+                    return None;
+                }
+                Err(error) => {
+                    warn_with_peers!("failed to get bid from builder {url}: {error:?}");
+                    return None;
+                }
+            };
+
+            let builder_index = bid.message.builder_index;
+
+            let accepted = entry.builder_pubkeys.is_empty()
+                || state
+                    .builders()
+                    .get(builder_index)
+                    .is_ok_and(|builder| entry.builder_pubkeys.contains(&builder.pubkey));
+
+            if !accepted {
+                warn_with_peers!(
+                    "rejected bid from builder {builder_index} at {url}: \
+                     not one of the accepted builder pubkeys",
+                );
+
+                return None;
+            }
+
+            Some(BuilderApiBid {
+                url: url.clone(),
+                bid,
+                weighting: entry.into(),
+            })
+        })
+        .collect()
+}
+
+fn bid_parent_block_hash<P: Preset>(
+    snapshot: &Snapshot<P>,
+    state: &(impl PostGloasBeaconState<P> + ?Sized),
+) -> ExecutionBlockHash {
+    if snapshot.should_build_on_full(state.slot()) {
+        state.latest_execution_payload_bid().block_hash
+    } else {
+        state.latest_execution_payload_bid().parent_block_hash
+    }
+}
+
+fn prepare_state_for_execution_payload_bid<P: Preset>(
+    chain_config: &ChainConfig,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    parent_block_hash: ExecutionBlockHash,
+    parent_execution_requests: &GloasExecutionRequests<P>,
+) -> Result<()> {
+    gloas::process_parent_execution_payload(
+        chain_config,
+        pubkey_cache,
+        state,
+        parent_block_hash,
+        parent_execution_requests,
+    )?;
+
+    gloas::process_withdrawals(state)
+}
+
+/// Returns the winning bid along with the `source` it came with.
+fn select_weighted_bid<'bid, P: Preset, S>(
+    candidates: impl IntoIterator<Item = (&'bid SignedExecutionPayloadBid<P>, BidWeighting, S)>,
+    local_mev: Option<Uint256>,
+) -> Option<(&'bid SignedExecutionPayloadBid<P>, S)> {
+    let (bid, source, builder_mev, builder_boost_factor, weighted_builder_mev) = candidates
+        .into_iter()
+        .filter_map(|(bid, weighting, source)| {
+            let BidWeighting {
+                max_execution_payment,
+                min_bid,
+                builder_boost_factor,
+            } = weighting;
+
+            let payment = bid
+                .message
+                .value
+                .saturating_add(bid.message.execution_payment.min(max_execution_payment));
+
+            if payment < min_bid {
+                return None;
+            }
+
+            let builder_mev = Uint256::from_u64(payment).saturating_mul(WEI_IN_GWEI);
+            let weighted_builder_mev = builder_mev.saturating_mul(builder_boost_factor);
+
+            Some((
+                bid,
+                source,
+                builder_mev,
+                builder_boost_factor,
+                weighted_builder_mev,
+            ))
+        })
+        .max_by_key(|(_, _, _, _, weighted_builder_mev)| *weighted_builder_mev)?;
+
+    if let Some(local_mev) = local_mev
+        && local_mev.saturating_mul(Uint256::from_u64(100)) >= weighted_builder_mev
+    {
+        info_with_peers!(
+            "using more profitable local payload: \
+             local MEV: {local_mev}, builder MEV: {builder_mev}, \
+             builder_boost_factor: {builder_boost_factor}",
+        );
+
+        return None;
+    }
+
+    Some((bid, source))
 }
