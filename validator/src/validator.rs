@@ -21,7 +21,7 @@ use debug_info::HealthCheck;
 use dedicated_executor::DedicatedExecutor;
 use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
-use eth2_libp2p::GossipId;
+use eth2_libp2p::{GossipId, NetworkGlobals, SyncStatus};
 use features::Feature;
 use fork_choice_control::{BlockWithRoot, Event, EventChannels, Topic, ValidatorMessage, Wait};
 use fork_choice_store::{
@@ -205,6 +205,7 @@ pub struct Validator<P: Preset, W: Wait> {
     dedicated_executor_low_priority: Arc<DedicatedExecutor>,
     last_proposer_preferences_epoch: Option<Epoch>,
     published_proposer_preferences: HashSet<(H256, Slot, ValidatorIndex)>,
+    network_globals: Option<Arc<NetworkGlobals>>,
 }
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
@@ -229,6 +230,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         _network_dir: Option<&Path>,
         dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
         dedicated_executor_low_priority: Arc<DedicatedExecutor>,
+        network_globals: Option<Arc<NetworkGlobals>>,
     ) -> Self {
         let Channels {
             api_to_validator_rx,
@@ -293,6 +295,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             dedicated_executor_low_priority,
             last_proposer_preferences_epoch: None,
             published_proposer_preferences: HashSet::new(),
+            network_globals,
         }
     }
 
@@ -920,7 +923,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         let head_epoch = misc::compute_epoch_at_slot::<P>(head_slot);
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-        if head_epoch.saturating_add(1) < current_epoch {
+        if head_epoch.saturating_add(1) < current_epoch
+            && self.any_peer_ahead_of(head_slot).unwrap_or(true)
+        {
             let error = if self.controller.finished_initial_forward_sync() {
                 HeadFarBehind::OutOfSync {
                     head_slot,
@@ -957,6 +962,33 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             beacon_state,
             optimistic: status.is_optimistic(),
         }))
+    }
+
+    fn any_peer_ahead_of(&self, head_slot: Slot) -> Option<bool> {
+        const MIN_PEERS_TO_CHECK: usize = 3;
+
+        let peer_head_slots = self
+            .network_globals
+            .as_ref()?
+            .peers
+            .read()
+            .connected_peers()
+            .filter_map(|(_, peer_info)| match peer_info.sync_status() {
+                SyncStatus::Synced { info }
+                | SyncStatus::Advanced { info }
+                | SyncStatus::Behind { info } => Some(info.head_slot),
+                SyncStatus::IrrelevantPeer | SyncStatus::Unknown => None,
+            })
+            .collect::<Vec<_>>();
+
+        if peer_head_slots.len() < MIN_PEERS_TO_CHECK {
+            return None;
+        }
+
+        peer_head_slots
+            .into_iter()
+            .max()
+            .map(|max_peer_head_slot| max_peer_head_slot > head_slot)
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#block-proposal>

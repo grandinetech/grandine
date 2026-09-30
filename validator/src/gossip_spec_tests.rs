@@ -270,6 +270,7 @@ impl<P: Preset> Context<P> {
             network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
+            None,
         );
 
         // Spawn the validator so it processes incoming gossip messages and sends responses
