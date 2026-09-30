@@ -1056,6 +1056,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 graffiti,
                 disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
                 builder_boost_factor: self.validator_config.builder_boost_factor(*public_key),
+                min_bid: self.validator_config.builder_min_bid(*public_key),
                 ..BlockBuildOptions::default()
             },
         );
@@ -1116,6 +1117,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             },
             _block_rewards,
+            _builder_url,
         )) = beacon_block_option
         else {
             warn_with_peers!(

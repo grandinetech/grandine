@@ -157,6 +157,28 @@ mod tests {
     }
 
     #[test]
+    fn builder_url_shows_only_the_origin_when_formatted() {
+        let url = "https://user:secret@builder.example.com:8443/relay?token=secret";
+        let builder_url = BuilderUrl::try_from(url).expect("URL should be valid");
+
+        assert_eq!(builder_url.to_string(), "https://builder.example.com:8443");
+        assert_eq!(
+            format!("{builder_url:?}"),
+            "\"https://builder.example.com:8443\"",
+        );
+        assert_eq!(builder_url.as_str(), url);
+        assert_eq!(
+            serde_json::to_value(&builder_url).expect("URL should be serializable"),
+            url,
+        );
+
+        let non_http = BuilderUrl::try_from("user:secret@builder.example.com")
+            .expect("any nonempty UTF-8 string is accepted");
+
+        assert_eq!(non_http.to_string(), "non-HTTP URL");
+    }
+
+    #[test]
     fn builder_url_rejects_empty_in_both_encodings() {
         BuilderUrl::try_from("").expect_err("an empty URL should be rejected");
 

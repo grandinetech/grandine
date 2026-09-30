@@ -1,8 +1,13 @@
+use core::time::Duration;
+
 use hex_literal::hex;
 use typenum::{U64, U2048, U4096};
 use types::phase0::primitives::{DomainType, H32};
 
 pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
+
+pub const BUILDER_BID_REQUEST_TIMEOUT: Duration =
+    Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 /// [`DOMAIN_APPLICATION_BUILDER`] from `builder-specs`.
 ///

@@ -10,7 +10,10 @@ use anyhow::{Context as _, Result, bail, ensure};
 use bls::PublicKeyBytes;
 use helper_functions::misc;
 use serde::{Deserialize, Serialize};
-use types::{bellatrix::primitives::Gas, phase0::primitives::ExecutionAddress};
+use types::{
+    bellatrix::primitives::Gas,
+    phase0::primitives::{ExecutionAddress, Gwei},
+};
 use zeroize::Zeroizing;
 
 const VALIDATORS_FILE_NAME: &str = "validators.yml";
@@ -112,6 +115,8 @@ pub struct BuilderOptions {
     pub builder_boost_factor: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefer_builder_proposals: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_bid: Option<Gwei>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

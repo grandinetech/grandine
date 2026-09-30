@@ -55,7 +55,7 @@ use types::{
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_SLOT},
         containers::{AttestationData, ProposerSlashing},
-        primitives::{Epoch, ExecutionAddress, Gwei, Slot},
+        primitives::{Epoch, ExecutionAddress, ExecutionBlockHash, Gwei, Slot},
     },
     preset::{BuilderPendingPaymentsLength, Preset, SlotsPerHistoricalRoot},
     traits::{
@@ -155,7 +155,17 @@ pub fn custom_process_block<P: Preset>(
 
     // > [New in Gloas:EIP7732]
     let parent_slot = state.latest_block_header().slot;
-    process_parent_execution_payload(config, pubkey_cache, state, block)?;
+    process_parent_execution_payload(
+        config,
+        pubkey_cache,
+        state,
+        block
+            .body
+            .signed_execution_payload_bid
+            .message
+            .parent_block_hash,
+        &block.body.parent_execution_requests,
+    )?;
 
     unphased::process_block_header(config, state, block)?;
 
@@ -583,7 +593,7 @@ fn validate_execution_payload_bid_signature_with_verifier<P: Preset>(
     )
 }
 
-fn validate_execution_payload_bid<P: Preset>(
+pub fn validate_execution_payload_bid<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &impl PostGloasBeaconState<P>,
@@ -710,22 +720,21 @@ pub fn process_parent_execution_payload<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut impl PostGloasBeaconState<P>,
-    block: &BeaconBlock<P>,
+    parent_block_hash: ExecutionBlockHash,
+    parent_execution_requests: &ExecutionRequests<P>,
 ) -> Result<()> {
-    let bid = &block.body.signed_execution_payload_bid.message;
     let parent_bid = state.latest_execution_payload_bid();
-    let requests = &block.body.parent_execution_requests;
 
-    if bid.parent_block_hash != parent_bid.block_hash {
+    if parent_block_hash != parent_bid.block_hash {
         // Parent was EMPTY -- no execution requests expected
         ensure!(
-            *requests == ExecutionRequests::<P>::default(),
+            *parent_execution_requests == ExecutionRequests::<P>::default(),
             Error::<P>::ExecutionRequestsNotEmpty
         );
         return Ok(());
     }
 
-    let computed = requests.hash_tree_root();
+    let computed = parent_execution_requests.hash_tree_root();
 
     ensure!(
         computed == parent_bid.execution_requests_root,
@@ -735,7 +744,7 @@ pub fn process_parent_execution_payload<P: Preset>(
         }
     );
 
-    apply_parent_execution_payload(config, pubkey_cache, state, requests)
+    apply_parent_execution_payload(config, pubkey_cache, state, parent_execution_requests)
 }
 
 pub fn apply_parent_execution_payload<P: Preset>(
@@ -1544,7 +1553,13 @@ mod spec_tests {
 
     processing_tests! {
         process_parent_execution_payload,
-        |config, pubkey_cache, state, block, _| process_parent_execution_payload(config, pubkey_cache, state, &block),
+        |config, pubkey_cache, state, block: BeaconBlock<P>, _| process_parent_execution_payload(
+            config,
+            pubkey_cache,
+            state,
+            block.body.signed_execution_payload_bid.message.parent_block_hash,
+            &block.body.parent_execution_requests,
+        ),
         "block",
         "consensus-spec-tests/tests/mainnet/gloas/operations/parent_execution_payload/*/*",
         "consensus-spec-tests/tests/minimal/gloas/operations/parent_execution_payload/*/*",
