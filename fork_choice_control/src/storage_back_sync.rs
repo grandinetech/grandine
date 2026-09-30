@@ -125,7 +125,7 @@ impl<P: Preset> Storage<P> {
                 if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
                     info_with_peers!("archiving back-sync data up to {slot} slot");
 
-                    self.database.put_batch(batch)?;
+                    self.database.put_batch_raw(batch)?;
 
                     batch = vec![];
                     states_in_batch = 0;
@@ -133,7 +133,7 @@ impl<P: Preset> Storage<P> {
             }
         }
 
-        self.database.put_batch(batch)?;
+        self.database.put_batch_raw(batch)?;
 
         info_with_peers!(
             "back-synced state archival completed (start_slot: {start_slot}, end_slot: {end_slot})",
@@ -172,7 +172,7 @@ impl<P: Preset> Storage<P> {
             batch.push(serialize(FinalizedBlockByRoot(block_root), block)?);
         }
 
-        self.database.put_batch(batch)
+        self.database.put_batch_raw(batch)
     }
 
     pub(crate) fn store_back_sync_execution_payload_envelopes(

@@ -6051,6 +6051,7 @@ dependencies = [
  "serde-aux",
  "serde_utils",
  "serde_with",
+ "snap",
  "spec_test_utils",
  "ssz",
  "state_cache",

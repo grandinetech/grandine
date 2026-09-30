@@ -41,6 +41,7 @@ serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
 spec_test_utils = { workspace = true }
+snap = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }
 std_ext = { workspace = true }
