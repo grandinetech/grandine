@@ -7,7 +7,7 @@ use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
     nonstandard::CustodyMode,
-    phase0::primitives::{ExecutionAddress, H256},
+    phase0::primitives::{ExecutionAddress, Gwei, H256},
 };
 
 #[derive(Clone, Debug, Derivative)]
@@ -21,6 +21,7 @@ pub struct ValidatorConfig {
     #[derivative(Default(value = "Uint256::from_u64(100)"))]
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Option<Gas>,
+    pub default_builder_min_bid: Gwei,
     pub keystore_storage_password_file: Option<PathBuf>,
     #[derivative(Default(value = "true"))]
     pub backfill_custody_groups: bool,
@@ -51,6 +52,7 @@ impl ValidatorConfig {
             prefer_builder_proposals,
             builder_boost_factor,
             builder_proposals,
+            ..
         } = definition.builder_options;
 
         if prefer_builder_proposals == Some(true) {
@@ -62,5 +64,14 @@ impl ValidatorConfig {
         } else {
             self.default_builder_boost_factor
         }
+    }
+
+    #[must_use]
+    pub fn builder_min_bid(&self, pubkey: PublicKeyBytes) -> Gwei {
+        self.validator_definitions
+            .read()
+            .get(pubkey)
+            .and_then(|definition| definition.builder_options.min_bid)
+            .unwrap_or(self.default_builder_min_bid)
     }
 }
