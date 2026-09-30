@@ -1,11 +1,17 @@
-use ssz::{Hc, SszHash as _};
+use std::sync::Arc;
+
+use ssz::{ContiguousList, Hc, SszHash as _};
 use std_ext::ArcExt as _;
 
 use crate::{
-    bellatrix::containers::{
-        BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody, ExecutionPayload,
-        ExecutionPayloadHeader,
+    bellatrix::{
+        containers::{
+            BeaconBlock, BeaconBlockBody, BlindedBeaconBlock, BlindedBeaconBlockBody,
+            ExecutionPayload, ExecutionPayloadHeader,
+        },
+        primitives::Transaction,
     },
+    nonstandard::ExecutionPayloadBody,
     phase0::primitives::H256,
     preset::Preset,
 };
@@ -106,6 +112,47 @@ impl<P: Preset> BlindedBeaconBlock<P> {
         .into()
     }
 
+    pub fn unblind(
+        self,
+        transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    ) -> Hc<BeaconBlock<P>> {
+        let ExecutionPayloadHeader {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions_root: _,
+        } = self.body.execution_payload_header.clone();
+
+        let execution_payload = ExecutionPayload {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+        };
+
+        self.with_execution_payload(execution_payload)
+    }
+
     #[must_use]
     pub const fn with_state_root(mut self, state_root: H256) -> Self {
         self.state_root = state_root;
@@ -150,6 +197,20 @@ impl<P: Preset> From<&ExecutionPayload<P>> for ExecutionPayloadHeader<P> {
             base_fee_per_gas,
             block_hash,
             transactions_root,
+        }
+    }
+}
+
+impl<P: Preset> From<ExecutionPayload<P>> for ExecutionPayloadBody<P> {
+    fn from(payload: ExecutionPayload<P>) -> Self {
+        let transactions = Arc::unwrap_or_clone(payload.transactions)
+            .map(Into::into)
+            .into();
+
+        Self {
+            transactions: Arc::new(transactions),
+            withdrawals: None,
+            block_access_list: None,
         }
     }
 }
