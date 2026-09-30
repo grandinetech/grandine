@@ -7,6 +7,7 @@ use helper_functions::{
     accessors,
     error::SignatureKind,
     fork, misc,
+    signing::SignForSingleFork as _,
     slot_report::{NullSlotReport, RealSlotReport, SlotReport},
     verifier::{MultiVerifier, NullVerifier, SingleVerifier, Verifier, VerifierOption},
 };
@@ -15,7 +16,9 @@ use ssz::{H256, SszHash as _};
 use static_assertions::const_assert_eq;
 use thiserror::Error;
 use types::{
-    combined::{BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock},
+    combined::{
+        BeaconBlock, BeaconState, BlindedBeaconBlock, SignedBeaconBlock, SignedBlindedBeaconBlock,
+    },
     config::Config,
     nonstandard::{Phase, Toption},
     phase0::{
@@ -87,6 +90,64 @@ pub fn trusted_state_transition<P: Preset>(
         NullVerifier,
         NullSlotReport,
     )
+}
+
+pub fn untrusted_blinded_state_transition<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_block: &SignedBlindedBeaconBlock<P>,
+) -> Result<()> {
+    custom_blinded_state_transition(
+        config,
+        pubkey_cache,
+        state,
+        signed_block,
+        ProcessSlots::Always,
+        StateRootPolicy::Verify,
+        MultiVerifier::default(),
+        NullSlotReport,
+    )
+}
+
+pub fn trusted_blinded_state_transition<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_block: &SignedBlindedBeaconBlock<P>,
+) -> Result<()> {
+    custom_blinded_state_transition(
+        config,
+        pubkey_cache,
+        state,
+        signed_block,
+        ProcessSlots::Always,
+        StateRootPolicy::Trust,
+        NullVerifier,
+        NullSlotReport,
+    )
+}
+
+pub fn blinded_state_transition_for_report<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_block: &SignedBlindedBeaconBlock<P>,
+) -> Result<RealSlotReport> {
+    let mut slot_report = RealSlotReport::default();
+
+    custom_blinded_state_transition(
+        config,
+        pubkey_cache,
+        state,
+        signed_block,
+        ProcessSlots::IfNeeded,
+        StateRootPolicy::Trust,
+        NullVerifier,
+        &mut slot_report,
+    )?;
+
+    Ok(slot_report)
 }
 
 pub fn state_transition_for_report<P: Preset>(
@@ -239,6 +300,117 @@ pub fn custom_state_transition<P: Preset>(
             });
         }
     }
+}
+
+#[expect(clippy::too_many_arguments)]
+fn custom_blinded_state_transition<P: Preset, V: Verifier>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut BeaconState<P>,
+    signed_block: &SignedBlindedBeaconBlock<P>,
+    process_slots: ProcessSlots,
+    state_root_policy: StateRootPolicy,
+    mut verifier: V,
+    slot_report: impl SlotReport,
+) -> Result<()> {
+    let block = signed_block.message();
+
+    // > Process slots (including those with no blocks) since block
+    if process_slots.should_process(state, block) {
+        self::process_slots(config, pubkey_cache, state, block.slot())?;
+    }
+
+    // > Verify signature
+    if !V::IS_NULL {
+        let public_key = accessors::public_key(state, block.proposer_index())?;
+
+        verifier.verify_singular(
+            block.signing_root(config, state),
+            signed_block.signature(),
+            pubkey_cache.get_or_insert(*public_key)?,
+            SignatureKind::Block,
+        )?;
+    }
+
+    // > Process block
+    // > Verify state root
+    match (state, signed_block) {
+        (BeaconState::Bellatrix(state), SignedBlindedBeaconBlock::Bellatrix(block)) => {
+            bellatrix::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                &block.message,
+                &mut verifier,
+                slot_report,
+            )?;
+
+            state_root_policy.verify(state, &block.message)?;
+        }
+        (BeaconState::Capella(state), SignedBlindedBeaconBlock::Capella(block)) => {
+            capella::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                &block.message,
+                &mut verifier,
+                slot_report,
+            )?;
+
+            state_root_policy.verify(state, &block.message)?;
+        }
+        (BeaconState::Deneb(state), SignedBlindedBeaconBlock::Deneb(block)) => {
+            deneb::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                &block.message,
+                &mut verifier,
+                slot_report,
+            )?;
+
+            state_root_policy.verify(state, &block.message)?;
+        }
+        (BeaconState::Electra(state), SignedBlindedBeaconBlock::Electra(block)) => {
+            electra::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                &block.message,
+                &mut verifier,
+                slot_report,
+            )?;
+
+            state_root_policy.verify(state, &block.message)?;
+        }
+        (BeaconState::Fulu(state), SignedBlindedBeaconBlock::Fulu(block)) => {
+            fulu::custom_process_blinded_block(
+                config,
+                pubkey_cache,
+                state,
+                &block.message,
+                &mut verifier,
+                slot_report,
+            )?;
+
+            state_root_policy.verify(state, &block.message)?;
+        }
+        (state, _) => {
+            // This match arm will silently match any new phases.
+            // Cause a compilation error if a new phase is added.
+            const_assert_eq!(Phase::CARDINALITY, 8);
+
+            bail!(PhaseError {
+                block_phase: signed_block.phase(),
+                block_root: block.hash_tree_root(),
+                block_slot: block.slot(),
+                state_phase: state.phase(),
+                state_slot: state.slot(),
+            });
+        }
+    }
+
+    verifier.finish()
 }
 
 pub fn verify_base_signature_with_head_state<P: Preset>(
@@ -1048,7 +1220,6 @@ pub struct PayloadEnvelopePhaseError {
 mod spec_tests {
     use arithmetic::UsizeExt as _;
     use duplicate::duplicate_item;
-    use helper_functions::predicates;
     use spec_test_utils::Case;
     use test_generator::test_resources;
     use types::{
@@ -1200,7 +1371,7 @@ mod spec_tests {
 
             assert_eq!(actual_post_state, expected_post_state);
 
-            if should_run_blinded_block_processing(&pre, blocks.clone()) {
+            if should_run_blinded_block_processing(&pre) {
                 let mut state = pre;
 
                 assert_still_succeeds_with_blinded_blocks(
@@ -1258,34 +1429,9 @@ mod spec_tests {
         assert_eq!(state, expected_post);
     }
 
-    fn should_run_blinded_block_processing<P: Preset>(
-        state: &BeaconState<P>,
-        blocks: impl IntoIterator<Item = SignedBeaconBlock<P>>,
-    ) -> bool {
-        // Starting with `consensus-specs` v1.4.0-alpha.0, all Capella blocks must be post-Merge.
+    fn should_run_blinded_block_processing<P: Preset>(state: &BeaconState<P>) -> bool {
         // Since Gloas, there is no blinded block processing
-        if state.phase() >= Phase::Capella && state.phase() < Phase::Gloas {
-            return true;
-        }
-
-        let Some(post_bellatrix_state) = state.post_bellatrix() else {
-            return false;
-        };
-
-        let first_block = blocks
-            .into_iter()
-            .next()
-            .expect("test case should contain at least one block");
-
-        let Some(post_bellatrix_body) = first_block.message().body().with_execution_payload()
-        else {
-            return false;
-        };
-
-        // Some Bellatrix test cases are pre-Merge.
-        // Our blinded block processing code assumes all blinded blocks are post-Merge.
-        // See `transition_functions::bellatrix::custom_process_blinded_block`.
-        predicates::is_execution_enabled(post_bellatrix_state, post_bellatrix_body)
+        state.phase() >= Phase::Bellatrix && state.phase() < Phase::Gloas
     }
 
     // We can only test blinded block processing with valid blocks.
@@ -1308,7 +1454,7 @@ mod spec_tests {
                 let header = message
                     .body()
                     .with_execution_payload()
-                    .expect("blocks should be post-Merge")
+                    .expect("blocks should be post-Bellatrix")
                     .execution_payload()
                     .to_header();
 

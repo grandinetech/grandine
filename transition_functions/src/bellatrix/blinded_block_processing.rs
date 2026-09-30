@@ -5,7 +5,9 @@ use pubkey_cache::PubkeyCache;
 use types::{
     bellatrix::{
         beacon_state::BeaconState,
-        containers::{BlindedBeaconBlock, BlindedBeaconBlockBody},
+        containers::{
+            BlindedBeaconBlock, BlindedBeaconBlockBody, ExecutionPayload, ExecutionPayloadHeader,
+        },
     },
     config::Config,
     preset::Preset,
@@ -31,11 +33,14 @@ pub fn custom_process_blinded_block<P: Preset>(
 
     // > [New in Bellatrix]
     //
-    // We call `process_execution_payload` unconditionally even in Bellatrix.
-    // This way we don't have to check if the payload header corresponds to the default payload.
-    // This is less general but probably safe because all blinded blocks should be post-Merge.
-    // See <https://github.com/ethereum/builder-specs/blob/v0.3.0/specs/bellatrix/validator.md#responsibilities-during-the-merge-transition>.
-    process_execution_payload(config, state, &block.body)?;
+    // The header of the default payload is not the default header.
+    // Its `transactions_root` is the root of an empty list.
+    if predicates::is_merge_transition_complete(state)
+        || block.body.execution_payload_header
+            != ExecutionPayloadHeader::from(&ExecutionPayload::default())
+    {
+        process_execution_payload(config, state, &block.body)?;
+    }
 
     unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
