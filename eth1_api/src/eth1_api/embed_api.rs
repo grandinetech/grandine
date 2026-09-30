@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use arc_swap::ArcSwap;
 use core::ops::RangeInclusive;
 use either::Either;
@@ -7,10 +7,10 @@ use ethereum_types::H64;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes,
-    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4, PayloadId,
-    PayloadStatusV1,
+    EngineGetPayloadV6Response, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
+    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadAttributesV1, PayloadAttributesV2,
+    PayloadAttributesV3, PayloadAttributesV4, PayloadId, PayloadStatusV1,
 };
 use futures::channel::mpsc::UnboundedSender;
 use prometheus_metrics::Metrics;
@@ -30,7 +30,7 @@ use types::{
     deneb::primitives::VersionedHash,
     electra::containers::ExecutionRequests as ElectraExecutionRequests,
     gloas::containers::ExecutionRequests as GloasExecutionRequests,
-    nonstandard::{Phase, WithBlobsAndMev},
+    nonstandard::{ExecutionPayloadBody, Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::{Mainnet, Preset},
     redacting_url::RedactingUrl,
@@ -44,6 +44,7 @@ use crate::{
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
+        ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1, ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2,
         ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
         ENGINE_GET_PAYLOAD_V5, ENGINE_GET_PAYLOAD_V6, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2,
         ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4, ENGINE_NEW_PAYLOAD_V5,
@@ -127,6 +128,15 @@ pub trait EmbedAdapter: Send + Sync {
     fn engine_get_payload_v6(&self, payload_id: H64)
     -> Result<EngineGetPayloadV6Response<Mainnet>>;
 
+    fn engine_get_payload_bodies_by_hash_v1(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Result<Vec<Option<ExecutionPayloadBodyV1<Mainnet>>>>;
+    fn engine_get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Result<Vec<Option<ExecutionPayloadBodyV2<Mainnet>>>>;
+
     fn engine_get_blobs_v1(
         &self,
         versioned_hashes: Vec<VersionedHash>,
@@ -155,6 +165,8 @@ enum Error {
     InvalidParameters,
     #[error("only mainnet preset supported for embedded client")]
     InvalidPreset,
+    #[error("execution client returned {received} payload bodies for {requested} block hashes")]
+    PayloadBodiesCountMismatch { requested: usize, received: usize },
     #[error("pre-Bellatrix phase passed to Eth1Api::forkchoice_updated")]
     PhasePreBellatrix,
 }
@@ -799,6 +811,74 @@ impl Eth1Api {
             client_versions: Some(self.versions.load().clone_arc()),
             result,
         })
+    }
+
+    /// Calls [`engine_getPayloadBodiesByHashV2`] if the execution client supports it,
+    /// [`engine_getPayloadBodiesByHashV1`] otherwise.
+    ///
+    /// The result has one entry per hash in `block_hashes`, in the same order.
+    /// Entries are `None` for payloads the execution client does not have.
+    ///
+    /// [`engine_getPayloadBodiesByHashV1`]: https://github.com/ethereum/execution-apis/blob/00ca4be81bc58328d49b85e01108bddfff034faa/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
+    /// [`engine_getPayloadBodiesByHashV2`]: https://github.com/ethereum/execution-apis/blob/5aebdfdd45cadeb723be4bd45b4611b71c8b1c85/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
+    pub async fn get_payload_bodies_by_hash<P: Preset>(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Result<Vec<Option<ExecutionPayloadBody<P>>>> {
+        let requested = block_hashes.len();
+
+        let bodies: Vec<Option<ExecutionPayloadBody<Mainnet>>> = if self
+            .capabilities
+            .load()
+            .contains(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2)
+        {
+            let _timer = self.metrics.as_ref().map(|metrics| {
+                prometheus_metrics::start_timer_vec(
+                    &metrics.eth1_api_request_times,
+                    ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2,
+                )
+            });
+
+            self.exec(move |adapter| adapter.engine_get_payload_bodies_by_hash_v2(block_hashes))
+                .await?
+                .into_iter()
+                .map(|body| body.map(Into::into))
+                .collect()
+        } else {
+            let _timer = self.metrics.as_ref().map(|metrics| {
+                prometheus_metrics::start_timer_vec(
+                    &metrics.eth1_api_request_times,
+                    ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1,
+                )
+            });
+
+            self.exec(move |adapter| adapter.engine_get_payload_bodies_by_hash_v1(block_hashes))
+                .await?
+                .into_iter()
+                .map(|body| body.map(Into::into))
+                .collect()
+        };
+
+        ensure!(
+            bodies.len() == requested,
+            Error::PayloadBodiesCountMismatch {
+                requested,
+                received: bodies.len(),
+            },
+        );
+
+        bodies
+            .into_iter()
+            .map(|body| {
+                body.map(|body| {
+                    let body: &dyn std::any::Any = &body;
+                    let body: &ExecutionPayloadBody<P> =
+                        body.downcast_ref().ok_or(Error::InvalidPreset)?;
+                    Ok(body.clone())
+                })
+                .transpose()
+            })
+            .collect()
     }
 
     pub(crate) async fn get_blobs_v1<P: Preset>(
