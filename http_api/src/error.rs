@@ -10,6 +10,7 @@ use axum::{
 };
 use axum_extra::{extract::QueryRejection, typed_header::TypedHeaderRejection};
 use bls::{SignatureBytes, traits::SignatureBytes as _};
+use fork_choice_control::BlockError;
 use futures::channel::oneshot::Canceled;
 use http_api_utils::{ApiError, PhaseHeaderError};
 use serde::{Serialize, Serializer};
@@ -219,6 +220,15 @@ pub enum Error {
     //                      See <https://github.com/attestantio/vouch/issues/75>.
     // #[error("validator not in committee: {validator_index}")]
     // ValidatorNotInCommittee { validator_index: ValidatorIndex },
+}
+
+impl From<BlockError> for Error {
+    fn from(error: BlockError) -> Self {
+        match error {
+            error @ BlockError::PayloadBodyNotFound { .. } => AnyhowError::new(error).into(),
+            BlockError::Other(error) => error.into(),
+        }
+    }
 }
 
 impl ApiError for Error {

@@ -1,16 +1,16 @@
 use core::{fmt::Debug, ops::Range};
 use std::{collections::HashSet, sync::Arc};
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use arc_swap::Guard;
 use eth2_libp2p::GossipId;
-use execution_engine::ExecutionEngine;
+use execution_engine::{ExecutionEngine, MAX_PAYLOAD_BODIES_PER_REQUEST};
 use fork_choice_store::{
     AggregateAndProofOrigin, AttestationItem, BlobSidecarAction, BlobSidecarOrigin, ChainLink,
     DataColumnSidecarAction, DataColumnSidecarOrigin, ExecutionPayloadEnvelopeAction,
     ExecutionPayloadEnvelopeOrigin, PayloadPresence, StateCacheProcessor, Store,
 };
-use futures::Future;
+use futures::{Future, StreamExt, channel::oneshot};
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use pubkey_cache::PubkeyCache;
@@ -20,7 +20,9 @@ use thiserror::Error;
 use tracing::instrument;
 use typenum::Unsigned as _;
 use types::{
-    combined::{BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock},
+    combined::{
+        BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock, UnblindError,
+    },
     deneb::containers::{BlobIdentifier, BlobSidecar},
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
@@ -28,7 +30,7 @@ use types::{
         containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
-    nonstandard::{PayloadStatus, Phase, RelativeEpoch, WithStatus},
+    nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
         primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds},
@@ -41,7 +43,7 @@ use crate::{
     controller::Controller,
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
-    storage::Storage,
+    storage::{Storage, StoredBlock, StoredEnvelope},
     unbounded_sink::UnboundedSink,
     wait::Wait,
 };
@@ -505,12 +507,34 @@ where
             .contains_block_and_data_available(block_root)
     }
 
-    pub fn block_by_root(
+    pub async fn block_by_root(
         &self,
         block_root: H256,
-    ) -> Result<Option<WithStatus<Arc<SignedBeaconBlock<P>>>>> {
+    ) -> Result<Option<WithStatus<Arc<SignedBeaconBlock<P>>>>, BlockError> {
+        let Some(WithStatus {
+            value,
+            status,
+            finalized,
+        }) = self.stored_block_by_root(block_root)?
+        else {
+            return Ok(None);
+        };
+
+        let value = self.unblind_block(value).await?;
+
+        Ok(Some(WithStatus {
+            value,
+            status,
+            finalized,
+        }))
+    }
+
+    pub fn stored_block_by_root(
+        &self,
+        block_root: H256,
+    ) -> Result<Option<WithStatus<StoredBlock<P>>>> {
         if let Some(with_status) = self.store_snapshot().block(block_root) {
-            return Ok(Some(with_status.cloned()));
+            return Ok(Some(with_status.cloned().map(StoredBlock::Full)));
         }
 
         if let Some(block) = self.storage().finalized_block_by_root(block_root)? {
@@ -518,19 +542,46 @@ where
         }
 
         if let Some(block) = self.storage().unfinalized_block_by_root(block_root)? {
-            return Ok(Some(WithStatus::valid_and_unfinalized(block)));
+            return Ok(Some(WithStatus::valid_and_unfinalized(StoredBlock::Full(
+                block,
+            ))));
         }
 
         Ok(None)
     }
 
-    pub fn block_by_slot(&self, slot: Slot) -> Result<Option<WithStatus<BlockWithRoot<P>>>> {
+    pub async fn block_by_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<BlockWithRoot<Arc<SignedBeaconBlock<P>>>>>, BlockError> {
+        let Some(WithStatus {
+            value: BlockWithRoot { block, root },
+            status,
+            finalized,
+        }) = self.stored_block_by_slot(slot)?
+        else {
+            return Ok(None);
+        };
+
+        let block = self.unblind_block(block).await?;
+
+        Ok(Some(WithStatus {
+            value: BlockWithRoot { block, root },
+            status,
+            finalized,
+        }))
+    }
+
+    pub fn stored_block_by_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<BlockWithRoot<StoredBlock<P>>>>> {
         let store = self.store_snapshot();
 
         if let Some(chain_link) = store.chain_link_before_or_at(slot)
             && chain_link.slot() == slot
         {
-            let block = chain_link.block.clone_arc();
+            let block = StoredBlock::Full(chain_link.block.clone_arc());
             let root = chain_link.block_root;
 
             return Ok(Some(WithStatus {
@@ -553,8 +604,34 @@ where
             .block_root_by_slot_with_store(self.store_snapshot().as_ref(), slot)
     }
 
-    pub fn blocks_by_range(&self, range: Range<Slot>) -> Result<Vec<BlockWithRoot<P>>> {
-        self.snapshot().blocks_by_range(range)
+    pub async fn blocks_by_range(
+        &self,
+        range: Range<Slot>,
+    ) -> Vec<Result<BlockWithRoot<Arc<SignedBeaconBlock<P>>>, BlockError>> {
+        let blocks_with_roots = match self.stored_blocks_by_range(range) {
+            Ok(blocks_with_roots) => blocks_with_roots,
+            Err(error) => return vec![Err(error.into())],
+        };
+
+        let (blocks, roots): (Vec<_>, Vec<_>) = blocks_with_roots
+            .into_iter()
+            .map(|BlockWithRoot { block, root }| (block, root))
+            .unzip();
+
+        self.unblind_blocks(blocks)
+            .await
+            .into_iter()
+            .zip(roots)
+            .map(|(block, root)| block.map(|block| BlockWithRoot { block, root }))
+            .take_while_inclusive(Result::is_ok)
+            .collect()
+    }
+
+    pub fn stored_blocks_by_range(
+        &self,
+        range: Range<Slot>,
+    ) -> Result<Vec<BlockWithRoot<StoredBlock<P>>>> {
+        self.snapshot().stored_blocks_by_range(range)
     }
 
     pub fn blob_sidecars_by_ids(
@@ -581,7 +658,7 @@ where
     }
 
     pub fn blob_sidecars_by_range(&self, range: Range<Slot>) -> Result<Vec<Arc<BlobSidecar<P>>>> {
-        let canonical_chain_blocks = self.blocks_by_range(range)?;
+        let canonical_chain_blocks = self.stored_blocks_by_range(range)?;
 
         let blob_ids =
             canonical_chain_blocks
@@ -610,49 +687,58 @@ where
         self.blob_sidecars_by_ids(blob_ids)
     }
 
-    pub fn execution_payload_envelopes_by_range(
+    pub async fn envelopes_by_range(
         &self,
         range: Range<Slot>,
-    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        let block_roots = self.snapshot().canonical_payload_block_roots(range)?;
+    ) -> Vec<Result<Arc<SignedExecutionPayloadEnvelope<P>>, BlockError>> {
+        let block_roots = match self.snapshot().canonical_payload_block_roots(range) {
+            Ok(block_roots) => block_roots,
+            Err(error) => return vec![Err(error.into())],
+        };
 
-        self.execution_payload_envelopes_by_roots(block_roots)
+        self.envelopes_by_roots(block_roots)
+            .await
+            .into_iter()
+            .take_while_inclusive(Result::is_ok)
+            .collect()
     }
 
-    pub fn execution_payload_envelopes_by_roots(
+    pub async fn envelopes_by_roots(
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,
-    ) -> Result<Vec<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        let snapshot = self.snapshot();
-        let storage = self.storage();
-
-        let envelopes = block_roots
+    ) -> Vec<Result<Arc<SignedExecutionPayloadEnvelope<P>>, BlockError>> {
+        let envelopes = match block_roots
             .into_iter()
-            .filter_map(|block_root| {
-                // Check cache then fallback to database
-                match snapshot.cached_execution_payload_envelope(block_root) {
-                    Some(envelope) => Some(Ok(envelope.clone_arc())),
-                    None => storage
-                        .execution_payload_envelope_by_root(block_root)
-                        .transpose(),
-                }
-            })
-            .collect::<Result<Vec<_>>>()?;
+            .filter_map(|block_root| self.stored_envelope_by_root(block_root).transpose())
+            .collect()
+        {
+            Ok(envelopes) => envelopes,
+            Err(error) => return vec![Err(error.into())],
+        };
 
-        Ok(envelopes)
+        self.unblind_envelopes(envelopes).await
     }
 
-    pub fn execution_payload_envelope_by_root(
+    pub async fn envelope_by_root(
         &self,
         block_root: H256,
-    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        let snapshot = self.snapshot();
-        let storage = self.storage();
+    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>, BlockError> {
+        let Some(envelope) = self.stored_envelope_by_root(block_root)? else {
+            return Ok(None);
+        };
 
-        match snapshot.cached_execution_payload_envelope(block_root) {
-            Some(envelope) => Ok(Some(envelope.clone_arc())),
-            None => storage.execution_payload_envelope_by_root(block_root),
+        self.unblind_envelope(envelope).await.map(Some)
+    }
+
+    pub fn stored_envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
+        if let Some(envelope) = self
+            .snapshot()
+            .cached_execution_payload_envelope(block_root)
+        {
+            return Ok(Some(StoredEnvelope::Full(envelope.clone_arc())));
         }
+
+        self.storage().envelope_by_root(block_root)
     }
 
     pub fn indices_of_missing_data_columns(
@@ -675,14 +761,29 @@ where
         self.store_snapshot().head_root_with_payload_status()
     }
 
-    pub fn blocks_by_root(
+    pub async fn blocks_by_root(
         &self,
         block_roots: impl IntoIterator<Item = H256> + Send,
-    ) -> Result<Vec<WithStatus<Arc<SignedBeaconBlock<P>>>>> {
-        block_roots
+    ) -> Vec<Result<WithStatus<Arc<SignedBeaconBlock<P>>>, BlockError>> {
+        let blocks_with_status = match block_roots
             .into_iter()
-            .map(|root| self.block_by_root(root))
-            .filter_map(Result::transpose)
+            .filter_map(|root| self.stored_block_by_root(root).transpose())
+            .collect::<Result<Vec<_>>>()
+        {
+            Ok(blocks_with_status) => blocks_with_status,
+            Err(error) => return vec![Err(error.into())],
+        };
+
+        let blocks = blocks_with_status
+            .iter()
+            .map(|with_status| with_status.value.clone())
+            .collect();
+
+        self.unblind_blocks(blocks)
+            .await
+            .into_iter()
+            .zip(blocks_with_status)
+            .map(|(block, with_status)| block.map(|block| with_status.map(|_| block)))
             .collect()
     }
 
@@ -759,7 +860,7 @@ where
     ) -> Result<
         impl Iterator<Item = impl Future<Output = Result<Option<Arc<DataColumnSidecar<P>>>>> + '_> + '_,
     > {
-        let canonical_chain_blocks = self.blocks_by_range(range)?;
+        let canonical_chain_blocks = self.stored_blocks_by_range(range)?;
 
         let data_column_ids = canonical_chain_blocks
             .iter()
@@ -1062,6 +1163,162 @@ where
                 execution_engine,
             )
     }
+
+    async fn unblind_block(
+        &self,
+        block: StoredBlock<P>,
+    ) -> Result<Arc<SignedBeaconBlock<P>>, BlockError> {
+        self.unblind_blocks(vec![block])
+            .await
+            .pop()
+            .expect("unblind_blocks returns one block per input block")
+    }
+
+    async fn unblind_blocks(
+        &self,
+        blocks: Vec<StoredBlock<P>>,
+    ) -> Vec<Result<Arc<SignedBeaconBlock<P>>, BlockError>> {
+        let mut output = Vec::with_capacity(blocks.len());
+        let mut pending_payloads = Vec::new();
+
+        for block in blocks {
+            let block = match block {
+                StoredBlock::Blinded(block) => block,
+                StoredBlock::Full(block) => {
+                    output.push(Ok(block));
+                    continue;
+                }
+            };
+
+            let execution_block_hash = block.execution_payload_header().block_hash();
+
+            if execution_block_hash.is_zero() {
+                output.push(
+                    Arc::unwrap_or_clone(block)
+                        .unblind(ExecutionPayloadBody::default())
+                        .map(Arc::new)
+                        .map_err(|error| BlockError::Other(error.into())),
+                );
+                continue;
+            }
+
+            pending_payloads.push((output.len(), block, execution_block_hash));
+            output.push(Err(BlockError::PayloadBodyNotFound {
+                block_hash: execution_block_hash,
+            }));
+        }
+
+        let payload_bodies = self
+            .payload_bodies_by_hash(pending_payloads.iter().map(|(_, _, hash)| *hash).collect())
+            .await;
+
+        for ((index, block, _), payload_body) in pending_payloads.into_iter().zip(payload_bodies) {
+            output[index] = match payload_body {
+                Ok(Some(payload_body)) => Arc::unwrap_or_clone(block)
+                    .unblind(payload_body)
+                    .map(Arc::new)
+                    .map_err(|error| BlockError::Other(error.into())),
+                Ok(None) => continue,
+                Err(unknown) => Err(unknown.into()),
+            }
+        }
+
+        output
+    }
+
+    async fn unblind_envelope(
+        &self,
+        envelope: StoredEnvelope<P>,
+    ) -> Result<Arc<SignedExecutionPayloadEnvelope<P>>, BlockError> {
+        self.unblind_envelopes(vec![envelope])
+            .await
+            .pop()
+            .expect("unblind_envelopes returns one envelope per input envelope")
+    }
+
+    async fn unblind_envelopes(
+        &self,
+        envelopes: Vec<StoredEnvelope<P>>,
+    ) -> Vec<Result<Arc<SignedExecutionPayloadEnvelope<P>>, BlockError>> {
+        let mut output = Vec::with_capacity(envelopes.len());
+        let mut pending_payloads = Vec::new();
+
+        for envelope in envelopes {
+            let envelope = match envelope {
+                StoredEnvelope::Blinded(envelope) => envelope,
+                StoredEnvelope::Full(envelope) => {
+                    output.push(Ok(envelope));
+                    continue;
+                }
+            };
+
+            let execution_block_hash = envelope.message.payload_header.block_hash;
+
+            pending_payloads.push((output.len(), envelope, execution_block_hash));
+            output.push(Err(BlockError::PayloadBodyNotFound {
+                block_hash: execution_block_hash,
+            }));
+        }
+
+        let payload_bodies = self
+            .payload_bodies_by_hash(pending_payloads.iter().map(|(_, _, hash)| *hash).collect())
+            .await;
+
+        for ((index, envelope, block_hash), payload_body) in
+            pending_payloads.into_iter().zip(payload_bodies)
+        {
+            output[index] = match payload_body {
+                Ok(Some(payload_body)) => {
+                    match Arc::unwrap_or_clone(envelope).unblind(payload_body) {
+                        Ok(envelope) => Ok(Arc::new(envelope)),
+                        // The execution engine answered without a block access list:
+                        // it either serves only `engine_getPayloadBodiesByHashV1` or has pruned it.
+                        Err(UnblindError::MissingBlockAccessList) => {
+                            Err(BlockError::PayloadBodyNotFound { block_hash })
+                        }
+                        Err(error) => Err(BlockError::Other(error.into())),
+                    }
+                }
+                Ok(None) => continue,
+                Err(unknown) => Err(unknown.into()),
+            }
+        }
+
+        output
+    }
+
+    async fn payload_bodies_by_hash(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Vec<Result<Option<ExecutionPayloadBody<P>>>> {
+        futures::stream::iter(
+            block_hashes
+                .chunks(MAX_PAYLOAD_BODIES_PER_REQUEST)
+                .map(<[_]>::to_vec),
+        )
+        .map(|block_hashes| async move {
+            let requested = block_hashes.len();
+            let (sender, receiver) = oneshot::channel();
+
+            self.execution_engine()
+                .get_payload_bodies_by_hash(block_hashes, sender);
+
+            let result = receiver
+                .await
+                .context("execution engine dropped the payload bodies request")
+                .flatten();
+
+            match result {
+                Ok(payload_bodies) => payload_bodies.into_iter().map(Ok).collect_vec(),
+                Err(error) => (0..requested)
+                    .map(|_| Err(anyhow!("{error:?}")))
+                    .collect_vec(),
+            }
+        })
+        .buffered(3)
+        .concat()
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -1211,22 +1468,22 @@ impl<P: Preset> From<(&ChainLink<P>, bool)> for ForkTip {
     }
 }
 
-pub struct BlockWithRoot<P: Preset> {
-    pub block: Arc<SignedBeaconBlock<P>>,
+pub struct BlockWithRoot<B> {
+    pub block: B,
     pub root: H256,
 }
 
-impl<P: Preset> From<&ChainLink<P>> for BlockWithRoot<P> {
+impl<P: Preset> From<&ChainLink<P>> for BlockWithRoot<StoredBlock<P>> {
     fn from(chain_link: &ChainLink<P>) -> Self {
         Self {
-            block: chain_link.block.clone_arc(),
+            block: StoredBlock::Full(chain_link.block.clone_arc()),
             root: chain_link.block_root,
         }
     }
 }
 
-impl<P: Preset> From<(Arc<SignedBeaconBlock<P>>, H256)> for BlockWithRoot<P> {
-    fn from((block, root): (Arc<SignedBeaconBlock<P>>, H256)) -> Self {
+impl<B> From<(B, H256)> for BlockWithRoot<B> {
+    fn from((block, root): (B, H256)) -> Self {
         Self { block, root }
     }
 }
@@ -1443,7 +1700,10 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 
     // This returns blocks ordered oldest to newest, as mandated for `BeaconBlocksByRange`.
-    pub fn blocks_by_range(&self, range: Range<Slot>) -> Result<Vec<BlockWithRoot<P>>> {
+    pub fn stored_blocks_by_range(
+        &self,
+        range: Range<Slot>,
+    ) -> Result<Vec<BlockWithRoot<StoredBlock<P>>>> {
         let Range { start, end } = range;
 
         let mut blocks = self
@@ -1476,7 +1736,7 @@ impl<P: Preset> Snapshot<'_, P> {
     }
 
     pub fn canonical_payload_block_roots(&self, range: Range<Slot>) -> Result<Vec<H256>> {
-        let blocks = self.blocks_by_range(range)?;
+        let blocks = self.stored_blocks_by_range(range)?;
 
         let Some(last_block) = blocks.last() else {
             return Ok(vec![]);
@@ -1509,7 +1769,10 @@ impl<P: Preset> Snapshot<'_, P> {
         Ok(block_roots)
     }
 
-    fn canonical_block_after_slot(&self, slot: Slot) -> Result<Option<BlockWithRoot<P>>> {
+    fn canonical_block_after_slot(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<BlockWithRoot<StoredBlock<P>>>> {
         // The store only keeps the most recent finalized blocks. It has the successor as long
         // as it reaches back to `slot` itself.
         if self.store_snapshot.chain_link_before_or_at(slot).is_some() {
@@ -1600,6 +1863,14 @@ enum Error {
     },
     #[error("state not found in fork choice store: {block_root:?}")]
     StateNotFound { block_root: H256 },
+}
+
+#[derive(Debug, Error)]
+pub enum BlockError {
+    #[error("execution payload body not found: {block_hash:?}")]
+    PayloadBodyNotFound { block_hash: ExecutionBlockHash },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 #[cfg(test)]

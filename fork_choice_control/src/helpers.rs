@@ -43,6 +43,7 @@ use crate::{
     misc::MutatorIgnoreReason,
     queries::BlockWithRoot,
     specialized::{TestController, TestExecutionEngine},
+    storage::StoredBlock,
 };
 
 pub struct Context<P: Preset> {
@@ -961,8 +962,11 @@ impl<P: Preset> Context<P> {
         );
     }
 
-    pub fn blocks_by_range(&self, range: Range<Slot>) -> Result<Vec<BlockWithRoot<P>>> {
-        self.controller().blocks_by_range(range)
+    pub fn stored_blocks_by_range(
+        &self,
+        range: Range<Slot>,
+    ) -> Result<Vec<BlockWithRoot<StoredBlock<P>>>> {
+        self.controller().stored_blocks_by_range(range)
     }
 
     pub fn assert_genesis_time(&self, expected_time: UnixSeconds) {

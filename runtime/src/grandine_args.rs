@@ -7,7 +7,7 @@
 use core::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     num::{NonZeroU16, NonZeroU64},
-    ops::Not as _,
+    ops::{Not as _, RangeInclusive},
     time::Duration,
 };
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
@@ -31,7 +31,9 @@ use eth2_libp2p::{
     rpc::config::{InboundRateLimiterConfig, OutboundRateLimiterConfig},
 };
 use features::Feature;
-use fork_choice_control::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS};
+use fork_choice_control::{
+    DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_MAX_EVENTS, DEFAULT_ZSTD_COMPRESSION_LEVEL,
+};
 use fork_choice_store::{
     BuilderCircuitBreakerConfig, DEFAULT_CACHE_LOCK_TIMEOUT_MILLIS, StoreConfig,
 };
@@ -345,6 +347,15 @@ struct BeaconNodeOptions {
     /// [default: disabled]
     #[clap(long, conflicts_with("archive_storage"))]
     prune_storage: bool,
+
+    /// Store execution payloads of finalized blocks in the database
+    /// [default: disabled]
+    #[clap(long)]
+    store_payloads: bool,
+
+    /// Compression level for zstd-compressed data in the database
+    #[clap(long, allow_negative_numbers = true, default_value_t = DEFAULT_ZSTD_COMPRESSION_LEVEL)]
+    zstd_compression_level: i32,
 
     /// Number of unfinalized states to keep in memory.
     #[clap(long, default_value_t = StoreConfig::default().unfinalized_states_in_memory)]
@@ -1093,6 +1104,8 @@ impl GrandineArgs {
             archival_epoch_interval,
             archive_storage,
             prune_storage,
+            store_payloads,
+            zstd_compression_level,
             unfinalized_states_in_memory,
             reconstruction_delay,
             request_timeout,
@@ -1410,6 +1423,13 @@ impl GrandineArgs {
             Error::UnfinalizedStatesInMemoryTooLow { minimum },
         );
 
+        let range = zstd::compression_level_range();
+
+        ensure!(
+            range.contains(&zstd_compression_level),
+            Error::ZstdCompressionLevelOutOfRange { range },
+        );
+
         let features = features
             .into_iter()
             .chain(subscribe_all_subnets.then_some(Feature::SubscribeToAllAttestationSubnets))
@@ -1509,6 +1529,8 @@ impl GrandineArgs {
             archival_epoch_interval,
             reset_databases: force_reset_beacon_db,
             storage_mode,
+            store_execution_payloads: store_payloads,
+            zstd_compression_level,
         };
 
         network_config_options.print_upnp_warning();
@@ -1681,6 +1703,8 @@ enum Error {
     ConfigMismatch { differences: Vec<Difference> },
     #[error("--unfinalized-states-in-memory must be at least {minimum}")]
     UnfinalizedStatesInMemoryTooLow { minimum: u64 },
+    #[error("--zstd-compression-level must be in {range:?}")]
+    ZstdCompressionLevelOutOfRange { range: RangeInclusive<i32> },
     #[error("identical addresses specified for {service1} and {service2}")]
     IdenticalAddresses {
         service1: &'static str,

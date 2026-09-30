@@ -30,7 +30,7 @@ use eth2_libp2p::{
 };
 use features::Feature;
 use fork_choice_control::{
-    BlockWithRoot, MutatorIgnoreReason, MutatorRejectionReason, P2pMessage, Wait,
+    BlockError, BlockWithRoot, MutatorIgnoreReason, MutatorRejectionReason, P2pMessage, Wait,
 };
 use futures::{
     channel::mpsc::{Receiver, UnboundedReceiver, UnboundedSender},
@@ -1535,10 +1535,46 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
         self.dedicated_executor
             .spawn(async move {
-                let blocks = controller.blocks_by_range(start_slot..end_slot)?;
+                let blocks = controller.blocks_by_range(start_slot..end_slot).await;
 
                 for block_with_root in blocks {
-                    let BlockWithRoot { block, root } = block_with_root;
+                    let BlockWithRoot { block, root } = match block_with_root {
+                        Ok(block_with_root) => block_with_root,
+                        Err(error @ BlockError::PayloadBodyNotFound { .. }) => {
+                            debug_with_peers!(
+                                "ending BeaconBlocksByRange response stream early \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error}",
+                            );
+
+                            ServiceInboundMessage::SendErrorResponse(
+                                peer_id,
+                                inbound_request_id,
+                                RpcErrorResponse::ResourceUnavailable,
+                                "execution layer not synced",
+                            )
+                            .send(&network_to_service_tx);
+
+                            return Ok(());
+                        }
+                        Err(BlockError::Other(error)) => {
+                            warn_with_peers!(
+                                "failed to load block for BeaconBlocksByRange request \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error:?}",
+                            );
+
+                            ServiceInboundMessage::SendErrorResponse(
+                                peer_id,
+                                inbound_request_id,
+                                RpcErrorResponse::ServerError,
+                                "failed fetching blocks",
+                            )
+                            .send(&network_to_service_tx);
+
+                            return Ok(());
+                        }
+                    };
 
                     debug_with_peers!(
                         "sending BeaconBlocksByRange response chunk \
@@ -1599,10 +1635,48 @@ impl<P: Preset, W: Wait> Network<P, W> {
 
         self.dedicated_executor
             .spawn(async move {
-                let envelopes =
-                    controller.execution_payload_envelopes_by_range(start_slot..end_slot)?;
+                let envelopes = controller.envelopes_by_range(start_slot..end_slot).await;
 
                 for envelope in envelopes {
+                    let envelope = match envelope {
+                        Ok(envelope) => envelope,
+                        Err(error @ BlockError::PayloadBodyNotFound { .. }) => {
+                            debug_with_peers!(
+                                "ending ExecutionPayloadEnvelopesByRange response stream early \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error}",
+                            );
+
+                            ServiceInboundMessage::SendErrorResponse(
+                                peer_id,
+                                inbound_request_id,
+                                RpcErrorResponse::ResourceUnavailable,
+                                "execution layer not synced",
+                            )
+                            .send(&network_to_service_tx);
+
+                            return Ok(());
+                        }
+                        Err(BlockError::Other(error)) => {
+                            warn_with_peers!(
+                                "failed to load execution payload envelope for \
+                                ExecutionPayloadEnvelopesByRange request \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error:?}",
+                            );
+
+                            ServiceInboundMessage::SendErrorResponse(
+                                peer_id,
+                                inbound_request_id,
+                                RpcErrorResponse::ServerError,
+                                "failed fetching execution payload envelopes",
+                            )
+                            .send(&network_to_service_tx);
+
+                            return Ok(());
+                        }
+                    };
+
                     debug_with_peers!(
                         "sending ExecutionPayloadEnvelopesByRange response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
@@ -1671,9 +1745,41 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         .min(max_request_payloads)
                         .try_into()?,
                 );
-                let envelopes = controller.execution_payload_envelopes_by_roots(block_roots)?;
+                let envelopes = controller.envelopes_by_roots(block_roots).await;
 
                 for envelope in envelopes {
+                    let envelope = match envelope {
+                        Ok(envelope) => envelope,
+                        Err(error @ BlockError::PayloadBodyNotFound { .. }) => {
+                            debug_with_peers!(
+                                "skipping execution payload envelope in \
+                                ExecutionPayloadEnvelopesByRoot response \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error}",
+                            );
+
+                            continue;
+                        }
+                        Err(BlockError::Other(error)) => {
+                            warn_with_peers!(
+                                "failed to load execution payload envelope for \
+                                ExecutionPayloadEnvelopesByRoot request \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error:?}",
+                            );
+
+                            ServiceInboundMessage::SendErrorResponse(
+                                peer_id,
+                                inbound_request_id,
+                                RpcErrorResponse::ServerError,
+                                "failed fetching execution payload envelopes",
+                            )
+                            .send(&network_to_service_tx);
+
+                            return Ok(());
+                        }
+                    };
+
                     debug_with_peers!(
                         "sending ExecutionPayloadEnvelopesByRoot response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \
@@ -1997,9 +2103,39 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     .into_iter()
                     .take(MAX_FOR_DOS_PREVENTION.min(max_request_blocks).try_into()?);
 
-                let blocks = controller.blocks_by_root(block_roots)?;
+                let blocks = controller.blocks_by_root(block_roots).await;
 
-                for block in blocks.into_iter().map(WithStatus::value) {
+                for block in blocks {
+                    let block = match block.map(WithStatus::value) {
+                        Ok(block) => block,
+                        Err(error @ BlockError::PayloadBodyNotFound { .. }) => {
+                            debug_with_peers!(
+                                "skipping block in BeaconBlocksByRoot response \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error}",
+                            );
+
+                            continue;
+                        }
+                        Err(BlockError::Other(error)) => {
+                            warn_with_peers!(
+                                "failed to load block for BeaconBlocksByRoot request \
+                                (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}): \
+                                {error:?}",
+                            );
+
+                            ServiceInboundMessage::SendErrorResponse(
+                                peer_id,
+                                inbound_request_id,
+                                RpcErrorResponse::ServerError,
+                                "failed fetching blocks",
+                            )
+                            .send(&network_to_service_tx);
+
+                            return Ok(());
+                        }
+                    };
+
                     debug_with_peers!(
                         "sending BeaconBlocksByRoot response chunk \
                         (inbound_request_id: {inbound_request_id:?}, peer_id: {peer_id}, \

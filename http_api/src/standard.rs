@@ -27,7 +27,9 @@ use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
-use fork_choice_control::{Event, EventChannels, ForkChoiceContext, ForkTip, Topic, Wait};
+use fork_choice_control::{
+    Event, EventChannels, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
+};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
 };
@@ -1195,7 +1197,7 @@ pub async fn block_headers<P: Preset, W: Wait>(
 ) -> Result<EthResponse<[BlockHeadersResponse; 1]>, Error> {
     let opt_block_by_slot = |slot| -> Result<_> {
         if let Some(root) = controller.block_root_by_slot(slot)?
-            && let Some(with_status) = controller.block_by_root(root)?
+            && let Some(with_status) = controller.stored_block_by_root(root)?
         {
             return Ok(Some((root, with_status)));
         }
@@ -1222,7 +1224,7 @@ pub async fn block_headers<P: Preset, W: Wait>(
             slot: None,
             parent_root: Some(parent_root),
         } => controller
-            .block_by_root(parent_root)?
+            .stored_block_by_root(parent_root)?
             .and_then(|parent_block| parent_block.value.message().slot().checked_add(1))
             .map(opt_block_by_slot)
             .transpose()?
@@ -1268,7 +1270,7 @@ pub async fn block_id_headers<P: Preset, W: Wait>(
         status,
         finalized,
     } = controller
-        .block_by_root(root)?
+        .stored_block_by_root(root)?
         .ok_or(Error::BlockNotFound)?;
 
     let response = BlockHeadersResponse {
@@ -1295,7 +1297,7 @@ pub async fn block<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider).await?;
 
     let version = block.phase();
 
@@ -1334,7 +1336,7 @@ pub async fn block_attestations<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let attestations = block.message().body().combined_attestations().collect_vec();
 
@@ -1357,7 +1359,7 @@ pub async fn block_attestations_v2<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let attestations = block.message().body().combined_attestations().collect_vec();
 
@@ -1382,11 +1384,14 @@ pub async fn blinded_block<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
-    let signed_blinded_block: SignedBlindedBeaconBlock<P> = Arc::unwrap_or_clone(block)
-        .try_into()
-        .map_err(AnyhowError::new)?;
+    let signed_blinded_block = match block {
+        StoredBlock::Full(block) => Arc::unwrap_or_clone(block)
+            .try_into()
+            .map_err(AnyhowError::new)?,
+        StoredBlock::Blinded(block) => Arc::unwrap_or_clone(block),
+    };
 
     let version = signed_blinded_block.phase();
 
@@ -1412,7 +1417,7 @@ pub async fn blob_sidecars<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider).await?;
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
@@ -1497,7 +1502,7 @@ pub async fn execution_payload_envelope<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let version = block.phase();
 
@@ -1508,7 +1513,8 @@ pub async fn execution_payload_envelope<P: Preset, W: Wait>(
     let root = block.message().hash_tree_root();
 
     let envelope = controller
-        .execution_payload_envelope_by_root(root)?
+        .envelope_by_root(root)
+        .await?
         .ok_or(Error::ExecutionPayloadEnvelopeNotFound)?;
 
     Ok(EthResponse::json_or_ssz(envelope, &headers)?
@@ -1532,7 +1538,7 @@ pub async fn blobs<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider).await?;
 
     let version = block.phase();
     let block_root = block.message().hash_tree_root();
@@ -1977,7 +1983,7 @@ pub async fn block_rewards<P: Preset, W: Wait>(
         value: signed_block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider).await?;
 
     let block: BeaconBlock<P> = Arc::unwrap_or_clone(signed_block).into();
     let block_slot = block.slot();
@@ -2034,7 +2040,7 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
         value: block,
         status,
         finalized,
-    } = block_id::block(block_id, &controller, &anchor_checkpoint_provider)?;
+    } = block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider)?;
 
     let block_slot = block.message().slot();
 
@@ -2050,13 +2056,26 @@ pub async fn sync_committee_rewards<P: Preset, W: Wait>(
         let mut state =
             controller.preprocessed_state_post_block_blocking(parent_root, block_slot)?;
 
-        let sync_committee_deltas = transition_functions::combined::state_transition_for_report(
-            &chain_config,
-            controller.pubkey_cache(),
-            state.make_mut(),
-            &block,
-        )?
-        .sync_committee_deltas;
+        let slot_report = match block {
+            StoredBlock::Full(block) => {
+                transition_functions::combined::state_transition_for_report(
+                    &chain_config,
+                    controller.pubkey_cache(),
+                    state.make_mut(),
+                    &block,
+                )?
+            }
+            StoredBlock::Blinded(block) => {
+                transition_functions::combined::blinded_state_transition_for_report(
+                    &chain_config,
+                    controller.pubkey_cache(),
+                    state.make_mut(),
+                    &block,
+                )?
+            }
+        };
+
+        let sync_committee_deltas = slot_report.sync_committee_deltas;
 
         Ok::<_, AnyhowError>((state, sync_committee_deltas))
     })
@@ -2583,7 +2602,7 @@ pub async fn debug_beacon_data_column_sidecars<P: Preset, W: Wait>(
     headers: HeaderMap,
 ) -> Result<EthResponse<DynamicList<Arc<DataColumnSidecar<P>>>, (), JsonOrSsz>, Error> {
     let block_with_status =
-        match block_id::block(block_id, &controller, &anchor_checkpoint_provider) {
+        match block_id::stored_block(block_id, &controller, &anchor_checkpoint_provider) {
             Ok(block) => block,
             Err(error) => {
                 if matches!(error, Error::BlockNotFound)
@@ -3251,7 +3270,7 @@ pub async fn validator_aggregate_attestation<P: Preset, W: Wait>(
 
     let block_root = attestation.data.beacon_block_root;
     let is_valid = controller
-        .block_by_root(attestation.data.beacon_block_root)?
+        .stored_block_by_root(attestation.data.beacon_block_root)?
         .is_some_and(|block| block.is_valid());
 
     if !is_valid {
@@ -3303,7 +3322,7 @@ pub async fn validator_aggregate_attestation_v2<P: Preset, W: Wait>(
 
     let block_root = attestation.data.beacon_block_root;
     let is_valid = controller
-        .block_by_root(block_root)?
+        .stored_block_by_root(block_root)?
         .is_some_and(|block| block.is_valid());
 
     if !is_valid {
@@ -3713,7 +3732,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     let is_optimistic = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
         let block = controller
-            .block_by_slot(slot)?
+            .stored_block_by_slot(slot)?
             .ok_or(Error::BlockNotFound)?;
 
         block_root = block.value.root;
@@ -4045,7 +4064,9 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
 
     let is_optimistic = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
-        let block = controller.block_by_slot(slot)?.ok_or(Error::BlockNotSeen)?;
+        let block = controller
+            .stored_block_by_slot(slot)?
+            .ok_or(Error::BlockNotSeen)?;
 
         block_root = block.value.root;
         state = controller
@@ -4087,9 +4108,7 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         return Err(Error::HeadIsOptimistic);
     }
 
-    let payload_present = controller
-        .execution_payload_envelope_by_root(block_root)?
-        .is_some();
+    let payload_present = controller.stored_envelope_by_root(block_root)?.is_some();
 
     if state.slot() < slot {
         state = tokio::task::spawn_blocking(move || {
@@ -5024,7 +5043,9 @@ fn build_attestation_item<P: Preset, W: Wait>(
     } = attestation.data();
 
     ensure!(
-        controller.block_by_root(beacon_block_root)?.is_some(),
+        controller
+            .stored_block_by_root(beacon_block_root)?
+            .is_some(),
         Error::MatchingAttestationHeadBlockNotFound,
     );
 
@@ -5181,7 +5202,9 @@ fn build_payload_attestation_item<P: Preset, W: Wait>(
     let validator_index = attestation.validator_index;
 
     ensure!(
-        controller.block_by_root(beacon_block_root)?.is_some(),
+        controller
+            .stored_block_by_root(beacon_block_root)?
+            .is_some(),
         Error::MatchingPayloadAttestationHeadBlockNotFound,
     );
 
@@ -5390,7 +5413,7 @@ async fn wait_for_missing_blocks_with_timeout<P: Preset, W: Wait>(
     let mut missing_blocks = block_roots
         .into_iter()
         .unique()
-        .map(|root| Ok::<_, AnyhowError>((root, controller.block_by_root(root)?.is_none())))
+        .map(|root| Ok::<_, AnyhowError>((root, controller.stored_block_by_root(root)?.is_none())))
         .process_results(|iter| {
             iter.filter(|(_, is_missing)| *is_missing)
                 .map(|(root, _)| root)
