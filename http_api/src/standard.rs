@@ -23,7 +23,8 @@ use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::{
-    gloas::containers::BuilderConfig as GloasBuilderConfig,
+    PayloadBuilderApi,
+    gloas::containers::{BuilderConfig as GloasBuilderConfig, BuilderUrl},
     unphased::containers::SignedValidatorRegistrationV1,
 };
 use dedicated_executor::DedicatedExecutor;
@@ -120,8 +121,8 @@ use types::{
     },
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
-        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
-        SignedBeaconBlock as _,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
+        BlockBodyWithPayloadBid, PostFuluBeaconState, SignedBeaconBlock as _,
     },
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -139,7 +140,7 @@ use crate::{
         SignedProposerPreferencesListFromPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
-    response::{ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz},
+    response::{ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
         ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
@@ -1765,6 +1766,21 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     }
 }
 
+fn builder_url_from_headers(headers: &HeaderMap) -> Option<BuilderUrl> {
+    let header_value = headers.get(ETH_BUILDER_URL)?;
+
+    let builder_url = header_value
+        .to_str()
+        .ok()
+        .and_then(|url| BuilderUrl::try_from(url).ok());
+
+    if builder_url.is_none() {
+        warn_with_peers!("ignoring malformed {ETH_BUILDER_URL} header");
+    }
+
+    builder_url
+}
+
 /// `POST /eth/v2/beacon/blinded_blocks`
 #[instrument(
     skip_all,
@@ -1822,6 +1838,7 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/blocks`
+#[expect(clippy::too_many_arguments)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -1834,7 +1851,9 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     State(dedicated_executor): State<Arc<DedicatedExecutor>>,
+    State(payload_builder_api): State<Arc<PayloadBuilderApi>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
+    headers: HeaderMap,
     EthJsonOrSsz(signed_api_block, _): EthJsonOrSsz<
         Box<SignedAPIBlock<P>>,
         SignedAPIBlockPhaseDeserializer<P>,
@@ -1843,22 +1862,40 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
     let phase = controller.chain_config().phase_at_slot::<P>(slot);
+    let signed_beacon_block = Arc::new(signed_beacon_block);
 
-    if phase >= Phase::Gloas {
-        // TODO(gloas): forward the block to the builder named by the `Eth-Builder-Url` header.
+    if let Some(signed_payload_bid) = signed_beacon_block
+        .message()
+        .body()
+        .with_payload_bid()
+        .map(BlockBodyWithPayloadBid::signed_execution_payload_bid)
+    {
         // Only publish signed beacon block for post-Gloas
-        publish_signed_block_v2(
-            Arc::new(signed_beacon_block),
+        let status_code = publish_signed_block_v2(
+            signed_beacon_block.clone_arc(),
             vec![],
             query.broadcast_validation.unwrap_or_default(),
             controller,
             event_channels,
             api_to_p2p_tx,
         )
-        .await
-    } else if phase.is_peerdas_activated() {
-        let signed_beacon_block = Arc::new(signed_beacon_block);
+        .await?;
 
+        if let Some(builder_url) = builder_url_from_headers(&headers)
+            && signed_payload_bid.message.builder_index != BUILDER_INDEX_SELF_BUILD
+        {
+            tokio::spawn(async move {
+                if let Err(error) = payload_builder_api
+                    .submit_signed_beacon_block(&builder_url, &signed_beacon_block)
+                    .await
+                {
+                    warn_with_peers!("failed to forward block to builder {builder_url}: {error:?}");
+                }
+            });
+        }
+
+        Ok(status_code)
+    } else if phase.is_peerdas_activated() {
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
             controller.clone_arc(),
             signed_beacon_block.clone_arc(),
@@ -1886,7 +1923,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         )?;
 
         publish_signed_block_v2(
-            Arc::new(signed_beacon_block),
+            signed_beacon_block,
             blob_sidecars,
             query.broadcast_validation.unwrap_or_default(),
             controller,
