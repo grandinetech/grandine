@@ -5,7 +5,8 @@ use bytesize::ByteSize;
 use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
-    ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId,
+    EnvelopeByBlockRoot, EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
+    FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
     StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
 use tracing::{info, warn};
@@ -76,6 +77,9 @@ pub fn print<P: Preset>(
         EntriesInfo::new("data_column_sidecars_by_column_id");
     let mut state_checkpoint_entries = EntriesInfo::new("state_checkpoint");
     let mut block_checkpoint_entries = EntriesInfo::new("block_checkpoint");
+    let mut envelope_by_block_root_entries = EntriesInfo::new("envelopes_by_block_root");
+    let mut envelope_root_by_slot_entries = EntriesInfo::new("envelope_roots_by_slot");
+    let mut finalized_validator_entries = EntriesInfo::new("finalized_validators");
 
     for result in storage_database.iterate_all_keys_with_lengths()? {
         let (key, length) = result?;
@@ -98,14 +102,21 @@ pub fn print<P: Preset>(
             blob_sidecar_by_blob_id_entries.track(&key, length);
         } else if BlockRootBySlot::has_prefix(&key) {
             block_root_by_slot_entries.track(&key, length);
-        } else if SlotColumnId::has_prefix(&key) {
-            slot_by_column_id_entries.track(&key, length);
-        } else if DataColumnSidecarByColumnId::has_prefix(&key) {
-            data_column_sidecar_by_column_id.track(&key, length);
         } else if StateCheckpoint::<P>::has_prefix(&key) {
             state_checkpoint_entries.track(&key, length);
         } else if BlockCheckpoint::<P>::has_prefix(&key) {
             block_checkpoint_entries.track(&key, length);
+        } else if SlotColumnId::has_prefix(&key) {
+            slot_by_column_id_entries.track(&key, length);
+        } else if DataColumnSidecarByColumnId::has_prefix(&key) {
+            data_column_sidecar_by_column_id.track(&key, length);
+        } else if EnvelopeByBlockRoot::has_prefix(&key) {
+            envelope_by_block_root_entries.track(&key, length);
+        } else if EnvelopeRootBySlot::has_prefix(&key) {
+            envelope_root_by_slot_entries.track(&key, length);
+        } else if FinalizedValidators::has_prefix(&key) || FinalizedValidatorCount::has_prefix(&key)
+        {
+            finalized_validator_entries.track(&key, length);
         } else {
             warn!("unknown database key: {}", String::from_utf8_lossy(&key));
         }
@@ -127,6 +138,9 @@ pub fn print<P: Preset>(
         data_column_sidecar_by_column_id,
         state_checkpoint_entries,
         block_checkpoint_entries,
+        envelope_by_block_root_entries,
+        envelope_root_by_slot_entries,
+        finalized_validator_entries,
     ];
 
     entries.sort_by_key(EntriesInfo::total_size);
