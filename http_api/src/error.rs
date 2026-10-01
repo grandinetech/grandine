@@ -106,6 +106,8 @@ pub enum Error {
     InvalidBlock(#[source] AnyhowError),
     #[error("invalid block root")]
     InvalidBlockRoot(#[source] AnyhowError),
+    #[error("invalid builder preferences")]
+    InvalidBuilderPreferences(Vec<IndexedError>),
     #[error("invalid bytes body")]
     InvalidBytesBody(#[source] BytesRejection),
     #[error("invalid data column sidecar")]
@@ -303,6 +305,7 @@ impl Error {
             | Self::InvalidBlobIndex(_)
             | Self::InvalidBlockId(_)
             | Self::InvalidBlockRoot(_)
+            | Self::InvalidBuilderPreferences(_)
             | Self::InvalidColumnIndex(_)
             | Self::InvalidDataColumnSidecar(_)
             | Self::InvalidRequestConsensusHeader(_)
@@ -369,6 +372,7 @@ impl Error {
         match self {
             Self::InvalidAggregatesAndProofs(failures)
             | Self::InvalidAttestations(failures)
+            | Self::InvalidBuilderPreferences(failures)
             | Self::InvalidContributionAndProofs(failures)
             | Self::InvalidProposerPreferences(failures)
             | Self::InvalidSyncCommitteeMessages(failures)

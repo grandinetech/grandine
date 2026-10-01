@@ -24,3 +24,6 @@ pub type MaxBuilderEntries = U64;
 pub type MaxBuilderAuthDataSize = U4096;
 pub type MaxBuilderPubkeys = U64;
 pub type MaxBuilderUrlSize = U2048;
+
+// MAX_BUILDER_ENTRIES * (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
+pub type MaxBuilderPreferencesEntries = U4096;
