@@ -24,7 +24,8 @@ use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBl
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::{
     PayloadBuilderApi,
-    gloas::containers::{BuilderConfig as GloasBuilderConfig, BuilderUrl},
+    consts::MaxBuilderPreferencesEntries,
+    gloas::containers::{BuilderConfig as GloasBuilderConfig, BuilderPreferencesEntry, BuilderUrl},
     unphased::containers::SignedValidatorRegistrationV1,
 };
 use dedicated_executor::DedicatedExecutor;
@@ -134,6 +135,7 @@ use crate::{
     full_config::FullConfig,
     misc::{
         APIBlock, BlockContents, BroadcastValidation, BuilderConfigPhaseDeserializer,
+        BuilderPreferencesEntryListPhaseDeserializer,
         PayloadAttestationMessageListPhaseDeserializer, SignedAPIBlock,
         SignedAPIBlockPhaseDeserializer, SignedAggregateAndProofListFromPhaseDeserializer,
         SignedBlindedBeaconPhaseDeserializer, SignedExecutionPayloadBidPhaseDeserializer,
@@ -1764,6 +1766,20 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         )
         .await
     }
+}
+
+// SSZ bodies decode regardless of phase.
+fn ensure_post_gloas_request(headers: &HeaderMap) -> Result<(), Error> {
+    let phase = http_api_utils::extract_phase_from_headers(headers)?;
+
+    if phase < Phase::Gloas {
+        return Err(Error::InvalidPhase {
+            expected: Phase::Gloas,
+            got: phase,
+        });
+    }
+
+    Ok(())
 }
 
 fn builder_url_from_headers(headers: &HeaderMap) -> Option<BuilderUrl> {
@@ -3602,7 +3618,6 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
 /// `POST /eth/v4/validator/blocks/{slot}`
 #[expect(clippy::type_complexity)]
 #[expect(clippy::too_many_arguments)]
-#[expect(clippy::too_many_lines)]
 #[instrument(skip_all, level = "debug", name = "http_api::validator_block_v4")]
 pub async fn validator_block_v4<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
@@ -3624,15 +3639,7 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         include_payload,
     } = query;
 
-    // The SSZ body decodes regardless of phase.
-    let phase = http_api_utils::extract_phase_from_headers(&headers)?;
-
-    if phase < Phase::Gloas {
-        return Err(Error::InvalidPhase {
-            expected: Phase::Gloas,
-            got: phase,
-        });
-    }
+    ensure_post_gloas_request(&headers)?;
 
     let GloasBuilderConfig {
         min_bid,
@@ -4431,6 +4438,53 @@ pub async fn validator_proposer_preferences<P: Preset, W: Wait>(
 
     if !failures.is_empty() {
         return Err(Error::InvalidProposerPreferences(failures));
+    }
+
+    Ok(())
+}
+
+/// `POST /eth/v1/validator/builder_preferences`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_builder_preferences"
+)]
+pub async fn validator_builder_preferences(
+    State(payload_builder_api): State<Arc<PayloadBuilderApi>>,
+    headers: HeaderMap,
+    EthJsonOrSsz(entries, _): EthJsonOrSsz<
+        ContiguousList<BuilderPreferencesEntry, MaxBuilderPreferencesEntries>,
+        BuilderPreferencesEntryListPhaseDeserializer,
+    >,
+) -> Result<(), Error> {
+    ensure_post_gloas_request(&headers)?;
+
+    let payload_builder_api = &payload_builder_api;
+
+    let failures = entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| async move {
+            let BuilderPreferencesEntry {
+                proposer_pubkey,
+                url,
+                auth,
+                max_execution_payment,
+            } = entry;
+
+            payload_builder_api
+                .submit_builder_preferences(&url, &auth, proposer_pubkey, max_execution_payment)
+                .await
+                .map_err(|error| IndexedError { index, error })
+                .err()
+        })
+        .collect::<FuturesOrdered<_>>()
+        .filter_map(core::future::ready)
+        .collect::<Vec<_>>()
+        .await;
+
+    if !failures.is_empty() {
+        return Err(Error::InvalidBuilderPreferences(failures));
     }
 
     Ok(())
