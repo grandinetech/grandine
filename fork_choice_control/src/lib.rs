@@ -27,9 +27,10 @@ pub use crate::{
     specialized::{AdHocBenchController, BenchController},
     storage::{
         BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-        DEFAULT_ZSTD_COMPRESSION_LEVEL, DataColumnSidecarByColumnId, ExecutionPayloadBySlotAndRoot,
-        FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId, StateByBlockRoot,
-        StateCheckpoint, StateLoadStrategy, Storage, StoredBlock, StoredEnvelope,
+        DEFAULT_ZSTD_COMPRESSION_LEVEL, DataColumnSidecarByColumnId, EnvelopeByBlockRoot,
+        EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
+        FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
+        StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage, StoredBlock, StoredEnvelope,
         UnfinalizedBlockByRoot, get, print_beacon_database_info, save,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},
