@@ -647,27 +647,6 @@ pub async fn run_after_genesis<P: Preset>(
         validator_to_slasher_tx,
     };
 
-    let validator = Validator::new(
-        validator_config.clone_arc(),
-        block_producer.clone_arc(),
-        controller.clone_arc(),
-        attestation_agg_pool.clone_arc(),
-        builder_api,
-        doppelganger_protection,
-        event_channels.clone_arc(),
-        keymanager.proposer_configs().clone_arc(),
-        signer.clone_arc(),
-        slashing_protector,
-        payload_attestation_agg_pool.clone_arc(),
-        sync_committee_agg_pool.clone_arc(),
-        metrics.clone(),
-        validator_statistics.clone(),
-        validator_channels,
-        network_config.network_dir.as_deref(),
-        dedicated_executor_normal_priority.clone_arc(),
-        dedicated_executor_low_priority.clone_arc(),
-    );
-
     let p2p_channels = Channels {
         api_to_p2p_rx,
         blob_fetcher_to_p2p_rx,
@@ -699,7 +678,7 @@ pub async fn run_after_genesis<P: Preset>(
         controller.clone_arc(),
         current_tick.slot,
         p2p_channels,
-        dedicated_executor_normal_priority,
+        dedicated_executor_normal_priority.clone_arc(),
         sync_committee_agg_pool.clone_arc(),
         bls_to_execution_change_pool.clone_arc(),
         metrics.clone(),
@@ -710,6 +689,28 @@ pub async fn run_after_genesis<P: Preset>(
         storage_mode,
     )
     .await?;
+
+    let validator = Validator::new(
+        validator_config.clone_arc(),
+        block_producer.clone_arc(),
+        controller.clone_arc(),
+        attestation_agg_pool.clone_arc(),
+        builder_api,
+        doppelganger_protection,
+        event_channels.clone_arc(),
+        keymanager.proposer_configs().clone_arc(),
+        signer.clone_arc(),
+        slashing_protector,
+        payload_attestation_agg_pool.clone_arc(),
+        sync_committee_agg_pool.clone_arc(),
+        metrics.clone(),
+        validator_statistics.clone(),
+        validator_channels,
+        network_config.network_dir.as_deref(),
+        dedicated_executor_normal_priority.clone_arc(),
+        dedicated_executor_low_priority.clone_arc(),
+        Some(network.network_globals().clone_arc()),
+    );
 
     let block_sync_service_channels = BlockSyncServiceChannels {
         fork_choice_to_sync_rx,
