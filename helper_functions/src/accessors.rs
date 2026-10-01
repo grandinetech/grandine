@@ -299,7 +299,7 @@ pub fn get_or_init_active_validator_indices_shuffled<P: Preset>(
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
-    fn shuffle<P: Preset, T: Copy>(ordered: &[T], seed: H256) -> Arc<[T]> {
+    fn shuffle<P: Preset, T: Copy + Send>(ordered: &[T], seed: H256) -> Arc<[T]> {
         let mut shuffled = ArcBox::from(ordered);
 
         shuffling::shuffle_slice::<P, _>(&mut shuffled, seed).expect(

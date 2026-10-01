@@ -22,7 +22,6 @@ use types::{
         beacon_state::BeaconState as FuluBeaconState,
         containers::{BeaconBlock, BeaconBlockBody, SignedBeaconBlock},
     },
-    phase0::primitives::H256,
     preset::Preset,
     traits::{
         BlockBodyWithBlsToExecutionChanges, BlockBodyWithElectraAttestations,
@@ -109,12 +108,12 @@ pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> Resul
 }
 
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
-pub fn custom_process_block<P: Preset>(
+pub fn custom_process_block<P: Preset, E: ExecutionEngine<P>>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
     state: &mut FuluBeaconState<P>,
     block: &Hc<BeaconBlock<P>>,
-    execution_engine: impl ExecutionEngine<P>,
+    execution_engine: E,
     mut verifier: impl Verifier,
     mut slot_report: impl SlotReport,
 ) -> Result<()> {
@@ -126,16 +125,7 @@ pub fn custom_process_block<P: Preset>(
     electra::process_withdrawals(state, &block.body.execution_payload)?;
 
     // > [Modified in Electra:EIP6110]
-    process_execution_payload(
-        config,
-        state,
-        // TODO(Grandine Team): Consider removing the parameter entirely.
-        //                      It's only used for error reporting.
-        //                      Perhaps it would be better to send the whole block?
-        block.hash_tree_root(),
-        &block.body,
-        execution_engine,
-    )?;
+    process_execution_payload(config, state, block, execution_engine)?;
 
     unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
@@ -339,13 +329,13 @@ fn process_execution_payload_for_gossip<P: Preset>(
 }
 
 #[cfg_attr(feature = "tracing", tracing::instrument(level = "debug", skip_all))]
-fn process_execution_payload<P: Preset>(
+fn process_execution_payload<P: Preset, E: ExecutionEngine<P>>(
     config: &Config,
     state: &mut FuluBeaconState<P>,
-    block_root: H256,
-    body: &BeaconBlockBody<P>,
-    execution_engine: impl ExecutionEngine<P>,
+    block: &Hc<BeaconBlock<P>>,
+    execution_engine: E,
 ) -> Result<()> {
+    let body = &block.body;
     let payload = &body.execution_payload;
     let execution_requests = &body.execution_requests;
 
@@ -370,23 +360,28 @@ fn process_execution_payload<P: Preset>(
     process_execution_payload_for_gossip(config, state, body)?;
 
     // > Verify the execution payload is valid
-    let versioned_hashes = body
-        .blob_kzg_commitments
-        .iter()
-        .copied()
-        .map(kzg_commitment_to_versioned_hash)
-        .collect();
+    //
+    // Notifying a null engine is a no-op, but assembling the notification has real cost, such as
+    // hashing the block.
+    if !E::IS_NULL {
+        let versioned_hashes = body
+            .blob_kzg_commitments
+            .iter()
+            .copied()
+            .map(kzg_commitment_to_versioned_hash)
+            .collect();
 
-    execution_engine.notify_new_payload(
-        block_root,
-        payload.clone().into(),
-        Some(ExecutionPayloadParams::Electra {
-            versioned_hashes,
-            parent_beacon_block_root: state.latest_block_header.parent_root,
-            execution_requests: execution_requests.clone(),
-        }),
-        None,
-    )?;
+        execution_engine.notify_new_payload(
+            block.hash_tree_root(),
+            payload.clone().into(),
+            Some(ExecutionPayloadParams::Electra {
+                versioned_hashes,
+                parent_beacon_block_root: state.latest_block_header.parent_root,
+                execution_requests: execution_requests.clone(),
+            }),
+            None,
+        )?;
+    }
 
     // > Cache execution payload header
     state.latest_execution_payload_header = ExecutionPayloadHeader::from(payload);
@@ -731,6 +726,7 @@ mod spec_tests {
     fn run_execution_payload_case<P: Preset>(case: Case) {
         let mut state = case.ssz_default::<FuluBeaconState<P>>("pre");
         let body = case.ssz_default("body");
+        let block = Hc::new(BeaconBlock { body, ..BeaconBlock::default() });
         let post_option = case.try_ssz_default("post");
         let Execution { execution_valid } = case.yaml("execution");
         let execution_engine = MockExecutionEngine::new(execution_valid, false, None);
@@ -738,8 +734,7 @@ mod spec_tests {
         let result = process_execution_payload(
             &P::default_config(),
             &mut state,
-            H256::default(),
-            &body,
+            &block,
             &execution_engine,
         )
         .map(|()| state);

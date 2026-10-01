@@ -250,8 +250,8 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
                     &state,
                     block_attestation.data(),
                     helper_functions::electra::get_attesting_indices(&state, block_attestation)?
-                        .intersection(validators_indices)
-                        .copied(),
+                        .into_iter()
+                        .filter(|index| validators_indices.contains(index)),
                 )?;
             }
         }
@@ -275,8 +275,8 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
                     &state,
                     block_attestation.data(),
                     helper_functions::electra::get_attesting_indices(&state, block_attestation)?
-                        .intersection(validators_indices)
-                        .copied(),
+                        .into_iter()
+                        .filter(|index| validators_indices.contains(index)),
                 )?;
             }
         }
