@@ -54,8 +54,8 @@ use crate::{
         sync_committee_rewards, validator_aggregate_attestation,
         validator_aggregate_attestation_v2, validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
-        validator_block_v3, validator_block_v4, validator_execution_payload_bid,
-        validator_execution_payload_envelope, validator_liveness,
+        validator_block_v3, validator_block_v4, validator_builder_preferences,
+        validator_execution_payload_bid, validator_execution_payload_envelope, validator_liveness,
         validator_payload_attestation_data, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_proposer_duties_v2, validator_proposer_preferences,
         validator_ptc_duties, validator_publish_aggregate_and_proofs_v1,
@@ -628,6 +628,10 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
         .route(
             "/eth/v1/validator/proposer_preferences",
             post(validator_proposer_preferences),
+        )
+        .route(
+            "/eth/v1/validator/builder_preferences",
+            post(validator_builder_preferences),
         )
         .route(
             "/eth/v1/validator/liveness/{epoch}",

@@ -5,7 +5,10 @@ use core::{
 use std::sync::Arc;
 
 use block_producer::ValidatorBlindedBlock;
-use builder_api::gloas::containers::BuilderConfig;
+use builder_api::{
+    consts::MaxBuilderPreferencesEntries,
+    gloas::containers::{BuilderConfig, BuilderPreferencesEntry},
+};
 use derive_more::From;
 use enum_iterator::Sequence as _;
 use serde::{
@@ -426,6 +429,31 @@ impl<'de> DeserializeSeed<'de> for BuilderConfigPhaseDeserializer {
     {
         if self.phase >= Phase::Gloas {
             BuilderConfig::deserialize(deserializer)
+        } else {
+            Err(D::Error::custom("invalid phase"))
+        }
+    }
+}
+
+pub struct BuilderPreferencesEntryListPhaseDeserializer {
+    phase: Phase,
+}
+
+impl From<Phase> for BuilderPreferencesEntryListPhaseDeserializer {
+    fn from(phase: Phase) -> Self {
+        Self { phase }
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for BuilderPreferencesEntryListPhaseDeserializer {
+    type Value = ContiguousList<BuilderPreferencesEntry, MaxBuilderPreferencesEntries>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if self.phase >= Phase::Gloas {
+            Self::Value::deserialize(deserializer)
         } else {
             Err(D::Error::custom("invalid phase"))
         }
