@@ -4,7 +4,7 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use logging::debug_with_peers;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
-    nonstandard::Phase,
+    nonstandard::{ExecutionPayloadBody, Phase},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
@@ -14,6 +14,10 @@ use crate::{EngineGetBlobsParams, PayloadAttributes, PayloadId, PayloadStatusV1}
 pub enum ExecutionServiceMessage<P: Preset> {
     ExchangeCapabilities,
     GetBlobs(EngineGetBlobsParams<P>),
+    GetPayloadBodiesByHash {
+        block_hashes: Vec<ExecutionBlockHash>,
+        sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    },
     NotifyForkchoiceUpdated {
         head_eth1_block_hash: ExecutionBlockHash,
         safe_eth1_block_hash: ExecutionBlockHash,

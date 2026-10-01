@@ -221,6 +221,31 @@ pub struct ExecutionPayload<P: Preset> {
     pub slot_number: Slot,
 }
 
+#[derive(Clone, PartialEq, Eq, Default, Debug, Ssz)]
+pub struct ExecutionPayloadHeader<P: Preset> {
+    pub parent_hash: ExecutionBlockHash,
+    pub fee_recipient: ExecutionAddress,
+    pub state_root: H256,
+    pub receipts_root: H256,
+    pub logs_bloom: ByteVector<P::BytesPerLogsBloom>,
+    pub prev_randao: H256,
+    pub block_number: ExecutionBlockNumber,
+    pub gas_limit: Gas,
+    pub gas_used: Gas,
+    pub timestamp: UnixSeconds,
+    // TODO(Grandine Team): Try removing the `Arc` when we have data for benchmarking Bellatrix.
+    //                      The cost of cloning `ByteList<MaxExtraDataBytes>` may be negligible.
+    pub extra_data: Arc<ByteList<P::MaxExtraDataBytes>>,
+    pub base_fee_per_gas: Uint256,
+    pub block_hash: ExecutionBlockHash,
+    pub transactions_root: H256,
+    pub withdrawals_root: H256,
+    pub blob_gas_used: Gas,
+    pub excess_blob_gas: Gas,
+    pub block_access_list_root: H256,
+    pub slot_number: Slot,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 #[ssz(stable(active = [1; 12]))]
@@ -254,6 +279,16 @@ pub struct ExecutionPayloadEnvelope<P: Preset> {
     pub payload: ExecutionPayload<P>,
     pub execution_requests: ExecutionRequests<P>,
     #[serde(with = "serde_utils::string_or_native")]
+    pub builder_index: BuilderIndex,
+    pub beacon_block_root: H256,
+    pub parent_beacon_block_root: H256,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default, Ssz)]
+#[ssz(stable(active = [1; 5]))]
+pub struct BlindedExecutionPayloadEnvelope<P: Preset> {
+    pub payload_header: ExecutionPayloadHeader<P>,
+    pub execution_requests: ExecutionRequests<P>,
     pub builder_index: BuilderIndex,
     pub beacon_block_root: H256,
     pub parent_beacon_block_root: H256,
@@ -400,6 +435,12 @@ pub struct SignedExecutionPayloadBid<P: Preset> {
 #[serde(bound = "", deny_unknown_fields)]
 pub struct SignedExecutionPayloadEnvelope<P: Preset> {
     pub message: ExecutionPayloadEnvelope<P>,
+    pub signature: SignatureBytes,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default, Ssz)]
+pub struct SignedBlindedExecutionPayloadEnvelope<P: Preset> {
+    pub message: BlindedExecutionPayloadEnvelope<P>,
     pub signature: SignatureBytes,
 }
 

@@ -219,7 +219,7 @@ pub fn attestation_performance_slot_report<P: Preset, W: Wait>(
 ) -> Result<SlotReports> {
     let snapshot = controller.snapshot();
     let mut slot_reports = SlotReports::new();
-    let blocks = snapshot.blocks_by_range(misc::slots_in_epoch::<P>(epoch)?)?;
+    let blocks = snapshot.stored_blocks_by_range(misc::slots_in_epoch::<P>(epoch)?)?;
 
     for block_with_root in blocks {
         let slot = block_with_root.block.message().slot();

@@ -215,6 +215,31 @@ public unsafe partial struct CEngineGetPayloadV6Response
     }
 }
 
+public unsafe partial struct CExecutionPayloadBodyV1
+{
+    public CExecutionPayloadBodyV1(ExecutionPayloadBodyV1Result body)
+    {
+        this.transactions = GrandineUtils.TransactionsFromBytes(body.Transactions);
+        this.withdrawals = body.Withdrawals == null
+            ? COption_CVec_CWithdrawalV1.None
+            : COption_CVec_CWithdrawalV1.Some(GrandineUtils.WithdrawalsToNative(body.Withdrawals));
+    }
+}
+
+public unsafe partial struct CExecutionPayloadBodyV2
+{
+    public CExecutionPayloadBodyV2(ExecutionPayloadBodyV2Result body)
+    {
+        this.transactions = GrandineUtils.TransactionsFromBytes(body.Transactions);
+        this.withdrawals = body.Withdrawals == null
+            ? COption_CVec_CWithdrawalV1.None
+            : COption_CVec_CWithdrawalV1.Some(GrandineUtils.WithdrawalsToNative(body.Withdrawals));
+        this.block_access_list = body.BlockAccessList == null
+            ? COption_CVec_u8.None
+            : COption_CVec_u8.Some(new CVec_u8(body.BlockAccessList));
+    }
+}
+
 public unsafe partial struct CTransaction
 {
     public CTransaction(CVec_u8 input)
@@ -685,6 +710,98 @@ public unsafe partial struct CVec_CBlobAndProofV2
     }
 }
 
+public unsafe partial struct CVec_COption_CExecutionPayloadBodyV1
+{
+    public CVec_COption_CExecutionPayloadBodyV1(nuint length)
+    {
+        if (length == 0)
+        {
+            this.data = null;
+            this.data_len = 0;
+            return;
+        }
+
+        IntPtr pointer;
+        unsafe
+        {
+            pointer = (IntPtr)NativeMethods.grandine_vec_alloc(NativeMethods.grandine_layout_option_execution_payload_body_v1(), length);
+        }
+
+        this.data = (COption_CExecutionPayloadBodyV1*)pointer.ToPointer();
+        this.data_len = length;
+    }
+
+    public CVec_COption_CExecutionPayloadBodyV1(COption_CExecutionPayloadBodyV1[] array)
+        : this((nuint)array.Length)
+    {
+        if (array.Length == 0)
+        {
+            return;
+        }
+
+        unsafe
+        {
+            var ptr = (IntPtr)this.data;
+
+            for (var i = 0; i < array.Length; ++i)
+            {
+                Marshal.StructureToPtr(array[i], IntPtr.Add(ptr, i * Marshal.SizeOf<COption_CExecutionPayloadBodyV1>()), false);
+            }
+        }
+    }
+
+    public CVec_COption_CExecutionPayloadBodyV1(IEnumerable<COption_CExecutionPayloadBodyV1> enumerator)
+        : this(enumerator?.ToArray() ?? Array.Empty<COption_CExecutionPayloadBodyV1>())
+    {
+    }
+}
+
+public unsafe partial struct CVec_COption_CExecutionPayloadBodyV2
+{
+    public CVec_COption_CExecutionPayloadBodyV2(nuint length)
+    {
+        if (length == 0)
+        {
+            this.data = null;
+            this.data_len = 0;
+            return;
+        }
+
+        IntPtr pointer;
+        unsafe
+        {
+            pointer = (IntPtr)NativeMethods.grandine_vec_alloc(NativeMethods.grandine_layout_option_execution_payload_body_v2(), length);
+        }
+
+        this.data = (COption_CExecutionPayloadBodyV2*)pointer.ToPointer();
+        this.data_len = length;
+    }
+
+    public CVec_COption_CExecutionPayloadBodyV2(COption_CExecutionPayloadBodyV2[] array)
+        : this((nuint)array.Length)
+    {
+        if (array.Length == 0)
+        {
+            return;
+        }
+
+        unsafe
+        {
+            var ptr = (IntPtr)this.data;
+
+            for (var i = 0; i < array.Length; ++i)
+            {
+                Marshal.StructureToPtr(array[i], IntPtr.Add(ptr, i * Marshal.SizeOf<COption_CExecutionPayloadBodyV2>()), false);
+            }
+        }
+    }
+
+    public CVec_COption_CExecutionPayloadBodyV2(IEnumerable<COption_CExecutionPayloadBodyV2> enumerator)
+        : this(enumerator?.ToArray() ?? Array.Empty<COption_CExecutionPayloadBodyV2>())
+    {
+    }
+}
+
 public unsafe partial struct CVec_COption_CBlobAndProofV1
 {
     public CVec_COption_CBlobAndProofV1(nuint length)
@@ -1011,6 +1128,24 @@ public unsafe partial struct CResult_COption_CVec_CBlobAndProofV2
     public static CResult_COption_CVec_CBlobAndProofV2 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
 }
 
+public unsafe partial struct CResult_CVec_COption_CExecutionPayloadBodyV1
+{
+    public static CResult_CVec_COption_CExecutionPayloadBodyV1 Success(CVec_COption_CExecutionPayloadBodyV1 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
+
+    public static CResult_CVec_COption_CExecutionPayloadBodyV1 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
+
+    public static CResult_CVec_COption_CExecutionPayloadBodyV1 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
+}
+
+public unsafe partial struct CResult_CVec_COption_CExecutionPayloadBodyV2
+{
+    public static CResult_CVec_COption_CExecutionPayloadBodyV2 Success(CVec_COption_CExecutionPayloadBodyV2 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
+
+    public static CResult_CVec_COption_CExecutionPayloadBodyV2 Fail(uint errorCode) => new () { code = errorCode, message = CGrandineString.Empty };
+
+    public static CResult_CVec_COption_CExecutionPayloadBodyV2 Fail(uint errorCode, string? message) => new () { code = errorCode, message = new CGrandineString(message) };
+}
+
 public unsafe partial struct CResult_CVec_COption_CBlobAndProofV1
 {
     public static CResult_CVec_COption_CBlobAndProofV1 Success(CVec_COption_CBlobAndProofV1 value) => new () { code = NativeMethods.GRANDINE_SUCCESS, value = value };
@@ -1115,6 +1250,34 @@ public unsafe partial struct COption_CVec_CBlobAndProofV2
     public static COption_CVec_CBlobAndProofV2 None => new () { is_something = false };
 
     public static COption_CVec_CBlobAndProofV2 Some(CVec_CBlobAndProofV2 value) => new () { is_something = true, value = value };
+}
+
+public unsafe partial struct COption_CExecutionPayloadBodyV1
+{
+    public static COption_CExecutionPayloadBodyV1 None => new () { is_something = false };
+
+    public static COption_CExecutionPayloadBodyV1 Some(CExecutionPayloadBodyV1 value) => new () { is_something = true, value = value };
+}
+
+public unsafe partial struct COption_CExecutionPayloadBodyV2
+{
+    public static COption_CExecutionPayloadBodyV2 None => new () { is_something = false };
+
+    public static COption_CExecutionPayloadBodyV2 Some(CExecutionPayloadBodyV2 value) => new () { is_something = true, value = value };
+}
+
+public unsafe partial struct COption_CVec_CWithdrawalV1
+{
+    public static COption_CVec_CWithdrawalV1 None => new () { is_something = false };
+
+    public static COption_CVec_CWithdrawalV1 Some(CVec_CWithdrawalV1 value) => new () { is_something = true, value = value };
+}
+
+public unsafe partial struct COption_CVec_u8
+{
+    public static COption_CVec_u8 None => new () { is_something = false };
+
+    public static COption_CVec_u8 Some(CVec_u8 value) => new () { is_something = true, value = value };
 }
 
 public unsafe partial struct COption_CBlobAndProofV1

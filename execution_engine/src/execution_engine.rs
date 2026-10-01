@@ -9,7 +9,7 @@ use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use thiserror::Error;
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
-    nonstandard::{Phase, TimedPowBlock},
+    nonstandard::{ExecutionPayloadBody, Phase, TimedPowBlock},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
@@ -29,6 +29,15 @@ pub trait ExecutionEngine<P: Preset> {
 
     /// [`engine_getBlobsV1`](https://github.com/ethereum/execution-apis/blob/9707339bc8222f6d43b3bf0a7a91623f7ce52213/src/engine/cancun.md#engine_getblobsv1)
     fn get_blobs(&self, params: EngineGetBlobsParams<P>);
+
+    /// [`engine_getPayloadBodiesByHashV1`](https://github.com/ethereum/execution-apis/blob/00ca4be81bc58328d49b85e01108bddfff034faa/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1)
+    /// or [`engine_getPayloadBodiesByHashV2`](https://github.com/ethereum/execution-apis/blob/5aebdfdd45cadeb723be4bd45b4611b71c8b1c85/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2)
+    /// if the execution client supports it.
+    fn get_payload_bodies_by_hash(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+        sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    );
 
     /// [`notify_forkchoice_updated`](https://github.com/ethereum/consensus-specs/blob/1bfefe301da592375e2e02f65849a96aadec1936/specs/bellatrix/fork-choice.md#notify_forkchoice_updated)
     fn notify_forkchoice_updated(
@@ -68,6 +77,14 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for &E {
 
     fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
         (*self).get_blobs(params)
+    }
+
+    fn get_payload_bodies_by_hash(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+        sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    ) {
+        (*self).get_payload_bodies_by_hash(block_hashes, sender)
     }
 
     fn notify_forkchoice_updated(
@@ -119,6 +136,15 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Arc<E> {
 
     fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
         self.as_ref().get_blobs(params)
+    }
+
+    fn get_payload_bodies_by_hash(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+        sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    ) {
+        self.as_ref()
+            .get_payload_bodies_by_hash(block_hashes, sender)
     }
 
     fn notify_forkchoice_updated(
@@ -179,6 +205,16 @@ impl<P: Preset, E: ExecutionEngine<P>> ExecutionEngine<P> for Mutex<E> {
             .get_blobs(params)
     }
 
+    fn get_payload_bodies_by_hash(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+        sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    ) {
+        self.lock()
+            .expect("execution engine mutex is poisoned")
+            .get_payload_bodies_by_hash(block_hashes, sender)
+    }
+
     fn notify_forkchoice_updated(
         &self,
         head_eth1_block_hash: ExecutionBlockHash,
@@ -237,6 +273,13 @@ impl<P: Preset> ExecutionEngine<P> for NullExecutionEngine {
 
     fn get_blobs(&self, _params: EngineGetBlobsParams<P>) {}
 
+    fn get_payload_bodies_by_hash(
+        &self,
+        _block_hashes: Vec<ExecutionBlockHash>,
+        _sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    ) {
+    }
+
     fn notify_forkchoice_updated(
         &self,
         _head_eth1_block_hash: ExecutionBlockHash,
@@ -284,6 +327,13 @@ impl<P: Preset> ExecutionEngine<P> for MockExecutionEngine<P> {
         if let Some(sender) = self.execution_service_tx.as_ref() {
             ExecutionServiceMessage::GetBlobs(params).send(sender);
         }
+    }
+
+    fn get_payload_bodies_by_hash(
+        &self,
+        _block_hashes: Vec<ExecutionBlockHash>,
+        _sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    ) {
     }
 
     fn notify_forkchoice_updated(

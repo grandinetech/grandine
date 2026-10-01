@@ -5,7 +5,7 @@ use anyhow::Result;
 use arithmetic::U64Ext as _;
 use bls::PublicKeyBytes;
 use eth1_api::ApiController;
-use fork_choice_control::Wait;
+use fork_choice_control::{StoredBlock, Wait};
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{
@@ -420,18 +420,24 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         previous_epoch_slot_reports = SlotReports::new();
 
         for block_with_root in
-            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(previous_epoch)?)?
+            snapshot.stored_blocks_by_range(misc::slots_in_epoch::<P>(previous_epoch)?)?
         {
             let slot = block_with_root.block.message().slot();
 
             let slot_report = (slot > GENESIS_SLOT)
-                .then(|| {
-                    combined::state_transition_for_report(
+                .then(|| match &block_with_root.block {
+                    StoredBlock::Full(block) => combined::state_transition_for_report(
                         config,
                         pubkey_cache,
                         state.make_mut(),
-                        &block_with_root.block,
-                    )
+                        block,
+                    ),
+                    StoredBlock::Blinded(block) => combined::blinded_state_transition_for_report(
+                        config,
+                        pubkey_cache,
+                        state.make_mut(),
+                        block,
+                    ),
                 })
                 .transpose()?
                 .unwrap_or_default();
@@ -466,18 +472,24 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
             HashMap::with_capacity(P::SlotsPerEpoch::USIZE);
 
         for block_with_root in
-            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(current_epoch)?)?
+            snapshot.stored_blocks_by_range(misc::slots_in_epoch::<P>(current_epoch)?)?
         {
             let slot = block_with_root.block.message().slot();
 
             let slot_report = (slot > GENESIS_SLOT)
-                .then(|| {
-                    combined::state_transition_for_report(
+                .then(|| match &block_with_root.block {
+                    StoredBlock::Full(block) => combined::state_transition_for_report(
                         config,
                         pubkey_cache,
                         state.make_mut(),
-                        &block_with_root.block,
-                    )
+                        block,
+                    ),
+                    StoredBlock::Blinded(block) => combined::blinded_state_transition_for_report(
+                        config,
+                        pubkey_cache,
+                        state.make_mut(),
+                        block,
+                    ),
                 })
                 .transpose()?
                 .unwrap_or_default();
@@ -688,18 +700,24 @@ pub async fn get_validator_statistics<P: Preset, W: Wait>(
         let mut current_epoch_slot_reports = SlotReports::new();
 
         for block_with_root in
-            snapshot.blocks_by_range(misc::slots_in_epoch::<P>(current_epoch)?)?
+            snapshot.stored_blocks_by_range(misc::slots_in_epoch::<P>(current_epoch)?)?
         {
             let slot = block_with_root.block.message().slot();
 
             let slot_report = (slot > GENESIS_SLOT)
-                .then(|| {
-                    combined::state_transition_for_report(
+                .then(|| match &block_with_root.block {
+                    StoredBlock::Full(block) => combined::state_transition_for_report(
                         config,
                         pubkey_cache,
                         state.make_mut(),
-                        &block_with_root.block,
-                    )
+                        block,
+                    ),
+                    StoredBlock::Blinded(block) => combined::blinded_state_transition_for_report(
+                        config,
+                        pubkey_cache,
+                        state.make_mut(),
+                        block,
+                    ),
                 })
                 .transpose()?
                 .unwrap_or_default();

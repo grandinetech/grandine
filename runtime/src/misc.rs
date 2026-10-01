@@ -28,6 +28,8 @@ pub struct StorageConfig {
     pub archival_epoch_interval: NonZeroU64,
     pub reset_databases: bool,
     pub storage_mode: StorageMode,
+    pub store_execution_payloads: bool,
+    pub zstd_compression_level: i32,
 }
 
 impl StorageConfig {
@@ -143,6 +145,8 @@ impl StorageConfig {
             archival_epoch_interval,
             reset_databases,
             storage_mode,
+            store_execution_payloads,
+            zstd_compression_level,
         } = self;
 
         let new_db_size = ByteSize::b(
@@ -167,6 +171,8 @@ impl StorageConfig {
             archival_epoch_interval,
             reset_databases,
             storage_mode,
+            store_execution_payloads,
+            zstd_compression_level,
         }
     }
 
@@ -181,6 +187,7 @@ impl StorageConfig {
 
 #[cfg(test)]
 mod tests {
+    use fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL;
     use nonzero_ext::nonzero;
 
     use super::*;
@@ -195,6 +202,8 @@ mod tests {
             archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
             storage_mode: StorageMode::default(),
+            store_execution_payloads: false,
+            zstd_compression_level: DEFAULT_ZSTD_COMPRESSION_LEVEL,
         };
 
         let StorageConfig {
@@ -217,6 +226,8 @@ mod tests {
             archival_epoch_interval: nonzero!(1_u64),
             reset_databases: false,
             storage_mode: StorageMode::default(),
+            store_execution_payloads: false,
+            zstd_compression_level: DEFAULT_ZSTD_COMPRESSION_LEVEL,
         };
 
         assert_eq!(storage_config.db_size, ByteSize::b(u64::MAX));

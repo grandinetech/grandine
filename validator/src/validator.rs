@@ -24,7 +24,9 @@ use doppelganger_protection::DoppelgangerProtection;
 use eth1_api::ApiController;
 use eth2_libp2p::GossipId;
 use features::Feature;
-use fork_choice_control::{BlockWithRoot, Event, EventChannels, Topic, ValidatorMessage, Wait};
+use fork_choice_control::{
+    BlockWithRoot, Event, EventChannels, StoredBlock, Topic, ValidatorMessage, Wait,
+};
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
     PayloadAttestationOrigin, StateCacheError,
@@ -1872,7 +1874,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // Skip attesting if validators has not seen any beacon block for the assigned slot
         let Some(block_with_root) = self
             .controller
-            .block_by_slot(slot_head.slot())?
+            .stored_block_by_slot(slot_head.slot())?
             .map(WithStatus::value)
         else {
             return Ok(());
@@ -2364,7 +2366,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn own_payload_attestations(
         &self,
         slot_head: &SlotHead<P>,
-        block_with_root: &BlockWithRoot<P>,
+        block_with_root: &BlockWithRoot<StoredBlock<P>>,
         own_members: &[PTCMember],
     ) -> Result<&[PayloadAttestationMessage]> {
         let beacon_block_root = block_with_root.root;
