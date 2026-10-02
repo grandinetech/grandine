@@ -10,7 +10,7 @@ use thiserror::Error;
 use typenum::{U1, Unsigned as _};
 use types::redacting_url::RedactingUrl;
 
-use crate::consts::MaxBuilderUrlSize;
+use crate::consts::{MaxBuilderAuthDataSize, MaxBuilderUrlSize};
 
 #[derive(Debug, Error)]
 pub enum BuilderUrlError {
@@ -50,6 +50,19 @@ impl BuilderUrl {
         }
 
         Ok(url)
+    }
+
+    /// The [default auth data] derived from the builder's hostname.
+    ///
+    /// [default auth data]: https://github.com/ethereum/builder-specs/blob/main/specs/gloas/validator.md#default-auth-data
+    pub fn default_auth_data(&self) -> Result<ByteList<MaxBuilderAuthDataSize>, BuilderUrlError> {
+        let url = self.http_url()?.into_url();
+        let host = url.host_str().ok_or(BuilderUrlError::Invalid)?;
+
+        host.as_bytes()
+            .to_vec()
+            .try_into()
+            .map_err(|_| BuilderUrlError::TooLong)
     }
 
     fn origin(&self) -> Option<String> {

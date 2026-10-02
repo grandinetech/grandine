@@ -1,7 +1,9 @@
 use core::marker::PhantomData;
 
 use bls::PublicKeyBytes;
-use builder_api::unphased::containers::ValidatorRegistrationV1;
+use builder_api::{
+    gloas::containers::BuilderRequestAuth, unphased::containers::ValidatorRegistrationV1,
+};
 use serde::Serialize;
 use ssz::Hc;
 use types::{
@@ -89,6 +91,20 @@ pub enum SigningMessage<'block, P: Preset> {
     ValidatorRegistration(ValidatorRegistrationV1),
     VoluntaryExit(VoluntaryExit),
     ProposerPreferences(ProposerPreferences),
+    BuilderRequestAuth(VersionedBuilderRequestAuth),
+}
+
+impl<P: Preset> From<BuilderRequestAuth> for SigningMessage<'_, P> {
+    fn from(builder_request_auth: BuilderRequestAuth) -> Self {
+        Self::BuilderRequestAuth(VersionedBuilderRequestAuth::Gloas(builder_request_auth))
+    }
+}
+
+/// `BuilderRequestAuth` tagged with the fork it belongs to, as the remote signing API expects.
+#[derive(Debug, Serialize)]
+#[serde(tag = "version", content = "data", rename_all = "UPPERCASE")]
+pub enum VersionedBuilderRequestAuth {
+    Gloas(BuilderRequestAuth),
 }
 
 impl<'block, P: Preset> From<&'block Hc<Phase0BeaconBlock<P>>> for SigningMessage<'block, P> {
