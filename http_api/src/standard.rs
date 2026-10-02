@@ -2938,26 +2938,54 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorPTCDutyResponse>>, Error> {
+    let current_epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+
+    if epoch > current_epoch.saturating_add(1) {
+        return Err(Error::InvalidEpoch(anyhow!(
+            "epoch {epoch} is after the next epoch"
+        )));
+    }
+
+    if epoch < controller.chain_config().gloas_fork_epoch {
+        return Err(Error::InvalidEpoch(anyhow!(
+            "epoch {epoch} is before the Gloas fork"
+        )));
+    }
+
     let head_state = controller.head_state();
+    let head_epoch = accessors::get_current_epoch(&head_state.value);
 
-    let state = match accessors::relative_epoch(&head_state.value, epoch) {
-        Ok(_) => head_state,
-        Err(_) => {
-            let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-            state_id::state(
-                &StateId::Slot(start_slot),
-                &controller,
-                &anchor_checkpoint_provider,
-            )?
-        }
+    // The head state lags the clock at epoch boundaries, and before the Gloas upgrade
+    // it has no PTC window.
+    let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+
+    let (state, status) = if head_state.value.is_post_gloas()
+        && (misc::previous_epoch(head_epoch)..=head_epoch.saturating_add(P::MinSeedLookahead::U64))
+            .contains(&epoch)
+    {
+        (head_state.value, head_state.status)
+    } else if epoch >= head_epoch {
+        let head = controller.head();
+
+        let state = controller
+            .preprocessed_state_for_block_production(head.value.block_root, start_slot)
+            .await?;
+
+        (state, head.status)
+    } else {
+        let WithStatus {
+            value: state,
+            status,
+            // `duties` responses are not supposed to contain a `finalized` field.
+            finalized: _,
+        } = state_id::state(
+            &StateId::Slot(start_slot),
+            &controller,
+            &anchor_checkpoint_provider,
+        )?;
+
+        (state, status)
     };
-
-    let WithStatus {
-        value: state,
-        status,
-        // `duties` responses are not supposed to contain a `finalized` field.
-        finalized: _,
-    } = state;
 
     // Unlike `GET /eth/v1/validator/duties/proposer/{epoch}`,
     // this endpoint is supposed to return the dependent root for the previous epoch.
