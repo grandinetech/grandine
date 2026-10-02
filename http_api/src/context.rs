@@ -258,6 +258,7 @@ impl<P: Preset> Context<P> {
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             H256::default(),
+            validator_config.builder_settings.clone(),
             validator_config.validator_definitions.clone_arc(),
         ));
 
