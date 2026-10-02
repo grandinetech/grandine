@@ -42,6 +42,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
             SigningMessage::ValidatorRegistration(_) => MessageType::ValidatorRegistration,
             SigningMessage::VoluntaryExit(_) => MessageType::VoluntaryExit,
             SigningMessage::ProposerPreferences(_) => MessageType::ProposerPreferences,
+            SigningMessage::BuilderRequestAuth(_) => MessageType::BuilderRequestAuth,
         };
 
         Self {
@@ -74,6 +75,7 @@ enum MessageType {
     ValidatorRegistration,
     VoluntaryExit,
     ProposerPreferences,
+    BuilderRequestAuth,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +85,10 @@ pub struct SigningResponse {
 
 #[cfg(test)]
 mod tests {
+    use builder_api::gloas::containers::BuilderRequestAuth;
+    use serde_json::json;
+    use types::preset::Mainnet;
+
     use super::*;
 
     // This exists mainly to ensure `MessageType::BlockV2` is renamed correctly.
@@ -104,7 +110,41 @@ mod tests {
                 "VALIDATOR_REGISTRATION",
                 "VOLUNTARY_EXIT",
                 "PROPOSER_PREFERENCES",
+                "BUILDER_REQUEST_AUTH",
             ],
+        );
+    }
+
+    // from <https://github.com/ethereum/remote-signing-api/blob/master/signing/paths/sign.yaml>
+    #[test]
+    fn builder_request_auth_request_matches_the_remote_signing_api() {
+        let builder_request_auth = BuilderRequestAuth {
+            data: b"builder.example.org"
+                .to_vec()
+                .try_into()
+                .expect("auth data fits in MaxBuilderAuthDataSize"),
+            slot: 32,
+        };
+
+        let request = SigningRequest::<Mainnet>::new(
+            SigningMessage::from(builder_request_auth),
+            H256::zero(),
+            None,
+        );
+
+        assert_eq!(
+            serde_json::to_value(request).expect("request should serialize"),
+            json!({
+                "type": "BUILDER_REQUEST_AUTH",
+                "signingRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "builder_request_auth": {
+                    "version": "GLOAS",
+                    "data": {
+                        "data": "0x6275696c6465722e6578616d706c652e6f7267",
+                        "slot": "32",
+                    },
+                },
+            }),
         );
     }
 }
