@@ -179,6 +179,11 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         Self { producer_context }
     }
 
+    #[must_use]
+    pub fn proposer_configs(&self) -> &ProposerConfigs {
+        &self.producer_context.proposer_configs
+    }
+
     pub fn new_build_context(
         &self,
         beacon_state: Arc<BeaconState<P>>,

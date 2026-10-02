@@ -35,8 +35,8 @@ use fork_choice_control::Wait;
 use helper_functions::{accessors, error::Error as HelperError, misc, signing::SignForSingleFork};
 use http_api_utils::{ApiError, ApiMetrics};
 use keymanager::{
-    KeyManager, KeymanagerError, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey,
-    ValidatingPubkey,
+    BuilderConfigError, BuilderConfigOptions, KeyManager, KeymanagerError,
+    KeymanagerOperationStatus, ListedRemoteKey, RemoteKey, ResolvedBuilderConfig, ValidatingPubkey,
 };
 use logging::{debug_with_peers, info_with_peers};
 use prometheus_metrics::Metrics;
@@ -96,6 +96,8 @@ impl ValidatorApiConfig {
 enum Error {
     #[error("internal error")]
     Internal(#[from] AnyhowError),
+    #[error("invalid builder config")]
+    InvalidBuilderConfig(#[source] AnyhowError),
     #[error("invalid JSON body")]
     InvalidJsonBody(#[source] JsonRejection),
     #[error("invalid graffiti")]
@@ -149,9 +151,10 @@ impl Error {
     fn status_code(&self) -> StatusCode {
         match self {
             Self::InvalidJsonBody(json_rejection) => json_rejection.status(),
-            Self::InvalidGraffiti(_) | Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidBuilderConfig(_)
+            | Self::InvalidGraffiti(_)
+            | Self::InvalidPublicKey(_)
+            | Self::InvalidQuery(_) => StatusCode::BAD_REQUEST,
             Self::ValidatorNotFound { pubkey: _ } | Self::ValidatorNotOwned { pubkey: _ } => {
                 StatusCode::NOT_FOUND
             }
@@ -219,6 +222,18 @@ impl<T: Serialize> IntoResponse for EthResponse<T> {
 
 // This has multiple `FromRequest` impls to make error messages more specific.
 struct EthJson<T>(pub T);
+
+impl<S: Sync> FromRequest<S, Body> for EthJson<BuilderConfigOptions> {
+    type Rejection = Error;
+
+    async fn from_request(request: Request<Body>, _state: &S) -> Result<Self, Self::Rejection> {
+        request
+            .extract()
+            .await
+            .map(|Json(builder_config)| Self(builder_config))
+            .map_err(Error::InvalidJsonBody)
+    }
+}
 
 impl<S: Sync> FromRequest<S, Body> for EthJson<SetFeeRecipientQuery> {
     type Rejection = Error;
@@ -439,6 +454,10 @@ fn proposer_config_error(pubkey: PublicKeyBytes, error: AnyhowError) -> Error {
         return Error::InvalidGraffiti(error);
     }
 
+    if error.is::<BuilderConfigError>() {
+        return Error::InvalidBuilderConfig(error);
+    }
+
     Error::Internal(error)
 }
 
@@ -532,6 +551,46 @@ async fn keymanager_delete_gas_limit(
     keymanager
         .proposer_configs()
         .delete_gas_limit(pubkey)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /eth/v1/validator/{pubkey}/builder_config`
+async fn keymanager_get_builder_config(
+    State(keymanager): State<Arc<KeyManager>>,
+    EthPath(pubkey): EthPath<PublicKeyBytes>,
+) -> Result<EthResponse<ResolvedBuilderConfig>, Error> {
+    let builder_config = keymanager
+        .proposer_configs()
+        .resolved_builder_config(pubkey)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
+
+    Ok(EthResponse::json(builder_config))
+}
+
+/// `POST /eth/v1/validator/{pubkey}/builder_config`
+async fn keymanager_set_builder_config(
+    State(keymanager): State<Arc<KeyManager>>,
+    EthPath(pubkey): EthPath<PublicKeyBytes>,
+    EthJson(builder_config): EthJson<BuilderConfigOptions>,
+) -> Result<StatusCode, Error> {
+    keymanager
+        .proposer_configs()
+        .set_builder_config(pubkey, builder_config)
+        .map_err(|error| proposer_config_error(pubkey, error))?;
+
+    Ok(StatusCode::ACCEPTED)
+}
+
+/// `DELETE /eth/v1/validator/{pubkey}/builder_config`
+async fn keymanager_delete_builder_config(
+    State(keymanager): State<Arc<KeyManager>>,
+    EthPath(pubkey): EthPath<PublicKeyBytes>,
+) -> Result<StatusCode, Error> {
+    keymanager
+        .proposer_configs()
+        .delete_builder_config(pubkey)
         .map_err(|error| proposer_config_error(pubkey, error))?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -817,6 +876,18 @@ fn eth_v1_keymanager_routes<P: Preset, W: Wait>() -> Router<ValidatorApiState<P,
         .route(
             "/eth/v1/validator/{pubkey}/graffiti",
             delete(keymanager_delete_graffiti),
+        )
+        .route(
+            "/eth/v1/validator/{pubkey}/builder_config",
+            get(keymanager_get_builder_config),
+        )
+        .route(
+            "/eth/v1/validator/{pubkey}/builder_config",
+            post(keymanager_set_builder_config),
+        )
+        .route(
+            "/eth/v1/validator/{pubkey}/builder_config",
+            delete(keymanager_delete_builder_config),
         )
         .route(
             "/eth/v1/validator/{pubkey}/voluntary_exit",

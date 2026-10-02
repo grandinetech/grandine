@@ -12,10 +12,10 @@ use core::{
 };
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
-use anyhow::{Result, anyhow, bail, ensure};
+use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use binary_utils::TelemetryConfig;
 use bls::PublicKeyBytes;
-use builder_api::{BuilderApiFormat, BuilderConfig};
+use builder_api::{BuilderApiFormat, BuilderConfig, gloas::containers::BuilderUrl};
 use bytesize::ByteSize;
 use clap::{
     Arg, Args, CommandFactory as _, Error as ClapError, Parser, ValueEnum, error::ErrorKind,
@@ -41,6 +41,7 @@ use grandine_version::{APPLICATION_NAME, APPLICATION_VERSION};
 use helper_functions::misc;
 use http_api::HttpApiConfig;
 use itertools::{EitherOrBoth, Itertools as _};
+use keymanager::BuilderSettings;
 use kzg_utils::{DEFAULT_KZG_BACKEND, KzgBackend};
 use logging::{info_with_peers, warn_with_peers};
 use metrics::{MetricsServerConfig, MetricsServiceConfig};
@@ -914,7 +915,7 @@ struct ValidatorOptions {
     builder_max_skipped_slots_per_epoch: u64,
 
     /// Percentage multiplier to apply to the builder's payload value when choosing between a builder payload header and payload from the paired execution node
-    #[clap(long, default_value_t = ValidatorConfig::default().default_builder_boost_factor)]
+    #[clap(long, default_value_t = BuilderSettings::default().default_builder_boost_factor)]
     default_builder_boost_factor: Uint256,
 
     /// Default execution gas limit for all validators [default: scheduled gas limit, or 60000000]
@@ -922,8 +923,20 @@ struct ValidatorOptions {
     default_gas_limit: Option<Gas>,
 
     /// Minimum total payment in Gwei that proposer are willing to accept from a builder
-    #[clap(long, default_value_t = ValidatorConfig::default().default_builder_min_bid)]
+    #[clap(long, default_value_t = BuilderSettings::default().default_builder_min_bid)]
     default_builder_min_bid: Gwei,
+
+    /// Maximum execution layer payment in Gwei counted toward a builder bid. Values above 0 require --allow-trusted-payments
+    #[clap(long, default_value_t = BuilderSettings::default().default_builder_max_execution_payment)]
+    default_builder_max_execution_payment: Gwei,
+
+    /// Allow counting execution layer payments toward builder bids.
+    #[clap(long)]
+    allow_trusted_payments: bool,
+
+    /// External builder URLs to request execution payload bids from post-Gloas
+    #[clap(long, num_args = 1.., value_delimiter = ',')]
+    payload_builder_urls: Vec<BuilderUrl>,
 
     /// List of public keys to use from Web3Signer
     #[clap(long, num_args = 1.., value_delimiter = ',')]
@@ -1160,6 +1173,9 @@ impl GrandineArgs {
             builder_max_skipped_slots_per_epoch,
             default_builder_boost_factor,
             default_builder_min_bid,
+            default_builder_max_execution_payment,
+            allow_trusted_payments,
+            payload_builder_urls,
             default_gas_limit,
             use_validator_key_cache,
             web3signer_public_keys,
@@ -1465,6 +1481,16 @@ impl GrandineArgs {
             builder_url
         };
 
+        ensure!(
+            default_builder_max_execution_payment == 0 || allow_trusted_payments,
+            "--default-builder-max-execution-payment above 0 requires --allow-trusted-payments",
+        );
+
+        for url in &payload_builder_urls {
+            url.http_url()
+                .with_context(|| format!("invalid --payload-builder-urls entry {url}"))?;
+        }
+
         let builder_config = builder_url.map(|url| BuilderConfig {
             builder_api_format,
             builder_api_url: url,
@@ -1559,6 +1585,9 @@ impl GrandineArgs {
             suggested_fee_recipient: suggested_fee_recipient.unwrap_or(GRANDINE_DONATION_ADDRESS),
             default_builder_boost_factor,
             default_builder_min_bid,
+            default_builder_max_execution_payment,
+            allow_trusted_payments,
+            payload_builder_urls,
             default_gas_limit,
             network_config: network_config_options.into_config(
                 network,

@@ -48,7 +48,7 @@ use grandine_version::{
 use helper_functions::misc;
 use http_api::{Channels as HttpApiChannels, HttpApi, HttpApiConfig};
 use keymanager::{
-    DefinitionsStorage, KeyManager, LegacyMigration, ValidatorDefinitions,
+    BuilderSettings, DefinitionsStorage, KeyManager, LegacyMigration, ValidatorDefinitions,
     ValidatorDefinitionsWithStorage,
 };
 use liveness_tracker::LivenessTracker;
@@ -578,6 +578,7 @@ pub async fn run_after_genesis<P: Preset>(
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             graffiti,
+            validator_config.builder_settings.clone(),
             validator_config.validator_definitions.clone_arc(),
         ))
     } else {
@@ -591,6 +592,7 @@ pub async fn run_after_genesis<P: Preset>(
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             graffiti,
+            validator_config.builder_settings.clone(),
             validator_config.validator_definitions.clone_arc(),
         )?)
     };
@@ -1312,6 +1314,9 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         suggested_fee_recipient,
         default_builder_boost_factor,
         default_builder_min_bid,
+        default_builder_max_execution_payment,
+        allow_trusted_payments,
+        payload_builder_urls,
         default_gas_limit,
         network_config,
         storage_config,
@@ -1467,9 +1472,14 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         graffiti,
         max_empty_slots,
         suggested_fee_recipient,
-        default_builder_boost_factor,
-        default_builder_min_bid,
         default_gas_limit,
+        builder_settings: BuilderSettings {
+            default_builder_boost_factor,
+            default_builder_min_bid,
+            default_builder_max_execution_payment,
+            allow_trusted_payments,
+            payload_builder_urls,
+        },
         keystore_storage_password_file,
         backfill_custody_groups,
         custody_mode,
