@@ -17,6 +17,9 @@ pub const BUILDER_BID_REQUEST_TIMEOUT: Duration =
 /// [`DOMAIN_APPLICATION_MASK`]:    https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/phase0/beacon-chain.md#domain-types
 pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
 
+/// <https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#constants>
+pub const DOMAIN_BUILDER_REQUEST_AUTH: DomainType = H32(hex!("0B000001"));
+
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
 
 // SSZ limits for builder entry fields in builder config

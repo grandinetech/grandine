@@ -72,6 +72,7 @@ pub struct BuilderPreferencesEntry {
 mod tests {
     use hex_literal::hex;
     use ssz::{SszReadDefault as _, SszWrite as _};
+    use test_case::test_case;
 
     use super::*;
 
@@ -154,6 +155,31 @@ mod tests {
             serde_json::from_value::<BuilderEntry>(json).expect("entry should be deserializable"),
             builder_entry(),
         );
+    }
+
+    // from <https://github.com/ethereum/builder-specs/blob/main/specs/gloas/validator.md#default-auth-data>
+    #[test_case("https://builder.example.com/" => "builder.example.com")]
+    #[test_case("HTTPS://Builder.Example.com:443/bids?x=1" => "builder.example.com")]
+    #[test_case("https://builder.example.com:8080" => "builder.example.com")]
+    #[test_case("https://user:pw@builder.example.com/" => "builder.example.com")]
+    #[test_case("https://10.0.0.5:18550/eth/v1/builder" => "10.0.0.5")]
+    #[test_case("https://[0:0:0:0:0:0:0:1]:8443/" => "[::1]")]
+    #[test_case("https://[::ffff:192.0.2.1]/" => "[::ffff:c000:201]")]
+    fn builder_url_default_auth_data_matches_spec(url: &str) -> String {
+        let auth_data = BuilderUrl::try_from(url)
+            .expect("URL should be valid")
+            .default_auth_data()
+            .expect("an http(s) URL should have default auth data");
+
+        String::from_utf8(auth_data.as_bytes().to_vec()).expect("auth data should be ASCII")
+    }
+
+    #[test]
+    fn builder_url_default_auth_data_requires_http() {
+        BuilderUrl::try_from("user:secret@builder.example.com")
+            .expect("any nonempty UTF-8 string is accepted")
+            .default_auth_data()
+            .expect_err("a non-HTTP URL has no default auth data");
     }
 
     #[test]
