@@ -1,4 +1,6 @@
-pub use block_producer::{BlockBuildOptions, BlockProducer, Options};
+pub use block_producer::{
+    BidWeighting, BlockBuildOptions, BlockProducer, BuilderApiBid, BuilderApiBidsHandle, Options,
+};
 pub use misc::{ProposerData, ValidatorBlindedBlock};
 
 mod block_producer;

@@ -17,7 +17,7 @@ use anyhow::{Context as _, Result, bail, ensure};
 use attestation_verifier::AttestationVerifier;
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
-use builder_api::{BuilderApi, BuilderConfig};
+use builder_api::{BuilderApi, BuilderConfig, PayloadBuilderApi};
 use bytesize::ByteSize;
 use clock::Tick;
 use data_dumper::DataDumper;
@@ -65,7 +65,7 @@ use p2p::{
     SubnetService,
 };
 use pubkey_cache::PubkeyCache;
-use reqwest::{Client, ClientBuilder};
+use reqwest::{Client, ClientBuilder, redirect::Policy};
 use scc::HashMap as SccHashMap;
 use signer::{KeyOrigin, Signer, Web3SignerClientOptions, build_web3signer_client};
 use slasher::{Databases, Slasher, SlasherConfig};
@@ -435,6 +435,22 @@ pub async fn run_after_genesis<P: Preset>(
     let validator_statistics =
         report_validator_performance.then(|| Arc::new(ValidatorStatistics::new(metrics.clone())));
 
+    // Builder URLs come from API callers, so redirects must not be followed (SSRF).
+    let payload_builder_client = ClientBuilder::new()
+        .user_agent(APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM)
+        .redirect(Policy::none())
+        .build()?;
+
+    let payload_builder_api = Arc::new(PayloadBuilderApi::new(
+        builder_config
+            .as_ref()
+            .map(|builder_config| builder_config.builder_api_format)
+            .unwrap_or_default(),
+        pubkey_cache.clone_arc(),
+        payload_builder_client,
+        metrics.clone(),
+    ));
+
     let builder_api = builder_config.map(|builder_config| {
         Arc::new(BuilderApi::new(
             builder_config,
@@ -625,6 +641,7 @@ pub async fn run_after_genesis<P: Preset>(
     let block_producer = Arc::new(BlockProducer::new(
         keymanager.proposer_configs().clone_arc(),
         builder_api.clone(),
+        payload_builder_api.clone_arc(),
         controller.clone_arc(),
         dedicated_executor_normal_priority.clone_arc(),
         execution_engine,
@@ -767,6 +784,7 @@ pub async fn run_after_genesis<P: Preset>(
         Some(http_api_config) => {
             let http_api = HttpApi {
                 block_producer,
+                payload_builder_api,
                 controller: controller.clone_arc(),
                 anchor_checkpoint_provider,
                 eth1_api,
@@ -1288,6 +1306,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         max_empty_slots,
         suggested_fee_recipient,
         default_builder_boost_factor,
+        default_builder_min_bid,
         default_gas_limit,
         network_config,
         storage_config,
@@ -1444,6 +1463,7 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         max_empty_slots,
         suggested_fee_recipient,
         default_builder_boost_factor,
+        default_builder_min_bid,
         default_gas_limit,
         keystore_storage_password_file,
         backfill_custody_groups,

@@ -1,7 +1,13 @@
+use core::time::Duration;
+
 use hex_literal::hex;
+use typenum::{U64, U2048, U4096};
 use types::phase0::primitives::{DomainType, H32};
 
 pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
+
+pub const BUILDER_BID_REQUEST_TIMEOUT: Duration =
+    Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 /// [`DOMAIN_APPLICATION_BUILDER`] from `builder-specs`.
 ///
@@ -12,3 +18,12 @@ pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
 pub const DOMAIN_APPLICATION_BUILDER: DomainType = H32(hex!("00000001"));
 
 pub const EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION: u64 = 1;
+
+// SSZ limits for builder entry fields in builder config
+pub type MaxBuilderEntries = U64;
+pub type MaxBuilderAuthDataSize = U4096;
+pub type MaxBuilderPubkeys = U64;
+pub type MaxBuilderUrlSize = U2048;
+
+// MAX_BUILDER_ENTRIES * (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH
+pub type MaxBuilderPreferencesEntries = U4096;

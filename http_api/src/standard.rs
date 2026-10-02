@@ -22,7 +22,12 @@ use axum::{
 use binary_utils::TracingHandle;
 use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
-use builder_api::unphased::containers::SignedValidatorRegistrationV1;
+use builder_api::{
+    PayloadBuilderApi,
+    consts::MaxBuilderPreferencesEntries,
+    gloas::containers::{BuilderConfig as GloasBuilderConfig, BuilderPreferencesEntry, BuilderUrl},
+    unphased::containers::SignedValidatorRegistrationV1,
+};
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
@@ -115,8 +120,8 @@ use types::{
     },
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
-        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
-        SignedBeaconBlock as _,
+        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
+        BlockBodyWithPayloadBid, PostFuluBeaconState, SignedBeaconBlock as _,
     },
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -127,14 +132,15 @@ use crate::{
     extractors::{EthJson, EthJsonOrSsz, EthJsonOrSszWithOptionalPhase, EthPath, EthQuery},
     full_config::FullConfig,
     misc::{
-        APIBlock, BlockContents, BroadcastValidation,
+        APIBlock, BlockContents, BroadcastValidation, BuilderConfigPhaseDeserializer,
+        BuilderPreferencesEntryListPhaseDeserializer,
         PayloadAttestationMessageListPhaseDeserializer, SignedAPIBlock,
         SignedAPIBlockPhaseDeserializer, SignedAggregateAndProofListFromPhaseDeserializer,
         SignedBlindedBeaconPhaseDeserializer, SignedExecutionPayloadBidPhaseDeserializer,
         SignedProposerPreferencesListFromPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
-    response::{ETH_BLOB_DATA_INCLUDED, EthResponse, JsonOrSsz},
+    response::{ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
         ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
@@ -234,7 +240,6 @@ pub struct ValidatorBlockQueryV4 {
     skip_randao_verification: bool,
     #[serde(default = "serde_aux::field_attributes::bool_true")]
     include_payload: bool,
-    builder_boost_factor: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -1757,6 +1762,35 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
     }
 }
 
+// SSZ bodies decode regardless of phase.
+fn ensure_post_gloas_request(headers: &HeaderMap) -> Result<(), Error> {
+    let phase = http_api_utils::extract_phase_from_headers(headers)?;
+
+    if phase < Phase::Gloas {
+        return Err(Error::InvalidPhase {
+            expected: Phase::Gloas,
+            got: phase,
+        });
+    }
+
+    Ok(())
+}
+
+fn builder_url_from_headers(headers: &HeaderMap) -> Option<BuilderUrl> {
+    let header_value = headers.get(ETH_BUILDER_URL)?;
+
+    let builder_url = header_value
+        .to_str()
+        .ok()
+        .and_then(|url| BuilderUrl::try_from(url).ok());
+
+    if builder_url.is_none() {
+        warn_with_peers!("ignoring malformed {ETH_BUILDER_URL} header");
+    }
+
+    builder_url
+}
+
 /// `POST /eth/v2/beacon/blinded_blocks`
 #[instrument(
     skip_all,
@@ -1814,6 +1848,7 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/blocks`
+#[expect(clippy::too_many_arguments)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -1826,7 +1861,9 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     State(dedicated_executor): State<Arc<DedicatedExecutor>>,
+    State(payload_builder_api): State<Arc<PayloadBuilderApi>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
+    headers: HeaderMap,
     EthJsonOrSsz(signed_api_block, _): EthJsonOrSsz<
         Box<SignedAPIBlock<P>>,
         SignedAPIBlockPhaseDeserializer<P>,
@@ -1835,21 +1872,40 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
     let (signed_beacon_block, proofs, blobs) = signed_api_block.split();
     let slot = signed_beacon_block.to_header().message.slot;
     let phase = controller.chain_config().phase_at_slot::<P>(slot);
+    let signed_beacon_block = Arc::new(signed_beacon_block);
 
-    if phase >= Phase::Gloas {
+    if let Some(signed_payload_bid) = signed_beacon_block
+        .message()
+        .body()
+        .with_payload_bid()
+        .map(BlockBodyWithPayloadBid::signed_execution_payload_bid)
+    {
         // Only publish signed beacon block for post-Gloas
-        publish_signed_block_v2(
-            Arc::new(signed_beacon_block),
+        let status_code = publish_signed_block_v2(
+            signed_beacon_block.clone_arc(),
             vec![],
             query.broadcast_validation.unwrap_or_default(),
             controller,
             event_channels,
             api_to_p2p_tx,
         )
-        .await
-    } else if phase.is_peerdas_activated() {
-        let signed_beacon_block = Arc::new(signed_beacon_block);
+        .await?;
 
+        if let Some(builder_url) = builder_url_from_headers(&headers)
+            && signed_payload_bid.message.builder_index != BUILDER_INDEX_SELF_BUILD
+        {
+            tokio::spawn(async move {
+                if let Err(error) = payload_builder_api
+                    .submit_signed_beacon_block(&builder_url, &signed_beacon_block)
+                    .await
+                {
+                    warn_with_peers!("failed to forward block to builder {builder_url}: {error:?}");
+                }
+            });
+        }
+
+        Ok(status_code)
+    } else if phase.is_peerdas_activated() {
         let data_column_sidecars = construct_data_column_sidecars_from_blobs(
             controller.clone_arc(),
             signed_beacon_block.clone_arc(),
@@ -1877,7 +1933,7 @@ pub async fn publish_block_v2<P: Preset, W: Wait>(
         )?;
 
         publish_signed_block_v2(
-            Arc::new(signed_beacon_block),
+            signed_beacon_block,
             blob_sidecars,
             query.broadcast_validation.unwrap_or_default(),
             controller,
@@ -3407,7 +3463,7 @@ pub async fn validator_block<P: Preset, W: Wait>(
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
     let (beacon_block, _) = block_build_context
-        .build_beacon_block(randao_reveal, local_execution_payload_handle)
+        .build_beacon_block(randao_reveal, local_execution_payload_handle, None)
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -3472,6 +3528,7 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
             builder_boost_factor,
+            ..BlockBuildOptions::default()
         },
     );
 
@@ -3511,8 +3568,9 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         .execution_payload_value(mev.unwrap_or_default()))
 }
 
-/// `GET /eth/v4/validator/blocks/{slot}`
+/// `POST /eth/v4/validator/blocks/{slot}`
 #[expect(clippy::type_complexity)]
+#[expect(clippy::too_many_arguments)]
 #[instrument(skip_all, level = "debug", name = "http_api::validator_block_v4")]
 pub async fn validator_block_v4<P: Preset, W: Wait>(
     State(chain_config): State<Arc<ChainConfig>>,
@@ -3522,14 +3580,25 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
     EthPath(slot): EthPath<Slot>,
     EthQuery(query): EthQuery<ValidatorBlockQueryV4>,
     headers: HeaderMap,
+    EthJsonOrSsz(builder_config, _): EthJsonOrSsz<
+        GloasBuilderConfig,
+        BuilderConfigPhaseDeserializer,
+    >,
 ) -> Result<EthResponse<APIBlock<BeaconBlock<P>, P>, (), JsonOrSsz>, Error> {
     let ValidatorBlockQueryV4 {
         randao_reveal,
         graffiti,
         skip_randao_verification,
         include_payload,
-        builder_boost_factor,
     } = query;
+
+    ensure_post_gloas_request(&headers)?;
+
+    let GloasBuilderConfig {
+        min_bid,
+        builder_boost_factor,
+        builders,
+    } = builder_config;
 
     if skip_randao_verification && !randao_reveal.is_empty() {
         return Err(Error::InvalidRandaoReveal);
@@ -3546,10 +3615,6 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
 
     let proposer_index = accessors::get_beacon_proposer_index(&chain_config, &beacon_state)?;
 
-    let builder_boost_factor = builder_boost_factor
-        .map(Uint256::from_u64)
-        .unwrap_or(validator_config.default_builder_boost_factor);
-
     let block_build_context = block_producer.new_build_context(
         beacon_state.clone_arc(),
         head_block_root,
@@ -3558,14 +3623,21 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
             graffiti,
             disable_blockprint_graffiti: validator_config.disable_blockprint_graffiti,
             skip_randao_verification,
-            builder_boost_factor,
+            builder_boost_factor: Uint256::from_u64(builder_boost_factor),
+            min_bid,
         },
     );
 
     let local_execution_payload_handle = block_build_context.get_local_execution_payload();
 
+    let builder_api_bids = block_build_context.get_builder_api_bids(builders);
+
     let (validator_block, block_rewards) = block_build_context
-        .build_beacon_block(randao_reveal, local_execution_payload_handle)
+        .build_beacon_block(
+            randao_reveal,
+            local_execution_payload_handle,
+            builder_api_bids.clone(),
+        )
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
@@ -3590,6 +3662,19 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD);
 
     let payload_included = include_payload && self_built;
+
+    let builder_url = match builder_api_bids {
+        Some(builder_api_bids) if !self_built => {
+            let winning_bid = validator_block.value.payload_bid();
+
+            builder_api_bids
+                .await
+                .iter()
+                .find(|builder_api_bid| Some(&builder_api_bid.bid.message) == winning_bid)
+                .map(|builder_api_bid| builder_api_bid.url.clone())
+        }
+        _ => None,
+    };
 
     let api_block = if payload_included {
         let (execution_payload_envelope, blobs, kzg_proofs) = block_producer
@@ -3619,7 +3704,8 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         .version(version)
         .consensus_block_value(consensus_block_value)
         .execution_payload_value(mev.unwrap_or_default())
-        .execution_payload_included(payload_included))
+        .execution_payload_included(payload_included)
+        .builder_url(builder_url))
 }
 
 /// `GET /eth/v1/validator/attestation_data`
@@ -4318,6 +4404,53 @@ pub async fn validator_proposer_preferences<P: Preset, W: Wait>(
 
     if !failures.is_empty() {
         return Err(Error::InvalidProposerPreferences(failures));
+    }
+
+    Ok(())
+}
+
+/// `POST /eth/v1/validator/builder_preferences`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::validator_builder_preferences"
+)]
+pub async fn validator_builder_preferences(
+    State(payload_builder_api): State<Arc<PayloadBuilderApi>>,
+    headers: HeaderMap,
+    EthJsonOrSsz(entries, _): EthJsonOrSsz<
+        ContiguousList<BuilderPreferencesEntry, MaxBuilderPreferencesEntries>,
+        BuilderPreferencesEntryListPhaseDeserializer,
+    >,
+) -> Result<(), Error> {
+    ensure_post_gloas_request(&headers)?;
+
+    let payload_builder_api = &payload_builder_api;
+
+    let failures = entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| async move {
+            let BuilderPreferencesEntry {
+                proposer_pubkey,
+                url,
+                auth,
+                max_execution_payment,
+            } = entry;
+
+            payload_builder_api
+                .submit_builder_preferences(&url, &auth, proposer_pubkey, max_execution_payment)
+                .await
+                .map_err(|error| IndexedError { index, error })
+                .err()
+        })
+        .collect::<FuturesOrdered<_>>()
+        .filter_map(core::future::ready)
+        .collect::<Vec<_>>()
+        .await;
+
+    if !failures.is_empty() {
+        return Err(Error::InvalidBuilderPreferences(failures));
     }
 
     Ok(())
