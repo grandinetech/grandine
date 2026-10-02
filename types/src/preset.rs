@@ -48,6 +48,7 @@ use crate::{
     },
     gloas::primitives::Transaction as GloasTransaction,
     phase0::{
+        consts::TargetAggregatorsPerCommittee,
         containers::{
             Attestation, AttesterSlashing, Deposit, ProposerSlashing, SignedVoluntaryExit,
         },
@@ -288,6 +289,7 @@ pub trait Preset: Copy + Eq + Ord + Hash + Default + Debug + Send + Sync + 'stat
         + Debug
         + Send
         + Sync;
+    type MaxAggregatesPerSlot: Unsigned + Send + Sync;
     type CellsPerExtBlob: ContiguousVectorElements<KzgProof>
         + ContiguousVectorElements<Cell<Self>>
         + ArrayLength<KzgProof, ArrayType: Copy>
@@ -433,6 +435,7 @@ impl Preset for Mainnet {
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
+    type MaxAggregatesPerSlot = Prod<Self::MaxCommitteesPerSlot, TargetAggregatorsPerCommittee>;
     type MaxCellProofsPerBlock =
         Prod<Self::FieldElementsPerExtBlob, Self::MaxBlobCommitmentsPerBlock>;
     type CellsPerExtBlob = Quot<Self::FieldElementsPerExtBlob, Self::FieldElementsPerCell>;
@@ -540,6 +543,7 @@ impl Preset for Minimal {
 
     // Derived type-level variables
     type MaxAttestersPerSlot = Prod<Self::MaxValidatorsPerCommittee, Self::MaxCommitteesPerSlot>;
+    type MaxAggregatesPerSlot = Prod<Self::MaxCommitteesPerSlot, TargetAggregatorsPerCommittee>;
     type MaxCellProofsPerBlock =
         Prod<Self::FieldElementsPerExtBlob, Self::MaxBlobCommitmentsPerBlock>;
     type CellsPerExtBlob = Quot<Self::FieldElementsPerExtBlob, Self::FieldElementsPerCell>;
@@ -642,6 +646,7 @@ impl Preset for Medalla {
 
         // Derived type-level variables
         type MaxAttestersPerSlot;
+        type MaxAggregatesPerSlot;
         type MaxCellProofsPerBlock;
         type CellsPerExtBlob;
     }

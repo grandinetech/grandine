@@ -857,7 +857,6 @@ mod tests {
         let signer = Arc::new(Signer::new(
             vec![],
             Client::new(),
-            Client::new(),
             Web3SignerConfig::default(),
             None,
         ));
@@ -1148,7 +1147,6 @@ mod tests {
                 decrypted.secret_key.clone_arc(),
                 KeyOrigin::External,
             )],
-            Client::new(),
             Client::new(),
             Web3SignerConfig::default(),
             None,

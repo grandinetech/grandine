@@ -5,7 +5,9 @@ use bls::{PublicKeyBytes, Signature};
 use builder_api::unphased::containers::ValidatorRegistrationV1;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use logging::warn_with_peers;
-use types::{altair::containers::SignedContributionAndProof, preset::Preset};
+use types::{
+    altair::containers::SignedContributionAndProof, phase0::primitives::Epoch, preset::Preset,
+};
 
 pub enum ApiToValidator<P: Preset> {
     RegisteredValidators(Sender<HashSet<PublicKeyBytes>>),
@@ -26,6 +28,7 @@ impl<P: Preset> ApiToValidator<P> {
 
 pub enum InternalMessage {
     DoppelgangerProtectionResult(Result<()>),
+    FinalizedCheckpoint(Epoch),
 }
 
 impl InternalMessage {
