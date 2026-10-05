@@ -781,8 +781,18 @@ where
             Ok(BlockAction::Ignore(publishable)) => {
                 let (gossip_id, sender) = origin.split();
 
-                if let Some(gossip_id) = gossip_id {
-                    self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                // `publishable` means the block is already known. Nothing to refetch.
+                if publishable {
+                    if let Some(gossip_id) = gossip_id {
+                        self.send_to_p2p(P2pMessage::Ignore(gossip_id));
+                    }
+                } else {
+                    debug_with_peers!("block ignored: {block_root:?}");
+
+                    self.send_to_p2p(P2pMessage::IgnoreWithReason(
+                        gossip_id,
+                        MutatorIgnoreReason::BlockIgnored { block_root },
+                    ));
                 }
 
                 reply_block_validation_result_to_http_api(

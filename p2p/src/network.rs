@@ -492,7 +492,8 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             }
 
                             match mutator_ignore_reason {
-                                MutatorIgnoreReason::BlockQueueFull { block_root } => {
+                                MutatorIgnoreReason::BlockIgnored { block_root }
+                                | MutatorIgnoreReason::BlockQueueFull { block_root } => {
                                     P2pToSync::BlockNotConsidered(block_root)
                                         .send(&self.channels.p2p_to_sync_tx)
                                 },

@@ -40,6 +40,7 @@ use unwrap_none::UnwrapNone as _;
 use crate::{
     controller::MutatorHandle,
     messages::P2pMessage,
+    misc::MutatorIgnoreReason,
     queries::BlockWithRoot,
     specialized::{TestController, TestExecutionEngine},
 };
@@ -402,13 +403,23 @@ impl<P: Preset> Context<P> {
     }
 
     pub fn on_ignorable_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
-        assert!(matches!(self.on_block(block), Some(P2pMessage::Ignore(_))));
+        assert!(matches!(
+            self.on_block(block),
+            Some(
+                P2pMessage::Ignore(_)
+                    | P2pMessage::IgnoreWithReason(_, MutatorIgnoreReason::BlockIgnored { .. })
+            )
+        ));
     }
 
     pub fn on_valid_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
         assert!(matches!(
             self.on_block(block),
-            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+            Some(
+                P2pMessage::Accept(_)
+                    | P2pMessage::Ignore(_)
+                    | P2pMessage::IgnoreWithReason(_, MutatorIgnoreReason::BlockIgnored { .. })
+            ),
         ));
     }
 
@@ -422,7 +433,11 @@ impl<P: Preset> Context<P> {
 
         assert!(matches!(
             message,
-            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+            Some(
+                P2pMessage::Accept(_)
+                    | P2pMessage::Ignore(_)
+                    | P2pMessage::IgnoreWithReason(_, MutatorIgnoreReason::BlockIgnored { .. })
+            ),
         ));
 
         true
@@ -436,7 +451,14 @@ impl<P: Preset> Context<P> {
             message => {
                 assert!(matches!(
                     message,
-                    Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _)) | None,
+                    Some(
+                        P2pMessage::Ignore(_)
+                            | P2pMessage::IgnoreWithReason(
+                                _,
+                                MutatorIgnoreReason::BlockIgnored { .. }
+                            )
+                            | P2pMessage::Reject(_, _)
+                    ) | None,
                 ));
             }
         }
@@ -457,7 +479,11 @@ impl<P: Preset> Context<P> {
 
         assert!(matches!(
             result,
-            Some(P2pMessage::Accept(_) | P2pMessage::Ignore(_)),
+            Some(
+                P2pMessage::Accept(_)
+                    | P2pMessage::Ignore(_)
+                    | P2pMessage::IgnoreWithReason(_, MutatorIgnoreReason::BlockIgnored { .. })
+            ),
         ));
 
         // discard p2p messages for objects that become available after block is imported
@@ -473,8 +499,12 @@ impl<P: Preset> Context<P> {
 
         assert!(matches!(
             result,
-            Some(P2pMessage::Ignore(_) | P2pMessage::Reject(_, _) | P2pMessage::BlockNeeded(_, _))
-                | None,
+            Some(
+                P2pMessage::Ignore(_)
+                    | P2pMessage::IgnoreWithReason(_, MutatorIgnoreReason::BlockIgnored { .. })
+                    | P2pMessage::Reject(_, _)
+                    | P2pMessage::BlockNeeded(_, _)
+            ) | None,
         ));
 
         self.controller().wait_for_tasks();

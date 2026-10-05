@@ -216,10 +216,13 @@ pub type VerifyAttestationResult<P> =
 pub type VerifyPayloadAttestationResult<P> =
     Result<PayloadAttestationAction<P>, PayloadAttestationValidationError<P>>;
 
-#[expect(clippy::enum_variant_names)]
 #[derive(Debug, IntoStaticStr, Serialize)]
 #[strum(serialize_all = "snake_case")]
 pub enum MutatorIgnoreReason {
+    // Fork choice dropped the block without delaying it (e.g. slot too far ahead of the store).
+    // Sync must forget it, or it will never fetch the block again.
+    #[strum(serialize = "block_ignored")]
+    BlockIgnored { block_root: H256 },
     #[strum(serialize = "block_queue_full")]
     BlockQueueFull { block_root: H256 },
     #[strum(serialize = "blob_queue_full")]
