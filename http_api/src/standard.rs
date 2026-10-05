@@ -2833,7 +2833,9 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
     let state = match accessors::relative_epoch(&head_state.value, epoch) {
         Ok(_) => head_state,
         Err(_) => {
-            let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+            // Committees are known an epoch ahead, so the state at the start of the previous
+            // epoch serves them without advancing through that whole epoch.
+            let start_slot = misc::compute_start_slot_at_epoch::<P>(misc::previous_epoch(epoch));
 
             state_id::state(
                 &StateId::Slot(start_slot),
