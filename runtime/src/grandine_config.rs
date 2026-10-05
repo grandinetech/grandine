@@ -6,6 +6,7 @@ use builder_api::BuilderConfig;
 use directories::Directories;
 use eth1_api::AuthOptions;
 use fork_choice_store::StoreConfig;
+use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
 use keymanager::{ValidatorDefinitions, ValidatorDefinitionsWithStorage};
@@ -204,6 +205,7 @@ impl GrandineConfig {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn report(&self) {
         let Self {
             predefined_network,
@@ -214,9 +216,12 @@ impl GrandineConfig {
             graffiti,
             suggested_fee_recipient,
             default_builder_boost_factor,
+            default_gas_limit,
             telemetry_config,
             ..
         } = self;
+
+        info!("client version: {APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM}");
 
         match predefined_network {
             Some(network) => info!("network: {network}"),
@@ -302,7 +307,11 @@ impl GrandineConfig {
             }
 
             if *use_builder {
-                info!("registering validators with the builder behind the remote beacon nodes");
+                info!(
+                    "registering validators with the builder behind the remote beacon nodes \
+                     (default_builder_boost_factor: {default_builder_boost_factor}, \
+                     default gas limit: {default_gas_limit:?})",
+                );
             }
         }
 
@@ -316,6 +325,10 @@ impl GrandineConfig {
 
             if validator_client.use_validator_key_cache {
                 info!("using validator key cache");
+            }
+
+            if validator_client.detect_doppelgangers {
+                info!("doppelganger protection enabled");
             }
         }
 
@@ -360,10 +373,6 @@ impl BeaconNodeConfig {
 
         if *track_liveness {
             info!("validator liveness tracking enabled");
-        }
-
-        if let Some(client_version) = &network_config.identify_agent_version {
-            info!("client version: {client_version}");
         }
 
         if !network_config.trusted_peers.is_empty() {

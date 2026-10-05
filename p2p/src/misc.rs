@@ -37,9 +37,13 @@ pub struct SubnetPeerDiscovery {
 #[derive(Debug, Serialize)]
 pub enum SyncCommitteeSubnetAction {
     /// Subscribe and discover peers.
-    Subscribe,
+    Subscribe {
+        expiration: Epoch,
+    },
     /// Discover peers but do not subscribe.
-    DiscoverPeers,
+    DiscoverPeers {
+        expiration: Epoch,
+    },
     Unsubscribe,
 }
 
