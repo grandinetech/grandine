@@ -176,6 +176,17 @@ impl RemoteBeaconNodes {
 
         self.refresh(slot).await;
 
+        let ready = self
+            .nodes
+            .iter()
+            .filter(|node| node.health().is_ready())
+            .count();
+
+        info_with_peers!(
+            "{ready} of {} remote beacon nodes are ready to serve duties",
+            self.nodes.len(),
+        );
+
         // Only a wrong network is fatal; anything else may be fine by the next poll.
         if let Some(node) = self
             .nodes

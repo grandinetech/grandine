@@ -1182,17 +1182,26 @@ impl<P: Preset, W: Wait> Network<P, W> {
         &self,
         actions: BTreeMap<SubnetId, SyncCommitteeSubnetAction>,
     ) {
+        let chain_config = self.controller.chain_config();
+        let current_slot = self.controller.slot();
+
         let subnet_discoveries = actions
             .iter()
-            .filter(|(_, action)| {
-                matches!(
-                    action,
-                    SyncCommitteeSubnetAction::Subscribe | SyncCommitteeSubnetAction::DiscoverPeers,
-                )
-            })
-            .map(|(subnet_id, _)| SubnetDiscovery {
-                subnet: Subnet::SyncCommittee(*subnet_id),
-                min_ttl: None,
+            .filter_map(|(subnet_id, action)| match action {
+                SyncCommitteeSubnetAction::Subscribe { expiration }
+                | SyncCommitteeSubnetAction::DiscoverPeers { expiration } => {
+                    // Without a lifetime the peer manager neither keeps the peers it finds on the
+                    // subnet nor looks for more once they leave.
+                    let time_diff = misc::compute_start_slot_at_epoch::<P>(*expiration)
+                        .saturating_sub(current_slot)
+                        .saturating_mul(chain_config.slot_duration_ms.as_secs());
+
+                    Some(SubnetDiscovery {
+                        subnet: Subnet::SyncCommittee(*subnet_id),
+                        min_ttl: Instant::now().checked_add(Duration::from_secs(time_diff)),
+                    })
+                }
+                SyncCommitteeSubnetAction::Unsubscribe => None,
             })
             .collect();
 
@@ -1203,7 +1212,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
             let subnet = Subnet::SyncCommittee(subnet_id);
 
             match action {
-                SyncCommitteeSubnetAction::Subscribe => {
+                SyncCommitteeSubnetAction::Subscribe { .. } => {
                     debug_with_peers!("subscribing to sync committee subnet {subnet_id}");
 
                     // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
@@ -1213,7 +1222,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, true)
                         .send(&self.network_to_service_tx);
                 }
-                SyncCommitteeSubnetAction::DiscoverPeers => {
+                SyncCommitteeSubnetAction::DiscoverPeers { .. } => {
                     debug_with_peers!("discovering peers in sync committee subnet {subnet_id}");
                 }
                 SyncCommitteeSubnetAction::Unsubscribe => {

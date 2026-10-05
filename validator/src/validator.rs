@@ -313,7 +313,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     ) -> Result<BeaconNodes<P, W>> {
         let context = self
             .local_context
-            .clone()
+            .as_ref()
+            .map(ArcExt::clone_arc)
             .ok_or_else(|| anyhow!("the built-in node's duties need its handles and channels"))?;
 
         Ok(BeaconNodes::Local(LocalBeaconNode::new(
@@ -1003,9 +1004,23 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let internal_tx = self.internal_tx.clone();
             let beacon_nodes = beacon_nodes.clone();
             let own_validator_indices = self.own_duties.validator_indices.clone_arc();
+            let signer = self.signer.clone_arc();
 
             tokio::spawn(async move {
-                let indices = own_validator_indices.load().clone_arc();
+                let own_validator_indices = own_validator_indices.load().clone_arc();
+
+                // The index map follows the signer asynchronously, so a key missing from it may
+                // still be held and must not be dropped from tracking.
+                let indices = signer
+                    .load()
+                    .keys()
+                    .map(|public_key| {
+                        (
+                            *public_key,
+                            own_validator_indices.get(public_key).copied().flatten(),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
 
                 let result = doppelganger_protection
                     .detect_doppelgangers::<P, _, _>(slot, &indices, |epoch, validator_indices| {
@@ -3085,7 +3100,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         }
 
-        let builder_api = self.chain_source.builder_api().cloned();
+        let builder_api = self.chain_source.builder_api().map(ArcExt::clone_arc);
         let chain_config = self.chain_source.chain_config.clone_arc();
         // Builders bid over gossip from Gloas on, so no registration is wanted.
         let use_builder = self.chain_source.registers_with_builder()
@@ -3531,7 +3546,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let controller = self.chain_source.controller()?;
         let event_channels = self.chain_source.event_channels()?;
-        let context = self.local_context.clone()?;
+        let context = self.local_context.as_ref().map(ArcExt::clone_arc)?;
         let head_root = node.head().beacon_block_root;
 
         let is_optimistic = match node.head().is_optimistic(controller) {

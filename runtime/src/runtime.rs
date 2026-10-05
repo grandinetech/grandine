@@ -1507,6 +1507,13 @@ async fn run_remote_validator<P: Preset>(
         );
     }
 
+    info_with_peers!(
+        "genesis agreed with the beacon nodes given with --beacon-node-urls \
+         (genesis validators root: {:?}, genesis time: {})",
+        genesis.genesis_validators_root,
+        genesis.genesis_time,
+    );
+
     // Nodes unreachable now are held to the agreed root on their first poll.
     remote_beacon_nodes.seed_genesis_validators_root(genesis.genesis_validators_root);
 
