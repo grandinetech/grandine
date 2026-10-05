@@ -2009,10 +2009,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             optimistic: false,
         };
 
-        if (slot_head.phase() >= Phase::Gloas || Feature::PublishAttestationsEarly.is_enabled())
-            && let Err(error) = self
-                .attest_and_start_aggregating(wait_group, Some(&slot_head))
-                .await
+        if let Err(error) = self
+            .attest_and_start_aggregating(wait_group, Some(&slot_head))
+            .await
         {
             error_with_peers!("failed to produce and publish own attestations: {error:?}");
         }
