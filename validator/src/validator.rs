@@ -105,6 +105,7 @@ use crate::{
     own_sync_committee_members::OwnSyncCommitteeMembers,
     own_sync_committee_subscriptions::OwnSyncCommitteeSubscriptions,
     own_validator_indices::OwnValidatorIndices,
+    remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
     tasks::{
@@ -399,6 +400,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 }
 
                 message = self.internal_rx.select_next_some() => match message {
+                    InternalMessage::Head { node, slot, block_root } => {
+                        self.attest_remote_head(node, slot, block_root).await;
+                    }
                     InternalMessage::FinalizedCheckpoint(finalized_epoch) => {
                         self.spawn_own_validator_index_resolution(
                             move |indices, chain_source| async move {
@@ -2348,7 +2352,51 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        if let Err(error) = self.attest_and_start_aggregating(&beacon_nodes).await {
+        self.attest_before_tick(&beacon_nodes).await;
+    }
+
+    async fn attest_remote_head(
+        &mut self,
+        node: Arc<RemoteBeaconNode>,
+        slot: Slot,
+        block_root: H256,
+    ) {
+        let Some(last_tick) = self.last_tick else {
+            return;
+        };
+
+        if !(last_tick.slot == slot && last_tick.is_before_attesting_interval()) {
+            return;
+        }
+
+        let Some(remote_beacon_nodes) = self.chain_source.remote_beacon_nodes() else {
+            return;
+        };
+
+        // The node that streamed the head is the one known to hold its block, so it is asked first.
+        let Some(nodes) = self
+            .remote_nodes_at(remote_beacon_nodes, slot)
+            .led_by(&node)
+        else {
+            return;
+        };
+
+        let Some(slot_head) = nodes.slot_head::<P>(slot) else {
+            return;
+        };
+
+        // The cache has moved past the event; the newer head arrives with an event of its own.
+        if slot_head.beacon_block_root != block_root {
+            return;
+        }
+
+        let beacon_nodes = BeaconNodes::Remote { nodes, slot_head };
+
+        self.attest_before_tick(&beacon_nodes).await;
+    }
+
+    async fn attest_before_tick(&mut self, beacon_nodes: &BeaconNodes<P, W>) {
+        if let Err(error) = self.attest_and_start_aggregating(beacon_nodes).await {
             error_with_peers!("failed to produce and publish own attestations: {error:?}");
         }
 
@@ -2356,7 +2404,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         // This noticeably improves rewards in Goerli.
         // This is a deviation from the Honest Validator specification.
         if Feature::PublishSyncCommitteeMessagesEarly.is_enabled()
-            && let Err(error) = self.publish_sync_committee_messages(&beacon_nodes).await
+            && let Err(error) = self.publish_sync_committee_messages(beacon_nodes).await
         {
             error_with_peers!(
                 "failed to produce and publish own sync_committee messages: {error:?}"
@@ -2447,6 +2495,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .ok()
             })
             .collect::<HashMap<_, _>>();
+
+        // Nothing fetched must not count as having attested, or the attestation tick skips the
+        // slot after an early attempt that found no data.
+        if attestation_data.is_empty() {
+            return &[];
+        }
 
         let snapshot = self.signer.load();
 

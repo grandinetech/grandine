@@ -7,6 +7,7 @@ use std::{
 use anyhow::Result;
 use futures::{StreamExt as _, channel::mpsc::UnboundedSender, future::join_all};
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
+use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -246,7 +247,7 @@ async fn follow<P: Preset>(
 
                             match event {
                                 StreamEvent::Head(update) => {
-                                    accept(&node, update);
+                                    accept(&node, update, &internal_tx);
                                 }
                                 StreamEvent::Finalized(epoch) => {
                                     InternalMessage::FinalizedCheckpoint(epoch).send(&internal_tx);
@@ -286,7 +287,11 @@ async fn follow<P: Preset>(
     }
 }
 
-fn accept(node: &RemoteBeaconNode, event: HeadUpdate) {
+fn accept(
+    node: &Arc<RemoteBeaconNode>,
+    event: HeadUpdate,
+    internal_tx: &UnboundedSender<InternalMessage>,
+) {
     // The roots only decide whether duties are fetched again, so an optimistic head may report
     // them; nothing is signed by them.
     node.chain_head()
@@ -298,13 +303,66 @@ fn accept(node: &RemoteBeaconNode, event: HeadUpdate) {
     }
 
     node.chain_head().update(event.slot, event.block);
+
+    InternalMessage::Head {
+        node: node.clone_arc(),
+        slot: event.slot,
+        block_root: event.block,
+    }
+    .send(internal_tx);
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::channel::mpsc::unbounded;
+    use reqwest::Client;
+    use types::config::Config;
+
     use super::*;
 
     const MAX_EMPTY_SLOTS: u64 = 8;
+
+    // Only a head the node reports as not optimistic is offered for signing.
+    #[test]
+    fn an_optimistic_head_records_its_roots_but_is_not_offered_for_signing() -> Result<()> {
+        let node = Arc::new(RemoteBeaconNode::new(
+            Arc::new(Config::mainnet()),
+            Client::new(),
+            "http://streaming".parse()?,
+            MAX_EMPTY_SLOTS,
+        ));
+        let (tx, mut rx) = unbounded();
+        let roots = DependentRoots {
+            epoch: 1,
+            current: H256::repeat_byte(1),
+            next: H256::repeat_byte(2),
+        };
+
+        let mut update = HeadUpdate {
+            slot: 40,
+            block: H256::repeat_byte(3),
+            execution_optimistic: true,
+            dependent_roots: roots,
+        };
+
+        accept(&node, update, &tx);
+
+        assert_eq!(node.chain_head().dependent_root_for(1), Some(roots.current));
+        assert_eq!(node.chain_head().cached(), None);
+        assert!(rx.try_recv().is_err());
+
+        update.execution_optimistic = false;
+
+        accept(&node, update, &tx);
+
+        assert_eq!(node.chain_head().cached(), Some((40, update.block)));
+        assert!(matches!(
+            rx.try_recv()?,
+            InternalMessage::Head { slot: 40, block_root, .. } if block_root == update.block
+        ));
+
+        Ok(())
+    }
 
     #[test]
     fn a_head_at_or_before_the_slot_is_signed_for() -> Result<()> {
