@@ -39,7 +39,6 @@ use types::{
 
 use crate::{
     beacon_node_api::{AttesterDuties, BeaconNodeApi, ProducedBlock, ProposerDuties, PtcDuties},
-    health::Health,
     local_beacon_node::LocalBeaconNode,
     misc,
     remote_beacon_node::RemoteBeaconNode,
@@ -141,6 +140,16 @@ impl RemoteNodes {
             publish_to_every_node: remotes.publish_to_every_node().to_vec(),
             producer: OnceLock::new(),
         }
+    }
+
+    pub fn led_by(mut self, node: &Arc<RemoteBeaconNode>) -> Option<Self> {
+        let position = self
+            .nodes
+            .iter()
+            .position(|serving| Arc::ptr_eq(serving, node))?;
+
+        self.nodes[..=position].rotate_right(1);
+        Some(self)
     }
 
     fn serving_nodes(&self) -> Vec<Arc<RemoteBeaconNode>> {
@@ -1245,19 +1254,19 @@ where
         return broadcast(operation, remotes, attempt).await;
     }
 
-    let mut timed_out = false;
+    let mut failures = Vec::new();
 
-    for node in &remotes {
+    for node in remotes {
         match attempt(node.clone_arc()).await {
             Ok(()) => return Ok(()),
             Err(error) => {
-                log_publish_failure(node, operation, &error);
-                timed_out |= is_timeout(&error);
+                log_publish_failure(&node, operation, &error);
+                failures.push((node, error));
             }
         }
     }
 
-    Err(publish_error(operation, timed_out))
+    Err(publish_error(operation, &failures))
 }
 
 async fn broadcast<F, Fut>(
@@ -1276,49 +1285,39 @@ where
             let attempt = attempt(node.clone_arc());
 
             tokio::spawn(async move {
-                attempt
-                    .await
-                    .inspect_err(|error| log_publish_failure(&node, operation, error))
+                attempt.await.map_err(|error| {
+                    log_publish_failure(&node, operation, &error);
+                    (node, error)
+                })
             })
         })
         .collect::<FuturesUnordered<_>>();
 
-    let mut timed_out = false;
+    let mut failures = Vec::new();
 
     while let Some(result) = attempts.next().await {
         match result {
             Ok(Ok(())) => return Ok(()),
-            Ok(Err(error)) => timed_out |= is_timeout(&error),
+            Ok(Err(failure)) => failures.push(failure),
             Err(error) => warn_with_peers!("task to {operation} failed: {error:?}"),
         }
     }
 
-    Err(publish_error(operation, timed_out))
+    Err(publish_error(operation, &failures))
 }
 
 fn log_publish_failure(node: &RemoteBeaconNode, operation: &str, error: &Error) {
-    // The health poll has already reported the node as unreachable.
-    if node.health() == Health::Unreachable {
-        debug_with_peers!("{node} beacon node failed to {operation}: {error:?}");
-    } else if is_timeout(error) {
-        warn_with_peers!("timed out waiting for {node} beacon node to {operation}: {error:?}");
-    } else {
-        warn_with_peers!("{node} beacon node failed to {operation}: {error:?}");
-    }
+    debug_with_peers!("{node} beacon node failed to {operation}: {error:?}");
 }
 
-fn publish_error(operation: &str, timed_out: bool) -> Error {
-    if timed_out {
-        anyhow!("timed out waiting to {operation}")
-    } else {
-        anyhow!("no remote beacon node was able to {operation}")
-    }
-}
+fn publish_error(operation: &str, failures: &[(Arc<RemoteBeaconNode>, Error)]) -> Error {
+    let reasons = failures
+        .iter()
+        .map(|(node, error)| format!("{node}: {error}"))
+        .collect::<Vec<_>>()
+        .join("; ");
 
-fn is_timeout(error: &Error) -> bool {
-    error
-        .downcast_ref::<reqwest::Error>()
-        .is_some_and(reqwest::Error::is_timeout)
+    anyhow!("no remote beacon node was able to {operation} ({reasons})")
 }
 
 pub async fn first_success<N: Display, T, F: Future<Output = Result<T>>>(
@@ -1353,6 +1352,62 @@ mod tests {
     use types::{config::Config as ChainConfig, preset::Mainnet};
 
     use super::*;
+    use crate::health::Health;
+
+    // A head streamed by a node that cannot serve duties is not acted on.
+    #[tokio::test]
+    async fn a_head_from_a_node_that_is_not_serving_is_ignored() -> Result<()> {
+        let node = Arc::new(RemoteBeaconNode::new(
+            Arc::new(ChainConfig::mainnet()),
+            Client::new(),
+            "http://unusable".parse()?,
+            32,
+        ));
+
+        node.set_health(Health::Incompatible);
+
+        let remotes = RemoteBeaconNodes::new(vec![node.clone_arc()], vec![], false);
+
+        assert!(RemoteNodes::new(&remotes, 0, 32).led_by(&node).is_none());
+
+        Ok(())
+    }
+
+    // The streaming node leads, and the others keep their health order behind it.
+    #[test]
+    fn led_by_moves_only_the_leading_node() -> Result<()> {
+        let node = |url: &str| -> Result<_> {
+            Ok(Arc::new(RemoteBeaconNode::new(
+                Arc::new(ChainConfig::mainnet()),
+                Client::new(),
+                url.parse()?,
+                32,
+            )))
+        };
+
+        let (first, second, third) = (node("http://a")?, node("http://b")?, node("http://c")?);
+        let remotes = RemoteBeaconNodes::new(
+            vec![first.clone_arc(), second.clone_arc(), third.clone_arc()],
+            vec![],
+            false,
+        );
+
+        let nodes = RemoteNodes::new(&remotes, 0, 32)
+            .led_by(&third)
+            .expect("a serving node can lead");
+
+        let expected = [third, first, second];
+
+        assert!(
+            nodes
+                .nodes
+                .iter()
+                .zip(&expected)
+                .all(|(actual, expected)| Arc::ptr_eq(actual, expected))
+        );
+
+        Ok(())
+    }
 
     // Only a synced node has seen the epoch's attestations, so a lagging one is never asked.
     #[tokio::test]
