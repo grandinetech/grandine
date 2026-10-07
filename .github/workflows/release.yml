@@ -39,6 +39,16 @@ jobs:
             const release = await github.rest.repos.getLatestRelease({ owner: 'NethermindEth', repo: 'nethermind' });
             return release.data.tag_name;
 
+      - name: Get release label
+        uses: actions/github-script@v8
+        id: label
+        with:
+          result-encoding: string
+          script: |
+            // only plain X.Y.Z tags are stable, pre-release (e.g. 3.0.0-rc.0) and other tags are unstable
+            const stable = context.eventName == 'push' && /^refs\/tags\/\d+\.\d+\.\d+$/.test(context.ref);
+            return stable ? 'stable' : 'unstable';
+
       - name: Set matrix
         uses: actions/github-script@v8
         id: matrix-vars
@@ -90,7 +100,8 @@ jobs:
       commit: ${{ steps.git-vars.outputs.sha_short }}
       version: ${{ (github.event_name == 'push' && github.event.ref != 'refs/heads/develop' && github.ref_name) || steps.git-vars.outputs.sha_short }}
       nethermind: ${{ inputs.nethermind_version || steps.nethermind-tag.outputs.result }}
-      label: ${{ (github.event_name == 'push' && github.event.ref != 'refs/heads/develop' && 'stable') || 'unstable' }}
+      release: ${{ github.event_name == 'push' && github.event.ref != 'refs/heads/develop' }}
+      label: ${{ steps.label.outputs.result }}
       matrix: ${{ steps.matrix-vars.outputs.result }}
 
   build:
@@ -205,6 +216,7 @@ jobs:
       GRANDINE_COMMIT: ${{ needs.version.outputs.commit }}
       NETHERMIND_VERSION: ${{ needs.version.outputs.nethermind }}
       DOCKER_LABEL: ${{ needs.version.outputs.label }}
+      DOCKER_RELEASE: ${{ needs.version.outputs.release }}
     if: always() && needs.version.result == 'success' && needs.build.result == 'success'
     steps:
       - uses: actions/checkout@v5
@@ -269,6 +281,7 @@ jobs:
           make docker \
             DOCKER_LABEL=${{ env.DOCKER_LABEL }} \
             DOCKER_SUFFIX=${{ env.DOCKER_SUFFIX }} \
+            DOCKER_RELEASE=${{ env.DOCKER_RELEASE }} \
             GRANDINE_VERSION=${{ env.GRANDINE_VERSION }} \
             NETHERMIND_VERSION=${{ env.NETHERMIND_VERSION }}
 
@@ -280,6 +293,7 @@ jobs:
           make grandine-docker \
             DOCKER_LABEL=${{ env.DOCKER_LABEL }} \
             DOCKER_SUFFIX=${{ env.DOCKER_SUFFIX }} \
+            DOCKER_RELEASE=${{ env.DOCKER_RELEASE }} \
             GRANDINE_VERSION=${{ env.GRANDINE_VERSION }}
 
   pack_nethermind:
@@ -327,7 +341,7 @@ jobs:
 
   publish:
     name: Draft release
-    if: always() && needs.version.outputs.label == 'stable'
+    if: always() && needs.version.outputs.release == 'true'
     needs: [build, pack_nethermind]
     runs-on: ubuntu-latest
     steps:
