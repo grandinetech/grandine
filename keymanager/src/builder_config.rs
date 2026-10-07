@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use bls::PublicKeyBytes;
 use builder_api::{
     consts::{MaxBuilderAuthDataSize, MaxBuilderEntries, MaxBuilderPubkeys},
-    gloas::containers::{BuilderUrl, BuilderUrlError},
+    gloas::containers::{BuilderEntry, BuilderUrl, BuilderUrlError, SignedBuilderRequestAuth},
 };
 use serde::{Deserialize, Serialize};
-use ssz::{ByteList, Uint256};
+use ssz::{ByteList, ContiguousList, Uint256};
 use thiserror::Error;
 use typenum::Unsigned as _;
 use types::phase0::primitives::Gwei;
@@ -148,13 +148,36 @@ pub struct ResolvedBuilderConfig {
 pub struct ResolvedBuilderEntry {
     pub url: BuilderUrl,
     pub auth_data: ByteList<MaxBuilderAuthDataSize>,
-    pub builder_pubkeys: Vec<PublicKeyBytes>,
+    pub builder_pubkeys: ContiguousList<PublicKeyBytes, MaxBuilderPubkeys>,
     #[serde(with = "serde_utils::string_or_native")]
     pub max_execution_payment: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub min_bid: Gwei,
     #[serde(with = "serde_utils::string_or_native")]
     pub builder_boost_factor: u64,
+}
+
+impl ResolvedBuilderEntry {
+    #[must_use]
+    pub fn into_builder_entry(self, auth: SignedBuilderRequestAuth) -> BuilderEntry {
+        let Self {
+            url,
+            builder_pubkeys,
+            max_execution_payment,
+            min_bid,
+            builder_boost_factor,
+            ..
+        } = self;
+
+        BuilderEntry {
+            url,
+            auth,
+            builder_pubkeys,
+            max_execution_payment,
+            min_bid,
+            builder_boost_factor,
+        }
+    }
 }
 
 /// Resolves `builders` against `defaults`, rejecting a list that breaks the builder config rules.
@@ -270,10 +293,16 @@ fn resolve_builder_entry(
         return Err(BuilderConfigError::TrustedPaymentsNotAllowed { index });
     }
 
+    let builder_pubkeys = builder_pubkeys
+        .clone()
+        .unwrap_or_default()
+        .try_into()
+        .map_err(|_| BuilderConfigError::TooManyBuilderPubkeys { index })?;
+
     Ok(ResolvedBuilderEntry {
         url: url.clone(),
         auth_data: entry_auth_data(index, entry)?,
-        builder_pubkeys: builder_pubkeys.clone().unwrap_or_default(),
+        builder_pubkeys,
         max_execution_payment,
         min_bid: min_bid.unwrap_or(defaults.min_bid),
         builder_boost_factor: builder_boost_factor.unwrap_or(defaults.builder_boost_factor),
