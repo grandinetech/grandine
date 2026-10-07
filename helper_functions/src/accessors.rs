@@ -1093,14 +1093,13 @@ pub fn ptc_for_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Resul
     ptc_from_committee_members(state, slot, members)
 }
 
-// Compute PTC for any epoch, bypassing the `relative_epoch` cache.
+// Compute PTCs for every slot of any epoch, bypassing the `relative_epoch` cache.
 // Used in epoch processing where the target epoch (current + `MinSeedLookahead` + 1) exceeds
 // the range covered by the shuffling cache (prev/current/next only).
-pub fn ptc_for_slot_for_epoch_processing<P: Preset>(
+pub fn ptc_for_epoch_processing<P: Preset>(
     state: &impl BeaconState<P>,
-    slot: Slot,
-) -> Result<Ptc<P>> {
-    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    epoch: Epoch,
+) -> Result<Vec<Ptc<P>>> {
     let ordered: Vec<ValidatorIndex> =
         get_active_validator_indices_by_epoch(state, epoch).collect();
 
@@ -1117,30 +1116,35 @@ pub fn ptc_for_slot_for_epoch_processing<P: Preset>(
     let committees_in_epoch = NonZeroU64::new(committees_per_slot.try_mul(P::SlotsPerEpoch::U64)?)
         .ok_or_else(|| anyhow!("there should be some committees per epoch"))?;
 
-    let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
+    misc::slots_in_epoch::<P>(epoch)?
+        .map(|slot| {
+            let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
 
-    let ranges = (0..committees_per_slot)
-        .map(|committee_index| -> Result<(usize, usize)> {
-            let index_in_epoch = slots_since_epoch_start
-                .try_mul(committees_per_slot)?
-                .try_add(committee_index)?;
+            let ranges = (0..committees_per_slot)
+                .map(|committee_index| -> Result<(usize, usize)> {
+                    let index_in_epoch = slots_since_epoch_start
+                        .try_mul(committees_per_slot)?
+                        .try_add(committee_index)?;
 
-            let start =
-                usize::try_from(validator_count.try_mul(index_in_epoch)? / committees_in_epoch)?;
+                    let start = usize::try_from(
+                        validator_count.try_mul(index_in_epoch)? / committees_in_epoch,
+                    )?;
 
-            let end = usize::try_from(
-                validator_count.try_mul(index_in_epoch.try_add(1)?)? / committees_in_epoch,
-            )?;
+                    let end = usize::try_from(
+                        validator_count.try_mul(index_in_epoch.try_add(1)?)? / committees_in_epoch,
+                    )?;
 
-            Ok((start, end))
+                    Ok((start, end))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let members = ranges
+                .into_iter()
+                .flat_map(|(start, end)| shuffled[start..end].iter().copied());
+
+            ptc_from_committee_members(state, slot, members)
         })
-        .collect::<Result<Vec<_>>>()?;
-
-    let members = ranges
-        .into_iter()
-        .flat_map(|(start, end)| shuffled[start..end].iter().copied());
-
-    ptc_from_committee_members(state, slot, members)
+        .collect()
 }
 
 fn ptc_from_committee_members<P: Preset>(
