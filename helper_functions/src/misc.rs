@@ -972,10 +972,7 @@ pub fn compute_balance_weighted_selection<P: Preset>(
             random_bytes[offset.try_add(1)?],
         ]));
 
-        let effective_balance = state
-            .validators()
-            .get(candidate_index)
-            .map(|validator| validator.effective_balance)?;
+        let effective_balance = state.validators().effective_balance(candidate_index)?;
 
         if effective_balance.try_mul(max_random_value)?
             >= P::MAX_EFFECTIVE_BALANCE_ELECTRA.try_mul(random_value)?
