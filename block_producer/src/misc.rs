@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use eth1_api::{ClientVersionV1, ClientVersions};
+use eth1_api::{ClientVersionV1, ClientVersions, WithClientVersions};
 use execution_engine::PayloadId;
 use grandine_version::{APPLICATION_NAME_WITH_VERSION, APPLICATION_NAME_WITH_VERSION_AND_COMMIT};
 use serde::{Deserialize, Serialize};
 use ssz::{Size, SszHash, SszSize, SszWrite, WriteError};
 use typenum::U1;
 use types::{
-    combined::{BeaconBlock, BlindedBeaconBlock},
-    nonstandard::Phase,
+    combined::{BeaconBlock, BlindedBeaconBlock, ExecutionPayload},
+    nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionAddress, H256, ValidatorIndex},
     preset::Preset,
     traits::BeaconBlock as _,
@@ -19,6 +19,12 @@ use types::{
 pub enum PayloadIdEntry {
     Cached(PayloadId),
     Live(PayloadId),
+}
+
+pub enum BlindedBlockPublication<P: Preset> {
+    // Boxed to pass `clippy::large_enum_variant`.
+    Payload(Box<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>),
+    PublishedByBuilder,
 }
 
 impl PayloadIdEntry {
