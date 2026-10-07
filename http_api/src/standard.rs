@@ -20,7 +20,9 @@ use axum::{
     },
 };
 use binary_utils::TracingHandle;
-use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
+use block_producer::{
+    BlindedBlockPublication, BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock,
+};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use dedicated_executor::DedicatedExecutor;
@@ -1654,18 +1656,22 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         SignedBlindedBeaconPhaseDeserializer<P>,
     >,
 ) -> Result<StatusCode, Error> {
-    let execution_payload = block_producer
+    let publication = block_producer
         .publish_signed_blinded_block(&signed_blinded_block)
-        .await;
+        .await
+        .ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+    let execution_payload = match publication {
+        BlindedBlockPublication::Payload(execution_payload) => *execution_payload,
+        BlindedBlockPublication::PublishedByBuilder => return Ok(StatusCode::OK),
+    };
 
     let WithBlobsAndMev {
         value: execution_payload,
         proofs,
         blobs,
         ..
-    } = execution_payload
-        .ok_or(Error::ExecutionPayloadNotAvailable)?
-        .result;
+    } = execution_payload.result;
 
     let (message, signature) = signed_blinded_block.split();
     let signed_beacon_block = message
@@ -1729,18 +1735,22 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
         SignedBlindedBeaconPhaseDeserializer<P>,
     >,
 ) -> Result<StatusCode, Error> {
-    let execution_payload = block_producer
+    let publication = block_producer
         .publish_signed_blinded_block(&signed_blinded_block)
-        .await;
+        .await
+        .ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+    let execution_payload = match publication {
+        BlindedBlockPublication::Payload(execution_payload) => *execution_payload,
+        BlindedBlockPublication::PublishedByBuilder => return Ok(StatusCode::OK),
+    };
 
     let WithBlobsAndMev {
         value: execution_payload,
         proofs,
         blobs,
         ..
-    } = execution_payload
-        .ok_or(Error::ExecutionPayloadNotAvailable)?
-        .result;
+    } = execution_payload.result;
 
     let (message, signature) = signed_blinded_block.split();
 
