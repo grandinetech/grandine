@@ -184,6 +184,11 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         &self.producer_context.proposer_configs
     }
 
+    #[must_use]
+    pub fn payload_builder_api(&self) -> &Arc<PayloadBuilderApi> {
+        &self.producer_context.payload_builder_api
+    }
+
     pub fn new_build_context(
         &self,
         beacon_state: Arc<BeaconState<P>>,
@@ -884,6 +889,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         randao_reveal: SignatureBytes,
         execution_payload_header_handle: Option<ExecutionPayloadHeaderJoinHandle<P>>,
         local_execution_payload_handle: Option<LocalExecutionPayloadJoinHandle<P>>,
+        builder_api_bids_handle: Option<BuilderApiBidsJoinHandle<P>>,
     ) -> Result<
         Option<(
             WithBlobsAndMev<ValidatorBlindedBlock<P>, P>,
@@ -907,7 +913,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             info_with_peers!("block producer starting to build local option");
 
             build_context
-                .produce_beacon_block(block, local_execution_payload_handle, None)
+                .produce_beacon_block(
+                    block,
+                    local_execution_payload_handle,
+                    builder_api_bids_handle,
+                )
                 .await
         });
 
