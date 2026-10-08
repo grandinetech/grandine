@@ -779,6 +779,10 @@ where
         self.unblind_envelope(envelope).await.map(Some)
     }
 
+    pub fn stored_envelope_by_root(&self, block_root: H256) -> Result<Option<StoredEnvelope<P>>> {
+        self.snapshot().stored_envelope_by_root(block_root)
+    }
+
     pub fn indices_of_missing_data_columns(
         &self,
         block: &impl traits::SignedBeaconBlock<P>,
@@ -1872,6 +1876,11 @@ impl<P: Preset> Snapshot<'_, P> {
             .cached_execution_payload_envelope_by_root(block_root)
         {
             return Ok(Some(StoredEnvelope::Full(envelope.clone_arc())));
+        }
+
+        // A rejected envelope stays in storage until the delete runs.
+        if self.store_snapshot.is_payload_invalid(block_root) {
+            return Ok(None);
         }
 
         self.storage.envelope_by_root(block_root)

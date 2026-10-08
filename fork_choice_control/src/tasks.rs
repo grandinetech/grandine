@@ -966,6 +966,21 @@ impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
                 .start_timer()
         });
 
+        let mut envelopes_to_delete = store_snapshot.rejected_envelopes().collect::<Vec<_>>();
+
+        if !envelopes_to_delete.is_empty()
+            && let Err(error) =
+                storage.delete_execution_payload_envelopes(envelopes_to_delete.iter().copied())
+        {
+            warn_with_peers!("failed to delete invalid execution payload envelopes: {error:?}");
+            envelopes_to_delete.clear();
+        }
+
+        let deleted_block_roots = envelopes_to_delete
+            .into_iter()
+            .map(|(_, block_root)| block_root)
+            .collect::<Vec<_>>();
+
         let envelopes = store_snapshot.unpersisted_envelopes();
 
         match storage.append_execution_payload_envelopes(envelopes) {
@@ -973,6 +988,7 @@ impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
                 MutatorMessage::FinishedPersistingExecutionPayloadEnvelopes {
                     wait_group,
                     persisted_block_roots,
+                    deleted_block_roots,
                 }
                 .send(&mutator_tx);
             }
