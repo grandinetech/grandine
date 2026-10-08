@@ -116,6 +116,9 @@ use crate::{
     validations::validate_merge_block,
 };
 
+// Parent root and parent payload presence of the first block of each segment.
+type BranchChildren = StdHashSet<(H256, PayloadPresence)>;
+
 #[derive(Default)]
 struct SeenGossipAttestations {
     attesters: BTreeMap<Epoch, BitVec>,
@@ -5889,6 +5892,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         block: &UnfinalizedBlock<P>,
         parent_balances: BlockBalances,
         proposer_boost: Gwei,
+        branch_children: &BranchChildren,
     ) -> bool {
         // Pre-Gloas the payload rides along in the block, so a rejected payload takes the block with it.
         if block.is_invalid() && !block.is_post_gloas() {
@@ -5929,16 +5933,78 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             //   and parent does not have more votes for its empty payload state;
             // - it's a child of parent with "pending" payload
             //   (meaning parent does not have payload presence at all, i.e. pre-Gloas block).
+            //
+            // A heavier variant only wins if it is viable.
+            // See `is_pruned_payload_variant`.
             match parent_payload_presence {
                 PayloadPresence::Empty
                     if parent_payload_verified && parent_empty <= parent_full =>
                 {
-                    true
+                    !self.is_pruned_payload_variant(
+                        parent_balances.block_root,
+                        PayloadPresence::Full,
+                        branch_children,
+                    )
                 }
-                PayloadPresence::Full if parent_empty > parent_full => true,
+                PayloadPresence::Full if parent_empty > parent_full => !self
+                    .is_pruned_payload_variant(
+                        parent_balances.block_root,
+                        PayloadPresence::Empty,
+                        branch_children,
+                    ),
                 _ => false,
             }
         }
+    }
+
+    // `filter_node_tree` drops a childless variant of a block that fails the FFG test.
+    // Such a variant cannot be the head, so it should not outweigh its sibling.
+    // See <https://github.com/ethereum/consensus-specs/issues/5496>.
+    //
+    // Only the childless case is handled.
+    // A variant whose descendants are all non-viable is not detected here.
+    //
+    // Children are checked first.
+    // They are O(1) lookups, while viability walks ancestors.
+    fn is_pruned_payload_variant(
+        &self,
+        block_root: H256,
+        presence: PayloadPresence,
+        branch_children: &BranchChildren,
+    ) -> bool {
+        // The finalized block is always viable.
+        let Some(location) = self.unfinalized_locations.get(&block_root).copied() else {
+            return false;
+        };
+
+        if branch_children.contains(&(block_root, presence)) {
+            return false;
+        }
+
+        let segment = &self.unfinalized[&location.segment_id];
+
+        let has_child_in_segment = location.position < segment.last_position()
+            && location
+                .position
+                .next()
+                .is_ok_and(|position| segment[position].parent_payload_presence() == presence);
+
+        !has_child_in_segment && !self.is_block_viable(&segment[location.position])
+    }
+
+    // Parent root and payload presence of every segment's first block.
+    // Built once per head update so `is_pruned_payload_variant` does not scan all segments.
+    fn branch_children(&self) -> BranchChildren {
+        self.unfinalized
+            .values()
+            .map(Segment::first_block)
+            .map(|block| {
+                (
+                    block.chain_link.parent_root(),
+                    block.parent_payload_presence(),
+                )
+            })
+            .collect()
     }
 
     fn payload_weights(&self, parent: BlockBalances, proposer_boost: Gwei) -> (Gwei, Gwei) {
@@ -6011,7 +6077,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .flatten()
     }
 
-    fn update_segment_head(&mut self, segment_id: SegmentId, proposer_boost: Gwei) {
+    fn update_segment_head(
+        &mut self,
+        segment_id: SegmentId,
+        proposer_boost: Gwei,
+        branch_children: &BranchChildren,
+    ) {
         let segment = self
             .unfinalized
             .get(&segment_id)
@@ -6029,7 +6100,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let mut head_index = 0;
 
         for (index, block) in segment.into_iter().enumerate().skip(1) {
-            if self.ignore_child(block, parent_balances, proposer_boost) {
+            if self.ignore_child(block, parent_balances, proposer_boost, branch_children) {
                 break;
             }
 
@@ -6057,8 +6128,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             0
         };
 
+        let branch_children = self.branch_children();
+
         for segment_id in self.unfinalized.keys().copied().collect_vec() {
-            self.update_segment_head(segment_id, proposer_boost);
+            self.update_segment_head(segment_id, proposer_boost, &branch_children);
         }
 
         for (segment_id, segment) in self.unfinalized.iter().rev() {
@@ -6092,7 +6165,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // The branch starts with a block that cannot be in the chain.
                 // Neither can the rest of the branch.
-                if self.ignore_child(first_branch_block, common_parent_balances, proposer_boost) {
+                if self.ignore_child(
+                    first_branch_block,
+                    common_parent_balances,
+                    proposer_boost,
+                    &branch_children,
+                ) {
                     continue;
                 }
 
@@ -6112,8 +6190,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
 
                 // Post-Gloas a rejected payload does not disqualify the sibling.
                 // It only costs the sibling its full node, which `ignore_child` accounts for.
-                let sibling_ignored =
-                    self.ignore_child(sibling, common_parent_balances, proposer_boost);
+                let sibling_ignored = self.ignore_child(
+                    sibling,
+                    common_parent_balances,
+                    proposer_boost,
+                    &branch_children,
+                );
 
                 if (sibling_score < branch_point_score || sibling_ignored)
                     && best_branch_score.is_none_or(|score| score < branch_point_score)

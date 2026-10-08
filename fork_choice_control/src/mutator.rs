@@ -51,6 +51,7 @@ use logging::{
 use num_traits::identities::Zero as _;
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
+use spec_test_utils::BlsSetting;
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
 use tracing::{Span, instrument};
@@ -1034,6 +1035,14 @@ where
 
                     self.send_to_p2p(P2pMessage::BlockNeeded(parent_root, peer_id));
 
+                    // Spec test runners queue early blocks and redeliver them later.
+                    // Parking them here too would import them in a different order.
+                    // The order decides which block attestations count as from-block.
+                    if matches!(pending_block.origin, BlockOrigin::Test(_)) {
+                        debug_with_peers!("test block with unknown parent dropped: {block_root:?}");
+                        return Ok(());
+                    }
+
                     trace_with_peers!("attempting to delay block until parent: {pending_block:?}");
 
                     let gossip_id = pending_block.origin.gossip_id_ref().cloned();
@@ -1598,7 +1607,14 @@ where
                     is_from_block: true,
                 }),
                 Ok(AttestationAction::Ignore(_)) => None,
-                Ok(AttestationAction::DelayUntilBlock(attestation, block_root)) => {
+                Ok(AttestationAction::DelayUntilBlock(mut attestation, block_root)) => {
+                    // Spec test runners retry these as plain attestations.
+                    // They lose the from-block exemption from the target epoch check.
+                    // Old ones are then dropped instead of counted.
+                    if from_test_block {
+                        attestation.origin = AttestationOrigin::Test(BlsSetting::Ignored);
+                    }
+
                     self.delay_attestation_until_block(wait_group, attestation, block_root);
                     None
                 }

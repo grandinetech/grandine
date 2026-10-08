@@ -1410,9 +1410,11 @@ mod spec_tests {
 
         let mut state = case.ssz(&config, "pre");
 
-        let expected_post = case.ssz::<_, BeaconState<P>>(&config, "post");
+        let expected_post = case.try_ssz::<_, BeaconState<P>>(&config, "post");
 
-        assert_eq!(expected_post.phase(), post_phase);
+        if let Some(expected_post) = &expected_post {
+            assert_eq!(expected_post.phase(), post_phase);
+        }
 
         for pre_block in case.numbered(&config, "blocks", 0..pre_block_count) {
             untrusted_state_transition(&config, &pubkey_cache, &mut state, &pre_block)
@@ -1421,7 +1423,30 @@ mod spec_tests {
 
         assert!(accessors::get_current_epoch(&state) < fork_epoch);
 
-        for post_block in case.numbered(&config, "blocks", pre_block_count..blocks_count) {
+        let post_blocks = case.numbered(&config, "blocks", pre_block_count..blocks_count);
+
+        let Some(expected_post) = expected_post else {
+            // No `post` state means the last block is invalid.
+            // Every block before it must still be valid.
+            let post_blocks = post_blocks.collect::<Vec<_>>();
+
+            let (last_block, valid_blocks) = post_blocks
+                .split_last()
+                .expect("transition test without post state should have a post-phase block");
+
+            for valid_block in valid_blocks {
+                untrusted_state_transition(&config, &pubkey_cache, &mut state, valid_block).expect(
+                    "transition test without post state should only fail on the last block",
+                );
+            }
+
+            untrusted_state_transition(&config, &pubkey_cache, &mut state, last_block)
+                .expect_err("transition test without post state should fail on the last block");
+
+            return;
+        };
+
+        for post_block in post_blocks {
             untrusted_state_transition(&config, &pubkey_cache, &mut state, &post_block)
                 .expect("every transition test should process post-phase blocks successfully");
         }
