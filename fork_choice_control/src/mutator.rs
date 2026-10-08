@@ -2970,6 +2970,19 @@ where
         wait_group: W,
         persisted_block_roots: Vec<H256>,
     ) {
+        // Invalidated envelopes may have been persisted while the task was running.
+        let invalidated_envelopes = persisted_block_roots
+            .iter()
+            .filter_map(|block_root| {
+                let chain_link = self.store.chain_link(*block_root)?;
+                chain_link
+                    .is_invalid()
+                    .then(|| (chain_link.slot(), *block_root))
+            })
+            .collect_vec();
+
+        self.delete_execution_payload_envelopes(invalidated_envelopes);
+
         self.store_mut()
             .mark_persisted_envelopes(persisted_block_roots);
 
@@ -3081,8 +3094,11 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            self.store_mut()
+            let invalidated_envelopes = self
+                .store_mut()
                 .invalidate_payload_and_descendant_payloads(beacon_block_root);
+
+            self.delete_execution_payload_envelopes(invalidated_envelopes);
         } else {
             return;
         }
@@ -5791,6 +5807,16 @@ where
         }
 
         BlockDataColumnAvailability::Missing(missing_indices)
+    }
+
+    fn delete_execution_payload_envelopes(&self, envelopes: Vec<(Slot, H256)>) {
+        if envelopes.is_empty() {
+            return;
+        }
+
+        if let Err(error) = self.storage.delete_execution_payload_envelopes(envelopes) {
+            warn_with_peers!("failed to delete invalid execution payload envelopes: {error:?}");
+        }
     }
 }
 
