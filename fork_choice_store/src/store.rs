@@ -300,6 +300,7 @@ pub struct Store<P: Preset, S: Storage<P>> {
     storage: Arc<S>,
     data_column_cache: DataColumnCache<P>,
     execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache<P>,
+    rejected_envelopes: HashMap<H256, Slot>,
     rejected_block_roots: HashSet<H256>,
     finished_initial_forward_sync: bool,
     finished_back_sync: bool,
@@ -419,6 +420,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             storage,
             data_column_cache: DataColumnCache::default(),
             execution_payload_envelope_cache: ExecutionPayloadEnvelopeCache::default(),
+            rejected_envelopes: HashMap::default(),
             rejected_block_roots: HashSet::default(),
             finished_initial_forward_sync,
             finished_back_sync,
@@ -3203,6 +3205,15 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 );
             }
 
+            // [REJECT] The attested execution payload is processed and invalid.
+            // Gossip only. Fork choice has no such check for attestations in blocks.
+            ensure!(
+                is_from_block || index == 0 || !self.is_payload_invalid(beacon_block_root),
+                Error::AttestationForInvalidPayload {
+                    attestation: attestation.clone_arc(),
+                },
+            );
+
             if index == 1 && !self.is_payload_verified(beacon_block_root) {
                 if is_from_block {
                     // TODO(gloas): the block should be delayed in this place
@@ -3216,15 +3227,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                     beacon_block_root,
                 ));
             }
-
-            // [REJECT] The attested execution payload is processed and invalid.
-            // Gossip only. Fork choice has no such check for attestations in blocks.
-            ensure!(
-                is_from_block || index == 0 || !self.is_payload_invalid(beacon_block_root),
-                Error::AttestationForInvalidPayload {
-                    attestation: attestation.clone_arc(),
-                },
-            );
         }
 
         // > Attestations must not be for blocks in the future.
@@ -4893,6 +4895,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let beacon_block_root = envelope.block_root();
         let builder_index = envelope.builder_index();
 
+        let is_block_invalid = self.is_block_invalid(beacon_block_root);
         let first_delivery = self.payloads.insert(beacon_block_root).is_none();
 
         if is_before_deadline {
@@ -4906,19 +4909,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             self.execution_payload_locations
                 .insert(envelope.message.payload.block_hash, location);
 
-            // On first delivery a `Valid` status was inherited or caught up.
-            // It says nothing about this payload.
+            // On first delivery the status says nothing about this payload.
+            // It was inherited, caught up, or set for an envelope the execution engine rejected.
             // Keep the block optimistic until the execution engine rules on it.
             // A verdict that arrived early is replayed after this.
-            let chain_link =
-                &mut self.unfinalized[&location.segment_id][location.position].chain_link;
-
-            if first_delivery && chain_link.is_valid() {
-                chain_link.payload_status = PayloadStatus::Optimistic;
+            if first_delivery && !is_block_invalid {
+                self.unfinalized[&location.segment_id][location.position]
+                    .chain_link
+                    .payload_status = PayloadStatus::Optimistic;
             }
         }
 
-        self.execution_payload_envelope_cache.insert(envelope);
+        if !is_block_invalid {
+            self.execution_payload_envelope_cache.insert(envelope);
+        }
     }
 
     pub fn apply_blob_sidecar(&mut self, blob_sidecar: Arc<BlobSidecar<P>>) {
@@ -5480,6 +5484,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .split_off(&self.last_finalized().slot());
         self.execution_payload_envelope_cache
             .prune_finalized(finalized_slot);
+        self.rejected_envelopes
+            .retain(|_, slot| finalized_slot <= *slot);
         self.block_timeliness
             .retain(|block_root, _| self.unfinalized_locations.contains_key(block_root));
         let last_finalized_root = self.last_finalized().block_root;
@@ -6841,7 +6847,10 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         vec![]
     }
 
-    pub fn invalidate_payload_and_descendant_payloads(&mut self, block_root: H256) {
+    pub fn invalidate_payload_and_descendant_payloads(
+        &mut self,
+        block_root: H256,
+    ) -> Vec<(Slot, H256)> {
         let invalidate_blocks_with_roots = self
             .unfinalized
             .values()
@@ -6882,13 +6891,31 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .flatten()
             .collect::<HashSet<H256>>();
 
+        let mut invalidated_envelopes = vec![];
+
         for root in invalidate_blocks_with_roots {
             if let Some(chain_link) = self.unfinalized_chain_link_mut(root) {
                 chain_link.payload_status = PayloadStatus::Invalid;
+
+                if chain_link.is_post_gloas() {
+                    invalidated_envelopes.push((chain_link.slot(), root));
+                }
             }
         }
 
+        for (slot, root) in &invalidated_envelopes {
+            self.rejected_envelopes.insert(*root, *slot);
+            self.execution_payload_envelope_cache.remove(*root);
+            self.payloads.remove(root);
+            self.timely_payloads.remove(root);
+        }
+
+        self.accepted_execution_payload_envelopes
+            .retain(|(_, root, _)| !invalidated_envelopes.iter().any(|(_, r)| r == root));
+
         self.update_head_segment_id();
+
+        invalidated_envelopes
     }
 
     pub fn update_chain_payload_statuses(
@@ -7034,7 +7061,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .has_unpersisted_envelopes()
     }
 
-    pub fn mark_persisted_envelopes(&mut self, persisted_block_roots: Vec<H256>) {
+    pub fn has_rejected_envelopes(&self) -> bool {
+        !self.rejected_envelopes.is_empty()
+    }
+
+    pub fn mark_persisted_envelopes(
+        &mut self,
+        persisted_block_roots: Vec<H256>,
+        deleted_block_roots: Vec<H256>,
+    ) {
+        for block_root in deleted_block_roots {
+            self.rejected_envelopes.remove(&block_root);
+        }
+
+        // Rejected while it was being written.
+        for block_root in &persisted_block_roots {
+            if let Some(chain_link) = self.chain_link(*block_root)
+                && chain_link.is_invalid()
+            {
+                self.rejected_envelopes
+                    .insert(*block_root, chain_link.slot());
+            }
+        }
+
+        // Do not mark persisted for a replacement that was not written.
+        let persisted_block_roots = persisted_block_roots
+            .into_iter()
+            .filter(|block_root| !self.rejected_envelopes.contains_key(block_root))
+            .collect();
+
         self.execution_payload_envelope_cache
             .mark_persisted_envelopes(persisted_block_roots);
     }
@@ -7045,6 +7100,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.execution_payload_envelope_cache
             .unpersisted_envelopes()
             .map(|(_, envelope)| envelope)
+    }
+
+    pub fn rejected_envelopes(&self) -> impl Iterator<Item = (Slot, H256)> + '_ {
+        self.rejected_envelopes
+            .iter()
+            .map(|(block_root, slot)| (*slot, *block_root))
     }
 
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {

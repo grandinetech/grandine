@@ -371,6 +371,12 @@ impl<P: Preset> BlockSyncService<P> {
                         P2pToSync::PayloadEnvelopeNeeded(block_root, peer_id) => {
                             self.request_needed_execution_payload_envelope(block_root, peer_id)?;
                         }
+                        P2pToSync::PayloadEnvelopeInvalidated(block_root) => {
+                            self.received_envelopes
+                                .retain(|identifier, _| identifier.beacon_block_root != block_root);
+
+                            self.request_needed_execution_payload_envelope(block_root, None)?;
+                        }
                         P2pToSync::BlockNotConsidered(block_root) => {
                             self.received_block_roots.remove(&block_root);
                         }

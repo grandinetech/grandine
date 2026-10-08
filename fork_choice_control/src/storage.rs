@@ -835,6 +835,22 @@ impl<P: Preset> Storage<P> {
         self.database.delete_batch(keys_to_remove)
     }
 
+    pub(crate) fn delete_execution_payload_envelopes(
+        &self,
+        envelopes: impl IntoIterator<Item = (Slot, H256)>,
+    ) -> Result<()> {
+        let keys_to_remove = envelopes.into_iter().flat_map(|(slot, block_root)| {
+            [
+                EnvelopeByBlockRoot::full(block_root).to_string(),
+                EnvelopeByBlockRoot::blinded(block_root).to_string(),
+                EnvelopeRootBySlot(slot, block_root).to_string(),
+                ExecutionPayloadBySlotAndRoot(slot, block_root).to_string(),
+            ]
+        });
+
+        self.database.delete_batch(keys_to_remove)
+    }
+
     pub(crate) fn genesis_block_root(&self, store: &Store<P, Self>) -> Result<H256> {
         self.block_root_by_slot_with_store(store, GENESIS_SLOT)?
             .ok_or(Error::GenesisBlockRootNotFound)
@@ -2276,6 +2292,41 @@ mod tests {
             storage.envelope_by_root(H256::repeat_byte(10))?,
             Some(StoredEnvelope::Full(envelope)) if *envelope == kept_envelope,
         ));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_delete_execution_payload_envelopes() -> Result<()> {
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
+            nonzero!(64_u64),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        );
+
+        let envelope = |slot, block_root| {
+            let mut envelope = SignedExecutionPayloadEnvelope::<Mainnet>::default();
+            envelope.message.payload.slot_number = slot;
+            envelope.message.beacon_block_root = block_root;
+            Arc::new(envelope)
+        };
+
+        let root_5 = H256::repeat_byte(5);
+        let root_10 = H256::repeat_byte(10);
+
+        storage.append_execution_payload_envelopes([envelope(5, root_5), envelope(10, root_10)])?;
+        storage.delete_execution_payload_envelopes([(5, root_5)])?;
+
+        assert!(storage.envelope_by_root(root_5)?.is_none());
+        assert!(!storage.contains_key(EnvelopeRootBySlot(5, root_5))?);
+        assert!(!storage.contains_key(ExecutionPayloadBySlotAndRoot(5, root_5))?);
+        assert!(storage.envelope_by_root(root_10)?.is_some());
+        assert!(storage.contains_key(EnvelopeRootBySlot(10, root_10))?);
+        assert!(storage.contains_key(ExecutionPayloadBySlotAndRoot(10, root_10))?);
 
         Ok(())
     }
