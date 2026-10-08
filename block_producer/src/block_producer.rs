@@ -2851,6 +2851,13 @@ async fn request_builder_api_bids<P: Preset>(
 
             let builder_index = bid.message.builder_index;
 
+            debug_with_peers!(
+                "received bid from builder {builder_index} at {url} for slot {slot} \
+                 (value: {}, execution_payment: {})",
+                bid.message.value,
+                bid.message.execution_payment,
+            );
+
             let accepted = entry.builder_pubkeys.is_empty()
                 || state
                     .builders()
