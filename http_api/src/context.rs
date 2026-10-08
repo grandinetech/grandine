@@ -141,9 +141,9 @@ impl<P: Preset> Context<P> {
         let pubkey_cache = Arc::new(PubkeyCache::default());
 
         let payload_builder_api = Arc::new(PayloadBuilderApi::new(
-            BuilderApiFormat::default(),
-            pubkey_cache.clone_arc(),
+            chain_config.clone_arc(),
             client.clone(),
+            BuilderApiFormat::default(),
             None,
         ));
 
