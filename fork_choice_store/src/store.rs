@@ -6522,7 +6522,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         vec![]
     }
 
-    pub fn invalidate_payload_and_descendant_payloads(&mut self, block_root: H256) {
+    #[must_use]
+    pub fn invalidate_payload_and_descendant_payloads(
+        &mut self,
+        block_root: H256,
+    ) -> Vec<(Slot, H256)> {
         let invalidate_blocks_with_roots = self
             .unfinalized
             .values()
@@ -6563,13 +6567,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .flatten()
             .collect::<HashSet<H256>>();
 
+        let mut invalidated_envelopes = vec![];
+
         for root in invalidate_blocks_with_roots {
             if let Some(chain_link) = self.unfinalized_chain_link_mut(root) {
                 chain_link.payload_status = PayloadStatus::Invalid;
+
+                if chain_link.is_post_gloas() {
+                    invalidated_envelopes.push((chain_link.slot(), root));
+                }
             }
         }
 
+        for (_, root) in &invalidated_envelopes {
+            self.execution_payload_envelope_cache.remove(*root);
+        }
+
         self.update_head_segment_id();
+
+        invalidated_envelopes
     }
 
     pub fn update_chain_payload_statuses(

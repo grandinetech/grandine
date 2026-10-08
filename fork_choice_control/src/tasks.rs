@@ -983,6 +983,33 @@ impl<P: Preset, W> Run for PersistExecutionPayloadEnvelopesTask<P, W> {
     }
 }
 
+pub struct DeleteExecutionPayloadEnvelopesTask<P: Preset, W> {
+    pub storage: Arc<Storage<P>>,
+    pub envelopes: Vec<(Slot, H256)>,
+    pub wait_group: W,
+}
+
+impl<P: Preset, W> Run for DeleteExecutionPayloadEnvelopesTask<P, W> {
+    #[instrument(
+        skip_all,
+        level = "debug",
+        name = "DeleteExecutionPayloadEnvelopesTask::run"
+    )]
+    fn run(self) {
+        let Self {
+            storage,
+            envelopes,
+            wait_group,
+        } = self;
+
+        if let Err(error) = storage.delete_execution_payload_envelopes(envelopes) {
+            warn_with_peers!("failed to delete invalid execution payload envelopes: {error:?}");
+        }
+
+        drop(wait_group);
+    }
+}
+
 pub struct CheckpointStateTask<P: Preset, W> {
     pub store_snapshot: Arc<Store<P, Storage<P>>>,
     pub state_cache: Arc<StateCacheProcessor<P>>,
