@@ -446,12 +446,12 @@ pub async fn run_after_genesis<P: Preset>(
         .build()?;
 
     let payload_builder_api = Arc::new(PayloadBuilderApi::new(
+        chain_config.clone_arc(),
+        payload_builder_client,
         builder_config
             .as_ref()
             .map(|builder_config| builder_config.builder_api_format)
             .unwrap_or_default(),
-        pubkey_cache.clone_arc(),
-        payload_builder_client,
         metrics.clone(),
     ));
 

@@ -65,7 +65,7 @@ impl BuilderUrl {
             .map_err(|_| BuilderUrlError::TooLong)
     }
 
-    fn origin(&self) -> Option<String> {
+    pub(crate) fn origin(&self) -> Option<String> {
         let url = self.http_url().ok()?.into_url();
 
         Some(url.origin().ascii_serialization())

@@ -631,7 +631,7 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
         )
         .route(
             "/eth/v1/validator/builder_preferences",
-            post(validator_builder_preferences),
+            post(validator_builder_preferences::<P>),
         )
         .route(
             "/eth/v1/validator/liveness/{epoch}",

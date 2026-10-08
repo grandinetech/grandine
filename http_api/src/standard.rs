@@ -4455,7 +4455,7 @@ pub async fn validator_proposer_preferences<P: Preset, W: Wait>(
     level = "debug",
     name = "http_api::validator_builder_preferences"
 )]
-pub async fn validator_builder_preferences(
+pub async fn validator_builder_preferences<P: Preset>(
     State(payload_builder_api): State<Arc<PayloadBuilderApi>>,
     headers: HeaderMap,
     EthJsonOrSsz(entries, _): EthJsonOrSsz<
@@ -4479,7 +4479,7 @@ pub async fn validator_builder_preferences(
             } = entry;
 
             payload_builder_api
-                .submit_builder_preferences(&url, &auth, proposer_pubkey, max_execution_payment)
+                .submit_builder_preferences::<P>(&url, auth, proposer_pubkey, max_execution_payment)
                 .await
                 .map_err(|error| IndexedError { index, error })
                 .err()

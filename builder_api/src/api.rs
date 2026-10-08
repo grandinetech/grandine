@@ -35,11 +35,10 @@ use types::{
 use crate::{
     BuilderApiFormat, BuilderConfig,
     combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
-    consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
+    consts::{BUILDER_PROPOSAL_DELAY_TOLERANCE, DATE_MS_HEADER},
     unphased::containers::SignedValidatorRegistrationV1,
 };
 
-const DATE_MS_HEADER: &str = "Date-Milliseconds";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 #[derive(Debug, Error)]
@@ -499,7 +498,7 @@ impl Api {
     }
 }
 
-async fn handle_error(response: Response) -> Result<Response> {
+pub async fn handle_error(response: Response) -> Result<Response> {
     if response.status().is_client_error() {
         let message = response.text().await?;
         bail!(BuilderApiError::BadRequest { message });
@@ -513,7 +512,7 @@ async fn handle_error(response: Response) -> Result<Response> {
     Ok(response)
 }
 
-fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
+pub fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
     ensure!(
         computed == in_response,
         BuilderApiError::VersionMismatch {

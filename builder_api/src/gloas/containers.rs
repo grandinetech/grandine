@@ -7,6 +7,7 @@
 //! - <https://github.com/ethereum/beacon-APIs/blob/159622d983a703eb03a8a37bb1edeab7ffc3b6bc/types/gloas/request_auth.yaml>
 //! - <https://github.com/ethereum/beacon-APIs/blob/159622d983a703eb03a8a37bb1edeab7ffc3b6bc/types/gloas/builder_entry.yaml>
 //! - <https://github.com/ethereum/beacon-APIs/blob/159622d983a703eb03a8a37bb1edeab7ffc3b6bc/types/gloas/builder_preferences_entry.yaml>
+//! - <https://github.com/ethereum/builder-specs/blob/61aeca42d9ba8eb467ae230d191ebc1c3f38107d/types/gloas/builder_preferences.yaml>
 
 use bls::{PublicKeyBytes, SignatureBytes};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,20 @@ pub struct BuilderPreferencesEntry {
     pub max_execution_payment: Gwei,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderPreferences {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub max_execution_payment: Gwei,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct BuilderPreferencesRequest {
+    pub preferences: BuilderPreferences,
+    pub auth: SignedBuilderRequestAuth,
+}
+
 #[cfg(test)]
 mod tests {
     use hex_literal::hex;
@@ -91,6 +106,15 @@ mod tests {
          0c000000
          0100000000000000
          1234567890abcdef"
+    );
+
+    // from <https://github.com/ethereum/builder-specs/tree/61aeca42d9ba8eb467ae230d191ebc1c3f38107d/examples/gloas>
+    const BUILDER_PREFERENCES_REQUEST_SSZ: [u8; 132] = hex!(
+        "00ca9a3b000000000c000000640000001b66ac1fb663c9bc59509846d6ec
+         05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b
+         679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc5950
+         9846d6ec05345bd908eda73e670af888da41af1715050c00000001000000
+         000000001234567890abcdef"
     );
 
     const BUILDER_URL: &str = "https://builder.example.com";
@@ -138,6 +162,51 @@ mod tests {
             SignedBuilderRequestAuth::from_ssz_default(SIGNED_BUILDER_REQUEST_AUTH_SSZ)
                 .expect("spec example should be deserializable"),
             signed_builder_request_auth(),
+        );
+    }
+
+    #[test]
+    fn builder_preferences_request_matches_spec_example() {
+        let request = BuilderPreferencesRequest {
+            preferences: BuilderPreferences {
+                max_execution_payment: 1_000_000_000,
+            },
+            auth: signed_builder_request_auth(),
+        };
+
+        assert_eq!(
+            request.to_ssz().expect("container should be serializable"),
+            BUILDER_PREFERENCES_REQUEST_SSZ,
+        );
+
+        assert_eq!(
+            BuilderPreferencesRequest::from_ssz_default(BUILDER_PREFERENCES_REQUEST_SSZ)
+                .expect("spec example should be deserializable"),
+            request,
+        );
+
+        let json = serde_json::json!({
+            "preferences": {
+                "max_execution_payment": "1000000000",
+            },
+            "auth": {
+                "message": {
+                    "data": "0x1234567890abcdef",
+                    "slot": "1",
+                },
+                "signature": "0x1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505cc411d61252fb6cb3fa0017b679f8bb2305b26a285fa2737f175668d0dff91cc1b66ac1fb663c9bc59509846d6ec05345bd908eda73e670af888da41af171505",
+            },
+        });
+
+        assert_eq!(
+            serde_json::to_value(&request).expect("request should be serializable"),
+            json,
+        );
+
+        assert_eq!(
+            serde_json::from_value::<BuilderPreferencesRequest>(json)
+                .expect("spec example should be deserializable"),
+            request,
         );
     }
 

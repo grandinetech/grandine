@@ -3107,9 +3107,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     let auth = SignedBuilderRequestAuth { message, signature };
 
                     let result = payload_builder_api
-                        .submit_builder_preferences(
+                        .submit_builder_preferences::<P>(
                             &entry.url,
-                            &auth,
+                            auth,
                             pubkey,
                             entry.max_execution_payment,
                         )

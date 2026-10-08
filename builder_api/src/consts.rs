@@ -4,10 +4,11 @@ use hex_literal::hex;
 use typenum::{U64, U2048, U4096};
 use types::phase0::primitives::{DomainType, H32};
 
+pub(crate) const DATE_MS_HEADER: &str = "Date-Milliseconds";
+
 pub const BUILDER_PROPOSAL_DELAY_TOLERANCE: u64 = 1;
 
-pub const BUILDER_BID_REQUEST_TIMEOUT: Duration =
-    Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
+pub const BUILDER_BID_REQUEST_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// [`DOMAIN_APPLICATION_BUILDER`] from `builder-specs`.
 ///

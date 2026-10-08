@@ -230,9 +230,9 @@ impl<P: Preset> Context<P> {
             keymanager.proposer_configs().clone_arc(),
             None,
             Arc::new(PayloadBuilderApi::new(
-                BuilderApiFormat::default(),
-                controller.pubkey_cache().clone_arc(),
+                controller.chain_config().clone_arc(),
                 Client::new(),
+                BuilderApiFormat::default(),
                 None,
             )),
             controller.clone_arc(),
