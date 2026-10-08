@@ -111,20 +111,6 @@ struct ViableHeadRootAndWeight {
     weight: u64,
 }
 
-// TODO: fix remaining failing compliance tests
-const SKIPPED_CASES: &[&str] = &[
-    "minimal/altair/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
-    "minimal/bellatrix/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
-    "minimal/capella/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
-    "minimal/deneb/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_1_922309954_7",
-    "minimal/electra/fork_choice_compliance/attester_slashing_test/pyspec_tests/attester_slashing_test_0_536686244_2",
-    "minimal/electra/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_73_149206934_1",
-    "minimal/fulu/fork_choice_compliance/attester_slashing_test/pyspec_tests/attester_slashing_test_1_930324755_3",
-    "minimal/fulu/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_73_149206934_1",
-    "minimal/gloas/fork_choice_compliance/block_tree_test/pyspec_tests/block_tree_test_101_886189127_1",
-    "minimal/gloas/fork_choice_compliance/shuffling_test/pyspec_tests/shuffling_test_0_6673355_20",
-];
-
 #[duplicate_item(
     glob                                                                                                function_name                                  preset    phase;
     ["consensus-spec-tests/tests/minimal/altair/fork_choice_compliance/attester_slashing_test/*/*"]    [altair_minimal_compliance_attester_slashing]    [Minimal] [Altair];
@@ -172,16 +158,6 @@ const SKIPPED_CASES: &[&str] = &[
 )]
 #[test_resources(glob)]
 fn function_name(case: Case<'_>) {
-    // Windows build fix
-    let case_path = case.case_path_relative_to_workspace_root.replace('\\', "/");
-
-    if SKIPPED_CASES
-        .iter()
-        .any(|skipped| case_path.contains(skipped))
-    {
-        return;
-    }
-
     let rt = tokio::runtime::Runtime::new().expect("Tokio runtime starts successfully in tests");
     let config = Arc::new(preset::default_config().start_and_stay_in(Phase::phase));
 

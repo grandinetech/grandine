@@ -296,12 +296,22 @@ fn get_builders_sweep_withdrawals_count<P: Preset>(
         }
 
         let builder = state.builders().get(builder_index)?;
-        if builder.withdrawable_epoch <= current_epoch && builder.balance > 0 {
+        let validator_index = convert_builder_index_to_validator_index(builder_index);
+
+        let withdrawn = withdrawals
+            .iter()
+            .filter(|withdrawal| withdrawal.validator_index == validator_index)
+            .map(|withdrawal| withdrawal.amount)
+            .sum();
+
+        let balance = builder.balance.saturating_sub(withdrawn);
+
+        if builder.withdrawable_epoch <= current_epoch && balance > 0 {
             withdrawals.push(Withdrawal {
                 index: *withdrawal_index,
-                validator_index: convert_builder_index_to_validator_index(builder_index),
+                validator_index,
                 address: builder.execution_address,
-                amount: builder.balance,
+                amount: balance,
             });
 
             *withdrawal_index = withdrawal_index
@@ -768,8 +778,6 @@ pub fn apply_parent_execution_payload<P: Preset>(
         P::MaxBuilderExitRequestsPerPayload::USIZE,
     )?;
 
-    process_execution_requests(config, pubkey_cache, state, execution_requests)?;
-
     let parent_bid = state.latest_execution_payload_bid().clone();
     let parent_slot = state.latest_block_header().slot;
     let parent_epoch = compute_epoch_at_slot::<P>(parent_slot);
@@ -789,6 +797,8 @@ pub fn apply_parent_execution_payload<P: Preset>(
                 builder_index: parent_bid.builder_index,
             })?;
     }
+
+    process_execution_requests(config, pubkey_cache, state, execution_requests)?;
 
     let slot: usize = parent_slot.try_into()?;
 
