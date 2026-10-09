@@ -37,9 +37,13 @@ pub struct SubnetPeerDiscovery {
 #[derive(Debug, Serialize)]
 pub enum SyncCommitteeSubnetAction {
     /// Subscribe and discover peers.
-    Subscribe,
+    Subscribe {
+        expiration: Epoch,
+    },
     /// Discover peers but do not subscribe.
-    DiscoverPeers,
+    DiscoverPeers {
+        expiration: Epoch,
+    },
     Unsubscribe,
 }
 
@@ -62,7 +66,7 @@ pub enum PeerReportReason {
     ExpiredSyncBatch,
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyncCommitteeSubscription {
     #[serde(with = "serde_utils::string_or_native")]

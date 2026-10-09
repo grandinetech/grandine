@@ -1,4 +1,4 @@
-use core::{error::Error as StdError, fmt::Display};
+use core::error::Error as StdError;
 
 use itertools::Itertools as _;
 
@@ -8,7 +8,7 @@ pub trait ApiError {
     // - <https://github.com/dtolnay/thiserror/issues/78>
     // - <https://github.com/dtolnay/thiserror/issues/98>
     // - <https://github.com/dtolnay/thiserror/issues/214>
-    fn format_sources(&self) -> impl Display + '_ {
+    fn format_sources(&self) -> String {
         self.sources().join(": ")
     }
 

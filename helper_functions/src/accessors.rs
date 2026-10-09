@@ -35,7 +35,9 @@ use types::{
         containers::{IndexedPayloadAttestation, PayloadAttestation, ProposerPreferences},
         primitives::BuilderIndex,
     },
-    nonstandard::{AttestationEpoch, PartialValidator, Participation, Phase, RelativeEpoch},
+    nonstandard::{
+        AttestationEpoch, ForkInfo, PartialValidator, Participation, Phase, RelativeEpoch,
+    },
     phase0::{
         consts::{DOMAIN_BEACON_ATTESTER, DOMAIN_BEACON_PROPOSER},
         containers::AttestationData,
@@ -555,7 +557,22 @@ pub fn get_domain<P: Preset>(
     epoch: Option<Epoch>,
 ) -> H256 {
     let epoch = epoch.unwrap_or_else(|| get_current_epoch(state));
-    let fork = state.fork();
+
+    get_domain_from_fork_info(config, ForkInfo::from_state(state), domain_type, epoch)
+}
+
+/// [`get_domain`] for a fork that is already known, as it is to a validator without a state.
+#[must_use]
+pub fn get_domain_from_fork_info(
+    config: &Config,
+    fork_info: ForkInfo,
+    domain_type: DomainType,
+    epoch: Epoch,
+) -> H256 {
+    let ForkInfo {
+        fork,
+        genesis_validators_root,
+    } = fork_info;
 
     let fork_version = if epoch < fork.epoch {
         fork.previous_version
@@ -567,7 +584,7 @@ pub fn get_domain<P: Preset>(
         config,
         domain_type,
         Some(fork_version),
-        Some(state.genesis_validators_root()),
+        Some(genesis_validators_root),
     )
 }
 
@@ -1310,8 +1327,10 @@ mod tests {
         ProposerLookahead,
         fulu::beacon_state::BeaconState as FuluBeaconState,
         phase0::{
-            beacon_state::BeaconState as Phase0BeaconState, consts::GENESIS_EPOCH,
-            containers::Validator,
+            beacon_state::BeaconState as Phase0BeaconState,
+            consts::GENESIS_EPOCH,
+            containers::{Fork, Validator},
+            primitives::Version,
         },
         preset::Minimal,
     };
@@ -1333,6 +1352,56 @@ mod tests {
         };
 
         assert_eq!(get_current_epoch(&state), 4);
+    }
+
+    // The version switches at the fork epoch, and a state and its fork info give the same domain.
+    #[test]
+    fn test_get_domain_from_fork_info_at_the_fork_boundary() {
+        let config = Config::minimal();
+
+        let fork = Fork {
+            previous_version: Version::from([0, 0, 0, 1]),
+            current_version: Version::from([0, 0, 0, 2]),
+            epoch: 5,
+        };
+
+        let genesis_validators_root = H256::repeat_byte(3);
+
+        let fork_info = ForkInfo {
+            fork,
+            genesis_validators_root,
+        };
+
+        let domain_at =
+            |epoch| get_domain_from_fork_info(&config, fork_info, DOMAIN_BEACON_ATTESTER, epoch);
+
+        let expected = |version| {
+            misc::compute_domain(
+                &config,
+                DOMAIN_BEACON_ATTESTER,
+                Some(version),
+                Some(genesis_validators_root),
+            )
+        };
+
+        assert_eq!(domain_at(4), expected(fork.previous_version));
+        assert_eq!(domain_at(5), expected(fork.current_version));
+        assert_ne!(domain_at(4), domain_at(5));
+
+        let state = Phase0BeaconState::<Minimal> {
+            fork,
+            genesis_validators_root,
+            ..Phase0BeaconState::default()
+        };
+
+        assert_eq!(
+            get_domain(&config, &state, DOMAIN_BEACON_ATTESTER, Some(4)),
+            domain_at(4),
+        );
+        assert_eq!(
+            get_domain(&config, &state, DOMAIN_BEACON_ATTESTER, Some(5)),
+            domain_at(5),
+        );
     }
 
     #[test]

@@ -1,11 +1,17 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Error, Result};
 use bls::{PublicKeyBytes, Signature};
 use builder_api::unphased::containers::ValidatorRegistrationV1;
 use futures::channel::{mpsc::UnboundedSender, oneshot::Sender};
 use logging::warn_with_peers;
-use types::{altair::containers::SignedContributionAndProof, preset::Preset};
+use types::{
+    altair::containers::SignedContributionAndProof,
+    phase0::primitives::{Epoch, H256, Slot},
+    preset::Preset,
+};
+
+use crate::remote_beacon_node::RemoteBeaconNode;
 
 pub enum ApiToValidator<P: Preset> {
     RegisteredValidators(Sender<HashSet<PublicKeyBytes>>),
@@ -26,6 +32,13 @@ impl<P: Preset> ApiToValidator<P> {
 
 pub enum InternalMessage {
     DoppelgangerProtectionResult(Result<()>),
+    FinalizedCheckpoint(Epoch),
+    /// A head one node streamed and reports as not optimistic.
+    Head {
+        node: Arc<RemoteBeaconNode>,
+        slot: Slot,
+        block_root: H256,
+    },
 }
 
 impl InternalMessage {

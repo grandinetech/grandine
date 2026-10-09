@@ -6835,6 +6835,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.current_slot_blocks_in_processing
             .load(Ordering::SeqCst)
             > 0
+            || self.has_current_slot_block_awaiting_data()
+    }
+
+    // The state transition is done by the time a block waits for its data columns, so the
+    // counter above no longer covers it; the import that follows still moves the head.
+    fn has_current_slot_block_awaiting_data(&self) -> bool {
+        self.head().slot() < self.slot()
+            && self
+                .delayed_block_at_slot
+                .get(&self.slot())
+                .is_some_and(|block_root| !self.contains_block(*block_root))
     }
 
     pub fn dec_current_slot_blocks_in_processing(&self) {

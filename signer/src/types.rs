@@ -1,9 +1,8 @@
-use core::marker::PhantomData;
-
 use bls::PublicKeyBytes;
 use builder_api::unphased::containers::ValidatorRegistrationV1;
 use serde::Serialize;
 use ssz::Hc;
+pub use types::nonstandard::ForkInfo;
 use types::{
     altair::containers::{
         BeaconBlock as AltairBeaconBlock, ContributionAndProof, SyncAggregatorSelectionData,
@@ -29,32 +28,13 @@ use types::{
     },
     phase0::{
         containers::{
-            AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, Fork,
-            VoluntaryExit,
+            AttestationData, BeaconBlock as Phase0BeaconBlock, BeaconBlockHeader, VoluntaryExit,
         },
         primitives::{Epoch, H256, Slot},
     },
     preset::Preset,
-    traits::{BeaconBlock as _, BeaconState},
+    traits::BeaconBlock as _,
 };
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ForkInfo<P: Preset> {
-    pub fork: Fork,
-    pub genesis_validators_root: H256,
-    #[serde(skip)]
-    pub phantom: PhantomData<P>,
-}
-
-impl<P: Preset, BS: BeaconState<P>> From<&BS> for ForkInfo<P> {
-    fn from(state: &BS) -> Self {
-        Self {
-            fork: state.fork(),
-            genesis_validators_root: state.genesis_validators_root(),
-            phantom: PhantomData,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct SigningTriple<'block, P: Preset> {

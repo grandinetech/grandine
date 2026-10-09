@@ -115,7 +115,7 @@ mod tests {
         let mut lock = LOGGER.lock().expect("Failed to acquire LOGGER mutex lock");
         if lock.is_none() {
             let handle =
-                initialize_tracing_logger(module_path!(), Some(data_dir.path()), None, false)
+                initialize_tracing_logger(module_path!(), Some(data_dir.path()), None, false, true)
                     .expect("Failed to initialize tracing logger");
 
             *lock = Some(LoggerWithTempDir {
