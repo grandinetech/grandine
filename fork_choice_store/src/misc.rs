@@ -128,7 +128,7 @@ pub enum PayloadAction {
 
 // It's too cumbersome to rename `PayloadStatus` and all the related fields and methods to something else.
 // So what is called `PayloadStatus` in the Gloas consensus specs, is called `PayloadPresence` in Grandine.
-#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PayloadPresence {
     Empty,

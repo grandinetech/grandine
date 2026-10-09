@@ -198,6 +198,7 @@ struct ViableHeadRootAndWeight {
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/on_payload_attestation_message/*/*"] [gloas_mainnet_on_payload_attestation_message] [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/payload_data_availability/*/*"]      [gloas_mainnet_payload_data_availability]      [Mainnet] [Gloas];
     ["consensus-spec-tests/tests/mainnet/gloas/fork_choice/payload_timeliness/*/*"]             [gloas_mainnet_payload_timeliness]             [Mainnet] [Gloas];
+    ["consensus-spec-tests/tests/minimal/gloas/fork_choice/filter_node_tree_variants/*/*"]      [gloas_minimal_filter_node_tree_variants]     [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/deposit_with_reorg/*/*"]             [gloas_minimal_deposit_with_reorg]             [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/ex_ante/*/*"]                        [gloas_minimal_ex_ante]                        [Minimal] [Gloas];
     ["consensus-spec-tests/tests/minimal/gloas/fork_choice/get_head/*/*"]                       [gloas_minimal_get_head]                       [Minimal] [Gloas];

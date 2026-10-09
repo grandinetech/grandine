@@ -1410,9 +1410,11 @@ mod spec_tests {
 
         let mut state = case.ssz(&config, "pre");
 
-        let expected_post = case.ssz::<_, BeaconState<P>>(&config, "post");
+        let expected_post = case.try_ssz::<_, BeaconState<P>>(&config, "post");
 
-        assert_eq!(expected_post.phase(), post_phase);
+        if let Some(expected_post) = &expected_post {
+            assert_eq!(expected_post.phase(), post_phase);
+        }
 
         for pre_block in case.numbered(&config, "blocks", 0..pre_block_count) {
             untrusted_state_transition(&config, &pubkey_cache, &mut state, &pre_block)
@@ -1421,7 +1423,20 @@ mod spec_tests {
 
         assert!(accessors::get_current_epoch(&state) < fork_epoch);
 
-        for post_block in case.numbered(&config, "blocks", pre_block_count..blocks_count) {
+        let mut post_blocks = case.numbered(&config, "blocks", pre_block_count..blocks_count);
+
+        let Some(expected_post) = expected_post else {
+            let result = post_blocks.try_for_each(|post_block| {
+                untrusted_state_transition(&config, &pubkey_cache, &mut state, &post_block)
+            });
+
+            // No `post` state means at least one of the blocks is invalid.
+            result.expect_err("transition test without post state should fail");
+
+            return;
+        };
+
+        for post_block in post_blocks {
             untrusted_state_transition(&config, &pubkey_cache, &mut state, &post_block)
                 .expect("every transition test should process post-phase blocks successfully");
         }
