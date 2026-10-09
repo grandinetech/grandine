@@ -15,6 +15,9 @@ nonzero_ext = { workspace = true }
 tap = { workspace = true }
 types = { workspace = true }
 
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+rayon = { workspace = true }
+
 [dev-dependencies]
 serde = { workspace = true }
 spec_test_utils = { workspace = true }
