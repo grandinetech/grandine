@@ -172,6 +172,7 @@ jobs:
               rustup run nightly-2025-06-30 cargo build --release --target mipsel-zkm-zkvm-elf
             execute: |
               source ~/.zkm-toolchain/env
+              export GOPROXY=https://proxy.golang.org,https://goproxy.cn,direct
               RUST_LOG=info cargo run -p zkvm_host --features ziren --release -- --test "$TEST" execute
     runs-on: ubuntu-latest
     steps:
