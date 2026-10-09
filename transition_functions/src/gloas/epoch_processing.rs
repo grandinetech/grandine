@@ -3,7 +3,7 @@ use arithmetic::{NonZeroExt as _, U64Ext as _, UsizeExt as _};
 use helper_functions::{
     accessors::{
         get_activation_churn_limit, get_builder_payment_quorum_threshold, get_current_epoch,
-        get_next_epoch, index_of_public_key, ptc_for_slot_for_epoch_processing,
+        get_next_epoch, index_of_public_key, ptc_for_epoch_processing,
     },
     misc,
 };
@@ -187,11 +187,7 @@ fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Re
 
     let target_epoch = get_current_epoch(state).try_add(P::MinSeedLookahead::U64.try_add(1)?)?;
 
-    let start_slot = misc::compute_start_slot_at_epoch::<P>(target_epoch);
-
-    let ptcs = (start_slot..start_slot.try_add(P::SlotsPerEpoch::U64)?)
-        .map(|slot| ptc_for_slot_for_epoch_processing(state, slot))
-        .collect::<Result<Vec<_>>>()?;
+    let ptcs = ptc_for_epoch_processing(state, target_epoch)?;
 
     let refs = ptcs.iter().collect::<Vec<_>>();
     ptc_window[last_epoch_start..].copy_from_slice(&refs);
