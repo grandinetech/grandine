@@ -57,8 +57,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
-    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszList as _,
-    SszRead,
+    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -93,12 +92,10 @@ use types::{
     gloas::{
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
-            ExecutionPayloadBid, ExecutionPayloadEnvelope, PayloadAttestation,
-            PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadBid,
-            SignedExecutionPayloadEnvelope, SignedExecutionPayloadEnvelopeContents,
-            SignedProposerPreferences,
+            ExecutionPayloadEnvelope, PayloadAttestation, PayloadAttestationData,
+            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
+            SignedExecutionPayloadEnvelopeContents, SignedProposerPreferences,
         },
-        primitives::BuilderIndex,
     },
     nonstandard::{
         BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome,
@@ -3938,43 +3935,6 @@ pub async fn validator_sync_committee_contribution<P: Preset, W: Wait>(
         .await;
 
     Ok(EthResponse::json(data))
-}
-
-/// `GET /eth/v1/validator/execution_payload_bids/{slot}/{builder_index}`
-#[instrument(
-    skip_all,
-    level = "debug",
-    name = "http_api::validator_execution_payload_bid"
-)]
-pub async fn validator_execution_payload_bid<P: Preset, W: Wait>(
-    State(controller): State<ApiController<P, W>>,
-    EthPath(slot): EthPath<Slot>,
-    EthPath(builder_index): EthPath<BuilderIndex>,
-    headers: HeaderMap,
-) -> Result<EthResponse<ExecutionPayloadBid<P>, (), JsonOrSsz>, Error> {
-    let current_slot = controller.slot();
-    let beacon_state = if slot == current_slot {
-        controller.preprocessed_state_at_current_slot().await?
-    } else if slot == current_slot.saturating_add(1) {
-        controller.preprocessed_state_at_next_slot().await?
-    } else {
-        return Err(Error::UnexpectedSlot(slot));
-    };
-
-    // TODO(gloas): check builder exist with `builder_indices` cache in beacon state
-    let _ = beacon_state
-        .post_gloas()
-        .ok_or(Error::StatePreGloas)?
-        .builders()
-        .get(builder_index)
-        .map_err(|_| Error::InvalidBuilderIndex(builder_index))?;
-
-    let version = beacon_state.phase();
-    let signed_bid = controller
-        .get_payload_bid_from(slot, builder_index)
-        .ok_or(Error::ExecutionPayloadBidNotFound)?;
-
-    Ok(EthResponse::json_or_ssz(signed_bid.message, &headers)?.version(version))
 }
 
 /// `GET /eth/v1/validator/execution_payload_envelopes/{slot}/{beacon_block_root}`
