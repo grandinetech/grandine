@@ -8,11 +8,11 @@ use crate::{
     size::Size,
 };
 
-impl<T: SszSize> SszSize for &T {
+impl<T: SszSize + ?Sized> SszSize for &T {
     const SIZE: Size = T::SIZE;
 }
 
-impl<T: SszWrite> SszWrite for &T {
+impl<T: SszWrite + ?Sized> SszWrite for &T {
     fn write_fixed(&self, bytes: &mut [u8]) {
         (*self).write_fixed(bytes);
     }
