@@ -5,6 +5,7 @@ use anyhow::Result;
 use attestation_verifier::AttestationVerifier;
 use block_producer::{BlockProducer, Options as BlockProducerOptions};
 use bls::{PublicKeyBytes, SecretKey, traits::SecretKey as _};
+use builder_api::{BuilderApiFormat, PayloadBuilderApi};
 use clock::Tick;
 use database::Database;
 use dedicated_executor::DedicatedExecutor;
@@ -139,6 +140,13 @@ impl<P: Preset> Context<P> {
 
         let pubkey_cache = Arc::new(PubkeyCache::default());
 
+        let payload_builder_api = Arc::new(PayloadBuilderApi::new(
+            chain_config.clone_arc(),
+            client.clone(),
+            BuilderApiFormat::default(),
+            None,
+        ));
+
         let storage = Arc::new(Storage::new(
             chain_config.clone_arc(),
             pubkey_cache.clone_arc(),
@@ -250,6 +258,7 @@ impl<P: Preset> Context<P> {
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             H256::default(),
+            validator_config.builder_settings.clone(),
             validator_config.validator_definitions.clone_arc(),
         ));
 
@@ -301,6 +310,7 @@ impl<P: Preset> Context<P> {
         let block_producer = Arc::new(BlockProducer::new(
             keymanager.proposer_configs().clone_arc(),
             None,
+            payload_builder_api.clone_arc(),
             controller.clone_arc(),
             dedicated_executor.clone_arc(),
             execution_engine,
@@ -373,6 +383,7 @@ impl<P: Preset> Context<P> {
 
         let http_api = HttpApi {
             block_producer,
+            payload_builder_api,
             controller,
             anchor_checkpoint_provider,
             eth1_api,

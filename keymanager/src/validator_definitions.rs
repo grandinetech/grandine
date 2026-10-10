@@ -10,8 +10,13 @@ use anyhow::{Context as _, Result, bail, ensure};
 use bls::PublicKeyBytes;
 use helper_functions::misc;
 use serde::{Deserialize, Serialize};
-use types::{bellatrix::primitives::Gas, phase0::primitives::ExecutionAddress};
+use types::{
+    bellatrix::primitives::Gas,
+    phase0::primitives::{ExecutionAddress, Gwei},
+};
 use zeroize::Zeroizing;
+
+use crate::builder_config::{BuilderEntryOptions, validate_builders};
 
 const VALIDATORS_FILE_NAME: &str = "validators.yml";
 
@@ -112,6 +117,10 @@ pub struct BuilderOptions {
     pub builder_boost_factor: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefer_builder_proposals: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_bid: Option<Gwei>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builders: Option<Vec<BuilderEntryOptions>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -211,7 +220,8 @@ impl ValidatorDefinitions {
         Ok(definitions)
     }
 
-    /// Reject a hand-edited file the node could not run: a duplicate pubkey or an oversized graffiti.
+    /// Reject a hand-edited file the node could not run: a duplicate pubkey, an oversized graffiti
+    /// or an invalid builders list.
     fn validate(&self) -> Result<()> {
         let mut seen = HashSet::new();
 
@@ -225,6 +235,12 @@ impl ValidatorDefinitions {
             if let Some(graffiti) = &definition.graffiti {
                 misc::parse_graffiti(graffiti).with_context(|| {
                     format!("invalid graffiti for validator {:?}", definition.pubkey)
+                })?;
+            }
+
+            if let Some(builders) = &definition.builder_options.builders {
+                validate_builders(builders).with_context(|| {
+                    format!("invalid builders for validator {:?}", definition.pubkey)
                 })?;
             }
         }
@@ -508,6 +524,7 @@ impl ValidatorDefinitionsWithStorage {
 
 #[cfg(test)]
 mod tests {
+    use builder_api::gloas::containers::BuilderUrl;
     use tempfile::Builder;
 
     use super::*;
@@ -781,6 +798,30 @@ mod tests {
 
         ValidatorDefinitions::load(&path)
             .expect_err("a file with an oversized graffiti must be refused");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_load_rejects_invalid_builders() -> Result<()> {
+        let tempdir = Builder::new()
+            .prefix("validators")
+            .rand_bytes(10)
+            .tempdir()?;
+        let path = ValidatorDefinitions::file_path(tempdir.path());
+
+        let builder =
+            BuilderEntryOptions::from(BuilderUrl::try_from("https://builder.example.com")?);
+
+        let mut definition = ValidatorDefinition::new(PUBKEY, SigningMethod::KeystoreStorage);
+        definition.builder_options.builders = Some(vec![builder.clone(), builder]);
+
+        let mut validator_definitions = ValidatorDefinitions::default();
+        validator_definitions.push(definition);
+        validator_definitions.save(&path)?;
+
+        ValidatorDefinitions::load(&path)
+            .expect_err("a file with duplicate builders must be refused");
 
         Ok(())
     }

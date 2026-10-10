@@ -3,10 +3,13 @@ use types::{phase0::primitives::DomainType, preset::Preset};
 
 use crate::{
     bellatrix::containers::BuilderBid as BellatrixBuilderBid,
-    capella::containers::BuilderBid as CapellaBuilderBid, consts::DOMAIN_APPLICATION_BUILDER,
+    capella::containers::BuilderBid as CapellaBuilderBid,
+    consts::{DOMAIN_APPLICATION_BUILDER, DOMAIN_BUILDER_REQUEST_AUTH},
     deneb::containers::BuilderBid as DenebBuilderBid,
     electra::containers::BuilderBid as ElectraBuilderBid,
-    fulu::containers::BuilderBid as FuluBuilderBid, unphased::containers::ValidatorRegistrationV1,
+    fulu::containers::BuilderBid as FuluBuilderBid,
+    gloas::containers::BuilderRequestAuth,
+    unphased::containers::ValidatorRegistrationV1,
 };
 
 /// <https://github.com/ethereum/builder-specs/blob/d246d57ba2a0c2378c1de4a2bdaff7cd438e99ee/specs/builder.md#signing>
@@ -42,5 +45,11 @@ impl<P: Preset> SignForAllForks for FuluBuilderBid<P> {
 /// <https://github.com/ethereum/builder-specs/blob/d246d57ba2a0c2378c1de4a2bdaff7cd438e99ee/specs/builder.md#signing>
 impl SignForAllForks for ValidatorRegistrationV1 {
     const DOMAIN_TYPE: DomainType = DOMAIN_APPLICATION_BUILDER;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::Builder;
+}
+
+/// <https://github.com/ethereum/builder-specs/blob/main/specs/gloas/builder.md#signing>
+impl SignForAllForks for BuilderRequestAuth {
+    const DOMAIN_TYPE: DomainType = DOMAIN_BUILDER_REQUEST_AUTH;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::Builder;
 }

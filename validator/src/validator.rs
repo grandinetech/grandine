@@ -13,7 +13,8 @@ use block_producer::{BlockBuildOptions, BlockProducer, ValidatorBlindedBlock};
 use bls::{PublicKeyBytes, Signature, SignatureBytes};
 use builder_api::{
     BuilderApi,
-    consts::EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION,
+    consts::{EPOCHS_PER_VALIDATOR_REGISTRATION_SUBMISSION, MaxBuilderEntries},
+    gloas::containers::{BuilderEntry, BuilderRequestAuth, BuilderUrl, SignedBuilderRequestAuth},
     unphased::containers::{SignedValidatorRegistrationV1, ValidatorRegistrationV1},
 };
 use clock::{Tick, TickKind};
@@ -35,7 +36,7 @@ use futures::{
         mpsc::{UnboundedReceiver, UnboundedSender},
         oneshot::Sender,
     },
-    future::{Either as EitherFuture, OptionFuture},
+    future::{Either as EitherFuture, OptionFuture, join_all},
     lock::Mutex,
     select,
     stream::{FuturesOrdered, StreamExt as _},
@@ -208,7 +209,12 @@ pub struct Validator<P: Preset, W: Wait> {
     last_proposer_preferences_epoch: Option<Epoch>,
     published_proposer_preferences: HashSet<(H256, Slot, ValidatorIndex)>,
     network_globals: Option<Arc<NetworkGlobals>>,
+    submitted_builder_preferences: HashSet<(Slot, ValidatorIndex)>,
+    signed_builder_request_auths: Arc<Mutex<SignedBuilderRequestAuths>>,
 }
+
+/// Request auth signatures by signer, proposal slot and auth data, reused for the bid requests.
+type SignedBuilderRequestAuths = HashMap<(PublicKeyBytes, Slot, Vec<u8>), SignatureBytes>;
 
 impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     #[expect(clippy::too_many_arguments)]
@@ -298,6 +304,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             last_proposer_preferences_epoch: None,
             published_proposer_preferences: HashSet::new(),
             network_globals,
+            submitted_builder_preferences: HashSet::new(),
+            signed_builder_request_auths: Arc::default(),
         }
     }
 
@@ -809,6 +817,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 || self.chain_config.gloas_fork_epoch == current_epoch.saturating_add(1))
         {
             self.publish_proposer_preferences(&slot_head);
+            self.submit_builder_preferences(&slot_head);
             self.last_proposer_preferences_epoch = Some(current_epoch);
         }
 
@@ -1055,7 +1064,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             BlockBuildOptions {
                 graffiti,
                 disable_blockprint_graffiti: self.validator_config.disable_blockprint_graffiti,
-                builder_boost_factor: self.validator_config.builder_boost_factor(*public_key),
+                builder_boost_factor: self.proposer_configs.builder_boost_factor(*public_key),
+                min_bid: self.proposer_configs.builder_min_bid(*public_key),
                 ..BlockBuildOptions::default()
             },
         );
@@ -1064,6 +1074,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             block_build_context.get_execution_payload_header(*public_key);
 
         let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
+        let builder_api_bids_handle = if slot_head.phase() >= Phase::Gloas {
+            let builders = self
+                .builder_entries(&signer_snapshot, *public_key, slot_head.slot())
+                .await;
+
+            block_build_context.get_builder_api_bids(builders)
+        } else {
+            None
+        };
 
         let epoch = slot_head.current_epoch();
 
@@ -1098,6 +1118,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 randao_reveal,
                 execution_payload_header_handle,
                 local_execution_payload_handle,
+                builder_api_bids_handle,
             )
             .await
         {
@@ -1116,6 +1137,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 ..
             },
             _block_rewards,
+            builder_url,
         )) = beacon_block_option
         else {
             warn_with_peers!(
@@ -1228,6 +1250,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
                 self.controller
                     .on_own_block(wait_group.clone(), block.clone_arc());
+
+                if let Some(builder_url) = builder_url {
+                    self.forward_block_to_builder(builder_url, block.clone_arc());
+                }
 
                 ValidatorToP2p::PublishBeaconBlock(block).send(&self.p2p_tx);
 
@@ -2591,6 +2617,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         self.published_proposer_preferences
             .retain(|(_, proposal_slot, _)| *proposal_slot >= current_epoch_start);
+
+        self.submitted_builder_preferences
+            .retain(|(proposal_slot, _)| *proposal_slot >= current_epoch_start);
     }
 
     fn discard_old_registered_validators(&mut self, current_epoch: Epoch) {
@@ -2826,6 +2855,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 return Ok(());
             };
 
+            // `ValidatorRegistrationV1` is deprecated in Gloas in favor of `ProposerPreferences`.
+            if chain_config.phase_at_epoch(current_epoch) >= Phase::Gloas {
+                return Ok(());
+            }
+
             let registrations = pubkeys
                 .into_iter()
                 .map(|pubkey| {
@@ -2900,7 +2934,257 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         self.last_registration_epoch = Some(current_epoch);
     }
 
+    async fn builder_entries(
+        &self,
+        signer: &Snapshot,
+        public_key: PublicKeyBytes,
+        slot: Slot,
+    ) -> ContiguousList<BuilderEntry, MaxBuilderEntries> {
+        let builders = match self.proposer_configs.resolved_builder_config(public_key) {
+            Ok(builder_config) => builder_config.builders,
+            Err(error) => {
+                warn_with_peers!(
+                    "unable to resolve builders for validator {public_key:?}: {error:?}"
+                );
+                return ContiguousList::default();
+            }
+        };
+
+        if builders.is_empty() {
+            return ContiguousList::default();
+        }
+
+        let auths = builders
+            .iter()
+            .map(|entry| BuilderRequestAuth {
+                data: entry.auth_data.clone(),
+                slot,
+            })
+            .collect_vec();
+
+        let mut signatures = {
+            let mut signed_auths = self.signed_builder_request_auths.lock().await;
+
+            auths
+                .iter()
+                .map(|auth| signed_auths.remove(&(public_key, slot, auth.data.as_bytes().to_vec())))
+                .collect_vec()
+        };
+
+        // Auths signed when submitting builder preferences are reused, the rest are signed now.
+        let (unsigned_indices, triples): (Vec<_>, Vec<_>) = auths
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| signatures[*index].is_none())
+            .map(|(index, auth)| {
+                (
+                    index,
+                    builder_request_auth_triple::<P>(&self.chain_config, public_key, auth),
+                )
+            })
+            .unzip();
+
+        match signer
+            .sign_triples_without_slashing_protection(triples, None)
+            .await
+        {
+            Ok(sigs) => {
+                for (index, signature) in unsigned_indices.into_iter().zip(sigs) {
+                    signatures[index] = Some(signature.into());
+                }
+            }
+            Err(error) => {
+                warn_with_peers!(
+                    "failed to sign builder request auths for validator {public_key:?}: {error:?}"
+                );
+                return ContiguousList::default();
+            }
+        }
+
+        builders
+            .into_iter()
+            .zip(auths)
+            .zip(signatures)
+            .filter_map(|((entry, message), signature)| {
+                let auth = SignedBuilderRequestAuth {
+                    message,
+                    signature: signature?,
+                };
+
+                Some(entry.into_builder_entry(auth))
+            })
+            .pipe(ContiguousList::try_from_iter)
+            .unwrap_or_default()
+    }
+
     #[expect(clippy::too_many_lines)]
+    #[instrument(level = "debug", skip_all)]
+    fn submit_builder_preferences(&mut self, slot_head: &SlotHead<P>) {
+        let signer_snapshot = self.signer.load().clone_arc();
+
+        if signer_snapshot.no_keys() {
+            return;
+        }
+
+        let preferences = self
+            .own_upcoming_proposals(&signer_snapshot, &slot_head.beacon_state)
+            .into_iter()
+            .filter_map(|(proposal_slot, validator_index, pubkey)| {
+                if !self
+                    .submitted_builder_preferences
+                    .insert((proposal_slot, validator_index))
+                {
+                    return None;
+                }
+
+                match self.proposer_configs.resolved_builder_config(pubkey) {
+                    Ok(builder_config) => {
+                        Some(builder_config.builders.into_iter().map(move |entry| {
+                            let auth = BuilderRequestAuth {
+                                data: entry.auth_data.clone(),
+                                slot: proposal_slot,
+                            };
+
+                            (pubkey, entry, auth)
+                        }))
+                    }
+                    Err(error) => {
+                        warn_with_peers!(
+                            "unable to resolve builders for validator {pubkey:?}: {error:?}"
+                        );
+                        None
+                    }
+                }
+            })
+            .flatten()
+            .collect_vec();
+
+        if preferences.is_empty() {
+            return;
+        }
+
+        let chain_config = self.chain_config.clone_arc();
+        let payload_builder_api = self.block_producer.payload_builder_api().clone_arc();
+        let signed_auths = self.signed_builder_request_auths.clone_arc();
+        let state_slot = slot_head.slot();
+
+        tokio::spawn(async move {
+            let triples = preferences
+                .iter()
+                .map(|(pubkey, _, auth)| {
+                    builder_request_auth_triple::<P>(&chain_config, *pubkey, auth)
+                })
+                .collect_vec();
+
+            let signatures = match signer_snapshot
+                .sign_triples_without_slashing_protection(triples, None)
+                .await
+            {
+                Ok(signatures) => signatures.map(SignatureBytes::from).collect_vec(),
+                Err(error) => {
+                    warn_with_peers!("failed to sign builder preferences: {error:?}");
+                    return;
+                }
+            };
+
+            {
+                let mut signed_auths = signed_auths.lock().await;
+
+                signed_auths.retain(|(_, proposal_slot, _), _| *proposal_slot > state_slot);
+
+                for ((pubkey, _, auth), signature) in preferences.iter().zip(&signatures) {
+                    signed_auths.insert(
+                        (*pubkey, auth.slot, auth.data.as_bytes().to_vec()),
+                        *signature,
+                    );
+                }
+            }
+
+            let payload_builder_api = &payload_builder_api;
+
+            let submissions = preferences.into_iter().zip(signatures).map(
+                |((pubkey, entry, message), signature)| async move {
+                    let auth = SignedBuilderRequestAuth { message, signature };
+
+                    let result = payload_builder_api
+                        .submit_builder_preferences::<P>(
+                            &entry.url,
+                            auth,
+                            pubkey,
+                            entry.max_execution_payment,
+                        )
+                        .await;
+
+                    (entry.url, pubkey, result)
+                },
+            );
+
+            let mut failures = Vec::<(BuilderUrl, usize, AnyhowError)>::new();
+
+            for (url, pubkey, result) in join_all(submissions).await {
+                let Err(error) = result else {
+                    continue;
+                };
+
+                debug_with_peers!(
+                    "failed to submit builder preferences to {url} for validator {pubkey:?}: \
+                     {error:?}",
+                );
+
+                match failures
+                    .iter_mut()
+                    .find(|(failed_url, _, _)| *failed_url == url)
+                {
+                    Some((_, count, _)) => *count = count.saturating_add(1),
+                    None => failures.push((url, 1, error)),
+                }
+            }
+
+            for (url, count, error) in failures {
+                warn_with_peers!(
+                    "failed to submit builder preferences to {url} for {count} proposals: \
+                     {error:?}",
+                );
+            }
+        });
+    }
+
+    fn own_upcoming_proposals(
+        &self,
+        signer: &Snapshot,
+        beacon_state: &BeaconState<P>,
+    ) -> Vec<(Slot, ValidatorIndex, PublicKeyBytes)> {
+        let pubkeys_by_index = signer
+            .keys()
+            .filter_map(|pubkey| {
+                let validator_index = accessors::index_of_public_key(beacon_state, pubkey)?;
+                Some((validator_index, *pubkey))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let validator_indices = pubkeys_by_index.keys().copied().collect::<HashSet<_>>();
+
+        accessors::get_upcoming_proposal_slots(&self.chain_config, beacon_state, &validator_indices)
+            .filter_map(|(proposal_slot, validator_index)| {
+                let pubkey = pubkeys_by_index.get(&validator_index).copied()?;
+                Some((proposal_slot, validator_index, pubkey))
+            })
+            .collect()
+    }
+
+    fn forward_block_to_builder(&self, builder_url: BuilderUrl, block: Arc<SignedBeaconBlock<P>>) {
+        let payload_builder_api = self.block_producer.payload_builder_api().clone_arc();
+
+        tokio::spawn(async move {
+            if let Err(error) = payload_builder_api
+                .submit_signed_beacon_block(&builder_url, &block)
+                .await
+            {
+                warn_with_peers!("failed to forward block to builder {builder_url}: {error:?}");
+            }
+        });
+    }
+
     #[instrument(level = "debug", skip_all)]
     fn publish_proposer_preferences(&mut self, slot_head: &SlotHead<P>) {
         let signer_snapshot = self.signer.load().clone_arc();
@@ -2911,69 +3195,55 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let beacon_state = slot_head.beacon_state.clone_arc();
         let beacon_block_root = slot_head.beacon_block_root;
-
-        let pubkeys_by_index = signer_snapshot
-            .keys()
-            .filter_map(|pubkey| {
-                let validator_index = accessors::index_of_public_key(&beacon_state, pubkey)?;
-                Some((validator_index, *pubkey))
-            })
-            .collect::<HashMap<_, _>>();
-
-        let validator_indices = pubkeys_by_index.keys().copied().collect::<HashSet<_>>();
         let mut dependent_roots = HashMap::<Epoch, Option<H256>>::new();
 
-        let preferences = accessors::get_upcoming_proposal_slots(
-            &self.chain_config,
-            &beacon_state,
-            &validator_indices,
-        )
-        .filter_map(|(proposal_slot, validator_index)| {
-            let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
+        let preferences = self
+            .own_upcoming_proposals(&signer_snapshot, &beacon_state)
+            .into_iter()
+            .filter_map(|(proposal_slot, validator_index, pubkey)| {
+                let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
 
-            let dependent_root = dependent_roots
-                .entry(proposal_epoch)
-                .or_insert_with(|| {
-                    let dependent_root = self
-                        .controller
-                        .shuffling_dependent_root(beacon_block_root, proposal_epoch);
+                let dependent_root = dependent_roots
+                    .entry(proposal_epoch)
+                    .or_insert_with(|| {
+                        let dependent_root = self
+                            .controller
+                            .shuffling_dependent_root(beacon_block_root, proposal_epoch);
 
-                    if dependent_root.is_none() {
-                        warn_with_peers!(
-                            "failed to compute shuffling dependent root for proposer \
+                        if dependent_root.is_none() {
+                            warn_with_peers!(
+                                "failed to compute shuffling dependent root for proposer \
                             preferences (epoch {proposal_epoch})"
-                        );
-                    }
+                            );
+                        }
 
-                    dependent_root
-                })
-                .as_ref()
-                .copied()?;
+                        dependent_root
+                    })
+                    .as_ref()
+                    .copied()?;
 
-            if self.published_proposer_preferences.contains(&(
-                dependent_root,
-                proposal_slot,
-                validator_index,
-            )) {
-                return None;
-            }
-
-            let pubkey = pubkeys_by_index.get(&validator_index).copied()?;
-
-            Some((
-                pubkey,
-                ProposerPreferences {
+                if self.published_proposer_preferences.contains(&(
                     dependent_root,
                     proposal_slot,
                     validator_index,
-                    fee_recipient: self.proposer_configs.fee_recipient(pubkey),
-                    target_gas_limit: self
-                        .chain_config
-                        .gas_limit(self.proposer_configs.gas_limit(pubkey), proposal_epoch),
-                },
-            ))
-        })
-        .collect_vec();
+                )) {
+                    return None;
+                }
+
+                Some((
+                    pubkey,
+                    ProposerPreferences {
+                        dependent_root,
+                        proposal_slot,
+                        validator_index,
+                        fee_recipient: self.proposer_configs.fee_recipient(pubkey),
+                        target_gas_limit: self
+                            .chain_config
+                            .gas_limit(self.proposer_configs.gas_limit(pubkey), proposal_epoch),
+                    },
+                ))
+            })
+            .collect_vec();
 
         if preferences.is_empty() {
             return;
@@ -3180,4 +3450,16 @@ fn group_into_btreemap<K: Ord, V>(pairs: impl IntoIterator<Item = (K, V)>) -> BT
     }
 
     groups
+}
+
+fn builder_request_auth_triple<P: Preset>(
+    chain_config: &ChainConfig,
+    public_key: PublicKeyBytes,
+    auth: &BuilderRequestAuth,
+) -> SigningTriple<'static, P> {
+    SigningTriple {
+        message: SigningMessage::from(auth.clone()),
+        signing_root: auth.signing_root(chain_config),
+        public_key,
+    }
 }

@@ -367,6 +367,7 @@ impl Snapshot {
                 | SigningMessage::ValidatorRegistration(_)
                 | SigningMessage::VoluntaryExit(_)
                 | SigningMessage::ProposerPreferences(_)
+                | SigningMessage::BuilderRequestAuth(_)
                 | SigningMessage::PayloadAttestation(_) => {
                     signable_messages.push(SigningTriple {
                         message,
