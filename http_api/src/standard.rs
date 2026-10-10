@@ -68,6 +68,7 @@ use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
+    Ptc,
     altair::{
         consts::SyncCommitteeSubnetCount,
         containers::{
@@ -174,6 +175,12 @@ pub struct StateCommitteesQuery {
 #[serde(deny_unknown_fields)]
 pub struct StateSyncCommitteesQuery {
     epoch: Option<Epoch>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatePtcQuery {
+    slot: Option<Slot>,
 }
 
 #[derive(Deserialize)]
@@ -393,6 +400,14 @@ struct StateSyncCommitteeResponse<'indices> {
     validators: Vec<ValidatorIndex>,
     #[serde(with = "As::<Vec<&[DisplayFromStr]>>")]
     validator_aggregates: Vec<&'indices [ValidatorIndex]>,
+}
+
+#[derive(Serialize, Ssz)]
+pub struct StatePtcResponse<P: Preset> {
+    #[serde(with = "serde_utils::string_or_native")]
+    slot: Slot,
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    validators: Ptc<P>,
 }
 
 #[derive(Serialize, Ssz)]
@@ -1144,6 +1159,52 @@ pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
             .finalized(finalized)
             .version(version)
             .into_response(),
+    )
+}
+
+/// `GET /eth/v1/beacon/states/{state_id}/ptc`
+#[instrument(skip_all, level = "debug", name = "http_api::state_ptc")]
+pub async fn state_ptc<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    EthQuery(query): EthQuery<StatePtcQuery>,
+    headers: HeaderMap,
+) -> Result<EthResponse<StatePtcResponse<P>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    if !state.is_post_gloas() {
+        return Err(Error::StatePreGloas);
+    }
+
+    let slot = query.slot.unwrap_or_else(|| state.slot());
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let state_epoch = accessors::get_current_epoch(&state);
+
+    if epoch < controller.chain_config().gloas_fork_epoch {
+        return Err(Error::InvalidSlot(anyhow!(
+            "slot {slot} is before the Gloas fork"
+        )));
+    }
+
+    if !(misc::previous_epoch(state_epoch)..=state_epoch.saturating_add(P::MinSeedLookahead::U64))
+        .contains(&epoch)
+    {
+        return Err(Error::InvalidSlot(anyhow!(
+            "slot {slot} is outside the PTC window of the state"
+        )));
+    }
+
+    let validators = accessors::get_ptc(controller.chain_config(), &state, slot)?;
+
+    Ok(
+        EthResponse::json_or_ssz(StatePtcResponse::<P> { slot, validators }, &headers)?
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized),
     )
 }
 

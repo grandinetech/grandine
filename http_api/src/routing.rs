@@ -45,7 +45,7 @@ use crate::{
         publish_execution_payload_bid, publish_execution_payload_envelope, state_committees,
         state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
-        state_randao, state_root, state_sync_committees, state_validator,
+        state_ptc, state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_payload_attestation_messages, submit_pool_attestations,
         submit_pool_attestations_v2, submit_pool_attester_slashing,
         submit_pool_attester_slashing_v2, submit_pool_bls_to_execution_change,
@@ -388,6 +388,7 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
             "/eth/v1/beacon/states/{state_id}/sync_committees",
             get(state_sync_committees),
         )
+        .route("/eth/v1/beacon/states/{state_id}/ptc", get(state_ptc))
         .route(
             "/eth/v1/beacon/states/{state_id}/pending_consolidations",
             get(state_pending_consolidations),
