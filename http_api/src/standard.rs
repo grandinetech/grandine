@@ -57,8 +57,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
-    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszList as _,
-    SszRead,
+    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, ProgressiveList, Ssz,
+    SszHash as _, SszList as _, SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -200,6 +200,13 @@ pub struct PoolAttestationQuery {
 #[serde(deny_unknown_fields)]
 pub struct PoolPayloadAttestationsQuery {
     slot: Option<Slot>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProposerPreferencesQuery {
+    slot: Option<Slot>,
+    dependent_root: Option<H256>,
 }
 
 #[derive(Deserialize)]
@@ -2518,6 +2525,35 @@ pub async fn pool_payload_attestations<P: Preset, W: Wait>(
         .to_vec();
 
     Ok(EthResponse::json(data).version(phase))
+}
+
+/// `GET /eth/v1/beacon/proposer_preferences`
+#[instrument(skip_all, level = "debug", name = "http_api::proposer_preferences")]
+pub async fn proposer_preferences<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    EthQuery(query): EthQuery<ProposerPreferencesQuery>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let ProposerPreferencesQuery {
+        slot,
+        dependent_root,
+    } = query;
+
+    let current_slot = controller.slot();
+    let phase = controller
+        .chain_config()
+        .phase_at_slot::<P>(slot.unwrap_or(current_slot));
+
+    let proposer_preferences = ProgressiveList::try_from(controller.accepted_proposer_preferences(
+        current_slot,
+        slot,
+        dependent_root,
+    ))
+    .map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(proposer_preferences, &headers)?
+        .version(phase)
+        .into_response())
 }
 
 /// `POST /eth/v1/beacon/pool/payload_attestations`

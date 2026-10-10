@@ -495,6 +495,12 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .unwrap_or_default()
     }
 
+    pub fn accepted_proposer_preferences(
+        &self,
+    ) -> impl Iterator<Item = &Arc<SignedProposerPreferences>> {
+        self.accepted_proposer_preferences.values()
+    }
+
     fn accepted_payload_bids_for_parent(
         &self,
         slot: Slot,
