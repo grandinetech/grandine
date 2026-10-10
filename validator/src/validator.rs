@@ -634,6 +634,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     &payload_attributes,
                     payload.block_number(),
                     payload.block_hash(),
+                    safe_execution_payload_hash,
+                    finalized_execution_payload_hash,
                 );
             }
 
