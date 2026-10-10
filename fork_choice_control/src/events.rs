@@ -29,7 +29,8 @@ use types::{
     fulu::primitives::ColumnIndex,
     gloas::{
         containers::{
-            PayloadAttestationMessage, SignedExecutionPayloadBid, SignedProposerPreferences,
+            ExecutionPayloadBid, PayloadAttestationMessage, SignedExecutionPayloadBid,
+            SignedProposerPreferences,
         },
         primitives::{BuilderIndex, PayloadStatus},
     },
@@ -242,13 +243,21 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
-    pub fn send_block_event(&self, slot: Slot, block_root: H256, execution_optimistic: bool) {
+    pub fn send_block_event(
+        &self,
+        slot: Slot,
+        block_root: H256,
+        execution_optimistic: bool,
+        bid: Option<&ExecutionPayloadBid<P>>,
+    ) {
         features::log!(
             LogBlockProcessingTime,
             "send block event (slot: {slot}, block_root: {block_root:?}, optimistic: {execution_optimistic})"
         );
 
-        if let Err(error) = self.send_block_event_internal(slot, block_root, execution_optimistic) {
+        if let Err(error) =
+            self.send_block_event_internal(slot, block_root, execution_optimistic, bid)
+        {
             warn_with_peers!("unable to send block event: {error}");
         }
     }
@@ -535,12 +544,15 @@ impl<P: Preset> EventChannels<P> {
         slot: Slot,
         block_root: H256,
         execution_optimistic: bool,
+        bid: Option<&ExecutionPayloadBid<P>>,
     ) -> Result<()> {
         if self.blocks.receiver_count() > 0 {
             let block_event = BlockEvent {
                 slot,
                 block: block_root,
                 execution_optimistic,
+                builder_index: bid.map(|bid| bid.builder_index),
+                block_hash: bid.map(|bid| bid.block_hash),
             };
 
             let event = Event::Block(block_event);
@@ -875,6 +887,13 @@ pub struct BlockEvent {
     pub slot: Slot,
     pub block: H256,
     pub execution_optimistic: bool,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "serde_utils::string_or_native_option"
+    )]
+    pub builder_index: Option<BuilderIndex>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_hash: Option<ExecutionBlockHash>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
