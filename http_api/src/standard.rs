@@ -57,8 +57,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use serde_with::{As, DisplayFromStr};
 use ssz::{
-    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, Ssz, SszHash as _, SszList as _,
-    SszRead,
+    ByteVector, ContiguousList, ContiguousVector, DynamicList, Hc, ProgressiveList, Ssz,
+    SszHash as _, SszList as _, SszRead,
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
@@ -2507,17 +2507,18 @@ pub async fn pool_payload_attestations<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(payload_attestation_agg_pool): State<Arc<PayloadAttestationAggPool<P, W>>>,
     EthQuery(query): EthQuery<PoolPayloadAttestationsQuery>,
-) -> Result<EthResponse<Vec<PayloadAttestation<P>>>, Error> {
-    let slot = query.slot.unwrap_or_else(|| controller.slot());
-    let phase = controller.chain_config().phase_at_slot::<P>(slot);
-    let beacon_block_root = controller.head_block_root().value;
+    headers: HeaderMap,
+) -> Result<EthResponse<ProgressiveList<PayloadAttestation<P>>, (), JsonOrSsz>, Error> {
+    let PoolPayloadAttestationsQuery { slot } = query;
+    let phase = controller
+        .chain_config()
+        .phase_at_slot::<P>(slot.unwrap_or_else(|| controller.slot()));
 
     let data = payload_attestation_agg_pool
-        .aggregate_payload_attestations(slot, beacon_block_root)
-        .await?
-        .to_vec();
+        .payload_attestations(slot)
+        .await?;
 
-    Ok(EthResponse::json(data).version(phase))
+    Ok(EthResponse::json_or_ssz(data, &headers)?.version(phase))
 }
 
 /// `POST /eth/v1/beacon/pool/payload_attestations`
