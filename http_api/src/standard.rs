@@ -38,7 +38,7 @@ use futures::{
     stream::{FuturesOrdered, Stream, StreamExt as _},
 };
 use genesis::AnchorCheckpointProvider;
-use helper_functions::{accessors, misc};
+use helper_functions::{accessors, error::Error as AccessorError, misc};
 use http_api_utils::{BlockId, StateId};
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
@@ -68,6 +68,7 @@ use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
+    Ptc,
     altair::{
         consts::SyncCommitteeSubnetCount,
         containers::{
@@ -172,6 +173,12 @@ pub struct StateCommitteesQuery {
 #[serde(deny_unknown_fields)]
 pub struct StateSyncCommitteesQuery {
     epoch: Option<Epoch>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StatePtcQuery {
+    slot: Option<Slot>,
 }
 
 #[derive(Deserialize)]
@@ -391,6 +398,14 @@ struct StateSyncCommitteeResponse<'indices> {
     validators: Vec<ValidatorIndex>,
     #[serde(with = "As::<Vec<&[DisplayFromStr]>>")]
     validator_aggregates: Vec<&'indices [ValidatorIndex]>,
+}
+
+#[derive(Serialize, Ssz)]
+pub struct StatePtcResponse<P: Preset> {
+    #[serde(with = "serde_utils::string_or_native")]
+    slot: Slot,
+    #[serde(with = "serde_utils::string_or_native_sequence")]
+    validators: Ptc<P>,
 }
 
 #[derive(Serialize, Ssz)]
@@ -1127,6 +1142,44 @@ pub async fn state_pending_partial_withdrawals<P: Preset, W: Wait>(
             .finalized(finalized)
             .version(version)
             .into_response(),
+    )
+}
+
+/// `GET /eth/v1/beacon/states/{state_id}/ptc`
+#[instrument(skip_all, level = "debug", name = "http_api::state_ptc")]
+pub async fn state_ptc<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    EthQuery(query): EthQuery<StatePtcQuery>,
+    headers: HeaderMap,
+) -> Result<EthResponse<StatePtcResponse<P>, (), JsonOrSsz>, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    if !state.is_post_gloas() {
+        return Err(Error::StatePreGloas);
+    }
+
+    let slot = query.slot.unwrap_or_else(|| state.slot());
+
+    let validators =
+        accessors::get_ptc(controller.chain_config(), &state, slot).map_err(|error| {
+            match error.downcast_ref::<AccessorError>() {
+                Some(AccessorError::PreGloasSlot { .. } | AccessorError::SlotOutOfRange) => {
+                    Error::InvalidSlot(error)
+                }
+                _ => Error::Internal(error),
+            }
+        })?;
+
+    Ok(
+        EthResponse::json_or_ssz(StatePtcResponse::<P> { slot, validators }, &headers)?
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized),
     )
 }
 
