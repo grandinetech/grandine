@@ -28,7 +28,7 @@ use types::{
     gloas::{
         consts::PAYLOAD_STATUS_FULL,
         containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
-        primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
+        primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
@@ -890,22 +890,6 @@ where
         .await?
     }
 
-    pub async fn preprocessed_state_at_next_slot(&self) -> Result<Arc<BeaconState<P>>> {
-        let store = self.store_snapshot();
-        let pubkey_cache = self.pubkey_cache().clone_arc();
-        let state_cache = self.state_cache().clone_arc();
-
-        tokio::task::spawn_blocking(move || {
-            state_cache.state_at_slot(
-                &pubkey_cache,
-                &store,
-                store.head().block_root,
-                store.slot().saturating_add(1),
-            )
-        })
-        .await?
-    }
-
     pub fn preprocessed_state_at_current_slot_blocking(&self) -> Result<Arc<BeaconState<P>>> {
         let store = self.store_snapshot();
         let head = store.head();
@@ -1093,17 +1077,6 @@ where
     ) -> Option<ChainLink<P>> {
         self.store_snapshot()
             .unfinalized_chain_link_by_execution_block_hash(block_hash)
-            .cloned()
-    }
-
-    #[must_use]
-    pub fn get_payload_bid_from(
-        &self,
-        slot: Slot,
-        builder_index: BuilderIndex,
-    ) -> Option<SignedExecutionPayloadBid<P>> {
-        self.store_snapshot()
-            .get_payload_bid_from(slot, builder_index)
             .cloned()
     }
 

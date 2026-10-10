@@ -544,20 +544,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
-    pub fn get_payload_bid_from(
-        &self,
-        slot: Slot,
-        builder_index: BuilderIndex,
-    ) -> Option<&SignedExecutionPayloadBid<P>> {
-        // A builder may have bid on more than one branch for the same slot.
-        self.accepted_payload_bids
-            .get(&slot)?
-            .values()
-            .filter(|bid| bid.message.builder_index == builder_index)
-            .max_by_key(|bid| bid.message.value)
-    }
-
-    #[must_use]
     pub fn cached_execution_payload_envelope_by_root(
         &self,
         block_root: H256,
