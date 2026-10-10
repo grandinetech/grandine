@@ -79,6 +79,33 @@ where
     }
 
     #[must_use]
+    pub fn accepted_proposer_preferences(
+        &self,
+        min_slot: Slot,
+        slot: Option<Slot>,
+        dependent_root: Option<H256>,
+    ) -> Vec<Arc<SignedProposerPreferences>> {
+        self.store_snapshot()
+            .accepted_proposer_preferences()
+            .filter(|signed_preferences| {
+                let preferences = &signed_preferences.message;
+
+                preferences.proposal_slot >= min_slot
+                    && slot.is_none_or(|slot| preferences.proposal_slot == slot)
+                    && dependent_root
+                        .is_none_or(|dependent_root| preferences.dependent_root == dependent_root)
+            })
+            .cloned()
+            .sorted_by_key(|signed_preferences| {
+                (
+                    signed_preferences.message.proposal_slot,
+                    signed_preferences.message.validator_index,
+                )
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn justified_checkpoint(&self) -> Checkpoint {
         self.store_snapshot().justified_checkpoint()
     }

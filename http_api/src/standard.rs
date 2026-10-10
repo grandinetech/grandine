@@ -216,6 +216,13 @@ pub struct PoolPayloadAttestationsQuery {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProposerPreferencesQuery {
+    slot: Option<Slot>,
+    dependent_root: Option<H256>,
+}
+
+#[derive(Deserialize)]
 // Allow custom fields in `ValidatorBlockQuery`.
 // This is required for Lodestar interoperability.
 // #[serde(deny_unknown_fields)]
@@ -2642,6 +2649,35 @@ pub async fn pool_payload_attestations<P: Preset, W: Wait>(
         .await?;
 
     Ok(EthResponse::json_or_ssz(data, &headers)?.version(phase))
+}
+
+/// `GET /eth/v1/beacon/proposer_preferences`
+#[instrument(skip_all, level = "debug", name = "http_api::proposer_preferences")]
+pub async fn proposer_preferences<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    EthQuery(query): EthQuery<ProposerPreferencesQuery>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let ProposerPreferencesQuery {
+        slot,
+        dependent_root,
+    } = query;
+
+    let chain_config = controller.chain_config();
+    let gloas_fork_slot = misc::compute_start_slot_at_epoch::<P>(chain_config.gloas_fork_epoch);
+    let min_slot = controller.slot().max(gloas_fork_slot);
+    let phase = chain_config.phase_at_slot::<P>(min_slot);
+
+    let proposer_preferences = ProgressiveList::try_from(controller.accepted_proposer_preferences(
+        min_slot,
+        slot,
+        dependent_root,
+    ))
+    .map_err(AnyhowError::new)?;
+
+    Ok(EthResponse::json_or_ssz(proposer_preferences, &headers)?
+        .version(phase)
+        .into_response())
 }
 
 /// `POST /eth/v1/beacon/pool/payload_attestations`
