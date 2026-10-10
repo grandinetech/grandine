@@ -118,7 +118,7 @@ use types::{
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
         BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
-        SignedBeaconBlock as _,
+        PostGloasBeaconState, SignedBeaconBlock as _,
     },
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -1044,6 +1044,72 @@ pub async fn state_proposer_lookahead<P: Preset, W: Wait>(
         .finalized(finalized)
         .version(version)
         .into_response())
+}
+
+/// `GET /eth/v1/beacon/states/{state_id}/builder_pending_withdrawals`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::state_builder_pending_withdrawals"
+)]
+pub async fn state_builder_pending_withdrawals<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = state.phase();
+    let builder_pending_withdrawals = state
+        .post_gloas()
+        .map(PostGloasBeaconState::builder_pending_withdrawals)
+        .ok_or(Error::StatePreGloas)?;
+
+    Ok(
+        EthResponse::json_or_ssz(builder_pending_withdrawals, &headers)?
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized)
+            .version(version)
+            .into_response(),
+    )
+}
+
+/// `GET /eth/v1/beacon/states/{state_id}/builder_pending_payments`
+#[instrument(
+    skip_all,
+    level = "debug",
+    name = "http_api::state_builder_pending_payments"
+)]
+pub async fn state_builder_pending_payments<P: Preset, W: Wait>(
+    State(controller): State<ApiController<P, W>>,
+    State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
+    EthPath(state_id): EthPath<StateId>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let WithStatus {
+        value: state,
+        status,
+        finalized,
+    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+
+    let version = state.phase();
+    let builder_pending_payments = state
+        .post_gloas()
+        .map(PostGloasBeaconState::builder_pending_payments)
+        .ok_or(Error::StatePreGloas)?;
+
+    Ok(
+        EthResponse::json_or_ssz(builder_pending_payments, &headers)?
+            .execution_optimistic(status.is_optimistic())
+            .finalized(finalized)
+            .version(version)
+            .into_response(),
+    )
 }
 
 /// `GET /eth/v1/beacon/states/{state_id}/pending_consolidations`

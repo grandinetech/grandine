@@ -42,7 +42,8 @@ use crate::{
         pool_proposer_slashings, pool_voluntary_exits, post_log_level,
         post_state_validator_balances, post_state_validators, post_trace_level,
         publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        publish_execution_payload_bid, publish_execution_payload_envelope, state_committees,
+        publish_execution_payload_bid, publish_execution_payload_envelope,
+        state_builder_pending_payments, state_builder_pending_withdrawals, state_committees,
         state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
         state_randao, state_root, state_sync_committees, state_validator,
@@ -403,6 +404,14 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route(
             "/eth/v1/beacon/states/{state_id}/proposer_lookahead",
             get(state_proposer_lookahead),
+        )
+        .route(
+            "/eth/v1/beacon/states/{state_id}/builder_pending_withdrawals",
+            get(state_builder_pending_withdrawals),
+        )
+        .route(
+            "/eth/v1/beacon/states/{state_id}/builder_pending_payments",
+            get(state_builder_pending_payments),
         )
         .route("/eth/v1/beacon/states/{state_id}/randao", get(state_randao));
 
