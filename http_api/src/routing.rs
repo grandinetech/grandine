@@ -41,9 +41,9 @@ use crate::{
         pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_payload_attestations,
         pool_proposer_slashings, pool_voluntary_exits, post_log_level,
         post_state_validator_balances, post_state_validators, post_trace_level,
-        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        publish_execution_payload_bid, publish_execution_payload_envelope, state_committees,
-        state_finality_checkpoints, state_fork, state_pending_consolidations,
+        proposer_preferences, publish_blinded_block, publish_blinded_block_v2, publish_block,
+        publish_block_v2, publish_execution_payload_bid, publish_execution_payload_envelope,
+        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
         state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_payload_attestation_messages, submit_pool_attestations,
@@ -497,6 +497,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         .route(
             "/eth/v1/beacon/execution_payload_envelopes/{block_id}",
             get(execution_payload_envelope),
+        )
+        .route(
+            "/eth/v1/beacon/proposer_preferences",
+            get(proposer_preferences),
         )
         .route("/eth/v1/beacon/genesis", get(genesis))
         .merge(state_routes)

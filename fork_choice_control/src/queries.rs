@@ -27,7 +27,9 @@ use types::{
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
         consts::PAYLOAD_STATUS_FULL,
-        containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+        containers::{
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        },
         primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
     nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
@@ -73,6 +75,33 @@ where
     #[must_use]
     pub fn phase(&self) -> Phase {
         self.store_snapshot().phase()
+    }
+
+    #[must_use]
+    pub fn accepted_proposer_preferences(
+        &self,
+        min_slot: Slot,
+        slot: Option<Slot>,
+        dependent_root: Option<H256>,
+    ) -> Vec<Arc<SignedProposerPreferences>> {
+        self.store_snapshot()
+            .accepted_proposer_preferences()
+            .filter(|signed_preferences| {
+                let preferences = &signed_preferences.message;
+
+                preferences.proposal_slot >= min_slot
+                    && slot.is_none_or(|slot| preferences.proposal_slot == slot)
+                    && dependent_root
+                        .is_none_or(|dependent_root| preferences.dependent_root == dependent_root)
+            })
+            .cloned()
+            .sorted_by_key(|signed_preferences| {
+                (
+                    signed_preferences.message.proposal_slot,
+                    signed_preferences.message.validator_index,
+                )
+            })
+            .collect()
     }
 
     #[must_use]
