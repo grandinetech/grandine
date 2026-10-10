@@ -7,7 +7,7 @@ use helper_functions::accessors;
 use itertools::Itertools as _;
 use logging::debug_with_peers;
 use prometheus_metrics::Metrics;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, ProgressiveList};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::sync::RwLock;
@@ -129,11 +129,35 @@ impl<P: Preset> Pool<P> {
         slot: Slot,
         beacon_block_root: H256,
     ) -> Result<ContiguousList<PayloadAttestation<P>, P::MaxPayloadAttestation>> {
+        self.collect_aggregates(|data| {
+            data.slot == slot && data.beacon_block_root == beacon_block_root
+        })
+        .await
+        .into_iter()
+        .take(P::MaxPayloadAttestation::USIZE)
+        .pipe(ContiguousList::try_from_iter)
+        .map_err(Into::into)
+    }
+
+    pub async fn payload_attestations(
+        &self,
+        slot: Option<Slot>,
+    ) -> Result<ProgressiveList<PayloadAttestation<P>>> {
+        self.collect_aggregates(|data| slot.is_none_or(|slot| data.slot == slot))
+            .await
+            .pipe(ProgressiveList::try_from_iter)
+            .map_err(Into::into)
+    }
+
+    async fn collect_aggregates(
+        &self,
+        filter: impl Fn(&PayloadAttestationData) -> bool,
+    ) -> Vec<PayloadAttestation<P>> {
         self.aggregates
             .read()
             .await
             .iter()
-            .filter(|(data, _)| data.slot == slot && data.beacon_block_root == beacon_block_root)
+            .filter(|(data, _)| filter(data))
             .map(|(data, aggregate)| async {
                 let Aggregate {
                     aggregation_bits,
@@ -147,12 +171,8 @@ impl<P: Preset> Pool<P> {
                 }
             })
             .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<_>>()
+            .collect()
             .await
-            .into_iter()
-            .take(P::MaxPayloadAttestation::USIZE)
-            .pipe(ContiguousList::try_from_iter)
-            .map_err(Into::into)
     }
 
     async fn pool_aggregate(&self, data: PayloadAttestationData) -> Arc<RwLock<Aggregate<P>>> {
@@ -212,6 +232,33 @@ mod tests {
             .await?
             .to_vec();
         assert!(none.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn payload_attestations_returns_all_roots_without_limit() -> Result<()> {
+        let pool = Pool::<Minimal>::new();
+        let slot = 5;
+
+        for (slot, root_byte) in [(slot, 1), (slot, 2), (slot + 1, 3)] {
+            for payload_present in [false, true] {
+                for blob_data_available in [false, true] {
+                    pool.pool_aggregate(PayloadAttestationData {
+                        beacon_block_root: H256::repeat_byte(root_byte),
+                        slot,
+                        payload_present,
+                        blob_data_available,
+                    })
+                    .await;
+                }
+            }
+        }
+
+        assert_eq!(pool.payload_attestations(None).await?.len(), 12);
+        assert_eq!(pool.payload_attestations(Some(slot)).await?.len(), 8);
+        assert_eq!(pool.payload_attestations(Some(slot + 1)).await?.len(), 4);
+        assert!(pool.payload_attestations(Some(slot + 2)).await?.is_empty());
 
         Ok(())
     }
