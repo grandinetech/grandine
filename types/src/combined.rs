@@ -1119,7 +1119,7 @@ impl<P: Preset> BeaconBlock<P> {
 }
 
 #[derive(Debug, Error)]
-#[error("block phase is pre-Bellatrix: {0}")]
+#[error("{0} block has no blinded form")]
 pub struct TryBlindedFromBlockError(Phase);
 
 #[derive(Debug, Error)]
@@ -2418,7 +2418,8 @@ impl<P: Preset> AttesterSlashing<P> {
     #[must_use]
     pub fn post_gloas(self) -> Option<GloasAttesterSlashing<P>> {
         match self {
-            Self::Phase0(_) | Self::Electra(_) => None,
+            Self::Phase0(_) => None,
+            Self::Electra(attester_slashing) => Some(attester_slashing.into()),
             Self::Gloas(attester_slashing) => Some(attester_slashing),
         }
     }

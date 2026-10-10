@@ -1389,7 +1389,7 @@ pub async fn blinded_block<P: Preset, W: Wait>(
     let signed_blinded_block = match block {
         StoredBlock::Full(block) => Arc::unwrap_or_clone(block)
             .try_into()
-            .map_err(AnyhowError::new)?,
+            .map_err(Error::BlockNotBlindable)?,
         StoredBlock::Blinded(block) => Arc::unwrap_or_clone(block),
     };
 
@@ -2312,10 +2312,15 @@ pub async fn pool_attester_slashings_v2<P: Preset, W: Wait>(
                 .map(|slashing| AttesterSlashing::Phase0(slashing))
                 .collect()
         }
-        Phase::Electra | Phase::Fulu | Phase::Gloas => slashings
+        Phase::Electra | Phase::Fulu => slashings
             .into_iter()
             .filter_map(AttesterSlashing::post_electra)
             .map(|slashing| AttesterSlashing::Electra(slashing))
+            .collect(),
+        Phase::Gloas => slashings
+            .into_iter()
+            .filter_map(AttesterSlashing::post_gloas)
+            .map(|slashing| AttesterSlashing::Gloas(slashing))
             .collect(),
     };
 
@@ -3695,12 +3700,6 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 
     let phase_at_slot = controller.chain_config().phase_at_slot::<P>(slot);
 
-    let committee_index = if phase_at_slot < Phase::Electra {
-        committee_index
-    } else {
-        0
-    };
-
     let WithStatus {
         value: head,
         status,
@@ -3799,6 +3798,21 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         );
     }
 
+    let index = if phase_at_slot < Phase::Electra {
+        committee_index
+    } else if phase_at_slot < Phase::Gloas || state.latest_block_header().slot == slot {
+        0
+    } else {
+        let block_slot = state.latest_block_header().slot;
+
+        let is_payload_full = controller
+            .snapshot()
+            .canonical_payload_block_roots(block_slot..block_slot.saturating_add(1))?
+            .contains(&block_root);
+
+        u64::from(is_payload_full)
+    };
+
     if state.slot() < slot {
         state = tokio::task::spawn_blocking(move || {
             controller.preprocessed_state_post_block_blocking(block_root, slot)
@@ -3814,7 +3828,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
 
     let attestation_data = AttestationData {
         slot,
-        index: committee_index,
+        index,
         beacon_block_root: block_root,
         source: state.current_justified_checkpoint(),
         target,
