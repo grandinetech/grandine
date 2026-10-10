@@ -1,10 +1,13 @@
 use core::fmt::Debug;
 
+use serde::{Serialize, Serializer};
 use typenum::U1;
 
 use crate::{
-    error::{IndexError, PushError, ReadError},
-    porcelain::SszHash,
+    error::{IndexError, PushError, ReadError, WriteError},
+    porcelain::{SszHash, SszSize, SszWrite},
+    shared,
+    size::Size,
 };
 
 pub trait SszList<T>: SszHash<PackingFactor = U1> + Send + Sync + Debug {
@@ -68,5 +71,21 @@ impl<'a, T: Clone> IntoIterator for &'a mut (dyn SszListMut<T> + 'a) {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
+    }
+}
+
+impl<T: Serialize> Serialize for dyn SszList<T> + '_ {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+impl<T: SszSize> SszSize for dyn SszList<T> + '_ {
+    const SIZE: Size = Size::Variable { minimum_size: 0 };
+}
+
+impl<T: SszWrite> SszWrite for dyn SszList<T> + '_ {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        shared::write_list(bytes, self.iter())
     }
 }
