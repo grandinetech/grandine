@@ -436,6 +436,8 @@ impl<P: Preset> EventChannels<P> {
         payload_attributes: &PayloadAttributes<P>,
         parent_block_number: Option<ExecutionBlockNumber>,
         parent_block_hash: ExecutionBlockHash,
+        safe_block_hash: ExecutionBlockHash,
+        finalized_block_hash: ExecutionBlockHash,
     ) {
         if let Err(error) = self.send_payload_attributes_event_internal(
             phase,
@@ -445,6 +447,8 @@ impl<P: Preset> EventChannels<P> {
             payload_attributes,
             parent_block_number,
             parent_block_hash,
+            safe_block_hash,
+            finalized_block_hash,
         ) {
             warn_with_peers!("unable to send payload attributes event: {error}");
         }
@@ -780,8 +784,12 @@ impl<P: Preset> EventChannels<P> {
         payload_attributes: &PayloadAttributes<P>,
         parent_block_number: Option<ExecutionBlockNumber>,
         parent_block_hash: ExecutionBlockHash,
+        safe_block_hash: ExecutionBlockHash,
+        finalized_block_hash: ExecutionBlockHash,
     ) -> Result<()> {
         if self.payload_attributes.receiver_count() > 0 {
+            let post_gloas = phase >= Phase::Gloas;
+
             let payload_attributes_event = PayloadAttributesEvent {
                 version: phase,
                 data: PayloadAttributesEventData {
@@ -791,6 +799,8 @@ impl<P: Preset> EventChannels<P> {
                     payload_attributes: payload_attributes.clone().into(),
                     parent_block_number,
                     parent_block_hash,
+                    safe_block_hash: post_gloas.then_some(safe_block_hash),
+                    finalized_block_hash: post_gloas.then_some(finalized_block_hash),
                 },
             };
 
@@ -1132,6 +1142,10 @@ pub struct PayloadAttributesEventData {
     )]
     pub parent_block_number: Option<ExecutionBlockNumber>,
     pub parent_block_hash: ExecutionBlockHash,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safe_block_hash: Option<ExecutionBlockHash>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finalized_block_hash: Option<ExecutionBlockHash>,
     #[serde(with = "serde_utils::string_or_native")]
     pub proposer_index: ValidatorIndex,
     pub payload_attributes: CombinedPayloadAttributesEventData,
