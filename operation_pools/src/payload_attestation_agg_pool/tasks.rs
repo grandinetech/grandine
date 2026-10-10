@@ -5,7 +5,7 @@ use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use logging::{debug_with_peers, warn_with_peers};
 use prometheus_metrics::Metrics;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, ProgressiveList};
 use types::{
     combined::BeaconState,
     config::Config,
@@ -163,5 +163,20 @@ impl<P: Preset> PoolTask for AggregatePayloadAttestationsTask<P> {
 
         pool.aggregate_payload_attestations(slot, beacon_block_root)
             .await
+    }
+}
+
+pub struct PayloadAttestationsTask<P: Preset> {
+    pub pool: Arc<Pool<P>>,
+    pub slot: Option<Slot>,
+}
+
+impl<P: Preset> PoolTask for PayloadAttestationsTask<P> {
+    type Output = ProgressiveList<PayloadAttestation<P>>;
+
+    async fn run(self) -> Result<Self::Output> {
+        let Self { pool, slot } = self;
+
+        pool.payload_attestations(slot).await
     }
 }

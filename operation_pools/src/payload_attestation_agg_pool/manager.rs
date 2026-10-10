@@ -6,7 +6,7 @@ use crate::{
         pool::Pool,
         tasks::{
             AggregateOwnMessagesTask, AggregatePayloadAttestationsTask, HandleSlotTask,
-            InsertPayloadAttestationTask,
+            InsertPayloadAttestationTask, PayloadAttestationsTask,
         },
     },
 };
@@ -15,7 +15,7 @@ use dedicated_executor::DedicatedExecutor;
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use prometheus_metrics::Metrics;
-use ssz::ContiguousList;
+use ssz::{ContiguousList, ProgressiveList};
 use std_ext::ArcExt;
 use types::{
     combined::BeaconState,
@@ -69,6 +69,17 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             pool: self.pool.clone_arc(),
             slot,
             beacon_block_root,
+        })
+        .await
+    }
+
+    pub async fn payload_attestations(
+        &self,
+        slot: Option<Slot>,
+    ) -> Result<ProgressiveList<PayloadAttestation<P>>> {
+        self.spawn_task(PayloadAttestationsTask {
+            pool: self.pool.clone_arc(),
+            slot,
         })
         .await
     }
