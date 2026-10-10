@@ -3109,8 +3109,12 @@ where
             && chain_link.is_valid()
             && !chain_link.is_post_gloas()
         {
-            self.event_channels
-                .send_block_event(chain_link.slot(), chain_link.block_root, false);
+            self.event_channels.send_block_event(
+                chain_link.slot(),
+                chain_link.block_root,
+                false,
+                None,
+            );
         }
 
         self.handle_potential_head_change(wait_group, &old_head, head_was_optimistic);
@@ -3400,8 +3404,12 @@ where
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
         if is_valid || is_post_gloas {
-            self.event_channels
-                .send_block_event(block_slot, block_root, false);
+            self.event_channels.send_block_event(
+                block_slot,
+                block_root,
+                false,
+                block.message().payload_bid(),
+            );
         }
 
         let from_test_block = matches!(origin, BlockOrigin::Test(_));
