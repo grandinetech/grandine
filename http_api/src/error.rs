@@ -20,6 +20,7 @@ use tokio::task::JoinError;
 use tracing::instrument;
 use types::{
     altair::primitives::SubcommitteeIndex,
+    combined::TryBlindedFromBlockError,
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
     nonstandard::Phase,
@@ -40,6 +41,8 @@ pub enum Error {
     BlockPreFulu,
     #[error("pre-gloas block has no execution payload envelope")]
     BlockPreGloas,
+    #[error(transparent)]
+    BlockNotBlindable(TryBlindedFromBlockError),
     #[error(transparent)]
     Canceled(#[from] Canceled),
     #[error("Content-Type header invalid")]
@@ -281,7 +284,8 @@ impl Error {
             | Self::TargetStateNotFound
             | Self::ValidatorNotFound => StatusCode::NOT_FOUND,
             Self::BlockNotSeen => StatusCode::NO_CONTENT,
-            Self::BlockPreFulu
+            Self::BlockNotBlindable(_)
+            | Self::BlockPreFulu
             | Self::BlockPreGloas
             | Self::CommitteesAtSlotMismatch { .. }
             | Self::ContentTypeHeaderInvalid(_)

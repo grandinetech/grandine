@@ -1,4 +1,4 @@
-use core::{fmt, iter};
+use core::{fmt, iter, marker::PhantomData};
 use std::sync::Arc;
 
 use ssz::{ByteList, ContiguousList, H256, ProgressiveList, SszHash};
@@ -11,16 +11,18 @@ use crate::{
     combined::UnblindError,
     deneb::primitives::{KzgCommitment, KzgProof},
     electra::containers::{
-        Attestation as ElectraAttestation, ConsolidationRequest, DepositRequest, WithdrawalRequest,
+        Attestation as ElectraAttestation, AttesterSlashing as ElectraAttesterSlashing,
+        ConsolidationRequest, DepositRequest, IndexedAttestation as ElectraIndexedAttestation,
+        WithdrawalRequest,
     },
     gloas::{
         containers::{
-            Attestation, BlindedExecutionPayloadEnvelope, BuilderDepositRequest,
+            Attestation, AttesterSlashing, BlindedExecutionPayloadEnvelope, BuilderDepositRequest,
             BuilderExitRequest, CombinedPayloadAttestation, DataColumnSidecar, ExecutionPayload,
             ExecutionPayloadEnvelope, ExecutionPayloadHeader, ExecutionRequests,
-            PayloadAttestationData, PayloadAttestationMessage, PayloadEnvelopeIdentifier,
-            SignedBlindedExecutionPayloadEnvelope, SignedExecutionPayloadBid,
-            SignedExecutionPayloadEnvelope,
+            IndexedAttestation, PayloadAttestationData, PayloadAttestationMessage,
+            PayloadEnvelopeIdentifier, SignedBlindedExecutionPayloadEnvelope,
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope,
         },
         primitives::BuilderIndex,
     },
@@ -66,6 +68,37 @@ impl<P: Preset> From<Attestation<P>> for ElectraAttestation<P> {
             data,
             signature,
             committee_bits,
+        }
+    }
+}
+
+impl<P: Preset> From<ElectraIndexedAttestation<P>> for IndexedAttestation<P> {
+    fn from(indexed_attestation: ElectraIndexedAttestation<P>) -> Self {
+        let ElectraIndexedAttestation {
+            attesting_indices,
+            data,
+            signature,
+        } = indexed_attestation;
+
+        Self {
+            attesting_indices: attesting_indices.into(),
+            data,
+            signature,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<P: Preset> From<ElectraAttesterSlashing<P>> for AttesterSlashing<P> {
+    fn from(attester_slashing: ElectraAttesterSlashing<P>) -> Self {
+        let ElectraAttesterSlashing {
+            attestation_1,
+            attestation_2,
+        } = attester_slashing;
+
+        Self {
+            attestation_1: attestation_1.into(),
+            attestation_2: attestation_2.into(),
         }
     }
 }
