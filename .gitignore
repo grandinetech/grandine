@@ -21,3 +21,6 @@ ssz-spec-tests/
 
 # exception logs
 exception.log
+
+# revmux round archives
+.revmux/tasks/
