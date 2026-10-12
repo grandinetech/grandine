@@ -237,6 +237,26 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
     relative_epoch: RelativeEpoch,
     report_cache_miss: bool,
 ) -> Result<&PackedIndices> {
+    state.cache().active_validator_indices_ordered[relative_epoch].get_or_try_init(|| {
+        if report_cache_miss {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = METRICS.get() {
+                metrics.active_validator_indices_ordered_init_count.inc();
+            }
+        }
+
+        // Possible optimization: cache the number of active validators and index of the last one.
+        // That would make it possible to avoid temporary allocations.
+        // The cached values would have to be kept up to date as the validator registry changes.
+        let mut indices = Vec::with_capacity(state.validators().len_usize());
+
+        indices.extend(get_active_validator_indices(state, relative_epoch)?);
+
+        Ok(pack_indices(indices))
+    })
+}
+
+fn pack_indices(indices: Vec<ValidatorIndex>) -> PackedIndices {
     fn pack<T>(indices: Vec<ValidatorIndex>) -> Arc<[T]>
     where
         ValidatorIndex: TryInto<T, Error: Debug>,
@@ -255,30 +275,12 @@ pub fn get_or_init_active_validator_indices_ordered<P: Preset>(
             .collect()
     }
 
-    state.cache().active_validator_indices_ordered[relative_epoch].get_or_try_init(|| {
-        if report_cache_miss {
-            #[cfg(feature = "metrics")]
-            if let Some(metrics) = METRICS.get() {
-                metrics.active_validator_indices_ordered_init_count.inc();
-            }
-        }
-
-        // Possible optimization: cache the number of active validators and index of the last one.
-        // That would make it possible to avoid temporary allocations.
-        // The cached values would have to be kept up to date as the validator registry changes.
-        let mut indices = Vec::with_capacity(state.validators().len_usize());
-
-        indices.extend(get_active_validator_indices(state, relative_epoch)?);
-
-        let result: PackedIndices = match indices.last().copied().unwrap_or_default() {
-            0..0x100 => PackedIndices::U8(pack(indices)),
-            0x100..0x1_0000 => PackedIndices::U16(pack(indices)),
-            0x1_0000..0x1_0000_0000 => PackedIndices::U32(pack(indices)),
-            0x1_0000_0000..=u64::MAX => PackedIndices::U64(indices.into()),
-        };
-
-        Ok(result)
-    })
+    match indices.last().copied().unwrap_or_default() {
+        0..0x100 => PackedIndices::U8(pack(indices)),
+        0x100..0x1_0000 => PackedIndices::U16(pack(indices)),
+        0x1_0000..0x1_0000_0000 => PackedIndices::U32(pack(indices)),
+        0x1_0000_0000..=u64::MAX => PackedIndices::U64(indices.into()),
+    }
 }
 
 pub fn active_validator_indices_shuffled<P: Preset>(
@@ -299,6 +301,27 @@ pub fn get_or_init_active_validator_indices_shuffled<P: Preset>(
 where
     P::ValidatorRegistryLimit: FitsInU64,
 {
+    state.cache().active_validator_indices_shuffled[relative_epoch].get_or_try_init(|| {
+        if report_cache_miss {
+            #[cfg(feature = "metrics")]
+            if let Some(metrics) = METRICS.get() {
+                metrics.active_validator_indices_shuffled_init_count.inc();
+            }
+        }
+
+        let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_ATTESTER)?;
+
+        let ordered =
+            get_or_init_active_validator_indices_ordered(state, relative_epoch, report_cache_miss)?;
+
+        Ok(shuffle_indices::<P>(ordered, seed))
+    })
+}
+
+fn shuffle_indices<P: Preset>(ordered: &PackedIndices, seed: H256) -> PackedIndices
+where
+    P::ValidatorRegistryLimit: FitsInU64,
+{
     fn shuffle<P: Preset, T: Copy>(ordered: &[T], seed: H256) -> Arc<[T]> {
         let mut shuffled = ArcBox::from(ordered);
 
@@ -310,29 +333,12 @@ where
         shuffled.into()
     }
 
-    state.cache().active_validator_indices_shuffled[relative_epoch].get_or_try_init(|| {
-        if report_cache_miss {
-            #[cfg(feature = "metrics")]
-            if let Some(metrics) = METRICS.get() {
-                metrics.active_validator_indices_shuffled_init_count.inc();
-            }
-        }
-
-        let seed = get_seed(state, relative_epoch, DOMAIN_BEACON_ATTESTER)?;
-
-        let result: PackedIndices = match get_or_init_active_validator_indices_ordered(
-            state,
-            relative_epoch,
-            report_cache_miss,
-        )? {
-            PackedIndices::U8(ordered) => PackedIndices::U8(shuffle::<P, _>(ordered, seed)),
-            PackedIndices::U16(ordered) => PackedIndices::U16(shuffle::<P, _>(ordered, seed)),
-            PackedIndices::U32(ordered) => PackedIndices::U32(shuffle::<P, _>(ordered, seed)),
-            PackedIndices::U64(ordered) => PackedIndices::U64(shuffle::<P, _>(ordered, seed)),
-        };
-
-        Ok(result)
-    })
+    match ordered {
+        PackedIndices::U8(ordered) => PackedIndices::U8(shuffle::<P, _>(ordered, seed)),
+        PackedIndices::U16(ordered) => PackedIndices::U16(shuffle::<P, _>(ordered, seed)),
+        PackedIndices::U32(ordered) => PackedIndices::U32(shuffle::<P, _>(ordered, seed)),
+        PackedIndices::U64(ordered) => PackedIndices::U64(shuffle::<P, _>(ordered, seed)),
+    }
 }
 
 pub fn active_validator_count_usize<P: Preset>(
@@ -1093,30 +1099,27 @@ pub fn ptc_for_slot<P: Preset>(state: &impl BeaconState<P>, slot: Slot) -> Resul
     ptc_from_committee_members(state, slot, members)
 }
 
-// Compute PTCs for every slot of any epoch, bypassing the `relative_epoch` cache.
-// Used in epoch processing where the target epoch (current + `MinSeedLookahead` + 1) exceeds
-// the range covered by the shuffling cache (prev/current/next only).
+// Compute PTCs for every slot of any epoch, along with the ordered and shuffled active validator
+// indices of that epoch. Used in epoch processing where the target epoch
+// (current + `MinSeedLookahead` + 1) exceeds the range covered by the shuffling cache
+// (prev/current/next only). The indices are returned so that the caller can store them in the cache
+// once the epoch is in range, rather than have them computed a second time.
 pub fn ptc_for_epoch_processing<P: Preset>(
     state: &impl BeaconState<P>,
     epoch: Epoch,
-) -> Result<Vec<Ptc<P>>> {
-    let ordered: Vec<ValidatorIndex> =
-        get_active_validator_indices_by_epoch(state, epoch).collect();
-
-    let active_validator_count = u64::try_from(ordered.len())?;
+) -> Result<(Vec<Ptc<P>>, PackedIndices, PackedIndices)> {
+    let ordered = pack_indices(get_active_validator_indices_by_epoch(state, epoch).collect());
     let attester_seed = get_seed_by_epoch(state, epoch, DOMAIN_BEACON_ATTESTER)?;
-    let mut shuffled = ordered;
-
-    shuffling::shuffle_slice::<P, _>(&mut shuffled, attester_seed)?;
+    let shuffled = shuffle_indices::<P>(&ordered, attester_seed);
 
     let validator_count = ValidatorIndex::try_from(shuffled.len())?;
     let committees_per_slot =
-        misc::committee_count_from_active_validator_count::<P>(active_validator_count);
+        misc::committee_count_from_active_validator_count::<P>(validator_count);
 
     let committees_in_epoch = NonZeroU64::new(committees_per_slot.try_mul(P::SlotsPerEpoch::U64)?)
         .ok_or_else(|| anyhow!("there should be some committees per epoch"))?;
 
-    misc::slots_in_epoch::<P>(epoch)?
+    let ptcs = misc::slots_in_epoch::<P>(epoch)?
         .map(|slot| {
             let slots_since_epoch_start = misc::slots_since_epoch_start::<P>(slot);
 
@@ -1140,11 +1143,13 @@ pub fn ptc_for_epoch_processing<P: Preset>(
 
             let members = ranges
                 .into_iter()
-                .flat_map(|(start, end)| shuffled[start..end].iter().copied());
+                .flat_map(|(start, end)| shuffled.slice(start..end));
 
             ptc_from_committee_members(state, slot, members)
         })
-        .collect()
+        .collect::<Result<_>>()?;
+
+    Ok((ptcs, ordered, shuffled))
 }
 
 fn ptc_from_committee_members<P: Preset>(

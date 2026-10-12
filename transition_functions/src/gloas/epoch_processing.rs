@@ -14,9 +14,11 @@ use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
     PtcWindow,
+    cache::PackedIndices,
     capella::containers::HistoricalSummary,
     config::Config,
     gloas::{beacon_state::BeaconState, containers::BuilderPendingPayment},
+    nonstandard::RelativeEpoch,
     phase0::consts::FAR_FUTURE_EPOCH,
     preset::{BuilderPendingPaymentsLength, Preset},
     traits::{BeaconState as _, PostElectraBeaconState, PostGloasBeaconState},
@@ -32,10 +34,10 @@ use crate::{
 #[cfg(feature = "metrics")]
 use prometheus_metrics::METRICS;
 
-pub fn process_epoch(
+pub fn process_epoch<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    state: &mut BeaconState<impl Preset>,
+    state: &mut BeaconState<P>,
 ) -> Result<()> {
     #[cfg(feature = "metrics")]
     let _timer = METRICS
@@ -89,9 +91,14 @@ pub fn process_epoch(
     fulu::process_proposer_lookahead(config, state)?;
 
     // > [New in Gloas:EIP7732]
-    process_ptc_window(state)?;
+    let (ordered, shuffled) = process_ptc_window(state)?;
 
     state.cache.advance_epoch();
+
+    if P::MinSeedLookahead::U64 == 1 {
+        state.cache.active_validator_indices_ordered[RelativeEpoch::Next] = ordered.into();
+        state.cache.active_validator_indices_shuffled[RelativeEpoch::Next] = shuffled.into();
+    }
 
     Ok(())
 }
@@ -179,7 +186,9 @@ fn process_pending_deposits<P: Preset>(
     Ok(())
 }
 
-fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
+fn process_ptc_window<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+) -> Result<(PackedIndices, PackedIndices)> {
     let mut ptc_window = state.ptc_window().into_iter().collect::<Vec<_>>();
     let last_epoch_start = ptc_window.len().try_sub(P::SlotsPerEpoch::USIZE)?;
 
@@ -187,14 +196,14 @@ fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Re
 
     let target_epoch = get_current_epoch(state).try_add(P::MinSeedLookahead::U64.try_add(1)?)?;
 
-    let ptcs = ptc_for_epoch_processing(state, target_epoch)?;
+    let (ptcs, ordered, shuffled) = ptc_for_epoch_processing(state, target_epoch)?;
 
     let refs = ptcs.iter().collect::<Vec<_>>();
     ptc_window[last_epoch_start..].copy_from_slice(&refs);
 
     *state.ptc_window_mut() = PtcWindow::<P>::try_from_iter(ptc_window.into_iter().cloned())?;
 
-    Ok(())
+    Ok((ordered, shuffled))
 }
 
 fn process_builder_pending_payments<P: Preset>(
@@ -488,12 +497,20 @@ mod spec_tests {
 
     #[test_resources("consensus-spec-tests/tests/mainnet/gloas/epoch_processing/ptc_window/*/*")]
     fn mainnet_process_ptc_window(case: Case) {
-        run_case::<Mainnet>(case, |_, state| process_ptc_window(state))
+        run_case::<Mainnet>(case, |_, state| {
+            process_ptc_window(state)?;
+
+            Ok(())
+        })
     }
 
     #[test_resources("consensus-spec-tests/tests/minimal/gloas/epoch_processing/ptc_window/*/*")]
     fn minimal_process_ptc_window(case: Case) {
-        run_case::<Minimal>(case, |_, state| process_ptc_window(state))
+        run_case::<Minimal>(case, |_, state| {
+            process_ptc_window(state)?;
+
+            Ok(())
+        })
     }
 
     #[test_resources("consensus-spec-tests/tests/mainnet/gloas/epoch_processing/*/*/*")]
