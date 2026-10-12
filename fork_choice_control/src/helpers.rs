@@ -11,7 +11,7 @@ use execution_engine::{
 };
 use fork_choice_store::{AttestationItem, AttestationOrigin};
 use futures::channel::mpsc::UnboundedReceiver;
-use helper_functions::misc;
+use helper_functions::{misc, signing::SignForSingleFork as _};
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
 use ssz::BitVector;
@@ -21,6 +21,7 @@ use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    electra::containers::SingleAttestation,
     gloas::{
         containers::{
             CombinedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
@@ -30,7 +31,9 @@ use types::{
     nonstandard::{PayloadStatus, Phase, TimedPowBlock},
     phase0::{
         containers::Checkpoint,
-        primitives::{Epoch, ExecutionBlockHash, H256, Slot, UnixSeconds, ValidatorIndex},
+        primitives::{
+            Epoch, ExecutionBlockHash, H256, Slot, SubnetId, UnixSeconds, ValidatorIndex,
+        },
     },
     preset::{Minimal, Preset},
     traits::SignedBeaconBlock as _,
@@ -1203,6 +1206,14 @@ impl<P: Preset> Context<P> {
         )
         .expect("attestation should be constructed successfully");
 
+        self.on_gossip_attestation(attestation, subnet_id)
+    }
+
+    pub fn on_gossip_attestation(
+        &mut self,
+        attestation: Attestation<P>,
+        subnet_id: SubnetId,
+    ) -> Option<P2pMessage<P>> {
         self.controller().on_singular_attestation(
             self.controller().owned_wait_group(),
             AttestationItem::unverified(
@@ -1213,6 +1224,47 @@ impl<P: Preset> Context<P> {
 
         self.controller().wait_for_tasks();
         self.next_p2p_message()
+    }
+
+    // The single attestation `member` would send in `epoch`, signed by `signer`. `state` must
+    // already be in `epoch`, as the genesis state is for epoch 0.
+    pub fn single_attestation_signed_by(
+        &self,
+        state: &Arc<BeaconState<P>>,
+        epoch: Epoch,
+        member: ValidatorIndex,
+        signer: ValidatorIndex,
+    ) -> (Attestation<P>, SubnetId) {
+        let (attestation, subnet_id) = factory::singular_attestation(
+            self.config(),
+            &self.pubkey_cache,
+            state.clone_arc(),
+            epoch,
+            member,
+        )
+        .expect("attestation should be constructed successfully");
+
+        let Attestation::Electra(attestation) = attestation else {
+            panic!("single attestations exist from Electra on");
+        };
+
+        let committee_index = misc::get_committee_indices::<P>(attestation.committee_bits)
+            .next()
+            .expect("a singular attestation has exactly one committee bit set");
+
+        let signature = attestation
+            .data
+            .sign(self.config(), state, &interop::secret_key(signer))
+            .into();
+
+        let attestation = Attestation::Single(SingleAttestation {
+            committee_index,
+            attester_index: signer,
+            data: attestation.data,
+            signature,
+        });
+
+        (attestation, subnet_id)
     }
 
     fn next_execution_service_message(&mut self) -> Option<ExecutionServiceMessage<P>> {
@@ -1276,6 +1328,11 @@ impl Context<Minimal> {
     pub fn bellatrix_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Bellatrix))
             .expect("minimal configuration modified to start in Bellatrix is valid")
+    }
+
+    pub fn electra_minimal() -> Self {
+        Self::with_config(Config::minimal().start_and_stay_in(Phase::Electra))
+            .expect("minimal configuration modified to start in Electra is valid")
     }
 
     #[must_use]

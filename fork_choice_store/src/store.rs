@@ -56,7 +56,10 @@ use types::{
         containers::{BlobIdentifier, BlobSidecar},
         primitives::{BlobIndex, KzgCommitment},
     },
-    electra::containers::IndexedAttestation as ElectraIndexedAttestation,
+    electra::{
+        containers::IndexedAttestation as ElectraIndexedAttestation,
+        error::AttestationConversionError,
+    },
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
         consts::{
@@ -3258,6 +3261,25 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 Ok(indexed_attestation.attesting_indices)
             }
             Attestation::Single(attestation) => {
+                let committee = accessors::beacon_committee(
+                    target_state,
+                    attestation.data.slot,
+                    attestation.committee_index,
+                )?;
+
+                // > The attester is a member of the committee -- i.e.
+                // > attestation.attester_index in
+                // > get_beacon_committee(state, attestation.data.slot, index)
+                ensure!(
+                    committee.into_iter().contains(&attestation.attester_index),
+                    AttestationConversionError::AttesterNotInCommittee {
+                        attester_index: attestation.attester_index,
+                        committee_index: attestation.committee_index,
+                        attestation_data: attestation.data,
+                        committee: committee.into_iter().collect(),
+                    },
+                );
+
                 let indexed_attestation: ElectraIndexedAttestation<P> =
                     (*attestation).try_into()?;
 
