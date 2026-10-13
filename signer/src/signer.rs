@@ -461,6 +461,25 @@ impl Snapshot {
         triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
         fork_info: Option<ForkInfo>,
     ) -> Result<impl Iterator<Item = Signature>> {
+        self.sign_triples_with_request_limit(triples, fork_info, usize::MAX)
+            .await
+    }
+
+    pub async fn sign_triples_throttled_without_slashing_protection<P: Preset>(
+        &self,
+        triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
+        fork_info: Option<ForkInfo>,
+    ) -> Result<impl Iterator<Item = Signature>> {
+        self.sign_triples_with_request_limit(triples, fork_info, MAX_CONCURRENT_WEB3SIGNER_REQUESTS)
+            .await
+    }
+
+    async fn sign_triples_with_request_limit<P: Preset>(
+        &self,
+        triples: impl IntoIterator<Item = SigningTriple<'_, P>> + Send,
+        fork_info: Option<ForkInfo>,
+        max_concurrent_requests: usize,
+    ) -> Result<impl Iterator<Item = Signature>> {
         let mut sign_locally = vec![];
         let mut sign_remotely = vec![];
 
@@ -508,7 +527,7 @@ impl Snapshot {
                 .collect_vec();
 
             stream::iter(requests)
-                .buffer_unordered(MAX_CONCURRENT_WEB3SIGNER_REQUESTS)
+                .buffer_unordered(max_concurrent_requests)
                 .try_collect::<Vec<_>>()
                 .await
         };

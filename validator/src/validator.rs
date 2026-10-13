@@ -3260,8 +3260,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 })
                 .collect_vec();
 
+            // Every validator is registered at once.
             let signatures = signer_snapshot
-                .sign_triples_without_slashing_protection(triples, None)
+                .sign_triples_throttled_without_slashing_protection(triples, None)
                 .await?;
 
             let signed_registrations = registrations

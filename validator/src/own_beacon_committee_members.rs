@@ -365,8 +365,9 @@ impl OwnBeaconCommitteeMembers {
             })
             .collect::<Vec<_>>();
 
+        // A whole epoch of proofs is signed at once.
         let selection_proofs = signer_snapshot
-            .sign_triples_without_slashing_protection(triples, Some(fork_info))
+            .sign_triples_throttled_without_slashing_protection(triples, Some(fork_info))
             .await?;
 
         for (duty, selection_proof) in duties.into_iter().zip(selection_proofs) {
