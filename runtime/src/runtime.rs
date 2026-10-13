@@ -309,6 +309,13 @@ async fn build_local_node<P: Preset>(
     let mut validator_to_slasher_tx = None;
     let mut validator_to_liveness_tx = None;
 
+    let dedicated_executor_for_recovery = Arc::new(DedicatedExecutor::new(
+        "de-recover",
+        (num_cpus::get() / 4).max(1),
+        Some(19),
+        metrics.clone(),
+    ));
+
     let dedicated_executor_for_reconstruction = Arc::new(DedicatedExecutor::new(
         "de-reconstruct",
         1,
@@ -568,6 +575,7 @@ async fn build_local_node<P: Preset>(
         controller.clone_arc(),
         dedicated_executor_for_reconstruction,
         metrics.clone(),
+        dedicated_executor_for_recovery,
     );
 
     let payload_attestation_agg_pool = PayloadAttestationAggPool::new(
