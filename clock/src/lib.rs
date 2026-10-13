@@ -170,6 +170,11 @@ impl Tick {
     }
 
     #[must_use]
+    pub fn is_before_aggregating_interval(self) -> bool {
+        self.kind < TickKind::Aggregate
+    }
+
+    #[must_use]
     pub fn is_before_payload_attesting_interval(self) -> bool {
         self.kind < TickKind::PayloadAttest
     }

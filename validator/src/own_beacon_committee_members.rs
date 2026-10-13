@@ -72,7 +72,7 @@ impl From<BeaconCommitteeMember> for BeaconCommitteeSubscription {
 pub struct OwnBeaconCommitteeMembers {
     config: Arc<ChainConfig>,
     signer: Arc<Signer>,
-    members: SccHashMap<Epoch, (H256, MembersBySlot)>,
+    members: SccHashMap<Epoch, (H256, MembersBySlot, bool)>,
     requested: RequestedIndices,
 }
 
@@ -86,9 +86,16 @@ impl OwnBeaconCommitteeMembers {
         }
     }
 
-    async fn discard_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
+    async fn mark_stale_for_other_keys(&self, validator_indices: &[ValidatorIndex]) {
         if self.requested.changed(validator_indices).await {
-            self.members.clear_async().await;
+            // Kept until replaced: the duties of the keys still held remain valid, and signing
+            // an epoch's selection proofs can outlast the attestation deadline.
+            self.members
+                .iter_mut_async(|mut entry| {
+                    entry.2 = true;
+                    true
+                })
+                .await;
         }
     }
 
@@ -109,8 +116,8 @@ impl OwnBeaconCommitteeMembers {
         let dependent_root = match local {
             Some((controller, state)) => {
                 // The prefetch's finalized indices, not the head's: a validator only in the head
-                // cannot have duties yet, and a differing list would clear the cache every slot.
-                self.discard_for_other_keys(validator_indices).await;
+                // cannot have duties yet, and a differing list would recompute them every slot.
+                self.mark_stale_for_other_keys(validator_indices).await;
 
                 controller.attestation_committee_dependent_root_for_slot(state, slot)?
             }
@@ -120,8 +127,8 @@ impl OwnBeaconCommitteeMembers {
                 match self.cached_dependent_root(epoch).await {
                     Some(dependent_root) => dependent_root,
                     None => {
-                        // Asked of the signer rather than a state, as there is none to ask.
-                        if self.signer.load().keys().next().is_some() {
+                        // Without a validator index there are no duties to prefetch.
+                        if !validator_indices.is_empty() {
                             warn_with_peers!(
                                 "no attester duties were prefetched for slot {slot}, so no \
                                  attestation will be produced; check that the beacon nodes given \
@@ -201,7 +208,7 @@ impl OwnBeaconCommitteeMembers {
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
     ) -> Result<()> {
-        self.discard_for_other_keys(validator_indices).await;
+        self.mark_stale_for_other_keys(validator_indices).await;
 
         // Split per epoch because a shuffling, and so a dependent root, covers exactly one.
         for (_, slots) in slots_by_epoch::<P>(slots) {
@@ -241,10 +248,9 @@ impl OwnBeaconCommitteeMembers {
     ) -> bool {
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
-        self.members
-            .get_async(&epoch)
-            .await
-            .is_none_or(|entry| entry.0 != dependent_root || !entry.1.contains_key(&slot))
+        self.members.get_async(&epoch).await.is_none_or(|entry| {
+            entry.2 || entry.0 != dependent_root || !entry.1.contains_key(&slot)
+        })
     }
 
     async fn slots_to_compute<P: Preset>(
@@ -275,7 +281,7 @@ impl OwnBeaconCommitteeMembers {
         slots: Range<Slot>,
         validator_indices: &[ValidatorIndex],
     ) -> Result<Option<Range<Slot>>> {
-        self.discard_for_other_keys(validator_indices).await;
+        self.mark_stale_for_other_keys(validator_indices).await;
 
         // The request that fetches the duties reports the dependent root anyway.
         if self.cached_dependent_root(epoch).await.is_none() {
@@ -414,17 +420,17 @@ impl OwnBeaconCommitteeMembers {
             .collect::<BTreeMap<_, Arc<[_]>>>();
 
         // A different root means a different shuffling, so what was cached under the old one no
-        // longer applies.
+        // longer applies. Neither does what was cached for another set of keys.
         match self.members.entry_async(epoch).await {
             Entry::Occupied(mut occupied) => {
-                if occupied.0 == dependent_root {
+                if occupied.0 == dependent_root && !occupied.2 {
                     occupied.1.extend(members_by_slot);
                 } else {
-                    *occupied.get_mut() = (dependent_root, members_by_slot);
+                    *occupied.get_mut() = (dependent_root, members_by_slot, false);
                 }
             }
             Entry::Vacant(vacant) => {
-                vacant.insert_entry((dependent_root, members_by_slot));
+                vacant.insert_entry((dependent_root, members_by_slot, false));
             }
         }
 
@@ -634,6 +640,79 @@ mod tests {
             !own_members
                 .needs_to_compute_members_at_slot::<Minimal>(new_root, 2)
                 .await
+        );
+
+        Ok(())
+    }
+
+    // Duties stay served while those of a changed key set are fetched, and the fetch then
+    // replaces the epoch rather than adding to it.
+    #[tokio::test]
+    async fn a_changed_key_set_keeps_the_epoch_until_it_is_replaced() -> Result<()> {
+        let (own_members, state) = own_members_with_keys()?;
+        let fork_info = ForkInfo::from_state(state.as_ref());
+        let dependent_root = H256::zero();
+        let slots = misc::slots_in_epoch::<Minimal>(0)?;
+
+        own_members
+            .init_from_duties::<Minimal>(
+                fork_info,
+                dependent_root,
+                slots.clone(),
+                vec![duty(public_key(40), 40, 1, 2, 1)],
+            )
+            .await?;
+
+        own_members.mark_stale_for_other_keys(&[40, 41]).await;
+
+        let members_at_slot_1 = own_members
+            .get_at_slot::<Minimal>(1)
+            .await
+            .expect("the duties are kept while their replacement is fetched");
+
+        assert_eq!(members_at_slot_1.len(), 1);
+
+        assert_eq!(
+            own_members.cached_dependent_root(0).await,
+            Some(dependent_root),
+        );
+
+        assert_eq!(
+            own_members
+                .slots_to_compute::<Minimal>(dependent_root, slots.clone())
+                .await,
+            Some(slots.clone()),
+        );
+
+        own_members
+            .init_from_duties::<Minimal>(
+                fork_info,
+                dependent_root,
+                slots.clone(),
+                vec![duty(public_key(41), 41, 0, 0, 2)],
+            )
+            .await?;
+
+        let members_at_slot_1 = own_members
+            .get_at_slot::<Minimal>(1)
+            .await
+            .expect("slots without duties are cached as empty");
+
+        assert!(members_at_slot_1.is_empty());
+
+        let members_at_slot_2 = own_members
+            .get_at_slot::<Minimal>(2)
+            .await
+            .expect("the new duties should be cached");
+
+        assert_eq!(members_at_slot_2.len(), 1);
+        assert_eq!(members_at_slot_2[0].validator_index, 41);
+
+        assert_eq!(
+            own_members
+                .slots_to_compute::<Minimal>(dependent_root, slots)
+                .await,
+            None,
         );
 
         Ok(())

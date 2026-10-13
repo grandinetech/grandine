@@ -2880,6 +2880,14 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorAttesterDutyResponse>>, Error> {
+    let current_epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+
+    if epoch > current_epoch.saturating_add(1) {
+        return Err(Error::InvalidEpoch(anyhow!(
+            "epoch {epoch} is after the next epoch"
+        )));
+    }
+
     let head_state = controller.head_state();
 
     let state = match accessors::relative_epoch(&head_state.value, epoch) {

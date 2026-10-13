@@ -9,7 +9,9 @@ use fork_choice_store::StoreConfig;
 use grandine_version::APPLICATION_VERSION_WITH_COMMIT_AND_PLATFORM;
 use http_api::HttpApiConfig;
 use itertools::Itertools as _;
-use keymanager::{ValidatorDefinitions, ValidatorDefinitionsWithStorage};
+use keymanager::{
+    GRANDINE_DONATION_ADDRESS, ValidatorDefinitions, ValidatorDefinitionsWithStorage,
+};
 use p2p::NetworkConfig;
 use signer::Web3SignerConfig;
 use slasher::SlasherConfig;
@@ -173,6 +175,13 @@ impl GrandineConfig {
     }
 
     #[must_use]
+    pub fn default_fee_recipient(&self) -> Option<ExecutionAddress> {
+        // A remote node pays its own recipient, so only the built-in node gets the fallback.
+        self.suggested_fee_recipient
+            .or_else(|| self.beacon_node_config().map(|_| GRANDINE_DONATION_ADDRESS))
+    }
+
+    #[must_use]
     pub fn validator_config(
         &self,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
@@ -181,7 +190,6 @@ impl GrandineConfig {
             disable_blockprint_graffiti,
             graffiti,
             max_empty_slots,
-            suggested_fee_recipient,
             default_builder_boost_factor,
             default_gas_limit,
             disable_wait_for_late_blocks,
@@ -196,7 +204,7 @@ impl GrandineConfig {
             disable_blockprint_graffiti: *disable_blockprint_graffiti,
             graffiti: graffiti.clone(),
             max_empty_slots: *max_empty_slots,
-            suggested_fee_recipient: *suggested_fee_recipient,
+            suggested_fee_recipient: self.default_fee_recipient(),
             default_builder_boost_factor: *default_builder_boost_factor,
             default_gas_limit: *default_gas_limit,
             custody_mode,
@@ -214,7 +222,6 @@ impl GrandineConfig {
             metrics_config,
             disable_blockprint_graffiti,
             graffiti,
-            suggested_fee_recipient,
             default_builder_boost_factor,
             default_gas_limit,
             telemetry_config,
@@ -332,7 +339,9 @@ impl GrandineConfig {
             }
         }
 
-        info!("suggested fee recipient: {suggested_fee_recipient:?}");
+        if let Some(fee_recipient) = self.default_fee_recipient() {
+            info!("suggested fee recipient: {fee_recipient:?}");
+        }
     }
 }
 

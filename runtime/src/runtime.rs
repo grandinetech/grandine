@@ -1110,7 +1110,8 @@ async fn wait_for_restart(mut rx: UnboundedReceiver<RestartMessage>) -> Result<(
         }
     }
 
-    Ok(())
+    // In-memory databases hold no sender, so the channel closes without a restart being asked.
+    core::future::pending().await
 }
 
 #[cfg(feature = "embed")]

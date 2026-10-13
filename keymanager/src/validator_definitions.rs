@@ -301,6 +301,12 @@ impl ValidatorDefinitions {
             .map(|definition| definition.pubkey)
     }
 
+    pub fn fee_recipients(&self) -> impl Iterator<Item = (PublicKeyBytes, ExecutionAddress)> + '_ {
+        self.0
+            .iter()
+            .filter_map(|definition| Some((definition.pubkey, definition.fee_recipient?)))
+    }
+
     /// The `(url, pubkey)` of every enabled `web3signer` entry.
     pub fn web3signer_definitions(&self) -> impl Iterator<Item = (&str, PublicKeyBytes)> {
         self.0

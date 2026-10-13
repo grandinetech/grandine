@@ -1,4 +1,4 @@
-use std::{io::ErrorKind, path::Path, str, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, path::Path, str, sync::Arc};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
@@ -60,6 +60,24 @@ impl ProposerConfigs {
             .get(pubkey)
             .and_then(|definition| definition.fee_recipient)
             .or(self.default_fee_recipient)
+    }
+
+    /// [`Self::configured_fee_recipient`] for many keys, with the definitions read only once.
+    pub fn configured_fee_recipients(&self) -> impl Fn(PublicKeyBytes) -> Option<ExecutionAddress> {
+        let fee_recipients = self
+            .validator_definitions
+            .read()
+            .fee_recipients()
+            .collect::<HashMap<_, _>>();
+
+        let default_fee_recipient = self.default_fee_recipient;
+
+        move |pubkey| {
+            fee_recipients
+                .get(&pubkey)
+                .copied()
+                .or(default_fee_recipient)
+        }
     }
 
     pub fn set_fee_recipient(
@@ -433,6 +451,34 @@ mod tests {
             proposer_configs.configured_fee_recipient(PUBKEY),
             Some(TEST_FEE_RECIPIENT),
         );
+
+        Ok(())
+    }
+
+    // Proposers are prepared from the lookup for many keys, which must answer as the one for a
+    // single key does: the definition's own recipient, else the default.
+    #[test]
+    fn configured_fee_recipients_match_the_lookup_for_one_key() -> Result<()> {
+        let proposer_configs = in_memory()?;
+        let pubkey_without_definition = PublicKeyBytes::repeat_byte(2);
+
+        proposer_configs.set_fee_recipient(PUBKEY, TEST_FEE_RECIPIENT)?;
+
+        let configured_fee_recipient = proposer_configs.configured_fee_recipients();
+
+        assert_eq!(configured_fee_recipient(PUBKEY), Some(TEST_FEE_RECIPIENT));
+
+        assert_eq!(
+            configured_fee_recipient(pubkey_without_definition),
+            Some(DEFAULT_FEE_RECIPIENT),
+        );
+
+        for pubkey in [PUBKEY, pubkey_without_definition] {
+            assert_eq!(
+                configured_fee_recipient(pubkey),
+                proposer_configs.configured_fee_recipient(pubkey),
+            );
+        }
 
         Ok(())
     }

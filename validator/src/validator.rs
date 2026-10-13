@@ -1072,7 +1072,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .map(|metrics| metrics.validator_propose_tick_times.start_timer());
 
                 if let Some(beacon_nodes) = self
-                    .wait_for_fully_validated_head(beacon_nodes, &wait_group)
+                    .wait_for_fully_validated_head(beacon_nodes, &wait_group, tick)
                     .await
                     && let Err(error) = self.propose(&beacon_nodes).await
                 {
@@ -1089,7 +1089,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
                 if let Some(beacon_nodes) = self
-                    .wait_for_fully_validated_head(beacon_nodes, &wait_group)
+                    .wait_for_fully_validated_head(beacon_nodes, &wait_group, tick)
                     .await
                 {
                     if let Err(error) = self.attest_and_start_aggregating(&beacon_nodes).await {
@@ -1111,12 +1111,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_aggregate_tick_times.start_timer());
 
-                if let Some(beacon_nodes) = self
-                    .wait_for_fully_validated_head(beacon_nodes, &wait_group)
+                match self
+                    .wait_for_fully_validated_head(beacon_nodes.clone(), &wait_group, tick)
                     .await
                 {
-                    self.publish_aggregates_and_proofs(&beacon_nodes).await;
-                    self.publish_contributions_and_proofs(&beacon_nodes).await;
+                    Some(beacon_nodes) => {
+                        self.publish_aggregates_and_proofs(&beacon_nodes).await;
+                        self.publish_contributions_and_proofs(&beacon_nodes).await;
+                    }
+                    // The messages were signed for a head that was validated, and contributions
+                    // aggregate those rather than vote for the head of this tick.
+                    None if self.published_own_sync_committee_messages_for.is_some() => {
+                        self.publish_contributions_and_proofs(&beacon_nodes).await;
+                    }
+                    None => {}
                 }
             }
             TickKind::PayloadAttest => {
@@ -1942,8 +1950,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .sync_committee_members(beacon_nodes, slot_head.slot())
             .await
         else {
-            // A node holding no keys has nothing to prefetch and nothing to sign.
-            if self.signer.load().keys().next().is_some() {
+            // Without a validator index there are no duties to prefetch and nothing to sign.
+            if !self.own_duties.validator_indices.sorted().is_empty() {
                 OwnSyncCommitteeMembers::warn_about_missing_duties(slot_head.slot());
             }
 
@@ -2233,11 +2241,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .cached_dependent_root(epoch)
             .await
         else {
-            warn_with_peers!(
-                "no attester duties were prefetched for slot {slot}, so no payload attestation \
-                 will be produced; check that the beacon nodes given with --beacon-node-urls are \
-                 reachable",
-            );
+            // Without a validator index there are no duties to prefetch.
+            if !self.own_duties.validator_indices.sorted().is_empty() {
+                warn_with_peers!(
+                    "no attester duties were prefetched for slot {slot}, so no payload \
+                     attestation will be produced; check that the beacon nodes given with \
+                     --beacon-node-urls are reachable",
+                );
+            }
 
             return Ok(None);
         };
@@ -3176,7 +3187,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
         let registered_validators = self.registered_validators.clone();
         let subnet_service_tx = self.channels.subnet_service_tx().cloned();
-        let uses_local_node = self.chain_source.uses_local_node();
 
         tokio::spawn(async move {
             let signer_snapshot = signer.load();
@@ -3202,21 +3212,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let registrations = pubkeys
                 .into_iter()
                 .filter_map(|pubkey| {
-                    // A remote node pays its own recipient for a local payload, so the fallback
-                    // would only ever be paid by a builder.
-                    let fee_recipient = if uses_local_node {
-                        proposer_configs.fee_recipient(pubkey)
-                    } else {
-                        let Some(fee_recipient) = proposer_configs.configured_fee_recipient(pubkey)
-                        else {
-                            debug_with_peers!(
-                                "validator {pubkey:?} has no fee recipient configured; \
-                                 it will not be registered with the builder",
-                            );
-                            return None;
-                        };
-
-                        fee_recipient
+                    // A remote node pays its own recipient for a local payload, so one made up
+                    // here would only ever be paid by a builder.
+                    let Some(fee_recipient) = proposer_configs.configured_fee_recipient(pubkey)
+                    else {
+                        debug_with_peers!(
+                            "validator {pubkey:?} has no fee recipient configured; \
+                             it will not be registered with the builder",
+                        );
+                        return None;
                     };
 
                     Some((pubkey, fee_recipient))
@@ -3363,20 +3367,13 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .filter_map(|(dependent_root, proposal_slot, validator_index, pubkey)| {
                 let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
 
-                let fee_recipient = if self.chain_source.uses_local_node() {
-                    self.proposer_configs.fee_recipient(pubkey)
-                } else {
-                    let Some(fee_recipient) =
-                        self.proposer_configs.configured_fee_recipient(pubkey)
-                    else {
-                        debug_with_peers!(
-                            "validator {validator_index} has no fee recipient configured; \
-                             no proposer preferences will be published for slot {proposal_slot}",
-                        );
-                        return None;
-                    };
-
-                    fee_recipient
+                let Some(fee_recipient) = self.proposer_configs.configured_fee_recipient(pubkey)
+                else {
+                    debug_with_peers!(
+                        "validator {validator_index} has no fee recipient configured; \
+                         no proposer preferences will be published for slot {proposal_slot}",
+                    );
+                    return None;
                 };
 
                 Some((
@@ -3587,6 +3584,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         &self,
         beacon_nodes: BeaconNodes<P, W>,
         wait_group: &W,
+        tick: Tick,
     ) -> Option<BeaconNodes<P, W>> {
         const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -3613,7 +3611,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             }
         };
 
-        if !is_optimistic && !self.should_wait_for_late_block() {
+        if !is_optimistic && !self.should_wait_for_late_block(tick) {
             return Some(beacon_nodes);
         }
 
@@ -3672,8 +3670,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             Ok(None) => Some(beacon_nodes),
             Err(error) => {
                 if is_optimistic {
-                    debug_with_peers!(
-                        "timed out while waiting for chain head to become fully validated: {error:?}",
+                    warn_with_peers!(
+                        "validator cannot perform its duties because \
+                         chain head has not been fully verified by an execution engine",
                     );
                     None
                 } else {
@@ -3686,8 +3685,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    fn should_wait_for_late_block(&self) -> bool {
-        !self.validator_config.disable_wait_for_late_blocks
+    fn should_wait_for_late_block(&self, tick: Tick) -> bool {
+        // From the aggregate on, the slot's attestations are already signed, which a late
+        // block cannot change.
+        tick.is_before_aggregating_interval()
+            && !self.validator_config.disable_wait_for_late_blocks
             && self
                 .chain_source
                 .controller()

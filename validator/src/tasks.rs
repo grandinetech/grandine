@@ -59,28 +59,31 @@ impl<P: Preset, W: Wait + Sync> UpdateBeaconCommitteeSubscriptionsTask<P, W> {
 
         let current_slot = beacon_nodes.head().slot();
         let fork_info = beacon_nodes.head().fork_info;
-
         let current_epoch = misc::compute_epoch_at_slot::<P>(current_slot);
-
         let validator_indices = own_validator_indices.sorted();
 
-        // Built every slot; each node sends it on only when it has something new to say.
-        let proposers = own_validator_indices
-            .load()
-            .iter()
-            .filter_map(|(pubkey, validator_index)| {
-                Some(ProposerData {
-                    validator_index: (*validator_index)?,
-                    fee_recipient: proposer_configs.configured_fee_recipient(*pubkey)?,
-                })
-            })
-            .collect_vec();
+        // The built-in node looks the fee recipient up itself when it produces a block.
+        if !beacon_nodes.has_local_node() {
+            let configured_fee_recipient = proposer_configs.configured_fee_recipients();
 
-        if let Err(error) = beacon_nodes
-            .prepare_beacon_proposer(current_slot, &proposers)
-            .await
-        {
-            warn_with_peers!("failed to prepare beacon proposers: {error:?}");
+            // Built every slot; each node sends it on only when it has something new to say.
+            let proposers = own_validator_indices
+                .load()
+                .iter()
+                .filter_map(|(pubkey, validator_index)| {
+                    Some(ProposerData {
+                        validator_index: (*validator_index)?,
+                        fee_recipient: configured_fee_recipient(*pubkey)?,
+                    })
+                })
+                .collect_vec();
+
+            if let Err(error) = beacon_nodes
+                .prepare_beacon_proposer(current_slot, &proposers)
+                .await
+            {
+                warn_with_peers!("failed to prepare beacon proposers: {error:?}");
+            }
         }
 
         let mut subscriptions = vec![];
