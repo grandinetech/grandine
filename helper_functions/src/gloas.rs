@@ -7,20 +7,24 @@ use try_from_iterator::TryFromIterator as _;
 use types::{
     config::Config,
     gloas::{
-        containers::{Attestation, Builder, IndexedAttestation},
+        containers::{Attestation, Builder, BuilderPendingPayment, IndexedAttestation},
         primitives::BuilderIndex,
     },
+    nonstandard::SlashingKind,
     phase0::{
         consts::FAR_FUTURE_EPOCH,
-        primitives::{ExecutionAddress, Gwei, Slot},
+        primitives::{ExecutionAddress, Gwei, Slot, ValidatorIndex},
     },
     preset::Preset,
     traits::{BeaconState, PostGloasBeaconState},
 };
 
 use crate::{
-    accessors::get_current_epoch, electra::get_attesting_indices, error::Error,
+    accessors::get_current_epoch,
+    electra::{self, get_attesting_indices},
+    error::Error,
     misc::compute_epoch_at_slot,
+    slot_report::SlotReport,
 };
 
 pub fn get_indexed_attestation<P: Preset>(
@@ -57,6 +61,43 @@ pub fn get_indexed_attestation<P: Preset>(
 #[derive(Default)]
 pub struct ReusableBuilderIndices {
     exhausted: bool,
+}
+
+// > Slash the validator with index ``slashed_index``.
+pub fn slash_validator<P: Preset>(
+    config: &Config,
+    state: &mut impl PostGloasBeaconState<P>,
+    slashed_index: ValidatorIndex,
+    whistleblower_index: Option<ValidatorIndex>,
+    kind: SlashingKind,
+    slot_report: impl SlotReport,
+) -> Result<()> {
+    electra::slash_validator(
+        config,
+        state,
+        slashed_index,
+        whistleblower_index,
+        kind,
+        slot_report,
+    )?;
+
+    // > Remove pending builder payments for blocks proposed by the slashed validator
+    //
+    // Collect the indices first.
+    // Writing only to matching elements keeps the rest of the tree cached.
+    let payment_indices = (0..)
+        .zip(state.builder_pending_payments())
+        .filter(|(_, payment)| payment.proposer_index == slashed_index)
+        .map(|(payment_index, _)| payment_index)
+        .collect::<Vec<u64>>();
+
+    for payment_index in payment_indices {
+        *state
+            .builder_pending_payments_mut()
+            .mod_index_mut(payment_index) = BuilderPendingPayment::default();
+    }
+
+    Ok(())
 }
 
 pub fn add_builder_to_registry<P: Preset>(
