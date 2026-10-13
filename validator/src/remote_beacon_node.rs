@@ -2098,7 +2098,6 @@ mod tests {
         Ok(())
     }
 
-    // The phase comes back next to the data, so the caller can tell which fork produced it.
     #[test]
     fn parses_payload_attestation_data_response() -> Result<()> {
         let response = json!({
@@ -2112,11 +2111,8 @@ mod tests {
             },
         });
 
-        let (data, version) =
-            serde_json::from_value::<EthResponse<PayloadAttestationData>>(response)?
-                .into_data_and_version();
-
-        assert_eq!(version, Some(Phase::Gloas));
+        let data =
+            serde_json::from_value::<EthResponse<PayloadAttestationData>>(response)?.into_data();
 
         assert_eq!(
             data,

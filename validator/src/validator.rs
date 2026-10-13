@@ -1746,12 +1746,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     return None;
                 }
 
-                let aggregator = selection_proof.map(|selection_proof| Aggregator {
+                let aggregator = Aggregator {
                     aggregator_index: validator_index,
                     position_in_committee,
                     public_key,
                     selection_proof,
-                })?;
+                };
 
                 let data = own_attestation.attestation.data();
                 let key = AttestationKey {
@@ -1952,7 +1952,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         else {
             // Without a validator index there are no duties to prefetch and nothing to sign.
             if !self.own_duties.validator_indices.sorted().is_empty() {
-                OwnSyncCommitteeMembers::warn_about_missing_duties(slot_head.slot());
+                warn_with_peers!(
+                    "no sync committee duties were prefetched for slot {}, so no sync committee \
+                     message will be produced; check that the beacon nodes given with \
+                     --beacon-node-urls are reachable",
+                    slot_head.slot(),
+                );
             }
 
             return Ok(());

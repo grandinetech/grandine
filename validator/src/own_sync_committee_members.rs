@@ -5,7 +5,6 @@ use anyhow::Result;
 use fork_choice_control::Wait;
 use helper_functions::misc;
 use itertools::Itertools as _;
-use logging::warn_with_peers;
 use p2p::SyncCommitteeSubscription;
 use scc::HashMap as SccHashMap;
 use std_ext::ArcExt as _;
@@ -218,14 +217,6 @@ impl OwnSyncCommitteeMembers {
         self.periods
             .retain_async(|period, _| *period >= current_period)
             .await;
-    }
-
-    pub fn warn_about_missing_duties(slot: Slot) {
-        warn_with_peers!(
-            "no sync committee duties were prefetched for slot {slot}, so no sync committee \
-             message will be produced; check that the beacon nodes given with --beacon-node-urls \
-             are reachable",
-        );
     }
 }
 

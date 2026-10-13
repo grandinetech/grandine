@@ -1440,8 +1440,9 @@ struct RemoteValidatorOptions {
     )]
     publish_to_every_node: Vec<PublishedDuty>,
 
-    /// Register validators with the builder the beacon nodes use; relevant only until Gloas, where
-    /// builders bid over gossip and need no registration
+    /// Use the builder behind the beacon nodes: register validators with it and accept its
+    /// payloads. Without it only local payloads are requested and builder boost factors are
+    /// ignored. Relevant only until Gloas, where builders bid over gossip and need no registration
     #[clap(long)]
     use_builder: bool,
 }

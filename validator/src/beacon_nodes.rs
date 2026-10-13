@@ -259,16 +259,6 @@ impl RemoteNodes {
         duty.is_none_or(|duty| should_publish_to_every_node(&self.publish_to_every_node, duty))
     }
 
-    async fn publish_from_producer<F, Fut>(&self, operation: &'static str, attempt: F) -> Result<()>
-    where
-        F: Fn(Arc<RemoteBeaconNode>) -> Fut,
-        Fut: Future<Output = Result<()>> + Send + 'static,
-    {
-        let to_every_node = self.should_publish_to_every_node(Some(PublishedDuty::Blocks));
-
-        publish(operation, self.producer_first(), to_every_node, attempt).await
-    }
-
     fn spawn_publish<T, F, Fut>(
         &self,
         operation: &'static str,
@@ -727,21 +717,29 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteNodes {
         let kzg_proofs = Arc::new(kzg_proofs.cloned());
         let blobs = Arc::new(blobs.cloned());
 
-        self.publish_from_producer("publish a block", move |node| {
-            let signed_block = signed_block.clone_arc();
-            let kzg_proofs = kzg_proofs.clone_arc();
-            let blobs = blobs.clone_arc();
+        let operation = "publish a block";
+        let to_every_node = self.should_publish_to_every_node(Some(PublishedDuty::Blocks));
 
-            async move {
-                BeaconNodeApi::<P>::publish_block(
-                    node.as_ref(),
-                    &signed_block,
-                    kzg_proofs.as_ref().as_ref(),
-                    blobs.as_ref().as_ref(),
-                )
-                .await
-            }
-        })
+        publish(
+            operation,
+            self.producer_first(),
+            to_every_node,
+            move |node| {
+                let signed_block = signed_block.clone_arc();
+                let kzg_proofs = kzg_proofs.clone_arc();
+                let blobs = blobs.clone_arc();
+
+                async move {
+                    BeaconNodeApi::<P>::publish_block(
+                        node.as_ref(),
+                        &signed_block,
+                        kzg_proofs.as_ref().as_ref(),
+                        blobs.as_ref().as_ref(),
+                    )
+                    .await
+                }
+            },
+        )
         .await
     }
 
@@ -1344,11 +1342,17 @@ fn should_publish_to_every_node(configured: &[PublishedDuty], duty: PublishedDut
 
 #[cfg(test)]
 mod tests {
-    use core::{iter::once, time::Duration};
+    use core::{
+        iter::once,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
 
     use anyhow::ensure;
+    use axum::{Json, Router};
     use reqwest::Client;
-    use tokio::time::sleep;
+    use serde_json::json;
+    use tokio::{net::TcpListener, time::sleep};
     use types::{config::Config as ChainConfig, preset::Mainnet};
 
     use super::*;
@@ -1412,10 +1416,24 @@ mod tests {
     // Only a synced node has seen the epoch's attestations, so a lagging one is never asked.
     #[tokio::test]
     async fn liveness_is_not_asked_of_a_node_that_is_not_ready() -> Result<()> {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counted_requests = requests.clone_arc();
+
+        // A lagging node answers that nobody is live, which would pass for a completed check.
+        let router = Router::new().fallback(move || async move {
+            counted_requests.fetch_add(1, Ordering::Relaxed);
+            Json(json!({ "data": [{ "index": "0", "is_live": false }] }))
+        });
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+
+        tokio::spawn(async move { axum::serve(listener, router).await });
+
         let node = Arc::new(RemoteBeaconNode::new(
             Arc::new(ChainConfig::mainnet()),
             Client::new(),
-            "http://unusable".parse()?,
+            format!("http://{address}").parse()?,
             32,
         ));
 
@@ -1427,6 +1445,8 @@ mod tests {
         BeaconNodeApi::<Mainnet>::liveness(&nodes, 0, &[0])
             .await
             .expect_err("a node that is not ready cannot report liveness");
+
+        assert_eq!(requests.load(Ordering::Relaxed), 0);
 
         Ok(())
     }

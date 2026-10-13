@@ -221,11 +221,6 @@ impl<P: Preset, W: Wait> ChainSource<P, W> {
             Chain::Remote(remote_beacon_nodes) => Some(remote_beacon_nodes),
         }
     }
-
-    #[must_use]
-    pub const fn uses_local_node(&self) -> bool {
-        matches!(self.chain, Chain::Local(_))
-    }
 }
 
 #[expect(clippy::struct_field_names)]

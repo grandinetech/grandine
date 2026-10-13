@@ -119,11 +119,6 @@ impl<T, M, F> EthResponse<T, M, F> {
     }
 
     #[must_use]
-    pub fn into_data_and_version(self) -> (T, Option<Phase>) {
-        (self.data, self.version)
-    }
-
-    #[must_use]
     pub fn into_data_and_execution_optimistic(self) -> (T, Option<bool>) {
         (self.data, self.execution_optimistic)
     }

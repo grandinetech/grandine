@@ -45,7 +45,7 @@ pub struct BeaconCommitteeMember {
     pub position_in_committee: usize,
     pub slot: Slot,
     pub is_aggregator: bool,
-    pub selection_proof: Option<SignatureBytes>,
+    pub selection_proof: SignatureBytes,
 }
 
 impl From<BeaconCommitteeMember> for BeaconCommitteeSubscription {
@@ -411,7 +411,7 @@ impl OwnBeaconCommitteeMembers {
                     position_in_committee: validator_committee_index,
                     slot,
                     is_aggregator,
-                    selection_proof: Some(selection_proof),
+                    selection_proof,
                 });
         }
 

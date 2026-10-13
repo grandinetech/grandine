@@ -750,15 +750,21 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         let chain_config = self.context.chain.controller.chain_config();
         let genesis_time = self.context.chain.controller.genesis_time();
 
-        if self.slot_head.phase() >= Phase::Fulu
-            && builder_api
+        if self.slot_head.phase() >= Phase::Fulu {
+            match builder_api
                 .post_blinded_block_post_fulu(chain_config, genesis_time, signed_block)
                 .await
-                .is_ok()
-        {
-            debug_with_peers!("submitted blinded block to the builder node");
+            {
+                Ok(()) => {
+                    debug_with_peers!("submitted blinded block to the builder node");
 
-            return Ok(());
+                    return Ok(());
+                }
+                Err(error) => warn_with_peers!(
+                    "builder did not accept the blinded block for publishing, \
+                     requesting its payload instead: {error:?}"
+                ),
+            }
         }
 
         let WithBlobsAndMev {

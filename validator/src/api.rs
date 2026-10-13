@@ -98,6 +98,8 @@ impl ValidatorApiConfig {
 
 #[derive(Debug, Error)]
 enum Error {
+    #[error("fee recipient is not set for validator {pubkey:?}")]
+    FeeRecipientNotSet { pubkey: PublicKeyBytes },
     #[error("internal error")]
     Internal(#[from] AnyhowError),
     #[error("invalid JSON body")]
@@ -156,9 +158,9 @@ impl Error {
             Self::InvalidGraffiti(_) | Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => {
                 StatusCode::BAD_REQUEST
             }
-            Self::ValidatorNotFound { pubkey: _ } | Self::ValidatorNotOwned { pubkey: _ } => {
-                StatusCode::NOT_FOUND
-            }
+            Self::FeeRecipientNotSet { pubkey: _ }
+            | Self::ValidatorNotFound { pubkey: _ }
+            | Self::ValidatorNotOwned { pubkey: _ } => StatusCode::NOT_FOUND,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
         }
@@ -451,7 +453,10 @@ async fn keymanager_list_fee_recipient(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let fee_recipient = keymanager.proposer_configs().fee_recipient(pubkey);
+    let fee_recipient = keymanager
+        .proposer_configs()
+        .configured_fee_recipient(pubkey)
+        .ok_or(Error::FeeRecipientNotSet { pubkey })?;
 
     let response = ProposerConfigResponse {
         pubkey,
