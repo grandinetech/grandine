@@ -164,6 +164,14 @@ enum Error {
         epoch: Epoch,
         target_epoch: Epoch,
     },
+    #[error(
+        "beacon node produced attestation data with source epoch {source_epoch} \
+         past target epoch {target_epoch}"
+    )]
+    UnexpectedAttestationSource {
+        source_epoch: Epoch,
+        target_epoch: Epoch,
+    },
     #[error("request to beacon node at {url} failed with status {status}: {body}")]
     Response {
         url: String,
@@ -1247,6 +1255,7 @@ impl<P: Preset> BeaconNodeApi<P> for RemoteBeaconNode {
 
         check_attestation_index(phase, committee_index, data.index)?;
         check_attestation_target::<P>(slot, data.target.epoch)?;
+        check_attestation_source(data.source.epoch, data.target.epoch)?;
 
         Ok(data)
     }
@@ -1889,6 +1898,19 @@ fn check_attestation_target<P: Preset>(slot: Slot, target_epoch: Epoch) -> Resul
     Ok(())
 }
 
+fn check_attestation_source(source_epoch: Epoch, target_epoch: Epoch) -> Result<()> {
+    // Once signed, every honest vote surrounds a source past the target until it is justified.
+    ensure!(
+        source_epoch <= target_epoch,
+        Error::UnexpectedAttestationSource {
+            source_epoch,
+            target_epoch,
+        },
+    );
+
+    Ok(())
+}
+
 fn check_not_optimistic(url: &RedactingUrl, execution_optimistic: Option<bool>) -> Result<()> {
     match execution_optimistic {
         Some(false) => Ok(()),
@@ -2250,6 +2272,16 @@ mod tests {
         check_attestation_target::<Mainnet>(65, 2)?;
         check_attestation_target::<Mainnet>(65, 1)?;
         check_attestation_target::<Mainnet>(65, 3).expect_err("epoch 3 has not begun in slot 65");
+
+        Ok(())
+    }
+
+    // A source past the target would lock the validator out through slashing protection.
+    #[test]
+    fn attestation_source_is_not_past_the_target() -> Result<()> {
+        check_attestation_source(1, 2)?;
+        check_attestation_source(0, 0)?;
+        check_attestation_source(3, 2).expect_err("epoch 3 is past target epoch 2");
 
         Ok(())
     }
