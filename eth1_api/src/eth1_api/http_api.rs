@@ -8,9 +8,9 @@ use ethereum_types::H64;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkChoiceStateV1, ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId,
-    PayloadStatusV1, RawExecutionRequests,
+    EngineGetPayloadV6Response, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
+    ForkChoiceUpdatedResponse, PayloadAttributes, PayloadId, PayloadStatusV1, RawExecutionRequests,
 };
 use futures::{Future, channel::mpsc::UnboundedSender};
 use logging::warn_with_peers;
@@ -25,7 +25,7 @@ use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
     deneb::primitives::VersionedHash,
-    nonstandard::{Phase, WithBlobsAndMev},
+    nonstandard::{ExecutionPayloadBody, Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
     preset::Preset,
     redacting_url::RedactingUrl,
@@ -46,6 +46,7 @@ use crate::{
     eth1_api::{
         ENGINE_FORKCHOICE_UPDATED_V1, ENGINE_FORKCHOICE_UPDATED_V2, ENGINE_FORKCHOICE_UPDATED_V3,
         ENGINE_FORKCHOICE_UPDATED_V4, ENGINE_GET_EL_BLOBS_V1, ENGINE_GET_EL_BLOBS_V2,
+        ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1, ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2,
         ENGINE_GET_PAYLOAD_V1, ENGINE_GET_PAYLOAD_V2, ENGINE_GET_PAYLOAD_V3, ENGINE_GET_PAYLOAD_V4,
         ENGINE_GET_PAYLOAD_V5, ENGINE_GET_PAYLOAD_V6, ENGINE_NEW_PAYLOAD_V1, ENGINE_NEW_PAYLOAD_V2,
         ENGINE_NEW_PAYLOAD_V3, ENGINE_NEW_PAYLOAD_V4, ENGINE_NEW_PAYLOAD_V5,
@@ -56,6 +57,7 @@ use crate::{
 const ENGINE_FORKCHOICE_UPDATED_TIMEOUT: Duration = Duration::from_secs(8);
 // In some of our setups 1 second is not enough to get blobs from the execution client
 const ENGINE_GET_BLOBS_TIMEOUT: Duration = Duration::from_secs(2);
+const ENGINE_GET_PAYLOAD_BODIES_TIMEOUT: Duration = Duration::from_secs(10);
 const ENGINE_GET_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(1);
 const ENGINE_NEW_PAYLOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -563,6 +565,63 @@ impl Eth1Api {
         }
     }
 
+    /// Calls [`engine_getPayloadBodiesByHashV2`] if the execution client supports it,
+    /// [`engine_getPayloadBodiesByHashV1`] otherwise.
+    ///
+    /// The result has one entry per hash in `block_hashes`, in the same order.
+    /// Entries are `None` for payloads the execution client does not have.
+    ///
+    /// [`engine_getPayloadBodiesByHashV1`]: https://github.com/ethereum/execution-apis/blob/00ca4be81bc58328d49b85e01108bddfff034faa/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
+    /// [`engine_getPayloadBodiesByHashV2`]: https://github.com/ethereum/execution-apis/blob/5aebdfdd45cadeb723be4bd45b4611b71c8b1c85/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
+    pub async fn get_payload_bodies_by_hash<P: Preset>(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Result<Vec<Option<ExecutionPayloadBody<P>>>> {
+        let params = vec![serde_json::to_value(&block_hashes)?];
+
+        let supports_v2 = self
+            .endpoints
+            .endpoints_for_request(Some(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2))
+            .next()
+            .is_some();
+
+        let bodies: Vec<Option<ExecutionPayloadBody<P>>> = if supports_v2 {
+            self.execute::<Vec<Option<ExecutionPayloadBodyV2<P>>>>(
+                ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2,
+                params,
+                Some(ENGINE_GET_PAYLOAD_BODIES_TIMEOUT),
+                Some(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2),
+            )
+            .await?
+            .result
+            .into_iter()
+            .map(|body| body.map(Into::into))
+            .collect()
+        } else {
+            self.execute::<Vec<Option<ExecutionPayloadBodyV1<P>>>>(
+                ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1,
+                params,
+                Some(ENGINE_GET_PAYLOAD_BODIES_TIMEOUT),
+                Some(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1),
+            )
+            .await?
+            .result
+            .into_iter()
+            .map(|body| body.map(Into::into))
+            .collect()
+        };
+
+        ensure!(
+            bodies.len() == block_hashes.len(),
+            Error::PayloadBodiesCountMismatch {
+                requested: block_hashes.len(),
+                received: bodies.len(),
+            },
+        );
+
+        Ok(bodies)
+    }
+
     async fn execute<T: DeserializeOwned + Send>(
         &self,
         method: &str,
@@ -694,6 +753,8 @@ enum Error {
     InvalidParameters,
     #[error("attempted to call Eth1 RPC endpoint but none were provided")]
     NoEndpointsProvided,
+    #[error("execution client returned {received} payload bodies for {requested} block hashes")]
+    PayloadBodiesCountMismatch { requested: usize, received: usize },
     #[error("pre-Bellatrix phase passed to Eth1Api::forkchoice_updated")]
     PhasePreBellatrix,
 }
@@ -1254,6 +1315,171 @@ mod tests {
         assert_eq!(actual_status, expected_status);
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_payload_bodies_by_hash_deserialization() -> Result<()> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "result": [
+                {
+                    "transactions": [
+                        "0xf86e078459682f0782520894419f2d6c3f5fe8bf43f91923ba21e996032897298894a1739b5e1d49c8808328d2f0a069dffffc6f9b20157bd17872d326de8ed088de3e24f2801dd9375ddbecd013f0a041aab6f5dff83fdd2595cc55725b28128b8902f12f3db598dce9f9183f989300",
+                    ],
+                    "withdrawals": null,
+                },
+                null,
+                {
+                    "transactions": [],
+                    "withdrawals": [
+                        {
+                            "index": "0x18561",
+                            "validatorIndex": "0x7c2e8",
+                            "address": "0xf97e180c050e5ab072211ad2c213eb5aee4df134",
+                            "amount": "0x18111",
+                        },
+                    ],
+                },
+            ],
+        });
+
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(200).body(body.to_string());
+        });
+
+        let eth1_api = payload_bodies_eth1_api(&server, ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1)?;
+
+        let bodies = eth1_api
+            .get_payload_bodies_by_hash::<Mainnet>(vec![H256::zero(); 3])
+            .await?;
+
+        let [pre_capella, missing, capella] = bodies.as_slice() else {
+            panic!("expected 3 payload bodies, got {}", bodies.len());
+        };
+
+        let pre_capella = pre_capella
+            .as_ref()
+            .expect("payload body should be present");
+        let capella = capella.as_ref().expect("payload body should be present");
+
+        assert_eq!(pre_capella.transactions.len(), 1);
+        assert!(pre_capella.withdrawals.is_none());
+        assert!(missing.is_none());
+        assert!(capella.transactions.is_empty());
+        assert_eq!(capella.withdrawals.as_ref().map(|w| w.len()), Some(1));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_payload_bodies_by_hash_v2_deserialization() -> Result<()> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "result": [
+                {
+                    "transactions": [],
+                    "withdrawals": [],
+                    "blockAccessList": "0xc0",
+                },
+                {
+                    "transactions": [],
+                    "withdrawals": [],
+                    "blockAccessList": null,
+                },
+            ],
+        });
+
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST)
+                .path("/")
+                .body_includes(ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2);
+            then.status(200).body(body.to_string());
+        });
+
+        let eth1_api = payload_bodies_eth1_api(&server, ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V2)?;
+
+        let bodies = eth1_api
+            .get_payload_bodies_by_hash::<Mainnet>(vec![H256::zero(); 2])
+            .await?;
+
+        let [with_block_access_list, pruned_block_access_list] = bodies.as_slice() else {
+            panic!("expected 2 payload bodies, got {}", bodies.len());
+        };
+
+        let with_block_access_list = with_block_access_list
+            .as_ref()
+            .expect("payload body should be present");
+        let pruned_block_access_list = pruned_block_access_list
+            .as_ref()
+            .expect("payload body should be present");
+
+        assert_eq!(
+            with_block_access_list
+                .block_access_list
+                .as_ref()
+                .map(|block_access_list| block_access_list.as_bytes()),
+            Some([0xc0].as_slice()),
+        );
+        assert!(pruned_block_access_list.block_access_list.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_payload_bodies_by_hash_count_mismatch() -> Result<()> {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 0,
+            "result": [null],
+        });
+
+        let server = MockServer::start();
+
+        server.mock(|when, then| {
+            when.method(Method::POST).path("/");
+            then.status(200).body(body.to_string());
+        });
+
+        let eth1_api = payload_bodies_eth1_api(&server, ENGINE_GET_PAYLOAD_BODIES_BY_HASH_V1)?;
+
+        assert_eq!(
+            eth1_api
+                .get_payload_bodies_by_hash::<Mainnet>(vec![H256::zero(); 2])
+                .await
+                .err()
+                .expect("response with fewer bodies than hashes should be an error")
+                .downcast::<Error>()?,
+            Error::PayloadBodiesCountMismatch {
+                requested: 2,
+                received: 1,
+            },
+        );
+
+        Ok(())
+    }
+
+    fn payload_bodies_eth1_api(server: &MockServer, capability: &str) -> Result<Eth1Api> {
+        let eth1_api = Eth1Api::new(
+            Arc::new(Config::mainnet()),
+            Client::new(),
+            Arc::default(),
+            vec![server.url("/").parse()?],
+            None,
+            None,
+        );
+
+        for endpoint in eth1_api.endpoints.endpoints_for_request(None) {
+            endpoint.set_capabilities([capability.to_owned()].into());
+        }
+
+        Ok(eth1_api)
     }
 
     fn default_payload<P: Preset>() -> ExecutionPayload<P> {

@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use anyhow::{Error as AnyhowError, Result, ensure};
 use ssz::{BitList, BitVector, ContiguousList, Hc};
 use typenum::Unsigned as _;
 
 use crate::{
+    bellatrix::primitives::Transaction,
     cache::IndexSlice,
+    capella::containers::Withdrawal,
     deneb::{
         containers::{ExecutionPayload, ExecutionPayloadHeader},
         primitives::KzgCommitment,
@@ -130,6 +134,54 @@ impl<P: Preset> BlindedBeaconBlock<P> {
             body,
         }
         .into()
+    }
+
+    pub fn unblind(
+        self,
+        transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+        withdrawals: ContiguousList<Withdrawal, P::MaxWithdrawalsPerPayload>,
+    ) -> Hc<BeaconBlock<P>> {
+        let ExecutionPayloadHeader {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions_root: _,
+            withdrawals_root: _,
+            blob_gas_used,
+            excess_blob_gas,
+        } = self.body.execution_payload_header.clone();
+
+        let execution_payload = ExecutionPayload {
+            parent_hash,
+            fee_recipient,
+            state_root,
+            receipts_root,
+            logs_bloom,
+            prev_randao,
+            block_number,
+            gas_limit,
+            gas_used,
+            timestamp,
+            extra_data,
+            base_fee_per_gas,
+            block_hash,
+            transactions,
+            withdrawals,
+            blob_gas_used,
+            excess_blob_gas,
+        };
+
+        self.with_execution_payload(execution_payload)
     }
 
     #[must_use]

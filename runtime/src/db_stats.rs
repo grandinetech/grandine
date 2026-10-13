@@ -5,8 +5,9 @@ use bytesize::ByteSize;
 use database::{DatabaseMode, PrefixableKey as _};
 use fork_choice_control::{
     BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DataColumnSidecarByColumnId,
-    FinalizedBlockByRoot, SlotBlobId, SlotByStateRoot, SlotColumnId, StateByBlockRoot,
-    StateCheckpoint, UnfinalizedBlockByRoot,
+    EnvelopeByBlockRoot, EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FinalizedBlockByRoot,
+    FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
+    StateByBlockRoot, StateCheckpoint, UnfinalizedBlockByRoot,
 };
 use tracing::{info, warn};
 use types::preset::Preset;
@@ -65,6 +66,7 @@ pub fn print<P: Preset>(
     let mut total_size: usize = 0;
     let mut finalized_block_root_entries = EntriesInfo::new("finalized_block_roots");
     let mut unfinalized_block_root_entries = EntriesInfo::new("unfinalized_block_roots");
+    let mut execution_payload_entries = EntriesInfo::new("execution_payloads_by_slot_and_root");
     let mut state_by_block_root_entries = EntriesInfo::new("states_by_block_root");
     let mut slot_by_state_root_entries = EntriesInfo::new("slots_by_state_root");
     let mut slot_by_blob_id_entries = EntriesInfo::new("slots_by_blob_id");
@@ -75,6 +77,9 @@ pub fn print<P: Preset>(
         EntriesInfo::new("data_column_sidecars_by_column_id");
     let mut state_checkpoint_entries = EntriesInfo::new("state_checkpoint");
     let mut block_checkpoint_entries = EntriesInfo::new("block_checkpoint");
+    let mut envelope_by_block_root_entries = EntriesInfo::new("envelopes_by_block_root");
+    let mut envelope_root_by_slot_entries = EntriesInfo::new("envelope_roots_by_slot");
+    let mut finalized_validator_entries = EntriesInfo::new("finalized_validators");
 
     for result in storage_database.iterate_all_keys_with_lengths()? {
         let (key, length) = result?;
@@ -85,6 +90,8 @@ pub fn print<P: Preset>(
             unfinalized_block_root_entries.track(&key, length);
         } else if FinalizedBlockByRoot::has_prefix(&key) {
             finalized_block_root_entries.track(&key, length);
+        } else if ExecutionPayloadBySlotAndRoot::has_prefix(&key) {
+            execution_payload_entries.track(&key, length);
         } else if StateByBlockRoot::has_prefix(&key) {
             state_by_block_root_entries.track(&key, length);
         } else if SlotByStateRoot::has_prefix(&key) {
@@ -95,14 +102,21 @@ pub fn print<P: Preset>(
             blob_sidecar_by_blob_id_entries.track(&key, length);
         } else if BlockRootBySlot::has_prefix(&key) {
             block_root_by_slot_entries.track(&key, length);
-        } else if SlotColumnId::has_prefix(&key) {
-            slot_by_column_id_entries.track(&key, length);
-        } else if DataColumnSidecarByColumnId::has_prefix(&key) {
-            data_column_sidecar_by_column_id.track(&key, length);
         } else if StateCheckpoint::<P>::has_prefix(&key) {
             state_checkpoint_entries.track(&key, length);
         } else if BlockCheckpoint::<P>::has_prefix(&key) {
             block_checkpoint_entries.track(&key, length);
+        } else if SlotColumnId::has_prefix(&key) {
+            slot_by_column_id_entries.track(&key, length);
+        } else if DataColumnSidecarByColumnId::has_prefix(&key) {
+            data_column_sidecar_by_column_id.track(&key, length);
+        } else if EnvelopeByBlockRoot::has_prefix(&key) {
+            envelope_by_block_root_entries.track(&key, length);
+        } else if EnvelopeRootBySlot::has_prefix(&key) {
+            envelope_root_by_slot_entries.track(&key, length);
+        } else if FinalizedValidators::has_prefix(&key) || FinalizedValidatorCount::has_prefix(&key)
+        {
+            finalized_validator_entries.track(&key, length);
         } else {
             warn!("unknown database key: {}", String::from_utf8_lossy(&key));
         }
@@ -115,6 +129,7 @@ pub fn print<P: Preset>(
         block_root_by_slot_entries,
         finalized_block_root_entries,
         unfinalized_block_root_entries,
+        execution_payload_entries,
         state_by_block_root_entries,
         slot_by_state_root_entries,
         slot_by_blob_id_entries,
@@ -123,6 +138,9 @@ pub fn print<P: Preset>(
         data_column_sidecar_by_column_id,
         state_checkpoint_entries,
         block_checkpoint_entries,
+        envelope_by_block_root_entries,
+        envelope_root_by_slot_entries,
+        finalized_validator_entries,
     ];
 
     entries.sort_by_key(EntriesInfo::total_size);

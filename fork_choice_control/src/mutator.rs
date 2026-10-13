@@ -530,7 +530,8 @@ where
                     let execution_payload_opt = if head.block.phase() >= Phase::Gloas {
                         // TODO(Gloas): review if this is still needed: notify new payload should only happen after validating payload envelope
 
-                        self.execution_payload_envelope_by_root(head.block_root)?
+                        self.store
+                            .cached_execution_payload_envelope_by_root(head.block_root)
                             .map(|envelope| {
                                 params = Some(ExecutionPayloadParams::Gloas {
                                     versioned_hashes,
@@ -5790,19 +5791,6 @@ where
         }
 
         BlockDataColumnAvailability::Missing(missing_indices)
-    }
-
-    fn execution_payload_envelope_by_root(
-        &self,
-        block_root: H256,
-    ) -> Result<Option<Arc<SignedExecutionPayloadEnvelope<P>>>> {
-        match self
-            .store
-            .cached_execution_payload_envelope_by_root(block_root)
-        {
-            Some(envelope) => Ok(Some(envelope.clone_arc())),
-            None => self.storage.execution_payload_envelope_by_root(block_root),
-        }
     }
 }
 

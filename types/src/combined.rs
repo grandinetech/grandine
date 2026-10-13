@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bls::SignatureBytes;
 use derive_more::From;
 use duplicate::duplicate_item;
@@ -110,7 +112,7 @@ use crate::{
             SignedBeaconBlock as GloasSignedBeaconBlock, SignedExecutionPayloadBid,
         },
     },
-    nonstandard::Phase,
+    nonstandard::{ExecutionPayloadBody, Phase},
     phase0::{
         beacon_state::BeaconState as Phase0BeaconState,
         containers::{
@@ -708,6 +710,10 @@ impl<P: Preset> SignedBeaconBlock<P> {
         }
     }
 
+    pub fn execution_payload_body(self) -> Option<ExecutionPayloadBody<P>> {
+        self.execution_payload().map(Into::into)
+    }
+
     pub const fn phase(&self) -> Phase {
         match self {
             Self::Phase0(_) => Phase::Phase0,
@@ -1116,6 +1122,16 @@ impl<P: Preset> BeaconBlock<P> {
 #[error("block phase is pre-Bellatrix: {0}")]
 pub struct TryBlindedFromBlockError(Phase);
 
+#[derive(Debug, Error)]
+pub enum UnblindError {
+    #[error("post-Gloas payload cannot be unblinded without block access list")]
+    MissingBlockAccessList,
+    #[error("post-Capella block cannot be unblinded without withdrawals")]
+    MissingWithdrawals,
+    #[error("pre-Capella block cannot be unblinded with withdrawals")]
+    UnexpectedWithdrawals,
+}
+
 impl<P: Preset> TryFrom<BeaconBlock<P>> for BlindedBeaconBlock<P> {
     type Error = TryBlindedFromBlockError;
 
@@ -1228,6 +1244,27 @@ impl<P: Preset> SszSize for SignedBlindedBeaconBlock<P> {
     ]);
 }
 
+impl<P: Preset> SszRead<Config> for SignedBlindedBeaconBlock<P> {
+    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        // There are 2 fixed parts before `block.message.slot`:
+        // - The offset of `block.message`.
+        // - The contents of `block.signature`.
+        let slot_start = Offset::SIZE
+            .get()
+            .saturating_add(SignatureBytes::SIZE.get());
+
+        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
+        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
+        let slot = Slot::from_ssz_default(slot_bytes)?;
+        let phase = config.phase_at_slot::<P>(slot);
+        let block = Self::from_ssz(&phase, bytes)?;
+
+        assert_eq!(slot, block.message().slot());
+
+        Ok(block)
+    }
+}
+
 impl<P: Preset> SszRead<Phase> for SignedBlindedBeaconBlock<P> {
     fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
         let block = match phase {
@@ -1298,6 +1335,52 @@ impl<P: Preset> TryFrom<SignedBeaconBlock<P>> for SignedBlindedBeaconBlock<P> {
 }
 
 impl<P: Preset> SignedBlindedBeaconBlock<P> {
+    pub fn unblind(
+        self,
+        payload_body: ExecutionPayloadBody<P>,
+    ) -> Result<SignedBeaconBlock<P>, UnblindError> {
+        let ExecutionPayloadBody {
+            transactions,
+            withdrawals,
+            block_access_list: _,
+        } = payload_body;
+
+        let transactions = Arc::new(Arc::unwrap_or_clone(transactions).map(Into::into).into());
+        let withdrawals = withdrawals.map(Into::into);
+
+        let block: SignedBeaconBlock<P> = match (self, withdrawals) {
+            (Self::Bellatrix(block), None) => {
+                let BellatrixSignedBlindedBeaconBlock { message, signature } = block;
+                let message = message.unblind(transactions);
+                BellatrixSignedBeaconBlock { message, signature }.into()
+            }
+            (Self::Capella(block), Some(withdrawals)) => {
+                let CapellaSignedBlindedBeaconBlock { message, signature } = block;
+                let message = message.unblind(transactions, withdrawals);
+                CapellaSignedBeaconBlock { message, signature }.into()
+            }
+            (Self::Deneb(block), Some(withdrawals)) => {
+                let DenebSignedBlindedBeaconBlock { message, signature } = block;
+                let message = message.unblind(transactions, withdrawals);
+                DenebSignedBeaconBlock { message, signature }.into()
+            }
+            (Self::Electra(block), Some(withdrawals)) => {
+                let ElectraSignedBlindedBeaconBlock { message, signature } = block;
+                let message = message.unblind(transactions, withdrawals);
+                ElectraSignedBeaconBlock { message, signature }.into()
+            }
+            (Self::Fulu(block), Some(withdrawals)) => {
+                let FuluSignedBlindedBeaconBlock { message, signature } = block;
+                let message = message.unblind(transactions, withdrawals);
+                FuluSignedBeaconBlock { message, signature }.into()
+            }
+            (Self::Bellatrix(_), Some(_)) => return Err(UnblindError::UnexpectedWithdrawals),
+            (_, None) => return Err(UnblindError::MissingWithdrawals),
+        };
+
+        Ok(block)
+    }
+
     pub fn split(self) -> (BlindedBeaconBlock<P>, SignatureBytes) {
         match self {
             Self::Bellatrix(block) => {
@@ -1525,6 +1608,17 @@ impl<P: Preset> SszSize for ExecutionPayload<P> {
     ]);
 }
 
+impl<P: Preset> SszWrite for ExecutionPayload<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Bellatrix(payload) => payload.write_variable(bytes),
+            Self::Capella(payload) => payload.write_variable(bytes),
+            Self::Deneb(payload) => payload.write_variable(bytes),
+            Self::Gloas(payload) => payload.write_variable(bytes),
+        }
+    }
+}
+
 impl<P: Preset> SszRead<Phase> for ExecutionPayload<P> {
     fn from_ssz_unchecked(phase: &Phase, bytes: &[u8]) -> Result<Self, ReadError> {
         let block = match phase {
@@ -1612,6 +1706,17 @@ impl<P: Preset> ExecutionPayload<P> {
             Self::Capella(payload) => payload.prev_randao,
             Self::Deneb(payload) => payload.prev_randao,
             Self::Gloas(payload) => payload.prev_randao,
+        }
+    }
+}
+
+impl<P: Preset> From<ExecutionPayload<P>> for ExecutionPayloadBody<P> {
+    fn from(payload: ExecutionPayload<P>) -> Self {
+        match payload {
+            ExecutionPayload::Bellatrix(payload) => payload.into(),
+            ExecutionPayload::Capella(payload) => payload.into(),
+            ExecutionPayload::Deneb(payload) => payload.into(),
+            ExecutionPayload::Gloas(payload) => (&payload).into(),
         }
     }
 }

@@ -172,9 +172,12 @@ const SKIPPED_CASES: &[&str] = &[
 )]
 #[test_resources(glob)]
 fn function_name(case: Case<'_>) {
+    // Windows build fix
+    let case_path = case.case_path_relative_to_workspace_root.replace('\\', "/");
+
     if SKIPPED_CASES
         .iter()
-        .any(|skipped| case.case_path_relative_to_workspace_root.contains(skipped))
+        .any(|skipped| case_path.contains(skipped))
     {
         return;
     }

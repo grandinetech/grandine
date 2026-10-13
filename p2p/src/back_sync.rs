@@ -10,6 +10,7 @@ use database::{Database, PrefixableKey};
 use derive_more::Display;
 use eth1_api::RealController;
 use execution_engine::NullExecutionEngine;
+use fork_choice_control::StoredBlock;
 use fork_choice_store::{
     BlobSidecarAction, BlobSidecarOrigin, DataColumnSidecarAction, DataColumnSidecarOrigin,
     ExecutionPayloadEnvelopeAction, ExecutionPayloadEnvelopeOrigin,
@@ -18,7 +19,7 @@ use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
 use helper_functions::misc;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
-use ssz::{Ssz, SszReadDefault as _, SszWrite as _};
+use ssz::{Ssz, SszHash as _, SszReadDefault as _, SszWrite as _};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use types::{
@@ -36,7 +37,7 @@ use types::{
         primitives::{H256, Slot},
     },
     preset::Preset,
-    traits::{BeaconState as _, SignedBeaconBlock as _},
+    traits::{self, BeaconBlock, BeaconState as _, SignedBeaconBlock as _},
 };
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -341,8 +342,8 @@ impl<P: Preset> Batch<P> {
         &self,
         config: &Config,
         controller: &RealController<P>,
-        block: &Arc<SignedBeaconBlock<P>>,
-        parent: &Arc<SignedBeaconBlock<P>>,
+        block: &impl traits::SignedBeaconBlock<P>,
+        parent: &impl traits::SignedBeaconBlock<P>,
         storage_mode: StorageMode,
     ) -> Result<Vec<Arc<BlobSidecar<P>>>> {
         let block = block.message();
@@ -380,7 +381,7 @@ impl<P: Preset> Batch<P> {
                         blob_sidecar.clone_arc(),
                         true,
                         &BlobSidecarOrigin::BackSync,
-                        || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                        || Some((parent.message().slot(), PayloadStatus::Optimistic)),
                         || Some(head_state.clone_arc()),
                     )
                 })?;
@@ -404,8 +405,8 @@ impl<P: Preset> Batch<P> {
         &self,
         config: &Config,
         controller: &RealController<P>,
-        block: &Arc<SignedBeaconBlock<P>>,
-        parent: &Arc<SignedBeaconBlock<P>>,
+        block: &impl traits::SignedBeaconBlock<P>,
+        parent: &impl traits::SignedBeaconBlock<P>,
         storage_mode: StorageMode,
         validatable_columns: &HashSet<ColumnIndex>,
         validate_block_presence: bool,
@@ -451,7 +452,7 @@ impl<P: Preset> Batch<P> {
                         true,
                         &DataColumnSidecarOrigin::BackSync,
                         validate_block_presence,
-                        || Some((parent.clone_arc(), PayloadStatus::Optimistic)),
+                        || Some((parent.message().slot(), PayloadStatus::Optimistic)),
                         || Some(head_state.clone_arc()),
                     )
                 })?;
@@ -579,7 +580,7 @@ impl<P: Preset> Batch<P> {
                         config,
                         controller,
                         block,
-                        parent,
+                        *parent,
                         storage_mode,
                         &controller.sampling_columns(),
                         false,
@@ -591,7 +592,7 @@ impl<P: Preset> Batch<P> {
                         config,
                         controller,
                         block,
-                        parent,
+                        *parent,
                         storage_mode,
                     )?;
 
@@ -660,10 +661,13 @@ impl<P: Preset> Batch<P> {
             .collect::<HashSet<_>>();
 
         let mut blocks_with_roots = HashMap::new();
-        let mut earliest_block: Option<Arc<SignedBeaconBlock<P>>> = None;
+        let mut earliest_block: Option<StoredBlock<P>> = None;
 
         for root in block_roots {
-            if let Some(block) = controller.block_by_root(root)?.map(WithStatus::value) {
+            if let Some(block) = controller
+                .stored_block_by_root(root)?
+                .map(WithStatus::value)
+            {
                 blocks_with_roots.insert(root, block);
             }
         }
@@ -674,7 +678,7 @@ impl<P: Preset> Batch<P> {
             let parent = match blocks_with_roots.get(&parent_root) {
                 Some(parent) => parent,
                 None => &match controller
-                    .block_by_root(parent_root)?
+                    .stored_block_by_root(parent_root)?
                     .map(WithStatus::value)
                 {
                     Some(parent) => parent,
@@ -705,7 +709,7 @@ impl<P: Preset> Batch<P> {
                 .map(|block| block_slot < block.message().slot())
                 .unwrap_or(true)
             {
-                earliest_block = Some(block.clone_arc());
+                earliest_block = Some(block.clone());
             }
         }
 
@@ -714,7 +718,7 @@ impl<P: Preset> Batch<P> {
             loop {
                 let parent_root = earliest_block.message().parent_root();
 
-                if let Some(parent) = controller.block_by_root(parent_root)? {
+                if let Some(parent) = controller.stored_block_by_root(parent_root)? {
                     let parent = parent.value;
 
                     // TODO: (gloas): get `blob_kzg_commitments` from post-gloas payload envelope
@@ -731,7 +735,7 @@ impl<P: Preset> Batch<P> {
                 break;
             }
 
-            checkpoint = earliest_block.as_ref().into();
+            checkpoint = earliest_block.message().into();
         }
 
         debug_with_peers!("next batch checkpoint: {checkpoint:?}");
@@ -857,8 +861,12 @@ pub struct SyncCheckpoint {
 
 impl<P: Preset> From<&SignedBeaconBlock<P>> for SyncCheckpoint {
     fn from(block: &SignedBeaconBlock<P>) -> Self {
-        let message = block.message();
+        block.message().into()
+    }
+}
 
+impl<P: Preset> From<&dyn BeaconBlock<P>> for SyncCheckpoint {
+    fn from(message: &dyn BeaconBlock<P>) -> Self {
         Self {
             slot: message.slot(),
             block_root: message.hash_tree_root(),

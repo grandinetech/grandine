@@ -43,13 +43,17 @@ use types::{
         },
         primitives::{BlockAccessList, Transaction as GloasTransaction},
     },
-    nonstandard::{BlockOrDataColumnSidecar, KzgProofs, Phase, WithBlobsAndMev},
+    nonstandard::{
+        BlockOrDataColumnSidecar, ExecutionPayloadBody, KzgProofs, Phase, WithBlobsAndMev,
+    },
     phase0::primitives::{
         ExecutionAddress, ExecutionBlockHash, ExecutionBlockNumber, Gwei, H256, Slot, UnixSeconds,
         ValidatorIndex,
     },
     preset::Preset,
 };
+
+pub const MAX_PAYLOAD_BODIES_PER_REQUEST: usize = 32;
 
 const SUPPORTED_REQUEST_TYPES: &[&str; 5] = &[
     RequestType::Deposits.request_type(),
@@ -586,6 +590,62 @@ impl<P: Preset> From<ExecutionPayloadV4<P>> for GloasExecutionPayload<P> {
             excess_blob_gas,
             block_access_list,
             slot_number,
+        }
+    }
+}
+
+/// [`ExecutionPayloadBodyV1`](https://github.com/ethereum/execution-apis/blob/00ca4be81bc58328d49b85e01108bddfff034faa/src/engine/shanghai.md#executionpayloadbodyv1)
+#[derive(Clone, Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct ExecutionPayloadBodyV1<P: Preset> {
+    pub transactions: Arc<ContiguousList<Transaction<P>, P::MaxTransactionsPerPayload>>,
+    pub withdrawals: Option<ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>>,
+}
+
+/// [`ExecutionPayloadBodyV2`](https://github.com/ethereum/execution-apis/blob/5aebdfdd45cadeb723be4bd45b4611b71c8b1c85/src/engine/amsterdam.md#executionpayloadbodyv2)
+#[derive(Clone, Deserialize)]
+#[serde(bound = "", rename_all = "camelCase")]
+pub struct ExecutionPayloadBodyV2<P: Preset> {
+    pub transactions: Arc<ContiguousList<GloasTransaction<P>, P::MaxTransactionsPerPayload>>,
+    pub withdrawals: Option<ContiguousList<WithdrawalV1, P::MaxWithdrawalsPerPayload>>,
+    pub block_access_list: Option<Arc<BlockAccessList<P>>>,
+}
+
+impl<P: Preset> From<ExecutionPayloadBodyV1<P>> for ExecutionPayloadBody<P> {
+    fn from(body: ExecutionPayloadBodyV1<P>) -> Self {
+        let ExecutionPayloadBodyV1 {
+            transactions,
+            withdrawals,
+        } = body;
+
+        let transactions = Arc::unwrap_or_clone(transactions).map(Into::into).into();
+        let withdrawals =
+            withdrawals.map(|withdrawals| ProgressiveList::from(withdrawals.map(Into::into)));
+
+        Self {
+            transactions: Arc::new(transactions),
+            withdrawals,
+            block_access_list: None,
+        }
+    }
+}
+
+impl<P: Preset> From<ExecutionPayloadBodyV2<P>> for ExecutionPayloadBody<P> {
+    fn from(body: ExecutionPayloadBodyV2<P>) -> Self {
+        let ExecutionPayloadBodyV2 {
+            transactions,
+            withdrawals,
+            block_access_list,
+        } = body;
+
+        let transactions = Arc::unwrap_or_clone(transactions).into();
+        let withdrawals =
+            withdrawals.map(|withdrawals| ProgressiveList::from(withdrawals.map(Into::into)));
+
+        Self {
+            transactions: Arc::new(transactions),
+            withdrawals,
+            block_access_list,
         }
     }
 }

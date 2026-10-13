@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
+bls = { workspace = true }
 cached = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
@@ -40,6 +41,7 @@ scc = { workspace = true }
 serde = { workspace = true }
 serde_utils = { workspace = true }
 serde_with = { workspace = true }
+snap = { workspace = true }
 spec_test_utils = { workspace = true }
 ssz = { workspace = true }
 state_cache = { workspace = true }
@@ -53,6 +55,7 @@ transition_functions = { workspace = true }
 tynm = { workspace = true }
 typenum = { workspace = true }
 types = { workspace = true }
+zstd = { workspace = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }

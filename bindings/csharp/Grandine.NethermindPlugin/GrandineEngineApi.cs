@@ -497,6 +497,70 @@ public class GrandineEngineApi : IGrandineEngineApi
         }
     }
 
+    public unsafe CResult_CVec_COption_CExecutionPayloadBodyV1 EngineGetPayloadBodiesByHashV1(CVec_CH256* blockHashesPtr)
+    {
+        this.logger.Debug("Received engine_getPayloadBodiesByHashV1 request from grandine");
+
+        try
+        {
+            var bodies = this.engineRpc.engine_getPayloadBodiesByHashV1(GrandineUtils.ConvertHashes(*blockHashesPtr));
+
+            if (bodies.Result != Result.Success)
+            {
+                return CResult_CVec_COption_CExecutionPayloadBodyV1.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, bodies.Result.Error);
+            }
+
+            var bodyArray = new CVec_COption_CExecutionPayloadBodyV1(bodies.Data.Select(body =>
+            {
+                if (body == null)
+                {
+                    return COption_CExecutionPayloadBodyV1.None;
+                }
+
+                return COption_CExecutionPayloadBodyV1.Some(new CExecutionPayloadBodyV1(body));
+            }));
+
+            return CResult_CVec_COption_CExecutionPayloadBodyV1.Success(bodyArray);
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_getPayloadBodiesByHashV1 function invocation", e);
+            return CResult_CVec_COption_CExecutionPayloadBodyV1.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
+    public unsafe CResult_CVec_COption_CExecutionPayloadBodyV2 EngineGetPayloadBodiesByHashV2(CVec_CH256* blockHashesPtr)
+    {
+        this.logger.Debug("Received engine_getPayloadBodiesByHashV2 request from grandine");
+
+        try
+        {
+            var bodies = this.engineRpc.engine_getPayloadBodiesByHashV2(GrandineUtils.ConvertHashes(*blockHashesPtr)).Result;
+
+            if (bodies.Result != Result.Success)
+            {
+                return CResult_CVec_COption_CExecutionPayloadBodyV2.Fail(NativeMethods.GRANDINE_ERROR_ENGINE_API, bodies.Result.Error);
+            }
+
+            var bodyArray = new CVec_COption_CExecutionPayloadBodyV2(bodies.Data.Select(body =>
+            {
+                if (body == null)
+                {
+                    return COption_CExecutionPayloadBodyV2.None;
+                }
+
+                return COption_CExecutionPayloadBodyV2.Some(new CExecutionPayloadBodyV2(body));
+            }));
+
+            return CResult_CVec_COption_CExecutionPayloadBodyV2.Success(bodyArray);
+        }
+        catch (Exception e)
+        {
+            this.logger.Error("Unexpected exception occurred during engine_getPayloadBodiesByHashV2 function invocation", e);
+            return CResult_CVec_COption_CExecutionPayloadBodyV2.Fail(NativeMethods.GRANDINE_ERROR_GENERIC, e.Message);
+        }
+    }
+
     public unsafe CResult_CVec_COption_CBlobAndProofV1 EngineGetBlobsV1(CVec_CH256* versionedHashesPtr)
     {
         this.logger.Debug("Received engine_getBlobsV1 request from grandine");

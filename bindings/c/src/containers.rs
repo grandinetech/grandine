@@ -5,10 +5,10 @@ use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, BlobAndProofV2, BlobsBundleV1, BlobsBundleV2, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadAttributesV4, PayloadStatusV1, PayloadValidationStatus,
-    RawExecutionRequests, RequestType, WithdrawalV1,
+    EngineGetPayloadV6Response, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
+    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4,
+    PayloadStatusV1, PayloadValidationStatus, RawExecutionRequests, RequestType, WithdrawalV1,
 };
 use generic_array::ArrayLength;
 use ssz::{ByteVector, ContiguousList, ContiguousVector, SszReadDefault, SszWrite};
@@ -790,6 +790,71 @@ impl TryInto<BlobAndProofV2<Mainnet>> for CBlobAndProofV2 {
         Ok(BlobAndProofV2 {
             blob: self.blob.try_into()?,
             proofs: ContiguousVector::try_from_iter(self.proof.into_iter().map(Into::into))?,
+        })
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CExecutionPayloadBodyV1 {
+    transactions: CVec<CTransaction>,
+    withdrawals: COption<CVec<CWithdrawalV1>>,
+}
+
+impl TryInto<ExecutionPayloadBodyV1<Mainnet>> for CExecutionPayloadBodyV1 {
+    type Error = ssz::ReadError;
+
+    fn try_into(self) -> Result<ExecutionPayloadBodyV1<Mainnet>, Self::Error> {
+        let transactions = self
+            .transactions
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let withdrawals: Option<CVec<CWithdrawalV1>> = self.withdrawals.into();
+
+        Ok(ExecutionPayloadBodyV1 {
+            transactions: Arc::new(ContiguousList::try_from(transactions)?),
+            withdrawals: withdrawals
+                .map(|withdrawals| {
+                    ContiguousList::try_from_iter(withdrawals.into_iter().map(Into::into))
+                })
+                .transpose()?,
+        })
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct CExecutionPayloadBodyV2 {
+    transactions: CVec<CTransaction>,
+    withdrawals: COption<CVec<CWithdrawalV1>>,
+    block_access_list: COption<CVec<u8>>,
+}
+
+impl TryInto<ExecutionPayloadBodyV2<Mainnet>> for CExecutionPayloadBodyV2 {
+    type Error = ssz::ReadError;
+
+    fn try_into(self) -> Result<ExecutionPayloadBodyV2<Mainnet>, Self::Error> {
+        let transactions = self
+            .transactions
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let withdrawals: Option<CVec<CWithdrawalV1>> = self.withdrawals.into();
+        let block_access_list: Option<CVec<u8>> = self.block_access_list.into();
+
+        Ok(ExecutionPayloadBodyV2 {
+            transactions: Arc::new(ContiguousList::try_from(transactions)?),
+            withdrawals: withdrawals
+                .map(|withdrawals| {
+                    ContiguousList::try_from_iter(withdrawals.into_iter().map(Into::into))
+                })
+                .transpose()?,
+            block_access_list: block_access_list
+                .map(|block_access_list| block_access_list.try_into().map(Arc::new))
+                .transpose()?,
         })
     }
 }

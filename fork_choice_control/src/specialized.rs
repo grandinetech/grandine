@@ -24,7 +24,7 @@ use crate::{
     controller::{Controller, MutatorHandle},
     events::EventChannels,
     messages::{AttestationVerifierMessage, P2pMessage},
-    storage::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, Storage},
+    storage::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, Storage},
     unbounded_sink::UnboundedSink,
 };
 
@@ -118,6 +118,8 @@ where
             StorageMode::Standard {
                 custom_data_availability_window: None,
             },
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
         ));
 
         let event_channels = Arc::new(EventChannels::default());

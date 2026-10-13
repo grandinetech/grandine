@@ -1107,6 +1107,10 @@ where
         &self.storage
     }
 
+    pub(crate) const fn execution_engine(&self) -> &E {
+        &self.execution_engine
+    }
+
     pub(crate) const fn wait_group(&self) -> &W::Swappable {
         &self.wait_group
     }

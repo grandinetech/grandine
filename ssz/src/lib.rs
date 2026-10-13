@@ -59,6 +59,7 @@ mod iter;
 mod list;
 mod merkle_tree;
 mod negative;
+mod option;
 mod persistent_list;
 mod persistent_progressive_list;
 mod persistent_vector;

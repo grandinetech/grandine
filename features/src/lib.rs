@@ -52,7 +52,7 @@ pub enum Feature {
     LogHttpRequests,
     PatchHttpContentType,
     PrometheusMetrics,
-    PublishAttestationsEarly,
+    PublishAttestationsEarly, // deprecated
     PublishSyncCommitteeMessagesEarly,
     ServeCostlyEndpoints,
     ServeLeakyEndpoints,

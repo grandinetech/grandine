@@ -90,7 +90,7 @@ impl<P: Preset> SlotHead<P> {
         }
 
         controller
-            .block_by_root(self.beacon_block_root)?
+            .stored_block_by_root(self.beacon_block_root)?
             .is_none_or(|block| block.status.is_optimistic())
             .pipe(Ok)
     }

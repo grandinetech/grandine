@@ -16,8 +16,8 @@ use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use smallvec::SmallVec;
 use ssz::{
-    ContiguousList, H256, IndexError, ReadError, Size, SszList, SszRead, SszSize, SszWrite,
-    WriteError, read_list, write_list,
+    ContiguousList, H256, IndexError, ProgressiveList, ReadError, Size, Ssz, SszList, SszRead,
+    SszSize, SszWrite, WriteError, read_list, write_list,
 };
 use static_assertions::assert_eq_size;
 use std_ext::CopyExt as _;
@@ -30,6 +30,7 @@ use crate::{
         primitives::ParticipationFlags,
     },
     bellatrix::{containers::PowBlock, primitives::Wei},
+    capella::containers::Withdrawal,
     combined::{Attestation, BeaconState, DataColumnSidecar, ExecutionRequests, SignedBeaconBlock},
     config::Config,
     deneb::{
@@ -37,6 +38,7 @@ use crate::{
         primitives::{Blob, KzgCommitment, KzgProof},
     },
     fulu::containers::DataColumnIdentifier,
+    gloas::primitives::{BlockAccessList, Transaction as GloasTransaction},
     phase0::{
         containers::{SignedBeaconBlockHeader, Validator},
         primitives::{Epoch, Gwei, Slot, Uint256, UnixSeconds, ValidatorIndex},
@@ -552,6 +554,14 @@ impl<T, P: Preset> WithBlobsAndMev<T, P> {
             execution_requests,
         }
     }
+}
+
+#[derive(Clone, Default, Ssz)]
+#[ssz(derive_hash = false)]
+pub struct ExecutionPayloadBody<P: Preset> {
+    pub transactions: Arc<ProgressiveList<GloasTransaction<P>>>,
+    pub withdrawals: Option<ProgressiveList<Withdrawal>>,
+    pub block_access_list: Option<Arc<BlockAccessList<P>>>,
 }
 
 pub struct WithStatus<T> {

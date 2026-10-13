@@ -38,6 +38,12 @@ impl<N> ProgressiveByteList<N> {
     }
 }
 
+impl<N> From<ProgressiveByteList<N>> for ByteList<N> {
+    fn from(list: ProgressiveByteList<N>) -> Self {
+        list.0
+    }
+}
+
 impl<N: Unsigned> TryFrom<Vec<u8>> for ProgressiveByteList<N> {
     type Error = ReadError;
 

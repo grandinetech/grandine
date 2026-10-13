@@ -13,7 +13,7 @@ use tokio::runtime::{Builder, Handle};
 use types::{
     combined::{ExecutionPayload, ExecutionPayloadParams},
     config::Config,
-    nonstandard::{Phase, TimedPowBlock, WithBlobsAndMev},
+    nonstandard::{ExecutionPayloadBody, Phase, TimedPowBlock, WithBlobsAndMev},
     phase0::primitives::{ExecutionBlockHash, H256},
     preset::Preset,
 };
@@ -41,6 +41,18 @@ impl<P: Preset> ExecutionEngine<P> for Eth1ExecutionEngine<P> {
 
     fn get_blobs(&self, params: EngineGetBlobsParams<P>) {
         ExecutionServiceMessage::GetBlobs(params).send(&self.execution_service_tx);
+    }
+
+    fn get_payload_bodies_by_hash(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+        sender: Sender<Result<Vec<Option<ExecutionPayloadBody<P>>>>>,
+    ) {
+        ExecutionServiceMessage::GetPayloadBodiesByHash {
+            block_hashes,
+            sender,
+        }
+        .send(&self.execution_service_tx);
     }
 
     fn notify_forkchoice_updated(

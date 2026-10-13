@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use genesis::AnchorCheckpointProvider;
 use logging::info_with_peers;
 use pubkey_cache::PubkeyCache;
@@ -13,10 +13,15 @@ use types::{
     traits::BeaconState as _,
 };
 
-use crate::Storage;
+use crate::{Storage, storage::StoredBlock};
 
 #[derive(Debug, Error)]
 enum Error {
+    #[error(
+        "block at slot {slot} is stored blinded and cannot be exported; \
+         blocks are stored with payloads only when --store-payloads is specified"
+    )]
+    BlindedBlock { slot: Slot },
     #[error("state file is missing for slot: {slot}")]
     StateFileMissing { slot: Slot },
 }
@@ -37,13 +42,24 @@ pub fn export_state_and_blocks<P: Preset>(
                     anchor_checkpoint_provider.clone().checkpoint().value.state;
 
                 for current_slot in temporary_state.slot().saturating_add(1)..=state_slot {
-                    if let Some((block, _)) = storage.finalized_block_by_slot(current_slot)? {
-                        combined::untrusted_state_transition(
-                            storage.config(),
-                            pubkey_cache,
-                            temporary_state.make_mut(),
-                            &block,
-                        )?;
+                    match storage.finalized_block_by_slot(current_slot)? {
+                        Some((StoredBlock::Full(block), _)) => {
+                            combined::untrusted_state_transition(
+                                storage.config(),
+                                pubkey_cache,
+                                temporary_state.make_mut(),
+                                &block,
+                            )?;
+                        }
+                        Some((StoredBlock::Blinded(block), _)) => {
+                            combined::untrusted_blinded_state_transition(
+                                storage.config(),
+                                pubkey_cache,
+                                temporary_state.make_mut(),
+                                &block,
+                            )?;
+                        }
+                        None => {}
                     }
                 }
 
@@ -77,6 +93,10 @@ pub fn export_state_and_blocks<P: Preset>(
 
     for current_slot in from_slot..=to_slot {
         if let Some((block, block_root)) = storage.finalized_block_by_slot(current_slot)? {
+            let StoredBlock::Full(block) = block else {
+                bail!(Error::BlindedBlock { slot: current_slot });
+            };
+
             let block_file_name =
                 format!("beacon_block_slot_{current_slot:06}_root_{block_root:?}.ssz");
 

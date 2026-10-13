@@ -13,7 +13,7 @@ use eth1_api::{ApiController, Eth1Api, Eth1ExecutionEngine};
 use eth2_libp2p::{GossipId, NetworkConfig};
 use features::Feature;
 use fork_choice_control::{
-    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, EventChannels, P2pMessage, Storage,
+    Controller, DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, EventChannels, P2pMessage, Storage,
     controller::MutatorHandle,
 };
 use fork_choice_store::StoreConfig;
@@ -120,6 +120,8 @@ impl<P: Preset> Context<P> {
             Database::in_memory(),
             DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
             StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
         ));
 
         let event_channels = Arc::new(EventChannels::default());
@@ -270,6 +272,7 @@ impl<P: Preset> Context<P> {
             network_config.network_dir.as_deref(),
             dedicated_executor.clone_arc(),
             dedicated_executor.clone_arc(),
+            None,
         );
 
         // Spawn the validator so it processes incoming gossip messages and sends responses

@@ -10,16 +10,18 @@ use eth1_api::ClientVersionV1;
 use execution_engine::{
     BlobAndProofV1, EngineGetPayloadV1Response, EngineGetPayloadV2Response,
     EngineGetPayloadV3Response, EngineGetPayloadV4Response, EngineGetPayloadV5Response,
-    EngineGetPayloadV6Response, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkChoiceStateV1, PayloadAttributesV1, PayloadAttributesV2,
-    PayloadAttributesV3, PayloadAttributesV4, PayloadStatusV1,
+    EngineGetPayloadV6Response, ExecutionPayloadBodyV1, ExecutionPayloadBodyV2, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, ExecutionPayloadV4, ForkChoiceStateV1,
+    PayloadAttributesV1, PayloadAttributesV2, PayloadAttributesV3, PayloadAttributesV4,
+    PayloadStatusV1,
 };
 use runtime::{grandine_args::GrandineArgs, run, shutdown};
 use tracing::error;
 use types::{
     electra::containers::ExecutionRequests as ElectraExecutionRequests,
     gloas::containers::ExecutionRequests as GloasExecutionRequests,
-    phase0::primitives::ExecutionBlockNumber, preset::Mainnet,
+    phase0::primitives::{ExecutionBlockHash, ExecutionBlockNumber},
+    preset::Mainnet,
 };
 use web3::types::{BlockNumber, H64, H256};
 
@@ -28,10 +30,10 @@ use crate::{
     containers::{
         CBlobAndProofV1, CBlobAndProofV2, CClientVersionV1, CEngineGetPayloadV2Response,
         CEngineGetPayloadV3Response, CEngineGetPayloadV4Response, CEngineGetPayloadV5Response,
-        CEngineGetPayloadV6Response, CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3,
-        CExecutionPayloadV4, CExecutionRequests, CForkChoiceStateV1, CForkChoiceUpdatedResponse,
-        CPayloadAttributesV1, CPayloadAttributesV2, CPayloadAttributesV3, CPayloadAttributesV4,
-        CPayloadStatusV1,
+        CEngineGetPayloadV6Response, CExecutionPayloadBodyV1, CExecutionPayloadBodyV2,
+        CExecutionPayloadV1, CExecutionPayloadV2, CExecutionPayloadV3, CExecutionPayloadV4,
+        CExecutionRequests, CForkChoiceStateV1, CForkChoiceUpdatedResponse, CPayloadAttributesV1,
+        CPayloadAttributesV2, CPayloadAttributesV3, CPayloadAttributesV4, CPayloadStatusV1,
     },
     generic::{CGrandineString, COption, CResult, CVec, GRANDINE_ERROR_GENERIC},
     layout::CLayout,
@@ -92,6 +94,14 @@ pub struct CEmbedAdapter {
         unsafe extern "C" fn(payload_id: CH64) -> CResult<CEngineGetPayloadV5Response>,
     engine_get_payload_v6:
         unsafe extern "C" fn(payload_id: CH64) -> CResult<CEngineGetPayloadV6Response>,
+    engine_get_payload_bodies_by_hash_v1:
+        unsafe extern "C" fn(
+            block_hashes: *const CVec<CH256>,
+        ) -> CResult<CVec<COption<CExecutionPayloadBodyV1>>>,
+    engine_get_payload_bodies_by_hash_v2:
+        unsafe extern "C" fn(
+            block_hashes: *const CVec<CH256>,
+        ) -> CResult<CVec<COption<CExecutionPayloadBodyV2>>>,
     engine_get_blobs_v1: unsafe extern "C" fn(
         versioned_hashes: *const CVec<CH256>,
     ) -> CResult<CVec<COption<CBlobAndProofV1>>>,
@@ -316,6 +326,52 @@ impl eth1_api::EmbedAdapter for CEmbedAdapter {
     ) -> Result<EngineGetPayloadV6Response<Mainnet>> {
         let result = unsafe { (self.engine_get_payload_v6)(payload_id.into()) };
         Result::<_>::from(result).and_then(|v| Ok(v.try_into()?))
+    }
+
+    fn engine_get_payload_bodies_by_hash_v1(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Result<Vec<Option<ExecutionPayloadBodyV1<Mainnet>>>> {
+        let block_hashes = block_hashes
+            .into_iter()
+            .map(Into::into)
+            .collect::<CVec<_>>();
+
+        let result = unsafe { (self.engine_get_payload_bodies_by_hash_v1)(&block_hashes) };
+
+        Result::<_>::from(result).and_then(|bodies| {
+            bodies
+                .into_iter()
+                .map(|body| {
+                    let body: Option<CExecutionPayloadBodyV1> = body.into();
+
+                    body.map(TryInto::try_into).transpose().map_err(Into::into)
+                })
+                .collect()
+        })
+    }
+
+    fn engine_get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<ExecutionBlockHash>,
+    ) -> Result<Vec<Option<ExecutionPayloadBodyV2<Mainnet>>>> {
+        let block_hashes = block_hashes
+            .into_iter()
+            .map(Into::into)
+            .collect::<CVec<_>>();
+
+        let result = unsafe { (self.engine_get_payload_bodies_by_hash_v2)(&block_hashes) };
+
+        Result::<_>::from(result).and_then(|bodies| {
+            bodies
+                .into_iter()
+                .map(|body| {
+                    let body: Option<CExecutionPayloadBodyV2> = body.into();
+
+                    body.map(TryInto::try_into).transpose().map_err(Into::into)
+                })
+                .collect()
+        })
     }
 
     fn engine_get_blobs_v1(
