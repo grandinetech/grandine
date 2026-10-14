@@ -436,7 +436,11 @@ mod tests {
         );
 
         // Asked after the last delivery, the answer stands, even for an earlier slot.
-        assert!(chain_head.update_seen_at(Instant::now(), 5, H256::repeat_byte(3)));
+        let asked_after = Instant::now()
+            .checked_add(Duration::from_millis(1))
+            .expect("an instant a millisecond away is representable");
+
+        assert!(chain_head.update_seen_at(asked_after, 5, H256::repeat_byte(3)));
         assert_eq!(
             chain_head.get(6, MAX_EMPTY_SLOTS)?,
             Some(H256::repeat_byte(3))
@@ -467,18 +471,29 @@ mod tests {
     #[test]
     fn a_polled_head_on_another_block_drops_the_streamed_dependent_roots() {
         let chain_head = ChainHead::new();
+
         chain_head.record_dependent_roots(DependentRoots {
             epoch: 5,
             current: H256::repeat_byte(1),
             next: H256::repeat_byte(2),
         });
+
         chain_head.update(40, H256::repeat_byte(3));
 
+        // Polls are stamped later than the delivery, which a coarse clock could otherwise tie.
+        let first_poll = Instant::now()
+            .checked_add(Duration::from_millis(1))
+            .expect("an instant a millisecond away is representable");
+
+        let second_poll = first_poll
+            .checked_add(Duration::from_millis(1))
+            .expect("an instant a millisecond away is representable");
+
         // Polled on the same block, the roots still hold.
-        assert!(chain_head.update_seen_at(Instant::now(), 40, H256::repeat_byte(3)));
+        assert!(chain_head.update_seen_at(first_poll, 40, H256::repeat_byte(3)));
         assert_eq!(chain_head.dependent_root_for(5), Some(H256::repeat_byte(1)));
 
-        assert!(chain_head.update_seen_at(Instant::now(), 41, H256::repeat_byte(4)));
+        assert!(chain_head.update_seen_at(second_poll, 41, H256::repeat_byte(4)));
         assert_eq!(chain_head.dependent_root_for(5), None);
     }
 
