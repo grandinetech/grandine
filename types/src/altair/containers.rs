@@ -72,7 +72,7 @@ pub struct LightClientFinalityUpdate<P: Preset> {
     pub signature_slot: Slot,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz, Default)]
 #[serde(deny_unknown_fields)]
 pub struct LightClientHeader {
     pub beacon: BeaconBlockHeader,
@@ -87,7 +87,7 @@ pub struct LightClientOptimisticUpdate<P: Preset> {
     pub signature_slot: Slot,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, PartialEq, Eq, Debug, Deserialize, Serialize, Ssz, Default)]
 #[serde(bound = "", deny_unknown_fields)]
 pub struct LightClientUpdate<P: Preset> {
     pub attested_header: LightClientHeader,
