@@ -6,6 +6,7 @@ use core::time::Duration;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
+    time::SystemTime,
 };
 
 use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
@@ -25,6 +26,7 @@ use block_producer::{
 };
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
+use clock::Tick;
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
@@ -2875,12 +2877,13 @@ pub async fn node_health(State(is_synced): State<Arc<SyncedStatus>>) -> StatusCo
     name = "http_api::validator_attester_duties"
 )]
 pub async fn validator_attester_duties<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorAttesterDutyResponse>>, Error> {
-    let current_epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+    let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
 
     if epoch > current_epoch.saturating_add(1) {
         return Err(Error::InvalidEpoch(anyhow!(
@@ -2932,14 +2935,34 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
         .execution_optimistic(status.is_optimistic()))
 }
 
+fn current_epoch_with_clock_disparity<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    chain_config: &ChainConfig,
+) -> Result<Epoch> {
+    // Fork choice enters a slot only once it handles the slot's tick, which a request sent at
+    // the epoch boundary can beat by a few milliseconds.
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+    let time = now.saturating_add(chain_config.maximum_gossip_clock_disparity);
+    let tick = Tick::at_time_in_ms::<P>(
+        chain_config,
+        u64::try_from(time.as_millis())?,
+        controller.genesis_time(),
+    )?;
+
+    Ok(tick
+        .epoch::<P>()
+        .max(misc::compute_epoch_at_slot::<P>(controller.slot())))
+}
+
 /// `POST /eth/v1/validator/duties/ptc/{epoch}`
 pub async fn validator_ptc_duties<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorPTCDutyResponse>>, Error> {
-    let current_epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+    let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
 
     if epoch > current_epoch.saturating_add(1) {
         return Err(Error::InvalidEpoch(anyhow!(
@@ -3138,7 +3161,10 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     ) = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
         (head_state, committee)
     } else {
-        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+        // A committee is known a period ahead, so the state at the current epoch serves the next
+        // period even while fork choice is still finishing the previous one.
+        let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
+        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
 
         let state = state_id::state(
             &StateId::Slot(start_slot),
