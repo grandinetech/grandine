@@ -318,7 +318,7 @@ impl FullConfig {
                 deprecated,
                 reason = "min_epochs_for_block_requests was removed from consensus specs v1.7.0-alpha.3"
             )]
-            min_epochs_for_block_requests: config.min_epochs_for_block_requests(),
+            min_epochs_for_block_requests: config.min_epochs_for_block_requests(Phase::Phase0),
 
             #[expect(
                 deprecated,

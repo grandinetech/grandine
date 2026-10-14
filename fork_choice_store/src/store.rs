@@ -6798,9 +6798,11 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     pub fn min_checked_block_availability_epoch(&self) -> Epoch {
-        self.tick
-            .epoch::<P>()
-            .checked_sub(self.chain_config.min_epochs_for_block_requests())
+        let current_epoch = self.tick.epoch::<P>();
+        let phase = self.chain_config.phase_at_epoch(current_epoch);
+
+        current_epoch
+            .checked_sub(self.chain_config.min_epochs_for_block_requests(phase))
             .unwrap_or(GENESIS_EPOCH)
     }
 
