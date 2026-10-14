@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::assertions_on_result_states)]
+use arithmetic::NonZeroExt as _;
 use core::{
     cmp::Ordering,
     convert::AsRef,
@@ -7,10 +8,6 @@ use core::{
     iter::{Flatten, FusedIterator},
     marker::PhantomData,
 };
-use std::sync::Arc;
-
-use arithmetic::NonZeroExt as _;
-use bit_field::BitField as _;
 use derivative::Derivative;
 use ethereum_types::H256;
 use serde::{
@@ -18,6 +15,7 @@ use serde::{
     de::{Error as _, SeqAccess, Visitor},
 };
 use std_ext::ArcExt as _;
+use triomphe::Arc;
 use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
@@ -26,15 +24,17 @@ use crate::{
     SszHash, SszList, SszListMut, SszRead, SszSize, SszWrite, WriteError,
     iter::ExactSize,
     merkle_tree,
-    persistent_list::{Leaves, LeavesMut, Node as MerkleTreeNode, PersistentList},
+    persistent_list::{
+        Leaves as MerkleTreeLeaves, LeavesMut as MerkleTreeLeavesMut, Node as MerkleTreeNode,
+        PersistentList,
+    },
     shared,
 };
 
 type PrettyBigU = typenum::U4294967296;
 
-// Unlike `PersistentList`, this does not support bundle sizes other than the minimum.
-// EIP-7916 partitions the chunk sequence at absolute positions (1, 4, 16, ... chunks),
-// so a bundle spanning more than one chunk would straddle a subtree boundary.
+type Height = u8;
+
 #[derive(Derivative)]
 #[derivative(
     Clone(bound = "T: Clone"),
@@ -42,12 +42,12 @@ type PrettyBigU = typenum::U4294967296;
     Eq(bound = "T: Eq"),
     Default(bound = "")
 )]
-pub struct PersistentProgressiveList<T: SszHash> {
-    root: Option<Arc<Hc<Node<T, MinimumBundleSize<T>>>>>,
+pub struct PersistentProgressiveList<T: SszHash, B = MinimumBundleSize<T>> {
+    root: Option<Arc<Hc<Node<T, B>>>>,
     length: usize,
 }
 
-impl<T: SszHash> PersistentProgressiveList<T> {
+impl<T: SszHash, B> PersistentProgressiveList<T, B> {
     const fn validate_length(actual: usize) -> Result<(), ReadError> {
         let maximum = shared::saturating_usize::<PrettyBigU>();
 
@@ -59,28 +59,27 @@ impl<T: SszHash> PersistentProgressiveList<T> {
     }
 }
 
-impl<T> TryFromIterator<T> for PersistentProgressiveList<T>
+impl<T, B> TryFromIterator<T> for PersistentProgressiveList<T, B>
 where
     T: SszHash,
+    B: BundleSize<T>,
     MinimumBundleSize<T>: BundleSize<T>,
 {
     type Error = ReadError;
 
     // Like `PersistentList::try_from_iter`, this does not deduplicate consecutive nodes.
-    // Unlike it, this builds each subtree in a single pass by merging equal-height nodes,
-    // which avoids collecting all nodes of a level into a `Vec` before pairing them up.
     fn try_from_iter(elements: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
         let mut elements = elements.into_iter();
         let mut subtrees_with_heights = vec![];
         let mut length: usize = 0;
-        let mut height: u8 = 0;
+        let mut height: Height = 0;
 
         loop {
             let capacity = MinimumBundleSize::<T>::USIZE
                 .checked_shl(height.into())
                 .unwrap_or(usize::MAX);
 
-            let Some((subtree, count)) = build_subtree(&mut elements, capacity) else {
+            let Some((subtree, count)) = Subtree::build(&mut elements, capacity, height) else {
                 break;
             };
 
@@ -99,11 +98,11 @@ where
         let mut root = None;
 
         for (left, height) in subtrees_with_heights.into_iter().rev() {
-            root = Some(Arc::new(Hc::new(Node {
+            root = Some(Hc::arc(Node {
                 left,
                 right: root,
                 height,
-            })));
+            }));
         }
 
         Ok(Self { root, length })
@@ -112,97 +111,192 @@ where
 
 // The trees have different shapes (and possibly different bundle sizes),
 // so no structural sharing is possible and the elements have to be cloned.
-impl<T, N, B> From<&PersistentList<T, N, B>> for PersistentProgressiveList<T>
+impl<T, N, B, B2> From<&PersistentList<T, N, B2>> for PersistentProgressiveList<T, B>
 where
     T: SszHash + Clone,
     N: Unsigned,
     B: BundleSize<T>,
+    B2: BundleSize<T>,
     MinimumBundleSize<T>: BundleSize<T>,
 {
-    fn from(list: &PersistentList<T, N, B>) -> Self {
+    fn from(list: &PersistentList<T, N, B2>) -> Self {
         Self::try_from_iter(list.into_iter().cloned())
             .expect("both lists have the same maximum length")
     }
 }
 
-impl<T, N, B> From<PersistentList<T, N, B>> for PersistentProgressiveList<T>
+impl<T, N, B, B2> From<PersistentList<T, N, B2>> for PersistentProgressiveList<T, B>
 where
     T: SszHash + Clone,
     N: Unsigned,
     B: BundleSize<T>,
+    B2: BundleSize<T>,
     MinimumBundleSize<T>: BundleSize<T>,
 {
-    fn from(list: PersistentList<T, N, B>) -> Self {
+    fn from(list: PersistentList<T, N, B2>) -> Self {
         Self::from(&list)
     }
 }
 
-// Build a left-aligned subtree holding up to `capacity` elements taken from `elements`.
-// Nodes of equal height are merged eagerly, like carries in a binary counter,
-// so the stack never holds more than one node per height.
-fn build_subtree<T, B: BundleSize<T>>(
-    elements: &mut impl Iterator<Item = T>,
-    capacity: usize,
-) -> Option<(Arc<Hc<MerkleTreeNode<T, B>>>, usize)> {
-    let mut stack: Vec<(MerkleTreeNode<T, B>, u8)> = vec![];
-    let mut count: usize = 0;
-
-    while count < capacity {
-        let bundle: Box<[T]> = elements.by_ref().take(B::USIZE).collect();
-
-        if bundle.is_empty() {
-            break;
-        }
-
-        let exhausted = bundle.len() < B::USIZE;
-
-        count = count.saturating_add(bundle.len());
-
-        let mut node = MerkleTreeNode::leaf(bundle);
-        let mut node_height: u8 = 0;
-
-        while stack
-            .last()
-            .is_some_and(|(_, top_height)| *top_height == node_height)
-        {
-            let (left, left_height) = stack.pop().expect("stack is not empty");
-
-            node = MerkleTreeNode::Internal {
-                left: Hc::arc(left),
-                right: Hc::arc(node),
-                left_height,
-                right_height: node_height,
-            };
-
-            node_height = left_height.saturating_add(1);
-        }
-
-        stack.push((node, node_height));
-
-        if exhausted {
-            break;
-        }
-    }
-
-    let (mut node, mut node_height) = stack.pop()?;
-
-    while let Some((left, left_height)) = stack.pop() {
-        node = MerkleTreeNode::Internal {
-            left: Hc::arc(left),
-            right: Hc::arc(node),
-            left_height,
-            right_height: node_height,
-        };
-
-        node_height = left_height.saturating_add(1);
-    }
-
-    Some((Arc::new(Hc::new(node)), count))
+#[derive(Derivative)]
+#[derivative(
+    Clone(bound = "T: Clone"),
+    PartialEq(bound = "T: PartialEq"),
+    Eq(bound = "T: Eq")
+)]
+enum Subtree<T: SszHash, B> {
+    Narrow(Arc<Hc<MerkleTreeNode<T, MinimumBundleSize<T>>>>),
+    Wide(Arc<Hc<MerkleTreeNode<T, B>>>),
 }
 
-impl<T> SszList<T> for PersistentProgressiveList<T>
+impl<T, B> Subtree<T, B>
+where
+    T: SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
+    fn shift() -> Height {
+        B::ilog2().saturating_sub(MinimumBundleSize::<T>::ilog2())
+    }
+
+    fn is_wide(height: Height) -> bool {
+        height >= Self::shift()
+    }
+
+    fn build(
+        elements: &mut impl Iterator<Item = T>,
+        capacity: usize,
+        height: Height,
+    ) -> Option<(Self, usize)> {
+        if Self::is_wide(height) {
+            MerkleTreeNode::build(elements, capacity).map(|(node, count)| (Self::Wide(node), count))
+        } else {
+            MerkleTreeNode::build(elements, capacity)
+                .map(|(node, count)| (Self::Narrow(node), count))
+        }
+    }
+
+    fn single(element: T, height: Height) -> Self {
+        if Self::is_wide(height) {
+            Self::Wide(Hc::arc(MerkleTreeNode::leaf([element])))
+        } else {
+            Self::Narrow(Hc::arc(MerkleTreeNode::leaf([element])))
+        }
+    }
+
+    fn get(&self, index: usize) -> &T {
+        match self {
+            Self::Narrow(node) => node.as_ref().as_ref().get(index),
+            Self::Wide(node) => node.as_ref().as_ref().get(index),
+        }
+    }
+
+    fn get_mut(&mut self, index: usize) -> &mut T
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Narrow(node) => node.make_mut().as_mut().get_mut(index),
+            Self::Wide(node) => node.make_mut().as_mut().get_mut(index),
+        }
+    }
+
+    fn push(&mut self, element: T, index: usize)
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Narrow(node) => node.make_mut().as_mut().push(element, index),
+            Self::Wide(node) => node.make_mut().as_mut().push(element, index),
+        }
+    }
+
+    fn update(&self, updater: &mut impl FnMut(&mut T)) -> Option<Self>
+    where
+        T: Clone + PartialEq,
+    {
+        match self {
+            Self::Narrow(node) => node.update(updater).map(Self::Narrow),
+            Self::Wide(node) => node.update(updater).map(Self::Wide),
+        }
+    }
+
+    fn root_at(&self, spine_height: Height) -> H256
+    where
+        T: SszWrite,
+        B: MerkleElements<T>,
+        MinimumBundleSize<T>: MerkleElements<T>,
+    {
+        match self {
+            Self::Narrow(node) => node.root_at(spine_height),
+            Self::Wide(node) => node.root_at(spine_height.saturating_sub(Self::shift())),
+        }
+    }
+
+    fn leaves(&self) -> SubtreeLeaves<'_, T, B> {
+        match self {
+            Self::Narrow(node) => {
+                SubtreeLeaves::Narrow(MerkleTreeLeaves::new(node.as_ref().as_ref()))
+            }
+            Self::Wide(node) => SubtreeLeaves::Wide(MerkleTreeLeaves::new(node.as_ref().as_ref())),
+        }
+    }
+
+    fn leaves_mut(&mut self) -> SubtreeLeavesMut<'_, T, B>
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Narrow(node) => {
+                SubtreeLeavesMut::Narrow(MerkleTreeLeavesMut::new(node.make_mut().as_mut()))
+            }
+            Self::Wide(node) => {
+                SubtreeLeavesMut::Wide(MerkleTreeLeavesMut::new(node.make_mut().as_mut()))
+            }
+        }
+    }
+}
+
+pub enum SubtreeLeaves<'list, T: SszHash, B> {
+    Narrow(MerkleTreeLeaves<'list, T, MinimumBundleSize<T>>),
+    Wide(MerkleTreeLeaves<'list, T, B>),
+}
+
+impl<'list, T: SszHash, B> Iterator for SubtreeLeaves<'list, T, B> {
+    type Item = &'list [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Narrow(leaves) => leaves.next(),
+            Self::Wide(leaves) => leaves.next(),
+        }
+    }
+}
+
+impl<T: SszHash, B> FusedIterator for SubtreeLeaves<'_, T, B> {}
+
+pub enum SubtreeLeavesMut<'list, T: SszHash, B> {
+    Narrow(MerkleTreeLeavesMut<'list, T, MinimumBundleSize<T>>),
+    Wide(MerkleTreeLeavesMut<'list, T, B>),
+}
+
+impl<'list, T: SszHash + Clone, B> Iterator for SubtreeLeavesMut<'list, T, B> {
+    type Item = &'list mut [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Narrow(leaves) => leaves.next(),
+            Self::Wide(leaves) => leaves.next(),
+        }
+    }
+}
+
+impl<T: SszHash + Clone, B> FusedIterator for SubtreeLeavesMut<'_, T, B> {}
+
+impl<T, B> SszList<T> for PersistentProgressiveList<T, B>
 where
     T: SszHash + SszWrite + Send + Sync + Debug,
+    B: BundleSize<T> + MerkleElements<T> + Send + Sync,
     MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T> + Send + Sync,
 {
     fn len_usize(&self) -> usize {
@@ -238,44 +332,7 @@ where
             }
         }
 
-        let mut node = spine.left.as_ref().as_ref();
-
-        let mut height = match node {
-            MerkleTreeNode::Internal { left_height, .. } => left_height.saturating_add(1),
-            MerkleTreeNode::Leaf { .. } => 0,
-        };
-
-        let bundle = loop {
-            match node {
-                MerkleTreeNode::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height
-                        .saturating_add(MinimumBundleSize::<T>::ilog2())
-                        .saturating_sub(1)
-                        .into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right;
-                    } else {
-                        height = *left_height;
-                        node = left;
-                    }
-                }
-                MerkleTreeNode::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
-
-        Ok(&bundle[MinimumBundleSize::<T>::index_in_bundle(index)])
+        Ok(spine.left.get(index))
     }
 
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a> {
@@ -290,9 +347,10 @@ where
     }
 }
 
-impl<T> SszListMut<T> for PersistentProgressiveList<T>
+impl<T, B> SszListMut<T> for PersistentProgressiveList<T, B>
 where
     T: SszHash + SszWrite + Send + Sync + Debug,
+    B: BundleSize<T> + MerkleElements<T> + Send + Sync,
     MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T> + Send + Sync,
 {
     fn get_mut(&mut self, index: u64) -> Result<&mut T, IndexError>
@@ -325,44 +383,7 @@ where
             }
         }
 
-        let mut node = spine.left.make_mut().as_mut();
-
-        let mut height = match node {
-            MerkleTreeNode::Internal { left_height, .. } => left_height.saturating_add(1),
-            MerkleTreeNode::Leaf { .. } => 0,
-        };
-
-        let bundle = loop {
-            match node {
-                MerkleTreeNode::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height
-                        .saturating_add(MinimumBundleSize::<T>::ilog2())
-                        .saturating_sub(1)
-                        .into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right.make_mut();
-                    } else {
-                        height = *left_height;
-                        node = left.make_mut();
-                    }
-                }
-                MerkleTreeNode::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
-
-        Ok(&mut bundle[MinimumBundleSize::<T>::index_in_bundle(index)])
+        Ok(spine.left.get_mut(index))
     }
 
     fn push(&mut self, element: T) -> Result<(), PushError>
@@ -372,7 +393,7 @@ where
         let length_u64: u64 = self
             .length
             .try_into()
-            .expect("PersistentProgressiveList length counter should fit in u64");
+            .expect("PersistentProgressiveList length counter should fit to u64");
 
         match length_u64.cmp(&PrettyBigU::U64) {
             Ordering::Less => {}
@@ -391,7 +412,7 @@ where
                     let capacity = MinimumBundleSize::<T>::USIZE << spine.height;
 
                     if index < capacity {
-                        spine.left.make_mut().as_mut().push(element, index);
+                        spine.left.push(element, index);
                         break;
                     }
 
@@ -402,7 +423,8 @@ where
                     if spine.right.is_none() {
                         assert_eq!(index, 0, "all subtrees before the last are full");
 
-                        spine.right = Some(Node::single(element, spine.height.saturating_add(2)));
+                        spine.right =
+                            Some(Node::arc_single(element, spine.height.saturating_add(2)));
 
                         break;
                     }
@@ -415,7 +437,7 @@ where
                         .as_mut();
                 }
             }
-            None => self.root = Some(Node::single(element, 0)),
+            None => self.root = Some(Node::arc_single(element, 0)),
         }
 
         self.length = self.length.saturating_add(1);
@@ -447,36 +469,48 @@ where
     }
 }
 
-impl<'list, T: SszHash> IntoIterator for &'list PersistentProgressiveList<T> {
+impl<'list, T, B> IntoIterator for &'list PersistentProgressiveList<T, B>
+where
+    T: SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
     type Item = &'list T;
-    type IntoIter = ExactSize<Flatten<Nodes<'list, T, MinimumBundleSize<T>>>>;
+    type IntoIter = ExactSize<Flatten<Leaves<'list, T, B>>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let nodes = Nodes {
+        let leaves = Leaves {
             node: self.root.as_deref().map(AsRef::as_ref),
         };
 
-        ExactSize::new(nodes.flatten(), self.length)
+        ExactSize::new(leaves.flatten(), self.length)
     }
 }
 
-impl<'list, T> IntoIterator for &'list mut PersistentProgressiveList<T>
+impl<'list, T, B> IntoIterator for &'list mut PersistentProgressiveList<T, B>
 where
     T: SszHash + Clone,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
 {
     type Item = &'list mut T;
-    type IntoIter = ExactSize<Flatten<NodesMut<'list, T, MinimumBundleSize<T>>>>;
+    type IntoIter = ExactSize<Flatten<LeavesMut<'list, T, B>>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let nodes = NodesMut {
+        let leaves = LeavesMut {
             node: self.root.as_mut().map(|node| node.make_mut().as_mut()),
         };
 
-        ExactSize::new(nodes.flatten(), self.length)
+        ExactSize::new(leaves.flatten(), self.length)
     }
 }
 
-impl<T: Debug + SszHash> Debug for PersistentProgressiveList<T> {
+impl<T, B> Debug for PersistentProgressiveList<T, B>
+where
+    T: Debug + SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
     fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
         formatter.debug_list().entries(self).finish()
     }
@@ -488,30 +522,22 @@ impl<T: Debug + SszHash> Debug for PersistentProgressiveList<T> {
     PartialEq(bound = "T: PartialEq"),
     Eq(bound = "T: Eq")
 )]
-struct Node<T, B> {
-    left: Arc<Hc<MerkleTreeNode<T, B>>>,
+struct Node<T: SszHash, B> {
+    left: Subtree<T, B>,
     right: Option<Arc<Hc<Self>>>,
-    height: u8,
+    height: Height,
 }
 
 impl<T, B> SszHash for Node<T, B>
 where
     T: SszHash + SszWrite,
     B: BundleSize<T> + MerkleElements<T>,
+    MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T>,
 {
     type PackingFactor = U1;
 
     fn hash_tree_root(&self) -> H256 {
-        let left_height = match self.left.as_ref().as_ref() {
-            MerkleTreeNode::Internal { left_height, .. } => left_height.saturating_add(1),
-            MerkleTreeNode::Leaf { .. } => 0,
-        };
-
-        assert!(left_height <= self.height);
-
-        let left_root = (left_height..self.height)
-            .map(B::zero_hash)
-            .fold(self.left.hash_tree_root(), hashing::hash_256_256);
+        let left_root = self.left.root_at(self.height);
 
         let right_root = match self.right.as_ref() {
             Some(node) => node.hash_tree_root(),
@@ -522,14 +548,19 @@ where
     }
 }
 
-impl<T, B: BundleSize<T>> Node<T, B> {
+impl<T, B> Node<T, B>
+where
+    T: SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
     // Construct a spine node whose subtree holds a single element.
-    fn single(element: T, height: u8) -> Arc<Hc<Self>> {
-        Arc::new(Hc::new(Self {
-            left: Arc::new(Hc::new(MerkleTreeNode::leaf([element]))),
+    fn arc_single(element: T, height: Height) -> Arc<Hc<Self>> {
+        Hc::arc(Self {
+            left: Subtree::single(element, height),
             right: None,
             height,
-        }))
+        })
     }
 
     // Mutably borrowing an `FnMut` closure inside a recursive function causes infinite recursion
@@ -544,17 +575,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         match (new_left, new_right) {
             (None, None | Some(None)) => None,
             (new_left, new_right) => {
-                let left = match new_left {
-                    // `MerkleTreeNode::update` wraps modified subtrees in `triomphe::Arc`,
-                    // while spine nodes store them in `std::sync::Arc`. The returned `Arc` is
-                    // newly created and thus uniquely owned, so it can be unwrapped for free.
-                    Some(arc) => Arc::new(
-                        triomphe::Arc::try_unwrap(arc)
-                            .ok()
-                            .expect("Arcs returned by MerkleTreeNode::update are uniquely owned"),
-                    ),
-                    None => self.left.clone_arc(),
-                };
+                let left = new_left.unwrap_or_else(|| self.left.clone());
 
                 let right = match new_right {
                     Some(Some(arc)) => Some(arc),
@@ -562,67 +583,91 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                     None => None,
                 };
 
-                Some(Arc::new(Hc::new(Self {
+                Some(Hc::arc(Self {
                     left,
                     right,
                     height: self.height,
-                })))
+                }))
             }
         }
     }
 }
 
-pub struct Nodes<'list, T, B> {
+pub struct Leaves<'list, T: SszHash, B> {
     node: Option<&'list Node<T, B>>,
 }
 
-impl<'list, T, B> Iterator for Nodes<'list, T, B> {
-    type Item = Flatten<Leaves<'list, T, B>>;
+impl<'list, T, B> Iterator for Leaves<'list, T, B>
+where
+    T: SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
+    type Item = Flatten<SubtreeLeaves<'list, T, B>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node.take()?;
 
         self.node = node.right.as_deref().map(AsRef::as_ref);
 
-        Some(Leaves::new(node.left.as_ref().as_ref()).flatten())
+        Some(node.left.leaves().flatten())
     }
 }
 
-impl<T, B> FusedIterator for Nodes<'_, T, B> {}
+impl<T, B> FusedIterator for Leaves<'_, T, B>
+where
+    T: SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
+}
 
-// Like `LeavesMut`, this clones `right` spine nodes earlier than needed.
-pub struct NodesMut<'list, T, B> {
+// Like `MerkleTreeLeavesMut`, this clones `right` spine nodes earlier than needed.
+pub struct LeavesMut<'list, T: SszHash, B> {
     node: Option<&'list mut Node<T, B>>,
 }
 
-impl<'list, T: Clone, B> Iterator for NodesMut<'list, T, B> {
-    type Item = Flatten<LeavesMut<'list, T, B>>;
+impl<'list, T, B> Iterator for LeavesMut<'list, T, B>
+where
+    T: SszHash + Clone,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
+    type Item = Flatten<SubtreeLeavesMut<'list, T, B>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node.take()?;
 
         self.node = node.right.as_mut().map(|node| node.make_mut().as_mut());
 
-        Some(LeavesMut::new(node.left.make_mut().as_mut()).flatten())
+        Some(node.left.leaves_mut().flatten())
     }
 }
 
-impl<T: Clone, B> FusedIterator for NodesMut<'_, T, B> {}
+impl<T, B> FusedIterator for LeavesMut<'_, T, B>
+where
+    T: SszHash + Clone,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
+}
 
-impl<'de, T> Deserialize<'de> for PersistentProgressiveList<T>
+impl<'de, T, B> Deserialize<'de> for PersistentProgressiveList<T, B>
 where
     T: Deserialize<'de> + SszHash,
+    B: BundleSize<T>,
     MinimumBundleSize<T>: BundleSize<T>,
 {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct PersistentProgressiveListVisitor<T>(PhantomData<(T, PrettyBigU)>);
+        struct PersistentProgressiveListVisitor<T, B>(PhantomData<(T, B)>);
 
-        impl<'de, T> Visitor<'de> for PersistentProgressiveListVisitor<T>
+        impl<'de, T, B> Visitor<'de> for PersistentProgressiveListVisitor<T, B>
         where
             T: Deserialize<'de> + SszHash,
+            B: BundleSize<T>,
             MinimumBundleSize<T>: BundleSize<T>,
         {
-            type Value = PersistentProgressiveList<T>;
+            type Value = PersistentProgressiveList<T, B>;
 
             fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
                 write!(
@@ -646,19 +691,25 @@ where
     }
 }
 
-impl<T: Serialize + SszHash> Serialize for PersistentProgressiveList<T> {
+impl<T, B> Serialize for PersistentProgressiveList<T, B>
+where
+    T: Serialize + SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self)
     }
 }
 
-impl<T: SszSize + SszHash> SszSize for PersistentProgressiveList<T> {
+impl<T: SszSize + SszHash, B> SszSize for PersistentProgressiveList<T, B> {
     const SIZE: Size = Size::Variable { minimum_size: 0 };
 }
 
-impl<T> SszHash for PersistentProgressiveList<T>
+impl<T, B> SszHash for PersistentProgressiveList<T, B>
 where
     T: SszHash + SszWrite,
+    B: BundleSize<T> + MerkleElements<T>,
     MinimumBundleSize<T>: BundleSize<T> + MerkleElements<T>,
 {
     type PackingFactor = U1;
@@ -673,15 +724,21 @@ where
     }
 }
 
-impl<T: SszWrite + SszHash> SszWrite for PersistentProgressiveList<T> {
+impl<T, B> SszWrite for PersistentProgressiveList<T, B>
+where
+    T: SszWrite + SszHash,
+    B: BundleSize<T>,
+    MinimumBundleSize<T>: BundleSize<T>,
+{
     fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
         shared::write_list(bytes, self)
     }
 }
 
-impl<C, T> SszRead<C> for PersistentProgressiveList<T>
+impl<C, T, B> SszRead<C> for PersistentProgressiveList<T, B>
 where
     T: SszRead<C> + SszHash,
+    B: BundleSize<T>,
     MinimumBundleSize<T>: BundleSize<T>,
 {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
@@ -691,22 +748,52 @@ where
 
 #[cfg(test)]
 mod tests {
+    use typenum::{U16, U64, U256};
+
     use crate::ProgressiveList;
 
     use super::*;
 
-    type TestList = PersistentProgressiveList<u64>;
+    type TestList = PersistentProgressiveList<u64, U64>;
     type ReferenceList = ProgressiveList<u64>;
 
-    type BigList = PersistentProgressiveList<u64>;
+    type BigList = PersistentProgressiveList<u64, U64>;
     type BigReferenceList = ProgressiveList<u64>;
 
-    type UnpackedList = PersistentProgressiveList<H256>;
+    type UnpackedList = PersistentProgressiveList<H256, U64>;
     type UnpackedReferenceList = ProgressiveList<H256>;
 
     // Lengths up to 300 cover the boundaries of the first several subtrees,
     // whose capacities in elements are 4, 16, 64 and 256 for `u64`.
     const LENGTHS: core::ops::Range<u64> = 0..300;
+
+    #[test]
+    fn roots_match_the_reference_for_every_bundle_size() {
+        fn check<B: BundleSize<u64> + MerkleElements<u64>>(width: &str) {
+            for length in LENGTHS {
+                let persistent = PersistentProgressiveList::<u64, B>::try_from_iter(0..length)
+                    .expect("length is below the maximum");
+                let reference =
+                    ReferenceList::try_from_iter(0..length).expect("length is below the maximum");
+
+                assert_eq!(
+                    persistent.hash_tree_root(),
+                    reference.hash_tree_root(),
+                    "hash_tree_root mismatch at length {length} with bundle {width}",
+                );
+
+                assert!(
+                    persistent.into_iter().copied().eq(0..length),
+                    "elements mismatch at length {length} with bundle {width}",
+                );
+            }
+        }
+
+        check::<MinimumBundleSize<u64>>("minimum");
+        check::<U16>("16");
+        check::<U64>("64");
+        check::<U256>("256");
+    }
 
     #[test]
     fn try_from_iter_matches_progressive_list_root() {
@@ -807,8 +894,47 @@ mod tests {
         }
     }
 
-    // `H256` has a packing factor of 1 and a minimum bundle size of 1,
-    // so subtree capacities in chunks follow the progression from EIP-7916 exactly: 1, 4, 16, 64.
+    #[test]
+    fn get_and_hashing_work_far_out_on_the_spine() {
+        for length in [5_000_u64, 20_000, 100_000] {
+            let persistent =
+                BigList::try_from_iter(0..length).expect("length is below the maximum");
+            let reference =
+                BigReferenceList::try_from_iter(0..length).expect("length is below the maximum");
+
+            assert_eq!(
+                persistent.hash_tree_root(),
+                reference.hash_tree_root(),
+                "hash_tree_root mismatch at length {length}",
+            );
+
+            for index in [0, 1, length / 3, length / 2, length - 1] {
+                let element = persistent.get(index).expect("index is within bounds");
+
+                assert_eq!(
+                    *element, index,
+                    "get mismatch at length {length}, index {index}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn push_matches_try_from_iter_far_out_on_the_spine() {
+        let length = 5_000_u64;
+        let mut pushed = BigList::default();
+
+        for element in 0..length {
+            pushed.push(element).expect("list is unbounded");
+        }
+
+        let built = BigList::try_from_iter(0..length).expect("length is below the maximum");
+
+        assert_eq!(pushed.hash_tree_root(), built.hash_tree_root());
+        assert_eq!(pushed, built);
+        assert!(pushed.into_iter().copied().eq(0..length));
+    }
+
     #[test]
     fn get_and_hashing_work_with_unpacked_elements() {
         let element = |index: u64| H256::from_low_u64_be(index.saturating_add(1));

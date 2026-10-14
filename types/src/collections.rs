@@ -11,6 +11,7 @@ use ssz::{
     ContiguousVector, IncompletePersistentVector, PersistentList, PersistentProgressiveList,
     PersistentVector, UnhashedBundleSize,
 };
+use typenum::{U64, U512};
 
 use crate::{
     altair::primitives::ParticipationFlags,
@@ -48,7 +49,7 @@ pub type ProgressiveValidators = ProgressiveValidatorList;
 pub type Balances<P> =
     PersistentList<Gwei, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<Gwei>>;
 
-pub type ProgressiveBalances = PersistentProgressiveList<Gwei>;
+pub type ProgressiveBalances = PersistentProgressiveList<Gwei, U64>;
 
 pub type RandaoMixes<P> =
     PersistentVector<H256, <P as Preset>::EpochsPerHistoricalVector, UnhashedBundleSize<H256>>;
@@ -64,12 +65,12 @@ pub type EpochParticipation<P> = PersistentList<
     UnhashedBundleSize<ParticipationFlags>,
 >;
 
-pub type ProgressiveEpochParticipation = PersistentProgressiveList<ParticipationFlags>;
+pub type ProgressiveEpochParticipation = PersistentProgressiveList<ParticipationFlags, U512>;
 
 pub type InactivityScores<P> =
     PersistentList<u64, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<u64>>;
 
-pub type ProgressiveInactivityScores = PersistentProgressiveList<u64>;
+pub type ProgressiveInactivityScores = PersistentProgressiveList<u64, U64>;
 
 pub type HistoricalSummaries<P> =
     PersistentList<HistoricalSummary, <P as Preset>::HistoricalRootsLimit>;
