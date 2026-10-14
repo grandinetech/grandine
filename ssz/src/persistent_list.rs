@@ -16,7 +16,6 @@ use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bit_field::BitField as _;
 use derivative::Derivative;
 use ethereum_types::H256;
-use itertools::Itertools as _;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{Error as _, SeqAccess, Visitor},
@@ -132,53 +131,13 @@ impl<T, N: Unsigned, B: BundleSize<T>> TryFromIterator<T> for PersistentList<T, 
     // transitions appear to be faster when list nodes are not deduplicated. Is it because more
     // `Arc`s are uniquely owned?
     fn try_from_iter(elements: impl IntoIterator<Item = T>) -> Result<Self, Self::Error> {
-        let mut length: usize = 0;
-
-        let mut nodes_with_heights = elements
-            .into_iter()
-            .inspect(|_| length = length.saturating_add(1))
-            .chunks(B::USIZE)
-            .into_iter()
-            .map(Box::from_iter)
-            .map(Node::leaf)
-            .map(Hc::arc)
-            .map(|node| (node, 0))
-            .collect_vec();
+        let Some((node, length)) = Node::build(&mut elements.into_iter(), usize::MAX) else {
+            return Ok(Self::default());
+        };
 
         Self::validate_length(length)?;
 
-        if length == 0 {
-            return Ok(Self::default());
-        }
-
-        for _ in 0..B::depth_of_length(length) {
-            nodes_with_heights = nodes_with_heights
-                .into_iter()
-                .chunks(2)
-                .into_iter()
-                .map(|mut chunk| match (chunk.next(), chunk.next()) {
-                    (Some((left, left_height)), Some((right, right_height))) => (
-                        Hc::arc(Node::Internal {
-                            left,
-                            right,
-                            left_height,
-                            right_height,
-                        }),
-                        left_height.saturating_add(1),
-                    ),
-                    (Some(left_over), None) => left_over,
-                    _ => unreachable!("Itertools::chunks never yields empty chunks"),
-                })
-                .collect();
-        }
-
-        let (node, root_height) = nodes_with_heights
-            .into_iter()
-            .exactly_one()
-            .ok()
-            .expect("only the root should be left");
-
-        assert_eq!(root_height, B::depth_of_length(length));
+        assert_eq!(node.height(), B::depth_of_length(length));
 
         Ok(Self {
             root: Some(node),
@@ -263,9 +222,7 @@ where
 
     fn hash_tree_root(&self) -> H256 {
         let root = match self.root.as_ref() {
-            Some(node) => (self.depth()..Self::max_depth())
-                .map(B::zero_hash)
-                .fold(node.hash_tree_root(), hashing::hash_256_256),
+            Some(node) => node.root_at(Self::max_depth()),
             None => B::zero_hash(Self::max_depth()),
         };
 
@@ -372,42 +329,12 @@ where
     fn get(&self, index: u64) -> Result<&T, IndexError> {
         let index = shared::validate_index(self.length, index)?;
 
-        let mut height = self.depth();
-
-        let mut node = self
+        let node = self
             .root
             .as_deref()
-            .expect("the length check in validate_index ensures that self.root is Some")
-            .as_ref();
+            .expect("the length check in validate_index ensures that self.root is Some");
 
-        let bundle = loop {
-            match node {
-                Node::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right;
-                    } else {
-                        height = *left_height;
-                        node = left;
-                    }
-                }
-                Node::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
-
-        Ok(&bundle[B::index_in_bundle(index)])
+        Ok(node.get(index))
     }
 
     fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = &'a T> + 'a> {
@@ -434,43 +361,14 @@ where
     {
         let index = shared::validate_index(self.length, index)?;
 
-        let mut height = self.depth();
-
-        let mut node = self
+        let node = self
             .root
             .as_mut()
             .expect("the length check in validate_index ensures that self.root is Some")
             .make_mut()
             .as_mut();
 
-        let bundle = loop {
-            match node {
-                Node::Internal {
-                    left,
-                    right,
-                    left_height,
-                    right_height,
-                } => {
-                    assert_eq!(height, left_height.saturating_add(1));
-
-                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
-
-                    if index.get_bit(bit_index) {
-                        height = *right_height;
-                        node = right.make_mut();
-                    } else {
-                        height = *left_height;
-                        node = left.make_mut();
-                    }
-                }
-                Node::Leaf { bundle, .. } => {
-                    assert_eq!(height, 0);
-                    break bundle;
-                }
-            }
-        };
-
-        Ok(&mut bundle[B::index_in_bundle(index)])
+        Ok(node.get_mut(index))
     }
 
     fn push(&mut self, element: T) -> Result<(), PushError>
@@ -569,14 +467,8 @@ where
                 left,
                 right,
                 left_height,
-                right_height,
-            } => {
-                let right_hash = (*right_height..*left_height)
-                    .map(B::zero_hash)
-                    .fold(right.hash_tree_root(), hashing::hash_256_256);
-
-                hashing::hash_256_256(left.hash_tree_root(), right_hash)
-            }
+                ..
+            } => hashing::hash_256_256(left.hash_tree_root(), right.root_at(*left_height)),
             Self::Leaf { bundle, .. } => {
                 if T::PackingFactor::USIZE == 1 {
                     let chunks = bundle.iter().map(SszHash::hash_tree_root);
@@ -592,6 +484,20 @@ where
     }
 }
 
+impl<T, B> Hc<Node<T, B>>
+where
+    T: SszHash + SszWrite,
+    B: BundleSize<T> + MerkleElements<T>,
+{
+    pub(crate) fn root_at(&self, height: Height) -> H256 {
+        assert!(self.height() <= height);
+
+        (self.height()..height)
+            .map(B::zero_hash)
+            .fold(self.hash_tree_root(), hashing::hash_256_256)
+    }
+}
+
 impl<T, B: BundleSize<T>> Node<T, B> {
     fn arc_single(element: T) -> Arc<Hc<Self>> {
         Hc::arc(Self::leaf([element]))
@@ -604,6 +510,137 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         assert!(bundle.len() <= B::USIZE);
 
         Self::Leaf { bundle, phantom }
+    }
+
+    pub(crate) const fn height(&self) -> Height {
+        match self {
+            Self::Internal { left_height, .. } => left_height.saturating_add(1),
+            Self::Leaf { .. } => 0,
+        }
+    }
+
+    // All leaves are allocated before any internal node, and internal nodes one level at a time.
+    // Trees built in that order are iterated about twice as fast as ones built depth-first.
+    pub(crate) fn build(
+        elements: &mut impl Iterator<Item = T>,
+        capacity: usize,
+    ) -> Option<(Arc<Hc<Self>>, usize)> {
+        let mut nodes_with_heights = vec![];
+        let mut count: usize = 0;
+
+        while count < capacity {
+            let bundle: Box<[T]> = elements.by_ref().take(B::USIZE).collect();
+
+            if bundle.is_empty() {
+                break;
+            }
+
+            let exhausted = bundle.len() < B::USIZE;
+
+            count = count.saturating_add(bundle.len());
+            nodes_with_heights.push((Hc::arc(Self::leaf(bundle)), 0));
+
+            if exhausted {
+                break;
+            }
+        }
+
+        while nodes_with_heights.len() > 1 {
+            let mut level = nodes_with_heights.into_iter();
+
+            nodes_with_heights = core::iter::from_fn(|| {
+                let (left, left_height) = level.next()?;
+
+                let Some((right, right_height)) = level.next() else {
+                    return Some((left, left_height));
+                };
+
+                let node = Self::Internal {
+                    left,
+                    right,
+                    left_height,
+                    right_height,
+                };
+
+                Some((Hc::arc(node), left_height.saturating_add(1)))
+            })
+            .collect();
+        }
+
+        let (node, _) = nodes_with_heights.pop()?;
+
+        Some((node, count))
+    }
+
+    pub(crate) fn get(&self, index: usize) -> &T {
+        let mut node = self;
+        let mut height = self.height();
+
+        let bundle = loop {
+            match node {
+                Self::Internal {
+                    left,
+                    right,
+                    left_height,
+                    right_height,
+                } => {
+                    assert_eq!(height, left_height.saturating_add(1));
+
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
+
+                    if index.get_bit(bit_index) {
+                        height = *right_height;
+                        node = right;
+                    } else {
+                        height = *left_height;
+                        node = left;
+                    }
+                }
+                Self::Leaf { bundle, .. } => {
+                    assert_eq!(height, 0);
+                    break bundle;
+                }
+            }
+        };
+
+        &bundle[B::index_in_bundle(index)]
+    }
+
+    pub(crate) fn get_mut(&mut self, index: usize) -> &mut T
+    where
+        T: Clone,
+    {
+        let mut height = self.height();
+        let mut node = self;
+
+        let bundle = loop {
+            match node {
+                Self::Internal {
+                    left,
+                    right,
+                    left_height,
+                    right_height,
+                } => {
+                    assert_eq!(height, left_height.saturating_add(1));
+
+                    let bit_index = height.saturating_add(B::ilog2()).saturating_sub(1).into();
+
+                    if index.get_bit(bit_index) {
+                        height = *right_height;
+                        node = right.make_mut();
+                    } else {
+                        height = *left_height;
+                        node = left.make_mut();
+                    }
+                }
+                Self::Leaf { bundle, .. } => {
+                    assert_eq!(height, 0);
+                    break bundle;
+                }
+            }
+        };
+
+        &mut bundle[B::index_in_bundle(index)]
     }
 
     fn prune(&mut self, mut length: usize)
@@ -655,7 +692,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         }
     }
 
-    pub(crate) fn push(&mut self, element: T, current_length_and_new_index: usize)
+    pub(crate) fn push(&mut self, element: T, index: usize)
     where
         T: Clone,
     {
@@ -671,7 +708,7 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                 left_height,
                 mut right_height,
             } => {
-                if Self::pushing_increases_height(current_length_and_new_index) {
+                if Self::pushing_increases_height(index) {
                     assert_eq!(left_height, right_height);
 
                     Self::Internal {
@@ -687,9 +724,9 @@ impl<T, B: BundleSize<T>> Node<T, B> {
                     }
                 } else {
                     let left_length = B::USIZE << left_height;
-                    assert!(left_length < current_length_and_new_index);
+                    assert!(left_length < index);
 
-                    let right_length = current_length_and_new_index.saturating_sub(left_length);
+                    let right_length = index.saturating_sub(left_length);
                     assert!(right_length < left_length);
 
                     right.make_mut().push(element, right_length);
@@ -758,9 +795,8 @@ impl<T, B: BundleSize<T>> Node<T, B> {
         }
     }
 
-    fn pushing_increases_height(current_length_and_new_index: usize) -> bool {
-        B::index_of_bundle(current_length_and_new_index).is_power_of_two()
-            && B::index_in_bundle(current_length_and_new_index) == 0
+    fn pushing_increases_height(index: usize) -> bool {
+        B::index_of_bundle(index).is_power_of_two() && B::index_in_bundle(index) == 0
     }
 }
 
