@@ -1121,9 +1121,26 @@ impl Config {
     }
 
     #[must_use]
-    pub const fn min_epochs_for_block_requests(&self) -> u64 {
+    pub fn min_epochs_for_block_requests(&self, phase: Phase) -> u64 {
+        let churn_limit_quotient = if phase >= Phase::Gloas {
+            let numerator = self
+                .churn_limit_quotient_gloas
+                .saturating_mul(self.consolidation_churn_limit_quotient)
+                .get()
+                .saturating_mul(3);
+
+            let denominator = self
+                .consolidation_churn_limit_quotient
+                .saturating_mul(nonzero!(2_u64))
+                .saturating_add(self.churn_limit_quotient_gloas.get().saturating_mul(3));
+
+            numerator / denominator
+        } else {
+            self.churn_limit_quotient.get()
+        };
+
         self.min_validator_withdrawability_delay
-            .saturating_add(self.churn_limit_quotient.get() / 2)
+            .saturating_add(churn_limit_quotient / 2)
     }
 
     #[must_use]
@@ -1311,6 +1328,14 @@ mod tests {
     use test_case::test_case;
 
     use super::*;
+
+    #[test]
+    fn min_epochs_for_block_requests_matches_specification() {
+        let config = Config::mainnet();
+
+        assert_eq!(config.min_epochs_for_block_requests(Phase::Fulu), 33024);
+        assert_eq!(config.min_epochs_for_block_requests(Phase::Gloas), 14299);
+    }
 
     #[test_case(Config::mainnet())]
     #[test_case(Config::minimal())]

@@ -731,8 +731,11 @@ pub fn blob_serve_range_slot<P: Preset>(
 
 #[must_use]
 pub fn block_serve_range_slot<P: Preset>(config: &Config, current_slot: Slot) -> Slot {
-    let epoch = compute_epoch_at_slot::<P>(current_slot)
-        .checked_sub(config.min_epochs_for_block_requests())
+    let current_epoch = compute_epoch_at_slot::<P>(current_slot);
+    let phase = config.phase_at_epoch(current_epoch);
+
+    let epoch = current_epoch
+        .checked_sub(config.min_epochs_for_block_requests(phase))
         .unwrap_or(GENESIS_EPOCH);
 
     compute_start_slot_at_epoch::<P>(epoch)
