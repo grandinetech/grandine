@@ -6309,8 +6309,13 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .map(|(index, _)| index)
     }
 
-    pub fn archive_finalized(&mut self, new_anchor_index: usize) -> Vector<ChainLink<P>> {
-        let archived = self.finalized.slice(..new_anchor_index);
+    #[must_use]
+    pub fn archivable_finalized(&self, new_anchor_index: usize) -> Vector<ChainLink<P>> {
+        self.finalized.take(new_anchor_index.saturating_add(1))
+    }
+
+    pub fn archive_finalized(&mut self, new_anchor_index: usize) {
+        self.finalized = self.finalized.skip(new_anchor_index);
 
         self.finalized_indices = self
             .finalized
@@ -6319,8 +6324,6 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             .enumerate()
             .map(|(index, block_root)| (block_root, index))
             .collect();
-
-        archived
     }
 
     // Return whether the current tick is before the deadline defined by `due_bps`

@@ -170,6 +170,10 @@ pub enum MutatorMessage<P: Preset, W> {
         wait_group: W,
         persisted_block_roots: Vec<H256>,
     },
+    FinishedArchivingFinalized {
+        wait_group: W,
+        new_anchor_index: Option<usize>,
+    },
     PayloadBid {
         result: Result<ExecutionPayloadBidAction<P>>,
         origin: ExecutionPayloadBidOrigin,

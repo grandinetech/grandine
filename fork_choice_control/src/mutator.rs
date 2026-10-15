@@ -14,6 +14,7 @@
 // tasks as well, but that would complicate code and would most likely not improve performance much
 // (in fact, the opposite may be true because `p2p_tx` would have to be cloned for each task).
 
+use core::panic::AssertUnwindSafe;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{
@@ -150,6 +151,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     metrics: Option<Arc<Metrics>>,
     finished_loading_from_storage: bool,
     has_pending_archive_tasks: bool,
+    is_archiving_finalized: bool,
     pending_state_cache_prune: Option<bool>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
@@ -218,6 +220,7 @@ where
             metrics,
             finished_loading_from_storage: false,
             has_pending_archive_tasks: false,
+            is_archiving_finalized: false,
             pending_state_cache_prune: None,
             mutator_tx,
             mutator_rx,
@@ -347,6 +350,10 @@ where
                         persisted_block_roots,
                     );
                 }
+                MutatorMessage::FinishedArchivingFinalized {
+                    wait_group,
+                    new_anchor_index,
+                } => self.handle_finish_archiving_finalized(&wait_group, new_anchor_index)?,
                 MutatorMessage::ExecutionPayloadEnvelope {
                     wait_group,
                     result,
@@ -2981,6 +2988,23 @@ where
         self.update_store_snapshot();
     }
 
+    fn handle_finish_archiving_finalized(
+        &mut self,
+        wait_group: &W,
+        new_anchor_index: Option<usize>,
+    ) -> Result<()> {
+        self.is_archiving_finalized = false;
+
+        // Without an index the archiver failed, and the blocks stay for the next finalization.
+        let Some(new_anchor_index) = new_anchor_index else {
+            return Ok(());
+        };
+
+        self.store_mut().archive_finalized(new_anchor_index);
+        self.update_store_snapshot();
+        self.archive_finalized(wait_group)
+    }
+
     fn handle_finish_persisting_execution_payload_envelopes(
         &mut self,
         wait_group: W,
@@ -5230,6 +5254,10 @@ where
     }
 
     fn archive_finalized(&mut self, wait_group: &W) -> Result<()> {
+        if self.is_archiving_finalized {
+            return Ok(());
+        }
+
         if let Some(latest_archivable_index) = self.store.latest_archivable_index() {
             debug_with_peers!("archiving finalized blocks and anchor state…");
 
@@ -5237,85 +5265,107 @@ where
             let store = self.owned_store();
             let storage = self.storage.clone_arc();
             let sync_tx = self.sync_tx.clone();
+            let mutator_tx = self.owned_mutator_tx();
             let wait_group = wait_group.clone();
             let finished_loading_from_storage = self.finished_loading_from_storage;
 
-            let mut archived = self.store_mut().archive_finalized(latest_archivable_index);
-            archived.push_back(self.store.anchor().clone());
+            // The blocks stay in the store until they are in storage, so queries never miss them.
+            let archived = self.store.archivable_finalized(latest_archivable_index);
 
             let last_finalized_slot = self.store.last_finalized().slot();
 
             Builder::new()
                 .name("store-archiver".to_owned())
                 .spawn(move || {
-                    debug_with_peers!("saving finalized blocks and anchor state…");
+                    // The closure only reads what it owns, so a panic leaves nothing inconsistent.
+                    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        debug_with_peers!("saving finalized blocks and anchor state…");
 
-                    match storage.append(core::iter::empty(), archived.iter(), &store) {
-                        Ok(slots) => {
-                            if let Some(chain_link) = archived.back() {
-                                let finalized_block = chain_link.block.clone_arc();
-                                let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
+                        let saved = match storage.append(core::iter::empty(), archived.iter(), &store) {
+                            Ok(slots) => {
+                                if let Some(chain_link) = archived.back() {
+                                    let finalized_block = chain_link.block.clone_arc();
+                                    let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
 
-                                for candidate in &archived {
-                                    let candidate_slot = candidate.slot();
-                                    let candidate_epoch = misc::compute_epoch_at_slot::<P>(candidate_slot);
+                                    for candidate in &archived {
+                                        let candidate_slot = candidate.slot();
+                                        let candidate_epoch = misc::compute_epoch_at_slot::<P>(candidate_slot);
 
-                                    let is_last_block = candidate_slot.saturating_add(1) == chain_link.slot();
-                                    let is_first_block = candidate_epoch == anchor_epoch.saturating_sub(1)
-                                        && misc::is_epoch_start::<P>(candidate_slot);
+                                        let is_last_block = candidate_slot.saturating_add(1) == chain_link.slot();
+                                        let is_first_block = candidate_epoch == anchor_epoch.saturating_sub(1)
+                                            && misc::is_epoch_start::<P>(candidate_slot);
 
-                                    // preload first and the last block of previous epoch into state_at_slot_cache
-                                    // to handle some of the beacon API use cases
-                                    if is_first_block || is_last_block {
-                                        debug_with_peers!(
-                                            "preloading state_at_slot_cache with chain_link: \
-                                            slot: {candidate_slot}, epoch: {candidate_epoch}, \
-                                            is_first_block: {is_first_block}, is_last_block: {is_last_block}",
-                                        );
-
-                                        if let Err(error) = state_at_slot_cache
-                                            .get_or_try_init(candidate.slot(), || {
-                                                Ok(Some(candidate.state(&store)))
-                                            })
-                                        {
+                                        // preload first and the last block of previous epoch into state_at_slot_cache
+                                        // to handle some of the beacon API use cases
+                                        if is_first_block || is_last_block {
                                             debug_with_peers!(
-                                                "failed to preload state_at_slot_cache with \
-                                                a chainlink: {error:?}",
+                                                "preloading state_at_slot_cache with chain_link: \
+                                                slot: {candidate_slot}, epoch: {candidate_epoch}, \
+                                                is_first_block: {is_first_block}, is_last_block: {is_last_block}",
                                             );
+
+                                            if let Err(error) = state_at_slot_cache
+                                                .get_or_try_init(candidate.slot(), || {
+                                                    Ok(Some(candidate.state(&store)))
+                                                })
+                                            {
+                                                debug_with_peers!(
+                                                    "failed to preload state_at_slot_cache with \
+                                                    a chainlink: {error:?}",
+                                                );
+                                            }
                                         }
+                                    }
+
+                                    if finished_loading_from_storage {
+                                        SyncMessage::Finalized(finalized_block).send(&sync_tx);
                                     }
                                 }
 
-                                if finished_loading_from_storage {
-                                    SyncMessage::Finalized(finalized_block).send(&sync_tx);
-                                }
-                            }
-
-                            debug_with_peers!(
-                                "finalized blocks and anchor state saved \
-                                 (appended block slots: {slots:?})",
-                            )
-                        }
-                        Err(error) => error_with_peers!("saving to storage failed: {error:?}"),
-                    }
-
-                    debug_with_peers!("removing unfinalized blocks");
-
-                    if !storage.archive_storage_enabled() {
-                        match storage.prune_unfinalized_blocks(last_finalized_slot) {
-                            Ok(slots) => {
                                 debug_with_peers!(
-                                    "unfinalized block pruning complete: pruned slots: {slots:?}"
+                                    "finalized blocks and anchor state saved \
+                                     (appended block slots: {slots:?})",
                                 );
+
+                                true
                             }
                             Err(error) => {
-                                error_with_peers!("unfinalized block pruning failed: {error:?}")
+                                error_with_peers!("saving to storage failed: {error:?}");
+                                false
+                            }
+                        };
+
+                        debug_with_peers!("removing unfinalized blocks");
+
+                        if !storage.archive_storage_enabled() {
+                            match storage.prune_unfinalized_blocks(last_finalized_slot) {
+                                Ok(slots) => {
+                                    debug_with_peers!(
+                                        "unfinalized block pruning complete: pruned slots: {slots:?}"
+                                    );
+                                }
+                                Err(error) => {
+                                    error_with_peers!("unfinalized block pruning failed: {error:?}")
+                                }
                             }
                         }
-                    }
 
-                    drop(wait_group);
+                        saved
+                    }));
+
+                    let saved = result.unwrap_or_else(|payload| {
+                        panics::log(payload);
+                        false
+                    });
+
+                    MutatorMessage::FinishedArchivingFinalized {
+                        wait_group,
+                        new_anchor_index: saved.then_some(latest_archivable_index),
+                    }
+                    .send(&mutator_tx);
                 })?;
+
+            self.is_archiving_finalized = true;
         }
 
         Ok(())
