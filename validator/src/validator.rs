@@ -863,6 +863,12 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             metrics.set_tick_delay(tick.kind.as_ref(), tick_delay);
         }
 
+        if let Some(metrics) = self.metrics.as_ref()
+            && tick.is_start_of_slot()
+        {
+            metrics.set_beacon_clock_slot(tick.slot);
+        }
+
         let Tick { slot, kind } = tick;
 
         let current_epoch = misc::compute_epoch_at_slot::<P>(slot);

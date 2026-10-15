@@ -1806,6 +1806,11 @@ impl GrandineArgs {
         let metrics = if metrics_enabled {
             let metrics = Metrics::new()?;
             metrics.register_with_default_metrics()?;
+
+            if mode_options.beacon_node_options().is_some() {
+                metrics.register_beacon_node_metrics()?;
+            }
+
             let metrics = Arc::new(metrics);
             METRICS.get_or_init(|| metrics.clone_arc());
             Some(metrics)
