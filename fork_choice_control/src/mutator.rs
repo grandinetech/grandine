@@ -3417,17 +3417,6 @@ where
             }
         }
 
-        // Do not send API events about optimistic blocks.
-        // Vouch treats all head events as non-optimistic.
-        if is_valid || is_post_gloas {
-            self.event_channels.send_block_event(
-                block_slot,
-                block_root,
-                false,
-                block.message().payload_bid(),
-            );
-        }
-
         let from_test_block = matches!(origin, BlockOrigin::Test(_));
 
         // TODO(Grandine Team): Performing the validation here results in the block being added to the
@@ -3553,6 +3542,17 @@ where
         // - Before spawning tasks to retry delayed objects or notifying other components to ensure
         //   that they cannot observe the store in an inconsistent state.
         self.update_store_snapshot();
+
+        // Do not send API events about optimistic blocks.
+        // Clients treat all head events as non-optimistic.
+        if is_valid || is_post_gloas {
+            self.event_channels.send_block_event(
+                block_slot,
+                block_root,
+                false,
+                block.message().payload_bid(),
+            );
+        }
 
         if let Some(objects) = self.take_delayed_until_block(block_root) {
             debug_with_peers!("retrying objects delayed until block {block_root:?}");
