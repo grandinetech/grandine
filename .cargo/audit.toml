@@ -2,23 +2,28 @@
 ignore = [
     'RUSTSEC-2023-0071',
     'RUSTSEC-2024-0336',
-    'RUSTSEC-2024-0370',
     'RUSTSEC-2024-0384',
     'RUSTSEC-2024-0388',
     'RUSTSEC-2025-0009',
     'RUSTSEC-2025-0055',
-    'RUSTSEC-2025-0137',
-    # zkm-sdk & sp1-sdk come with rustls-webpki 0.101.7
-    # TODO: remove this when this no longer the case
+    # rustls-webpki 0.101.7 comes with rustls 0.21 from zkm-sdk and sp1-sdk 6.1
+    # TODO: remove this once zkm-sdk moves to rustls 0.23 and sp1-sdk can be updated past 6.1
     'RUSTSEC-2026-0098',
     'RUSTSEC-2026-0099',
     'RUSTSEC-2026-0104',
-    # TODO: revisit once libp2p and zkm-sdk are updated
+    # hickory-proto 0.24 comes only with zkm-sdk via ethers 2.0 & reqwest 0.11
+    # TODO: remove this once zkm-sdk drops hickory-proto 0.24
     'RUSTSEC-2026-0119',
     # Optional zkVM prover backends pull in h2 0.3 (zkm-sdk via tonic 0.8 & ethers 2.0,
-    # sp1-sdk & boundless-market via hyper 0.14). The fix is only in h2 >= 0.4.16 and
-    # 0.3.27 is the last 0.3.x release, so this cannot be resolved from our side.
+    # sp1-sdk 6.1 via hyper 0.14 from aws-sdk-kms defaults). The fix is only in h2 >= 0.4.16
+    # and 0.3.27 is the last 0.3.x release, so this cannot be resolved from our side.
     # Not reachable from the node: none of these features are enabled by default.
-    # TODO: remove this once zkm-sdk, sp1-sdk and boundless-market move to h2 0.4
-    'RUSTSEC-2026-0258'
+    # TODO: remove this once zkm-sdk moves to h2 0.4 and sp1-sdk can be updated past 6.1
+    'RUSTSEC-2026-0258',
+    # rustls 0.20 & 0.21 come only with the optional zkVM prover backends: zkm-sdk via
+    # tonic 0.8, ethers 2.0 & reqwest 0.11, and sp1-sdk 6.1 via aws-sdk-kms defaults.
+    # The fixes are only in rustls >= 0.23.46.
+    # TODO: remove this once zkm-sdk moves to rustls 0.23 and sp1-sdk can be updated past 6.1
+    'RUSTSEC-2026-0346',
+    'RUSTSEC-2026-0349'
 ]
