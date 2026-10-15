@@ -15,6 +15,7 @@ use features::Feature;
 use fork_choice_control::{EventChannels, Wait};
 use futures::channel::mpsc::UnboundedSender;
 use genesis::AnchorCheckpointProvider;
+use http_api_utils::{post_log_level, post_trace_level};
 use liveness_tracker::ApiToLiveness;
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
@@ -39,11 +40,10 @@ use crate::{
         node_peer_count, node_peers, node_syncing_status, node_version, node_version_v2,
         pool_attestations, pool_attestations_v2, pool_attester_slashings,
         pool_attester_slashings_v2, pool_bls_to_execution_changes, pool_payload_attestations,
-        pool_proposer_slashings, pool_voluntary_exits, post_log_level,
-        post_state_validator_balances, post_state_validators, post_trace_level,
-        publish_blinded_block, publish_blinded_block_v2, publish_block, publish_block_v2,
-        publish_execution_payload_bid, publish_execution_payload_envelope, state_committees,
-        state_finality_checkpoints, state_fork, state_pending_consolidations,
+        pool_proposer_slashings, pool_voluntary_exits, post_state_validator_balances,
+        post_state_validators, publish_blinded_block, publish_blinded_block_v2, publish_block,
+        publish_block_v2, publish_execution_payload_bid, publish_execution_payload_envelope,
+        state_committees, state_finality_checkpoints, state_fork, state_pending_consolidations,
         state_pending_deposits, state_pending_partial_withdrawals, state_proposer_lookahead,
         state_ptc, state_randao, state_root, state_sync_committees, state_validator,
         state_validator_identities, submit_payload_attestation_messages, submit_pool_attestations,

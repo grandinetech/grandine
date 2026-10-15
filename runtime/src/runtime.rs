@@ -151,6 +151,7 @@ struct SharedConfig {
     metrics_config: MetricsConfig,
     dedicated_executor_normal_priority: Arc<DedicatedExecutor>,
     dedicated_executor_low_priority: Arc<DedicatedExecutor>,
+    tracing_handle: Option<TracingHandle>,
 }
 
 /// What the clock drives: fork choice when the built-in node runs, otherwise the validator.
@@ -820,6 +821,7 @@ fn shared_config(
     validator_config: Arc<ValidatorConfig>,
     signer: Arc<Signer>,
     genesis: Genesis,
+    tracing_handle: Option<TracingHandle>,
 ) -> SharedConfig {
     let metrics_config = config.metrics_config.clone();
     let metrics = &metrics_config.metrics;
@@ -873,6 +875,7 @@ fn shared_config(
         metrics_config,
         dedicated_executor_normal_priority,
         dedicated_executor_low_priority,
+        tracing_handle,
     }
 }
 
@@ -895,6 +898,7 @@ async fn run_services<P: Preset>(
         metrics_config,
         dedicated_executor_normal_priority,
         dedicated_executor_low_priority,
+        tracing_handle,
     } = shared;
 
     let MetricsConfig {
@@ -1036,6 +1040,7 @@ async fn run_services<P: Preset>(
             keymanager,
             signer,
             metrics.clone(),
+            tracing_handle,
         )),
         None => Either::Right(core::future::pending()),
     };
@@ -1318,6 +1323,7 @@ impl Context {
                     beacon_node_urls.clone(),
                     publish_to_every_node.clone(),
                     *use_builder,
+                    tracing_handle,
                 )
                 .await
             }
@@ -1428,7 +1434,7 @@ async fn run_beacon_node<P: Preset>(
     let anchor_checkpoint_provider = load_anchor_checkpoint_provider().await?;
     let genesis = anchor_genesis(&config.chain_config, &anchor_checkpoint_provider);
 
-    let shared = shared_config(config, validator_config, signer, genesis);
+    let shared = shared_config(config, validator_config, signer, genesis, tracing_handle);
 
     let (chain, services) = build_local_node(
         LocalNodeConfig {
@@ -1439,7 +1445,7 @@ async fn run_beacon_node<P: Preset>(
             anchor_checkpoint_provider,
             report_validator_performance: validator_client
                 .is_some_and(|validator_client| validator_client.report_validator_performance),
-            tracing_handle,
+            tracing_handle: shared.tracing_handle.clone(),
             eth1_api_to_metrics_tx,
             eth1_api_to_metrics_rx,
             restart_tx,
@@ -1452,6 +1458,7 @@ async fn run_beacon_node<P: Preset>(
     run_services(shared, config, Chain::Local(chain), services).await
 }
 
+#[expect(clippy::too_many_arguments)]
 async fn run_remote_validator<P: Preset>(
     config: &GrandineConfig,
     client: Client,
@@ -1460,6 +1467,7 @@ async fn run_remote_validator<P: Preset>(
     beacon_node_urls: Vec<RedactingUrl>,
     publish_to_every_node: Vec<PublishedDuty>,
     use_builder: bool,
+    tracing_handle: Option<TracingHandle>,
 ) -> Result<()> {
     const GENESIS_RETRY_DELAY: Duration = Duration::from_secs(2);
 
@@ -1526,7 +1534,7 @@ async fn run_remote_validator<P: Preset>(
     // Nodes unreachable now are held to the agreed root on their first poll.
     remote_beacon_nodes.seed_genesis_validators_root(genesis.genesis_validators_root);
 
-    let shared = shared_config(config, validator_config, signer, genesis);
+    let shared = shared_config(config, validator_config, signer, genesis, tracing_handle);
 
     // Without the built-in node's fork choice the validator receives ticks straight from the clock.
     let (runtime_tx, runtime_rx) = mpsc::unbounded();

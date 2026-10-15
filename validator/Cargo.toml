@@ -12,6 +12,7 @@ arc-swap = { workspace = true }
 arithmetic = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
+binary_utils = { workspace = true }
 block_producer = { workspace = true }
 bls = { workspace = true }
 builder_api = { workspace = true }

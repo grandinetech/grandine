@@ -1,4 +1,5 @@
 pub use block_id::BlockId;
+pub use debug_tracing::{post_log_level, post_trace_level};
 pub use helpers::{
     PhaseHeaderError, extend_router_with_middleware, extract_phase_from_headers,
     try_extract_phase_from_headers,
@@ -19,6 +20,7 @@ pub mod logging;
 pub mod middleware;
 
 mod block_id;
+mod debug_tracing;
 mod error;
 mod helpers;
 mod misc;

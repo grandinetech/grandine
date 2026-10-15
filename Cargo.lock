@@ -7190,6 +7190,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
+ "binary_utils",
  "bls",
  "features",
  "hex-literal 1.1.0",
@@ -17436,6 +17437,7 @@ dependencies = [
  "arithmetic",
  "axum 0.8.9",
  "axum-extra",
+ "binary_utils",
  "block_producer",
  "bls",
  "builder_api",

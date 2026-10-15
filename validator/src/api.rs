@@ -27,13 +27,14 @@ use axum_extra::{
     extract::{Query, QueryRejection},
     headers::{Authorization, authorization::Bearer},
 };
+use binary_utils::TracingHandle;
 use bls::PublicKeyBytes;
 use clock::Tick;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, error::Error as HelperError, misc, signing::SignForSingleFork};
-use http_api_utils::{ApiError, ApiMetrics};
+use http_api_utils::{ApiError, ApiMetrics, post_log_level, post_trace_level};
 use keymanager::{
     KeyManager, KeymanagerError, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey,
     ValidatingPubkey,
@@ -348,6 +349,7 @@ struct ValidatorApiState<P: Preset, W: Wait> {
     keymanager: Arc<KeyManager>,
     signer: Arc<Signer>,
     token: Arc<ApiToken>,
+    tracing_handle: Option<TracingHandle>,
 }
 
 impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<ChainSource<P, W>> {
@@ -371,6 +373,12 @@ impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Signer> {
 impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<ApiToken> {
     fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
         state.token.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Option<TracingHandle> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
+        state.tracing_handle.clone()
     }
 }
 
@@ -773,6 +781,7 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
     keymanager: Arc<KeyManager>,
     signer: Arc<Signer>,
     metrics: Option<Arc<Metrics>>,
+    tracing_handle: Option<TracingHandle>,
 ) -> Result<()> {
     let ValidatorApiConfig {
         address,
@@ -808,9 +817,12 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
         keymanager,
         token: Arc::new(token),
         signer,
+        tracing_handle,
     };
 
     let router = eth_v1_keymanager_routes()
+        .route("/eth/v2/debug/tracing/log_level", post(post_log_level))
+        .route("/eth/v2/debug/tracing/trace_level", post(post_trace_level))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             authorize_token,
