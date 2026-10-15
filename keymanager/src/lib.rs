@@ -4,6 +4,10 @@ pub use remote_keys::{ListedRemoteKey, RemoteKey};
 pub use types::bellatrix::primitives::Gas;
 
 pub use crate::{
+    builder_config::{
+        BuilderConfigDefaults, BuilderConfigError, BuilderConfigOptions, BuilderEntryOptions,
+        BuilderSettings, ResolvedBuilderConfig, ResolvedBuilderEntry, resolve_builder_config,
+    },
     proposer_configs::{
         LegacyMigration, ProposerConfigs, migrate_legacy_database, prune_legacy_database,
     },
@@ -27,6 +31,7 @@ use types::phase0::primitives::{ExecutionAddress, H256};
 
 use crate::{keystores::KeystoreManager, remote_keys::RemoteKeyManager};
 
+mod builder_config;
 mod keystores;
 mod misc;
 mod proposer_configs;
@@ -40,6 +45,7 @@ pub struct KeyManager {
 }
 
 impl KeyManager {
+    #[expect(clippy::too_many_arguments)]
     pub fn new_in_memory(
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
@@ -47,12 +53,14 @@ impl KeyManager {
         default_fee_recipient: ExecutionAddress,
         default_gas_limit: Option<Gas>,
         default_graffiti: H256,
+        builder_settings: BuilderSettings,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Self {
         let proposer_configs = Arc::new(ProposerConfigs::new(
             default_fee_recipient,
             default_gas_limit,
             default_graffiti,
+            builder_settings,
             validator_definitions.clone_arc(),
         ));
 
@@ -84,12 +92,14 @@ impl KeyManager {
         default_fee_recipient: ExecutionAddress,
         default_gas_limit: Option<Gas>,
         default_graffiti: H256,
+        builder_settings: BuilderSettings,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Result<Self> {
         let proposer_configs = Arc::new(ProposerConfigs::new(
             default_fee_recipient,
             default_gas_limit,
             default_graffiti,
+            builder_settings,
             validator_definitions.clone_arc(),
         ));
 

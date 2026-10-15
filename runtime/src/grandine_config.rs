@@ -2,7 +2,7 @@ use core::{net::SocketAddr, time::Duration};
 use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use binary_utils::TelemetryConfig;
-use builder_api::BuilderConfig;
+use builder_api::{BuilderConfig, gloas::containers::BuilderUrl};
 use eth1_api::AuthOptions;
 use fork_choice_store::BuilderCircuitBreakerConfig;
 use http_api::HttpApiConfig;
@@ -16,7 +16,7 @@ use types::{
     bellatrix::primitives::Gas,
     config::Config as ChainConfig,
     nonstandard::CustodyMode,
-    phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, H256, Slot},
+    phase0::primitives::{ExecutionAddress, ExecutionBlockNumber, Gwei, H256, Slot},
     redacting_url::RedactingUrl,
 };
 use validator::ValidatorApiConfig;
@@ -50,6 +50,10 @@ pub struct GrandineConfig {
     pub suggested_fee_recipient: ExecutionAddress,
     pub default_builder_boost_factor: Uint256,
     pub default_gas_limit: Option<Gas>,
+    pub default_builder_min_bid: Gwei,
+    pub default_builder_max_execution_payment: Gwei,
+    pub allow_trusted_payments: bool,
+    pub payload_builder_urls: Vec<BuilderUrl>,
     pub network_config: NetworkConfig,
     pub storage_config: StorageConfig,
     pub unfinalized_states_in_memory: u64,

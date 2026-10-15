@@ -4,7 +4,9 @@ use axum::{
     http::{HeaderMap, HeaderValue, header::ACCEPT},
     response::{IntoResponse, Response},
 };
+use builder_api::gloas::containers::BuilderUrl;
 use http_api_utils::ETH_CONSENSUS_VERSION;
+use logging::warn_with_peers;
 use mediatype::{MediaType, MediaTypeList};
 use mime::APPLICATION_OCTET_STREAM;
 use serde::Serialize;
@@ -20,6 +22,7 @@ pub const ETH_BLOB_DATA_INCLUDED: &str = "eth-blob-data-included";
 const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
 const ETH_EXECUTION_PAYLOAD_VALUE: &str = "eth-execution-payload-value";
 const ETH_EXECUTION_PAYLOAD_INCLUDED: &str = "eth-execution-payload-included";
+pub const ETH_BUILDER_URL: &str = "eth-builder-url";
 
 pub struct AlwaysJson;
 
@@ -53,6 +56,10 @@ pub struct EthResponse<T, M = (), F = AlwaysJson> {
     execution_optimistic: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     finalized: Option<bool>,
+
+    // These are returned only in headers.
+    #[serde(skip)]
+    builder_url: Option<BuilderUrl>,
 
     #[serde(skip)]
     format: F,
@@ -102,6 +109,7 @@ impl<T, M, F> EthResponse<T, M, F> {
             dependent_root: None,
             execution_optimistic: None,
             finalized: None,
+            builder_url: None,
             format,
         }
     }
@@ -146,6 +154,11 @@ impl<T, M, F> EthResponse<T, M, F> {
         self
     }
 
+    pub fn builder_url(mut self, builder_url: Option<BuilderUrl>) -> Self {
+        self.builder_url = builder_url;
+        self
+    }
+
     fn response_headers(&self) -> Result<HeaderMap> {
         let mut response_headers = HeaderMap::new();
 
@@ -174,6 +187,18 @@ impl<T, M, F> EthResponse<T, M, F> {
             response_headers.insert(ETH_EXECUTION_PAYLOAD_INCLUDED, header_value);
         }
 
+        // The block is more important than the header, so an unencodable URL is left out.
+        if let Some(builder_url) = &self.builder_url {
+            match HeaderValue::from_str(builder_url.as_str()) {
+                Ok(header_value) => {
+                    response_headers.insert(ETH_BUILDER_URL, header_value);
+                }
+                Err(error) => {
+                    warn_with_peers!("builder URL {builder_url} is not a valid header: {error}");
+                }
+            }
+        }
+
         Ok(response_headers)
     }
 
@@ -189,6 +214,7 @@ impl<T, M, F> EthResponse<T, M, F> {
             dependent_root,
             execution_optimistic,
             finalized,
+            builder_url,
             format: _,
         } = self;
 
@@ -203,6 +229,7 @@ impl<T, M, F> EthResponse<T, M, F> {
             dependent_root,
             execution_optimistic,
             finalized,
+            builder_url,
             format: AlwaysJson,
         };
 
@@ -223,6 +250,7 @@ impl<T, F> EthResponse<T, (), F> {
             dependent_root,
             execution_optimistic,
             finalized,
+            builder_url,
             format,
         } = self;
 
@@ -237,6 +265,7 @@ impl<T, F> EthResponse<T, (), F> {
             dependent_root,
             execution_optimistic,
             finalized,
+            builder_url,
             format,
         }
     }

@@ -7,14 +7,21 @@ use database::{Database, DatabaseMode};
 use derive_more::Display;
 use helper_functions::misc;
 use serde::de::DeserializeOwned;
+use ssz::Uint256;
 use types::{
     bellatrix::primitives::Gas,
-    phase0::primitives::{ExecutionAddress, H256},
+    phase0::primitives::{ExecutionAddress, Gwei, H256},
 };
 
 use crate::{
+    builder_config::{
+        BuilderConfigDefaults, BuilderConfigOptions, BuilderSettings, ResolvedBuilderConfig,
+        resolve_builder_config,
+    },
     misc::Error,
-    validator_definitions::{ValidatorDefinitions, ValidatorDefinitionsWithStorage},
+    validator_definitions::{
+        BuilderOptions, ValidatorDefinitions, ValidatorDefinitionsWithStorage,
+    },
 };
 
 const DB_MAX_SIZE: ByteSize = ByteSize::gib(1);
@@ -23,6 +30,7 @@ pub struct ProposerConfigs {
     default_fee_recipient: ExecutionAddress,
     default_gas_limit: Option<Gas>,
     default_graffiti: H256,
+    builder_settings: BuilderSettings,
     validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
 }
 
@@ -32,12 +40,14 @@ impl ProposerConfigs {
         default_fee_recipient: ExecutionAddress,
         default_gas_limit: Option<Gas>,
         default_graffiti: H256,
+        builder_settings: BuilderSettings,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Self {
         Self {
             default_fee_recipient,
             default_gas_limit,
             default_graffiti,
+            builder_settings,
             validator_definitions,
         }
     }
@@ -108,6 +118,122 @@ impl ProposerConfigs {
                 .ok_or(Error::NotFound)?;
 
             definition.gas_limit = None;
+
+            Ok(())
+        })?
+    }
+
+    pub fn set_builder_config(
+        &self,
+        pubkey: PublicKeyBytes,
+        builder_config: BuilderConfigOptions,
+    ) -> Result<()> {
+        let BuilderConfigOptions {
+            min_bid,
+            builder_boost_factor,
+            builders,
+        } = builder_config;
+
+        resolve_builder_config(builders.as_deref(), &self.builder_config_defaults(pubkey))?;
+
+        self.validator_definitions.update(|validator_definitions| {
+            let definition = validator_definitions
+                .get_mut(pubkey)
+                .ok_or(Error::NotFound)?;
+
+            definition.builder_options = BuilderOptions {
+                builder_boost_factor,
+                min_bid,
+                builders,
+                ..BuilderOptions::default()
+            };
+
+            Ok(())
+        })?
+    }
+
+    /// Resolve the builder boost factor for `pubkey`: per-validator overrides declared in
+    /// `validators.yml` take precedence over the process-wide default.
+    ///
+    /// - `prefer_builder_proposals == Some(true)` → `Uint256::MAX` (always prefer the builder)
+    /// - `builder_boost_factor == Some(n)`        → `n` (percentage applied to the builder bid)
+    /// - `builder_proposals == Some(false)`       → `Uint256::ZERO` (always prefer local)
+    /// - otherwise                                → the process-wide default
+    #[must_use]
+    pub fn builder_boost_factor(&self, pubkey: PublicKeyBytes) -> Uint256 {
+        let validator_definitions = self.validator_definitions.read();
+        let default_builder_boost_factor = self.builder_settings.default_builder_boost_factor;
+
+        let Some(definition) = validator_definitions.get(pubkey) else {
+            return default_builder_boost_factor;
+        };
+
+        let BuilderOptions {
+            prefer_builder_proposals,
+            builder_boost_factor,
+            builder_proposals,
+            ..
+        } = definition.builder_options;
+
+        if prefer_builder_proposals == Some(true) {
+            Uint256::MAX
+        } else if let Some(factor) = builder_boost_factor {
+            Uint256::from_u64(factor)
+        } else if builder_proposals == Some(false) {
+            Uint256::ZERO
+        } else {
+            default_builder_boost_factor
+        }
+    }
+
+    #[must_use]
+    pub fn builder_min_bid(&self, pubkey: PublicKeyBytes) -> Gwei {
+        self.validator_definitions
+            .read()
+            .get(pubkey)
+            .and_then(|definition| definition.builder_options.min_bid)
+            .unwrap_or(self.builder_settings.default_builder_min_bid)
+    }
+
+    pub fn resolved_builder_config(&self, pubkey: PublicKeyBytes) -> Result<ResolvedBuilderConfig> {
+        let builders = self
+            .validator_definitions
+            .read()
+            .get(pubkey)
+            .ok_or(Error::NotFound)?
+            .builder_options
+            .builders
+            .clone();
+
+        resolve_builder_config(builders.as_deref(), &self.builder_config_defaults(pubkey))
+            .map_err(Into::into)
+    }
+
+    fn builder_config_defaults(&self, pubkey: PublicKeyBytes) -> BuilderConfigDefaults<'_> {
+        let BuilderSettings {
+            default_builder_max_execution_payment,
+            allow_trusted_payments,
+            payload_builder_urls,
+            ..
+        } = &self.builder_settings;
+
+        BuilderConfigDefaults {
+            urls: payload_builder_urls,
+            min_bid: self.builder_min_bid(pubkey),
+            builder_boost_factor: u64::try_from(self.builder_boost_factor(pubkey))
+                .unwrap_or(u64::MAX),
+            max_execution_payment: *default_builder_max_execution_payment,
+            allow_trusted_payments: *allow_trusted_payments,
+        }
+    }
+
+    pub fn delete_builder_config(&self, pubkey: PublicKeyBytes) -> Result<()> {
+        self.validator_definitions.update(|validator_definitions| {
+            let definition = validator_definitions
+                .get_mut(pubkey)
+                .ok_or(Error::NotFound)?;
+
+            definition.builder_options = BuilderOptions::default();
 
             Ok(())
         })?
@@ -379,6 +505,7 @@ mod tests {
             DEFAULT_FEE_RECIPIENT,
             Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
+            BuilderSettings::default(),
             validator_definitions,
         ))
     }
@@ -515,6 +642,45 @@ mod tests {
         Ok(())
     }
 
+    fn rejected_builder_config(builder_config: serde_json::Value) -> Result<()> {
+        let proposer_configs = in_memory()?;
+
+        proposer_configs
+            .set_builder_config(PUBKEY, serde_json::from_value(builder_config)?)
+            .expect_err("an invalid builder config must be rejected");
+
+        let builder_options = proposer_configs
+            .validator_definitions
+            .read()
+            .get(PUBKEY)
+            .map(|definition| definition.builder_options.clone())
+            .expect("the validator has an entry");
+
+        assert_eq!(builder_options.min_bid, None);
+        assert_eq!(builder_options.builders, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_set_builder_config_rejects_duplicate_builders() -> Result<()> {
+        rejected_builder_config(serde_json::json!({
+            "min_bid": "10",
+            "builders": [
+                {"url": "https://builder.example.com"},
+                {"url": "https://builder.example.com", "auth_data": "0x6275696c6465722e6578616d706c652e636f6d"},
+            ],
+        }))
+    }
+
+    #[test]
+    fn test_set_builder_config_rejects_trusted_payments_without_opting_in() -> Result<()> {
+        rejected_builder_config(serde_json::json!({
+            "min_bid": "10",
+            "builders": [{"url": "https://builder.example.com", "max_execution_payment": "1"}],
+        }))
+    }
+
     #[test]
     fn test_settings_persist_across_reload() -> Result<()> {
         let tempdir = Builder::new()
@@ -540,6 +706,7 @@ mod tests {
             DEFAULT_FEE_RECIPIENT,
             Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
+            BuilderSettings::default(),
             validator_definitions,
         );
 
@@ -556,6 +723,7 @@ mod tests {
             DEFAULT_FEE_RECIPIENT,
             Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
+            BuilderSettings::default(),
             reloaded_definitions,
         );
 

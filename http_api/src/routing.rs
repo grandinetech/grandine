@@ -9,6 +9,7 @@ use axum::{
 use binary_utils::TracingHandle;
 use block_producer::BlockProducer;
 use bls::PublicKeyBytes;
+use builder_api::PayloadBuilderApi;
 use dedicated_executor::DedicatedExecutor;
 use eth1_api::{ApiController, Eth1Api};
 use features::Feature;
@@ -53,8 +54,8 @@ use crate::{
         sync_committee_rewards, validator_aggregate_attestation,
         validator_aggregate_attestation_v2, validator_attestation_data, validator_attester_duties,
         validator_beacon_committee_selections, validator_blinded_block, validator_block,
-        validator_block_v3, validator_block_v4, validator_execution_payload_bid,
-        validator_execution_payload_envelope, validator_liveness,
+        validator_block_v3, validator_block_v4, validator_builder_preferences,
+        validator_execution_payload_bid, validator_execution_payload_envelope, validator_liveness,
         validator_payload_attestation_data, validator_prepare_beacon_proposer,
         validator_proposer_duties, validator_proposer_duties_v2, validator_proposer_preferences,
         validator_ptc_duties, validator_publish_aggregate_and_proofs_v1,
@@ -80,6 +81,7 @@ use crate::{misc::SpyReceiver, test_endpoints};
 pub struct NormalState<P: Preset, W: Wait> {
     pub chain_config: Arc<ChainConfig>,
     pub block_producer: Arc<BlockProducer<P, W>>,
+    pub payload_builder_api: Arc<PayloadBuilderApi>,
     pub controller: ApiController<P, W>,
     pub anchor_checkpoint_provider: AnchorCheckpointProvider<P>,
     pub eth1_api: Arc<Eth1Api>,
@@ -124,6 +126,12 @@ impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<BlockProducer<P, W>>
 impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for ApiController<P, W> {
     fn from_ref(state: &NormalState<P, W>) -> Self {
         state.controller.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<NormalState<P, W>> for Arc<PayloadBuilderApi> {
+    fn from_ref(state: &NormalState<P, W>) -> Self {
+        state.payload_builder_api.clone_arc()
     }
 }
 
@@ -622,6 +630,10 @@ fn eth_v1_validator_routes<P: Preset, W: Wait>(
             post(validator_proposer_preferences),
         )
         .route(
+            "/eth/v1/validator/builder_preferences",
+            post(validator_builder_preferences::<P>),
+        )
+        .route(
             "/eth/v1/validator/liveness/{epoch}",
             post(validator_liveness),
         )
@@ -691,7 +703,7 @@ fn eth_v3_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalS
 }
 
 fn eth_v4_validator_routes_no_sync_check<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
-    Router::new().route("/eth/v4/validator/blocks/{slot}", get(validator_block_v4))
+    Router::new().route("/eth/v4/validator/blocks/{slot}", post(validator_block_v4))
 }
 
 #[cfg(test)]
