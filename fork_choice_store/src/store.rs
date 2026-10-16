@@ -7,7 +7,7 @@ use core::{
 use std::{
     backtrace::Backtrace,
     collections::{
-        BTreeMap, HashSet as StdHashSet,
+        BTreeMap, HashMap as StdHashMap, HashSet as StdHashSet,
         binary_heap::{BinaryHeap, PeekMut},
     },
     sync::{Arc, OnceLock},
@@ -355,6 +355,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 None,
                 PayloadPresence::default(),
                 false,
+                PayloadStatus::Valid,
             ),
             parent_payload_presence: PayloadPresence::default(),
         };
@@ -959,6 +960,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         self.head_with_payload_status().1
     }
 
+    // Status of the payload the head rests on.
+    // That is its own payload if fork choice resolves the head to its full node,
+    // and the payload under its empty node otherwise.
+    // Pre-Gloas it is the head's own status.
+    #[must_use]
+    pub fn head_node_payload_status(&self) -> PayloadStatus {
+        let (head_root, payload_status) = self.head_root_with_payload_status();
+
+        self.node_payload_status(head_root, payload_status == PAYLOAD_STATUS_FULL)
+            .unwrap_or_else(|| self.head().payload_status)
+    }
+
     /// The payload status of the head, together with the root it applies to.
     #[must_use]
     pub fn head_root_with_payload_status(&self) -> (H256, ExecutionPayloadStatus) {
@@ -1073,7 +1086,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             if let Some(parent) = self.chain_link(boosted_block.parent_root())
-                && PayloadPresence::of_parent(&boosted_block.block, &parent.block).is_full()
+                && PayloadPresence::of_parent(boosted_block.block.message(), parent.block.message())
+                    .is_full()
             {
                 return true;
             }
@@ -2136,7 +2150,8 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             return Ok(BlockAction::DelayUntilParent(block));
         };
 
-        let parent_payload_presence = PayloadPresence::of_parent(&block.item, &parent.block);
+        let parent_payload_presence =
+            PayloadPresence::of_parent(block.item.message(), parent.block.message());
 
         // > If this block builds on the parent's full payload, that payload must
         // > have been verified by on_execution_payload_envelope
@@ -2243,6 +2258,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             Some(parent),
             parent_payload_presence,
             self.is_block_invalid(parent.block_root),
+            self.empty_node_payload_status(parent.block_root),
         );
 
         let chain_link = ChainLink {
@@ -4803,7 +4819,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         let beacon_block_root = envelope.block_root();
         let builder_index = envelope.builder_index();
 
-        self.payloads.insert(beacon_block_root);
+        let first_delivery = self.payloads.insert(beacon_block_root).is_none();
 
         if is_before_deadline {
             self.timely_payloads.insert(beacon_block_root);
@@ -4815,6 +4831,17 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         if let Some(location) = self.unfinalized_locations.get(&beacon_block_root).copied() {
             self.execution_payload_locations
                 .insert(envelope.message.payload.block_hash, location);
+
+            // On first delivery a `Valid` status was inherited or caught up.
+            // It says nothing about this payload.
+            // Keep the block optimistic until the execution engine rules on it.
+            // A verdict that arrived early is replayed after this.
+            let chain_link =
+                &mut self.unfinalized[&location.segment_id][location.position].chain_link;
+
+            if first_delivery && chain_link.is_valid() {
+                chain_link.payload_status = PayloadStatus::Optimistic;
+            }
         }
 
         self.execution_payload_envelope_cache.insert(envelope);
@@ -6331,6 +6358,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         parent: Option<&ChainLink<P>>,
         parent_payload_presence: PayloadPresence,
         parent_block_invalid: bool,
+        parent_empty_node_payload_status: PayloadStatus,
     ) -> PayloadStatus {
         let is_post_merge = state
             .post_bellatrix()
@@ -6347,14 +6375,18 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         };
 
         if state.is_post_gloas() {
-            // Building on the parent's empty node leaves the parent's rejected payload behind,
-            // so the rejection does not carry over.
-            // A dead parent is different: its empty node is dead too.
-            if parent.is_invalid() && parent_payload_presence.is_empty() && !parent_block_invalid {
-                return PayloadStatus::Valid;
+            // A dead parent takes everything built on it, its empty node included.
+            if parent_block_invalid {
+                return PayloadStatus::Invalid;
             }
 
-            // Newly imported post-Gloas block inherits its parent's payload status
+            // Building on the parent's empty node leaves the parent's payload behind.
+            // A verdict on it, rejection included, does not carry over.
+            if parent_payload_presence.is_empty() {
+                return parent_empty_node_payload_status;
+            }
+
+            // Newly imported post-Gloas block inherits the status of the payload it builds on
             parent.payload_status
         } else {
             // Newly imported post-merge pre-Gloas block is optimistic until its payload is validated
@@ -6549,6 +6581,116 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
         }
     }
 
+    // Post-Gloas a block's status follows the payload its empty node rests on
+    // until its own payload is delivered. Then it follows the verdict on that payload.
+    // A block without its own payload is not touched by verdicts on other payloads,
+    // so it stays optimistic even after the payload it builds on is validated.
+    // This catches those blocks up.
+    fn validate_inherited_payload_statuses(&mut self) {
+        let mut memo = StdHashMap::new();
+
+        let block_roots = self
+            .unfinalized
+            .values()
+            .flatten()
+            .map(|unfinalized_block| &unfinalized_block.chain_link)
+            .filter(|chain_link| chain_link.is_post_gloas() && chain_link.is_optimistic())
+            .filter(|chain_link| !self.is_payload_verified(chain_link.block_root))
+            .filter(|chain_link| {
+                self.memoized_empty_node_payload_status(chain_link.block_root, &mut memo)
+                    .is_valid()
+            })
+            .map(|chain_link| chain_link.block_root)
+            .collect_vec();
+
+        for block_root in block_roots {
+            if let Some(chain_link) = self.unfinalized_chain_link_mut(block_root) {
+                chain_link.payload_status = PayloadStatus::Valid;
+            }
+        }
+    }
+
+    // Status of the payload a duty relies on when it uses the block's full or empty node.
+    // Pre-Gloas a block has one node, so it is the block's own status.
+    pub fn node_payload_status(&self, block_root: H256, full: bool) -> Option<PayloadStatus> {
+        let chain_link = self.chain_link(block_root)?;
+
+        if full || !chain_link.is_post_gloas() {
+            return Some(chain_link.payload_status);
+        }
+
+        if self.is_block_invalid(block_root) {
+            return Some(PayloadStatus::Invalid);
+        }
+
+        Some(self.empty_node_payload_status(block_root))
+    }
+
+    // The parent node a new block extends: the parent's root and whether it is the full node.
+    // A bid on the parent's payload extends its full node. Any other bid extends its empty node.
+    // Pre-Gloas a block has one node, which counts as full.
+    // `None` if fork choice no longer holds the parent.
+    pub fn extended_node(
+        &self,
+        block: &(impl traits::BeaconBlock<P> + ?Sized),
+    ) -> Option<(H256, bool)> {
+        let parent = self.chain_link(block.parent_root())?;
+        let full = !PayloadPresence::of_parent(block, parent.block.message()).is_empty();
+        Some((parent.block_root, full))
+    }
+
+    // Status of the latest payload under the block's empty node.
+    // That is the latest payload in the block's execution chain, leaving its own payload out.
+    //
+    // Walked as (child, parent) pairs, from the block downwards.
+    // A child on its parent's empty node leaves that payload out, so the walk goes past it.
+    // A child on its parent's full node needs that payload delivered,
+    // so the parent's status is the verdict on it.
+    // Pre-Gloas every presence is `Pending`, so a pre-Gloas parent always ends the walk.
+    // Finalized blocks all share one status.
+    fn empty_node_payload_status(&self, block_root: H256) -> PayloadStatus {
+        self.memoized_empty_node_payload_status(block_root, &mut StdHashMap::new())
+    }
+
+    // `empty_node_payload_status`, memoized across one pass.
+    // A run of blocks on empty nodes shares one answer.
+    // Without the memo each of them walks the whole run.
+    fn memoized_empty_node_payload_status(
+        &self,
+        block_root: H256,
+        memo: &mut StdHashMap<H256, PayloadStatus>,
+    ) -> PayloadStatus {
+        let mut visited = vec![];
+        let mut root = block_root;
+
+        let status = loop {
+            if let Some(status) = memo.get(&root) {
+                break *status;
+            }
+
+            let Some(location) = self.unfinalized_locations.get(&root) else {
+                break self.last_finalized().payload_status;
+            };
+
+            let chain_link = &self.unfinalized[&location.segment_id][location.position].chain_link;
+
+            visited.push(root);
+
+            if !chain_link.parent_payload_presence.is_empty() {
+                break self.chain_link(chain_link.parent_root()).map_or_else(
+                    || self.last_finalized().payload_status,
+                    |parent| parent.payload_status,
+                );
+            }
+
+            root = chain_link.parent_root();
+        };
+
+        memo.extend(visited.into_iter().map(|root| (root, status)));
+
+        status
+    }
+
     fn set_block_descendant_payload_statuses(
         &mut self,
         ancestor: ExecutionBlockHash,
@@ -6585,6 +6727,38 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
             }
 
             hashes.push(hash);
+        }
+
+        vec![]
+    }
+
+    // Post-Gloas counterpart of `unfinalized_execution_chain_hashes`, which skips post-Gloas blocks.
+    // Roots of the post-Gloas blocks whose payloads sit between `ancestor`
+    // and the block at `last_included`, leaving both out.
+    //
+    // Walked as (child, parent) pairs, from the block downwards.
+    // A child on its parent's empty node leaves that payload out, so the walk goes past it.
+    // Pre-Gloas parents are left to `unfinalized_execution_chain_hashes`.
+    // Empty if `ancestor` is not in the chain, same as `unfinalized_execution_chain_hashes`.
+    fn unfinalized_post_gloas_payload_block_roots(
+        &self,
+        ancestor: ExecutionBlockHash,
+        ending_segment: &Segment<P>,
+        last_included: Position,
+    ) -> Vec<H256> {
+        let mut block_roots = vec![];
+
+        for (child, parent) in self
+            .unfinalized_chain_ending_with(ending_segment, last_included)
+            .tuple_windows()
+        {
+            if parent.execution_block_hash() == Some(ancestor) {
+                return block_roots;
+            }
+
+            if parent.is_post_gloas() && !child.parent_payload_presence.is_empty() {
+                block_roots.push(parent.block_root);
+            }
         }
 
         vec![]
@@ -6647,6 +6821,7 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     ) -> PayloadAction {
         if self.set_block_payload_status(latest_valid_hash, PayloadStatus::Valid) {
             self.set_block_ancestor_payload_statuses(latest_valid_hash, PayloadStatus::Valid);
+            self.validate_inherited_payload_statuses();
 
             if let Some(block_hash) = block_hash
                 && block_hash != latest_valid_hash
@@ -6665,9 +6840,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                         *position,
                     );
 
+                    let post_gloas_block_roots = self.unfinalized_post_gloas_payload_block_roots(
+                        latest_valid_hash,
+                        segment,
+                        *position,
+                    );
+
                     if let Some(hash) = descendant_chain_hashes.last() {
                         self.set_block_payload_status(*hash, PayloadStatus::Invalid);
                         self.set_block_descendant_payload_statuses(*hash, PayloadStatus::Invalid);
+                    }
+
+                    // The deepest payload is enough.
+                    // Its child builds on it, so everything above it goes with it.
+                    if let Some(block_root) = post_gloas_block_roots.last() {
+                        self.invalidate_payload_and_descendant_payloads(*block_root);
                     }
                 } else {
                     return PayloadAction::DelayUntilBlock(block_hash);

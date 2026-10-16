@@ -9,13 +9,14 @@ use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
-use fork_choice_store::{AttestationItem, AttestationOrigin};
+use fork_choice_store::{AttestationItem, AttestationOrigin, PayloadPresence};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
 use ssz::BitVector;
 use std_ext::ArcExt as _;
+use tokio::sync::broadcast::Receiver;
 use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
@@ -39,6 +40,7 @@ use unwrap_none::UnwrapNone as _;
 
 use crate::{
     controller::MutatorHandle,
+    events::{Event, EventChannels, Topic},
     messages::P2pMessage,
     misc::MutatorIgnoreReason,
     queries::BlockWithRoot,
@@ -57,6 +59,8 @@ pub struct Context<P: Preset> {
     execution_engine: TestExecutionEngine<P>,
     p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     service_rx: UnboundedReceiver<ExecutionServiceMessage<P>>,
+    // Subscribed from the start. Events are only sent while someone listens.
+    head_v2_rx: Receiver<Event<P>>,
 }
 
 impl<P: Preset> Drop for Context<P> {
@@ -107,6 +111,9 @@ impl<P: Preset> Context<P> {
 
         let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
 
+        let event_channels = Arc::new(EventChannels::default());
+        let head_v2_rx = event_channels.receiver_for(Topic::HeadV2);
+
         let phase = anchor_block.phase();
 
         let (controller, mutator_handle) = TestController::with_p2p_tx(
@@ -116,6 +123,7 @@ impl<P: Preset> Context<P> {
             anchor_state,
             execution_engine.clone_arc(),
             p2p_tx,
+            event_channels,
             thread_pool_size,
         );
 
@@ -130,6 +138,7 @@ impl<P: Preset> Context<P> {
             p2p_rx,
             service_rx,
             execution_engine,
+            head_v2_rx,
         }
     }
 
@@ -1093,6 +1102,36 @@ impl<P: Preset> Context<P> {
         );
     }
 
+    pub fn assert_node_payload_status(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        full: bool,
+        expected_payload_status: Option<PayloadStatus>,
+    ) {
+        assert_eq!(
+            self.controller()
+                .node_payload_status(block.message().hash_tree_root(), full),
+            expected_payload_status,
+        );
+    }
+
+    // `block` is a proposal that has not been imported.
+    pub fn assert_extended_payload_status(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        expected_payload_status: Option<PayloadStatus>,
+    ) {
+        let extended_payload_status = self
+            .controller()
+            .store_snapshot()
+            .extended_node(block.message())
+            .and_then(|(parent_root, full)| {
+                self.controller().node_payload_status(parent_root, full)
+            });
+
+        assert_eq!(extended_payload_status, expected_payload_status);
+    }
+
     pub fn assert_optimistic(&self, block: &SignedBeaconBlock<P>, expected_optimistic: bool) {
         assert_eq!(
             self.controller()
@@ -1103,6 +1142,26 @@ impl<P: Preset> Context<P> {
                 .is_optimistic(),
             expected_optimistic,
         );
+    }
+
+    // Checks the `head_v2` events sent since the last call.
+    // Each is (block root, payload presence, `execution_optimistic`).
+    pub fn assert_head_v2_events(&mut self, expected_events: &[(H256, PayloadPresence, bool)]) {
+        let actual_events = core::iter::from_fn(|| self.head_v2_rx.try_recv().ok())
+            .map(|event| {
+                let Event::HeadV2(event) = event else {
+                    panic!("head_v2 channel should only carry head_v2 events");
+                };
+
+                (
+                    event.data.block,
+                    event.data.payload_status,
+                    event.data.execution_optimistic,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual_events, expected_events);
     }
 
     pub fn assert_forward_synced(&self, expected_forward_synced: bool) {
@@ -1282,6 +1341,12 @@ impl Context<Minimal> {
     pub fn gloas_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Gloas))
             .expect("minimal configuration modified to start in Gloas is valid")
+    }
+
+    #[must_use]
+    pub fn gloas_at_epoch_1_minimal() -> Self {
+        Self::with_config(Config::minimal().upgrade_once(Phase::Gloas, 1))
+            .expect("minimal configuration modified to upgrade to Gloas in epoch 1 is valid")
     }
 }
 

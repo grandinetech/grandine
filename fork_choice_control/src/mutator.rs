@@ -2287,17 +2287,24 @@ where
                     // Emit a second `head_v2` event reflecting the head's payload
                     // status transitioning from empty to full once its envelope is
                     // available.
+                    // The head stays optimistic until the execution engine rules on the payload.
+                    // Post-Gloas head events go out regardless, like everywhere else.
+                    // The events are sent again once the verdict validates the payload.
+                    // See `Mutator::handle_potential_head_change`.
                     let head = self.store.head();
 
-                    if head.block_root == beacon_block_root && head.is_valid() {
+                    if head.block_root == beacon_block_root {
                         let head = head.clone();
                         let payload_status = self.store.head_payload_status();
+                        let execution_optimistic =
+                            self.store.head_node_payload_status().is_optimistic();
 
                         match self.calculate_dependent_roots(&head) {
                             Ok(dependent_roots) => self.event_channels.send_head_v2_event(
                                 &head,
                                 payload_status,
                                 dependent_roots,
+                                execution_optimistic,
                             ),
                             Err(error) => {
                                 warn_with_peers!(
@@ -3046,7 +3053,7 @@ where
         };
 
         let old_head = self.store.head().clone();
-        let head_was_optimistic = old_head.is_optimistic();
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
 
         self.store_mut()
             .update_chain_payload_statuses(latest_valid_hash, None);
@@ -3069,7 +3076,7 @@ where
         }
 
         let old_head = self.store.head().clone();
-        let head_was_optimistic = old_head.is_optimistic();
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
         let latest_valid_hash = payload_status.latest_valid_hash;
 
         let payload_action = if let Some(valid_hash) = latest_valid_hash {
@@ -3145,14 +3152,25 @@ where
         let head = self.store.head();
         let head_changed = head.block_root != old_head.block_root;
 
+        // `head_was_optimistic` is about the payload the head rests on.
+        // Post-Gloas that depends on the node fork choice resolves the head to.
+        let head_became_valid = !head_changed
+            && head_was_optimistic
+            && self.store.head_node_payload_status().is_valid();
+
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
-        if !head_changed && head_was_optimistic && head.is_valid() && !head.is_post_gloas() {
+        // Post-Gloas head events go out regardless, so they are sent again here
+        // to tell clients the head is no longer optimistic.
+        if head_became_valid {
             self.send_head_events(head);
 
+            // Post-Gloas the validator polls payload statuses itself.
             // The call to `Store::notify_about_reorganization` below sends
             // a `ValidatorMessage::Head` message if the head changed.
-            self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
+            if !head.is_post_gloas() {
+                self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
+            }
         }
 
         if head_changed {
@@ -3949,12 +3967,16 @@ where
     fn send_head_events(&self, head: &ChainLink<P>) {
         match self.calculate_dependent_roots(head) {
             Ok(dependent_roots) => {
-                self.event_channels.send_head_event(head, dependent_roots);
+                let execution_optimistic = self.store.head_node_payload_status().is_optimistic();
+
+                self.event_channels
+                    .send_head_event(head, dependent_roots, execution_optimistic);
 
                 self.event_channels.send_head_v2_event(
                     head,
                     self.store.head_payload_status(),
                     dependent_roots,
+                    execution_optimistic,
                 );
             }
             Err(error) => {

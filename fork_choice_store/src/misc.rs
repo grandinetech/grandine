@@ -42,7 +42,7 @@ use types::{
         primitives::{ExecutionBlockHash, Gwei, H256, Slot, SubnetId, ValidatorIndex},
     },
     preset::Preset,
-    traits::{self, BeaconBlock as _, SignedBeaconBlock as _, SszValidatorList},
+    traits::{self, SignedBeaconBlock as _, SszValidatorList},
 };
 
 use crate::{segment::Position, store::Store};
@@ -150,14 +150,14 @@ impl From<RawPayloadPresence> for PayloadPresence {
 impl PayloadPresence {
     #[must_use]
     pub fn of_parent<P: Preset>(
-        block: &impl traits::SignedBeaconBlock<P>,
-        parent: &impl traits::SignedBeaconBlock<P>,
+        block: &(impl traits::BeaconBlock<P> + ?Sized),
+        parent: &(impl traits::BeaconBlock<P> + ?Sized),
     ) -> Self {
-        let Some(block_payload_bid) = block.message().payload_bid() else {
+        let Some(block_payload_bid) = block.payload_bid() else {
             return Self::Pending;
         };
 
-        let Some(parent_payload_bid) = parent.message().payload_bid() else {
+        let Some(parent_payload_bid) = parent.payload_bid() else {
             return Self::Pending;
         };
 

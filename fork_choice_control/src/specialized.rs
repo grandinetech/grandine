@@ -106,6 +106,7 @@ where
         execution_engine: E,
         metrics: Option<Arc<Metrics>>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        event_channels: Arc<EventChannels<P>>,
         thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let tick = Tick::block_proposal(&anchor_block);
@@ -121,8 +122,6 @@ where
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
         ));
-
-        let event_channels = Arc::new(EventChannels::default());
 
         Self::new(
             chain_config,
@@ -171,6 +170,7 @@ impl<P: Preset> AdHocBenchController<P> {
             NullExecutionEngine,
             None,
             p2p_tx,
+            Arc::new(EventChannels::default()),
             None,
         )
     }
@@ -195,6 +195,7 @@ impl<P: Preset> BenchController<P> {
             NullExecutionEngine,
             None,
             futures::sink::drain(),
+            Arc::new(EventChannels::default()),
             None,
         )
     }
@@ -214,10 +215,12 @@ impl<P: Preset> TestController<P> {
             anchor_state,
             Arc::new(Mutex::new(MockExecutionEngine::new(true, false, None))),
             futures::sink::drain(),
+            Arc::new(EventChannels::default()),
             None,
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn with_p2p_tx(
         chain_config: Arc<ChainConfig>,
         pubkey_cache: Arc<PubkeyCache>,
@@ -225,6 +228,7 @@ impl<P: Preset> TestController<P> {
         anchor_state: Arc<BeaconState<P>>,
         execution_engine: TestExecutionEngine<P>,
         p2p_tx: impl UnboundedSink<P2pMessage<P>>,
+        event_channels: Arc<EventChannels<P>>,
         thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
         let store_config = StoreConfig::aggressive(&chain_config);
@@ -239,6 +243,7 @@ impl<P: Preset> TestController<P> {
             execution_engine,
             None,
             p2p_tx,
+            event_channels,
             thread_pool_size,
         )
     }

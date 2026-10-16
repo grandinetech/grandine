@@ -62,7 +62,7 @@ use ssz::{
 };
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
-use tokio::time::timeout;
+use tokio::time::{interval, timeout};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
@@ -100,7 +100,7 @@ use types::{
         },
     },
     nonstandard::{
-        BlockRewards, KzgProofs, Phase, RelativeEpoch, ValidationOutcome,
+        BlockRewards, KzgProofs, PayloadStatus, Phase, RelativeEpoch, ValidationOutcome,
         ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
@@ -116,8 +116,8 @@ use types::{
     },
     preset::{Preset, ProposerLookaheadLength, SyncSubcommitteeSize},
     traits::{
-        BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments, PostFuluBeaconState,
-        SignedBeaconBlock as _,
+        self, BeaconBlock as _, BeaconState as _, BlockBodyWithBlobKzgCommitments,
+        PostFuluBeaconState, SignedBeaconBlock as _,
     },
 };
 use validator::{ApiToValidator, ValidatorConfig};
@@ -3448,9 +3448,48 @@ pub async fn validator_blinded_block<P: Preset, W: Wait>(
         .value
         .into_blinded();
 
+    ensure_validator_block_extends_valid_payload(&controller, &blinded_block, slot).await?;
+
     let version = blinded_block.phase();
 
     Ok(EthResponse::json(blinded_block).version(version))
+}
+
+// Refuses a block that extends a payload the execution engine has not validated.
+// The validator client would sign it, which the optimistic sync rules forbid.
+// Same rule and wait as `Validator::propose`, so both kinds of validators decide the same way.
+async fn ensure_extends_valid_payload<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    block: &(impl traits::BeaconBlock<P> + Sync),
+    slot: Slot,
+) -> Result<(), Error> {
+    let status = controller.wait_for_valid_extended_payload(block).await;
+
+    if status.is_some_and(PayloadStatus::is_valid) {
+        return Ok(());
+    }
+
+    warn_with_peers!(
+        "refusing to produce block for slot {slot} \
+         because it extends a payload that is not fully validated (status: {status:?})",
+    );
+
+    Err(Error::HeadIsOptimistic)
+}
+
+async fn ensure_validator_block_extends_valid_payload<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    block: &ValidatorBlindedBlock<P>,
+    slot: Slot,
+) -> Result<(), Error> {
+    match block {
+        ValidatorBlindedBlock::BlindedBeaconBlock(block) => {
+            ensure_extends_valid_payload(controller, block, slot).await
+        }
+        ValidatorBlindedBlock::BeaconBlock(block) => {
+            ensure_extends_valid_payload(controller, block, slot).await
+        }
+    }
 }
 
 /// `GET /eth/v2/validator/blocks/{slot}`
@@ -3499,6 +3538,8 @@ pub async fn validator_block<P: Preset, W: Wait>(
         .build_beacon_block(randao_reveal, local_execution_payload_handle)
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
+
+    ensure_extends_valid_payload(&controller, &beacon_block.value, slot).await?;
 
     let version = beacon_block.value.phase();
 
@@ -3577,6 +3618,8 @@ pub async fn validator_block_v3<P: Preset, W: Wait>(
         )
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
+
+    ensure_validator_block_extends_valid_payload(&controller, &validator_block.value, slot).await?;
 
     let mev = validator_block.mev;
     let version = validator_block.value.phase();
@@ -3658,6 +3701,8 @@ pub async fn validator_block_v4<P: Preset, W: Wait>(
         .await?
         .ok_or(Error::UnableToProduceBeaconBlock)?;
 
+    ensure_extends_valid_payload(&controller, &validator_block.value, slot).await?;
+
     let beacon_block_root = validator_block.value.hash_tree_root();
     let version = validator_block.value.phase();
 
@@ -3727,6 +3772,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     headers: HeaderMap,
 ) -> Result<EthResponse<AttestationData, (), JsonOrSsz>, Error> {
     const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+    const PAYLOAD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
     let _timer = metrics.map(|metrics| metrics.validator_api_attestation_data_times.start_timer());
 
@@ -3765,7 +3811,13 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
     let mut block_root;
     let mut state;
 
-    let is_optimistic = if slot < head_slot {
+    // Post-Gloas the payload an attestation relies on depends on which node of the block it votes for.
+    let attests_full_node = |block_root, block_slot| -> Result<bool, Error> {
+        Ok(phase_at_slot >= Phase::Gloas
+            && attested_payload_present(&controller, block_root, block_slot, slot)?)
+    };
+
+    let own_status = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
         let block = controller
             .stored_block_by_slot(slot)?
@@ -3775,79 +3827,122 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         state = controller
             .state_before_or_at_slot(block_root, slot)
             .ok_or(Error::StateNotFound)?;
-        block.status.is_optimistic()
+        block.status
     } else {
         block_root = head.block_root;
         state = controller.state_by_chain_link(&head);
-        status.is_optimistic()
+        status
     };
 
-    let should_wait_for_late_block = !validator_config.disable_wait_for_late_blocks
+    // The node the wait checks is the node the attestation votes for.
+    // It also gives `index`.
+    let mut full = attests_full_node(block_root, state.latest_block_header().slot)?;
+
+    let is_optimistic = controller
+        .node_payload_status(block_root, full)
+        .unwrap_or(own_status)
+        .is_optimistic();
+
+    // A late block cannot change the attested block of a past slot.
+    // Late blocks are only counted for the current slot.
+    let should_wait_for_late_block = slot >= controller.slot()
+        && !validator_config.disable_wait_for_late_blocks
         && controller.has_current_slot_blocks_in_processing();
 
-    if (is_optimistic || should_wait_for_late_block)
-        && let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
+    if is_optimistic || should_wait_for_late_block {
+        let mut block_events = event_channels.receiver_for(Topic::Block);
+
+        // Post-Gloas blocks do not get a block event when they become fully validated.
+        // Polling catches that.
+        let mut poll = interval(PAYLOAD_STATUS_POLL_INTERVAL);
+
+        let result = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
             loop {
-                let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
-                    Ok(Event::Block(block_event)) => block_event,
-                    Ok(_) => continue,
-                    Err(error) => {
-                        debug_with_peers!("error receiving block event: {error:?}");
-                        continue;
-                    }
-                };
-
-                if block_event.execution_optimistic {
-                    continue;
-                }
-
-                if block_event.block == block_root {
-                    debug_with_peers!(
-                        "fork choice head became fully validated (block event: {block_event:?})",
-                    );
-                    break;
+                tokio::select! {
+                    _ = block_events.recv() => {}
+                    _ = poll.tick() => {}
                 }
 
                 let head = controller.head().value;
 
-                if block_event.block == head.block_root {
-                    debug_with_peers!("fork choice head changed (block event: {block_event:?})");
+                if head.block_root != block_root && head.slot() <= slot {
+                    let head_full = match attests_full_node(head.block_root, head.slot()) {
+                        Ok(head_full) => head_full,
+                        Err(error) => break Err(error),
+                    };
 
-                    block_root = head.block_root;
-                    state = controller.state_by_chain_link(&head);
+                    if controller
+                        .node_payload_status(head.block_root, head_full)
+                        .is_some_and(PayloadStatus::is_valid)
+                    {
+                        debug_with_peers!(
+                            "fork choice head changed (new head: {:?})",
+                            head.block_root,
+                        );
 
-                    break;
+                        block_root = head.block_root;
+                        state = controller.state_by_chain_link(&head);
+                        full = head_full;
+
+                        break Ok(());
+                    }
+                }
+
+                if !is_optimistic {
+                    continue;
+                }
+
+                // A rejected payload of its own only moves the vote to its empty node.
+                // `Invalid` there means the block itself is dead.
+                let status = match controller.node_payload_status(block_root, full) {
+                    Some(status) if full && status.is_invalid() => {
+                        full = false;
+                        controller.node_payload_status(block_root, false)
+                    }
+                    status => status,
+                };
+
+                match status {
+                    Some(status) if status.is_valid() => {
+                        debug_with_peers!("fork choice head became fully validated");
+                        break Ok(());
+                    }
+                    Some(status) if status.is_invalid() => {
+                        debug_with_peers!("fork choice head was found to be invalid");
+                        break Err(Error::HeadIsOptimistic);
+                    }
+                    _ => {}
                 }
             }
         })
-        .await
-    {
-        if is_optimistic {
-            debug_with_peers!(
-                "timed out while waiting for chain head to become fully validated: {error:?}",
-            );
+        .await;
 
-            return Err(Error::HeadIsOptimistic);
+        match result {
+            Ok(outcome) => outcome?,
+            Err(error) if is_optimistic => {
+                debug_with_peers!(
+                    "timed out while waiting for chain head to become fully validated: {error:?}",
+                );
+
+                return Err(Error::HeadIsOptimistic);
+            }
+            Err(error) => {
+                debug_with_peers!(
+                    "timed out while waiting for current slot block to be processed: {error:?}",
+                );
+            }
         }
-
-        debug_with_peers!(
-            "timed out while waiting for current slot block to be processed: {error:?}",
-        );
     }
 
+    // Post-Gloas `index` says whether the attestation votes for the block's full node.
+    // Taken from the node the wait checked.
+    // Working it out again could vote for a payload nobody checked.
+    // `full` is always false before Gloas and for a block from `slot` itself.
+    // See: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.5/specs/gloas/validator.md#attestation
     let index = if phase_at_slot < Phase::Electra {
         committee_index
-    } else if phase_at_slot < Phase::Gloas || state.latest_block_header().slot == slot {
-        0
     } else {
-        let block_slot = state.latest_block_header().slot;
-
-        let is_payload_full = controller
-            .snapshot()
-            .canonical_payload_block_roots(block_slot..block_slot.saturating_add(1))?
-            .contains(&block_root);
-
-        u64::from(is_payload_full)
+        u64::from(full)
     };
 
     if state.slot() < slot {
@@ -4031,14 +4126,11 @@ pub async fn validator_execution_payload_envelope<P: Preset, W: Wait>(
 )]
 pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
-    State(event_channels): State<Arc<EventChannels<P>>>,
     State(metrics): State<Option<Arc<Metrics>>>,
     State(validator_config): State<Arc<ValidatorConfig>>,
     EthQuery(query): EthQuery<PayloadAttestationDataQuery>,
     headers: HeaderMap,
 ) -> Result<EthResponse<PayloadAttestationData, (), JsonOrSsz>, Error> {
-    const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
-
     let _timer = metrics.map(|metrics| {
         metrics
             .validator_api_payload_attestation_data_times
@@ -4047,11 +4139,7 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
 
     let PayloadAttestationDataQuery { slot } = query;
 
-    let WithStatus {
-        value: head,
-        status,
-        ..
-    } = controller.head();
+    let head = controller.head().value;
 
     let head_slot = head.slot();
     let max_empty_slots = validator_config.max_empty_slots;
@@ -4072,55 +4160,34 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         return Err(Error::EpochBeforePrevious);
     }
 
-    let block_root;
-    let mut state;
-    let blob_data_available;
-
-    let is_optimistic = if slot < head_slot {
+    // Payload attestations report timeliness, not validity.
+    // An optimistic block does not stop them.
+    let (block_root, mut state, blob_data_available) = if slot < head_slot {
         // Search for the latest canonical block before or at slot.
         let block = controller
             .stored_block_by_slot(slot)?
             .ok_or(Error::BlockNotSeen)?;
 
-        block_root = block.value.root;
-        state = controller
+        let block_root = block.value.root;
+        let state = controller
             .state_before_or_at_slot(block_root, slot)
             .ok_or(Error::StateNotFound)?;
-        blob_data_available = controller
+        let blob_data_available = controller
             .indices_of_missing_data_columns(&block.value.block)
             .is_empty();
-        block.status.is_optimistic()
+
+        (block_root, state, blob_data_available)
     } else {
-        block_root = head.block_root;
-        state = controller.state_by_chain_link(&head);
-        blob_data_available = controller
+        let blob_data_available = controller
             .indices_of_missing_data_columns(&head.block)
             .is_empty();
-        status.is_optimistic()
+
+        (
+            head.block_root,
+            controller.state_by_chain_link(&head),
+            blob_data_available,
+        )
     };
-
-    if is_optimistic
-        && let Err(error) = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
-            loop {
-                let block_event = match event_channels.receiver_for(Topic::Block).recv().await {
-                    Ok(Event::Block(block_event)) => block_event,
-                    Ok(_) => continue,
-                    Err(error) => {
-                        debug_with_peers!("error receiving block event: {error:?}");
-                        continue;
-                    }
-                };
-
-                if block_event.block == block_root && !block_event.execution_optimistic {
-                    break;
-                }
-            }
-        })
-        .await
-    {
-        debug_with_peers!("timeout while waiting for block event: {error:?}");
-        return Err(Error::HeadIsOptimistic);
-    }
 
     let payload_present = controller.stored_envelope_by_root(block_root)?.is_some();
 
@@ -5735,6 +5802,27 @@ async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
     };
 
     Ok(status_code)
+}
+
+// Whether an attestation at `slot` for this block votes for its payload.
+// That is, whether the payload is in the canonical chain.
+// A block from `slot` itself is always voted for without it.
+fn attested_payload_present<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    block_root: H256,
+    block_slot: Slot,
+    slot: Slot,
+) -> Result<bool, Error> {
+    if block_slot >= slot {
+        return Ok(false);
+    }
+
+    let payload_present = controller
+        .snapshot()
+        .canonical_payload_block_roots(block_slot..block_slot.saturating_add(1))?
+        .contains(&block_root);
+
+    Ok(payload_present)
 }
 
 /// Deserialize a request body as SSZ (when `Content-Type: application/octet-stream`) or JSON.

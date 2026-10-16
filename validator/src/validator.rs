@@ -24,7 +24,7 @@ use eth1_api::ApiController;
 use eth2_libp2p::{GossipId, NetworkGlobals, SyncStatus};
 use features::Feature;
 use fork_choice_control::{
-    BlockWithRoot, Event, EventChannels, StoredBlock, Topic, ValidatorMessage, Wait,
+    BlockWithRoot, EventChannels, StoredBlock, Topic, ValidatorMessage, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, ChainLink, PayloadAttestationItem,
@@ -63,7 +63,7 @@ use ssz::{BitList, ContiguousList, ReadError};
 use std_ext::ArcExt as _;
 use tap::{Conv as _, Pipe as _};
 use thiserror::Error;
-use tokio::time::timeout;
+use tokio::time::{interval, timeout};
 use tracing::instrument;
 use try_from_iterator::TryFromIterator as _;
 use types::{
@@ -91,8 +91,8 @@ use types::{
         },
     },
     nonstandard::{
-        CustodyMode, KzgProofs, OwnAttestation, Phase, SyncCommitteeEpoch, WithBlobsAndMev,
-        WithStatus,
+        CustodyMode, KzgProofs, OwnAttestation, PayloadStatus, Phase, SyncCommitteeEpoch,
+        WithBlobsAndMev, WithStatus,
     },
     phase0::{
         consts::GENESIS_SLOT,
@@ -821,7 +821,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_propose_tick_times.start_timer());
 
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let slot_head = self
+                    .wait_for_fully_validated_head(slot_head, HeadDuty::Propose)
+                    .await
+                    .map(|(slot_head, _)| slot_head);
 
                 self.discard_previous_slot_attestations();
                 self.discard_previous_slot_payload_attestations();
@@ -834,10 +837,15 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_attest_tick_times.start_timer());
 
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let settled_head = self
+                    .wait_for_fully_validated_head(slot_head, HeadDuty::Attest)
+                    .await;
+
+                let full = settled_head.as_ref().is_some_and(|(_, full)| *full);
+                let slot_head = settled_head.map(|(slot_head, _)| slot_head);
 
                 if let Err(error) = self
-                    .attest_and_start_aggregating(&wait_group, slot_head.as_ref())
+                    .attest_and_start_aggregating(&wait_group, slot_head.as_ref(), full)
                     .await
                 {
                     error_with_peers!("failed to produce and publish own attestations: {error:?}");
@@ -858,7 +866,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     .as_ref()
                     .map(|metrics| metrics.validator_aggregate_tick_times.start_timer());
 
-                let slot_head = self.wait_for_fully_validated_head(slot_head).await;
+                let slot_head = self
+                    .wait_for_fully_validated_head(slot_head, HeadDuty::Attest)
+                    .await
+                    .map(|(slot_head, _)| slot_head);
 
                 self.publish_aggregates_and_proofs(&wait_group, slot_head.as_ref())
                     .await;
@@ -871,14 +882,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 .await;
             }
             TickKind::PayloadAttest => {
-                // TODO(Gloas): review and fix
-                // let slot_head = self.wait_for_fully_validated_head(slot_head).await;
-                let slot_head = Some(slot_head);
-
-                if let Err(error) = self
-                    .attest_payload(&wait_group, slot_head.as_ref(), false)
-                    .await
-                {
+                // Payload attestations report timeliness, not validity.
+                // An optimistic head does not stop them.
+                if let Err(error) = self.attest_payload(&wait_group, &slot_head, false).await {
                     error_with_peers!(
                         "failed to produce and publish own payload attestations: {error:?}"
                     );
@@ -909,11 +915,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     // <https://sled.rs/errors.html#making-unhandled-errors-unrepresentable>
     #[instrument(level = "debug", skip_all, fields(slot = slot))]
     async fn slot_head(&self, slot: Slot) -> Result<Result<SlotHead<P>, HeadFarBehind>> {
-        let WithStatus {
-            value: head,
-            status,
-            ..
-        } = self.controller.head();
+        let head = self.controller.head().value;
 
         let block_root = head.block_root;
         let state = self.controller.state_by_chain_link(&head);
@@ -958,7 +960,6 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             config: self.chain_config.clone_arc(),
             beacon_block_root: block_root,
             beacon_state,
-            optimistic: status.is_optimistic(),
         }))
     }
 
@@ -1132,6 +1133,30 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             "block producer finished block production task at slot {}",
             slot_head.slot()
         );
+
+        // The wait checked the payload the proposal was going to extend.
+        // Production picks the parent's node again, so it can extend a different payload.
+        // Its envelope may have arrived in between, or the PTC vote may have flipped the node.
+        // Never sign a block that extends a payload the execution engine has not validated.
+        let extended_payload_status = match &validator_blinded_block {
+            ValidatorBlindedBlock::BlindedBeaconBlock(block) => {
+                self.controller.wait_for_valid_extended_payload(block).await
+            }
+            ValidatorBlindedBlock::BeaconBlock(block) => {
+                self.controller.wait_for_valid_extended_payload(block).await
+            }
+        };
+
+        if !extended_payload_status.is_some_and(PayloadStatus::is_valid) {
+            warn_with_peers!(
+                "validator {proposer_index} skipping beacon block proposal in slot {} \
+                 because the block extends a payload that is not fully validated \
+                 (status: {extended_payload_status:?})",
+                slot_head.slot(),
+            );
+
+            return Ok(());
+        }
 
         let beacon_block_or_root = match validator_blinded_block {
             ValidatorBlindedBlock::BlindedBeaconBlock(blinded_block) => {
@@ -1461,10 +1486,14 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     /// - <https://github.com/ethereum/consensus-specs/blob/b2f42bf4d79432ee21e2f2b3912ff4bbf7898ada/specs/phase0/validator.md#attestation-aggregation>
     #[expect(clippy::too_many_lines)]
     #[instrument(level = "debug", skip_all)]
+    //
+    // `full` is whether the attestations vote for the full node of `slot_head`.
+    // It must be the node the payload status was checked on.
     async fn attest_and_start_aggregating(
         &mut self,
         wait_group: &W,
         slot_head: Option<&SlotHead<P>>,
+        full: bool,
     ) -> Result<()> {
         let Some(slot_head) = slot_head else {
             warn_with_peers!(
@@ -1514,7 +1543,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         let own_singular_attestations = self
-            .own_singular_attestations(slot_head, &own_members)
+            .own_singular_attestations(slot_head, full, &own_members)
             .await?;
 
         if own_singular_attestations.is_empty() {
@@ -1910,18 +1939,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn attest_payload(
         &self,
         wait_group: &W,
-        slot_head: Option<&SlotHead<P>>,
+        slot_head: &SlotHead<P>,
         early: bool,
     ) -> Result<()> {
-        let Some(slot_head) = slot_head else {
-            warn_with_peers!(
-                "validator cannot participate in payload attestation because \
-                 chain head has not been fully verified by an execution engine",
-            );
-
-            return Ok(());
-        };
-
         // Skip attesting if validators already attested at slot
         if self.payload_attested_in_current_slot() {
             return Ok(());
@@ -2037,13 +2057,9 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             config: self.chain_config.clone_arc(),
             beacon_block_root: head.block_root,
             beacon_state: self.controller.state_by_chain_link(&head),
-            optimistic: false,
         };
 
-        if let Err(error) = self
-            .attest_payload(wait_group, Some(&slot_head), true)
-            .await
-        {
+        if let Err(error) = self.attest_payload(wait_group, &slot_head, true).await {
             error_with_peers!("failed to produce and publish own payload attestations: {error:?}");
         }
     }
@@ -2058,17 +2074,27 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return;
         }
 
+        // Pre-Gloas only fully validated heads are sent here. Post-Gloas every head is.
+        // Leave an unsettled one to the attesting tick, which waits for it.
+        let full =
+            self.duty_uses_full_node(head.block_root, head.slot(), head.slot(), HeadDuty::Attest);
+
+        if !self
+            .controller
+            .node_payload_status(head.block_root, full)
+            .is_some_and(PayloadStatus::is_valid)
+        {
+            return;
+        }
+
         let slot_head = SlotHead {
             config: self.chain_config.clone_arc(),
             beacon_block_root: head.block_root,
             beacon_state: self.controller.state_by_chain_link(&head),
-            // Validator is only notified about new fully validated chain heads
-            // (ValidatorMessage::Head event does not inform validator about optimistic heads)
-            optimistic: false,
         };
 
         if let Err(error) = self
-            .attest_and_start_aggregating(wait_group, Some(&slot_head))
+            .attest_and_start_aggregating(wait_group, Some(&slot_head), full)
             .await
         {
             error_with_peers!("failed to produce and publish own attestations: {error:?}");
@@ -2116,6 +2142,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
     async fn own_singular_attestations(
         &self,
         slot_head: &SlotHead<P>,
+        full: bool,
         own_members: &[BeaconCommitteeMember],
     ) -> Result<&[OwnAttestation<P>]> {
         if let Some(own_attestations) = self.own_singular_attestations.get() {
@@ -2124,21 +2151,10 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
 
         let phase = slot_head.phase();
 
+        // `full` is the node the payload status was checked on.
+        // Choosing it again here could vote for a payload nobody checked.
         // See: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.5/specs/gloas/validator.md#attestation
-        let gloas_index = (phase >= Phase::Gloas).then(|| {
-            if slot_head.beacon_state.latest_block_header().slot == slot_head.slot() {
-                return 0;
-            }
-
-            let (head_root, payload_status) = self.controller.head_root_with_payload_status();
-
-            // The status belongs to fork choice's head, which may have moved since `slot_head`
-            // was taken. Signalling a payload the attestation does not point at would put weight
-            // behind the wrong branch, so fall back to empty.
-            u64::from(
-                head_root == slot_head.beacon_block_root && payload_status == PAYLOAD_STATUS_FULL,
-            )
-        });
+        let gloas_index = (phase >= Phase::Gloas).then_some(u64::from(full));
 
         let (triples, other_data): (Vec<_>, Vec<_>) = tokio::task::block_in_place(|| {
             let target = Checkpoint {
@@ -3085,70 +3101,143 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
     }
 
-    // TODO(Gloas): fix optimistic head handling in Gloas
-    #[instrument(level = "debug", skip_all)]
-    async fn wait_for_fully_validated_head(&self, slot_head: SlotHead<P>) -> Option<SlotHead<P>> {
-        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+    // `SlotHead` for `head` with its state advanced to `slot`.
+    // `SlotHead::slot` comes from the state, so an older head must be advanced.
+    async fn slot_head_at(&self, head: &ChainLink<P>, slot: Slot) -> Result<SlotHead<P>> {
+        let beacon_state = if head.slot() < slot {
+            let controller = self.controller.clone_arc();
+            let block_root = head.block_root;
 
-        // TODO(Gloas): review and fix.
-        if slot_head.phase() >= Phase::Gloas {
-            return Some(slot_head);
-        }
-
-        let is_optimistic = match slot_head.is_optimistic(&self.controller) {
-            Ok(is_optimistic) => is_optimistic,
-            Err(error) => {
-                warn_with_peers!("error while checking if slot head is optimistic: {error:?}");
-                return None;
-            }
+            tokio::task::spawn_blocking(move || {
+                controller.preprocessed_state_post_block_blocking(block_root, slot)
+            })
+            .await??
+        } else {
+            self.controller.state_by_chain_link(head)
         };
 
+        Ok(SlotHead {
+            config: self.chain_config.clone_arc(),
+            beacon_block_root: head.block_root,
+            beacon_state,
+        })
+    }
+
+    // Waits for the head to become fully validated or for a late current slot block.
+    // Returns the head and whether the duty uses its full node.
+    // That is the node whose payload status the wait checked.
+    // Returns `None` if the head is still optimistic when the wait times out,
+    // or if the block itself turns out to be invalid.
+    #[instrument(level = "debug", skip_all)]
+    async fn wait_for_fully_validated_head(
+        &self,
+        slot_head: SlotHead<P>,
+        duty: HeadDuty,
+    ) -> Option<(SlotHead<P>, bool)> {
+        const BLOCK_EVENT_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
+        const PAYLOAD_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+        // The duty's own slot, not fork choice's.
+        // Fork choice may already be a slot ahead if this tick ran late.
+        let slot = slot_head.slot();
+        let head_block_slot = slot_head.beacon_state.latest_block_header().slot;
+
+        // Decided once: if a late block replaces `slot_head` as fork choice's head,
+        // `slot_head` must still be checked on the node the duty was going to use.
+        let mut full =
+            self.duty_uses_full_node(slot_head.beacon_block_root, head_block_slot, slot, duty);
+
+        let is_optimistic = self
+            .controller
+            .node_payload_status(slot_head.beacon_block_root, full)
+            .is_some_and(PayloadStatus::is_optimistic);
+
         if !is_optimistic && !self.should_wait_for_late_block() {
-            return Some(slot_head);
+            return Some((slot_head, full));
         }
+
+        let mut block_events = self.event_channels.receiver_for(Topic::Block);
+
+        // Post-Gloas blocks do not get a block event when they become fully validated.
+        // Polling catches that.
+        let mut poll = interval(PAYLOAD_STATUS_POLL_INTERVAL);
 
         let result = timeout(BLOCK_EVENT_WAIT_TIMEOUT, async {
             loop {
-                let block_event = match self.event_channels.receiver_for(Topic::Block).recv().await
-                {
-                    Ok(Event::Block(block_event)) => block_event,
-                    Ok(_) => continue,
-                    Err(error) => {
-                        warn_with_peers!("error receiving block event: {error:?}");
-                        continue;
-                    }
-                };
-
-                if block_event.execution_optimistic {
-                    continue;
-                }
-
-                if block_event.block == slot_head.beacon_block_root {
-                    debug_with_peers!(
-                        "fork choice head became fully validated (block event: {block_event:?})",
-                    );
-                    break None;
+                tokio::select! {
+                    _ = block_events.recv() => {}
+                    _ = poll.tick() => {}
                 }
 
                 let head = self.controller.head().value;
 
-                if block_event.block == head.block_root && self.controller.slot() == head.slot() {
-                    debug_with_peers!("fork choice head changed (block event: {block_event:?})");
+                // An attestation may move to an older head, like the Beacon API does.
+                // Fork choice falls back to one when the payload under the head is rejected.
+                let head_usable = match duty {
+                    HeadDuty::Propose => head.slot() == slot,
+                    HeadDuty::Attest => head.slot() <= slot,
+                };
 
-                    break Some(SlotHead {
-                        config: self.chain_config.clone_arc(),
-                        beacon_block_root: head.block_root,
-                        beacon_state: self.controller.state_by_chain_link(&head),
-                        optimistic: head.is_optimistic(),
-                    });
+                if head.block_root != slot_head.beacon_block_root && head_usable {
+                    let head_full =
+                        self.duty_uses_full_node(head.block_root, head.slot(), slot, duty);
+
+                    if self
+                        .controller
+                        .node_payload_status(head.block_root, head_full)
+                        .is_some_and(PayloadStatus::is_valid)
+                    {
+                        match self.slot_head_at(&head, slot).await {
+                            Ok(new_slot_head) => {
+                                debug_with_peers!(
+                                    "fork choice head changed (new head: {:?})",
+                                    head.block_root,
+                                );
+
+                                break HeadWait::Changed(new_slot_head, head_full);
+                            }
+                            Err(error) => warn_with_peers!(
+                                "failed to advance new head state to slot {slot}: {error:?}",
+                            ),
+                        }
+                    }
+                }
+
+                if !is_optimistic {
+                    continue;
+                }
+
+                let root = slot_head.beacon_block_root;
+
+                // A rejected payload of its own only moves the duty to its empty node.
+                // `Invalid` there means the block itself is dead.
+                let status = match self.controller.node_payload_status(root, full) {
+                    Some(status) if full && status.is_invalid() => {
+                        full = false;
+                        self.controller.node_payload_status(root, false)
+                    }
+                    status => status,
+                };
+
+                match status {
+                    Some(status) if status.is_valid() => {
+                        debug_with_peers!("fork choice head became fully validated");
+                        break HeadWait::Validated;
+                    }
+                    Some(status) if status.is_invalid() => {
+                        debug_with_peers!("fork choice head was found to be invalid");
+                        break HeadWait::Invalidated;
+                    }
+                    _ => {}
                 }
             }
         })
         .await;
 
         match result {
-            Ok(Some(new_slot_head)) => Some(new_slot_head),
-            Ok(None) => Some(slot_head),
+            Ok(HeadWait::Changed(new_slot_head, new_full)) => Some((new_slot_head, new_full)),
+            Ok(HeadWait::Validated) => Some((slot_head, full)),
+            Ok(HeadWait::Invalidated) => None,
             Err(error) => {
                 if is_optimistic {
                     debug_with_peers!(
@@ -3159,16 +3248,52 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                     debug_with_peers!(
                         "timed out while waiting for current slot block to be processed: {error:?}",
                     );
-                    Some(slot_head)
+                    Some((slot_head, full))
                 }
             }
         }
+    }
+
+    // Whether a duty at `slot` uses the full node of this block.
+    // That decides which payload the duty relies on.
+    // Proposals use the node fork choice builds on, the same choice as the block producer.
+    // Attestations use the node fork choice resolves the head to.
+    // A block from `slot` itself is attested on its empty node.
+    fn duty_uses_full_node(
+        &self,
+        block_root: H256,
+        block_slot: Slot,
+        slot: Slot,
+        duty: HeadDuty,
+    ) -> bool {
+        let (head_root, head_payload_status) = self.controller.head_root_with_payload_status();
+
+        head_root == block_root
+            && match duty {
+                HeadDuty::Propose => self.controller.snapshot().should_build_on_full(slot),
+                HeadDuty::Attest => block_slot < slot && head_payload_status == PAYLOAD_STATUS_FULL,
+            }
     }
 
     fn should_wait_for_late_block(&self) -> bool {
         !self.validator_config.disable_wait_for_late_blocks
             && self.controller.has_current_slot_blocks_in_processing()
     }
+}
+
+// What the head is used for in `Validator::wait_for_fully_validated_head`.
+#[derive(Clone, Copy)]
+enum HeadDuty {
+    Propose,
+    Attest,
+}
+
+// Outcome of `Validator::wait_for_fully_validated_head`.
+enum HeadWait<P: Preset> {
+    // The new head and whether the duty uses its full node.
+    Changed(SlotHead<P>, bool),
+    Validated,
+    Invalidated,
 }
 
 // Use `BTreeMap` to make grouping deterministic for snapshot testing.

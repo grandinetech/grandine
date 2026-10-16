@@ -1,4 +1,4 @@
-use core::{fmt::Debug, ops::Range};
+use core::{fmt::Debug, ops::Range, time::Duration};
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
@@ -17,6 +17,7 @@ use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use tokio::time::{sleep, timeout};
 use tracing::instrument;
 use typenum::Unsigned as _;
 use types::{
@@ -750,6 +751,51 @@ where
 
     pub fn is_payload_verified(&self, block_root: H256) -> bool {
         self.store_snapshot().is_payload_verified(block_root)
+    }
+
+    // Status of the payload a duty relies on when it uses the block's full or empty node.
+    // `None` if fork choice no longer holds the block.
+    pub fn node_payload_status(&self, block_root: H256, full: bool) -> Option<PayloadStatus> {
+        self.store_snapshot().node_payload_status(block_root, full)
+    }
+
+    // Waits for the payload a new block extends to be validated, for at most 1 second.
+    // A proposal must never extend a payload the execution engine has not validated.
+    // Production can pick a payload whose verdict is still on its way,
+    // e.g. when its envelope arrived just before. A short wait saves the proposal.
+    // Returns the last status seen. Only `Valid` makes the block safe to sign.
+    // `None` if fork choice no longer holds the parent.
+    // Used by the validator and the Beacon API alike, so they decide the same way.
+    pub fn wait_for_valid_extended_payload(
+        &self,
+        block: &(impl traits::BeaconBlock<P> + ?Sized),
+    ) -> impl Future<Output = Option<PayloadStatus>> + Send + '_ {
+        const TIMEOUT: Duration = Duration::from_secs(1);
+        const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+        // Taken before the first `await`. A `dyn` block is not `Sync`, so the future cannot hold it.
+        let extended_node = self.store_snapshot().extended_node(block);
+
+        async move {
+            let (parent_root, full) = extended_node?;
+            let status = || self.node_payload_status(parent_root, full);
+
+            let wait_for_verdict = async {
+                loop {
+                    let status = status();
+
+                    if !status.is_some_and(PayloadStatus::is_optimistic) {
+                        break status;
+                    }
+
+                    sleep(POLL_INTERVAL).await;
+                }
+            };
+
+            timeout(TIMEOUT, wait_for_verdict)
+                .await
+                .unwrap_or_else(|_| status())
+        }
     }
 
     pub fn is_payload_present_timely(&self, block_root: H256) -> bool {
@@ -1723,7 +1769,7 @@ impl<P: Preset> Snapshot<'_, P> {
             .chain(successor.as_ref())
             .tuple_windows()
             .filter_map(|(current, child)| {
-                PayloadPresence::of_parent(&child.block, &current.block)
+                PayloadPresence::of_parent(child.block.message(), current.block.message())
                     .is_full()
                     .then_some(current.root)
             })
