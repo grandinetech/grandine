@@ -96,7 +96,9 @@ use validator_statistics::ValidatorStatistics;
 use crate::{
     beacon_node_api::{BeaconNodeApi, EnvelopeContents, ProducedBlock},
     beacon_nodes::{BeaconNodes, RemoteNodes},
-    local_beacon_node::{LocalBeaconNode, LocalContext},
+    local_beacon_node::{
+        BlindedBlockNotPublished, LocalBeaconNode, LocalContext, proposer_dependent_epoch,
+    },
     messages::{ApiToValidator, InternalMessage},
     misc::{Aggregator, Chain, ChainSource, LocalChain, OwnDuties, SyncCommitteeMember},
     own_beacon_committee_members::{BeaconCommitteeMember, OwnBeaconCommitteeMembers},
@@ -108,10 +110,7 @@ use crate::{
     remote_beacon_node::RemoteBeaconNode,
     remote_beacon_nodes::RemoteBeaconNodes,
     slot_head::SlotHead,
-    tasks::{
-        PrefetchSyncCommitteeDutiesTask, UpdateBeaconCommitteeSubscriptionsTask,
-        proposer_dependent_epoch,
-    },
+    tasks::{PrefetchSyncCommitteeDutiesTask, UpdateBeaconCommitteeSubscriptionsTask},
     validator_config::ValidatorConfig,
 };
 
@@ -1465,7 +1464,11 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         };
 
         if let Err(error) = published {
-            warn_with_peers!("failed to publish beacon block: {error:?}");
+            // The block producer has already logged why the builder did not publish the block.
+            if error.downcast_ref::<BlindedBlockNotPublished>().is_none() {
+                warn_with_peers!("failed to publish beacon block: {error:?}");
+            }
+
             return Ok(());
         }
 
@@ -1960,8 +1963,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             if !self.own_duties.validator_indices.sorted().is_empty() {
                 warn_with_peers!(
                     "no sync committee duties were prefetched for slot {}, so no sync committee \
-                     message will be produced; check that the beacon nodes given with \
-                     --beacon-node-urls are reachable",
+                     message will be produced",
                     slot_head.slot(),
                 );
             }
@@ -2256,8 +2258,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             if !self.own_duties.validator_indices.sorted().is_empty() {
                 warn_with_peers!(
                     "no attester duties were prefetched for slot {slot}, so no payload \
-                     attestation will be produced; check that the beacon nodes given with \
-                     --beacon-node-urls are reachable",
+                     attestation will be produced",
                 );
             }
 

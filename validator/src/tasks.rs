@@ -18,6 +18,7 @@ use types::{
 use crate::{
     beacon_node_api::BeaconNodeApi as _,
     beacon_nodes::BeaconNodes,
+    local_beacon_node::proposer_dependent_epoch,
     misc::{OwnDuties, slots_by_epoch, slots_to_compute_in_advance},
     own_beacon_committee_members::OwnBeaconCommitteeMembers,
     own_proposer_duties::OwnProposerDuties,
@@ -203,16 +204,6 @@ async fn prefetch_ptc_duties<P: Preset, W: Wait + Sync>(
     }
 }
 
-pub fn proposer_dependent_epoch(chain_config: &ChainConfig, epoch: Epoch) -> Epoch {
-    // The Fulu proposer lookahead fixes proposers an epoch earlier than before, but it is first
-    // filled as the fork epoch begins, so the fork epoch itself keeps the old dependency.
-    if chain_config.phase_at_epoch(epoch.saturating_sub(1)) >= Phase::Fulu {
-        epoch
-    } else {
-        epoch.saturating_add(1)
-    }
-}
-
 async fn prefetch_proposer_duties<P: Preset, W: Wait + Sync>(
     chain_config: &ChainConfig,
     own_beacon_committee_members: &OwnBeaconCommitteeMembers,
@@ -312,23 +303,5 @@ impl<P: Preset, W: Wait + Sync> PrefetchSyncCommitteeDutiesTask<P, W> {
         }
 
         drop(wait_group);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The Fulu fork epoch's proposers are computed as it begins, so they depend on the previous
-    // epoch's last block like before Fulu; the lookahead moves the root back only after it.
-    #[test]
-    fn proposer_duties_share_the_attester_root_of_the_same_epoch_after_the_fulu_fork_epoch() {
-        let config = ChainConfig::mainnet();
-        let fulu = config.fulu_fork_epoch;
-
-        assert_eq!(proposer_dependent_epoch(&config, fulu - 1), fulu);
-        assert_eq!(proposer_dependent_epoch(&config, fulu), fulu + 1);
-        assert_eq!(proposer_dependent_epoch(&config, fulu + 1), fulu + 1);
-        assert_eq!(proposer_dependent_epoch(&config, fulu + 2), fulu + 2);
     }
 }

@@ -172,7 +172,8 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     FinishedArchivingFinalized {
         wait_group: W,
-        new_anchor_index: Option<usize>,
+        new_anchor_index: usize,
+        saved: bool,
     },
     PayloadBid {
         result: Result<ExecutionPayloadBidAction<P>>,

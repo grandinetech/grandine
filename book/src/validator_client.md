@@ -50,6 +50,8 @@ Options must be given after `bn` or `vc`; an option given before the command is 
 
 With `vc`, `--detect-doppelgangers` does not need `--track-liveness`: liveness is queried from the remote beacon nodes. With the built-in beacon node, `--detect-doppelgangers` still requires `--track-liveness`.
 
+With `vc`, a validator without a fee recipient, given either with `--suggested-fee-recipient` or per validator in `validators.yml`, is not registered with the builder and gets no proposer preferences published, and the remote beacon node pays its own default fee recipient for local payloads. The built-in beacon node falls back to a default fee recipient instead.
+
 ### Relevant command line options for `vc`:
 
 * `--beacon-node-urls` - a list of beacon node API URLs to perform validator duties against (required). Among the healthiest nodes, duties go to the one with the newest head, then to the first listed;

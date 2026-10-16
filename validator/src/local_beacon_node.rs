@@ -5,7 +5,9 @@ use std::{
 };
 
 use anyhow::{Result, anyhow, bail, ensure};
-use block_producer::{BlockBuildOptions, ProposerData, ValidatorBlindedBlock};
+use block_producer::{
+    BlindedBlockPublication, BlockBuildOptions, ProposerData, ValidatorBlindedBlock,
+};
 use bls::{PublicKeyBytes, SignatureBytes};
 use builder_api::unphased::containers::SignedValidatorRegistrationV1;
 use dedicated_executor::DedicatedExecutor;
@@ -21,7 +23,7 @@ use http_api_utils::{
 };
 use itertools::Itertools as _;
 use liveness_tracker::ApiToLiveness;
-use logging::{debug_with_peers, warn_with_peers};
+use logging::warn_with_peers;
 use operation_pools::{AttestationKey, convert_to_electra_attestation};
 use p2p::{
     BeaconCommitteeSubscription, SyncCommitteeSubscription, ToSubnetService, ValidatorToP2p,
@@ -31,6 +33,7 @@ use signer::Signer;
 use ssz::{ContiguousList, SszHash as _};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
+use thiserror::Error;
 use try_from_iterator::TryFromIterator as _;
 use types::{
     altair::{
@@ -65,9 +68,12 @@ use crate::{
     },
     misc::LocalChain,
     slot_head::SlotHead,
-    tasks::proposer_dependent_epoch,
     validator_config::ValidatorConfig,
 };
+
+#[derive(Debug, Error)]
+#[error("the builder did not publish the blinded block")]
+pub struct BlindedBlockNotPublished;
 
 /// What duties against the built-in beacon node are performed with, the same in every slot.
 pub struct LocalContext<P: Preset, W: Wait> {
@@ -743,48 +749,25 @@ impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
         &self,
         signed_block: &SignedBlindedBeaconBlock<P>,
     ) -> Result<()> {
-        let Some(builder_api) = &self.context.chain.builder_api else {
-            bail!("no builder API is configured to submit the blinded block to");
+        let Some(publication) = self
+            .context
+            .chain
+            .block_producer
+            .publish_signed_blinded_block(signed_block)
+            .await
+        else {
+            bail!(BlindedBlockNotPublished);
         };
-
-        let chain_config = self.context.chain.controller.chain_config();
-        let genesis_time = self.context.chain.controller.genesis_time();
-
-        if self.slot_head.phase() >= Phase::Fulu {
-            match builder_api
-                .post_blinded_block_post_fulu(chain_config, genesis_time, signed_block)
-                .await
-            {
-                Ok(()) => {
-                    debug_with_peers!("submitted blinded block to the builder node");
-
-                    return Ok(());
-                }
-                Err(error) => warn_with_peers!(
-                    "builder did not accept the blinded block for publishing, \
-                     requesting its payload instead: {error:?}"
-                ),
-            }
-        }
 
         let WithBlobsAndMev {
             value: execution_payload,
             proofs,
             blobs,
             ..
-        } = match builder_api
-            .post_blinded_block(chain_config, genesis_time, signed_block)
-            .await
-        {
-            Ok(response) => response,
-            Err(error) => {
-                bail!("failed to post blinded block to the builder node: {error:?}");
-            }
+        } = match publication {
+            BlindedBlockPublication::Payload(execution_payload) => execution_payload.result,
+            BlindedBlockPublication::PublishedByBuilder => return Ok(()),
         };
-
-        debug_with_peers!(
-            "received execution payload from the builder node: {execution_payload:?}"
-        );
 
         let (message, signature) = signed_block.clone().split();
 
@@ -893,6 +876,22 @@ pub fn ptc_duties_at_epoch<P: Preset>(
         })
         .flatten_ok()
         .try_collect()
+}
+
+/// The Fulu lookahead fixes proposers an epoch earlier, but it is first filled as the fork epoch
+/// begins, so the fork epoch itself keeps the old dependency.
+#[must_use]
+pub fn proposer_lookahead_applies(config: &Config, epoch: Epoch) -> bool {
+    config.phase_at_epoch(epoch.saturating_sub(1)) >= Phase::Fulu
+}
+
+#[must_use]
+pub fn proposer_dependent_epoch(config: &Config, epoch: Epoch) -> Epoch {
+    if proposer_lookahead_applies(config, epoch) {
+        epoch
+    } else {
+        epoch.saturating_add(1)
+    }
 }
 
 pub fn proposer_duties_at_epoch<P: Preset>(
@@ -1009,4 +1008,22 @@ pub fn attester_duties_at_slot<P: Preset>(
                 })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The Fulu fork epoch's proposers are computed as it begins, so they depend on the previous
+    // epoch's last block like before Fulu; the lookahead moves the root back only after it.
+    #[test]
+    fn proposer_duties_share_the_attester_root_of_the_same_epoch_after_the_fulu_fork_epoch() {
+        let config = Config::mainnet();
+        let fulu = config.fulu_fork_epoch;
+
+        assert_eq!(proposer_dependent_epoch(&config, fulu - 1), fulu);
+        assert_eq!(proposer_dependent_epoch(&config, fulu), fulu + 1);
+        assert_eq!(proposer_dependent_epoch(&config, fulu + 1), fulu + 1);
+        assert_eq!(proposer_dependent_epoch(&config, fulu + 2), fulu + 2);
+    }
 }

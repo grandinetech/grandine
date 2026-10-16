@@ -109,6 +109,8 @@ use crate::{
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
 const MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT: usize = 16;
 const MAX_DELAYED_BLOCKS_UNTIL_PARENT: usize = 64;
+// Failed archives keep their blocks in memory, so a persistent failure must not keep them forever.
+const MAX_CONSECUTIVE_FAILED_ARCHIVES: u8 = 2;
 // Room for requested envelopes waiting for their blocks.
 // Forward sync runs many 32-slot batches ahead of the head.
 // 64 was too small: envelopes near the head got dropped and sync stalled.
@@ -152,6 +154,7 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     finished_loading_from_storage: bool,
     has_pending_archive_tasks: bool,
     is_archiving_finalized: bool,
+    consecutive_failed_archives: u8,
     pending_state_cache_prune: Option<bool>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
@@ -221,6 +224,7 @@ where
             finished_loading_from_storage: false,
             has_pending_archive_tasks: false,
             is_archiving_finalized: false,
+            consecutive_failed_archives: 0,
             pending_state_cache_prune: None,
             mutator_tx,
             mutator_rx,
@@ -353,7 +357,10 @@ where
                 MutatorMessage::FinishedArchivingFinalized {
                     wait_group,
                     new_anchor_index,
-                } => self.handle_finish_archiving_finalized(&wait_group, new_anchor_index)?,
+                    saved,
+                } => {
+                    self.handle_finish_archiving_finalized(&wait_group, new_anchor_index, saved)?
+                }
                 MutatorMessage::ExecutionPayloadEnvelope {
                     wait_group,
                     result,
@@ -2991,14 +2998,26 @@ where
     fn handle_finish_archiving_finalized(
         &mut self,
         wait_group: &W,
-        new_anchor_index: Option<usize>,
+        new_anchor_index: usize,
+        saved: bool,
     ) -> Result<()> {
         self.is_archiving_finalized = false;
 
-        // Without an index the archiver failed, and the blocks stay for the next finalization.
-        let Some(new_anchor_index) = new_anchor_index else {
-            return Ok(());
-        };
+        if !saved {
+            self.consecutive_failed_archives = self.consecutive_failed_archives.saturating_add(1);
+
+            // The blocks stay for the next finalization to retry.
+            if self.consecutive_failed_archives < MAX_CONSECUTIVE_FAILED_ARCHIVES {
+                return Ok(());
+            }
+
+            error_with_peers!(
+                "dropping finalized blocks that failed to be archived \
+                 {MAX_CONSECUTIVE_FAILED_ARCHIVES} times in a row",
+            );
+        }
+
+        self.consecutive_failed_archives = 0;
 
         self.store_mut().archive_finalized(new_anchor_index);
         self.update_store_snapshot();
@@ -3539,8 +3558,6 @@ where
             }
         }
 
-        // Call `Store::apply_attester_slashing` after `Store::archive_finalized` to reduce the
-        // amount of work needed to update balances.
         let slashable_indices = attester_slashing_results
             .into_iter()
             .flat_map(|result| {
@@ -3561,10 +3578,9 @@ where
                 .apply_attester_slashing(slashable_indices)?;
         }
 
-        // The snapshot should be updated:
-        // - After calling `Mutator::archive_finalized` because it mutates the store.
-        // - Before spawning tasks to retry delayed objects or notifying other components to ensure
-        //   that they cannot observe the store in an inconsistent state.
+        // The snapshot should be updated before spawning tasks to retry delayed objects or
+        // notifying other components to ensure that they cannot observe the store in an
+        // inconsistent state.
         self.update_store_snapshot();
 
         // Do not send API events about optimistic blocks.
@@ -5277,7 +5293,8 @@ where
             Builder::new()
                 .name("store-archiver".to_owned())
                 .spawn(move || {
-                    // The closure only reads what it owns, so a panic leaves nothing inconsistent.
+                    // Storage writes are transactional and a panic counts as a failed save, so the
+                    // blocks stay in the store and the next archive writes them again.
                     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
                         debug_with_peers!("saving finalized blocks and anchor state…");
 
@@ -5360,7 +5377,8 @@ where
 
                     MutatorMessage::FinishedArchivingFinalized {
                         wait_group,
-                        new_anchor_index: saved.then_some(latest_archivable_index),
+                        new_anchor_index: latest_archivable_index,
+                        saved,
                     }
                     .send(&mutator_tx);
                 })?;

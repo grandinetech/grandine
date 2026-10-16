@@ -69,10 +69,28 @@ impl From<BeaconCommitteeMember> for BeaconCommitteeSubscription {
     }
 }
 
+/// One epoch's members under one shuffling.
+struct EpochMembers {
+    dependent_root: H256,
+    members_by_slot: MembersBySlot,
+    /// Set when the key set changes; kept until replaced.
+    stale_for_other_keys: bool,
+}
+
+impl EpochMembers {
+    const fn new(dependent_root: H256, members_by_slot: MembersBySlot) -> Self {
+        Self {
+            dependent_root,
+            members_by_slot,
+            stale_for_other_keys: false,
+        }
+    }
+}
+
 pub struct OwnBeaconCommitteeMembers {
     config: Arc<ChainConfig>,
     signer: Arc<Signer>,
-    members: SccHashMap<Epoch, (H256, MembersBySlot, bool)>,
+    members: SccHashMap<Epoch, EpochMembers>,
     requested: RequestedIndices,
 }
 
@@ -92,7 +110,7 @@ impl OwnBeaconCommitteeMembers {
             // an epoch's selection proofs can outlast the attestation deadline.
             self.members
                 .iter_mut_async(|mut entry| {
-                    entry.2 = true;
+                    entry.stale_for_other_keys = true;
                     true
                 })
                 .await;
@@ -131,8 +149,7 @@ impl OwnBeaconCommitteeMembers {
                         if !validator_indices.is_empty() {
                             warn_with_peers!(
                                 "no attester duties were prefetched for slot {slot}, so no \
-                                 attestation will be produced; check that the beacon nodes given \
-                                 with --beacon-node-urls are reachable",
+                                 attestation will be produced",
                             );
                         }
 
@@ -159,8 +176,8 @@ impl OwnBeaconCommitteeMembers {
             .members
             .get_async(&epoch)
             .await
-            .filter(|entry| entry.0 == dependent_root)
-            .and_then(|entry| entry.1.get(&slot).map(ArcExt::clone_arc))
+            .filter(|entry| entry.dependent_root == dependent_root)
+            .and_then(|entry| entry.members_by_slot.get(&slot).map(ArcExt::clone_arc))
             .map(|members| (members, needs_to_compute)))
     }
 
@@ -189,7 +206,10 @@ impl OwnBeaconCommitteeMembers {
     }
 
     pub async fn cached_dependent_root(&self, epoch: Epoch) -> Option<H256> {
-        self.members.get_async(&epoch).await.map(|entry| entry.0)
+        self.members
+            .get_async(&epoch)
+            .await
+            .map(|entry| entry.dependent_root)
     }
 
     pub async fn get_at_slot<P: Preset>(&self, slot: Slot) -> Option<Arc<[BeaconCommitteeMember]>> {
@@ -198,7 +218,7 @@ impl OwnBeaconCommitteeMembers {
         self.members
             .get_async(&epoch)
             .await
-            .and_then(|entry| entry.1.get(&slot).map(ArcExt::clone_arc))
+            .and_then(|entry| entry.members_by_slot.get(&slot).map(ArcExt::clone_arc))
     }
 
     pub async fn init_at_slots<P: Preset, W: Wait + Sync>(
@@ -249,7 +269,9 @@ impl OwnBeaconCommitteeMembers {
         let epoch = misc::compute_epoch_at_slot::<P>(slot);
 
         self.members.get_async(&epoch).await.is_none_or(|entry| {
-            entry.2 || entry.0 != dependent_root || !entry.1.contains_key(&slot)
+            entry.stale_for_other_keys
+                || entry.dependent_root != dependent_root
+                || !entry.members_by_slot.contains_key(&slot)
         })
     }
 
@@ -424,14 +446,14 @@ impl OwnBeaconCommitteeMembers {
         // longer applies. Neither does what was cached for another set of keys.
         match self.members.entry_async(epoch).await {
             Entry::Occupied(mut occupied) => {
-                if occupied.0 == dependent_root && !occupied.2 {
-                    occupied.1.extend(members_by_slot);
+                if occupied.dependent_root == dependent_root && !occupied.stale_for_other_keys {
+                    occupied.members_by_slot.extend(members_by_slot);
                 } else {
-                    *occupied.get_mut() = (dependent_root, members_by_slot, false);
+                    *occupied.get_mut() = EpochMembers::new(dependent_root, members_by_slot);
                 }
             }
             Entry::Vacant(vacant) => {
-                vacant.insert_entry((dependent_root, members_by_slot, false));
+                vacant.insert_entry(EpochMembers::new(dependent_root, members_by_slot));
             }
         }
 

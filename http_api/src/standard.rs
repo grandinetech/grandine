@@ -129,7 +129,7 @@ use types::{
 };
 use validator::{
     ApiToValidator, ValidatorConfig, attester_duties_at_slot, proposer_duties_at_epoch,
-    ptc_duties_at_epoch,
+    proposer_lookahead_applies, ptc_duties_at_epoch,
 };
 
 use crate::{
@@ -1743,6 +1743,7 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
 }
 
 /// `POST /eth/v2/beacon/blinded_blocks`
+#[expect(clippy::too_many_arguments)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -1753,7 +1754,9 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
     EthJsonOrSsz(signed_blinded_block, _): EthJsonOrSsz<
         Box<SignedBlindedBeaconBlock<P>>,
@@ -1785,21 +1788,45 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
         .with_signature(signature)
         .pipe(Arc::new);
 
-    let blob_sidecars = misc::construct_blob_sidecars(
-        &signed_beacon_block,
-        blobs.unwrap_or_default().into_iter(),
-        proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
-    )?;
+    let broadcast_validation = query.broadcast_validation.unwrap_or_default();
 
-    publish_signed_block_v2(
-        signed_beacon_block,
-        blob_sidecars,
-        query.broadcast_validation.unwrap_or_default(),
-        controller,
-        event_channels,
-        api_to_p2p_tx,
-    )
-    .await
+    if signed_beacon_block.phase() == Phase::Fulu {
+        let data_column_sidecars = construct_data_column_sidecars_from_blobs(
+            controller.clone_arc(),
+            signed_beacon_block.clone_arc(),
+            blobs,
+            proofs,
+            metrics,
+            dedicated_executor,
+        )
+        .await?;
+
+        publish_signed_block_v2_with_data_column_sidecar(
+            signed_beacon_block,
+            data_column_sidecars,
+            broadcast_validation,
+            controller,
+            event_channels,
+            api_to_p2p_tx,
+        )
+        .await
+    } else {
+        let blob_sidecars = misc::construct_blob_sidecars(
+            &signed_beacon_block,
+            blobs.unwrap_or_default().into_iter(),
+            proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
+        )?;
+
+        publish_signed_block_v2(
+            signed_beacon_block,
+            blob_sidecars,
+            broadcast_validation,
+            controller,
+            event_channels,
+            api_to_p2p_tx,
+        )
+        .await
+    }
 }
 
 /// `POST /eth/v2/beacon/blocks`
@@ -3089,10 +3116,7 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
         (state, status)
     };
 
-    // The lookahead first fills as the Fulu fork epoch begins, so that epoch keeps the old root.
-    let dependent_root = if post_fulu_check
-        && chain_config.phase_at_epoch(misc::previous_epoch(epoch)) >= Phase::Fulu
-    {
+    let dependent_root = if post_fulu_check && proposer_lookahead_applies(&chain_config, epoch) {
         // Post-Fulu get dependent root for the previous epoch because proposer suffling is done at
         // the last slot of epoch N - 2 with proposer lookahead. We should note that `dependent_root`
         // itself will return block root of the last slot in epoch `epoch` - 1.
@@ -5784,7 +5808,7 @@ mod tests {
         assert!(matches!(error, Error::InvalidJsonValue(_)));
     }
 
-    // The boost factor moved into the body, so the query no longer carries it.
+    // `produceBlockV4` takes the boost factor in the body, not the query.
     #[tokio::test]
     async fn parses_produce_block_v4_query_without_a_boost_factor() -> Result<()> {
         let query = extract_query::<ValidatorBlockQueryV4>(format!(

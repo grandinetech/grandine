@@ -59,7 +59,7 @@ impl Directories {
         self
     }
 
-    // TODO: This does not include validator_dir and other files outside store and network directories
+    // TODO: This does not include files outside the store, network and validator directories
     pub fn disk_usage(&self) -> Result<u64> {
         // The validator client never creates the store and network directories.
         let dir_usage = |dir: Option<&PathBuf>| {
