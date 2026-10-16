@@ -387,6 +387,7 @@ pub fn singular_attestation<P: Preset>(
     state: Arc<BeaconState<P>>,
     epoch: Epoch,
     validator_index: ValidatorIndex,
+    payload_present: bool,
 ) -> Result<(Attestation<P>, SubnetId)> {
     let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
     let state_in_epoch = advance_state(config, pubkey_cache, state, start_slot)?;
@@ -412,10 +413,11 @@ pub fn singular_attestation<P: Preset>(
                 let beacon_block_root = accessors::latest_block_root(&state_in_epoch);
                 let root = accessors::epoch_boundary_block_root(&state_in_epoch, beacon_block_root);
 
+                // Post-Gloas the index says whether the payload is present.
                 let index = if pre_electra {
                     committee_index
                 } else {
-                    Default::default()
+                    payload_present.into()
                 };
 
                 let data = AttestationData {

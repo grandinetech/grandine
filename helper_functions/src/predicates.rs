@@ -3,7 +3,7 @@ use core::{
     ops::{Div as _, Index as _},
 };
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use arithmetic::U64Ext as _;
 use bit_field::BitField as _;
 use bls::SignatureBytes;
@@ -161,6 +161,18 @@ fn validate_indexed_attestation<P: Preset>(
                 .all(|(a, b)| a < b),
             Error::AttestingIndicesNotSortedAndUnique,
         );
+    }
+
+    let validator_count = state.validators().len_u64();
+
+    if let Some(index) = indexed_attestation
+        .attesting_indices()
+        .find(|index| *index >= validator_count)
+    {
+        bail!(Error::AttestingIndexOutOfBounds {
+            index,
+            validator_count,
+        });
     }
 
     // > Verify aggregate signature
@@ -926,7 +938,7 @@ mod extra_tests {
         preset::Mainnet,
     };
 
-    use crate::verifier::SingleVerifier;
+    use crate::verifier::{NullVerifier, SingleVerifier};
 
     use super::*;
 
@@ -1208,6 +1220,31 @@ mod extra_tests {
             &state,
             &attestation,
             SingleVerifier,
+        )
+        .expect_err("validation should fail");
+    }
+
+    #[test]
+    fn validate_received_indexed_attestation_nonexistent_validators_without_signatures() {
+        let pubkey_cache = PubkeyCache::default();
+        let state = Phase0BeaconState::<Mainnet> {
+            validators: [inactive_validator()]
+                .try_into()
+                .expect("length is under maximum"),
+            ..Phase0BeaconState::default()
+        };
+
+        let attestation = IndexedAttestation {
+            attesting_indices: [0, 1].try_into().expect("length is under maximum"),
+            ..IndexedAttestation::default()
+        };
+
+        validate_received_indexed_attestation(
+            &Config::mainnet(),
+            &pubkey_cache,
+            &state,
+            &attestation,
+            NullVerifier,
         )
         .expect_err("validation should fail");
     }

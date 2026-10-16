@@ -2,7 +2,7 @@ use anyhow::Error as AnyhowError;
 use parse_display::Display;
 use ssz::H256;
 use thiserror::Error;
-use types::phase0::primitives::{CommitteeIndex, Slot};
+use types::phase0::primitives::{CommitteeIndex, Slot, ValidatorIndex};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -10,6 +10,11 @@ pub enum Error {
     AttestationHasNoAttestingIndices,
     #[error("attestation source does not match justified checkpoint")]
     AttestationSourceMismatch,
+    #[error("attesting index {index} is out of bounds (validator count: {validator_count})")]
+    AttestingIndexOutOfBounds {
+        index: ValidatorIndex,
+        validator_count: u64,
+    },
     #[error("attesting indices are not sorted and unique")]
     AttestingIndicesNotSortedAndUnique,
     #[error(

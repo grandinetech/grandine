@@ -192,6 +192,7 @@ pub enum MutatorMessage<P: Preset, W> {
     },
     NotifiedForkChoiceUpdate {
         wait_group: W,
+        head_execution_block_hash: ExecutionBlockHash,
         payload_status: PayloadStatusV1,
     },
     NotifiedNewPayload {

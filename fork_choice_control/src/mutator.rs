@@ -384,8 +384,13 @@ where
                 }
                 MutatorMessage::NotifiedForkChoiceUpdate {
                     wait_group,
+                    head_execution_block_hash,
                     payload_status,
-                } => self.handle_notified_forkchoice_update_result(&wait_group, &payload_status),
+                } => self.handle_notified_forkchoice_update_result(
+                    &wait_group,
+                    head_execution_block_hash,
+                    payload_status,
+                ),
                 MutatorMessage::NotifiedNewPayload {
                     wait_group,
                     beacon_block_root,
@@ -581,6 +586,9 @@ where
             }
         }
 
+        let old_head_root = self.store.head().block_root;
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
+
         let Some(changes) = self.store_mut().apply_tick(tick)? else {
             return Ok(());
         };
@@ -649,8 +657,12 @@ where
         if let ApplyTickChanges::Reorganized { old_head, .. } = changes {
             self.notify_about_reorganization(wait_group.clone(), &old_head, ReorgSource::Tick);
             self.spawn_preprocess_head_state_for_next_slot_task();
-        } else if self.store.tick().kind == TickKind::Attest {
-            self.spawn_preprocess_head_state_for_next_slot_task();
+        } else {
+            self.send_head_events_if_head_node_became_valid(old_head_root, head_was_optimistic);
+
+            if self.store.tick().kind == TickKind::Attest {
+                self.spawn_preprocess_head_state_for_next_slot_task();
+            }
         }
 
         if self.store.is_forward_synced() && misc::slots_since_epoch_start::<P>(tick.slot) == 0 {
@@ -1713,6 +1725,9 @@ where
             return Ok(());
         }
 
+        let old_head_root = self.store.head().block_root;
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
+
         let old_head = self
             .store_mut()
             .apply_attestation_batch(valid_attestations)?;
@@ -1723,6 +1738,8 @@ where
             self.notify_about_reorganization(wait_group.clone(), &old_head, reorg_source);
 
             self.spawn_preprocess_head_state_for_next_slot_task();
+        } else {
+            self.send_head_events_if_head_node_became_valid(old_head_root, head_was_optimistic);
         }
 
         Ok(())
@@ -1736,6 +1753,9 @@ where
         if valid_payload_attestations.is_empty() {
             return;
         }
+
+        let old_head_root = self.store.head().block_root;
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
 
         let old_head = self
             .store_mut()
@@ -1751,6 +1771,8 @@ where
             );
 
             self.spawn_preprocess_head_state_for_next_slot_task();
+        } else {
+            self.send_head_events_if_head_node_became_valid(old_head_root, head_was_optimistic);
         }
     }
 
@@ -1762,6 +1784,9 @@ where
     ) -> Result<()> {
         match result {
             Ok(slashable_indices) => {
+                let old_head_root = self.store.head().block_root;
+                let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
+
                 let old_head = self
                     .store_mut()
                     .apply_attester_slashing(slashable_indices)?;
@@ -1776,6 +1801,11 @@ where
                     );
 
                     self.spawn_preprocess_head_state_for_next_slot_task();
+                } else {
+                    self.send_head_events_if_head_node_became_valid(
+                        old_head_root,
+                        head_was_optimistic,
+                    );
                 }
             }
             Err(error) => {
@@ -2287,17 +2317,24 @@ where
                     // Emit a second `head_v2` event reflecting the head's payload
                     // status transitioning from empty to full once its envelope is
                     // available.
+                    // The head stays optimistic until the execution engine rules on the payload.
+                    // Post-Gloas head events go out regardless, like everywhere else.
+                    // The events are sent again once the verdict validates the payload.
+                    // See `Mutator::handle_potential_head_change`.
                     let head = self.store.head();
 
-                    if head.block_root == beacon_block_root && head.is_valid() {
+                    if head.block_root == beacon_block_root {
                         let head = head.clone();
                         let payload_status = self.store.head_payload_status();
+                        let execution_optimistic =
+                            self.store.head_node_payload_status().is_optimistic();
 
                         match self.calculate_dependent_roots(&head) {
                             Ok(dependent_roots) => self.event_channels.send_head_v2_event(
                                 &head,
                                 payload_status,
                                 dependent_roots,
+                                execution_optimistic,
                             ),
                             Err(error) => {
                                 warn_with_peers!(
@@ -3039,14 +3076,36 @@ where
     fn handle_notified_forkchoice_update_result(
         &mut self,
         wait_group: &W,
-        payload_status: &PayloadStatusV1,
+        head_execution_block_hash: ExecutionBlockHash,
+        payload_status: PayloadStatusV1,
     ) {
+        // INVALID condemns the head payload, same as from `engine_newPayload`.
+        // `latest_valid_hash` alone only validates its ancestors.
+        // Post-Gloas the hash may be an ancestor's payload if the head is empty.
+        // The lookup finds the block that carries it.
+        if payload_status.status.is_invalid()
+            && let Some(chain_link) = self
+                .store
+                .unfinalized_chain_link_by_execution_block_hash(head_execution_block_hash)
+        {
+            let beacon_block_root = chain_link.block_root;
+
+            self.handle_notified_new_payload(
+                wait_group,
+                beacon_block_root,
+                head_execution_block_hash,
+                payload_status,
+            );
+
+            return;
+        }
+
         let Some(latest_valid_hash) = payload_status.latest_valid_hash else {
             return;
         };
 
         let old_head = self.store.head().clone();
-        let head_was_optimistic = old_head.is_optimistic();
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
 
         self.store_mut()
             .update_chain_payload_statuses(latest_valid_hash, None);
@@ -3069,7 +3128,7 @@ where
         }
 
         let old_head = self.store.head().clone();
-        let head_was_optimistic = old_head.is_optimistic();
+        let head_was_optimistic = self.store.head_node_payload_status().is_optimistic();
         let latest_valid_hash = payload_status.latest_valid_hash;
 
         let payload_action = if let Some(valid_hash) = latest_valid_hash {
@@ -3147,12 +3206,17 @@ where
 
         // Do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
-        if !head_changed && head_was_optimistic && head.is_valid() && !head.is_post_gloas() {
+        // Post-Gloas head events go out regardless, so they are sent again here
+        // to tell clients the head is no longer optimistic.
+        if self.head_node_became_valid(old_head.block_root, head_was_optimistic) {
             self.send_head_events(head);
 
+            // Post-Gloas the validator polls payload statuses itself.
             // The call to `Store::notify_about_reorganization` below sends
             // a `ValidatorMessage::Head` message if the head changed.
-            self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
+            if !head.is_post_gloas() {
+                self.send_to_validator(ValidatorMessage::Head(wait_group.clone(), head.clone()));
+            }
         }
 
         if head_changed {
@@ -3164,6 +3228,30 @@ where
 
             self.spawn_preprocess_head_state_for_next_slot_task();
         }
+    }
+
+    // Post-Gloas fork choice can move the head between the nodes of one block.
+    // That is no reorg, but the head can stop being optimistic:
+    // its full node rests on its own unvalidated payload, its empty node on a valid one.
+    // Head events go out again then, like in `handle_potential_head_change`.
+    // They also send a chain reorg event held back while the head was optimistic.
+    fn send_head_events_if_head_node_became_valid(
+        &self,
+        old_head_root: H256,
+        head_was_optimistic: bool,
+    ) {
+        if self.head_node_became_valid(old_head_root, head_was_optimistic) {
+            self.send_head_events(self.store.head());
+        }
+    }
+
+    // Whether the head block stayed the same and the payload its node rests on became valid.
+    // `head_was_optimistic` is about the payload the head rests on.
+    // Post-Gloas that depends on the node fork choice resolves the head to.
+    fn head_node_became_valid(&self, old_head_root: H256, head_was_optimistic: bool) -> bool {
+        self.store.head().block_root == old_head_root
+            && head_was_optimistic
+            && self.store.head_node_payload_status().is_valid()
     }
 
     fn handle_stop(&self, save_to_storage: bool) -> Result<()> {
@@ -3417,13 +3505,21 @@ where
             }
         }
 
-        // Do not send API events about optimistic blocks.
+        // Pre-Gloas, do not send API events about optimistic blocks.
         // Vouch treats all head events as non-optimistic.
+        // Post-Gloas they go out regardless, flagged like head events.
+        // A new block has no payload of its own yet.
+        // It is optimistic if the payload it rests on is.
         if is_valid || is_post_gloas {
+            let execution_optimistic = self
+                .store
+                .node_payload_status(block_root, false)
+                .is_some_and(PayloadStatus::is_optimistic);
+
             self.event_channels.send_block_event(
                 block_slot,
                 block_root,
-                false,
+                execution_optimistic,
                 block.message().payload_bid(),
             );
         }
@@ -3625,15 +3721,25 @@ where
 
     fn reject_block(&mut self, error: AnyhowError, block_root: H256, origin: BlockOrigin) {
         warn_with_peers!(
-            "block rejected (error: {error}, block root: {block_root:?}, origin: {origin:?})"
+            "block rejected (error: {error:#}, block root: {block_root:?}, origin: {origin:?})"
         );
+
+        // A bad signature condemns this copy, not the root.
+        // Remembering the root would turn away the genuine block and its descendants.
+        let condemns_root = !matches!(
+            error.downcast_ref(),
+            Some(Error::<P>::BlockWithoutValidProposerSignature { .. }),
+        );
+
+        let rejection_reason = if condemns_root {
+            MutatorRejectionReason::InvalidBlock
+        } else {
+            MutatorRejectionReason::InvalidBlockSignature { block_root }
+        };
 
         let sender = match origin {
             BlockOrigin::Gossip(gossip_id) => {
-                self.send_to_p2p(P2pMessage::Reject(
-                    Some(gossip_id),
-                    MutatorRejectionReason::InvalidBlock,
-                ));
+                self.send_to_p2p(P2pMessage::Reject(Some(gossip_id), rejection_reason));
 
                 None
             }
@@ -3642,27 +3748,23 @@ where
                 if let Some(peer_id) = peer_id {
                     // During block sync (and especially during non-finality events)
                     // it's important to drop peers that send invalid blocks
-                    self.send_to_p2p(P2pMessage::PenalizePeer(
-                        peer_id,
-                        MutatorRejectionReason::InvalidBlock,
-                    ));
+                    self.send_to_p2p(P2pMessage::PenalizePeer(peer_id, rejection_reason));
                 }
 
                 None
             }
             BlockOrigin::Own | BlockOrigin::Persisted => None,
             BlockOrigin::Test(_) => {
-                self.send_to_p2p(P2pMessage::Reject(
-                    None,
-                    MutatorRejectionReason::InvalidBlock,
-                ));
+                self.send_to_p2p(P2pMessage::Reject(None, rejection_reason));
 
                 None
             }
         };
 
-        self.store_mut().register_rejected_block(block_root);
-        self.update_store_snapshot();
+        if condemns_root {
+            self.store_mut().register_rejected_block(block_root);
+            self.update_store_snapshot();
+        }
 
         reply_block_validation_result_to_http_api(sender, Err(error));
     }
@@ -3845,7 +3947,7 @@ where
         self.event_channels.send_finalized_checkpoint_event(
             head.block_root,
             finalized_checkpoint,
-            head.is_optimistic(),
+            self.store.head_node_payload_status().is_optimistic(),
         );
     }
 
@@ -3857,8 +3959,12 @@ where
     ) {
         let new_head = self.store.head().clone();
 
-        self.event_channels
-            .send_chain_reorg_event(&self.store, &new_head, old_head);
+        self.event_channels.send_chain_reorg_event(
+            &self.store,
+            &new_head,
+            old_head,
+            self.store.head_node_payload_status(),
+        );
 
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.beacon_reorgs_total.inc();
@@ -3949,12 +4055,20 @@ where
     fn send_head_events(&self, head: &ChainLink<P>) {
         match self.calculate_dependent_roots(head) {
             Ok(dependent_roots) => {
-                self.event_channels.send_head_event(head, dependent_roots);
+                let head_node_payload_status = self.store.head_node_payload_status();
+                let execution_optimistic = head_node_payload_status.is_optimistic();
+
+                self.event_channels.send_head_event(
+                    head,
+                    dependent_roots,
+                    head_node_payload_status,
+                );
 
                 self.event_channels.send_head_v2_event(
                     head,
                     self.store.head_payload_status(),
                     dependent_roots,
+                    execution_optimistic,
                 );
             }
             Err(error) => {

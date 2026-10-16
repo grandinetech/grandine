@@ -1,4 +1,4 @@
-use core::{fmt::Debug, ops::Range};
+use core::{fmt::Debug, ops::Range, time::Duration};
 use std::{collections::HashSet, sync::Arc};
 
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
@@ -17,6 +17,7 @@ use pubkey_cache::PubkeyCache;
 use serde::Serialize;
 use std_ext::ArcExt;
 use thiserror::Error;
+use tokio::time::{sleep, timeout};
 use tracing::instrument;
 use typenum::Unsigned as _;
 use types::{
@@ -212,12 +213,22 @@ where
         let store = self.store_snapshot();
 
         if store.unfinalized().is_empty() {
-            return vec![(store.head(), store.head().is_optimistic()).into()];
+            return vec![
+                (
+                    store.head(),
+                    store.head_node_payload_status().is_optimistic(),
+                )
+                    .into(),
+            ];
         }
 
+        // See `Store::reported_payload_status`.
         store
             .unfinalized_fork_tips()
-            .map(|chain_link| (chain_link, chain_link.is_optimistic()))
+            .map(|chain_link| {
+                let is_optimistic = store.reported_payload_status(chain_link).is_optimistic();
+                (chain_link, is_optimistic)
+            })
             .map_into()
             .collect_vec()
     }
@@ -259,6 +270,11 @@ where
             .has_current_slot_blocks_in_processing()
     }
 
+    // The `head*` methods report the status of the payload the head rests on.
+    // Post-Gloas that depends on the node fork choice resolves the head to.
+    // Head events report the same. See `Store::head_node_payload_status`.
+    // Queries by slot, root or state root report the same for the head.
+    // See `Store::reported_payload_status`.
     #[must_use]
     pub fn head(&self) -> WithStatus<ChainLink<P>> {
         let store = self.store_snapshot();
@@ -266,7 +282,7 @@ where
 
         WithStatus {
             value: head.clone(),
-            status: head.payload_status,
+            status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -291,7 +307,7 @@ where
 
         WithStatus {
             value: head.block_root,
-            status: head.payload_status,
+            status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -303,7 +319,7 @@ where
 
         WithStatus {
             value: head.block.clone_arc(),
-            status: head.payload_status,
+            status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -315,7 +331,7 @@ where
 
         WithStatus {
             value: head.state(&store),
-            status: head.payload_status,
+            status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         }
     }
@@ -482,7 +498,7 @@ where
         if let Some(chain_link) = store.chain_link(block_root) {
             return Ok(Some(WithStatus {
                 value: block_root,
-                status: chain_link.payload_status,
+                status: store.reported_payload_status(chain_link),
                 finalized: store.is_slot_finalized(chain_link.slot()),
             }));
         }
@@ -586,7 +602,7 @@ where
 
             return Ok(Some(WithStatus {
                 value: BlockWithRoot { block, root },
-                status: chain_link.payload_status,
+                status: store.reported_payload_status(chain_link),
                 finalized: store.is_slot_finalized(chain_link.slot()),
             }));
         }
@@ -750,6 +766,51 @@ where
 
     pub fn is_payload_verified(&self, block_root: H256) -> bool {
         self.store_snapshot().is_payload_verified(block_root)
+    }
+
+    // Status of the payload a duty relies on when it uses the block's full or empty node.
+    // `None` if fork choice no longer holds the block.
+    pub fn node_payload_status(&self, block_root: H256, full: bool) -> Option<PayloadStatus> {
+        self.store_snapshot().node_payload_status(block_root, full)
+    }
+
+    // Waits for the payload a new block extends to be validated, for at most 1 second.
+    // A proposal must never extend a payload the execution engine has not validated.
+    // Production can pick a payload whose verdict is still on its way,
+    // e.g. when its envelope arrived just before. A short wait saves the proposal.
+    // Returns the last status seen. Only `Valid` makes the block safe to sign.
+    // `None` if fork choice no longer holds the parent.
+    // Used by the validator and the Beacon API alike, so they decide the same way.
+    pub fn wait_for_valid_extended_payload(
+        &self,
+        block: &(impl traits::BeaconBlock<P> + ?Sized),
+    ) -> impl Future<Output = Option<PayloadStatus>> + Send + '_ {
+        const TIMEOUT: Duration = Duration::from_secs(1);
+        const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+        // Taken before the first `await`. A `dyn` block is not `Sync`, so the future cannot hold it.
+        let extended_node = self.store_snapshot().extended_node(block);
+
+        async move {
+            let (parent_root, full) = extended_node?;
+            let status = || self.node_payload_status(parent_root, full);
+
+            let wait_for_verdict = async {
+                loop {
+                    let status = status();
+
+                    if !status.is_some_and(PayloadStatus::is_optimistic) {
+                        break status;
+                    }
+
+                    sleep(POLL_INTERVAL).await;
+                }
+            };
+
+            timeout(TIMEOUT, wait_for_verdict)
+                .await
+                .unwrap_or_else(|_| status())
+        }
     }
 
     pub fn is_payload_present_timely(&self, block_root: H256) -> bool {
@@ -1008,7 +1069,7 @@ where
 
         Ok(WithStatus {
             value: state,
-            status: head.payload_status,
+            status: store.head_node_payload_status(),
             finalized: store.is_slot_finalized(head.slot()),
         })
     }
@@ -1395,10 +1456,10 @@ where
 
 #[derive(Serialize)]
 pub struct ForkTip {
-    root: H256,
+    pub(crate) root: H256,
     #[serde(with = "serde_utils::string_or_native")]
     slot: Slot,
-    execution_optimistic: bool,
+    pub(crate) execution_optimistic: bool,
 }
 
 #[derive(Serialize)]
@@ -1592,11 +1653,13 @@ impl<P: Preset> Snapshot<'_, P> {
     /// > 2. Blocks from every viable (with respect to FFG) branch have transitioned from
     /// >    `NOT_VALIDATED` to `INVALIDATED` leaving the block tree without viable branches
     ///
+    /// Post-Gloas `head` is the node fork choice resolves the head to.
+    ///
     /// [Optimistic Sync specification]: https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/sync/optimistic.md#helpers
     #[must_use]
     pub fn is_optimistic(&self) -> bool {
         let store = &self.store_snapshot;
-        store.head().is_optimistic() || self.store_snapshot.is_poisoned()
+        store.head_node_payload_status().is_optimistic() || self.store_snapshot.is_poisoned()
     }
 
     #[must_use]
@@ -1656,7 +1719,7 @@ impl<P: Preset> Snapshot<'_, P> {
 
             return Ok(Some(WithStatus {
                 value: state,
-                status: chain_link.payload_status,
+                status: store.reported_payload_status(chain_link),
                 finalized: store.is_slot_finalized(slot),
             }));
         }
@@ -1723,7 +1786,7 @@ impl<P: Preset> Snapshot<'_, P> {
             .chain(successor.as_ref())
             .tuple_windows()
             .filter_map(|(current, child)| {
-                PayloadPresence::of_parent(&child.block, &current.block)
+                PayloadPresence::of_parent(child.block.message(), current.block.message())
                     .is_full()
                     .then_some(current.root)
             })

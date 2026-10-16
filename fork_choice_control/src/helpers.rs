@@ -9,13 +9,14 @@ use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
-use fork_choice_store::{AttestationItem, AttestationOrigin};
+use fork_choice_store::{AttestationItem, AttestationOrigin, PayloadPresence};
 use futures::channel::mpsc::UnboundedReceiver;
 use helper_functions::misc;
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
 use ssz::BitVector;
 use std_ext::ArcExt as _;
+use tokio::sync::broadcast::Receiver;
 use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
@@ -39,8 +40,9 @@ use unwrap_none::UnwrapNone as _;
 
 use crate::{
     controller::MutatorHandle,
+    events::{Event, EventChannels, Topic},
     messages::P2pMessage,
-    misc::MutatorIgnoreReason,
+    misc::{MutatorIgnoreReason, MutatorRejectionReason},
     queries::BlockWithRoot,
     specialized::{TestController, TestExecutionEngine},
     storage::StoredBlock,
@@ -57,6 +59,10 @@ pub struct Context<P: Preset> {
     execution_engine: TestExecutionEngine<P>,
     p2p_rx: UnboundedReceiver<P2pMessage<P>>,
     service_rx: UnboundedReceiver<ExecutionServiceMessage<P>>,
+    // Subscribed from the start. Events are only sent while someone listens.
+    block_rx: Receiver<Event<P>>,
+    head_v2_rx: Receiver<Event<P>>,
+    chain_reorg_rx: Receiver<Event<P>>,
 }
 
 impl<P: Preset> Drop for Context<P> {
@@ -107,6 +113,11 @@ impl<P: Preset> Context<P> {
 
         let (p2p_tx, p2p_rx) = futures::channel::mpsc::unbounded();
 
+        let event_channels = Arc::new(EventChannels::default());
+        let block_rx = event_channels.receiver_for(Topic::Block);
+        let head_v2_rx = event_channels.receiver_for(Topic::HeadV2);
+        let chain_reorg_rx = event_channels.receiver_for(Topic::ChainReorg);
+
         let phase = anchor_block.phase();
 
         let (controller, mutator_handle) = TestController::with_p2p_tx(
@@ -116,6 +127,7 @@ impl<P: Preset> Context<P> {
             anchor_state,
             execution_engine.clone_arc(),
             p2p_tx,
+            event_channels,
             thread_pool_size,
         );
 
@@ -130,6 +142,9 @@ impl<P: Preset> Context<P> {
             p2p_rx,
             service_rx,
             execution_engine,
+            block_rx,
+            head_v2_rx,
+            chain_reorg_rx,
         }
     }
 
@@ -413,6 +428,36 @@ impl<P: Preset> Context<P> {
         ));
     }
 
+    // Sync must be told to forget the root, so the genuine block can still arrive.
+    pub fn on_block_with_invalid_signature(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
+        let expected_root = block.message().hash_tree_root();
+
+        assert!(matches!(
+            self.on_block(block),
+            Some(P2pMessage::Reject(
+                _,
+                MutatorRejectionReason::InvalidBlockSignature { block_root },
+            )) if block_root == expected_root,
+        ));
+    }
+
+    pub fn on_block_with_unknown_parent(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
+        let parent_root = block.message().parent_root();
+
+        assert!(matches!(
+            self.on_block(block),
+            Some(P2pMessage::BlockNeeded(block_root, _)) if block_root == parent_root,
+        ));
+    }
+
+    // A block delayed until its parent is retried once the parent is accepted.
+    pub fn assert_delayed_block_accepted(&mut self) {
+        assert!(matches!(
+            self.next_p2p_message(),
+            Some(P2pMessage::Accept(_))
+        ));
+    }
+
     pub fn on_valid_block(&mut self, block: &Arc<SignedBeaconBlock<P>>) {
         assert!(matches!(
             self.on_block(block),
@@ -654,6 +699,22 @@ impl<P: Preset> Context<P> {
         ));
     }
 
+    // Unlike envelopes from tests, envelopes from gossip generate events.
+    pub fn on_valid_gossip_execution_payload(
+        &mut self,
+        envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+    ) {
+        self.controller()
+            .on_gossip_execution_payload(envelope.clone_arc(), GossipId::default());
+
+        self.controller().wait_for_tasks();
+
+        assert!(matches!(
+            self.next_p2p_message(),
+            Some(P2pMessage::Accept(_)),
+        ));
+    }
+
     pub fn on_ignorable_execution_payload(
         &mut self,
         envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
@@ -734,8 +795,32 @@ impl<P: Preset> Context<P> {
         validator_index: ValidatorIndex,
     ) {
         assert!(matches!(
-            self.on_singular_attestation(state, epoch, validator_index),
+            self.on_singular_attestation(state, epoch, validator_index, false),
             Some(P2pMessage::Accept(_)),
+        ));
+    }
+
+    pub fn on_acceptable_singular_attestation_for_payload(
+        &mut self,
+        state: &Arc<BeaconState<P>>,
+        epoch: Epoch,
+        validator_index: ValidatorIndex,
+    ) {
+        assert!(matches!(
+            self.on_singular_attestation(state, epoch, validator_index, true),
+            Some(P2pMessage::Accept(_)),
+        ));
+    }
+
+    pub fn on_rejectable_singular_attestation_for_payload(
+        &mut self,
+        state: &Arc<BeaconState<P>>,
+        epoch: Epoch,
+        validator_index: ValidatorIndex,
+    ) {
+        assert!(matches!(
+            self.on_singular_attestation(state, epoch, validator_index, true),
+            Some(P2pMessage::Reject(_, _)),
         ));
     }
 
@@ -746,7 +831,7 @@ impl<P: Preset> Context<P> {
         validator_index: ValidatorIndex,
     ) {
         assert!(matches!(
-            self.on_singular_attestation(state, epoch, validator_index),
+            self.on_singular_attestation(state, epoch, validator_index, false),
             Some(P2pMessage::Ignore(_)),
         ));
     }
@@ -962,6 +1047,23 @@ impl<P: Preset> Context<P> {
         );
     }
 
+    // `head_block` is the block whose payload was sent as the head in `engine_forkchoiceUpdated`.
+    pub fn on_notified_invalid_fork_choice_update(
+        &self,
+        head_block: &SignedBeaconBlock<P>,
+        latest_valid_block: Option<&SignedBeaconBlock<P>>,
+    ) {
+        self.controller().on_notified_fork_choice_update(
+            Self::execution_block_hash(head_block),
+            PayloadStatusV1 {
+                status: PayloadValidationStatus::Invalid,
+                latest_valid_hash: latest_valid_block.map(Self::execution_block_hash),
+                validation_error: None,
+            },
+        );
+        self.controller().wait_for_tasks();
+    }
+
     pub fn stored_blocks_by_range(
         &self,
         range: Range<Slot>,
@@ -1093,6 +1195,36 @@ impl<P: Preset> Context<P> {
         );
     }
 
+    pub fn assert_node_payload_status(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        full: bool,
+        expected_payload_status: Option<PayloadStatus>,
+    ) {
+        assert_eq!(
+            self.controller()
+                .node_payload_status(block.message().hash_tree_root(), full),
+            expected_payload_status,
+        );
+    }
+
+    // `block` is a proposal that has not been imported.
+    pub fn assert_extended_payload_status(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        expected_payload_status: Option<PayloadStatus>,
+    ) {
+        let extended_payload_status = self
+            .controller()
+            .store_snapshot()
+            .extended_node(block.message())
+            .and_then(|(parent_root, full)| {
+                self.controller().node_payload_status(parent_root, full)
+            });
+
+        assert_eq!(extended_payload_status, expected_payload_status);
+    }
+
     pub fn assert_optimistic(&self, block: &SignedBeaconBlock<P>, expected_optimistic: bool) {
         assert_eq!(
             self.controller()
@@ -1103,6 +1235,120 @@ impl<P: Preset> Context<P> {
                 .is_optimistic(),
             expected_optimistic,
         );
+    }
+
+    // Checks what the Beacon API reports about the head:
+    // the `head` block, header and state endpoints, `/eth/v1/node/syncing`
+    // and the head's entry in `/eth/v2/debug/beacon/heads`.
+    // Asking for the head block or state by slot, root or state root must agree.
+    pub fn assert_head_optimistic(&self, expected_optimistic: bool) {
+        let controller = self.controller();
+        let head = controller.head().value;
+        let head_state_root = head.block.message().state_root();
+
+        let by_slot_and_root = [
+            controller
+                .stored_block_by_slot(head.slot())
+                .map(|block| block.map(|block| block.status)),
+            controller
+                .stored_block_by_root(head.block_root)
+                .map(|block| block.map(|block| block.status)),
+            controller
+                .check_block_root(head.block_root)
+                .map(|root| root.map(|root| root.status)),
+            controller
+                .state_at_slot_blocking(head.slot())
+                .map(|state| state.map(|state| state.status)),
+            controller
+                .state_by_state_root(head_state_root)
+                .map(|state| state.map(|state| state.status)),
+        ];
+
+        for status in by_slot_and_root {
+            let status = status
+                .expect("no storage errors should occur")
+                .expect("head should be present in the store");
+
+            assert_eq!(status.is_optimistic(), expected_optimistic);
+        }
+
+        assert_eq!(
+            controller.head().status.is_optimistic(),
+            expected_optimistic
+        );
+        assert_eq!(
+            controller.head_block().status.is_optimistic(),
+            expected_optimistic
+        );
+        assert_eq!(
+            controller.head_block_root().status.is_optimistic(),
+            expected_optimistic
+        );
+        assert_eq!(
+            controller.head_state().status.is_optimistic(),
+            expected_optimistic
+        );
+        assert_eq!(controller.snapshot().is_optimistic(), expected_optimistic);
+
+        let head_fork_tip = controller
+            .fork_tips()
+            .into_iter()
+            .find(|fork_tip| fork_tip.root == head.block_root)
+            .expect("head should be a fork tip");
+
+        assert_eq!(head_fork_tip.execution_optimistic, expected_optimistic);
+    }
+
+    // Checks the `block` events sent since the last call.
+    // Each is (block root, `execution_optimistic`).
+    pub fn assert_block_events(&mut self, expected_events: &[(H256, bool)]) {
+        let actual_events = core::iter::from_fn(|| self.block_rx.try_recv().ok())
+            .map(|event| {
+                let Event::Block(event) = event else {
+                    panic!("block channel should only carry block events");
+                };
+
+                (event.block, event.execution_optimistic)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual_events, expected_events);
+    }
+
+    // Checks the `head_v2` events sent since the last call.
+    // Each is (block root, payload presence, `execution_optimistic`).
+    pub fn assert_head_v2_events(&mut self, expected_events: &[(H256, PayloadPresence, bool)]) {
+        let actual_events = core::iter::from_fn(|| self.head_v2_rx.try_recv().ok())
+            .map(|event| {
+                let Event::HeadV2(event) = event else {
+                    panic!("head_v2 channel should only carry head_v2 events");
+                };
+
+                (
+                    event.data.block,
+                    event.data.payload_status,
+                    event.data.execution_optimistic,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual_events, expected_events);
+    }
+
+    // Checks the `chain_reorg` events sent since the last call.
+    // Each is (new head block root, `execution_optimistic`).
+    pub fn assert_chain_reorg_events(&mut self, expected_events: &[(H256, bool)]) {
+        let actual_events = core::iter::from_fn(|| self.chain_reorg_rx.try_recv().ok())
+            .map(|event| {
+                let Event::ChainReorg(event) = event else {
+                    panic!("chain_reorg channel should only carry chain_reorg events");
+                };
+
+                (event.new_head_block, event.execution_optimistic)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual_events, expected_events);
     }
 
     pub fn assert_forward_synced(&self, expected_forward_synced: bool) {
@@ -1193,6 +1439,7 @@ impl<P: Preset> Context<P> {
         state: &Arc<BeaconState<P>>,
         epoch: Epoch,
         validator_index: ValidatorIndex,
+        payload_present: bool,
     ) -> Option<P2pMessage<P>> {
         let (attestation, subnet_id) = factory::singular_attestation(
             self.config(),
@@ -1200,6 +1447,7 @@ impl<P: Preset> Context<P> {
             state.clone_arc(),
             epoch,
             validator_index,
+            payload_present,
         )
         .expect("attestation should be constructed successfully");
 
@@ -1282,6 +1530,12 @@ impl Context<Minimal> {
     pub fn gloas_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Gloas))
             .expect("minimal configuration modified to start in Gloas is valid")
+    }
+
+    #[must_use]
+    pub fn gloas_at_epoch_1_minimal() -> Self {
+        Self::with_config(Config::minimal().upgrade_once(Phase::Gloas, 1))
+            .expect("minimal configuration modified to upgrade to Gloas in epoch 1 is valid")
     }
 }
 
