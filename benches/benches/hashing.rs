@@ -12,10 +12,10 @@ use sha2::{Digest as _, Sha256 as Sha2Sha256};
 use tap::Conv as _;
 use types::phase0::primitives::H256;
 
-// Criterion macros only add confusion.
-fn main() {
-    let mut criterion = Criterion::default().configure_from_args();
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
 
+fn run_benchmarks(criterion: &mut Criterion) {
     criterion
         .benchmark_group("64 bits")
         .throughput(Throughput::Elements(1))
@@ -87,8 +87,6 @@ fn main() {
         )
         .bench_function("sha2::Sha256", hash_a(sha2_hash_768))
         .bench_function("openssl::sha::sha256", hash_a(openssl_hash_768));
-
-    criterion.final_summary();
 }
 
 // Arrays of arbitrary length do not implement `Default` as of Rust 1.95.0.

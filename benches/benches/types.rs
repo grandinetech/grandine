@@ -23,10 +23,11 @@ use types::{
     preset::Preset,
 };
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion
         .benchmark_state(
             "mainnet genesis state",
             &Config::mainnet(),
@@ -80,8 +81,7 @@ fn main() {
         .benchmark_blob_sidecars(
             "mainnet Deneb blob sidecars from 32 slots",
             &mainnet::DENEB_BLOB_SIDECARS_FROM_32_SLOTS,
-        )
-        .final_summary();
+        );
 }
 
 #[ext]

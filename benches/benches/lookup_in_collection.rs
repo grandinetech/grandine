@@ -27,7 +27,7 @@ use allocator as _;
 use std::collections::{BTreeMap, HashMap as StdHashMap, VecDeque};
 
 use criterion::{
-    Bencher, BenchmarkGroup, BenchmarkId, Criterion, Throughput, measurement::Measurement,
+    Bencher, BenchmarkGroup, BenchmarkId, Criterion, Throughput, measurement::WallTime,
 };
 use easy_ext::ext;
 use im::{HashMap as ImHashMap, OrdMap, Vector};
@@ -43,10 +43,10 @@ struct Small;
 #[expect(dead_code)]
 struct Large([usize; 8]);
 
-// Criterion macros only add confusion.
-fn main() {
-    let mut criterion = Criterion::default().configure_from_args();
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
 
+fn run_benchmarks(criterion: &mut Criterion) {
     criterion
         .benchmark_group("lookup in collection")
         .benchmark_all(0)
@@ -55,12 +55,10 @@ fn main() {
         .benchmark_all(16)
         .benchmark_all(64)
         .benchmark_all(256);
-
-    criterion.final_summary();
 }
 
 #[ext]
-impl<M: Measurement> BenchmarkGroup<'_, M> {
+impl BenchmarkGroup<'_, WallTime> {
     fn benchmark_all(&mut self, length: usize) -> &mut Self {
         self.benchmark_sequence::<Vec<(Key, Small)>, Vec<(Key, Large)>>(length)
             .benchmark_sequence::<VecDeque<(Key, Small)>, VecDeque<(Key, Large)>>(length)
@@ -153,7 +151,7 @@ impl<M: Measurement> BenchmarkGroup<'_, M> {
 }
 
 #[ext]
-impl<M: Measurement> Bencher<'_, M> {
+impl Bencher<'_> {
     fn benchmark_linear_best<T: Sequence>(&mut self, length: usize) {
         let sequence = collect::<T::Item, T>(length);
         self.iter(|| sequence.linear_search(core::hint::black_box(0)))

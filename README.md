@@ -1,5 +1,7 @@
 # Grandine: A fast and lightweight Ethereum consensus client
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/grandinetech/grandine?utm_source=badge)
+
 ## Documentation
 
 The documentation is available [here](https://docs.grandine.io/). Feel free to reach us if you would like more details in some documentation chapters or have any questions.

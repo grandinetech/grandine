@@ -10,10 +10,11 @@ use easy_ext::ext;
 use itertools::Itertools as _;
 use types::{config::Config, phase0::primitives::H256, preset::Mainnet};
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion
         .benchmark_shuffle_slice(
             "shuffling::shuffle_slice with minimum number of validators in mainnet (2 ** 16)",
             Config::mainnet().min_genesis_active_validator_count.get(),
@@ -27,8 +28,7 @@ fn main() {
             // See <https://github.com/ethereum/consensus-specs/issues/2137>.
             "shuffling::shuffle_slice with proposed cap for number of validators (2 ** 20)",
             1 << 20,
-        )
-        .final_summary();
+        );
 }
 
 #[ext]

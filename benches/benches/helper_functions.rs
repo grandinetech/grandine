@@ -19,10 +19,11 @@ use types::{
     phase0::primitives::ValidatorIndex, preset::Preset, traits::BeaconState as _,
 };
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion
         .benchmark_get_beacon_proposer_index(
             "accessors::get_beacon_proposer_index with mainnet genesis state",
             &Config::mainnet(),
@@ -41,8 +42,7 @@ fn main() {
         .benchmark_get_next_sync_committee(
             "accessors::get_next_sync_committee with mainnet Altair state",
             &mainnet::ALTAIR_BEACON_STATE,
-        )
-        .final_summary();
+        );
 }
 
 #[ext]
