@@ -1081,6 +1081,20 @@ impl<P: Preset> Context<P> {
         );
     }
 
+    pub fn assert_execution_payload_envelope_present(
+        &self,
+        block: &SignedBeaconBlock<P>,
+        expected_present: bool,
+    ) {
+        assert_eq!(
+            self.controller()
+                .stored_envelope_by_root(block.message().hash_tree_root())
+                .expect("envelope lookup should not fail")
+                .is_some(),
+            expected_present,
+        );
+    }
+
     pub fn assert_payload_status(
         &self,
         block: &SignedBeaconBlock<P>,
