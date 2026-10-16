@@ -4,7 +4,7 @@ The list of command line options:
 
 ```
       --network <NETWORK>
-          Name of the Eth2 network to connect to [default: mainnet] [possible values: mainnet, goerli, custom]
+          Name of the Eth2 network to connect to [default: mainnet] [possible values: mainnet, sepolia, holesky, hoodi, custom]
       --configuration-file <YAML_FILE>
           Load configuration from YAML_FILE
       --configuration-directory <DIRECTORY>
@@ -61,8 +61,6 @@ The list of command line options:
           HTTP API port [default: 5052]
       --state-slot <STATE_SLOT>
           State slot [default: None]
-      --disable-block-verification-pool
-          Disable block signature verification pool [default: enabled]
       --subscribe-all-subnets
           Subscribe to all subnets
       --suggested-fee-recipient <EXECUTION_ADDRESS>
@@ -135,8 +133,6 @@ The list of command line options:
           Path to a directory containing passwords for keystore files
       --keystore-password-file <KEYSTORE_PASSWORD_FILE>
           Path to a file containing password for keystore files
-      --pack-extra-attestations
-          Pack extra singular attestations to proposed block
       --builder-api-url <BUILDER_API_URL>
           External block builder API URL
       --builder-disable-checks
