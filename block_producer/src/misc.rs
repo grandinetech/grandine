@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use eth1_api::{ClientVersionV1, ClientVersions};
+use eth1_api::{ClientVersionV1, ClientVersions, WithClientVersions};
 use execution_engine::PayloadId;
 use grandine_version::{APPLICATION_NAME_WITH_VERSION, APPLICATION_NAME_WITH_VERSION_AND_COMMIT};
 use serde::{Deserialize, Serialize};
 use ssz::{Size, SszHash, SszSize, SszWrite, WriteError};
 use typenum::U1;
 use types::{
-    combined::{BeaconBlock, BlindedBeaconBlock},
-    nonstandard::Phase,
+    combined::{BeaconBlock, BlindedBeaconBlock, ExecutionPayload},
+    nonstandard::{Phase, WithBlobsAndMev},
     phase0::primitives::{ExecutionAddress, H256, ValidatorIndex},
     preset::Preset,
     traits::BeaconBlock as _,
@@ -21,6 +21,12 @@ pub enum PayloadIdEntry {
     Live(PayloadId),
 }
 
+pub enum BlindedBlockPublication<P: Preset> {
+    // Boxed to pass `clippy::large_enum_variant`.
+    Payload(Box<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>>),
+    PublishedByBuilder,
+}
+
 impl PayloadIdEntry {
     #[must_use]
     pub const fn id(self) -> PayloadId {
@@ -30,7 +36,7 @@ impl PayloadIdEntry {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ProposerData {
     #[serde(with = "serde_utils::string_or_native")]
     pub validator_index: ValidatorIndex,
@@ -100,6 +106,14 @@ impl<P: Preset> ValidatorBlindedBlock<P> {
     #[must_use]
     pub const fn is_blinded(&self) -> bool {
         matches!(self, Self::BlindedBeaconBlock(_))
+    }
+
+    #[must_use]
+    pub fn parent_root(&self) -> H256 {
+        match self {
+            Self::BlindedBeaconBlock(block) => block.parent_root(),
+            Self::BeaconBlock(block) => block.parent_root(),
+        }
     }
 }
 

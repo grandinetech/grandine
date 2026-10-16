@@ -1,6 +1,6 @@
 ## CLI options
 
-The list of command line options:
+The list of command line options. `grandine bn` and `grandine vc` each accept a subset of them, and `vc` adds options of its own; `grandine bn --help` and `grandine vc --help` print the exact lists.
 
 ```
       --network <NETWORK>

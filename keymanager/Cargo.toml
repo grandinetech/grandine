@@ -14,6 +14,7 @@ eip_2335 = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
 helper_functions = { workspace = true }
+hex-literal = { workspace = true }
 itertools = { workspace = true }
 logging = { workspace = true }
 serde = { workspace = true }
@@ -33,7 +34,6 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 fs-err = { workspace = true }
-hex-literal = { workspace = true }
 reqwest = { workspace = true }
 tempfile = { workspace = true }
 

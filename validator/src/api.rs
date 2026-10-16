@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Error as AnyhowError, Result, ensure};
+use anyhow::{Error as AnyhowError, Result, bail, ensure};
 use axum::{
     Json, RequestExt as _, RequestPartsExt as _, Router,
     body::Body,
@@ -27,13 +27,14 @@ use axum_extra::{
     extract::{Query, QueryRejection},
     headers::{Authorization, authorization::Bearer},
 };
+use binary_utils::TracingHandle;
 use bls::PublicKeyBytes;
+use clock::Tick;
 use constant_time_eq::constant_time_eq;
 use directories::Directories;
-use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, error::Error as HelperError, misc, signing::SignForSingleFork};
-use http_api_utils::{ApiError, ApiMetrics};
+use http_api_utils::{ApiError, ApiMetrics, post_log_level, post_trace_level};
 use keymanager::{
     KeyManager, KeymanagerError, KeymanagerOperationStatus, ListedRemoteKey, RemoteKey,
     ValidatingPubkey,
@@ -49,13 +50,17 @@ use tower_http::cors::AllowOrigin;
 use tracing::instrument;
 use types::{
     bellatrix::primitives::Gas,
+    nonstandard::ForkInfo,
     phase0::{
         containers::{SignedVoluntaryExit, VoluntaryExit},
         primitives::{Epoch, ExecutionAddress},
     },
     preset::Preset,
 };
+
 use zeroize::Zeroizing;
+
+use crate::misc::{Chain, ChainSource};
 
 const VALIDATOR_API_TOKEN_PATH: &str = "api-token.txt";
 const VALIDATOR_API_DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -94,6 +99,8 @@ impl ValidatorApiConfig {
 
 #[derive(Debug, Error)]
 enum Error {
+    #[error("fee recipient is not set for validator {pubkey:?}")]
+    FeeRecipientNotSet { pubkey: PublicKeyBytes },
     #[error("internal error")]
     Internal(#[from] AnyhowError),
     #[error("invalid JSON body")]
@@ -152,9 +159,9 @@ impl Error {
             Self::InvalidGraffiti(_) | Self::InvalidPublicKey(_) | Self::InvalidQuery(_) => {
                 StatusCode::BAD_REQUEST
             }
-            Self::ValidatorNotFound { pubkey: _ } | Self::ValidatorNotOwned { pubkey: _ } => {
-                StatusCode::NOT_FOUND
-            }
+            Self::FeeRecipientNotSet { pubkey: _ }
+            | Self::ValidatorNotFound { pubkey: _ }
+            | Self::ValidatorNotOwned { pubkey: _ } => StatusCode::NOT_FOUND,
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
         }
@@ -338,15 +345,16 @@ impl<S: Sync, T: DeserializeOwned + 'static> FromRequestParts<S> for EthQuery<T>
 
 #[derive(Clone)]
 struct ValidatorApiState<P: Preset, W: Wait> {
-    controller: ApiController<P, W>,
+    chain_source: Arc<ChainSource<P, W>>,
     keymanager: Arc<KeyManager>,
     signer: Arc<Signer>,
     token: Arc<ApiToken>,
+    tracing_handle: Option<TracingHandle>,
 }
 
-impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for ApiController<P, W> {
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<ChainSource<P, W>> {
     fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
-        state.controller.clone_arc()
+        state.chain_source.clone_arc()
     }
 }
 
@@ -365,6 +373,12 @@ impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<Signer> {
 impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Arc<ApiToken> {
     fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
         state.token.clone_arc()
+    }
+}
+
+impl<P: Preset, W: Wait> FromRef<ValidatorApiState<P, W>> for Option<TracingHandle> {
+    fn from_ref(state: &ValidatorApiState<P, W>) -> Self {
+        state.tracing_handle.clone()
     }
 }
 
@@ -447,7 +461,10 @@ async fn keymanager_list_fee_recipient(
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let fee_recipient = keymanager.proposer_configs().fee_recipient(pubkey);
+    let fee_recipient = keymanager
+        .proposer_configs()
+        .configured_fee_recipient(pubkey)
+        .ok_or(Error::FeeRecipientNotSet { pubkey })?;
 
     let response = ProposerConfigResponse {
         pubkey,
@@ -490,13 +507,13 @@ async fn keymanager_delete_fee_recipient(
 
 /// `GET /eth/v1/validator/{pubkey}/gas_limit`
 async fn keymanager_get_gas_limit<P: Preset, W: Wait>(
-    State(controller): State<ApiController<P, W>>,
+    State(chain_source): State<Arc<ChainSource<P, W>>>,
     State(keymanager): State<Arc<KeyManager>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
 ) -> Result<EthResponse<ProposerConfigResponse>, Error> {
-    let epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+    let epoch = misc::compute_epoch_at_slot::<P>(chain_source.slot()?);
     let configured = keymanager.proposer_configs().gas_limit(pubkey);
-    let gas_limit = controller.chain_config().gas_limit(configured, epoch);
+    let gas_limit = chain_source.chain_config.gas_limit(configured, epoch);
 
     let response = ProposerConfigResponse {
         pubkey,
@@ -658,25 +675,66 @@ async fn keymanager_delete_remote_keys(
 
 /// `POST /eth/v1/validator/{pubkey}/voluntary_exit`
 async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
-    State(controller): State<ApiController<P, W>>,
+    State(chain_source): State<Arc<ChainSource<P, W>>>,
     State(signer): State<Arc<Signer>>,
     EthPath(pubkey): EthPath<PublicKeyBytes>,
     EthQuery(query): EthQuery<CreateVoluntaryExitQuery>,
 ) -> Result<EthResponse<SignedVoluntaryExit>, Error> {
-    let state = controller.preprocessed_state_at_current_slot().await?;
-
-    let epoch = query
-        .epoch
-        .unwrap_or_else(|| accessors::get_current_epoch(&state));
-
     let signer_snapshot = signer.load();
 
     if !signer_snapshot.has_key(pubkey) {
         return Err(Error::ValidatorNotOwned { pubkey });
     }
 
-    let validator_index = accessors::index_of_public_key(&state, &pubkey)
-        .ok_or(Error::ValidatorNotFound { pubkey })?;
+    let chain_config = &chain_source.chain_config;
+
+    let (epoch, validator_index, fork_info) = match &chain_source.chain {
+        Chain::Local(local) => {
+            let state = local
+                .controller
+                .preprocessed_state_at_current_slot()
+                .await?;
+            let epoch = query
+                .epoch
+                .unwrap_or_else(|| accessors::get_current_epoch(&state));
+
+            let validator_index = accessors::index_of_public_key(&state, &pubkey)
+                .ok_or(Error::ValidatorNotFound { pubkey })?;
+
+            (epoch, validator_index, ForkInfo::from_state(state.as_ref()))
+        }
+        Chain::Remote(remote_beacon_nodes) => {
+            let current_epoch =
+                Tick::current::<P>(chain_config, chain_source.genesis_time)?.epoch::<P>();
+            let epoch = query.epoch.unwrap_or(current_epoch);
+            let known_index = chain_source
+                .own_validator_indices
+                .load()
+                .get(&pubkey)
+                .copied()
+                .flatten();
+
+            // A key the duty loop has not resolved yet, such as one just imported, is asked about.
+            let validator_index = match known_index {
+                Some(validator_index) => validator_index,
+                None => remote_beacon_nodes
+                    .validator_indices(&[pubkey])
+                    .await?
+                    .get(&pubkey)
+                    .copied()
+                    .ok_or(Error::ValidatorNotFound { pubkey })?,
+            };
+
+            // Verifiers use the state's fork, not the exit's epoch.
+            let fork_info = ForkInfo::at_epoch(
+                chain_config,
+                current_epoch,
+                chain_source.genesis_validators_root,
+            );
+
+            (epoch, validator_index, fork_info)
+        }
+    };
 
     let voluntary_exit = VoluntaryExit {
         epoch,
@@ -685,9 +743,13 @@ async fn keymanager_create_voluntary_exit<P: Preset, W: Wait>(
 
     let signature = signer_snapshot
         .sign_without_slashing_protection(
-            SigningMessage::VoluntaryExit(voluntary_exit),
-            voluntary_exit.signing_root(controller.chain_config(), &state),
-            Some(state.as_ref().into()),
+            SigningMessage::<P>::VoluntaryExit(voluntary_exit),
+            SignForSingleFork::<P>::signing_root_from_fork_info(
+                &voluntary_exit,
+                chain_config,
+                fork_info,
+            ),
+            Some(fork_info),
             pubkey,
         )
         .await?;
@@ -714,11 +776,12 @@ async fn authorize_token(
 
 pub async fn run_validator_api<P: Preset, W: Wait>(
     validator_api_config: ValidatorApiConfig,
-    controller: ApiController<P, W>,
+    chain_source: Arc<ChainSource<P, W>>,
     directories: Arc<Directories>,
     keymanager: Arc<KeyManager>,
     signer: Arc<Signer>,
     metrics: Option<Arc<Metrics>>,
+    tracing_handle: Option<TracingHandle>,
 ) -> Result<()> {
     let ValidatorApiConfig {
         address,
@@ -737,26 +800,29 @@ pub async fn run_validator_api<P: Preset, W: Wait>(
         )
     });
 
-    let token = ApiToken::load_or_build_from(&token_file_path).map_err(|error| {
-        TokenLoadError::UnableToLoad {
+    let token = match ApiToken::load_or_build_from(&token_file_path) {
+        Ok(token) => token,
+        Err(error) => bail!(TokenLoadError::UnableToLoad {
             error,
             token_file_path,
-        }
-    })?;
+        }),
+    };
 
     info_with_peers!(
-        "Validator API is listening on {address}, authorization token: {:?}",
-        *Zeroizing::new(hex::encode(&token.bytes)),
+        "Validator API is listening on {address}, authorization token file: {token_file_path:?}",
     );
 
     let state = ValidatorApiState {
-        controller,
+        chain_source,
         keymanager,
         token: Arc::new(token),
         signer,
+        tracing_handle,
     };
 
     let router = eth_v1_keymanager_routes()
+        .route("/eth/v2/debug/tracing/log_level", post(post_log_level))
+        .route("/eth/v2/debug/tracing/trace_level", post(post_trace_level))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             authorize_token,

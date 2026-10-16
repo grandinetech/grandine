@@ -11,7 +11,7 @@ pub struct SigningRequest<'block, P: Preset> {
     #[serde(rename = "type")]
     message_type: MessageType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    fork_info: Option<ForkInfo<P>>,
+    fork_info: Option<ForkInfo>,
     #[serde(rename = "signingRoot")]
     signing_root: H256,
     #[serde(flatten)]
@@ -22,7 +22,7 @@ impl<'block, P: Preset> SigningRequest<'block, P> {
     pub const fn new(
         message: SigningMessage<'block, P>,
         signing_root: H256,
-        fork_info: Option<ForkInfo<P>>,
+        fork_info: Option<ForkInfo>,
     ) -> Self {
         let message_type = match message {
             SigningMessage::AggregationSlot { .. } => MessageType::AggregationSlot,

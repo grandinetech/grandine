@@ -8,3 +8,5 @@ Grandine supports [Builder API](https://github.com/ethereum/builder-specs) for s
 * `--builder-disable-checks` - always specified external block builder without checking for circuit breaker conditions (default: disabled);
 * `--builder-max-skipped-slots` - number of consecutive missing blocks to trigger circuit breaker condition and switch to a local execution engine for payload construction (default: `3`);
 * `--builder-max-skipped-slots-per-epoch` - number of missing blocks in the last rolling epoch to trigger circuit breaker condition and switch to a local execution engine for payload construction (default: `5`).
+
+The options above configure the beacon node. A validator client run separately with `grandine vc` takes none of them: the builder is configured on the beacon nodes it connects to, and the validator client opts into it with `--use-builder` (see [Validator Client](./validator_client.md#running-the-validator-client-separately)).

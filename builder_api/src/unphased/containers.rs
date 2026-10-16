@@ -20,7 +20,7 @@ pub struct ValidatorRegistrationV1 {
     pub pubkey: PublicKeyBytes,
 }
 
-#[derive(Debug, Deserialize, Serialize, Ssz)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Ssz)]
 #[ssz(derive_hash = false, derive_read = false)]
 pub struct SignedValidatorRegistrationV1 {
     pub message: ValidatorRegistrationV1,

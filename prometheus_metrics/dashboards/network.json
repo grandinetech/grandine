@@ -3000,7 +3000,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", instance=~\"$Instance\"})",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{topic_hash=~\".*$Topic.*\", instance=~\"$Instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "total for {{instance}}",
@@ -3009,7 +3009,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"})",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{topic_hash=~\".*$Topic.*\", topic_hash=~\".*beacon_attestation.*\", instance=~\"$Instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "beacon attestation total for {{instance}}",
@@ -3018,7 +3018,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"})",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{topic_hash=~\".*$Topic.*\", topic_hash=~\".*blob_sidecar.*\", instance=~\"$Instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "blob sidecar total for {{instance}}",
@@ -3027,7 +3027,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", hash=~\".*sync_committee.*\", hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"})",
+          "expr": "sum by(instance) (gossipsub_mesh_peer_counts{topic_hash=~\".*$Topic.*\", topic_hash=~\".*sync_committee.*\", topic_hash!~\".*sync_committee_contribution_and_proof.*\", instance=~\"$Instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "sync committee total for {{instance}}",
@@ -3037,11 +3037,11 @@
         {
           "editorMode": "code",
           "exemplar": true,
-          "expr": "gossipsub_mesh_peer_counts{hash=~\".*$Topic.*\", instance=~\"$Instance\"}",
+          "expr": "sum by(instance, topic_hash) (gossipsub_mesh_peer_counts{topic_hash=~\".*$Topic.*\", instance=~\"$Instance\"})",
           "hide": false,
           "instant": false,
           "interval": "",
-          "legendFormat": "{{hash}} for {{instance}}",
+          "legendFormat": "{{topic_hash}} for {{instance}}",
           "refId": "A"
         }
       ],
@@ -6390,14 +6390,14 @@
             "$__all"
           ]
         },
-        "definition": "label_values(gossipsub_mesh_peer_counts,hash)",
+        "definition": "label_values(gossipsub_topic_peers_counts,hash)",
         "includeAll": true,
         "multi": true,
         "name": "Fork",
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(gossipsub_mesh_peer_counts,hash)",
+          "query": "label_values(gossipsub_topic_peers_counts,hash)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,

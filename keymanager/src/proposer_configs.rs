@@ -1,4 +1,4 @@
-use std::{io::ErrorKind, path::Path, str, sync::Arc};
+use std::{collections::HashMap, io::ErrorKind, path::Path, str, sync::Arc};
 
 use anyhow::Result;
 use bls::PublicKeyBytes;
@@ -6,10 +6,11 @@ use bytesize::ByteSize;
 use database::{Database, DatabaseMode};
 use derive_more::Display;
 use helper_functions::misc;
+use hex_literal::hex;
 use serde::de::DeserializeOwned;
 use types::{
     bellatrix::primitives::Gas,
-    phase0::primitives::{ExecutionAddress, H256},
+    phase0::primitives::{ExecutionAddress, H160, H256},
 };
 
 use crate::{
@@ -19,8 +20,11 @@ use crate::{
 
 const DB_MAX_SIZE: ByteSize = ByteSize::gib(1);
 
+pub const GRANDINE_DONATION_ADDRESS: ExecutionAddress =
+    H160(hex!("e7cf7C3BA875Dd3884Ed6a9082d342cb4FBb1f1b"));
+
 pub struct ProposerConfigs {
-    default_fee_recipient: ExecutionAddress,
+    default_fee_recipient: Option<ExecutionAddress>,
     default_gas_limit: Option<Gas>,
     default_graffiti: H256,
     validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
@@ -29,7 +33,7 @@ pub struct ProposerConfigs {
 impl ProposerConfigs {
     #[must_use]
     pub const fn new(
-        default_fee_recipient: ExecutionAddress,
+        default_fee_recipient: Option<ExecutionAddress>,
         default_gas_limit: Option<Gas>,
         default_graffiti: H256,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
@@ -44,11 +48,36 @@ impl ProposerConfigs {
 
     #[must_use]
     pub fn fee_recipient(&self, pubkey: PublicKeyBytes) -> ExecutionAddress {
+        self.configured_fee_recipient(pubkey)
+            .unwrap_or(GRANDINE_DONATION_ADDRESS)
+    }
+
+    /// [`Self::fee_recipient`] without the fallback, for what is told to other beacon nodes.
+    #[must_use]
+    pub fn configured_fee_recipient(&self, pubkey: PublicKeyBytes) -> Option<ExecutionAddress> {
         self.validator_definitions
             .read()
             .get(pubkey)
             .and_then(|definition| definition.fee_recipient)
-            .unwrap_or(self.default_fee_recipient)
+            .or(self.default_fee_recipient)
+    }
+
+    /// [`Self::configured_fee_recipient`] for many keys, with the definitions read only once.
+    pub fn configured_fee_recipients(&self) -> impl Fn(PublicKeyBytes) -> Option<ExecutionAddress> {
+        let fee_recipients = self
+            .validator_definitions
+            .read()
+            .fee_recipients()
+            .collect::<HashMap<_, _>>();
+
+        let default_fee_recipient = self.default_fee_recipient;
+
+        move |pubkey| {
+            fee_recipients
+                .get(&pubkey)
+                .copied()
+                .or(default_fee_recipient)
+        }
     }
 
     pub fn set_fee_recipient(
@@ -376,7 +405,7 @@ mod tests {
         ));
 
         Ok(ProposerConfigs::new(
-            DEFAULT_FEE_RECIPIENT,
+            Some(DEFAULT_FEE_RECIPIENT),
             Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
             validator_definitions,
@@ -391,6 +420,65 @@ mod tests {
             proposer_configs.fee_recipient(PUBKEY),
             DEFAULT_FEE_RECIPIENT
         );
+
+        Ok(())
+    }
+
+    // Only a configured fee recipient may be told to other beacon nodes.
+    #[test]
+    fn configured_fee_recipient_has_no_fallback() -> Result<()> {
+        let validator_definitions = Arc::new(ValidatorDefinitionsWithStorage::new(
+            Arc::new(RwLock::new(definitions_with_pubkey())),
+            DefinitionsStorage::InMemory,
+        ));
+
+        let proposer_configs = ProposerConfigs::new(
+            None,
+            Some(DEFAULT_GAS_LIMIT),
+            H256::default(),
+            validator_definitions,
+        );
+
+        assert_eq!(proposer_configs.configured_fee_recipient(PUBKEY), None);
+        assert_eq!(
+            proposer_configs.fee_recipient(PUBKEY),
+            GRANDINE_DONATION_ADDRESS
+        );
+
+        proposer_configs.set_fee_recipient(PUBKEY, TEST_FEE_RECIPIENT)?;
+
+        assert_eq!(
+            proposer_configs.configured_fee_recipient(PUBKEY),
+            Some(TEST_FEE_RECIPIENT),
+        );
+
+        Ok(())
+    }
+
+    // Proposers are prepared from the lookup for many keys, which must answer as the one for a
+    // single key does: the definition's own recipient, else the default.
+    #[test]
+    fn configured_fee_recipients_match_the_lookup_for_one_key() -> Result<()> {
+        let proposer_configs = in_memory()?;
+        let pubkey_without_definition = PublicKeyBytes::repeat_byte(2);
+
+        proposer_configs.set_fee_recipient(PUBKEY, TEST_FEE_RECIPIENT)?;
+
+        let configured_fee_recipient = proposer_configs.configured_fee_recipients();
+
+        assert_eq!(configured_fee_recipient(PUBKEY), Some(TEST_FEE_RECIPIENT));
+
+        assert_eq!(
+            configured_fee_recipient(pubkey_without_definition),
+            Some(DEFAULT_FEE_RECIPIENT),
+        );
+
+        for pubkey in [PUBKEY, pubkey_without_definition] {
+            assert_eq!(
+                configured_fee_recipient(pubkey),
+                proposer_configs.configured_fee_recipient(pubkey),
+            );
+        }
 
         Ok(())
     }
@@ -537,7 +625,7 @@ mod tests {
         ));
 
         let proposer_configs = ProposerConfigs::new(
-            DEFAULT_FEE_RECIPIENT,
+            Some(DEFAULT_FEE_RECIPIENT),
             Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
             validator_definitions,
@@ -553,7 +641,7 @@ mod tests {
         ));
 
         let reloaded = ProposerConfigs::new(
-            DEFAULT_FEE_RECIPIENT,
+            Some(DEFAULT_FEE_RECIPIENT),
             Some(DEFAULT_GAS_LIMIT),
             graffiti_bytes,
             reloaded_definitions,

@@ -1042,11 +1042,44 @@ impl Metrics {
         default_registry.register(Box::new(self.total_cpu_seconds.clone()))?;
         default_registry.register(Box::new(self.grandine_thread_count.clone()))?;
         default_registry.register(Box::new(self.collection_lengths.clone()))?;
-        default_registry.register(Box::new(self.http_api_response_times.clone()))?;
         default_registry.register(Box::new(self.metrics_api_response_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_response_times.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_task_count.clone()))?;
         default_registry.register(Box::new(self.dedicated_executor_thread_count.clone()))?;
+        default_registry.register(Box::new(self.validator_propose_tick_times.clone()))?;
+        default_registry.register(Box::new(self.validator_attest_tick_times.clone()))?;
+        default_registry.register(Box::new(self.validator_aggregate_tick_times.clone()))?;
+        default_registry.register(Box::new(self.validator_epoch_processing_times.clone()))?;
+        default_registry.register(Box::new(self.validator_own_attestations_init_times.clone()))?;
+        default_registry.register(Box::new(self.validator_attest_times.clone()))?;
+        default_registry.register(Box::new(
+            self.validator_attest_slashing_protector_times.clone(),
+        ))?;
+        default_registry.register(Box::new(
+            self.validator_own_payload_attestations_init_times.clone(),
+        ))?;
+        default_registry.register(Box::new(self.validator_attest_payload_times.clone()))?;
+        default_registry.register(Box::new(self.validator_propose_times.clone()))?;
+        default_registry.register(Box::new(self.validator_propose_successes.clone()))?;
+        default_registry.register(Box::new(
+            self.validator_proposal_slashing_protector_times.clone(),
+        ))?;
+        default_registry.register(Box::new(self.web3signer_load_keys_times.clone()))?;
+        default_registry.register(Box::new(self.web3signer_sign_times.clone()))?;
+        default_registry.register(Box::new(self.jemalloc_bytes_allocated.clone()))?;
+        default_registry.register(Box::new(self.jemalloc_bytes_active.clone()))?;
+        default_registry.register(Box::new(self.jemalloc_bytes_metadata.clone()))?;
+        default_registry.register(Box::new(self.jemalloc_bytes_resident.clone()))?;
+        default_registry.register(Box::new(self.jemalloc_bytes_mapped.clone()))?;
+        default_registry.register(Box::new(self.jemalloc_bytes_retained.clone()))?;
+        default_registry.register(Box::new(self.tick_delay_times.clone()))?;
+        Ok(())
+    }
+
+    pub fn register_beacon_node_metrics(&self) -> Result<()> {
+        let default_registry = prometheus::default_registry();
+
+        default_registry.register(Box::new(self.http_api_response_times.clone()))?;
         default_registry.register(Box::new(self.gossip_objects.clone()))?;
         default_registry.register(Box::new(self.received_sync_contribution_subsets.clone()))?;
         default_registry.register(Box::new(
@@ -1109,27 +1142,9 @@ impl Metrics {
             self.payload_attestation_verifier_process_attestation_batch_times
                 .clone(),
         ))?;
-        default_registry.register(Box::new(self.validator_propose_tick_times.clone()))?;
-        default_registry.register(Box::new(self.validator_attest_tick_times.clone()))?;
-        default_registry.register(Box::new(self.validator_aggregate_tick_times.clone()))?;
-        default_registry.register(Box::new(self.validator_epoch_processing_times.clone()))?;
-        default_registry.register(Box::new(self.validator_own_attestations_init_times.clone()))?;
-        default_registry.register(Box::new(self.validator_attest_times.clone()))?;
-        default_registry.register(Box::new(
-            self.validator_attest_slashing_protector_times.clone(),
-        ))?;
-        default_registry.register(Box::new(
-            self.validator_own_payload_attestations_init_times.clone(),
-        ))?;
-        default_registry.register(Box::new(self.validator_attest_payload_times.clone()))?;
         default_registry.register(Box::new(self.validator_api_attestation_data_times.clone()))?;
         default_registry.register(Box::new(
             self.validator_api_payload_attestation_data_times.clone(),
-        ))?;
-        default_registry.register(Box::new(self.validator_propose_times.clone()))?;
-        default_registry.register(Box::new(self.validator_propose_successes.clone()))?;
-        default_registry.register(Box::new(
-            self.validator_proposal_slashing_protector_times.clone(),
         ))?;
         default_registry.register(Box::new(self.build_beacon_block_times.clone()))?;
         default_registry.register(Box::new(self.local_execution_payload_times.clone()))?;
@@ -1239,19 +1254,9 @@ impl Metrics {
         default_registry.register(Box::new(
             self.builder_get_execution_payload_header_times.clone(),
         ))?;
-        default_registry.register(Box::new(self.web3signer_load_keys_times.clone()))?;
-        default_registry.register(Box::new(self.web3signer_sign_times.clone()))?;
         default_registry.register(Box::new(self.eth1_api_request_times.clone()))?;
         default_registry.register(Box::new(self.eth1_api_errors_count.clone()))?;
         default_registry.register(Box::new(self.eth1_api_reset_count.clone()))?;
-        default_registry.register(Box::new(self.jemalloc_bytes_allocated.clone()))?;
-        default_registry.register(Box::new(self.jemalloc_bytes_active.clone()))?;
-        default_registry.register(Box::new(self.jemalloc_bytes_metadata.clone()))?;
-        default_registry.register(Box::new(self.jemalloc_bytes_resident.clone()))?;
-        default_registry.register(Box::new(self.jemalloc_bytes_mapped.clone()))?;
-        default_registry.register(Box::new(self.jemalloc_bytes_retained.clone()))?;
-        default_registry.register(Box::new(self.tick_delay_times.clone()))?;
-
         Ok(())
     }
 
