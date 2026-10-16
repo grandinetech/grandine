@@ -1,0 +1,69 @@
+name: CodSpeed
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+  # `workflow_dispatch` allows CodSpeed to trigger backtest
+  # performance analysis in order to generate initial data.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # for OpenID Connect authentication with CodSpeed
+
+# Cancel in-progress runs for the same ref
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+
+      - name: Install system dependencies (Ubuntu)
+        run: |
+          sudo DEBIAN_FRONTEND='noninteractive' apt-get update && \
+            sudo DEBIAN_FRONTEND='noninteractive' apt-get install \
+            --no-install-recommends -yq \
+            ca-certificates \
+            libssl-dev \
+            clang \
+            cmake \
+            unzip \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libz-dev
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Check out necessary submodules only
+        run: git submodule update --init dedicated_executor eth2_libp2p
+
+      - name: Setup Rust toolchain, cache and cargo-codspeed binary
+        uses: moonrepo/setup-rust@v1
+        with:
+          cache-target: release
+          bins: cargo-codspeed
+
+      # Only benchmarks that do not depend on the `eth2-cache` data set are run.
+      - name: Build the benchmark targets
+        run: >-
+          cargo codspeed build -m simulation
+          -p benches -p kzg_utils --features bls/blst,kzg_utils/blst
+          --bench genesis --bench hashing --bench integer_square_root --bench lookup_in_collection --bench shuffling
+
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: simulation
+          run: cargo codspeed run -p benches --bench genesis --bench hashing --bench integer_square_root --bench lookup_in_collection --bench shuffling

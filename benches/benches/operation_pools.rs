@@ -16,10 +16,11 @@ use operation_pools::PoolAttestation;
 use std_ext::ArcExt as _;
 use types::{config::Config, phase0::containers::Attestation, preset::Preset};
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion
         .benchmark_greedy_attestation_packing(
             "greedy attestation packing in Goerli at slot 547813",
             LazyBeaconState::new(|| goerli::beacon_state(547_813, 6)),
@@ -33,8 +34,7 @@ fn main() {
             LazyBeaconState::new(|| holesky::beacon_state(50_015, 8)),
             LazyCell::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562 - 1)),
             LazyCell::new(|| holesky::aggregate_attestations_by_epoch_sorted_by_data(1562)),
-        )
-        .final_summary();
+        );
 }
 
 #[ext]

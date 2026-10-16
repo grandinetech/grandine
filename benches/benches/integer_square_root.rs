@@ -14,16 +14,16 @@ use types::{
     preset::{Mainnet, Preset as _},
 };
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion
         .benchmark_sqrt(
             "integer_sqrt::IntegerSquareRoot::integer_sqrt",
             IntegerSquareRoot::integer_sqrt,
         )
-        .benchmark_sqrt("num_integer::Roots::sqrt", Roots::sqrt)
-        .final_summary();
+        .benchmark_sqrt("num_integer::Roots::sqrt", Roots::sqrt);
 }
 
 #[ext]

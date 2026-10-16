@@ -8,7 +8,6 @@ use core::cell::LazyCell;
 use std::sync::Arc;
 
 use allocator as _;
-use anyhow::Result;
 use criterion::{BatchSize, Criterion, Throughput};
 use easy_ext::ext;
 use eth2_cache_utils::{LazyBeaconBlocks, LazyBeaconState, goerli, mainnet, medalla};
@@ -28,14 +27,15 @@ use types::{
 // This should be set high enough to cover all of epoch processing.
 const EMPTY_SLOT_COUNT: u64 = 1024;
 
-// Criterion macros only add confusion.
-#[expect(clippy::too_many_lines)]
-fn main() -> Result<()> {
-    // Initialize the global Rayon thread pool in advance for more consistent results.
-    binary_utils::initialize_rayon()?;
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
 
-    Criterion::default()
-        .configure_from_args()
+#[expect(clippy::too_many_lines)]
+fn run_benchmarks(criterion: &mut Criterion) {
+    // Initialize the global Rayon thread pool in advance for more consistent results.
+    binary_utils::initialize_rayon().expect("global Rayon thread pool should be initialized");
+
+    criterion
         .benchmark_empty_slots(
             format!("{EMPTY_SLOT_COUNT} empty slots in mainnet Phase 0 starting from genesis"),
             &Config::mainnet(),
@@ -191,10 +191,7 @@ fn main() -> Result<()> {
             &Config::medalla(),
             &medalla::BEACON_STATE_DURING_ROUGHTIME,
             &medalla::BEACON_BLOCKS_DURING_ROUGHTIME,
-        )
-        .final_summary();
-
-    Ok(())
+        );
 }
 
 #[ext]

@@ -38,12 +38,11 @@ use types::{
     traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
-        .benchmark_store_apply_tick()
-        .final_summary();
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion.benchmark_store_apply_tick();
 }
 
 #[ext]
