@@ -518,6 +518,11 @@ impl<P: Preset, W: Wait> Network<P, W> {
                             self.publish_data_column_sidecar(data_column_sidecar);
                         }
                         P2pMessage::PenalizePeer(peer_id, mutator_rejection_reason) => {
+                            if let MutatorRejectionReason::InvalidBlockSignature { block_root } = mutator_rejection_reason {
+                                P2pToSync::BlockNotConsidered(block_root)
+                                    .send(&self.channels.p2p_to_sync_tx);
+                            }
+
                             self.report_peer(
                                 peer_id,
                                 PeerAction::LowToleranceError,
@@ -527,6 +532,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         }
                         P2pMessage::Reject(gossip_id, mutator_rejection_reason) => {
                             match mutator_rejection_reason {
+                                MutatorRejectionReason::InvalidBlockSignature { block_root } => {
+                                    P2pToSync::BlockNotConsidered(block_root)
+                                        .send(&self.channels.p2p_to_sync_tx)
+                                }
                                 MutatorRejectionReason::InvalidDataColumnSidecar { data_column_identifier } => {
                                     P2pToSync::DataColumnSidecarRejected(data_column_identifier)
                                         .send(&self.channels.p2p_to_sync_tx)

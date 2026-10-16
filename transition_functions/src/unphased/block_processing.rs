@@ -333,15 +333,13 @@ pub fn validate_attester_slashing_with_verifier<P: Preset>(
     let current_epoch = get_current_epoch(state);
 
     let slashable_indices = slashable_indices(attester_slashing)
-        .filter(|attester_index| {
-            let attester = state
-                .validators()
-                .partial_validator(*attester_index)
-                .expect("attester indices are validated in validate_received_indexed_attestation");
-
-            is_slashable_validator(attester, current_epoch)
+        .map(|attester_index| {
+            let attester = state.validators().partial_validator(attester_index)?;
+            Ok((attester_index, attester))
         })
-        .collect_vec();
+        .filter_ok(|(_, attester)| is_slashable_validator(attester, current_epoch))
+        .map_ok(|(attester_index, _)| attester_index)
+        .collect::<Result<Vec<_>>>()?;
 
     ensure!(
         !slashable_indices.is_empty(),

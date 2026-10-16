@@ -32,9 +32,9 @@ use types::{
             ExecutionPayloadBid, PayloadAttestationMessage, SignedExecutionPayloadBid,
             SignedProposerPreferences,
         },
-        primitives::{BuilderIndex, PayloadStatus},
+        primitives::{BuilderIndex, PayloadStatus as ExecutionPayloadStatus},
     },
-    nonstandard::Phase,
+    nonstandard::{PayloadStatus, Phase},
     phase0::{
         containers::{Checkpoint, ProposerSlashing, SignedVoluntaryExit},
         primitives::{
@@ -289,10 +289,12 @@ impl<P: Preset> EventChannels<P> {
         store: &Store<P, S>,
         new_head: &ChainLink<P>,
         old_head: &ChainLink<P>,
+        head_node_payload_status: PayloadStatus,
     ) {
-        let chain_reorg_event = ChainReorgEvent::new(store, old_head);
+        let chain_reorg_event =
+            ChainReorgEvent::new(store, old_head, head_node_payload_status.is_optimistic());
 
-        if new_head.is_valid() {
+        if head_node_payload_status.is_valid() {
             if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
                 warn_with_peers!("unable to send chain reorg event: {error}");
             }
@@ -300,6 +302,8 @@ impl<P: Preset> EventChannels<P> {
             return;
         }
 
+        // Held back until the head is valid.
+        // `send_head_event` sends it then.
         self.optimistic_reorgs
             .upsert_sync((new_head.block_root, new_head.slot()), chain_reorg_event);
     }
@@ -394,17 +398,26 @@ impl<P: Preset> EventChannels<P> {
         }
     }
 
-    pub fn send_head_event(&self, head: &ChainLink<P>, dependent_roots: DependentRootsBundle) {
-        if let Err(error) = self.send_head_event_internal(head, dependent_roots) {
+    pub fn send_head_event(
+        &self,
+        head: &ChainLink<P>,
+        dependent_roots: DependentRootsBundle,
+        head_node_payload_status: PayloadStatus,
+    ) {
+        let execution_optimistic = head_node_payload_status.is_optimistic();
+
+        if let Err(error) =
+            self.send_head_event_internal(head, dependent_roots, execution_optimistic)
+        {
             warn_with_peers!("unable to send head event: {error}");
         }
 
-        if head.is_valid()
+        if head_node_payload_status.is_valid()
             && let Some((_, mut chain_reorg_event)) = self
                 .optimistic_reorgs
                 .remove_sync(&(head.block_root, head.slot()))
         {
-            chain_reorg_event.execution_optimistic = head.is_optimistic();
+            chain_reorg_event.execution_optimistic = execution_optimistic;
 
             if let Err(error) = self.send_chain_reorg_event_internal(chain_reorg_event) {
                 warn_with_peers!("unable to send chain reorg event: {error}");
@@ -415,11 +428,16 @@ impl<P: Preset> EventChannels<P> {
     pub fn send_head_v2_event(
         &self,
         head: &ChainLink<P>,
-        payload_status: PayloadStatus,
+        payload_status: ExecutionPayloadStatus,
         dependent_roots: DependentRootsBundle,
+        execution_optimistic: bool,
     ) {
-        if let Err(error) = self.send_head_v2_event_internal(head, payload_status, dependent_roots)
-        {
+        if let Err(error) = self.send_head_v2_event_internal(
+            head,
+            payload_status,
+            dependent_roots,
+            execution_optimistic,
+        ) {
             warn_with_peers!("unable to send head_v2 event: {error}");
         }
     }
@@ -746,9 +764,10 @@ impl<P: Preset> EventChannels<P> {
         &self,
         head: &ChainLink<P>,
         dependent_roots: DependentRootsBundle,
+        execution_optimistic: bool,
     ) -> Result<()> {
         if self.heads.receiver_count() > 0 {
-            let head_event = HeadEvent::new(head, dependent_roots);
+            let head_event = HeadEvent::new(head, dependent_roots, execution_optimistic);
             let event = Event::Head(head_event);
             self.heads.send(event)?;
         }
@@ -759,11 +778,13 @@ impl<P: Preset> EventChannels<P> {
     fn send_head_v2_event_internal(
         &self,
         head: &ChainLink<P>,
-        payload_status: PayloadStatus,
+        payload_status: ExecutionPayloadStatus,
         dependent_roots: DependentRootsBundle,
+        execution_optimistic: bool,
     ) -> Result<()> {
         if self.heads_v2.receiver_count() > 0 {
-            let head_v2_event = HeadV2Event::new(head, payload_status, dependent_roots);
+            let head_v2_event =
+                HeadV2Event::new(head, payload_status, dependent_roots, execution_optimistic);
             let event = Event::HeadV2(head_v2_event);
             self.heads_v2.send(event)?;
         }
@@ -984,7 +1005,11 @@ impl ChainReorgEvent {
     //
     // [Eth Beacon Node API specification]: https://ethereum.github.io/beacon-APIs/
     #[must_use]
-    fn new<P: Preset, S: Storage<P>>(store: &Store<P, S>, old_head: &ChainLink<P>) -> Self {
+    fn new<P: Preset, S: Storage<P>>(
+        store: &Store<P, S>,
+        old_head: &ChainLink<P>,
+        execution_optimistic: bool,
+    ) -> Self {
         let new_head = store.head();
         let old_slot = old_head.slot();
         let new_slot = new_head.slot();
@@ -1012,7 +1037,7 @@ impl ChainReorgEvent {
             old_head_state: old_head.block.message().state_root(),
             new_head_state: new_head.block.message().state_root(),
             epoch: misc::compute_epoch_at_slot::<P>(new_slot),
-            execution_optimistic: new_head.is_optimistic(),
+            execution_optimistic,
         }
     }
 }
@@ -1039,7 +1064,11 @@ pub struct HeadEvent {
 }
 
 impl HeadEvent {
-    fn new<P: Preset>(head: &ChainLink<P>, dependent_roots_bundle: DependentRootsBundle) -> Self {
+    fn new<P: Preset>(
+        head: &ChainLink<P>,
+        dependent_roots_bundle: DependentRootsBundle,
+        execution_optimistic: bool,
+    ) -> Self {
         let DependentRootsBundle {
             current_duty_dependent_root,
             previous_duty_dependent_root,
@@ -1054,7 +1083,7 @@ impl HeadEvent {
             epoch_transition: misc::is_epoch_start::<P>(slot),
             previous_duty_dependent_root,
             current_duty_dependent_root,
-            execution_optimistic: head.is_optimistic(),
+            execution_optimistic,
         }
     }
 }
@@ -1082,8 +1111,9 @@ pub struct HeadV2EventData {
 impl HeadV2Event {
     fn new<P: Preset>(
         head: &ChainLink<P>,
-        payload_status: PayloadStatus,
+        payload_status: ExecutionPayloadStatus,
         dependent_roots_bundle: DependentRootsBundle,
+        execution_optimistic: bool,
     ) -> Self {
         let DependentRootsBundle {
             current_duty_dependent_root,
@@ -1105,7 +1135,7 @@ impl HeadV2Event {
                 // unchanged, so this apparent swap is intentional, not a bug.
                 current_epoch_dependent_root: previous_duty_dependent_root,
                 next_epoch_dependent_root: current_duty_dependent_root,
-                execution_optimistic: head.is_optimistic(),
+                execution_optimistic,
             },
         }
     }

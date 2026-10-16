@@ -484,9 +484,14 @@ where
         })
     }
 
-    pub fn on_notified_fork_choice_update(&self, payload_status: PayloadStatusV1) {
+    pub fn on_notified_fork_choice_update(
+        &self,
+        head_execution_block_hash: ExecutionBlockHash,
+        payload_status: PayloadStatusV1,
+    ) {
         MutatorMessage::NotifiedForkChoiceUpdate {
             wait_group: self.owned_wait_group(),
+            head_execution_block_hash,
             payload_status,
         }
         .send(&self.mutator_tx);

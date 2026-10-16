@@ -11,7 +11,6 @@
 #![expect(clippy::similar_names)]
 #![expect(clippy::too_many_lines)]
 
-#[cfg(feature = "eth2-cache")]
 use std::sync::Arc;
 
 #[cfg(feature = "eth2-cache")]
@@ -25,15 +24,21 @@ use std_ext::ArcExt as _;
 #[cfg(feature = "eth2-cache")]
 use types::{config::Config, preset::Medalla};
 use types::{
-    gloas::consts::PAYLOAD_STATUS_EMPTY,
-    nonstandard::PayloadStatus,
+    gloas::consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
+    nonstandard::{PayloadStatus, Phase},
     phase0::{
         consts::{GENESIS_EPOCH, GENESIS_SLOT},
+        containers::{
+            AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint,
+            IndexedAttestation,
+        },
         primitives::H256,
     },
     preset::Minimal,
     traits::SignedBeaconBlock as _,
 };
+
+use fork_choice_store::PayloadPresence;
 
 use crate::{
     helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch},
@@ -2206,6 +2211,61 @@ fn all_descendants_of_first_invalid_block_are_invalidated() {
     context.assert_payload_status(&block_5, Some(PayloadStatus::Optimistic));
 }
 
+// The execution engine syncs and only learns at `engine_forkchoiceUpdated` that 3 is invalid.
+// The verdict must invalidate it the same way `engine_newPayload` would.
+#[test]
+fn forkchoice_updated_invalid_verdict_invalidates_payloads_after_latest_valid_hash() {
+    let mut context = Context::bellatrix_minimal();
+
+    let (block_0, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_2, state_2) =
+        context.block_with_payload(&state_1, 2, H256::default(), H256::repeat_byte(2));
+    let (block_3, _) =
+        context.block_with_payload(&state_2, 3, H256::default(), H256::repeat_byte(3));
+
+    context.on_slot(block_3.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    context.assert_head(3, block_3.message().hash_tree_root());
+    context.assert_head_optimistic(true);
+
+    context.on_notified_invalid_fork_choice_update(&block_3, Some(&block_1));
+
+    context.assert_payload_status(&block_0, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_head(1, block_1.message().hash_tree_root());
+}
+
+// No `latest_valid_hash` means only the head payload is known to be invalid.
+#[test]
+fn forkchoice_updated_invalid_verdict_without_latest_valid_hash_invalidates_head() {
+    let mut context = Context::bellatrix_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) =
+        context.block_with_payload(&state_1, 2, H256::default(), H256::repeat_byte(2));
+
+    context.on_slot(block_2.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(2, block_2.message().hash_tree_root());
+
+    context.on_notified_invalid_fork_choice_update(&block_2, None);
+
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_head(1, block_1.message().hash_tree_root());
+}
+
 // ```text
 // 0
 //  \
@@ -2545,6 +2605,124 @@ fn gloas_genesis_accepts_blocks_built_on_it() {
     context.on_acceptable_block(&block_2);
 }
 
+// ```text
+//   1  R, the head
+//  /
+// 0
+//  \
+//   15 S
+// ```
+//
+// Validator 0 votes R in epoch 1, S in epoch 2 and R again in epoch 3.
+// The epoch 3 vote arrives before the epoch 2 one.
+// The repeated vote for R moves no weight, but it still makes the epoch 2 vote stale.
+// The head must not depend on delivery order.
+#[test]
+fn repeated_vote_for_same_root_makes_older_votes_stale() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_r, state_r) = context.empty_block(&state_0, 1, H256::default());
+    let (block_s, state_s) = context.empty_block(&state_0, 15, H256::default());
+
+    context.on_slot(block_s.message().slot());
+    context.on_acceptable_block(&block_r);
+    context.on_acceptable_block(&block_s);
+
+    context.on_slot(20);
+    context.on_acceptable_singular_attestation(&state_r, 1, 0);
+    context.assert_head(1, block_r.message().hash_tree_root());
+
+    context.on_slot(30);
+    context.on_acceptable_singular_attestation(&state_r, 3, 0);
+    context.on_acceptable_singular_attestation(&state_s, 2, 0);
+    context.assert_head(1, block_r.message().hash_tree_root());
+}
+
+// The same slashing arrives twice, e.g. via gossip and then in a block.
+// The slashed validator's vote must be removed once, not once per copy.
+#[test]
+fn repeated_attester_slashing_removes_vote_once() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+
+    context.on_slot(start_of_epoch(2));
+    context.on_acceptable_singular_attestation(&state_1, 1, 0);
+    context.on_acceptable_singular_attestation(&state_1, 1, 1);
+
+    let attestation_data = |beacon_block_root| AttestationData {
+        beacon_block_root,
+        target: Checkpoint {
+            epoch: 1,
+            ..Checkpoint::default()
+        },
+        ..AttestationData::default()
+    };
+
+    let indexed_attestation = |beacon_block_root| IndexedAttestation {
+        attesting_indices: [0].try_into().expect("length is under maximum"),
+        data: attestation_data(beacon_block_root),
+        ..IndexedAttestation::default()
+    };
+
+    let attester_slashing = Phase0AttesterSlashing {
+        attestation_1: indexed_attestation(H256::repeat_byte(1)),
+        attestation_2: indexed_attestation(H256::repeat_byte(2)),
+    };
+
+    let expected_status = || Status {
+        head: &block_1,
+        attesting_validators: Some(1),
+        store_justified_epoch: 0,
+        store_finalized_epoch: 0,
+        fork_count_viable: 1,
+        fork_count_total: 1,
+        finalized_block_count: 1,
+        unfinalized_block_count_in_fork: 1,
+        unfinalized_block_count_total: 1,
+    };
+
+    context.on_test_attester_slashing(attester_slashing.clone().into(), BlsSetting::Ignored);
+    context.assert_status(expected_status());
+
+    context.on_test_attester_slashing(attester_slashing.into(), BlsSetting::Ignored);
+    context.assert_status(expected_status());
+}
+
+// ```text
+// 0 - 1 - 2
+// ```
+//
+// A block root does not cover the signature.
+// Anyone can rewrap 1 with a bad signature and send it first.
+// That copy is rejected, but it says nothing about the genuine 1.
+// 2 arrives before the genuine 1 and must wait for it, not be rejected.
+#[test]
+fn block_with_invalid_signature_does_not_condemn_its_root() {
+    let mut context = Context::minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+
+    let (message_1, _) = block_1.as_ref().clone().split();
+    let forged_block_1 = Arc::new(message_1.with_zero_signature());
+
+    context.on_slot(block_2.message().slot());
+
+    context.on_block_with_invalid_signature(&forged_block_1);
+    context.on_block_with_unknown_parent(&block_2);
+    context.on_acceptable_block(&block_1);
+    context.assert_delayed_block_accepted();
+
+    context.assert_head(2, block_2.message().hash_tree_root());
+}
+
 // Post-Gloas the execution engine judges a block's payload, not the block.
 // The tests below check that a rejected payload only takes down what builds on it.
 //
@@ -2619,6 +2797,92 @@ fn gloas_invalid_payload_kills_children_on_full_node_and_their_descendants() {
     context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
     context.assert_head(1, block_1.message().hash_tree_root());
     context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -e- 3
+// ```
+//
+// Same chain as above, but the rejection comes from `engine_forkchoiceUpdated`.
+// Head 3 skips 2's payload, so the head payload sent is 1's.
+// The verdict must find 1 by that payload and take down 2 and 3.
+#[test]
+fn gloas_forkchoice_updated_invalid_verdict_invalidates_the_block_carrying_the_head_payload() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_2, 3, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_3.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    context.assert_head(3, block_3.message().hash_tree_root());
+
+    context.on_notified_invalid_fork_choice_update(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_head(1, block_1.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+}
+
+// ```text
+// 0 -e- 1
+// ```
+//
+// The execution engine rejects 1's payload after its envelope is applied.
+// 1 stays in fork choice on its empty node.
+// A vote saying 1's payload is present must be rejected.
+#[test]
+fn gloas_rejects_attestation_for_invalid_payload() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_1.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
+    context.assert_head(1, block_1.message().hash_tree_root());
+
+    context.on_slot(16);
+    context.on_rejectable_singular_attestation_for_payload(&state_1, 1, 0);
+    context.on_acceptable_singular_attestation(&state_1, 1, 1);
+}
+
+// Same chain, but the payload is valid. The same vote is accepted.
+#[test]
+fn gloas_accepts_attestation_for_valid_payload() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_1.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_slot(16);
+    context.on_acceptable_singular_attestation_for_payload(&state_1, 1, 0);
 }
 
 // ```text
@@ -2698,6 +2962,374 @@ fn gloas_new_descendants_of_invalid_payload_inherit_the_right_status() {
     context.assert_head(3, block_3.message().hash_tree_root());
 }
 
+// ```text
+// 0 --- 1 ===== 8 -e- 9
+// ```
+//
+// 1 is pre-Gloas and optimistic. 8 is the first Gloas block. 8 and 9 inherit the optimistic status.
+// 8's payload is validated. That proves 1 too.
+// 9 skips 8's payload, has none of its own, and builds on a validated chain, so it is valid too.
+#[test]
+fn gloas_blocks_without_payload_become_valid_when_chain_they_build_on_is_validated() {
+    let mut context = Context::gloas_at_epoch_1_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_8, state_8) = context.empty_block(&state_1, 8, H256::default());
+    let (block_9, _) = context.empty_block(&state_8, 9, H256::default());
+
+    assert_eq!(block_1.phase(), Phase::Fulu);
+    assert_eq!(block_8.phase(), Phase::Gloas);
+
+    let envelope_8 = context.execution_payload_envelope(&block_8, &state_8);
+
+    context.on_slot(block_9.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_8);
+    context.on_valid_execution_payload(&envelope_8, BlsSetting::Required);
+    context.on_acceptable_block(&block_9);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_8, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_9, Some(PayloadStatus::Optimistic));
+
+    context.on_notified_valid_payload(&block_8);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_8, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_9, Some(PayloadStatus::Valid));
+}
+
+// ```text
+// 0 --- 1 ===== 8 -e- 9
+// ```
+//
+// 1 is pre-Gloas and optimistic. 8 is the first Gloas block.
+// 8's payload is delivered but the execution engine has not ruled on it.
+// 1's payload is validated.
+// 8 waits for its own verdict. 9 skips 8's payload, so it rests on 1 and is valid.
+#[test]
+fn gloas_block_on_empty_node_of_unvalidated_payload_becomes_valid_with_payload_below() {
+    let mut context = Context::gloas_at_epoch_1_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_8, state_8) = context.empty_block(&state_1, 8, H256::default());
+    let (block_9, _) = context.empty_block(&state_8, 9, H256::default());
+
+    let envelope_8 = context.execution_payload_envelope(&block_8, &state_8);
+
+    context.on_slot(block_9.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_8);
+    context.on_valid_execution_payload(&envelope_8, BlsSetting::Required);
+    context.on_acceptable_block(&block_9);
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_8, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_9, Some(PayloadStatus::Valid));
+}
+
+// ```text
+// 0 --- 1 ===== 8 -f- 9
+// ```
+//
+// Same as above, but 9 builds on 8's payload.
+// 8's payload is still unvalidated, so 9 must stay optimistic.
+#[test]
+fn gloas_block_on_full_node_of_unvalidated_payload_stays_optimistic() {
+    let mut context = Context::gloas_at_epoch_1_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_8, state_8) = context.empty_block(&state_1, 8, H256::default());
+    let (block_9, _) = context.empty_block_extending_parent_payload(&state_8, 9, H256::default());
+
+    let envelope_8 = context.execution_payload_envelope(&block_8, &state_8);
+
+    context.on_slot(block_9.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_acceptable_block(&block_8);
+    context.on_valid_execution_payload(&envelope_8, BlsSetting::Required);
+    context.on_acceptable_block(&block_9);
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_8, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_9, Some(PayloadStatus::Optimistic));
+
+    context.on_notified_valid_payload(&block_8);
+
+    context.assert_payload_status(&block_8, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_9, Some(PayloadStatus::Valid));
+}
+
+// ```text
+//       f- 2
+//      /
+// 0 -e- 1
+//      \
+//       e- 3
+// ```
+//
+// 1 inherits a valid status from genesis before its payload arrives.
+// That status says nothing about 1's own payload.
+// Once the payload is delivered, 1 waits for the execution engine's verdict.
+// 2 builds on that payload and waits too. 3 skips it and stays valid.
+#[test]
+fn gloas_delivered_payload_is_optimistic_until_validated() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_1, 3, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_3.message().slot());
+
+    context.on_acceptable_block(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_acceptable_block(&block_3);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
+
+    // Duties on 1's empty node do not depend on its payload.
+    context.assert_node_payload_status(&block_1, true, Some(PayloadStatus::Optimistic));
+    context.assert_node_payload_status(&block_1, false, Some(PayloadStatus::Valid));
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Valid));
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -f- 3
+//             |
+//             e- 4
+// ```
+//
+// 3's payload is rejected, and the execution engine names 1's payload as the latest valid one.
+// 2's payload sits in between, so it is rejected too, along with 3 built on it.
+// 4 skips 2's payload and rests on 1, so it stays valid.
+#[test]
+fn gloas_invalid_payload_with_older_latest_valid_hash_invalidates_payloads_in_between() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, state_3) =
+        context.empty_block_extending_parent_payload(&state_2, 3, H256::default());
+    let (block_4, _) = context.empty_block(&state_2, 4, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
+    let envelope_3 = context.execution_payload_envelope(&block_3, &state_3);
+
+    context.on_slot(block_4.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
+    context.on_acceptable_block(&block_3);
+    context.on_valid_execution_payload(&envelope_3, BlsSetting::Required);
+    context.on_acceptable_block(&block_4);
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_4, Some(PayloadStatus::Valid));
+
+    context.on_notified_invalid_payload(&block_3, Some(&block_1));
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_4, Some(PayloadStatus::Valid));
+    context.assert_head(4, block_4.message().hash_tree_root());
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -e- 3 -f- 4
+//             |
+//             f- 5
+// ```
+//
+// 4's payload is rejected, and the execution engine names 1's payload as the latest valid one.
+// 3's payload sits in between, so it is rejected too, along with 4 built on it.
+// 4's chain skips 2's payload, so the verdict says nothing about it.
+// 2 and 5 built on its payload are untouched.
+#[test]
+fn gloas_invalid_payload_with_older_latest_valid_hash_skips_payloads_left_out() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, state_3) = context.empty_block(&state_2, 3, H256::default());
+    let (block_4, state_4) =
+        context.empty_block_extending_parent_payload(&state_3, 4, H256::default());
+    let (block_5, _) = context.empty_block_extending_parent_payload(&state_2, 5, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
+    let envelope_3 = context.execution_payload_envelope(&block_3, &state_3);
+    let envelope_4 = context.execution_payload_envelope(&block_4, &state_4);
+
+    context.on_slot(block_5.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
+    context.on_acceptable_block(&block_3);
+    context.on_valid_execution_payload(&envelope_3, BlsSetting::Required);
+    context.on_acceptable_block(&block_4);
+    context.on_valid_execution_payload(&envelope_4, BlsSetting::Required);
+    context.on_acceptable_block(&block_5);
+
+    context.on_notified_valid_payload(&block_1);
+    context.on_notified_invalid_payload(&block_4, Some(&block_1));
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Optimistic));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_4, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_5, Some(PayloadStatus::Optimistic));
+}
+
+// ```text
+//       f- 2f
+//      /
+// 0 -e- 1
+//      \
+//       e- 2e
+// ```
+//
+// 2f and 2e are proposals, not imported. The validator checks them right before signing.
+// 1's payload is delivered, but the execution engine has not ruled on it.
+// 2f extends that payload, so it must not be signed. Who built 2f's payload does not matter.
+// 2e leaves it out and rests on genesis, so it can be signed.
+// Once the verdict comes in, 2f can be signed too.
+#[test]
+fn gloas_proposal_extending_unvalidated_payload_is_not_signable_until_validated() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2f, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_2e, _) = context.empty_block(&state_1, 2, H256::repeat_byte(1));
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_2f.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.assert_extended_payload_status(&block_2f, Some(PayloadStatus::Optimistic));
+    context.assert_extended_payload_status(&block_2e, Some(PayloadStatus::Valid));
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_extended_payload_status(&block_2f, Some(PayloadStatus::Valid));
+    context.assert_extended_payload_status(&block_2e, Some(PayloadStatus::Valid));
+}
+
+// ```text
+//             f- 3f
+//            /
+// 0 -e- 1 -f- 2
+//            \
+//             e- 3e
+// ```
+//
+// 3f and 3e are proposals, not imported.
+// 2's payload is rejected, and the execution engine names 1's payload as the latest valid one.
+// 3f extends the rejected payload, so it must never be signed.
+// 3e leaves it out and rests on 1, so it can be signed.
+#[test]
+fn gloas_proposal_extending_rejected_payload_is_not_signable() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3f, _) = context.empty_block_extending_parent_payload(&state_2, 3, H256::default());
+    let (block_3e, _) = context.empty_block(&state_2, 3, H256::repeat_byte(1));
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
+
+    context.on_slot(block_3f.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
+
+    context.on_notified_valid_payload(&block_1);
+    context.on_notified_invalid_payload(&block_2, Some(&block_1));
+
+    context.assert_extended_payload_status(&block_3f, Some(PayloadStatus::Invalid));
+    context.assert_extended_payload_status(&block_3e, Some(PayloadStatus::Valid));
+}
+
+// ```text
+// 0 --- 1 ===== 8
+// ```
+//
+// 1 is pre-Gloas and optimistic. 8 is a proposal for the first Gloas slot, not imported.
+// A pre-Gloas parent has one node, so 8 extends 1's payload either way.
+// It can only be signed once 1's payload is validated.
+#[test]
+fn gloas_first_proposal_on_unvalidated_pre_gloas_parent_is_not_signable_until_validated() {
+    let mut context = Context::gloas_at_epoch_1_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) =
+        context.block_with_payload(&state_0, 1, H256::default(), H256::repeat_byte(1));
+    let (block_8, _) = context.empty_block(&state_1, 8, H256::default());
+
+    assert_eq!(block_1.phase(), Phase::Fulu);
+    assert_eq!(block_8.phase(), Phase::Gloas);
+
+    context.on_slot(block_8.message().slot());
+
+    context.on_acceptable_block(&block_1);
+
+    context.assert_extended_payload_status(&block_8, Some(PayloadStatus::Optimistic));
+
+    context.on_notified_valid_payload(&block_1);
+
+    context.assert_extended_payload_status(&block_8, Some(PayloadStatus::Valid));
+}
+
 // An envelope from too far in the future is ignored right away.
 // Even if its block is unknown. No point asking peers for that block.
 #[test]
@@ -2713,4 +3345,333 @@ fn gloas_envelope_from_far_future_is_ignored_before_looking_up_its_block() {
     context.on_slot(block_1.message().slot());
 
     context.on_ignorable_execution_payload(&envelope_10, BlsSetting::Required);
+}
+
+// ```text
+// 0 -e- 1 -f- 2 -f- 3 -f- 4
+// ```
+//
+// 4's payload is rejected, and the execution engine names 1's payload as the latest valid one.
+// 2's and 3's payloads sit in between, so they are rejected too.
+// Only the deepest of them is invalidated directly. The rest go with it as its descendants.
+#[test]
+fn gloas_invalid_payload_with_older_latest_valid_hash_invalidates_all_payloads_in_between() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, state_2) =
+        context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, state_3) =
+        context.empty_block_extending_parent_payload(&state_2, 3, H256::default());
+    let (block_4, state_4) =
+        context.empty_block_extending_parent_payload(&state_3, 4, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
+    let envelope_3 = context.execution_payload_envelope(&block_3, &state_3);
+    let envelope_4 = context.execution_payload_envelope(&block_4, &state_4);
+
+    context.on_slot(block_4.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+    context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
+    context.on_acceptable_block(&block_3);
+    context.on_valid_execution_payload(&envelope_3, BlsSetting::Required);
+    context.on_acceptable_block(&block_4);
+    context.on_valid_execution_payload(&envelope_4, BlsSetting::Required);
+
+    context.on_notified_valid_payload(&block_1);
+    context.on_notified_invalid_payload(&block_4, Some(&block_1));
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Valid));
+    context.assert_payload_status(&block_2, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
+    context.assert_payload_status(&block_4, Some(PayloadStatus::Invalid));
+}
+
+// ```text
+// 0 -e- 1 -f- 2
+// ```
+//
+// 1's envelope arrives and the head turns full.
+// The execution engine has not ruled on 1's payload yet, so the head is optimistic.
+// The envelope comes from gossip, so a `head_v2` event goes out for the full head, optimistic.
+// The verdict sends the head events again, no longer optimistic.
+// 2 builds on 1's validated payload, so its `head_v2` event is not optimistic from the start.
+#[test]
+fn gloas_head_v2_events_are_sent_again_when_the_head_is_validated() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    context.on_slot(block_1.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.assert_head_v2_events(&[(root_1, PayloadPresence::Empty, false)]);
+
+    context.assert_head_optimistic(false);
+
+    context.on_valid_gossip_execution_payload(&envelope_1);
+    context.assert_head_payload_status(PAYLOAD_STATUS_FULL);
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_head_v2_events(&[(root_1, PayloadPresence::Full, true)]);
+    context.assert_head_optimistic(true);
+
+    context.on_notified_valid_payload(&block_1);
+    context.assert_head_v2_events(&[(root_1, PayloadPresence::Full, false)]);
+    context.assert_head_optimistic(false);
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+    context.assert_head_v2_events(&[(root_2, PayloadPresence::Empty, false)]);
+}
+
+// ```text
+// 0 -e- 1
+// ```
+//
+// 1's envelope arrives and the head turns full.
+// The execution engine has not ruled on 1's payload yet, so the head is optimistic.
+// Then an attestation votes for 1 without its payload, and the head turns empty.
+// The empty node rests on genesis, which is valid, so the head is no longer optimistic.
+// 1's own payload is still waiting for its verdict.
+#[test]
+fn gloas_head_on_empty_node_of_unvalidated_payload_is_not_optimistic() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    context.on_slot(block_1.message().slot());
+
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.assert_head_payload_status(PAYLOAD_STATUS_FULL);
+    context.assert_head_optimistic(true);
+
+    context.on_slot(16);
+    context.on_acceptable_singular_attestation(&state_1, 1, 0);
+
+    context.assert_head(1, block_1.message().hash_tree_root());
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_head_optimistic(false);
+}
+
+// ```text
+// 0 -e- 1
+//  \
+//   e- 2
+// ```
+//
+// 1's payload is delivered, but the execution engine has not ruled on it.
+// 2 arrives on time and takes the head with proposer boost. Nothing in 2 is unvalidated.
+// 2 has the larger root, so it keeps the head once the boost is gone.
+// Then an attestation votes for 1 without its payload, and the head moves back to 1.
+// 1's empty node rests on genesis, so the reorg is not optimistic and is sent at once.
+// 1's own payload is still waiting for its verdict. It must not hold the reorg back.
+#[test]
+fn gloas_reorg_to_empty_node_of_unvalidated_payload_is_sent_at_once() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block(&state_0, 2, H256::repeat_byte(1));
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    assert!(root_1 < root_2);
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(2, root_2);
+    context.assert_chain_reorg_events(&[(root_2, false)]);
+
+    context.on_slot(16);
+
+    // Without votes or boost, the head is the larger root.
+    context.assert_head(2, root_2);
+    context.assert_chain_reorg_events(&[]);
+
+    context.on_acceptable_singular_attestation(&state_1, 1, 0);
+
+    context.assert_head(1, root_1);
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_chain_reorg_events(&[(root_1, false)]);
+}
+
+// ```text
+//       f- 2
+//      /
+// 0 -e- 1
+//      \
+//       e- 3
+// ```
+//
+// 3's payload is delivered, but the execution engine has not ruled on it.
+// 2 arrives on time and takes the head with proposer boost.
+// 2 rests on 1's payload, which is unvalidated, so that reorg is held back.
+// Then 1's payload is rejected. 2 dies and the head moves to 3's full node.
+// 3's payload is unvalidated, so this reorg is held back too.
+// The verdict on 3's payload sends it, no longer optimistic.
+#[test]
+fn gloas_reorg_to_full_node_of_unvalidated_payload_is_held_until_validated() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 3, H256::default());
+    let (block_3, state_3) = context.empty_block(&state_1, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_3 = context.execution_payload_envelope(&block_3, &state_3);
+
+    let root_3 = block_3.message().hash_tree_root();
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_slot(block_3.message().slot());
+    context.on_acceptable_block(&block_3);
+    context.on_valid_execution_payload(&envelope_3, BlsSetting::Required);
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(3, block_2.message().hash_tree_root());
+    context.assert_chain_reorg_events(&[]);
+
+    context.on_notified_invalid_payload(&block_1, None);
+
+    context.assert_head(2, root_3);
+    context.assert_head_payload_status(PAYLOAD_STATUS_FULL);
+    context.assert_head_optimistic(true);
+    context.assert_chain_reorg_events(&[]);
+
+    context.on_notified_valid_payload(&block_3);
+
+    context.assert_head_optimistic(false);
+    context.assert_chain_reorg_events(&[(root_3, false)]);
+}
+
+// ```text
+// 0 -e- 1
+//  \
+//   e- 2
+// ```
+//
+// 1's payload is delivered, but the execution engine has not ruled on it.
+// 2 arrives on time and takes the head with proposer boost.
+// 1 has the larger root, so the head moves back to 1 once the boost is gone.
+// Fork choice resolves it to 1's full node, which rests on 1's unvalidated payload.
+// That reorg is held back.
+// Then an attestation votes for 1 without its payload, and the head turns empty.
+// The head block stays the same, but the head is no longer optimistic.
+// That sends the held reorg, before 1's own payload gets its verdict.
+#[test]
+fn gloas_held_reorg_is_sent_when_the_head_turns_empty() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::repeat_byte(1));
+    let (block_2, _) = context.empty_block(&state_0, 2, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+
+    assert!(root_1 > root_2);
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+
+    context.assert_head(2, root_2);
+    context.assert_chain_reorg_events(&[(root_2, false)]);
+
+    context.on_slot(3);
+
+    context.assert_head(1, root_1);
+    context.assert_head_payload_status(PAYLOAD_STATUS_FULL);
+    context.assert_head_optimistic(true);
+    context.assert_chain_reorg_events(&[]);
+
+    context.on_slot(16);
+    context.on_acceptable_singular_attestation(&state_1, 1, 0);
+
+    context.assert_head(1, root_1);
+    context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_head_optimistic(false);
+    context.assert_chain_reorg_events(&[(root_1, false)]);
+}
+
+// ```text
+// 0 -e- 1 -f- 2
+//        \
+//         e- 3
+// ```
+//
+// 1's payload is delivered, but the execution engine has not ruled on it.
+// 1 rests on genesis, so its `block` event is not optimistic.
+// 2 builds on 1's unvalidated payload, so its `block` event is optimistic.
+// 3 skips 1's payload and rests on genesis, so its `block` event is not optimistic.
+#[test]
+fn gloas_block_events_are_optimistic_if_the_payload_they_rest_on_is() {
+    let mut context = Context::gloas_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
+    let (block_2, _) = context.empty_block_extending_parent_payload(&state_1, 2, H256::default());
+    let (block_3, _) = context.empty_block(&state_1, 3, H256::default());
+
+    let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+
+    let root_1 = block_1.message().hash_tree_root();
+    let root_2 = block_2.message().hash_tree_root();
+    let root_3 = block_3.message().hash_tree_root();
+
+    context.on_slot(block_1.message().slot());
+    context.on_acceptable_block(&block_1);
+    context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
+
+    context.assert_block_events(&[(root_1, false)]);
+
+    context.on_slot(block_2.message().slot());
+    context.on_acceptable_block(&block_2);
+
+    context.assert_payload_status(&block_1, Some(PayloadStatus::Optimistic));
+    context.assert_block_events(&[(root_2, true)]);
+
+    context.on_slot(block_3.message().slot());
+    context.on_acceptable_block(&block_3);
+
+    context.assert_block_events(&[(root_3, false)]);
 }

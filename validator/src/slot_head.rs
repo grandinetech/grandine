@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use bls::{PublicKeyBytes, SignatureBytes};
-use eth1_api::ApiController;
-use fork_choice_control::Wait;
 use futures::lock::Mutex;
 use helper_functions::{
     accessors, misc, predicates,
@@ -14,7 +12,6 @@ use itertools::Itertools as _;
 use logging::warn_with_peers;
 use signer::{Signer, SigningMessage, SigningTriple};
 use slashing_protection::SlashingProtector;
-use tap::Pipe as _;
 use types::{
     altair::{
         containers::{SyncAggregatorSelectionData, SyncCommitteeMessage},
@@ -33,7 +30,6 @@ pub struct SlotHead<P: Preset> {
     pub config: Arc<Config>,
     pub beacon_block_root: H256,
     pub beacon_state: Arc<BeaconState<P>>,
-    pub optimistic: bool,
 }
 
 impl<P: Preset> SlotHead<P> {
@@ -82,17 +78,6 @@ impl<P: Preset> SlotHead<P> {
     #[must_use]
     pub fn has_sync_committee(&self) -> bool {
         self.beacon_state.phase() >= Phase::Altair
-    }
-
-    pub fn is_optimistic<W: Wait>(&self, controller: &ApiController<P, W>) -> Result<bool> {
-        if !self.optimistic {
-            return Ok(false);
-        }
-
-        controller
-            .stored_block_by_root(self.beacon_block_root)?
-            .is_none_or(|block| block.status.is_optimistic())
-            .pipe(Ok)
     }
 
     pub fn subnet_id(&self, slot: Slot, committee_index: CommitteeIndex) -> Result<SubnetId> {

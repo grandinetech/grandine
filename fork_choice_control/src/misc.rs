@@ -244,6 +244,11 @@ pub enum MutatorRejectionReason {
     InvalidAggregateAndProof,
     InvalidAttestation,
     InvalidBlock,
+    // Sync must forget the root, or it will turn away the genuine block.
+    #[strum(serialize = "invalid_block_signature")]
+    InvalidBlockSignature {
+        block_root: H256,
+    },
     #[strum(serialize = "invalid_blob_sidecar")]
     InvalidBlobSidecar {
         blob_identifier: BlobIdentifier,

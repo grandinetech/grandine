@@ -100,7 +100,7 @@ impl<P: Preset, W: Wait> ExecutionService<P, W> {
                     } = response;
 
                     self.controller
-                        .on_notified_fork_choice_update(payload_status);
+                        .on_notified_fork_choice_update(head_eth1_block_hash, payload_status);
 
                     if let Some(sender) = sender
                         && let Err(message) = sender.send(payload_id)

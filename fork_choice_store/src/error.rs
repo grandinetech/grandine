@@ -47,6 +47,8 @@ pub enum Error<P: Preset> {
     },
     #[error("block being voted for failed validation (attestation: {attestation:?})")]
     AttestationForRejectedBlock { attestation: Arc<Attestation<P>> },
+    #[error("attestation asserts a payload the execution engine rejected: {attestation:?}")]
+    AttestationForInvalidPayload { attestation: Arc<Attestation<P>> },
     #[error("attestation votes for a checkpoint in the wrong epoch: {attestation:?}")]
     AttestationTargetsWrongEpoch { attestation: Arc<Attestation<P>> },
     #[error(
@@ -97,6 +99,8 @@ pub enum Error<P: Preset> {
     },
     #[error("block with root {block_root} not found in fork choice")]
     BlockNotFound { block_root: H256 },
+    #[error("block rejected without a valid proposer signature (block root: {block_root:?})")]
+    BlockWithoutValidProposerSignature { block_root: H256 },
     #[error("block parent rejected (block: {block:?}")]
     BlockParentRejectedBlock { block: Arc<SignedBeaconBlock<P>> },
     #[error("delayed until slot block queue is full (slot: {slot})")]
