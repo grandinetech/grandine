@@ -17,7 +17,9 @@ use crate::{
     capella::containers::{HistoricalSummary, Withdrawal},
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     gloas::{
-        containers::{Builder, BuilderPendingPayment, BuilderPendingWithdrawal},
+        containers::{
+            Builder, BuilderPendingPayment, BuilderPendingWithdrawal, PendingRandaoCommitment,
+        },
         validator_list::ProgressiveValidatorList,
     },
     phase0::{
@@ -52,6 +54,13 @@ pub type ProgressiveBalances = PersistentProgressiveList<Gwei>;
 
 pub type RandaoMixes<P> =
     PersistentVector<H256, <P as Preset>::EpochsPerHistoricalVector, UnhashedBundleSize<H256>>;
+
+// Hash-chain RANDAO (EIP-8321). `RandaoCommitments` holds one entry per registry member, so it
+// shares the bound of the other per-validator lists. A zero entry means unregistered.
+pub type RandaoCommitments<P> =
+    PersistentList<H256, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<H256>>;
+
+pub type PendingRandaoCommitments = PersistentProgressiveList<PendingRandaoCommitment>;
 
 pub type Slashings<P> =
     PersistentVector<Gwei, <P as Preset>::EpochsPerSlashingsVector, UnhashedBundleSize<Gwei>>;

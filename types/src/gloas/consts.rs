@@ -1,12 +1,13 @@
 use core::num::NonZeroUsize;
 
 use typenum::{
-    Prod, Sum, U0, U1, U2, U4, U46, U64, U357, U367, U735, U808, U897, U898, U2048, assert_type_eq,
+    Prod, Sum, U0, U1, U2, U4, U46, U64, U128, U357, U367, U735, U808, U897, U898, U2048,
+    assert_type_eq,
 };
 
 use crate::{
     gloas::primitives::{BuilderIndex, PayloadStatus},
-    phase0::primitives::{DomainType, H32},
+    phase0::primitives::{DomainType, Epoch, H32},
     unphased::consts::{ConcatGeneralizedIndices, GeneralizedIndexInContainer},
 };
 use hex_literal::hex;
@@ -85,6 +86,8 @@ pub const DOMAIN_BEACON_BUILDER: DomainType = H32(hex!("0B000000"));
 pub const DOMAIN_PTC_ATTESTER: DomainType = H32(hex!("0C000000"));
 pub const DOMAIN_PROPOSER_PREFERENCES: DomainType = H32(hex!("0D000000"));
 pub const DOMAIN_BUILDER_DEPOSIT: DomainType = H32(hex!("0E000000"));
+/// [`DOMAIN_RANDAO_COMMITMENT_REGISTRATION`](https://eips.ethereum.org/EIPS/eip-8321)
+pub const DOMAIN_RANDAO_COMMITMENT_REGISTRATION: DomainType = H32(hex!("0F000000"));
 
 // Payload status
 pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 0u8;
@@ -104,3 +107,13 @@ pub const BUILDER_WITHDRAWAL_PREFIX: &[u8] = &hex!("B0");
 
 // Versioning
 pub const PAYLOAD_BUILDER_VERSION: u8 = 0;
+
+// Hash-chain RANDAO (EIP-8321)
+/// [`COMMITMENT_REGISTRATION_DELAY`](https://eips.ethereum.org/EIPS/eip-8321)
+///
+/// Must be at least `MIN_SEED_LOOKAHEAD + 2` so that a registration cannot be made in reaction to
+/// proposer duties it would influence. Both presets use `MIN_SEED_LOOKAHEAD = 1`.
+pub const COMMITMENT_REGISTRATION_DELAY: Epoch = 3;
+
+/// [`MAX_RANDAO_COMMITMENT_REGISTRATIONS`](https://eips.ethereum.org/EIPS/eip-8321)
+pub type MaxRandaoCommitmentRegistrations = U128;

@@ -23,7 +23,7 @@ use types::{
     preset::Preset,
 };
 
-use super::{block_processing, slot_processing};
+use super::{block_processing, hash_chain_randao, slot_processing};
 use crate::{
     altair,
     unphased::{ProcessSlots, StateRootPolicy},
@@ -108,14 +108,19 @@ pub fn verify_signatures<P: Preset>(
         }
 
         // RANDAO reveal
+        //
+        // > [Modified in EIP-8321] A proposer with a registered hash-chain commitment reveals a
+        // > preimage instead of a signature, which `process_randao` checks.
 
-        verifier.verify_singular(
-            RandaoEpoch::from(misc::compute_epoch_at_slot::<P>(block.message.slot))
-                .signing_root(config, state),
-            block.message.body.randao_reveal,
-            pubkey,
-            SignatureKind::Randao,
-        )?;
+        if !hash_chain_randao::has_randao_commitment(state, block.message.proposer_index)? {
+            verifier.verify_singular(
+                RandaoEpoch::from(misc::compute_epoch_at_slot::<P>(block.message.slot))
+                    .signing_root(config, state),
+                block.message.body.randao_reveal,
+                pubkey,
+                SignatureKind::Randao,
+            )?;
+        }
 
         // Proposer slashings
 

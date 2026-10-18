@@ -23,6 +23,9 @@ use crate::{
     misc::compute_epoch_at_slot,
 };
 
+#[cfg(feature = "eip8321")]
+use types::phase0::primitives::H256;
+
 pub fn get_indexed_attestation<P: Preset>(
     state: &impl BeaconState<P>,
     attestation: &Attestation<P>,
@@ -148,6 +151,34 @@ fn get_index_for_new_builder<P: Preset>(state: &impl PostGloasBeaconState<P>) ->
             (builder.withdrawable_epoch <= current_epoch && builder.balance == 0).then_some(index)
         })
         .unwrap_or_else(|| state.builders().len_u64())
+}
+
+/// Appends zero `randao_commitments` entries for validators added without one ([EIP-8321]).
+///
+/// The EIP keeps `randao_commitments.len() == validators.len()` by extending the list inside
+/// `add_validator_to_registry`. That function is shared with pre-Gloas forks, so instead this is
+/// called after the paths that onboard validators, which produces the same state: a zero entry
+/// means unregistered, and nothing reads a commitment in between.
+///
+/// [EIP-8321]: https://eips.ethereum.org/EIPS/eip-8321
+#[cfg(feature = "eip8321")]
+pub fn align_randao_commitments<P: Preset>(
+    state: &mut (impl PostGloasBeaconState<P> + ?Sized),
+) -> Result<()> {
+    let validator_count = state.validators().len_usize();
+
+    while state.randao_commitments().len_usize() < validator_count {
+        state.randao_commitments_mut().push(H256::zero())?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(feature = "eip8321"))]
+pub fn align_randao_commitments<P: Preset>(
+    _state: &mut (impl PostGloasBeaconState<P> + ?Sized),
+) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]

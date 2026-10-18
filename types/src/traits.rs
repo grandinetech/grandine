@@ -130,6 +130,9 @@ use crate::{
     preset::{Preset, SlotsPerHistoricalRoot},
 };
 
+#[cfg(feature = "eip8321")]
+use crate::collections::{PendingRandaoCommitments, RandaoCommitments};
+
 pub trait BeaconState<P: Preset>: SszHash<PackingFactor = U1> + Send + Sync {
     fn genesis_time(&self) -> UnixSeconds;
     fn genesis_validators_root(&self) -> H256;
@@ -958,6 +961,10 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn builders(&self) -> &Builders;
     fn next_withdrawal_builder_index(&self) -> BuilderIndex;
     fn ptc_window(&self) -> &PtcWindow<P>;
+    #[cfg(feature = "eip8321")]
+    fn randao_commitments(&self) -> &RandaoCommitments<P>;
+    #[cfg(feature = "eip8321")]
+    fn pending_randao_commitments(&self) -> &PendingRandaoCommitments;
 
     fn latest_execution_payload_bid_mut(&mut self) -> &mut ExecutionPayloadBid<P>;
     fn execution_payload_availability_mut(&mut self) -> &mut BitVector<SlotsPerHistoricalRoot<P>>;
@@ -968,6 +975,10 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn builders_mut(&mut self) -> &mut Builders;
     fn next_withdrawal_builder_index_mut(&mut self) -> &mut BuilderIndex;
     fn ptc_window_mut(&mut self) -> &mut PtcWindow<P>;
+    #[cfg(feature = "eip8321")]
+    fn randao_commitments_mut(&mut self) -> &mut RandaoCommitments<P>;
+    #[cfg(feature = "eip8321")]
+    fn pending_randao_commitments_mut(&mut self) -> &mut PendingRandaoCommitments;
 }
 
 #[duplicate_item(
@@ -1027,6 +1038,29 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
     )]
     fn method(&mut self) -> &mut return_type {
         get_ref_mut([field], [method])
+    }
+
+    #[cfg(feature = "eip8321")]
+    fn randao_commitments(&self) -> &RandaoCommitments<P> {
+        get_ref([randao_commitments])
+    }
+
+    #[cfg(feature = "eip8321")]
+    fn pending_randao_commitments(&self) -> &PendingRandaoCommitments {
+        get_ref([pending_randao_commitments])
+    }
+
+    #[cfg(feature = "eip8321")]
+    fn randao_commitments_mut(&mut self) -> &mut RandaoCommitments<P> {
+        get_ref_mut([randao_commitments], [randao_commitments_mut])
+    }
+
+    #[cfg(feature = "eip8321")]
+    fn pending_randao_commitments_mut(&mut self) -> &mut PendingRandaoCommitments {
+        get_ref_mut(
+            [pending_randao_commitments],
+            [pending_randao_commitments_mut],
+        )
     }
 }
 

@@ -5,6 +5,7 @@ use helper_functions::{
         get_activation_churn_limit, get_builder_payment_quorum_threshold, get_current_epoch,
         get_next_epoch, index_of_public_key, ptc_for_slot_for_epoch_processing,
     },
+    gloas::align_randao_commitments,
     misc,
 };
 use itertools::Itertools as _;
@@ -26,7 +27,9 @@ use super::epoch_intermediates;
 use crate::{
     altair::{self, EpochDeltasForTransition},
     electra::{self, apply_pending_deposit},
-    fulu, unphased,
+    fulu,
+    gloas::hash_chain_randao,
+    unphased,
 };
 
 #[cfg(feature = "metrics")]
@@ -70,9 +73,14 @@ pub fn process_epoch(
 
     unphased::process_rewards_and_penalties(state, epoch_deltas)?;
     electra::process_registry_updates(config, state, summaries.as_mut_slice())?;
+
+    // > [New in EIP-8321]
+    hash_chain_randao::process_pending_randao_commitments(state)?;
+
     electra::process_slashings::<_, ()>(state, summaries)?;
     unphased::process_eth1_data_reset(state)?;
     process_pending_deposits(config, pubkey_cache, state)?;
+    align_randao_commitments(state)?;
     electra::process_pending_consolidations(state)?;
 
     process_builder_pending_payments(state)?;

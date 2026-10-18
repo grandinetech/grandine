@@ -280,11 +280,50 @@ pub fn hash_768(bytes: impl AsRef<[u8; 96]>) -> H256 {
         .output()
 }
 
+/// [`HASH_CHAIN_RANDAO_DST`](https://eips.ethereum.org/EIPS/eip-8321)
+///
+/// Domain separation tag prefixed to every link of an EIP-8321 hash chain so that chain values
+/// cannot collide with hashes used elsewhere in the protocol.
+pub const HASH_CHAIN_RANDAO_DST: &[u8] = b"HASH_CHAIN_RANDAO";
+
+/// One link of an EIP-8321 hash chain: `blake3(HASH_CHAIN_RANDAO_DST + value)`.
+#[inline]
+#[must_use]
+pub fn blake3_hash_chain_link(value: H256) -> H256 {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(HASH_CHAIN_RANDAO_DST);
+    hasher.update(value.as_bytes());
+
+    H256(hasher.finalize().into())
+}
+
+/// The EIP-8321 RANDAO accumulator step: `blake3(left + right)`.
+#[inline]
+#[must_use]
+pub fn blake3_256_256(left: H256, right: H256) -> H256 {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(left.as_bytes());
+    hasher.update(right.as_bytes());
+
+    H256(hasher.finalize().into())
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools as _;
 
     use super::*;
+
+    #[test]
+    fn hash_chain_link_is_domain_separated() {
+        let value = H256::repeat_byte(1);
+
+        assert_ne!(blake3_hash_chain_link(value), blake3_256_256(value, value));
+        assert_eq!(
+            blake3_hash_chain_link(value),
+            H256(blake3::hash(&[HASH_CHAIN_RANDAO_DST, value.as_bytes()].concat()).into()),
+        );
+    }
 
     #[test]
     fn higher_zero_hashes_are_calculated_from_lower_ones() {

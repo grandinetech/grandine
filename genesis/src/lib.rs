@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use arithmetic::U64Ext as _;
 use deposit_tree::DepositTree;
-use helper_functions::{accessors, misc, mutators::increase_balance};
+use helper_functions::{accessors, gloas, misc, mutators::increase_balance};
 use pubkey_cache::PubkeyCache;
 use ssz::{Hc, PersistentVector, SszHash as _};
 use std_ext::ArcExt as _;
@@ -306,6 +306,9 @@ impl<'config, P: Preset> Incremental<'config, P> {
         // the genesis block is empty.
         if let Some(state) = beacon_state.post_gloas_mut() {
             *state.latest_block_hash_mut() = eth1_block_hash;
+
+            // > [New in EIP-8321] Genesis validators start unregistered.
+            gloas::align_randao_commitments(state)?;
         }
 
         // > Seed RANDAO with Eth1 entropy

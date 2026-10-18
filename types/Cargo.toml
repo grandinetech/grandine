@@ -47,3 +47,8 @@ serde_json = { workspace = true }
 spec_test_utils = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }
+
+[features]
+# Hash-Chain RANDAO (EIP-8321). Changes the Gloas `BeaconState` and `BeaconBlockBody` layouts, so
+# upstream Gloas spec test vectors do not apply when it is enabled.
+eip8321 = []

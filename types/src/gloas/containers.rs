@@ -10,6 +10,8 @@ use ssz::{
 };
 use typenum::Log2;
 
+#[cfg(feature = "eip8321")]
+use crate::gloas::consts::MaxRandaoCommitmentRegistrations;
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
     bellatrix::primitives::Gas,
@@ -95,8 +97,14 @@ pub struct BeaconBlock<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-#[ssz(stable(active = [1; 13]))]
+#[cfg_attr(not(feature = "eip8321"), ssz(stable(active = [1; 13])))]
+#[cfg_attr(feature = "eip8321", ssz(stable(active = [1; 15])))]
 pub struct BeaconBlockBody<P: Preset> {
+    /// Transitional: must be [`SignatureBytes::empty`] (the G2 point at infinity) once the
+    /// proposer has an active hash-chain commitment. See [EIP-8321].
+    ///
+    /// [EIP-8321]: https://eips.ethereum.org/EIPS/eip-8321
+    /// [`SignatureBytes::empty`]: bls::traits::SignatureBytes::empty
     pub randao_reveal: SignatureBytes,
     pub eth1_data: Eth1Data,
     pub graffiti: H256,
@@ -110,6 +118,42 @@ pub struct BeaconBlockBody<P: Preset> {
     pub signed_execution_payload_bid: SignedExecutionPayloadBid<P>,
     pub payload_attestations: ProgressiveList<PayloadAttestation<P>>,
     pub parent_execution_requests: ExecutionRequests<P>,
+    /// [New in EIP-8321] Zero unless the proposer has an active hash-chain commitment.
+    #[cfg(feature = "eip8321")]
+    pub hash_chain_reveal: H256,
+    /// [New in EIP-8321]
+    #[cfg(feature = "eip8321")]
+    pub randao_commitment_registrations:
+        ContiguousList<SignedRandaoCommitmentRegistration, MaxRandaoCommitmentRegistrations>,
+}
+
+/// [`RandaoCommitmentRegistration`](https://eips.ethereum.org/EIPS/eip-8321)
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct RandaoCommitmentRegistration {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    /// The hash-chain commitment to register. Must be non-zero.
+    pub commitment: H256,
+}
+
+/// [`SignedRandaoCommitmentRegistration`](https://eips.ethereum.org/EIPS/eip-8321)
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct SignedRandaoCommitmentRegistration {
+    pub message: RandaoCommitmentRegistration,
+    pub signature: SignatureBytes,
+}
+
+/// [`PendingRandaoCommitment`](https://eips.ethereum.org/EIPS/eip-8321)
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
+#[serde(deny_unknown_fields)]
+pub struct PendingRandaoCommitment {
+    #[serde(with = "serde_utils::string_or_native")]
+    pub validator_index: ValidatorIndex,
+    pub commitment: H256,
+    #[serde(with = "serde_utils::string_or_native")]
+    pub activation_epoch: Epoch,
 }
 
 #[derive(Clone, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]

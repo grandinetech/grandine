@@ -32,12 +32,12 @@ use types::{
     gloas::{
         consts::{
             DOMAIN_BEACON_BUILDER, DOMAIN_BUILDER_DEPOSIT, DOMAIN_PROPOSER_PREFERENCES,
-            DOMAIN_PTC_ATTESTER,
+            DOMAIN_PTC_ATTESTER, DOMAIN_RANDAO_COMMITMENT_REGISTRATION,
         },
         containers::{
             AggregateAndProof as GloasAggregateAndProof, BeaconBlock as GloasBeaconBlock,
             BuilderDepositMessage, ExecutionPayloadBid, ExecutionPayloadEnvelope,
-            PayloadAttestationData, ProposerPreferences,
+            PayloadAttestationData, ProposerPreferences, RandaoCommitmentRegistration,
         },
     },
     phase0::{
@@ -225,6 +225,15 @@ impl SignForAllForks for DepositMessage {
 impl<P: Preset> SignForAllForksWithGenesis<P> for BlsToExecutionChange {
     const DOMAIN_TYPE: DomainType = DOMAIN_BLS_TO_EXECUTION_CHANGE;
     const SIGNATURE_KIND: SignatureKind = SignatureKind::BlsToExecutionChange;
+}
+
+/// [`process_randao_commitment_registration`](https://eips.ethereum.org/EIPS/eip-8321)
+///
+/// The domain is computed against the genesis fork version so that registrations remain valid
+/// across forks, like `BlsToExecutionChange`.
+impl<P: Preset> SignForAllForksWithGenesis<P> for RandaoCommitmentRegistration {
+    const DOMAIN_TYPE: DomainType = DOMAIN_RANDAO_COMMITMENT_REGISTRATION;
+    const SIGNATURE_KIND: SignatureKind = SignatureKind::RandaoCommitmentRegistration;
 }
 
 /// <https://github.com/ethereum/consensus-specs/blob/99934ee16c7e990c8c39bc66e1aa58845057faa01/specs/phase0/validator.md#broadcast-aggregate>

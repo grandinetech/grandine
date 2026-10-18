@@ -41,5 +41,6 @@ spec_test_utils = { workspace = true }
 test-generator = { workspace = true }
 
 [features]
+eip8321 = ['types/eip8321', 'helper_functions/eip8321']
 metrics = ['helper_functions/metrics', 'dep:prometheus_metrics']
 tracing = ['helper_functions/tracing', 'dep:tracing']

@@ -69,7 +69,7 @@ use crate::{
     altair,
     capella::{self, PREFIX_LEN},
     electra,
-    gloas::execution_payload_processing::process_execution_requests,
+    gloas::{execution_payload_processing::process_execution_requests, hash_chain_randao},
     unphased::{self, Error},
 };
 
@@ -139,7 +139,10 @@ pub fn process_block_for_gossip<P: Preset>(
 pub fn count_required_signatures<P: Preset>(block: &Hc<BeaconBlock<P>>) -> Result<usize> {
     altair::count_required_signatures(block)?
         .try_add(block.body.bls_to_execution_changes.len())?
-        .try_add(block.body.payload_attestations.len())
+        .try_add(block.body.payload_attestations.len())?
+        .try_add(hash_chain_randao::count_registration_signatures(
+            &block.body,
+        ))
         .map_err(Into::into)
 }
 
@@ -171,7 +174,8 @@ pub fn custom_process_block<P: Preset>(
         &block.body.signed_execution_payload_bid,
     )?;
 
-    unphased::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
+    // > [Modified in EIP-8321]
+    hash_chain_randao::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
     unphased::process_eth1_data(state, &block.body)?;
 
     // > [Modified in Gloas:EIP7732]
@@ -183,6 +187,16 @@ pub fn custom_process_block<P: Preset>(
         parent_slot,
         &mut verifier,
         &mut slot_report,
+    )?;
+
+    // > [New in EIP-8321] Processed after all other operations, so a registration included in a
+    // > block cannot affect that block's own RANDAO reveal.
+    hash_chain_randao::process_randao_commitment_registrations(
+        config,
+        pubkey_cache,
+        state,
+        &block.body,
+        &mut verifier,
     )?;
 
     altair::process_sync_aggregate(

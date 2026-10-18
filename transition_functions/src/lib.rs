@@ -250,6 +250,7 @@ pub mod gloas {
     mod epoch_intermediates;
     mod epoch_processing;
     mod execution_payload_processing;
+    mod hash_chain_randao;
     mod slot_processing;
     mod state_transition;
 }

@@ -47,5 +47,6 @@ test-case = { workspace = true }
 test-generator = { workspace = true }
 
 [features]
+eip8321 = ['types/eip8321']
 metrics = ['dep:prometheus_metrics']
 tracing = ['dep:tracing']

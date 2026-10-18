@@ -51,6 +51,9 @@ use types::{
     traits::{BeaconState as _, PostElectraBeaconState as _, SszValidatorList as _},
 };
 
+#[cfg(feature = "eip8321")]
+use types::RandaoCommitments;
+
 use crate::{
     accessors, deposit_signatures,
     gloas::{ReusableBuilderIndices, add_builder_to_registry_reusing},
@@ -861,6 +864,10 @@ pub fn upgrade_to_gloas<P: Preset>(
         epoch,
     };
 
+    // > [New in EIP-8321] Every validator starts unregistered, on the legacy BLS reveal path.
+    #[cfg(feature = "eip8321")]
+    let randao_commitments = RandaoCommitments::<P>::repeat_zero_with_length_of(&balances);
+
     let latest_execution_payload_bid = ExecutionPayloadBid {
         parent_block_hash: latest_execution_payload_header.parent_hash,
         parent_block_root: latest_block_header.parent_root,
@@ -935,6 +942,11 @@ pub fn upgrade_to_gloas<P: Preset>(
         latest_execution_payload_bid,
         payload_expected_withdrawals: PersistentProgressiveList::default(),
         ptc_window,
+        // > Hash-chain RANDAO [New in EIP-8321]
+        #[cfg(feature = "eip8321")]
+        randao_commitments,
+        #[cfg(feature = "eip8321")]
+        pending_randao_commitments: PersistentProgressiveList::default(),
         // Cache
         cache,
     };

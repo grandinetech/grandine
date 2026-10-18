@@ -4,6 +4,8 @@ use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use ssz::{BitVector, Hc, Ssz};
 
+#[cfg(feature = "eip8321")]
+use crate::collections::{PendingRandaoCommitments, RandaoCommitments};
 use crate::{
     altair::containers::SyncCommittee,
     cache::Cache,
@@ -30,7 +32,8 @@ use crate::{
 #[derive(Clone, Debug, Default, Derivative, Deserialize, Serialize, Ssz)]
 #[derivative(PartialEq, Eq)]
 #[serde(bound = "", deny_unknown_fields)]
-#[ssz(stable(active = [1; 46]))]
+#[cfg_attr(not(feature = "eip8321"), ssz(stable(active = [1; 46])))]
+#[cfg_attr(feature = "eip8321", ssz(stable(active = [1; 48])))]
 pub struct BeaconState<P: Preset> {
     // > Versioning
     #[serde(with = "serde_utils::string_or_native")]
@@ -132,6 +135,16 @@ pub struct BeaconState<P: Preset> {
     // > Payload timeliness
     #[serde(with = "serde_utils::string_or_native_nested_sequence")]
     pub ptc_window: PtcWindow<P>,
+
+    // > Hash-chain RANDAO [New in EIP-8321]
+    //
+    // `randao_commitments` holds one entry per registry member, so
+    // `randao_commitments.len() == validators.len()` is an invariant. A zero entry means the
+    // validator has no commitment registered and uses the legacy BLS reveal path.
+    #[cfg(feature = "eip8321")]
+    pub randao_commitments: RandaoCommitments<P>,
+    #[cfg(feature = "eip8321")]
+    pub pending_randao_commitments: PendingRandaoCommitments,
 
     // Cache
     #[derivative(PartialEq = "ignore")]

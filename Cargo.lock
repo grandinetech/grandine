@@ -6730,6 +6730,7 @@ dependencies = [
 name = "hashing"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "ethereum-types",
  "generic-array 0.14.7",
  "hex-literal 1.1.0",
