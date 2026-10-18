@@ -499,6 +499,8 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
         let mut current_phase = config.phase_at_slot::<P>(next_tick.slot);
 
         while now_to_next_tick < current_slot_to_now {
+            // Finish the current tick before adopting the next fork's duration.
+            now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
             next_tick = next_tick.next::<P>(config)?;
             let next_phase = config.phase_at_slot::<P>(next_tick.slot);
 
@@ -506,11 +508,11 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
                 tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
                 current_phase = next_phase;
             }
-            now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
         }
 
         if only_interval_ticks {
             while !next_tick.is_start_of_interval() {
+                now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
                 next_tick = next_tick.next::<P>(config)?;
                 let next_phase = config.phase_at_slot::<P>(next_tick.slot);
 
@@ -518,7 +520,6 @@ fn next_tick_with_instant<P: Preset, I: InstantLike, S: SystemTimeLike>(
                     tick_duration = tick_duration_at_slot::<P>(config, next_tick.slot);
                     current_phase = next_phase;
                 }
-                now_to_next_tick = now_to_next_tick.saturating_add(tick_duration);
             }
         }
 
@@ -1180,6 +1181,35 @@ mod tests {
         time: UnixSeconds,
     ) -> (UnixSeconds, Tick) {
         next_tick_with_instant::<Minimal>(&Config::minimal(), time, true)
+    }
+
+    #[test_case(500, false)]
+    #[test_case(500, true)]
+    #[test_case(1000, true)]
+    #[test_case(1500, true)]
+    fn next_tick_at_gloas_fork_uses_pre_fork_interval(
+        millis_before_fork: u64,
+        only_interval_ticks: bool,
+    ) -> Result<()> {
+        let config = Config::mainnet().upgrade_once(Phase::Gloas, 2);
+        let fork_slot = 64;
+        let fork_time = config
+            .slot_duration_ms
+            .saturating_mul(fork_slot.try_into()?);
+        let now = fork_time.saturating_sub(Duration::from_millis(millis_before_fork));
+
+        let (tick, instant) = super::next_tick_with_instant::<Mainnet, _, _>(
+            &config,
+            FakeInstant(now),
+            FakeSystemTime(now),
+            0,
+            only_interval_ticks,
+        )?;
+
+        assert_eq!(tick, Tick::start_of_slot(fork_slot));
+        assert_eq!(instant, FakeInstant(fork_time));
+
+        Ok(())
     }
 
     #[test_case(Duration::from_secs(3) => Duration::from_millis(250))]
