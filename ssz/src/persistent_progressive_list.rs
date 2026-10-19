@@ -1,5 +1,6 @@
 #![allow(clippy::type_complexity)]
 #![allow(clippy::assertions_on_result_states)]
+use anyhow::ensure;
 use arithmetic::NonZeroExt as _;
 use core::{
     cmp::Ordering,
@@ -211,6 +212,21 @@ where
         }
     }
 
+    fn update_at(
+        &mut self,
+        start: u64,
+        indices: &[u64],
+        f: &mut (impl FnMut(u64, &mut T) -> Result<(), anyhow::Error> + ?Sized),
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Narrow(node) => node.make_mut().as_mut().update_at(start, indices, f),
+            Self::Wide(node) => node.make_mut().as_mut().update_at(start, indices, f),
+        }
+    }
+
     fn update(&self, updater: &mut impl FnMut(&mut T)) -> Option<Self>
     where
         T: Clone + PartialEq,
@@ -384,6 +400,55 @@ where
         }
 
         Ok(spine.left.get_mut(index))
+    }
+
+    fn update_at(
+        &mut self,
+        indices: &[u64],
+        f: &mut dyn FnMut(u64, &mut T) -> Result<(), anyhow::Error>,
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone,
+    {
+        ensure!(indices.is_sorted(), "indices are not in ascending order");
+
+        let Some(&last) = indices.last() else {
+            return Ok(());
+        };
+
+        shared::validate_index(self.length, last)?;
+
+        let mut indices = indices;
+        let mut start = 0_u64;
+        let mut spine = self.root.as_mut();
+
+        while let Some(node) = spine {
+            let node = node.make_mut().as_mut();
+
+            let end = start.saturating_add(
+                1_u64 << node.height.saturating_add(MinimumBundleSize::<T>::ilog2()),
+            );
+
+            let (left_indices, right_indices) =
+                indices.split_at(indices.partition_point(|index| *index < end));
+
+            if !left_indices.is_empty() {
+                node.left.update_at(start, left_indices, f)?;
+            }
+
+            indices = right_indices;
+
+            if indices.is_empty() {
+                break;
+            }
+
+            start = end;
+            spine = node.right.as_mut();
+        }
+
+        assert!(indices.is_empty());
+
+        Ok(())
     }
 
     fn push(&mut self, element: T) -> Result<(), PushError>
@@ -748,7 +813,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use typenum::{U16, U64, U256};
+    use typenum::{U16, U64, U128, U256, U512, U2048};
 
     use crate::ProgressiveList;
 
@@ -796,6 +861,36 @@ mod tests {
     }
 
     #[test]
+    fn roots_match_the_reference_for_every_bundle_size_with_bytes() {
+        fn check<B: BundleSize<u8> + MerkleElements<u8>>(width: &str) {
+            for length in 0..2800 {
+                let elements = (0..=u8::MAX).cycle().take(length);
+                let persistent =
+                    PersistentProgressiveList::<u8, B>::try_from_iter(elements.clone())
+                        .expect("length is below the maximum");
+                let reference = ProgressiveList::<u8>::try_from_iter(elements.clone())
+                    .expect("length is below the maximum");
+
+                assert_eq!(
+                    persistent.hash_tree_root(),
+                    reference.hash_tree_root(),
+                    "hash_tree_root mismatch at length {length} with bundle {width}",
+                );
+
+                assert!(
+                    persistent.into_iter().copied().eq(elements),
+                    "elements mismatch at length {length} with bundle {width}",
+                );
+            }
+        }
+
+        check::<MinimumBundleSize<u8>>("minimum");
+        check::<U128>("128");
+        check::<U512>("512");
+        check::<U2048>("2048");
+    }
+
+    #[test]
     fn try_from_iter_matches_progressive_list_root() {
         for length in LENGTHS {
             let persistent =
@@ -831,6 +926,92 @@ mod tests {
             assert!(persistent.get(length).is_err());
             assert!(persistent.iter().copied().eq(0..length));
         }
+    }
+
+    #[test]
+    fn update_at_changes_the_same_elements_as_get_mut() {
+        for length in LENGTHS.skip(1) {
+            let base = TestList::try_from_iter(0..length).expect("length is below the maximum");
+
+            for step in [1, 2, 3, 7, 64] {
+                let indices = (0..length).step_by(step).collect::<Vec<_>>();
+
+                let mut walked = base.clone();
+                let mut looked_up = base.clone();
+
+                walked
+                    .update_at(&indices, &mut |index, element| {
+                        *element += 1000 + index;
+                        Ok(())
+                    })
+                    .expect("every index is in the list");
+
+                for index in indices.iter().copied() {
+                    *looked_up
+                        .get_mut(index)
+                        .expect("every index is in the list") += 1000 + index;
+                }
+
+                assert_eq!(walked, looked_up, "length {length}, step {step}");
+                assert_eq!(walked.hash_tree_root(), looked_up.hash_tree_root());
+            }
+
+            let mut list = base.clone();
+
+            assert!(
+                list.update_at(&[0, length], &mut |_, element| {
+                    *element += 1000;
+                    Ok(())
+                })
+                .is_err(),
+            );
+            assert_eq!(list, base);
+            assert!(list.update_at(&[1, 0], &mut |_, _| Ok(())).is_err());
+        }
+    }
+
+    #[test]
+    fn update_at_changes_the_same_elements_as_get_mut_with_bytes() {
+        fn check<B: BundleSize<u8> + MerkleElements<u8> + Send + Sync>(width: &str) {
+            for length in 1..2800 {
+                let base = PersistentProgressiveList::<u8, B>::try_from_iter(
+                    (0..=u8::MAX).cycle().take(length),
+                )
+                .expect("length is below the maximum");
+
+                for step in [1, 3, 31, 512] {
+                    let indices = (0..base.len_u64()).step_by(step).collect::<Vec<_>>();
+
+                    let mut walked = base.clone();
+                    let mut looked_up = base.clone();
+
+                    walked
+                        .update_at(&indices, &mut |_, element| {
+                            *element = !*element;
+                            Ok(())
+                        })
+                        .expect("every index is in the list");
+
+                    for index in indices.iter().copied() {
+                        let element = looked_up
+                            .get_mut(index)
+                            .expect("every index is in the list");
+
+                        *element = !*element;
+                    }
+
+                    assert_eq!(
+                        walked, looked_up,
+                        "length {length}, step {step}, bundle {width}",
+                    );
+                    assert_eq!(walked.hash_tree_root(), looked_up.hash_tree_root());
+                }
+            }
+        }
+
+        check::<MinimumBundleSize<u8>>("minimum");
+        check::<U512>("512");
+        check::<U2048>("2048");
     }
 
     #[test]

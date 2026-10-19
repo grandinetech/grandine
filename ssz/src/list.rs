@@ -42,6 +42,14 @@ pub trait SszListMut<T>: SszList<T> {
     fn iter_mut<'a>(&'a mut self) -> Box<dyn ExactSizeIterator<Item = &'a mut T> + 'a>
     where
         T: Clone;
+
+    fn update_at(
+        &mut self,
+        indices: &[u64],
+        f: &mut dyn FnMut(u64, &mut T) -> Result<(), anyhow::Error>,
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone;
 }
 
 pub trait SszBitList: SszHash<PackingFactor = U1> + Send + Sync + Debug {

@@ -12,6 +12,7 @@ use core::{
     marker::PhantomData,
 };
 
+use anyhow::ensure;
 use arithmetic::{NonZeroExt as _, U64Ext as _};
 use bit_field::BitField as _;
 use derivative::Derivative;
@@ -424,6 +425,30 @@ where
         *self = Self::try_from_iter(iter)?;
         Ok(())
     }
+
+    fn update_at(
+        &mut self,
+        indices: &[u64],
+        f: &mut dyn FnMut(u64, &mut T) -> Result<(), anyhow::Error>,
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone,
+    {
+        ensure!(indices.is_sorted(), "indices are not in ascending order");
+
+        let Some(&last) = indices.last() else {
+            return Ok(());
+        };
+
+        shared::validate_index(self.length, last)?;
+
+        self.root
+            .as_mut()
+            .expect("the checks above ensure that self.root is Some")
+            .make_mut()
+            .as_mut()
+            .update_at(0, indices, f)
+    }
 }
 
 type Height = u8;
@@ -499,6 +524,50 @@ where
 }
 
 impl<T, B: BundleSize<T>> Node<T, B> {
+    pub(crate) fn update_at(
+        &mut self,
+        start: u64,
+        indices: &[u64],
+        f: &mut (impl FnMut(u64, &mut T) -> Result<(), anyhow::Error> + ?Sized),
+    ) -> Result<(), anyhow::Error>
+    where
+        T: Clone,
+    {
+        match self {
+            Self::Internal {
+                left,
+                right,
+                left_height,
+                ..
+            } => {
+                let right_start =
+                    start.saturating_add(1_u64 << left_height.saturating_add(B::ilog2()));
+
+                let (left_indices, right_indices) =
+                    indices.split_at(indices.partition_point(|index| *index < right_start));
+
+                if !left_indices.is_empty() {
+                    left.make_mut().as_mut().update_at(start, left_indices, f)?;
+                }
+
+                if !right_indices.is_empty() {
+                    right
+                        .make_mut()
+                        .as_mut()
+                        .update_at(right_start, right_indices, f)?;
+                }
+            }
+            Self::Leaf { bundle, .. } => {
+                for &index in indices {
+                    let element = &mut bundle[usize::try_from(index.saturating_sub(start))?];
+                    f(index, element)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn arc_single(element: T) -> Arc<Hc<Self>> {
         Hc::arc(Self::leaf([element]))
     }
@@ -868,3 +937,81 @@ impl<'list, T: Clone, B> Iterator for LeavesMut<'list, T, B> {
 }
 
 impl<T: Clone, B> FusedIterator for LeavesMut<'_, T, B> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_at_changes_the_same_elements_as_get_mut() {
+        type List = PersistentList<u64, typenum::U4096, U4>;
+
+        for length in [1_u64, 3, 4, 5, 15, 16, 17, 100, 1023, 1024, 1025, 3000] {
+            let base = List::try_from_iter(0..length).expect("length is below the maximum");
+
+            for step in [1, 2, 3, 7, 64] {
+                let indices = (0..length).step_by(step).collect::<Vec<_>>();
+
+                let mut walked = base.clone();
+                let mut looked_up = base.clone();
+
+                walked
+                    .update_at(&indices, &mut |index, element| {
+                        *element += 1000 + index;
+                        Ok(())
+                    })
+                    .expect("every index is in the list");
+
+                for index in indices.iter().copied() {
+                    *looked_up
+                        .get_mut(index)
+                        .expect("every index is in the list") += 1000 + index;
+                }
+
+                assert_eq!(walked, looked_up, "length {length}, step {step}");
+                assert_eq!(walked.hash_tree_root(), looked_up.hash_tree_root());
+            }
+
+            let mut list = base.clone();
+
+            assert!(
+                list.update_at(&[0, length], &mut |_, element| {
+                    *element += 1000;
+                    Ok(())
+                })
+                .is_err(),
+                "an index past the end is reported",
+            );
+            assert_eq!(list, base, "nothing is changed before the error");
+        }
+    }
+
+    #[test]
+    fn update_at_stops_at_the_first_callback_error() {
+        let mut list = PersistentList::<u64, typenum::U4096, U4>::try_from_iter(0..100)
+            .expect("length is below the maximum");
+
+        let indices = (0..100).collect::<Vec<_>>();
+
+        let result = list.update_at(&indices, &mut |index, element| {
+            ensure!(index != 50, "callback failed");
+            *element += 1000;
+            Ok(())
+        });
+
+        assert!(result.is_err());
+
+        for index in 0..100 {
+            let expected = if index < 50 { index + 1000 } else { index };
+            assert_eq!(*list.get(index).expect("index is in the list"), expected);
+        }
+    }
+
+    #[test]
+    fn update_at_rejects_unsorted_indices() {
+        let mut list = PersistentList::<u64, typenum::U4096, U4>::try_from_iter(0..16)
+            .expect("length is below the maximum");
+
+        assert!(list.update_at(&[1, 0], &mut |_, _| Ok(())).is_err());
+    }
+}

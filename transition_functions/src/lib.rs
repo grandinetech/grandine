@@ -1,9 +1,5 @@
 // TODO(Grandine Team): Optimize state transitions further.
 //
-//                      `altair::block_processing::apply_attestation` is slow due to calls to
-//                      `PersistentList::get`. That could be optimized by implementing an iterator
-//                      limited to specific indices.
-//
 //                      The most time-consuming parts of epoch processing in Phase 0 are
 //                      (slowest to fastest):
 //                      1. `phase0::epoch_intermediates::statistics_and_summaries`.
