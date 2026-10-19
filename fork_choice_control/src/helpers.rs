@@ -1123,7 +1123,7 @@ impl<P: Preset> Context<P> {
         self.controller().chain_config()
     }
 
-    fn controller(&self) -> &TestController<P> {
+    pub(crate) fn controller(&self) -> &TestController<P> {
         self.controller
             .as_ref()
             .expect("Self.controller is only taken in Drop::drop")

@@ -57,6 +57,7 @@ use types::{
         primitives::{BlobIndex, KzgCommitment},
     },
     electra::containers::IndexedAttestation as ElectraIndexedAttestation,
+    electra::error::AttestationConversionError,
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
         consts::{
@@ -3258,8 +3259,35 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 Ok(indexed_attestation.attesting_indices)
             }
             Attestation::Single(attestation) => {
+                // > [REJECT] The attester is a member of the committee
+                //
+                // The claimed `attester_index` must be part of the committee resolved from the
+                // attestation's slot and committee index. Unlike the other `Attestation` variants,
+                // the `Attestation::Single` conversion to `IndexedAttestation` trusts the claimed
+                // index (see `TryFrom<SingleAttestation> for IndexedAttestation`), so membership
+                // has to be verified explicitly here. This must run regardless of
+                // `validate_indexed` so prevalidated batches (skip_signatures) reject too.
+                // See grandinetech/grandine#925.
+                let committee = accessors::beacon_committee(
+                    target_state,
+                    attestation.data.slot,
+                    attestation.committee_index,
+                )?;
+
+                let committee_members: Vec<_> = committee.into_iter().collect();
+
+                ensure!(
+                    committee_members.contains(&attestation.attester_index),
+                    AttestationConversionError::AttesterNotInCommittee {
+                        attester_index: attestation.attester_index,
+                        committee_index: attestation.committee_index,
+                        attestation_data: attestation.data,
+                        committee: committee_members,
+                    },
+                );
+
                 let indexed_attestation: ElectraIndexedAttestation<P> =
-                    (*attestation).try_into()?;
+                    (*attestation).clone().try_into()?;
 
                 if validate_indexed {
                     predicates::validate_constructed_indexed_attestation(

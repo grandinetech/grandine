@@ -2714,3 +2714,73 @@ fn gloas_envelope_from_far_future_is_ignored_before_looking_up_its_block() {
 
     context.on_ignorable_execution_payload(&envelope_10, BlsSetting::Required);
 }
+
+// Regression for grandinetech/grandine#925: a `SingleAttestation` whose claimed
+// `attester_index` is not in the resolved committee must be [REJECT]-ed on the gossip
+// path (also during prevalidation with signatures skipped).
+#[test]
+fn single_attestation_with_attester_outside_committee_is_rejected() {
+    use std::sync::Arc;
+
+    use bls::SignatureBytes;
+    use eth2_libp2p::GossipId;
+    use fork_choice_store::{AttestationItem, AttestationOrigin, AttestationValidationError};
+    use spec_test_utils::BlsSetting;
+    use types::{
+        combined::Attestation,
+        electra::containers::SingleAttestation,
+        phase0::{
+            containers::{AttestationData, Checkpoint},
+            primitives::H256,
+        },
+        traits::SignedBeaconBlock as _,
+    };
+
+    let context = Context::gloas_minimal();
+    let (genesis_block, _genesis_state) = context.genesis();
+
+    let root = genesis_block.message().hash_tree_root();
+    let data = AttestationData {
+        slot: 0,
+        index: 0,
+        beacon_block_root: root,
+        source: Checkpoint {
+            epoch: 0,
+            root: H256::default(),
+        },
+        target: Checkpoint { epoch: 0, root },
+    };
+
+    // An index beyond the validator count of the minimal preset cannot belong to any
+    // committee.
+    let single = SingleAttestation {
+        committee_index: 0,
+        attester_index: u64::MAX,
+        data,
+        signature: SignatureBytes::zero(),
+    };
+
+    let item = AttestationItem::<Minimal, GossipId>::unverified(
+        Arc::new(Attestation::Single(single)),
+        AttestationOrigin::Test(BlsSetting::Ignored),
+    );
+
+    let result = context
+        .controller()
+        .store_snapshot()
+        .validate_attestation(item, true);
+
+    match result {
+        Err(AttestationValidationError::Other { source, .. }) => {
+            let report = format!("{source:#}");
+            assert!(
+                report.contains("not in committee"),
+                "expected AttesterNotInCommittee, got: {report}",
+            );
+        }
+        Err(other) => panic!("unexpected validation error variant: {other:?}"),
+        Ok(action) => panic!(
+            "single attestation with attester outside the committee must be rejected, got: {action:?}"
+        ),
+    }
+}
