@@ -25,5 +25,11 @@ ignore = [
     # The fixes are only in rustls >= 0.23.46.
     # TODO: remove this once zkm-sdk moves to rustls 0.23 and sp1-sdk can be updated past 6.1
     'RUSTSEC-2026-0346',
-    'RUSTSEC-2026-0349'
+    'RUSTSEC-2026-0349',
+    # zip 0.6 comes only with zkm-sdk via ethers 2.0, ethers-solc & svm-rs 0.3.
+    # The fixes are only in zip >= 9.0.0. Not reachable from the node.
+    # TODO: remove this once zkm-sdk drops ethers 2.0
+    'RUSTSEC-2026-0367',
+    'RUSTSEC-2026-0368',
+    'RUSTSEC-2026-0369'
 ]
