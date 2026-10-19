@@ -38,6 +38,14 @@ pub enum Error<P: Preset> {
         committee: Box<[ValidatorIndex]>,
     },
     #[error(
+        "attester is not in committee \
+         (attestation: {attestation:?}, committee: {committee:?})"
+    )]
+    AttesterNotInCommittee {
+        attestation: Arc<Attestation<P>>,
+        committee: Box<[ValidatorIndex]>,
+    },
+    #[error(
         "attestation votes for a block from the future \
          (attestation: {attestation:?}, block: {block:?})"
     )]

@@ -63,6 +63,7 @@ duplicate = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
 fs-err = { workspace = true }
+interop = { workspace = true }
 serde-aux = { workspace = true }
 spec_test_utils = { workspace = true }
 tap = { workspace = true }

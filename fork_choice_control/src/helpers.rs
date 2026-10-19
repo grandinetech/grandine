@@ -9,31 +9,38 @@ use execution_engine::{
     EngineGetBlobsParams, EngineGetBlobsV1Params, EngineGetBlobsV2Params, ExecutionServiceMessage,
     MockExecutionEngine, PayloadStatusV1, PayloadValidationStatus,
 };
-use fork_choice_store::{AttestationItem, AttestationOrigin};
+use fork_choice_store::{
+    AttestationAction, AttestationItem, AttestationOrigin, AttestationValidationError,
+};
 use futures::channel::mpsc::UnboundedReceiver;
-use helper_functions::misc;
+use helper_functions::{accessors, misc, signing::SignForSingleFork as _};
 use pubkey_cache::PubkeyCache;
 use spec_test_utils::BlsSetting;
 use ssz::BitVector;
 use std_ext::ArcExt as _;
+use transition_functions::combined;
 use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, AttesterSlashing, BeaconState, DataColumnSidecar, SignedBeaconBlock},
     config::Config,
     deneb::containers::{BlobIdentifier, BlobSidecar},
+    electra::containers::SingleAttestation,
     gloas::{
         containers::{
             CombinedPayloadAttestation, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
         },
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
-    nonstandard::{PayloadStatus, Phase, TimedPowBlock},
+    nonstandard::{PayloadStatus, Phase, RelativeEpoch, TimedPowBlock},
     phase0::{
-        containers::Checkpoint,
-        primitives::{Epoch, ExecutionBlockHash, H256, Slot, UnixSeconds, ValidatorIndex},
+        containers::{AttestationData, Checkpoint},
+        primitives::{
+            CommitteeIndex, Epoch, ExecutionBlockHash, H256, Slot, SubnetId, UnixSeconds,
+            ValidatorIndex,
+        },
     },
     preset::{Minimal, Preset},
-    traits::SignedBeaconBlock as _,
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
 use unwrap_none::UnwrapNone as _;
 
@@ -739,6 +746,132 @@ impl<P: Preset> Context<P> {
         ));
     }
 
+    pub fn committee_member(
+        &self,
+        state: &Arc<BeaconState<P>>,
+        slot: Slot,
+        committee_index: CommitteeIndex,
+    ) -> ValidatorIndex {
+        let state_in_epoch = self.state_at_attestation_epoch(state, slot);
+
+        accessors::beacon_committee(&state_in_epoch, slot, committee_index)
+            .expect("committee should exist")
+            .into_iter()
+            .next()
+            .expect("committee should be non-empty")
+    }
+
+    pub fn validate_gossip_single_attestation(
+        &self,
+        state: &Arc<BeaconState<P>>,
+        slot: Slot,
+        committee_index: CommitteeIndex,
+        attester_index: ValidatorIndex,
+        skip_signatures: bool,
+    ) -> Result<AttestationAction<P, GossipId>, AttestationValidationError<P, GossipId>> {
+        let (attestation, subnet_id) =
+            self.build_gossip_single_attestation(state, slot, committee_index, attester_index);
+
+        self.controller().store_snapshot().validate_attestation(
+            AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Gossip(subnet_id, GossipId::default()),
+            ),
+            skip_signatures,
+        )
+    }
+
+    pub fn on_gossip_single_attestation(
+        &mut self,
+        state: &Arc<BeaconState<P>>,
+        slot: Slot,
+        committee_index: CommitteeIndex,
+        attester_index: ValidatorIndex,
+    ) -> Option<P2pMessage<P>> {
+        let (attestation, subnet_id) =
+            self.build_gossip_single_attestation(state, slot, committee_index, attester_index);
+
+        self.controller().on_singular_attestation(
+            self.controller().owned_wait_group(),
+            AttestationItem::unverified(
+                attestation,
+                AttestationOrigin::Gossip(subnet_id, GossipId::default()),
+            ),
+        );
+
+        self.controller().wait_for_tasks();
+        self.next_p2p_message()
+    }
+
+    fn state_at_attestation_epoch(
+        &self,
+        state: &Arc<BeaconState<P>>,
+        slot: Slot,
+    ) -> Arc<BeaconState<P>> {
+        let start_slot =
+            misc::compute_start_slot_at_epoch::<P>(misc::compute_epoch_at_slot::<P>(slot));
+
+        let mut state_in_epoch = state.clone_arc();
+        if state_in_epoch.slot() < start_slot {
+            combined::process_slots(
+                self.config(),
+                &self.pubkey_cache,
+                state_in_epoch.make_mut(),
+                start_slot,
+            )
+            .expect("state should advance to attestation epoch");
+        }
+
+        state_in_epoch
+    }
+
+    fn build_gossip_single_attestation(
+        &self,
+        state: &Arc<BeaconState<P>>,
+        slot: Slot,
+        committee_index: CommitteeIndex,
+        attester_index: ValidatorIndex,
+    ) -> (Arc<Attestation<P>>, SubnetId) {
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let state_in_epoch = self.state_at_attestation_epoch(state, slot);
+
+        let committees_per_slot =
+            accessors::get_committee_count_per_slot(&state_in_epoch, RelativeEpoch::Current)
+                .expect("committee count should be available");
+
+        let subnet_id =
+            misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
+                .expect("subnet should be computed for claimed committee");
+
+        let beacon_block_root = accessors::latest_block_root(&state_in_epoch);
+        let target_root = accessors::epoch_boundary_block_root(&state_in_epoch, beacon_block_root);
+
+        let data = AttestationData {
+            slot,
+            index: 0,
+            beacon_block_root,
+            source: state_in_epoch.current_justified_checkpoint(),
+            target: Checkpoint {
+                epoch,
+                root: target_root,
+            },
+        };
+
+        let secret_key = interop::secret_key(attester_index);
+        let signature = data
+            .sign(self.config(), &state_in_epoch, &secret_key)
+            .into();
+
+        let attestation = Arc::new(Attestation::from(SingleAttestation {
+            committee_index,
+            attester_index,
+            data,
+            signature,
+        }));
+
+        (attestation, subnet_id)
+    }
+
     pub fn on_ignorable_singular_attestation(
         &mut self,
         state: &Arc<BeaconState<P>>,
@@ -1276,6 +1409,12 @@ impl Context<Minimal> {
     pub fn bellatrix_minimal() -> Self {
         Self::with_config(Config::minimal().start_and_stay_in(Phase::Bellatrix))
             .expect("minimal configuration modified to start in Bellatrix is valid")
+    }
+
+    #[must_use]
+    pub fn electra_minimal() -> Self {
+        Self::with_config(Config::minimal().start_and_stay_in(Phase::Electra))
+            .expect("minimal configuration modified to start in Electra is valid")
     }
 
     #[must_use]

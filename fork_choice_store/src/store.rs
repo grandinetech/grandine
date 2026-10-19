@@ -3258,6 +3258,21 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
                 Ok(indexed_attestation.attesting_indices)
             }
             Attestation::Single(attestation) => {
+                // > The attester is a member of the committee
+                let committee = accessors::beacon_committee(
+                    target_state,
+                    attestation.data.slot,
+                    attestation.committee_index,
+                )?;
+
+                ensure!(
+                    committee.into_iter().contains(&attestation.attester_index),
+                    Error::AttesterNotInCommittee {
+                        attestation: Arc::new(Attestation::<P>::Single(*attestation)),
+                        committee: committee.into_iter().collect(),
+                    },
+                );
+
                 let indexed_attestation: ElectraIndexedAttestation<P> =
                     (*attestation).try_into()?;
 
