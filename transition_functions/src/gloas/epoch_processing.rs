@@ -5,7 +5,6 @@ use helper_functions::{
         get_activation_churn_limit, get_builder_payment_quorum_threshold, get_current_epoch,
         get_next_epoch, index_of_public_key, ptc_for_slot_for_epoch_processing,
     },
-    gloas::align_randao_commitments,
     misc,
 };
 use itertools::Itertools as _;
@@ -20,7 +19,7 @@ use types::{
     gloas::{beacon_state::BeaconState, containers::BuilderPendingPayment},
     phase0::consts::FAR_FUTURE_EPOCH,
     preset::{BuilderPendingPaymentsLength, Preset},
-    traits::{BeaconState as _, PostElectraBeaconState, PostGloasBeaconState},
+    traits::{BeaconState as _, PostGloasBeaconState},
 };
 
 use super::epoch_intermediates;
@@ -106,7 +105,7 @@ pub fn process_epoch(
 fn apply_pending_deposit<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    state: &mut impl PostElectraBeaconState<P>,
+    state: &mut impl PostGloasBeaconState<P>,
     deposit: &types::electra::containers::PendingDeposit,
 ) -> Result<()> {
     #[cfg(feature = "eip8321")]
@@ -115,7 +114,16 @@ fn apply_pending_deposit<P: Preset>(
     {
         return Ok(());
     }
-    electra::apply_pending_deposit(config, pubkey_cache, state, deposit)
+    #[cfg(feature = "eip8321")]
+    let old_count = state.validators().len_usize();
+    electra::apply_pending_deposit(config, pubkey_cache, state, deposit)?;
+    #[cfg(feature = "eip8321")]
+    for _ in old_count..state.validators().len_usize() {
+        state
+            .randao_commitments_mut()
+            .push(types::phase0::primitives::H256::zero())?;
+    }
+    Ok(())
 }
 
 #[expect(
@@ -198,11 +206,12 @@ pub(crate) fn process_pending_deposits<P: Preset>(
         *state.deposit_balance_to_consume_mut() = 0;
     }
 
-    align_randao_commitments(state)?;
     Ok(())
 }
 
-fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Result<()> {
+pub(super) fn process_ptc_window<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+) -> Result<()> {
     let mut ptc_window = state.ptc_window().into_iter().collect::<Vec<_>>();
     let last_epoch_start = ptc_window.len().try_sub(P::SlotsPerEpoch::USIZE)?;
 
@@ -224,7 +233,7 @@ fn process_ptc_window<P: Preset>(state: &mut impl PostGloasBeaconState<P>) -> Re
     Ok(())
 }
 
-fn process_builder_pending_payments<P: Preset>(
+pub(super) fn process_builder_pending_payments<P: Preset>(
     state: &mut impl PostGloasBeaconState<P>,
 ) -> Result<()> {
     let quorum = get_builder_payment_quorum_threshold(state)?;
@@ -256,7 +265,9 @@ fn process_builder_pending_payments<P: Preset>(
     Ok(())
 }
 
-fn process_historical_summaries_update<P: Preset>(state: &mut BeaconState<P>) -> Result<()> {
+pub(super) fn process_historical_summaries_update<P: Preset>(
+    state: &mut BeaconState<P>,
+) -> Result<()> {
     let next_epoch = get_next_epoch(state)?;
 
     // > Set historical block root accumulator.

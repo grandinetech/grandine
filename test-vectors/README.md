@@ -16,7 +16,11 @@ mainnet registration lifecycle test attempts 256 registrations with a limit of
 
     bash scripts/test_randao.sh quick
 
-Or only the official vectors:
+Run every consensus state-transition vector (both presets):
+
+    bash scripts/test_randao.sh vectors-all
+
+Or only the 144 focused RANDAO/deposit vectors:
 
     bash scripts/test_randao.sh vectors
 
@@ -27,8 +31,30 @@ test-vectors/eip8321. That generated directory is Git-ignored; the archive,
 checksum and provenance are versioned. Subsequent runs reuse the extracted files.
 A separate consensus-specs clone is not required to execute these Rust tests.
 
-The currently connected Rust runners cover 144 official cases, not every fixture
-in the archive. See RANDAO_REVIEW.md for the categories and implementation scope.
+The full runner covers all 1,577 available consensus state-transition cases:
+826 minimal and 751 mainnet. This includes operations, epoch processing (including
+full-epoch inputs where supplied), rewards, slots, blocks, finality, and Heze to
+EIP-8321 upgrades. Block cases verify intermediate block state roots as well as
+the final post-state root. Invalid cases must be rejected.
+
+Every one of the archive's 2,600 manifests is accounted for in the generated
+TSV reports under test-vectors/reports/all-{minimal,mainnet}.tsv:
+
+- PASS / FAIL: serialized state-transition vectors.
+- PROPERTY_PASS: one upstream RANDAO property per preset emits no SSZ inputs.
+  Its equivalent two-link property is executed separately using a fixture state;
+  it is not counted as an official serialized vector.
+- OUT_OF_SCOPE: 1,021 client/network manifests (fork choice, fast confirmation,
+  networking, light client). These are not counted as passing.
+
+Limit a diagnostic run to one category without regenerating anything:
+
+    EIP8321_CATEGORY=operations/voluntary_exit bash scripts/test_randao.sh vectors-all
+
+Filtered runs overwrite the reports, so run vectors-all without a filter to
+restore the complete reports. The upstream mainnet lifecycle fixture is absent
+because generation failed; it is not added to the vector count. See
+RANDAO_REVIEW.md for implementation scope.
 
 Override the extraction directory with already prepared external fixtures:
 

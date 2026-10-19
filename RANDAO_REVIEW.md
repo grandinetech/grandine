@@ -23,6 +23,36 @@ consensus-specs 12c8b24bc09b12f62688d439ba20ef00b1fdfe1f.
   verification of every block's Python-generated state root in the minimal
   registration lifecycle.
 
+## Full state-transition coverage
+
+The consensus-only scope includes every available state-transition vector in the
+pinned generated archive: operations, epochs, rewards, slots, blocks, finality,
+and Heze -> EIP-8321 upgrades. Run:
+
+    bash scripts/test_randao.sh vectors-all
+
+This mode executes 826 minimal and 751 mainnet cases (1,577 total), checking
+positive post-state roots, negative rejection, full-epoch inputs when present,
+and every supplied block's state root. Reports under test-vectors/reports account
+for all 2,600 archive manifests. Two manifest-only RANDAO properties are executed
+separately and are not counted as serialized vectors. The remaining 1,021
+networking/fork-choice/fast-confirmation/light-client manifests are OUT_OF_SCOPE,
+not passing. This follows the requested consensus-only implementation scope.
+
+Additional fixes found by this broader suite:
+
+- Freeze voluntary-exit signatures to the Capella domain for the EIP mode,
+  independently of the state's new fork version.
+- Settle the parent builder payment before processing execution requests.
+- Deduct already queued withdrawals when calculating a builder's sweep balance.
+- Clear all pending builder payments associated with a slashed proposer, including
+  attester slashings, rather than only the equivocation's slot.
+- Append an unset RANDAO commitment only when a deposit appends a validator.
+  Epoch processing must not repair unrelated pre-existing list lengths.
+- Add a separate Heze serialized pre-state and a callable upgrade_to_eip8321
+  consensus upgrade. Its fork version is supplied by the caller; automatic client
+  activation scheduling remains outside this change.
+
 ## Short checks
 
 From the WSL checkout, with Rust available on PATH:
@@ -33,6 +63,7 @@ Individual checks:
 
     bash scripts/test_randao.sh new
     bash scripts/test_randao.sh vectors
+    bash scripts/test_randao.sh vectors-all
     bash scripts/test_randao.sh legacy
     bash scripts/test_randao.sh client
 
@@ -46,7 +77,9 @@ Individual checks:
   test-vectors/eip8321.tar.xz. On first use the script verifies SHA-256 and
   extracts to test-vectors/eip8321. Override with
   EIP8321_VECTORS_DIR=/path/to/reftests.
-- legacy: 54 existing randao-related reference tests with the mode disabled.
+- legacy: 54 existing RANDAO-related tests and a separate 898-case Gloas operation
+  regression check with the mode disabled. The filters overlap; counts are not
+  added together as unique cases.
 - client: cargo check for the complete client with eip8321 enabled.
 
 These commands do not regenerate or modify Python test vectors. Vector checks
@@ -58,14 +91,19 @@ does not require them.
 
 ## Verified results
 
+- Full state-transition vectors: 1,577 passed, 0 failed (826 minimal, 751 mainnet).
+- Additional manifest-only RANDAO properties: 2 passed, counted separately.
+
 - Local unit/regression tests: 17 passed, 0 failed, 0.01 s execution.
 - Official vector runners: 5 passed, covering 144 cases; 0.56 s execution.
-- Legacy reference tests: 54 passed, 0 failed, 0.08 s execution.
-- Complete client cargo check with eip8321: passed, 30.14 s.
+- Legacy RANDAO reference tests: 54 passed, 0 failed, 0.07 s execution.
+- Legacy Gloas operation tests: 898 passed, 0 failed, 0.42 s execution.
+- Complete client cargo check with eip8321: passed.
 - Rust formatting, shell syntax and git diff whitespace checks: passed.
 
-Compilation depends on the cache and selected features; the last local-test
-compilation took 44.14 s. The full workspace test suite was not executed.
+Full state-transition execution took 28.28 s after compilation. Compilation
+depends on the cache and selected features. The full workspace test suite
+was not executed.
 
 ## Build and scope
 

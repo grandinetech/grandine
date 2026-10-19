@@ -311,12 +311,24 @@ fn get_builders_sweep_withdrawals_count<P: Preset>(
         }
 
         let builder = state.builders().get(builder_index)?;
-        if builder.withdrawable_epoch <= current_epoch && builder.balance > 0 {
+        #[cfg(not(feature = "eip8321"))]
+        let balance = builder.balance;
+        #[cfg(feature = "eip8321")]
+        let balance = builder.balance.saturating_sub(
+            withdrawals
+                .iter()
+                .filter(|w| {
+                    w.validator_index == convert_builder_index_to_validator_index(builder_index)
+                })
+                .map(|w| w.amount)
+                .sum(),
+        );
+        if builder.withdrawable_epoch <= current_epoch && balance > 0 {
             withdrawals.push(Withdrawal {
                 index: *withdrawal_index,
                 validator_index: convert_builder_index_to_validator_index(builder_index),
                 address: builder.execution_address,
-                amount: builder.balance,
+                amount: balance,
             });
 
             *withdrawal_index = withdrawal_index
@@ -783,6 +795,7 @@ pub fn apply_parent_execution_payload<P: Preset>(
         P::MaxBuilderExitRequestsPerPayload::USIZE,
     )?;
 
+    #[cfg(not(feature = "eip8321"))]
     process_execution_requests(config, pubkey_cache, state, execution_requests)?;
 
     let parent_bid = state.latest_execution_payload_bid().clone();
@@ -804,6 +817,9 @@ pub fn apply_parent_execution_payload<P: Preset>(
                 builder_index: parent_bid.builder_index,
             })?;
     }
+
+    #[cfg(feature = "eip8321")]
+    process_execution_requests(config, pubkey_cache, state, execution_requests)?;
 
     let slot: usize = parent_slot.try_into()?;
 
@@ -969,7 +985,7 @@ where
     }
 
     for attester_slashing in body.attester_slashings() {
-        electra::process_attester_slashing(
+        process_attester_slashing(
             config,
             pubkey_cache,
             state,
@@ -1279,6 +1295,50 @@ pub fn process_payload_attestation<P: Preset>(
     )
 }
 
+#[cfg(feature = "eip8321")]
+fn clear_builder_payments<P: Preset>(
+    state: &mut impl PostGloasBeaconState<P>,
+    slashed_index: u64,
+) -> Result<()> {
+    for index in 0..BuilderPendingPaymentsLength::<P>::U64 {
+        let payment = state.builder_pending_payments_mut().mod_index_mut(index);
+        if payment.proposer_index == slashed_index {
+            *payment = BuilderPendingPayment::default();
+        }
+    }
+    Ok(())
+}
+
+pub fn process_attester_slashing<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostGloasBeaconState<P>,
+    attester_slashing: &impl types::traits::AttesterSlashing<P>,
+    verifier: impl Verifier,
+    mut slot_report: impl SlotReport,
+) -> Result<()> {
+    let indices = unphased::validate_attester_slashing_with_verifier(
+        config,
+        pubkey_cache,
+        state,
+        attester_slashing,
+        verifier,
+    )?;
+    for index in indices {
+        slash_validator(
+            config,
+            state,
+            index,
+            None,
+            SlashingKind::Attester,
+            &mut slot_report,
+        )?;
+        #[cfg(feature = "eip8321")]
+        clear_builder_payments(state, index)?;
+    }
+    Ok(())
+}
+
 pub fn process_proposer_slashing<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
@@ -1320,6 +1380,9 @@ pub fn process_proposer_slashing<P: Preset>(
             *payment = BuilderPendingPayment::default();
         }
     }
+
+    #[cfg(feature = "eip8321")]
+    clear_builder_payments(state, proposer_index)?;
 
     slash_validator(
         config,
@@ -1432,7 +1495,7 @@ mod spec_tests {
     processing_tests! {
         process_attester_slashing,
         |config, pubkey_cache, state, attester_slashing: AttesterSlashing<P>, _| {
-            electra::process_attester_slashing(
+            process_attester_slashing(
                 config,
                 pubkey_cache,
                 state,

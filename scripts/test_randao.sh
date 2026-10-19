@@ -15,7 +15,7 @@ case "$mode" in
       --features transition_functions/eip8321,bls/blst,kzg_utils/blst \
       --lib hash_chain_randao -- --nocapture
     ;;
-  vectors)
+  vectors|vectors-all)
     vector_dir="${EIP8321_VECTORS_DIR:-$PWD/test-vectors/eip8321}"
     if [[ -z "${EIP8321_VECTORS_DIR:-}" && ! -d "$vector_dir" ]]; then
       archive="$PWD/test-vectors/eip8321.tar.xz"
@@ -34,27 +34,33 @@ case "$mode" in
       exit 2
     fi
     export EIP8321_VECTORS_DIR="$vector_dir"
+    test_filter='eip8321_reference_vectors::official_'
+    if [[ "$mode" == vectors-all ]]; then
+      test_filter='eip8321_reference_vectors::full_suite::official_all'
+    fi
     cargo test --locked --release \
       -p transition_functions -p bls -p kzg_utils \
       --features transition_functions/eip8321,bls/blst,kzg_utils/blst \
-      --lib eip8321_reference_vectors -- --ignored --nocapture
+      --lib "$test_filter" -- --ignored --nocapture
     ;;
   legacy)
     if [[ ! -d consensus-spec-tests/tests/minimal/gloas ]]; then
       echo 'Existing consensus-spec-tests fixtures are required for legacy checks.' >&2
       exit 2
     fi
-    cargo test --locked --release \
-      -p transition_functions -p bls -p kzg_utils \
-      --features bls/blst,kzg_utils/blst \
-      --lib randao -- --nocapture
+    for test_filter in randao gloas::block_processing::spec_tests; do
+      cargo test --locked --release \
+        -p transition_functions -p bls -p kzg_utils \
+        --features bls/blst,kzg_utils/blst \
+        --lib "$test_filter" -- --nocapture
+    done
     ;;
   client)
     cargo check --locked --release -p grandine -p transition_functions \
       --features grandine/default-networks,grandine/eip8321
     ;;
   *)
-    echo 'Usage: bash scripts/test_randao.sh [quick|new|vectors|legacy|client]' >&2
+    echo 'Usage: bash scripts/test_randao.sh [quick|new|vectors|vectors-all|legacy|client]' >&2
     exit 2
     ;;
 esac

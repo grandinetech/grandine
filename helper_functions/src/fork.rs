@@ -1263,3 +1263,66 @@ mod spec_tests {
         assert_eq!(actual_post, expected_post);
     }
 }
+
+/// Upgrade the pinned Heze state schema to EIP-8321. The caller supplies the
+/// configured EIP fork version; activation scheduling belongs to the client.
+#[cfg(feature = "eip8321")]
+pub fn upgrade_to_eip8321<P: Preset>(
+    pre: types::heze::beacon_state::BeaconState<P>,
+    fork_version: types::phase0::primitives::Version,
+) -> Result<GloasBeaconState<P>> {
+    let randao_commitments =
+        RandaoCommitments::try_from_iter((0..pre.validators.len_usize()).map(|_| H256::zero()))?;
+    let epoch = misc::compute_epoch_at_slot::<P>(pre.slot);
+    Ok(GloasBeaconState {
+        fork: Fork {
+            previous_version: pre.fork.current_version,
+            current_version: fork_version,
+            epoch,
+        },
+        genesis_time: pre.genesis_time,
+        genesis_validators_root: pre.genesis_validators_root,
+        slot: pre.slot,
+        latest_block_header: pre.latest_block_header,
+        block_roots: pre.block_roots,
+        state_roots: pre.state_roots,
+        historical_roots: pre.historical_roots,
+        validators: pre.validators,
+        balances: pre.balances,
+        randao_mixes: pre.randao_mixes,
+        slashings: pre.slashings,
+        previous_epoch_participation: pre.previous_epoch_participation,
+        current_epoch_participation: pre.current_epoch_participation,
+        justification_bits: pre.justification_bits,
+        previous_justified_checkpoint: pre.previous_justified_checkpoint,
+        current_justified_checkpoint: pre.current_justified_checkpoint,
+        finalized_checkpoint: pre.finalized_checkpoint,
+        inactivity_scores: pre.inactivity_scores,
+        current_sync_committee: pre.current_sync_committee,
+        next_sync_committee: pre.next_sync_committee,
+        latest_block_hash: pre.latest_block_hash,
+        next_withdrawal_index: pre.next_withdrawal_index,
+        next_withdrawal_validator_index: pre.next_withdrawal_validator_index,
+        historical_summaries: pre.historical_summaries,
+        deposit_balance_to_consume: pre.deposit_balance_to_consume,
+        exit_balance_to_consume: pre.exit_balance_to_consume,
+        earliest_exit_epoch: pre.earliest_exit_epoch,
+        consolidation_balance_to_consume: pre.consolidation_balance_to_consume,
+        earliest_consolidation_epoch: pre.earliest_consolidation_epoch,
+        pending_deposits: pre.pending_deposits,
+        pending_partial_withdrawals: pre.pending_partial_withdrawals,
+        pending_consolidations: pre.pending_consolidations,
+        proposer_lookahead: pre.proposer_lookahead,
+        builders: pre.builders,
+        next_withdrawal_builder_index: pre.next_withdrawal_builder_index,
+        execution_payload_availability: pre.execution_payload_availability,
+        builder_pending_payments: pre.builder_pending_payments,
+        builder_pending_withdrawals: pre.builder_pending_withdrawals,
+        latest_execution_payload_bid: pre.latest_execution_payload_bid,
+        payload_expected_withdrawals: pre.payload_expected_withdrawals,
+        ptc_window: pre.ptc_window,
+        randao_commitments,
+        pending_randao_commitments: Default::default(),
+        ..Default::default()
+    })
+}
