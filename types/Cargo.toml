@@ -49,6 +49,6 @@ test-case = { workspace = true }
 test-generator = { workspace = true }
 
 [features]
-# Hash-Chain RANDAO (EIP-8321). Changes the Gloas `BeaconState` and `BeaconBlockBody` layouts, so
-# upstream Gloas spec test vectors do not apply when it is enabled.
+# Experimental Heze/EIP-8321 consensus mode using the existing Gloas dispatch.
+# Enables the pinned EIP-8321 SSZ schema; original Gloas vectors require it disabled.
 eip8321 = []

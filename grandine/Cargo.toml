@@ -17,6 +17,7 @@ runtime = { workspace = true }
 tracing = { workspace = true }
 
 [features]
+eip8321 = ['runtime/eip8321']
 default = ["bls/blst", "kzg_utils/blst"]
 
 logger-always-write-style = []

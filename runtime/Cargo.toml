@@ -89,6 +89,7 @@ tempfile = { workspace = true }
 test-case = { workspace = true }
 
 [features]
+eip8321 = ['block_producer/eip8321']
 embed = []
 
 logger-always-write-style = []

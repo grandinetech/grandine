@@ -52,6 +52,8 @@ use types::{
 };
 
 #[cfg(feature = "eip8321")]
+use ssz::SszList as _;
+#[cfg(feature = "eip8321")]
 use types::RandaoCommitments;
 
 use crate::{
@@ -866,7 +868,8 @@ pub fn upgrade_to_gloas<P: Preset>(
 
     // > [New in EIP-8321] Every validator starts unregistered, on the legacy BLS reveal path.
     #[cfg(feature = "eip8321")]
-    let randao_commitments = RandaoCommitments::<P>::repeat_zero_with_length_of(&balances);
+    let randao_commitments =
+        RandaoCommitments::try_from_iter(core::iter::repeat_n(H256::zero(), balances.len_usize()))?;
 
     let latest_execution_payload_bid = ExecutionPayloadBid {
         parent_block_hash: latest_execution_payload_header.parent_hash,

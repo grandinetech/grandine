@@ -56,9 +56,8 @@ pub type RandaoMixes<P> =
     PersistentVector<H256, <P as Preset>::EpochsPerHistoricalVector, UnhashedBundleSize<H256>>;
 
 // Hash-chain RANDAO (EIP-8321). `RandaoCommitments` holds one entry per registry member, so it
-// shares the bound of the other per-validator lists. A zero entry means unregistered.
-pub type RandaoCommitments<P> =
-    PersistentList<H256, <P as Preset>::ValidatorRegistryLimit, UnhashedBundleSize<H256>>;
+// uses the progressive SSZ layout from the pinned specification. Zero means unregistered.
+pub type RandaoCommitments = PersistentProgressiveList<H256>;
 
 pub type PendingRandaoCommitments = PersistentProgressiveList<PendingRandaoCommitment>;
 

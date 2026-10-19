@@ -176,6 +176,7 @@ pub fn custom_process_block<P: Preset>(
 
     // > [Modified in EIP-8321]
     hash_chain_randao::process_randao(config, pubkey_cache, state, &block.body, &mut verifier)?;
+    #[cfg(not(feature = "eip8321"))]
     unphased::process_eth1_data(state, &block.body)?;
 
     // > [Modified in Gloas:EIP7732]
@@ -913,7 +914,8 @@ where
         + BlockBodyWithBlsToExecutionChanges<P>
         + BlockBodyWithPayloadAttestations<P>,
 {
-    // > [Modified in Fulu:EIP6110]
+    // Heze removes deposits from the block body.
+    #[cfg(not(feature = "eip8321"))]
     ensure!(
         body.deposits().len_usize() == 0,
         Error::<P>::DepositCountMismatch {

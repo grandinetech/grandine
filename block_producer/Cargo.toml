@@ -47,4 +47,5 @@ types = { workspace = true }
 factory = { workspace = true }
 
 [features]
+eip8321 = ['transition_functions/eip8321']
 stub-grandine-version = ['grandine_version/stub-grandine-version', 'hex-literal', 'test-case']

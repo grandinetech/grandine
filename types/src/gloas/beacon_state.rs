@@ -33,7 +33,7 @@ use crate::{
 #[derivative(PartialEq, Eq)]
 #[serde(bound = "", deny_unknown_fields)]
 #[cfg_attr(not(feature = "eip8321"), ssz(stable(active = [1; 46])))]
-#[cfg_attr(feature = "eip8321", ssz(stable(active = [1; 48])))]
+#[cfg_attr(feature = "eip8321", ssz(stable(active = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])))]
 pub struct BeaconState<P: Preset> {
     // > Versioning
     #[serde(with = "serde_utils::string_or_native")]
@@ -50,9 +50,15 @@ pub struct BeaconState<P: Preset> {
     pub historical_roots: HistoricalRoots<P>,
 
     // > Eth1
+    #[cfg_attr(feature = "eip8321", ssz(skip))]
+    #[cfg_attr(feature = "eip8321", serde(skip))]
     pub eth1_data: Eth1Data,
+    #[cfg_attr(feature = "eip8321", ssz(skip))]
+    #[cfg_attr(feature = "eip8321", serde(skip))]
     pub eth1_data_votes: Eth1DataVotes<P>,
     #[serde(with = "serde_utils::string_or_native")]
+    #[cfg_attr(feature = "eip8321", ssz(skip))]
+    #[cfg_attr(feature = "eip8321", serde(skip))]
     pub eth1_deposit_index: DepositIndex,
 
     // > Registry
@@ -99,6 +105,8 @@ pub struct BeaconState<P: Preset> {
     // > Deep history valid from Capella onwards
     pub historical_summaries: HistoricalSummaries<P>,
     #[serde(with = "serde_utils::string_or_native")]
+    #[cfg_attr(feature = "eip8321", ssz(skip))]
+    #[cfg_attr(feature = "eip8321", serde(skip))]
     pub deposit_requests_start_index: DepositIndex,
     #[serde(with = "serde_utils::string_or_native")]
     pub deposit_balance_to_consume: Gwei,
@@ -142,7 +150,7 @@ pub struct BeaconState<P: Preset> {
     // `randao_commitments.len() == validators.len()` is an invariant. A zero entry means the
     // validator has no commitment registered and uses the legacy BLS reveal path.
     #[cfg(feature = "eip8321")]
-    pub randao_commitments: RandaoCommitments<P>,
+    pub randao_commitments: RandaoCommitments,
     #[cfg(feature = "eip8321")]
     pub pending_randao_commitments: PendingRandaoCommitments,
 

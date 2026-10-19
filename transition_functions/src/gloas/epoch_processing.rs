@@ -26,8 +26,7 @@ use types::{
 use super::epoch_intermediates;
 use crate::{
     altair::{self, EpochDeltasForTransition},
-    electra::{self, apply_pending_deposit},
-    fulu,
+    electra, fulu,
     gloas::hash_chain_randao,
     unphased,
 };
@@ -78,9 +77,9 @@ pub fn process_epoch(
     hash_chain_randao::process_pending_randao_commitments(state)?;
 
     electra::process_slashings::<_, ()>(state, summaries)?;
+    #[cfg(not(feature = "eip8321"))]
     unphased::process_eth1_data_reset(state)?;
     process_pending_deposits(config, pubkey_cache, state)?;
-    align_randao_commitments(state)?;
     electra::process_pending_consolidations(state)?;
 
     process_builder_pending_payments(state)?;
@@ -104,14 +103,29 @@ pub fn process_epoch(
     Ok(())
 }
 
+fn apply_pending_deposit<P: Preset>(
+    config: &Config,
+    pubkey_cache: &PubkeyCache,
+    state: &mut impl PostElectraBeaconState<P>,
+    deposit: &types::electra::containers::PendingDeposit,
+) -> Result<()> {
+    #[cfg(feature = "eip8321")]
+    if index_of_public_key(state, &deposit.pubkey).is_none()
+        && deposit.withdrawal_credentials.as_bytes()[0] == 0
+    {
+        return Ok(());
+    }
+    electra::apply_pending_deposit(config, pubkey_cache, state, deposit)
+}
+
 #[expect(
     clippy::useless_let_if_seq,
     reason = "assignments with multiple variables are more readable with conditional affectation"
 )]
-fn process_pending_deposits<P: Preset>(
+pub(crate) fn process_pending_deposits<P: Preset>(
     config: &Config,
     pubkey_cache: &PubkeyCache,
-    state: &mut impl PostElectraBeaconState<P>,
+    state: &mut impl PostGloasBeaconState<P>,
 ) -> Result<()> {
     let next_epoch = get_current_epoch(state).try_add(1)?;
     let available_for_processing = state
@@ -184,6 +198,7 @@ fn process_pending_deposits<P: Preset>(
         *state.deposit_balance_to_consume_mut() = 0;
     }
 
+    align_randao_commitments(state)?;
     Ok(())
 }
 

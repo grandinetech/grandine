@@ -27,10 +27,11 @@ mod with_eip8321 {
     };
     use pubkey_cache::PubkeyCache;
     use ssz::{SszList as _, SszListMut as _};
+    use typenum::Unsigned as _;
     use types::{
         config::Config,
         gloas::{
-            consts::COMMITMENT_REGISTRATION_DELAY,
+            consts::{COMMITMENT_REGISTRATION_DELAY, MaxRandaoCommitmentRegistrations},
             containers::{
                 BeaconBlockBody, PendingRandaoCommitment, SignedRandaoCommitmentRegistration,
             },
@@ -121,6 +122,14 @@ mod with_eip8321 {
         body: &BeaconBlockBody<P>,
         mut verifier: impl Verifier,
     ) -> Result<()> {
+        ensure!(
+            body.randao_commitment_registrations.len() <= MaxRandaoCommitmentRegistrations::USIZE,
+            Error::<P>::TooManyOperations {
+                kind: "RANDAO commitment registrations",
+                maximum: MaxRandaoCommitmentRegistrations::USIZE,
+                in_block: body.randao_commitment_registrations.len(),
+            },
+        );
         for registration in body.randao_commitment_registrations.iter().copied() {
             process_randao_commitment_registration(
                 config,
@@ -235,6 +244,26 @@ mod with_eip8321 {
         body.randao_commitment_registrations.len()
     }
 
+    pub fn verify_registration_signatures<P: Preset>(
+        config: &Config,
+        pubkey_cache: &PubkeyCache,
+        state: &(impl PostGloasBeaconState<P> + ?Sized),
+        body: &BeaconBlockBody<P>,
+        mut verifier: impl Verifier,
+    ) -> Result<()> {
+        for registration in &body.randao_commitment_registrations {
+            let index = registration.message.validator_index;
+            let pubkey = *state.validators().pubkey(index)?;
+            verifier.verify_singular(
+                registration.message.signing_root(config, state),
+                registration.signature,
+                pubkey_cache.get_or_insert(pubkey)?,
+                SignatureKind::RandaoCommitmentRegistration,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Whether the validator reveals from a hash chain rather than signing the epoch with its BLS
     /// key, which is what decides which branch of `process_randao` applies to it.
     pub fn has_randao_commitment<P: Preset>(
@@ -290,6 +319,16 @@ mod without_eip8321 {
     #[must_use]
     pub const fn count_registration_signatures<P: Preset>(_body: &BeaconBlockBody<P>) -> usize {
         0
+    }
+
+    pub fn verify_registration_signatures<P: Preset>(
+        _config: &Config,
+        _pubkey_cache: &PubkeyCache,
+        _state: &(impl PostGloasBeaconState<P> + ?Sized),
+        _body: &BeaconBlockBody<P>,
+        _verifier: impl Verifier,
+    ) -> Result<()> {
+        Ok(())
     }
 
     pub const fn has_randao_commitment<P: Preset>(
@@ -603,4 +642,5 @@ mod tests {
 
         assert!(result.is_err());
     }
+    include!("hash_chain_randao_review_tests.rs");
 }

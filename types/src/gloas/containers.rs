@@ -10,8 +10,6 @@ use ssz::{
 };
 use typenum::Log2;
 
-#[cfg(feature = "eip8321")]
-use crate::gloas::consts::MaxRandaoCommitmentRegistrations;
 use crate::{
     altair::containers::{SyncAggregate, SyncCommittee},
     bellatrix::primitives::Gas,
@@ -98,7 +96,7 @@ pub struct BeaconBlock<P: Preset> {
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
 #[cfg_attr(not(feature = "eip8321"), ssz(stable(active = [1; 13])))]
-#[cfg_attr(feature = "eip8321", ssz(stable(active = [1; 15])))]
+#[cfg_attr(feature = "eip8321", ssz(stable(active = [1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1])))]
 pub struct BeaconBlockBody<P: Preset> {
     /// Transitional: must be [`SignatureBytes::empty`] (the G2 point at infinity) once the
     /// proposer has an active hash-chain commitment. See [EIP-8321].
@@ -106,11 +104,15 @@ pub struct BeaconBlockBody<P: Preset> {
     /// [EIP-8321]: https://eips.ethereum.org/EIPS/eip-8321
     /// [`SignatureBytes::empty`]: bls::traits::SignatureBytes::empty
     pub randao_reveal: SignatureBytes,
+    #[cfg_attr(feature = "eip8321", ssz(skip))]
+    #[cfg_attr(feature = "eip8321", serde(skip))]
     pub eth1_data: Eth1Data,
     pub graffiti: H256,
     pub proposer_slashings: ProgressiveList<ProposerSlashing>,
     pub attester_slashings: ProgressiveList<AttesterSlashing<P>>,
     pub attestations: ProgressiveList<Attestation<P>>,
+    #[cfg_attr(feature = "eip8321", ssz(skip))]
+    #[cfg_attr(feature = "eip8321", serde(skip))]
     pub deposits: ProgressiveList<Deposit>,
     pub voluntary_exits: ProgressiveList<SignedVoluntaryExit>,
     pub sync_aggregate: SyncAggregate<P>,
@@ -123,8 +125,7 @@ pub struct BeaconBlockBody<P: Preset> {
     pub hash_chain_reveal: H256,
     /// [New in EIP-8321]
     #[cfg(feature = "eip8321")]
-    pub randao_commitment_registrations:
-        ContiguousList<SignedRandaoCommitmentRegistration, MaxRandaoCommitmentRegistrations>,
+    pub randao_commitment_registrations: ProgressiveList<SignedRandaoCommitmentRegistration>,
 }
 
 /// [`RandaoCommitmentRegistration`](https://eips.ethereum.org/EIPS/eip-8321)
@@ -292,7 +293,8 @@ pub struct ExecutionPayloadHeader<P: Preset> {
 
 #[derive(Clone, PartialEq, Eq, Debug, Default, Deserialize, Serialize, Ssz)]
 #[serde(bound = "", deny_unknown_fields)]
-#[ssz(stable(active = [1; 12]))]
+#[cfg_attr(not(feature = "eip8321"), ssz(stable(active = [1; 12])))]
+#[cfg_attr(feature = "eip8321", ssz(stable(active = [1; 13])))]
 pub struct ExecutionPayloadBid<P: Preset> {
     pub parent_block_hash: ExecutionBlockHash,
     pub parent_block_root: H256,
@@ -311,6 +313,9 @@ pub struct ExecutionPayloadBid<P: Preset> {
     pub execution_payment: Gwei,
     pub blob_kzg_commitments: ProgressiveList<KzgCommitment>,
     pub execution_requests_root: H256,
+    /// Heze (EIP-7805), inherited by EIP-8321.
+    #[cfg(feature = "eip8321")]
+    pub inclusion_list_bits: BitVector<typenum::U16>,
     #[ssz(skip)]
     #[serde(skip)]
     pub phantom: PhantomData<P>,

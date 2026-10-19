@@ -87,7 +87,7 @@ pub const DOMAIN_PTC_ATTESTER: DomainType = H32(hex!("0C000000"));
 pub const DOMAIN_PROPOSER_PREFERENCES: DomainType = H32(hex!("0D000000"));
 pub const DOMAIN_BUILDER_DEPOSIT: DomainType = H32(hex!("0E000000"));
 /// [`DOMAIN_RANDAO_COMMITMENT_REGISTRATION`](https://eips.ethereum.org/EIPS/eip-8321)
-pub const DOMAIN_RANDAO_COMMITMENT_REGISTRATION: DomainType = H32(hex!("0F000000"));
+pub const DOMAIN_RANDAO_COMMITMENT_REGISTRATION: DomainType = H32(hex!("11000000"));
 
 // Payload status
 pub const PAYLOAD_STATUS_EMPTY: PayloadStatus = 0u8;

@@ -962,7 +962,7 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn next_withdrawal_builder_index(&self) -> BuilderIndex;
     fn ptc_window(&self) -> &PtcWindow<P>;
     #[cfg(feature = "eip8321")]
-    fn randao_commitments(&self) -> &RandaoCommitments<P>;
+    fn randao_commitments(&self) -> &RandaoCommitments;
     #[cfg(feature = "eip8321")]
     fn pending_randao_commitments(&self) -> &PendingRandaoCommitments;
 
@@ -976,7 +976,7 @@ pub trait PostGloasBeaconState<P: Preset>: PostFuluBeaconState<P> {
     fn next_withdrawal_builder_index_mut(&mut self) -> &mut BuilderIndex;
     fn ptc_window_mut(&mut self) -> &mut PtcWindow<P>;
     #[cfg(feature = "eip8321")]
-    fn randao_commitments_mut(&mut self) -> &mut RandaoCommitments<P>;
+    fn randao_commitments_mut(&mut self) -> &mut RandaoCommitments;
     #[cfg(feature = "eip8321")]
     fn pending_randao_commitments_mut(&mut self) -> &mut PendingRandaoCommitments;
 }
@@ -1041,7 +1041,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
     }
 
     #[cfg(feature = "eip8321")]
-    fn randao_commitments(&self) -> &RandaoCommitments<P> {
+    fn randao_commitments(&self) -> &RandaoCommitments {
         get_ref([randao_commitments])
     }
 
@@ -1051,7 +1051,7 @@ impl<parameters> PostGloasBeaconState<P> for implementor {
     }
 
     #[cfg(feature = "eip8321")]
-    fn randao_commitments_mut(&mut self) -> &mut RandaoCommitments<P> {
+    fn randao_commitments_mut(&mut self) -> &mut RandaoCommitments {
         get_ref_mut([randao_commitments], [randao_commitments_mut])
     }
 

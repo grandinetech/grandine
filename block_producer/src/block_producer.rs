@@ -1215,6 +1215,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
                                 payload_attestations,
                                 parent_execution_requests,
+                                ..GloasBeaconBlockBody::default()
                             },
                         }))
                     }
@@ -1940,6 +1941,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             blob_kzg_commitments: blob_kzg_commitments_opt.unwrap_or_default().into(),
             execution_requests_root,
             phantom: PhantomData,
+            ..ExecutionPayloadBid::default()
         };
 
         Ok(Some(SignedExecutionPayloadBid {

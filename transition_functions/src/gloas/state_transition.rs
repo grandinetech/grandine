@@ -258,6 +258,13 @@ pub fn verify_signatures<P: Preset>(
         )?;
     }
 
+    hash_chain_randao::verify_registration_signatures(
+        config,
+        pubkey_cache,
+        state,
+        &block.message.body,
+        &mut verifier,
+    )?;
     verifier.finish()
 }
 
