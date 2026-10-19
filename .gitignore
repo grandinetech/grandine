@@ -27,3 +27,5 @@ exception.log
 /test-vectors/.eip8321-extract.*/
 
 /test-vectors/reports/
+
+/target-eip8321-ci/

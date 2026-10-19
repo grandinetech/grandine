@@ -124,7 +124,32 @@ The upstream mainnet lifecycle Python test still fails at its 256 <= 128 asserti
 It was not edited. The generated minimal lifecycle is used; no missing mainnet
 lifecycle fixture is reported as passing.
 
-Existing submodule working-tree differences were left untouched. In particular,
-the working eth2_libp2p points to eee0bdd while the reviewed commit pins 0eb8c4c.
-Full tests were not run; the targeted checks do not establish absence of all
+Existing submodule working-tree differences were left untouched. Full tests were not run; the targeted checks do not establish absence of all
 unrelated regressions.
+
+## GitHub Actions
+
+The dedicated workflow is `.github/workflows/eip8321.yml` (EIP-8321 consensus tests).
+It runs on pushes to claude, pull requests, and manual workflow dispatch when
+GitHub exposes the workflow on the default branch. It uses a fresh GitHub-hosted
+Ubuntu 24.04 runner and the Rust version from rust-toolchain.toml.
+
+The job checks out the committed Cargo submodules, installs native dependencies,
+and downloads checksum-pinned v1.7.0-beta.1 legacy state-transition fixtures plus
+v0.1.0 cryptography fixtures. Other legacy categories are not needed by the
+selected test crates. Fixture preparation verifies all compile-time test globs;
+this is necessary even when the execution filter selects only EIP tests.
+The EIP-8321 archive is checked against its committed SHA-256.
+
+Required steps run local RANDAO regressions, all 1,577 EIP consensus vector cases,
+and feature-off legacy RANDAO/Gloas operation regressions. A final check validates
+exact report counts and publishes a GitHub job summary. Logs and TSV reports are
+uploaded as the eip8321-results-<commit> artifact even when a test fails. Failed
+test commands propagate through tee; there is no continue-on-error.
+
+The caches speed up downloads/compilation but are not required for correctness.
+Release debug symbols are disabled in CI to reduce runner disk/memory use.
+This workflow does not claim to regenerate the Python vectors or validate the
+out-of-scope networking/fork-choice/fast-confirmation/light-client categories.
+A successful local run is not a successful GitHub Actions run: use the green run
+for the exact submitted commit as the assessment evidence.

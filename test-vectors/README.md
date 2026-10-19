@@ -73,3 +73,12 @@ are identical. Update the checksum when deliberately replacing the archive.
 
 The upstream consensus-specs project declares CC0-1.0. SOURCE_COMMIT identifies
 the exact source version for these generated fixtures.
+
+## GitHub Actions evidence
+
+The EIP-8321 consensus tests workflow runs the local regressions, complete
+vectors-all suite and legacy regressions in a clean GitHub-hosted Ubuntu runner.
+In the repository Actions tab, open the run for the submitted commit. Its job
+summary lists both preset counts, and the eip8321-results-<commit> artifact
+contains complete logs and per-case TSV reports, including OUT_OF_SCOPE entries.
+The workflow definition is .github/workflows/eip8321.yml.

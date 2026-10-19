@@ -1,0 +1,97 @@
+name: EIP-8321 consensus tests
+
+on:
+  push:
+    branches: [claude]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eip8321-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target-eip8321-ci
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  consensus:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check out required Cargo submodules
+        run: git submodule update --init --recursive dedicated_executor eth2_libp2p
+      - name: Prepare logs and identify source versions
+        run: |
+          mkdir -p "$RUNNER_TEMP/randao-logs"
+          git rev-parse HEAD
+          cat rust-toolchain.toml test-vectors/SOURCE_COMMIT
+          (cd test-vectors && sha256sum --check eip8321.sha256)
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential clang libclang-dev cmake pkg-config libssl-dev \
+            protobuf-compiler libprotobuf-dev zlib1g-dev unzip xz-utils
+      - name: Install the repository Rust version
+        run: |
+          toolchain="$(python3 -c 'import tomllib; print(tomllib.load(open("rust-toolchain.toml", "rb"))["toolchain"]["channel"])')"
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup override set "$toolchain"
+          rustc --version
+          cargo --version
+      - name: Cache official legacy fixtures
+        id: fixtures
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            consensus-spec-tests
+            cryptography-spec-tests
+          key: randao-fixtures-v1-${{ hashFiles('scripts/ci/prepare_randao_fixtures.sh') }}
+      - name: Download pinned official legacy fixtures
+        if: steps.fixtures.outputs.cache-hit != 'true'
+        run: bash scripts/ci/prepare_randao_fixtures.sh
+      - name: Verify all compile-time fixture paths exist
+        run: bash scripts/ci/prepare_randao_fixtures.sh --check
+      - name: Cache Cargo dependencies and build outputs
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target-eip8321-ci
+          key: randao-rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.github/workflows/eip8321.yml') }}-${{ github.sha }}
+          restore-keys: |
+            randao-rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.github/workflows/eip8321.yml') }}-
+      - name: Run local RANDAO unit and signature regressions
+        run: bash scripts/test_randao.sh new 2>&1 | tee "$RUNNER_TEMP/randao-logs/local.log"
+      - name: Run every bundled consensus state-transition vector
+        run: bash scripts/test_randao.sh vectors-all 2>&1 | tee "$RUNNER_TEMP/randao-logs/vectors.log"
+      - name: Run feature-off legacy regressions
+        run: bash scripts/test_randao.sh legacy 2>&1 | tee "$RUNNER_TEMP/randao-logs/legacy.log"
+      - name: Verify full vector accounting and publish summary
+        if: always()
+        run: python3 scripts/ci/randao_summary.py
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eip8321-results-${{ github.sha }}
+          path: |
+            test-vectors/reports/*.tsv
+            ${{ runner.temp }}/randao-logs/*.log
+          if-no-files-found: error
+          retention-days: 30
