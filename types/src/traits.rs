@@ -554,53 +554,75 @@ pub trait PostAltairBeaconState<P: Preset>: BeaconState<P> {
     fn inactivity_scores_mut(&mut self) -> &mut dyn SszListMut<u64>;
     fn current_sync_committee_mut(&mut self) -> &mut Arc<Hc<SyncCommittee<P>>>;
     fn next_sync_committee_mut(&mut self) -> &mut Arc<Hc<SyncCommittee<P>>>;
+
+    fn previous_epoch_participation_mut_with_validators(
+        &mut self,
+    ) -> (
+        &mut dyn SszListMut<ParticipationFlags>,
+        &dyn SszValidatorList,
+    );
+    fn current_epoch_participation_mut_with_validators(
+        &mut self,
+    ) -> (
+        &mut dyn SszListMut<ParticipationFlags>,
+        &dyn SszValidatorList,
+    );
 }
 
 #[duplicate_item(
     parameters
     implementor
     get_ref(field)
-    get_ref_mut(field, method);
+    get_ref_mut(field, method)
+    get_ref_mut_with_validators(field, method);
 
     [P: Preset, S: PostAltairBeaconState<P>]
     [Hc<S>]
     [self.as_ref().field()]
+    [self.as_mut().method()]
     [self.as_mut().method()];
 
     [P: Preset]
     [AltairBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [BellatrixBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [CapellaBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [DenebBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [ElectraBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [FuluBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 
     [P: Preset]
     [GloasBeaconState<P>]
     [&self.field]
-    [&mut self.field];
+    [&mut self.field]
+    [(&mut self.field, &self.validators)];
 )]
 impl<parameters> PostAltairBeaconState<P> for implementor {
     #[duplicate_item(
@@ -625,6 +647,20 @@ impl<parameters> PostAltairBeaconState<P> for implementor {
     )]
     fn method(&mut self) -> &mut return_type {
         get_ref_mut([field], [method])
+    }
+
+    #[duplicate_item(
+        field                          method;
+        [previous_epoch_participation] [previous_epoch_participation_mut_with_validators];
+        [current_epoch_participation]  [current_epoch_participation_mut_with_validators];
+    )]
+    fn method(
+        &mut self,
+    ) -> (
+        &mut dyn SszListMut<ParticipationFlags>,
+        &dyn SszValidatorList,
+    ) {
+        get_ref_mut_with_validators([field], [method])
     }
 }
 

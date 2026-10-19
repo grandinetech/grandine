@@ -8594,6 +8594,7 @@ dependencies = [
 name = "ssz"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "arithmetic",
  "bit_field",
  "bitvec",
