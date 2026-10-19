@@ -21,3 +21,7 @@ ssz-spec-tests/
 
 # exception logs
 exception.log
+
+# EIP-8321 fixtures are versioned as a compressed archive.
+/test-vectors/eip8321/
+/test-vectors/.eip8321-extract.*/

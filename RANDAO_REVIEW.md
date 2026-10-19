@@ -42,7 +42,9 @@ Individual checks:
   multiple hash-chain reveals within one epoch.
 - vectors: 144 official cases across minimal and mainnet: RANDAO (16), registration
   (20), pending commitments (10), pending deposits (97), and minimal lifecycle (1).
-  Fixtures are read from ../consensus-specs/reftests by default. Override with
+  The full generated EIP-8321 fixture directories are bundled in
+  test-vectors/eip8321.tar.xz. On first use the script verifies SHA-256 and
+  extracts to test-vectors/eip8321. Override with
   EIP8321_VECTORS_DIR=/path/to/reftests.
 - legacy: 54 existing randao-related reference tests with the mode disabled.
 - client: cargo check for the complete client with eip8321 enabled.

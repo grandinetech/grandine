@@ -16,7 +16,19 @@ case "$mode" in
       --lib hash_chain_randao -- --nocapture
     ;;
   vectors)
-    vector_dir="${EIP8321_VECTORS_DIR:-$PWD/../consensus-specs/reftests}"
+    vector_dir="${EIP8321_VECTORS_DIR:-$PWD/test-vectors/eip8321}"
+    if [[ -z "${EIP8321_VECTORS_DIR:-}" && ! -d "$vector_dir" ]]; then
+      archive="$PWD/test-vectors/eip8321.tar.xz"
+      if [[ ! -f "$archive" ]]; then
+        echo 'Missing bundled test-vectors/eip8321.tar.xz archive.' >&2
+        exit 2
+      fi
+      (cd test-vectors && sha256sum --check --status eip8321.sha256)
+      staging="$(mktemp -d "$PWD/test-vectors/.eip8321-extract.XXXXXX")"
+      echo 'Extracting bundled EIP-8321 reference vectors...'
+      tar -xJf "$archive" -C "$staging"
+      mv -T -- "$staging" "$vector_dir"
+    fi
     if [[ ! -d "$vector_dir/minimal/eip8321" || ! -d "$vector_dir/mainnet/eip8321" ]]; then
       echo 'Missing generated vectors: set EIP8321_VECTORS_DIR to the reftests directory.' >&2
       exit 2

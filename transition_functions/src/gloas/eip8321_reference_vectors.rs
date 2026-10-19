@@ -25,7 +25,7 @@ use crate::unphased::{ProcessSlots, StateRootPolicy};
 
 fn vector_root() -> PathBuf {
     std::env::var_os("EIP8321_VECTORS_DIR").map_or_else(
-        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../consensus-specs/reftests"),
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-vectors/eip8321"),
         PathBuf::from,
     )
 }
