@@ -75,6 +75,8 @@ pub enum IndexError {
     DoesNotFitInUsize { index: u64 },
     #[error("index {index} is out of bounds for collection of length {length}")]
     OutOfBounds { length: usize, index: usize },
+    #[error("range start {start} is greater than range end {end}")]
+    InvalidRange { start: usize, end: usize },
 }
 
 #[derive(Debug, Error)]

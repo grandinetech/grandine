@@ -77,6 +77,7 @@ impl<I: Iterator> Iterator for ExactSize<I> {
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.size = self.size.saturating_sub(n.saturating_add(1));
         self.inner.nth(n)
     }
 
@@ -107,6 +108,7 @@ impl<T: DoubleEndedIterator> DoubleEndedIterator for ExactSize<T> {
     }
 
     fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        self.size = self.size.saturating_sub(n.saturating_add(1));
         self.inner.nth_back(n)
     }
 

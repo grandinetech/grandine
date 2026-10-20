@@ -215,6 +215,26 @@ pub fn validate_index(length: usize, index: u64) -> Result<usize, IndexError> {
     Ok(index)
 }
 
+pub fn validate_range(length: usize, start: u64, end: u64) -> Result<(usize, usize), IndexError> {
+    let start = start
+        .try_into()
+        .map_err(|_| IndexError::DoesNotFitInUsize { index: start })?;
+
+    let end = end
+        .try_into()
+        .map_err(|_| IndexError::DoesNotFitInUsize { index: end })?;
+
+    if start > end {
+        return Err(IndexError::InvalidRange { start, end });
+    }
+
+    if length < end {
+        return Err(IndexError::OutOfBounds { length, index: end });
+    }
+
+    Ok((start, end))
+}
+
 #[inline]
 fn read_variable_elements<'all, C, T: SszRead<C>>(
     context: &'all C,

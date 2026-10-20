@@ -33,6 +33,14 @@ pub trait SszListMut<T>: SszList<T> {
     where
         T: Clone;
 
+    fn extend(&mut self, elements: &[T]) -> Result<(), PushError>
+    where
+        T: Clone;
+
+    fn retain_range(&mut self, start: u64, end: u64) -> Result<(), IndexError>
+    where
+        T: Clone;
+
     fn update(&mut self, f: &mut dyn FnMut(&mut T))
     where
         T: Clone + PartialEq;
