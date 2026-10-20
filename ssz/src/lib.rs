@@ -41,6 +41,10 @@ pub use crate::{
     zero_default::ZeroDefault,
 };
 
+// zkVM guests never compress, and zstd is a C library they would otherwise have to cross-compile.
+#[cfg(not(target_os = "zkvm"))]
+pub use crate::compressed::Compressed;
+
 mod arrays;
 mod basic;
 mod bit_list;
@@ -48,6 +52,8 @@ mod bit_vector;
 mod bundle_size;
 mod byte_list;
 mod byte_vector;
+#[cfg(not(target_os = "zkvm"))]
+mod compressed;
 mod consts;
 mod contiguous_list;
 mod contiguous_vector;

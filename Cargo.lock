@@ -8627,6 +8627,7 @@ dependencies = [
  "triomphe",
  "try_from_iterator",
  "typenum",
+ "zstd 0.13.3",
 ]
 
 [[package]]

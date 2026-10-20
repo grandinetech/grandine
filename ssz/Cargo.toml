@@ -35,6 +35,9 @@ triomphe = { workspace = true }
 try_from_iterator = { workspace = true }
 typenum = { workspace = true }
 
+[target.'cfg(not(target_os = "zkvm"))'.dependencies]
+zstd = { workspace = true }
+
 [dev-dependencies]
 duplicate = { workspace = true }
 hex = { workspace = true }
