@@ -249,10 +249,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                         let current_sampling_columns =
                             Self::sampling_columns(chain_config, node_id, current_sampling_size)?;
 
-                        let backfill_column_indices = prev_sampling_columns
-                            .difference(&current_sampling_columns)
-                            .copied()
-                            .collect::<HashSet<_>>();
+                        let backfill_column_indices = Self::backfill_column_indices(
+                            &prev_sampling_columns,
+                            &current_sampling_columns,
+                        );
 
                         if !backfill_column_indices.is_empty() {
                             P2pToSync::RequestCustodyGroupBackfill(
@@ -1253,6 +1253,16 @@ impl<P: Preset, W: Wait> Network<P, W> {
         }
 
         Ok(sampling_columns)
+    }
+
+    fn backfill_column_indices(
+        prev_sampling_columns: &HashSet<ColumnIndex>,
+        current_sampling_columns: &HashSet<ColumnIndex>,
+    ) -> HashSet<ColumnIndex> {
+        current_sampling_columns
+            .difference(prev_sampling_columns)
+            .copied()
+            .collect()
     }
 
     fn update_earliest_available_slot(&mut self, mut slot: Slot) {
@@ -3382,7 +3392,7 @@ mod tests {
         preset::Mainnet,
     };
 
-    use crate::network::{MAX_FOR_DOS_PREVENTION, compute_enr_fork_id};
+    use crate::network::{MAX_FOR_DOS_PREVENTION, Network, compute_enr_fork_id};
 
     #[test]
     fn ensure_constant_sanity() {
@@ -3433,5 +3443,46 @@ mod tests {
             chain_config.version(expected_version_phase),
         );
         assert_eq!(enr_fork_id.next_fork_epoch, expected_next_fork_epoch);
+    }
+
+    // `get_custody_groups` iterates deterministically starting from `node_id`, so the
+    // columns sampled for a lower custody group count are a strict subset of the
+    // columns sampled for a higher one. The columns to backfill after a custody
+    // group count increase are the ones added by the increase.
+    #[test]
+    fn backfill_column_indices_returns_columns_added_by_custody_increase() {
+        let chain_config = Arc::new(Config::mainnet());
+        let node_id = [1; 32];
+
+        let prev_sampling_columns =
+            Network::<Mainnet, ()>::sampling_columns(&chain_config, node_id, 4)
+                .expect("should compute node custody groups and columns");
+        let current_sampling_columns =
+            Network::<Mainnet, ()>::sampling_columns(&chain_config, node_id, 8)
+                .expect("should compute node custody groups and columns");
+
+        assert!(prev_sampling_columns.is_subset(&current_sampling_columns));
+
+        let backfill_column_indices = Network::<Mainnet, ()>::backfill_column_indices(
+            &prev_sampling_columns,
+            &current_sampling_columns,
+        );
+
+        assert!(!backfill_column_indices.is_empty());
+        assert!(backfill_column_indices.is_subset(&current_sampling_columns));
+        assert!(backfill_column_indices.is_disjoint(&prev_sampling_columns));
+        assert_eq!(
+            backfill_column_indices.len(),
+            current_sampling_columns.len() - prev_sampling_columns.len()
+        );
+
+        // A custody group count decrease must not trigger a backfill.
+        assert!(
+            Network::<Mainnet, ()>::backfill_column_indices(
+                &current_sampling_columns,
+                &prev_sampling_columns,
+            )
+            .is_empty()
+        );
     }
 }
