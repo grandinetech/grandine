@@ -19,6 +19,7 @@ members = [
     'database',
     'debug_info',
     'deposit_tree',
+    'diff',
     'directories',
     'doppelganger_protection',
     'eip_2335',
@@ -495,6 +496,7 @@ data_dumper = { path = 'data_dumper' }
 database = { path = 'database' }
 debug_info = { path = 'debug_info' }
 deposit_tree = { path = 'deposit_tree' }
+diff = { path = 'diff' }
 directories = { path = 'directories' }
 doppelganger_protection = { path = 'doppelganger_protection' }
 eip_2335 = { path = 'eip_2335' }

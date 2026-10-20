@@ -2338,6 +2338,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "bitvec",
+ "ssz",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+ "try_from_iterator",
+ "typenum",
+ "unsigned-varint",
+ "zstd 0.13.3",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
