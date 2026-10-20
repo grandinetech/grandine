@@ -286,7 +286,7 @@ pub enum ServiceInboundMessage<P: Preset> {
     SubscribeKind(GossipKind),
     SubscribeNewForkTopics(Phase, ForkDigest),
     Unsubscribe(GossipTopic),
-    UnsubscribeFromForkTopicsExcept(ForkDigest),
+    UnsubscribeFromForkTopicsExcept(Vec<ForkDigest>),
     UpdateDataColumnSubnets(u64),
     UpdateEnrCgc(u64),
     UpdateEnrSubnet(Subnet, bool),
