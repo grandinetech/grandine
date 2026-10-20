@@ -29,7 +29,7 @@ use crate::{
         primitives::Gwei,
         validator_list::{CacheNode as MerkleTreeCacheNode, ValidatorList},
     },
-    traits::{SszValidatorList, SszValidatorListMut},
+    traits::SszValidatorList,
 };
 
 #[derive(Clone, Debug, Default, Derivative)]
@@ -185,40 +185,6 @@ impl SszValidatorList for ProgressiveValidatorList {
         self.buf.effective_balance(index)
     }
 
-    fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError> {
-        self.buf.partial_validator(index)
-    }
-
-    fn pubkeys(&self) -> &PubkeyList {
-        self.buf.pubkeys()
-    }
-
-    fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
-        self.buf.partial_validators()
-    }
-
-    fn effective_balances(&self) -> VectorIter<'_, Gwei> {
-        self.buf.effective_balances()
-    }
-
-    fn len_usize(&self) -> usize {
-        self.buf.len_usize()
-    }
-
-    fn len_u64(&self) -> u64 {
-        self.buf.len_u64()
-    }
-
-    fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a> {
-        Box::new(self.into_iter())
-    }
-
-    fn clone_boxed(&self) -> Box<dyn SszValidatorList> {
-        Box::new(self.clone())
-    }
-}
-
-impl SszValidatorListMut for ProgressiveValidatorList {
     fn effective_balance_mut(&mut self, index: u64) -> Result<&mut u64, IndexError> {
         self.invalidate_index(
             index
@@ -227,6 +193,10 @@ impl SszValidatorListMut for ProgressiveValidatorList {
         );
 
         self.buf.effective_balance_mut(index)
+    }
+
+    fn partial_validator(&self, index: u64) -> Result<&PartialValidator, IndexError> {
+        self.buf.partial_validator(index)
     }
 
     fn partial_validator_mut(&mut self, index: u64) -> Result<&mut PartialValidator, IndexError> {
@@ -239,15 +209,8 @@ impl SszValidatorListMut for ProgressiveValidatorList {
         self.buf.partial_validator_mut(index)
     }
 
-    fn update_effective_balances(
-        &mut self,
-        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
-    ) -> Result<(), anyhow::Error> {
-        self.buf.update_effective_balances(updater, |index, len| {
-            if let Some(cache) = self.cache.as_mut() {
-                cache.invalidate(index, len);
-            }
-        })
+    fn pubkeys(&self) -> &PubkeyList {
+        self.buf.pubkeys()
     }
 
     fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
@@ -265,6 +228,25 @@ impl SszValidatorListMut for ProgressiveValidatorList {
         self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
     }
 
+    fn partial_validators(&self) -> VectorIter<'_, PartialValidator> {
+        self.buf.partial_validators()
+    }
+
+    fn effective_balances(&self) -> VectorIter<'_, Gwei> {
+        self.buf.effective_balances()
+    }
+
+    fn update_effective_balances(
+        &mut self,
+        updater: &mut dyn FnMut(&PartialValidator, Gwei) -> Result<Gwei, anyhow::Error>,
+    ) -> Result<(), anyhow::Error> {
+        self.buf.update_effective_balances(updater, |index, len| {
+            if let Some(cache) = self.cache.as_mut() {
+                cache.invalidate(index, len);
+            }
+        })
+    }
+
     fn push(&mut self, validator: Validator) -> Result<(), PushError> {
         let old_length = self.len_usize();
 
@@ -276,6 +258,22 @@ impl SszValidatorListMut for ProgressiveValidatorList {
         }
 
         Ok(())
+    }
+
+    fn len_usize(&self) -> usize {
+        self.buf.len_usize()
+    }
+
+    fn len_u64(&self) -> u64 {
+        self.buf.len_u64()
+    }
+
+    fn iter<'a>(&'a self) -> Box<dyn ExactSizeIterator<Item = Validator> + 'a> {
+        Box::new(self.into_iter())
+    }
+
+    fn clone_boxed(&self) -> Box<dyn SszValidatorList> {
+        Box::new(self.clone())
     }
 }
 

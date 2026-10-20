@@ -514,7 +514,7 @@ mod gloas_payload_context_tests {
             primitives::H256,
         },
         preset::{Minimal, SlotsPerHistoricalRoot},
-        traits::SszValidatorListMut as _,
+        traits::SszValidatorList as _,
     };
 
     use super::*;
