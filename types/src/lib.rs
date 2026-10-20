@@ -7,6 +7,8 @@ pub mod redacting_url;
 pub mod traits;
 
 pub mod phase0 {
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod balances_patch;
     pub mod beacon_state;
     pub mod consts;
     pub mod containers;
@@ -23,6 +25,8 @@ pub mod altair {
     pub mod beacon_state;
     pub mod consts;
     pub mod containers;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod participation_patch;
     pub mod primitives;
 
     mod container_impls;
