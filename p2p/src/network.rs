@@ -26,7 +26,7 @@ use eth2_libp2p::{
         },
     },
     service::{Network as Service, api_types::AppRequestId},
-    types::{EnrForkId, ForkContext, GossipEncoding, GossipKind, core_topics_to_subscribe},
+    types::{EnrForkId, ForkContext, GossipEncoding, core_topics_to_subscribe},
 };
 use features::Feature;
 use fork_choice_control::{
@@ -72,7 +72,7 @@ use types::{
     phase0::{
         consts::{FAR_FUTURE_EPOCH, GENESIS_EPOCH},
         containers::{ProposerSlashing, SignedVoluntaryExit},
-        primitives::{Epoch, H256, NodeId, Slot, SubnetId},
+        primitives::{Epoch, ForkDigest, H256, NodeId, Slot, SubnetId},
     },
     preset::Preset,
     traits::{BeaconState as _, SignedBeaconBlock as _},
@@ -96,18 +96,17 @@ const PEER_COUNT_UPDATE_INTERVAL: Duration = Duration::from_millis(100);
 // > Clients MAY limit the number of blocks and sidecars in the response.
 const MAX_FOR_DOS_PREVENTION: u64 = 64;
 
-/// Number of slots before a new phase to subscribe to its topics.
+/// Number of epochs before a fork digest change to subscribe to its topics.
 ///
-/// The number 5 was chosen arbitrarily.
 /// The behavior is specified in the [Networking specification] but the exact number is not:
 /// > In advance of the fork, a node SHOULD subscribe to the post-fork variants of the topics.
 ///
-/// Lighthouse uses the number 2 with no explanation why:
-/// - <https://github.com/sigp/lighthouse/blob/bf533c8e42cc73c35730e285c21df8add0195369/beacon_node/network/src/service.rs#L42>
-/// - <https://github.com/sigp/lighthouse/pull/2532>
+/// Proposer preferences for the new fork digest arrive one epoch early, so subscribe to all topics
+/// of the new fork digest one epoch early as well. Lighthouse does the same:
+/// - <https://github.com/sigp/lighthouse/pull/10204>
 ///
 /// [Networking specification]: https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/specs/altair/p2p-interface.md#transitioning-the-gossip
-const NEW_PHASE_TOPICS_ADVANCE_SLOTS: u64 = 5;
+const NEW_PHASE_TOPICS_ADVANCE_EPOCHS: u64 = 1;
 
 /// Number of epochs to remain subscribed to the topics of previous phases as defined in:
 /// <https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/specs/altair/p2p-interface.md#transitioning-the-gossip>
@@ -148,7 +147,7 @@ pub struct Network<P: Preset, W: Wait> {
     data_dumper: Arc<DataDumper>,
     earliest_available_slot: Slot,
     last_nfd_update_epoch: Option<Epoch>,
-    proposer_preferences_subscribed: bool,
+    next_fork_topics_digest: Option<ForkDigest>,
     backfill_custody_groups: bool,
     storage_mode: StorageMode,
 }
@@ -222,7 +221,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
             }
         }
 
-        let earliest_available_slot = controller.anchor_block().message().slot();
+        let mut earliest_available_slot = controller.anchor_block().message().slot();
 
         if chain_config.is_peerdas_scheduled() {
             // dereference is required to avoid deadlock
@@ -236,31 +235,35 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 if prev_custody_group_count < custody_group_count {
                     service.update_enr_cgc(custody_group_count);
 
-                    if backfill_custody_groups {
-                        let prev_sampling_size =
-                            chain_config.sampling_size_custody_groups(prev_custody_group_count);
+                    let prev_sampling_size =
+                        chain_config.sampling_size_custody_groups(prev_custody_group_count);
 
-                        let prev_sampling_columns =
-                            Self::sampling_columns(chain_config, node_id, prev_sampling_size)?;
+                    let prev_sampling_columns =
+                        Self::sampling_columns(chain_config, node_id, prev_sampling_size)?;
 
-                        let current_sampling_size =
-                            chain_config.sampling_size_custody_groups(custody_group_count);
+                    let current_sampling_size =
+                        chain_config.sampling_size_custody_groups(custody_group_count);
 
-                        let current_sampling_columns =
-                            Self::sampling_columns(chain_config, node_id, current_sampling_size)?;
+                    let current_sampling_columns =
+                        Self::sampling_columns(chain_config, node_id, current_sampling_size)?;
 
-                        let backfill_column_indices = prev_sampling_columns
-                            .difference(&current_sampling_columns)
-                            .copied()
-                            .collect::<HashSet<_>>();
+                    let new_column_indices = current_sampling_columns
+                        .difference(&prev_sampling_columns)
+                        .copied()
+                        .collect::<HashSet<_>>();
 
-                        if !backfill_column_indices.is_empty() {
+                    if !new_column_indices.is_empty() {
+                        if backfill_custody_groups {
                             P2pToSync::RequestCustodyGroupBackfill(
-                                backfill_column_indices,
+                                new_column_indices,
                                 earliest_available_slot,
                             )
                             .send(&channels.p2p_to_sync_tx);
                         }
+
+                        // New custody columns are only available from the current slot onwards
+                        // (until custody group backfill, if enabled, completes).
+                        earliest_available_slot = controller.slot();
                     }
                 }
 
@@ -298,7 +301,7 @@ impl<P: Preset, W: Wait> Network<P, W> {
             data_dumper,
             earliest_available_slot,
             last_nfd_update_epoch: None,
-            proposer_preferences_subscribed: false,
+            next_fork_topics_digest: None,
             backfill_custody_groups,
             storage_mode,
         };
@@ -739,41 +742,24 @@ impl<P: Preset, W: Wait> Network<P, W> {
             self.last_nfd_update_epoch = Some(epoch);
         }
 
-        // Subscribe to the topics of the next phase.
+        // Subscribe to the topics of the next fork digest.
+        // This also covers starting up inside the subscription window.
         if let Some((next_phase, next_fork_digest, next_fork_epoch)) = self.fork_context.next_fork()
+            && epoch.saturating_add(NEW_PHASE_TOPICS_ADVANCE_EPOCHS) >= next_fork_epoch
+            && self.next_fork_topics_digest != Some(next_fork_digest)
         {
-            let next_phase_slot = misc::compute_start_slot_at_epoch::<P>(next_fork_epoch);
+            info_with_peers!(
+                "subscribing to new topics for {next_phase} with digest {next_fork_digest}"
+            );
 
-            if slot.saturating_add(NEW_PHASE_TOPICS_ADVANCE_SLOTS) == next_phase_slot {
-                info_with_peers!(
-                    "subscribing to new topics for {next_phase} with digest {next_fork_digest}"
-                );
+            ServiceInboundMessage::SubscribeNewForkTopics(next_phase, next_fork_digest)
+                .send(&self.network_to_service_tx);
 
-                ServiceInboundMessage::SubscribeNewForkTopics(next_phase, next_fork_digest)
-                    .send(&self.network_to_service_tx);
-            }
-
-            // Subscribe to proposer_preferences topic one epoch before Gloas activation
-            if next_phase == Phase::Gloas
-                && epoch.saturating_add(1) == next_fork_epoch
-                && !self.proposer_preferences_subscribed
-            {
-                info_with_peers!(
-                    "subscribing to proposer_preferences topic ahead of Gloas activation"
-                );
-
-                let topic = GossipTopic::new(
-                    GossipKind::ProposerPreferences,
-                    GossipEncoding::default(),
-                    next_fork_digest,
-                );
-                ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
-                self.proposer_preferences_subscribed = true;
-            }
+            self.next_fork_topics_digest = Some(next_fork_digest);
         }
 
         if Some(phase_by_slot) > Phase::first() && misc::is_epoch_start::<P>(slot) {
-            // Unsubscribe from the topics of previous phases.
+            // Unsubscribe from the topics of previous fork digests.
             if self
                 .fork_context
                 .current_fork_epoch()
@@ -782,11 +768,26 @@ impl<P: Preset, W: Wait> Network<P, W> {
             {
                 info_with_peers!("unsubscribing from old topics");
 
-                let fork_digest = self.fork_context.current_fork_digest();
-                ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest)
-                    .send(&self.network_to_service_tx);
+                ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(
+                    self.required_gossip_fork_digests(epoch),
+                )
+                .send(&self.network_to_service_tx);
             }
         }
+    }
+
+    /// Returns the fork digests whose topics should be subscribed to at `epoch`:
+    /// the current one and the next one if it activates within `NEW_PHASE_TOPICS_ADVANCE_EPOCHS`.
+    fn required_gossip_fork_digests(&self, epoch: Epoch) -> Vec<ForkDigest> {
+        let mut fork_digests = vec![self.fork_context.current_fork_digest()];
+
+        if let Some((_, next_fork_digest, next_fork_epoch)) = self.fork_context.next_fork()
+            && epoch.saturating_add(NEW_PHASE_TOPICS_ADVANCE_EPOCHS) >= next_fork_epoch
+        {
+            fork_digests.push(next_fork_digest);
+        }
+
+        fork_digests
     }
 
     // See <https://github.com/ethereum/consensus-specs/blob/9839ed49346a85f95af4f8b0cb9c4d98b2308af8/specs/phase0/p2p-interface.md#eth2-field>.
@@ -966,15 +967,15 @@ impl<P: Preset, W: Wait> Network<P, W> {
             signed_proposer_preferences.message.proposal_slot
         );
 
+        // Proposer preferences are published on the fork digest of their proposal epoch,
+        // which may be the next fork digest.
+        let proposal_epoch =
+            misc::compute_epoch_at_slot::<P>(signed_proposer_preferences.message.proposal_slot);
+        let fork_digest = self.fork_context.context_bytes(proposal_epoch);
         let message = PubsubMessage::ProposerPreferences(signed_proposer_preferences);
 
-        // Pre-fork: topic uses Gloas fork digest even during Fulu epoch
-        if let Some((Phase::Gloas, next_fork_digest, _)) = self.fork_context.next_fork() {
-            ServiceInboundMessage::PublishWithDigest(message, next_fork_digest)
-                .send(&self.network_to_service_tx);
-        } else {
-            self.publish(message);
-        }
+        ServiceInboundMessage::PublishWithDigest(message, fork_digest)
+            .send(&self.network_to_service_tx);
     }
 
     fn publish_aggregate_and_proof(&self, aggregate_and_proof: Arc<SignedAggregateAndProof<P>>) {
@@ -1108,19 +1109,22 @@ impl<P: Preset, W: Wait> Network<P, W> {
             if subscribe {
                 debug_with_peers!("subscribing to attestation subnet (subnet_id: {subnet_id})");
 
-                // TODO(Grandine Team): The Honest Validator specification says:
-                //                      > *Note*: When preparing for a hard fork, a validator must
-                //                      > select and subscribe to random subnets of the future
-                //                      > fork versioning at least
-                //                      > `EPOCHS_PER_RANDOM_SUBNET_SUBSCRIPTION` epochs in
-                //                      > advance of the fork.
-                let topic = self.subnet_gossip_topic(subnet);
-                ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
+                // TODO(Grandine Team): The Networking specification says:
+                //                      > *Note*: When preparing for an upgrade, a node must
+                //                      > select and subscribe to subnets of the future fork
+                //                      > versioning at least `EPOCHS_PER_SUBNET_SUBSCRIPTION`
+                //                      > epochs in advance of the upgrade.
+                //                      Subnets of the future fork digest are currently only
+                //                      subscribed to `NEW_PHASE_TOPICS_ADVANCE_EPOCHS` in advance.
+                for topic in self.subnet_gossip_topics(subnet) {
+                    ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
+                }
             } else {
                 debug_with_peers!("unsubscribing from attestation subnet {subnet_id}");
 
-                let topic = self.subnet_gossip_topic(subnet);
-                ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
+                for topic in self.subnet_gossip_topics(subnet) {
+                    ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
+                }
             }
         }
 
@@ -1177,10 +1181,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 SyncCommitteeSubnetAction::Subscribe => {
                     debug_with_peers!("subscribing to sync committee subnet {subnet_id}");
 
-                    // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
-                    let topic = self.subnet_gossip_topic(subnet);
+                    for topic in self.subnet_gossip_topics(subnet) {
+                        ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
+                    }
 
-                    ServiceInboundMessage::Subscribe(topic).send(&self.network_to_service_tx);
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, true)
                         .send(&self.network_to_service_tx);
                 }
@@ -1190,10 +1194,10 @@ impl<P: Preset, W: Wait> Network<P, W> {
                 SyncCommitteeSubnetAction::Unsubscribe => {
                     debug_with_peers!("unsubscribing from sync committee subnet {subnet_id}");
 
-                    // TODO(Grandine Team): Does it make sense to use the Phase 0 digest here?
-                    let topic = self.subnet_gossip_topic(subnet);
+                    for topic in self.subnet_gossip_topics(subnet) {
+                        ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
+                    }
 
-                    ServiceInboundMessage::Unsubscribe(topic).send(&self.network_to_service_tx);
                     ServiceInboundMessage::UpdateEnrSubnet(subnet, false)
                         .send(&self.network_to_service_tx);
                 }
@@ -1218,21 +1222,38 @@ impl<P: Preset, W: Wait> Network<P, W> {
         let sampling_columns = Self::sampling_columns(config, node_id, sampling_size)
             .expect("should compute node custody groups and columns");
 
-        if self.backfill_custody_groups {
-            let current_sampling_columns = self.controller.sampling_columns();
-            let backfill_column_indices = sampling_columns
-                .difference(&current_sampling_columns)
-                .copied()
-                .collect::<HashSet<_>>();
+        let current_sampling_columns = self.controller.sampling_columns();
+        let new_column_indices = sampling_columns
+            .difference(&current_sampling_columns)
+            .copied()
+            .collect::<HashSet<_>>();
 
-            if !backfill_column_indices.is_empty() {
+        if !new_column_indices.is_empty() {
+            if self.backfill_custody_groups {
                 P2pToSync::RequestCustodyGroupBackfill(
-                    backfill_column_indices,
+                    new_column_indices,
                     self.earliest_available_slot,
                 )
                 .send(&self.channels.p2p_to_sync_tx);
+            }
 
-                self.update_earliest_available_slot(self.controller.slot());
+            // New custody columns are only available from the current slot onwards
+            // (until custody group backfill, if enabled, completes).
+            self.update_earliest_available_slot(self.controller.slot());
+
+            // The custody group count increase has moved our `earliest_available_slot` forward.
+            // Re-status all connected peers so they stop requesting data columns from ranges we
+            // no longer serve.
+            let connected_peers = self
+                .network_globals
+                .peers
+                .read()
+                .connected_peer_ids()
+                .copied()
+                .collect::<Vec<_>>();
+
+            for peer_id in connected_peers {
+                self.init_status_peer_request(peer_id);
             }
         }
 
@@ -3066,11 +3087,15 @@ impl<P: Preset, W: Wait> Network<P, W> {
     fn subscribe_to_core_topics(&self) {
         // `subscribe_kind` locks `gossipsub_subscriptions` for writing.
         // Read current subscriptions before subscribing to avoid a deadlock.
+        // Only consider topics of the current fork digest. Topics of other fork digests
+        // (e.g. ones from before a fork transition) do not count as subscribed.
+        let current_fork_digest = self.fork_context.current_fork_digest();
         let subscribed_topics = self
             .network_globals
             .gossipsub_subscriptions
             .read()
             .iter()
+            .filter(|topic| topic.fork_digest == current_fork_digest)
             .map(GossipTopic::kind)
             .cloned()
             .collect::<HashSet<_>>();
@@ -3130,10 +3155,14 @@ impl<P: Preset, W: Wait> Network<P, W> {
             .send(&self.network_to_service_tx);
     }
 
-    fn subnet_gossip_topic(&self, subnet: Subnet) -> GossipTopic {
-        let digest = self.fork_context.current_fork_digest();
+    /// Returns the topics of `subnet` for all fork digests in `required_gossip_fork_digests`,
+    /// so that subnet subscriptions made in advance of a fork carry over to the new fork digest.
+    fn subnet_gossip_topics(&self, subnet: Subnet) -> impl Iterator<Item = GossipTopic> {
+        let epoch = misc::compute_epoch_at_slot::<P>(self.controller.slot());
 
-        GossipTopic::new(subnet.into(), GossipEncoding::default(), digest)
+        self.required_gossip_fork_digests(epoch)
+            .into_iter()
+            .map(move |digest| GossipTopic::new(subnet.into(), GossipEncoding::default(), digest))
     }
 
     fn update_peer_count(&self) {
@@ -3328,8 +3357,8 @@ fn run_network_service<P: Preset>(
                         ServiceInboundMessage::Unsubscribe(gossip_topic) => {
                             service.unsubscribe(gossip_topic);
                         }
-                        ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digest) => {
-                            service.unsubscribe_from_fork_topics_except(fork_digest);
+                        ServiceInboundMessage::UnsubscribeFromForkTopicsExcept(fork_digests) => {
+                            service.unsubscribe_from_fork_topics_except(&fork_digests);
                         }
                         ServiceInboundMessage::UpdateDataColumnSubnets(sampling_size) => {
                             service.subscribe_new_data_column_subnets(sampling_size);

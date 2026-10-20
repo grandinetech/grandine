@@ -318,10 +318,11 @@ delay_map = '0.4'
 derivative = '2'
 derive_more = { version = '2', features = ['full'] }
 dirs = '6'
-discv5 = { version = '0.11', features = ['libp2p'] }
+discv5 = { version = '0.12', features = ['libp2p'] }
 duplicate = '2'
 easy-ext = '1'
 either = '1'
+enr = '0.14'
 enum-iterator = '2'
 enum-map = '2'
 enumset = '1'
@@ -361,9 +362,8 @@ kzg = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2
 lazy_static = '1'
 libmdbx = { git = 'https://github.com/paradigmxyz/reth.git', package = 'reth-libmdbx', rev = 'd6324d63e27ef6b7c49cdc9b1977c1b808234c7b' }
 libp2p = { git = 'https://github.com/libp2p/rust-libp2p.git', default-features = false, features = ['metrics', 'dns', 'identify', 'macros', 'noise', 'plaintext', 'secp256k1', 'serde', 'tcp', 'tokio', 'yamux', 'quic', 'upnp', 'gossipsub'] }
-libp2p-identity = { version = '0.2.13', features = ['peerid'] }
+libp2p-identity = { version = '0.3', features = ['peerid'] }
 libp2p-mplex = { git = 'https://github.com/libp2p/rust-libp2p.git' }
-local-ip-address = '0.6'
 log = '0.4'
 logroller = '0.1'
 lru = '0.17'
@@ -389,7 +389,7 @@ primitive-types = '0.12'
 proc-macro-crate = '3'
 proc-macro2 = '1'
 prometheus = '0.14'
-prometheus-client = '0.24'
+prometheus-client = '0.25'
 proptest = '1'
 psutil = '3'
 quote = '1'
@@ -608,9 +608,9 @@ jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
 sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
 
 [patch.'https://github.com/libp2p/rust-libp2p.git']
-libp2p = { git = "https://github.com/sigp/rust-libp2p.git", rev = "c774d4e71357d7cd2f792c4767d616d2dd369ee3" }
-libp2p-mplex = { git = "https://github.com/sigp/rust-libp2p.git", rev = "c774d4e71357d7cd2f792c4767d616d2dd369ee3" }
-libp2p-quic = { git = "https://github.com/sigp/rust-libp2p.git", rev = "c774d4e71357d7cd2f792c4767d616d2dd369ee3" }
+libp2p = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
+libp2p-mplex = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
+libp2p-quic = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
 
 [patch.'https://github.com/zkcrypto/bls12_381.git']
 bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }

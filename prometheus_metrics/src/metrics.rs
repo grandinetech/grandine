@@ -61,7 +61,6 @@ pub struct Metrics {
     pub received_aggregated_attestation_subsets: IntCounter,
 
     // Custody Subnets / PeerDAS
-    column_subnet_peers: IntGaugeVec,
     pub data_column_sidecars_submitted_for_processing: IntCounter,
     pub verified_gossip_data_column_sidecar: IntCounter,
     pub data_column_sidecar_verification_times: Histogram,
@@ -351,14 +350,6 @@ impl Metrics {
             )?,
 
             // Custody Subnets / PeerDAS
-            column_subnet_peers: IntGaugeVec::new(
-                opts!(
-                    "PEERS_PER_COLUMN_SUBNET",
-                    "Number of connected peers per column subnet",
-                ),
-                &["subnet_id"],
-            )?,
-
             data_column_sidecars_submitted_for_processing: IntCounter::new(
                 "beacon_data_column_sidecar_processing_requests_total",
                 "Number of data column sidecars submitted for processing",
@@ -1052,7 +1043,6 @@ impl Metrics {
         default_registry.register(Box::new(
             self.received_aggregated_attestation_subsets.clone(),
         ))?;
-        default_registry.register(Box::new(self.column_subnet_peers.clone()))?;
         default_registry.register(Box::new(
             self.data_column_sidecars_submitted_for_processing.clone(),
         ))?;
@@ -1410,22 +1400,6 @@ impl Metrics {
                 warn_with_peers!(
                     "unable to register received object over gossip for {labels:?}: {error:?}"
                 )
-            }
-        }
-    }
-
-    // Custody Subnets / PeerDAS
-    pub fn set_column_subnet_peers(&self, subnet_id: &str, num_peers: usize) {
-        match self
-            .column_subnet_peers
-            .get_metric_with_label_values(&[subnet_id])
-        {
-            Ok(metric) => metric.set(num_peers as i64),
-            Err(error) => {
-                warn_with_peers!(
-                    "the number of label values should match the number \
-                 of labels that column_subnet_peers was created: {error:?}"
-                );
             }
         }
     }
