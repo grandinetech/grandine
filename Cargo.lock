@@ -9564,6 +9564,7 @@ dependencies = [
  "bls",
  "derivative",
  "derive_more 2.1.1",
+ "diff",
  "duplicate",
  "enum-iterator",
  "enum-map",
