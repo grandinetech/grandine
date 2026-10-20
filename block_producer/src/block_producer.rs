@@ -3368,7 +3368,7 @@ mod gloas_scoring_tests {
         use crossbeam_utils::sync::WaitGroup;
         use helper_functions::signing::SignForSingleFork as _;
         use ssz::{BitList, SszListMut as _};
-        use types::{phase0::containers::Validator, traits::SszValidatorListMut as _};
+        use types::{phase0::containers::Validator, traits::SszValidatorList as _};
 
         assert!(!Feature::TrustOwnBlockSignatures.is_enabled());
         let config = Arc::new(config.start_and_stay_in(Phase::Gloas));
@@ -4046,7 +4046,7 @@ mod gloas_scoring_tests {
     #[test]
     fn pre_gloas_parent_does_not_require_envelope() -> Result<()> {
         use ssz::SszListMut as _;
-        use types::traits::SszValidatorListMut as _;
+        use types::traits::SszValidatorList as _;
 
         let mut config = ChainConfig::minimal().start_and_stay_in(Phase::Fulu);
         config.gloas_fork_epoch = 12;
