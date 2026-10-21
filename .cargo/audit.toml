@@ -31,5 +31,12 @@ ignore = [
     # TODO: remove this once zkm-sdk drops ethers 2.0
     'RUSTSEC-2026-0367',
     'RUSTSEC-2026-0368',
-    'RUSTSEC-2026-0369'
+    'RUSTSEC-2026-0369',
+    # rustls-webpki 0.101.7 (via rustls 0.21) & webpki-roots 0.25 come only with the optional zkVM
+    # prover backends: zkm-sdk via reqwest 0.11 & ethers 2.0 (both), and sp1-sdk 6.1 via
+    # aws-sdk-kms defaults (rustls-webpki only).
+    # The fixes are only in rustls-webpki >= 0.103.16 and webpki-roots >= 1.0.10.
+    # TODO: remove this once zkm-sdk moves to rustls 0.23 and sp1-sdk can be updated past 6.1
+    'RUSTSEC-2026-0381',
+    'RUSTSEC-2026-0382'
 ]
