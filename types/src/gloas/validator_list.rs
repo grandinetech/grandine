@@ -36,7 +36,7 @@ use crate::{
 #[derivative(PartialEq, Eq)]
 pub struct ProgressiveValidatorList {
     /// Validator memory representation, backing container.
-    buf: RawValidatorList,
+    pub(crate) buf: RawValidatorList,
 
     /// Merkle root cache.
     #[derivative(PartialEq = "ignore")]
@@ -159,6 +159,13 @@ impl CacheNode {
 }
 
 impl ProgressiveValidatorList {
+    pub(crate) fn from_raw(buf: RawValidatorList) -> Self {
+        Self {
+            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize(), 0)),
+            buf,
+        }
+    }
+
     fn invalidate_index(&mut self, index: usize) {
         let len = self.len_usize();
 

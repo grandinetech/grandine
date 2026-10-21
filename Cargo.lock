@@ -9819,6 +9819,7 @@ dependencies = [
  "typenum",
  "url",
  "variant_count",
+ "zstd 0.13.3",
 ]
 
 [[package]]

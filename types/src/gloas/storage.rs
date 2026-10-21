@@ -1,13 +1,23 @@
 use std::sync::Arc;
 
 use diff::{Error, Patch, PatchConfig, PositionalPatch, QueuePatch, ReplacePatch, VectorPatch};
-use ssz::{BitVector, Compressed, Hc, Ssz};
+use ssz::{BitVector, Compressed, Hc, ReadError, Ssz};
+use std_ext::ArcExt as _;
 
 use crate::{
     altair::{containers::SyncCommittee, participation_patch::ParticipationPatch},
+    cache::Cache,
     capella::{
         containers::{HistoricalSummary, Withdrawal},
         primitives::WithdrawalIndex,
+    },
+    collections::{
+        BuilderPendingPayments, BuilderPendingWithdrawals, Builders, Eth1DataVotes,
+        HistoricalRoots, HistoricalSummaries, PayloadExpectedWithdrawals, ProgressiveBalances,
+        ProgressiveEpochParticipation, ProgressiveInactivityScores,
+        ProgressivePendingConsolidations, ProgressivePendingDeposits,
+        ProgressivePendingPartialWithdrawals, ProposerLookahead, PtcWindow, RandaoMixes,
+        RecentRoots, Slashings,
     },
     electra::containers::{PendingConsolidation, PendingDeposit, PendingPartialWithdrawal},
     gloas::{
@@ -17,11 +27,15 @@ use crate::{
         primitives::BuilderIndex,
         ptc_patch::PtcPatch,
     },
+    nonstandard::PubkeyList,
+    phase0::stored_validators::StoredValidators,
     phase0::{
         balances_patch::BalancesPatch,
         consts::JustificationBitsLength,
-        containers::{BeaconBlockHeader, Checkpoint, Eth1Data},
-        primitives::{DepositIndex, Epoch, ExecutionBlockHash, Gwei, H256, Slot, ValidatorIndex},
+        containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork},
+        primitives::{
+            DepositIndex, Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex,
+        },
         validator_list_patch::ValidatorListPatch,
     },
     preset::{Preset, SlotsPerHistoricalRoot},
@@ -373,6 +387,268 @@ impl<P: Preset> Patch<BeaconState<P>> for BeaconStatePatch<P> {
         self.payload_expected_withdrawals
             .apply(&mut base.payload_expected_withdrawals)?;
         self.ptc_window.apply(&mut base.ptc_window)
+    }
+}
+
+#[derive(Ssz)]
+#[ssz(derive_hash = false)]
+pub struct BeaconStateFrame<P: Preset> {
+    // > Versioning
+    pub genesis_time: UnixSeconds,
+    pub genesis_validators_root: H256,
+    pub slot: Slot,
+    pub fork: Fork,
+
+    // > History
+    pub latest_block_header: BeaconBlockHeader,
+    pub block_roots: RecentRoots<P>,
+    pub state_roots: RecentRoots<P>,
+    pub historical_roots: HistoricalRoots<P>,
+
+    // > Eth1
+    pub eth1_data: Eth1Data,
+    pub eth1_data_votes: Compressed<Eth1DataVotes<P>>,
+    pub eth1_deposit_index: DepositIndex,
+
+    // > Registry
+    pub validators: StoredValidators<P::ValidatorRegistryLimit>,
+    pub balances: Compressed<ProgressiveBalances>,
+
+    // > Randomness
+    pub randao_mixes: RandaoMixes<P>,
+
+    // > Slashings
+    pub slashings: Compressed<Slashings<P>>,
+
+    // > Participation
+    pub previous_epoch_participation: Compressed<ProgressiveEpochParticipation>,
+    pub current_epoch_participation: Compressed<ProgressiveEpochParticipation>,
+
+    // > Finality
+    pub justification_bits: BitVector<JustificationBitsLength>,
+    pub previous_justified_checkpoint: Checkpoint,
+    pub current_justified_checkpoint: Checkpoint,
+    pub finalized_checkpoint: Checkpoint,
+
+    // > Inactivity
+    pub inactivity_scores: Compressed<ProgressiveInactivityScores>,
+
+    // > Sync
+    pub current_sync_committee: Arc<Hc<SyncCommittee<P>>>,
+    pub next_sync_committee: Arc<Hc<SyncCommittee<P>>>,
+
+    // > Execution
+    pub latest_block_hash: ExecutionBlockHash,
+
+    // > Withdrawals
+    pub next_withdrawal_index: WithdrawalIndex,
+    pub next_withdrawal_validator_index: ValidatorIndex,
+
+    // > Deep history valid from Capella onwards
+    pub historical_summaries: HistoricalSummaries<P>,
+    pub deposit_requests_start_index: DepositIndex,
+    pub deposit_balance_to_consume: Gwei,
+    pub exit_balance_to_consume: Gwei,
+    pub earliest_exit_epoch: Epoch,
+    pub consolidation_balance_to_consume: Gwei,
+    pub earliest_consolidation_epoch: Epoch,
+    pub pending_deposits: Compressed<ProgressivePendingDeposits>,
+    pub pending_partial_withdrawals: Compressed<ProgressivePendingPartialWithdrawals>,
+    pub pending_consolidations: Compressed<ProgressivePendingConsolidations>,
+
+    // > Next proposers
+    pub proposer_lookahead: Compressed<ProposerLookahead<P>>,
+
+    // > Builders
+    pub builders: Compressed<Builders>,
+    pub next_withdrawal_builder_index: BuilderIndex,
+
+    // > Payload availability
+    pub execution_payload_availability: BitVector<SlotsPerHistoricalRoot<P>>,
+
+    // > Builder payments
+    pub builder_pending_payments: Compressed<BuilderPendingPayments<P>>,
+    pub builder_pending_withdrawals: Compressed<BuilderPendingWithdrawals>,
+    pub latest_execution_payload_bid: ExecutionPayloadBid<P>,
+    pub payload_expected_withdrawals: Compressed<PayloadExpectedWithdrawals>,
+
+    // > Payload timeliness
+    pub ptc_window: Compressed<PtcWindow<P>>,
+}
+
+impl<P: Preset> BeaconStateFrame<P> {
+    #[must_use]
+    pub fn new(state: &BeaconState<P>, finalized_validators: usize, level: i32) -> Self {
+        Self {
+            genesis_time: state.genesis_time,
+            genesis_validators_root: state.genesis_validators_root,
+            slot: state.slot,
+            fork: state.fork,
+            latest_block_header: state.latest_block_header,
+            block_roots: state.block_roots.clone(),
+            state_roots: state.state_roots.clone(),
+            historical_roots: state.historical_roots.clone(),
+            eth1_data: state.eth1_data,
+            eth1_data_votes: Compressed::with_level(state.eth1_data_votes.clone(), level),
+            eth1_deposit_index: state.eth1_deposit_index,
+            validators: StoredValidators::new(&state.validators.buf, finalized_validators, level),
+            balances: Compressed::with_level(state.balances.clone(), level),
+            randao_mixes: state.randao_mixes.clone(),
+            slashings: Compressed::with_level(state.slashings.clone(), level),
+            previous_epoch_participation: Compressed::with_level(
+                state.previous_epoch_participation.clone(),
+                level,
+            ),
+            current_epoch_participation: Compressed::with_level(
+                state.current_epoch_participation.clone(),
+                level,
+            ),
+            justification_bits: state.justification_bits,
+            previous_justified_checkpoint: state.previous_justified_checkpoint,
+            current_justified_checkpoint: state.current_justified_checkpoint,
+            finalized_checkpoint: state.finalized_checkpoint,
+            inactivity_scores: Compressed::with_level(state.inactivity_scores.clone(), level),
+            current_sync_committee: state.current_sync_committee.clone_arc(),
+            next_sync_committee: state.next_sync_committee.clone_arc(),
+            latest_block_hash: state.latest_block_hash,
+            next_withdrawal_index: state.next_withdrawal_index,
+            next_withdrawal_validator_index: state.next_withdrawal_validator_index,
+            historical_summaries: state.historical_summaries.clone(),
+            deposit_requests_start_index: state.deposit_requests_start_index,
+            deposit_balance_to_consume: state.deposit_balance_to_consume,
+            exit_balance_to_consume: state.exit_balance_to_consume,
+            earliest_exit_epoch: state.earliest_exit_epoch,
+            consolidation_balance_to_consume: state.consolidation_balance_to_consume,
+            earliest_consolidation_epoch: state.earliest_consolidation_epoch,
+            pending_deposits: Compressed::with_level(state.pending_deposits.clone(), level),
+            pending_partial_withdrawals: Compressed::with_level(
+                state.pending_partial_withdrawals.clone(),
+                level,
+            ),
+            pending_consolidations: Compressed::with_level(
+                state.pending_consolidations.clone(),
+                level,
+            ),
+            proposer_lookahead: Compressed::with_level(state.proposer_lookahead.clone(), level),
+            builders: Compressed::with_level(state.builders.clone(), level),
+            next_withdrawal_builder_index: state.next_withdrawal_builder_index,
+            execution_payload_availability: state.execution_payload_availability,
+            builder_pending_payments: Compressed::with_level(
+                state.builder_pending_payments.clone(),
+                level,
+            ),
+            builder_pending_withdrawals: Compressed::with_level(
+                state.builder_pending_withdrawals.clone(),
+                level,
+            ),
+            latest_execution_payload_bid: state.latest_execution_payload_bid.clone(),
+            payload_expected_withdrawals: Compressed::with_level(
+                state.payload_expected_withdrawals.clone(),
+                level,
+            ),
+            ptc_window: Compressed::with_level(state.ptc_window.clone(), level),
+        }
+    }
+
+    pub fn into_state(self, finalized_pubkeys: &PubkeyList) -> Result<BeaconState<P>, ReadError> {
+        let Self {
+            genesis_time,
+            genesis_validators_root,
+            slot,
+            fork,
+            latest_block_header,
+            block_roots,
+            state_roots,
+            historical_roots,
+            eth1_data,
+            eth1_data_votes,
+            eth1_deposit_index,
+            validators,
+            balances,
+            randao_mixes,
+            slashings,
+            previous_epoch_participation,
+            current_epoch_participation,
+            justification_bits,
+            previous_justified_checkpoint,
+            current_justified_checkpoint,
+            finalized_checkpoint,
+            inactivity_scores,
+            current_sync_committee,
+            next_sync_committee,
+            latest_block_hash,
+            next_withdrawal_index,
+            next_withdrawal_validator_index,
+            historical_summaries,
+            deposit_requests_start_index,
+            deposit_balance_to_consume,
+            exit_balance_to_consume,
+            earliest_exit_epoch,
+            consolidation_balance_to_consume,
+            earliest_consolidation_epoch,
+            pending_deposits,
+            pending_partial_withdrawals,
+            pending_consolidations,
+            proposer_lookahead,
+            builders,
+            next_withdrawal_builder_index,
+            execution_payload_availability,
+            builder_pending_payments,
+            builder_pending_withdrawals,
+            latest_execution_payload_bid,
+            payload_expected_withdrawals,
+            ptc_window,
+        } = self;
+
+        Ok(BeaconState {
+            genesis_time,
+            genesis_validators_root,
+            slot,
+            fork,
+            latest_block_header,
+            block_roots,
+            state_roots,
+            historical_roots,
+            eth1_data,
+            eth1_data_votes: eth1_data_votes.into_inner(),
+            eth1_deposit_index,
+            validators: validators.into_progressive_list(finalized_pubkeys)?,
+            balances: balances.into_inner(),
+            randao_mixes,
+            slashings: slashings.into_inner(),
+            previous_epoch_participation: previous_epoch_participation.into_inner(),
+            current_epoch_participation: current_epoch_participation.into_inner(),
+            justification_bits,
+            previous_justified_checkpoint,
+            current_justified_checkpoint,
+            finalized_checkpoint,
+            inactivity_scores: inactivity_scores.into_inner(),
+            current_sync_committee,
+            next_sync_committee,
+            latest_block_hash,
+            next_withdrawal_index,
+            next_withdrawal_validator_index,
+            historical_summaries,
+            deposit_requests_start_index,
+            deposit_balance_to_consume,
+            exit_balance_to_consume,
+            earliest_exit_epoch,
+            consolidation_balance_to_consume,
+            earliest_consolidation_epoch,
+            pending_deposits: pending_deposits.into_inner(),
+            pending_partial_withdrawals: pending_partial_withdrawals.into_inner(),
+            pending_consolidations: pending_consolidations.into_inner(),
+            proposer_lookahead: proposer_lookahead.into_inner(),
+            builders: builders.into_inner(),
+            next_withdrawal_builder_index,
+            execution_payload_availability,
+            builder_pending_payments: builder_pending_payments.into_inner(),
+            builder_pending_withdrawals: builder_pending_withdrawals.into_inner(),
+            latest_execution_payload_bid,
+            payload_expected_withdrawals: payload_expected_withdrawals.into_inner(),
+            ptc_window: ptc_window.into_inner(),
+            cache: Cache::default(),
+        })
     }
 }
 

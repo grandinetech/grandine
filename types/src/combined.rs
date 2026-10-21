@@ -186,13 +186,7 @@ impl<P: Preset> SszSize for BeaconState<P> {
 
 impl<P: Preset> SszRead<Config> for BeaconState<P> {
     fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
-        // There are 2 fixed parts before `state.slot`:
-        // - The contents of `state.genesis_time`.
-        // - The contents of `state.genesis_validators_root`.
-        let slot_start = UnixSeconds::SIZE.get().saturating_add(H256::SIZE.get());
-        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
-        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
-        let slot = Slot::from_ssz_default(slot_bytes)?;
+        let slot = Self::slot_from_ssz(bytes)?;
         let phase = config.phase_at_slot::<P>(slot);
 
         let state = Self::from_ssz_at_phase(phase, bytes)?;
@@ -487,6 +481,17 @@ impl<P: Preset> BeaconState<P> {
             Self::Fulu(state) => Some(state.deposit_requests_start_index),
             Self::Gloas(state) => Some(state.deposit_requests_start_index),
         }
+    }
+
+    pub(crate) fn slot_from_ssz(bytes: &[u8]) -> Result<Slot, ReadError> {
+        // There are 2 fixed parts before `state.slot`:
+        // - The contents of `state.genesis_time`.
+        // - The contents of `state.genesis_validators_root`.
+        let slot_start = UnixSeconds::SIZE.get().saturating_add(H256::SIZE.get());
+        let slot_end = slot_start.saturating_add(Slot::SIZE.get());
+        let slot_bytes = ssz::subslice(bytes, slot_start..slot_end)?;
+
+        Slot::from_ssz_default(slot_bytes)
     }
 
     pub fn from_ssz_at_phase(phase: Phase, bytes: &[u8]) -> Result<Self, ReadError> {
@@ -2608,7 +2613,10 @@ mod spec_tests {
     use spec_test_utils::Case;
     use test_generator::test_resources;
 
-    use crate::preset::{Mainnet, Minimal};
+    use crate::{
+        preset::{Mainnet, Minimal},
+        storage::BeaconStateFrame,
+    };
 
     use super::*;
 
@@ -2675,6 +2683,53 @@ mod spec_tests {
 
         assert_eq!(actual_ssz_bytes, expected_ssz_bytes);
         assert_eq!(value.phase(), Phase::test_phase);
+    }
+
+    #[duplicate_item(
+        glob                                                                        function_name                          preset    test_phase;
+        ["consensus-spec-tests/tests/mainnet/phase0/ssz_static/BeaconState/*/*"]    [phase0_mainnet_beacon_state_frame]    [Mainnet] [Phase0];
+        ["consensus-spec-tests/tests/minimal/phase0/ssz_static/BeaconState/*/*"]    [phase0_minimal_beacon_state_frame]    [Minimal] [Phase0];
+        ["consensus-spec-tests/tests/mainnet/altair/ssz_static/BeaconState/*/*"]    [altair_mainnet_beacon_state_frame]    [Mainnet] [Altair];
+        ["consensus-spec-tests/tests/minimal/altair/ssz_static/BeaconState/*/*"]    [altair_minimal_beacon_state_frame]    [Minimal] [Altair];
+        ["consensus-spec-tests/tests/mainnet/bellatrix/ssz_static/BeaconState/*/*"] [bellatrix_mainnet_beacon_state_frame] [Mainnet] [Bellatrix];
+        ["consensus-spec-tests/tests/minimal/bellatrix/ssz_static/BeaconState/*/*"] [bellatrix_minimal_beacon_state_frame] [Minimal] [Bellatrix];
+        ["consensus-spec-tests/tests/mainnet/capella/ssz_static/BeaconState/*/*"]   [capella_mainnet_beacon_state_frame]   [Mainnet] [Capella];
+        ["consensus-spec-tests/tests/minimal/capella/ssz_static/BeaconState/*/*"]   [capella_minimal_beacon_state_frame]   [Minimal] [Capella];
+        ["consensus-spec-tests/tests/mainnet/deneb/ssz_static/BeaconState/*/*"]     [deneb_mainnet_beacon_state_frame]     [Mainnet] [Deneb];
+        ["consensus-spec-tests/tests/minimal/deneb/ssz_static/BeaconState/*/*"]     [deneb_minimal_beacon_state_frame]     [Minimal] [Deneb];
+        ["consensus-spec-tests/tests/mainnet/electra/ssz_static/BeaconState/*/*"]   [electra_mainnet_beacon_state_frame]   [Mainnet] [Electra];
+        ["consensus-spec-tests/tests/minimal/electra/ssz_static/BeaconState/*/*"]   [electra_minimal_beacon_state_frame]   [Minimal] [Electra];
+        ["consensus-spec-tests/tests/mainnet/fulu/ssz_static/BeaconState/*/*"]      [fulu_mainnet_beacon_state_frame]      [Mainnet] [Fulu];
+        ["consensus-spec-tests/tests/minimal/fulu/ssz_static/BeaconState/*/*"]      [fulu_minimal_beacon_state_frame]      [Minimal] [Fulu];
+        ["consensus-spec-tests/tests/mainnet/gloas/ssz_static/BeaconState/*/*"]     [gloas_mainnet_beacon_state_frame]     [Mainnet] [Gloas];
+        ["consensus-spec-tests/tests/minimal/gloas/ssz_static/BeaconState/*/*"]     [gloas_minimal_beacon_state_frame]     [Minimal] [Gloas];
+    )]
+    #[test_resources(glob)]
+    fn function_name(case: Case) {
+        let config = preset::default_config().start_and_stay_in(Phase::test_phase);
+        let ssz_bytes = case.bytes("serialized.ssz_snappy");
+
+        let state = BeaconState::<preset>::from_ssz(&config, ssz_bytes.as_slice())
+            .expect("SSZ decoding should succeed");
+
+        // Half of the registry is stored without public keys and half with them.
+        let pubkeys = state.validators().pubkeys();
+
+        let frame =
+            BeaconStateFrame::new(&state, pubkeys.len() / 2, zstd::DEFAULT_COMPRESSION_LEVEL)
+                .to_ssz()
+                .expect("frame encoding should succeed");
+
+        let restored = BeaconStateFrame::<preset>::from_ssz(&config, frame)
+            .expect("frame decoding should succeed")
+            .into_state(pubkeys)
+            .expect("the state should be restored from the frame");
+
+        assert_eq!(
+            restored.to_ssz().expect("SSZ encoding should succeed"),
+            ssz_bytes
+        );
+        assert_eq!(restored.phase(), Phase::test_phase);
     }
 
     #[duplicate_item(

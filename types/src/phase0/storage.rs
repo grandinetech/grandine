@@ -1,13 +1,19 @@
 use diff::{Error, Patch, PatchConfig, PositionalPatch, ReplacePatch, VectorPatch};
-use ssz::{BitVector, Compressed, Ssz};
+use ssz::{BitVector, Compressed, ReadError, Ssz};
 
 use crate::{
+    cache::Cache,
+    collections::{
+        Attestations, Balances, Eth1DataVotes, HistoricalRoots, RandaoMixes, RecentRoots, Slashings,
+    },
+    nonstandard::PubkeyList,
+    phase0::stored_validators::StoredValidators,
     phase0::{
         balances_patch::BalancesPatch,
         beacon_state::BeaconState,
         consts::JustificationBitsLength,
-        containers::{BeaconBlockHeader, Checkpoint, Eth1Data, PendingAttestation},
-        primitives::{DepositIndex, Gwei, H256, Slot},
+        containers::{BeaconBlockHeader, Checkpoint, Eth1Data, Fork, PendingAttestation},
+        primitives::{DepositIndex, Gwei, H256, Slot, UnixSeconds},
         validator_list_patch::ValidatorListPatch,
     },
     preset::Preset,
@@ -151,5 +157,132 @@ impl<P: Preset> Patch<BeaconState<P>> for BeaconStatePatch<P> {
             .apply(&mut base.current_justified_checkpoint)?;
         self.finalized_checkpoint
             .apply(&mut base.finalized_checkpoint)
+    }
+}
+
+#[derive(Ssz)]
+#[ssz(derive_hash = false)]
+pub struct BeaconStateFrame<P: Preset> {
+    // > Versioning
+    pub genesis_time: UnixSeconds,
+    pub genesis_validators_root: H256,
+    pub slot: Slot,
+    pub fork: Fork,
+
+    // > History
+    pub latest_block_header: BeaconBlockHeader,
+    pub block_roots: RecentRoots<P>,
+    pub state_roots: RecentRoots<P>,
+    pub historical_roots: HistoricalRoots<P>,
+
+    // > Eth1
+    pub eth1_data: Eth1Data,
+    pub eth1_data_votes: Compressed<Eth1DataVotes<P>>,
+    pub eth1_deposit_index: DepositIndex,
+
+    // > Registry
+    pub validators: StoredValidators<P::ValidatorRegistryLimit>,
+    pub balances: Compressed<Balances<P>>,
+
+    // > Randomness
+    pub randao_mixes: RandaoMixes<P>,
+
+    // > Slashings
+    pub slashings: Compressed<Slashings<P>>,
+
+    // > Attestations
+    pub previous_epoch_attestations: Compressed<Attestations<P>>,
+    pub current_epoch_attestations: Compressed<Attestations<P>>,
+
+    // > Finality
+    pub justification_bits: BitVector<JustificationBitsLength>,
+    pub previous_justified_checkpoint: Checkpoint,
+    pub current_justified_checkpoint: Checkpoint,
+    pub finalized_checkpoint: Checkpoint,
+}
+
+impl<P: Preset> BeaconStateFrame<P> {
+    #[must_use]
+    pub fn new(state: &BeaconState<P>, finalized_validators: usize, level: i32) -> Self {
+        Self {
+            genesis_time: state.genesis_time,
+            genesis_validators_root: state.genesis_validators_root,
+            slot: state.slot,
+            fork: state.fork,
+            latest_block_header: state.latest_block_header,
+            block_roots: state.block_roots.clone(),
+            state_roots: state.state_roots.clone(),
+            historical_roots: state.historical_roots.clone(),
+            eth1_data: state.eth1_data,
+            eth1_data_votes: Compressed::with_level(state.eth1_data_votes.clone(), level),
+            eth1_deposit_index: state.eth1_deposit_index,
+            validators: StoredValidators::new(&state.validators.buf, finalized_validators, level),
+            balances: Compressed::with_level(state.balances.clone(), level),
+            randao_mixes: state.randao_mixes.clone(),
+            slashings: Compressed::with_level(state.slashings.clone(), level),
+            previous_epoch_attestations: Compressed::with_level(
+                state.previous_epoch_attestations.clone(),
+                level,
+            ),
+            current_epoch_attestations: Compressed::with_level(
+                state.current_epoch_attestations.clone(),
+                level,
+            ),
+            justification_bits: state.justification_bits,
+            previous_justified_checkpoint: state.previous_justified_checkpoint,
+            current_justified_checkpoint: state.current_justified_checkpoint,
+            finalized_checkpoint: state.finalized_checkpoint,
+        }
+    }
+
+    pub fn into_state(self, finalized_pubkeys: &PubkeyList) -> Result<BeaconState<P>, ReadError> {
+        let Self {
+            genesis_time,
+            genesis_validators_root,
+            slot,
+            fork,
+            latest_block_header,
+            block_roots,
+            state_roots,
+            historical_roots,
+            eth1_data,
+            eth1_data_votes,
+            eth1_deposit_index,
+            validators,
+            balances,
+            randao_mixes,
+            slashings,
+            previous_epoch_attestations,
+            current_epoch_attestations,
+            justification_bits,
+            previous_justified_checkpoint,
+            current_justified_checkpoint,
+            finalized_checkpoint,
+        } = self;
+
+        Ok(BeaconState {
+            genesis_time,
+            genesis_validators_root,
+            slot,
+            fork,
+            latest_block_header,
+            block_roots,
+            state_roots,
+            historical_roots,
+            eth1_data,
+            eth1_data_votes: eth1_data_votes.into_inner(),
+            eth1_deposit_index,
+            validators: validators.into_list(finalized_pubkeys)?,
+            balances: balances.into_inner(),
+            randao_mixes,
+            slashings: slashings.into_inner(),
+            previous_epoch_attestations: previous_epoch_attestations.into_inner(),
+            current_epoch_attestations: current_epoch_attestations.into_inner(),
+            justification_bits,
+            previous_justified_checkpoint,
+            current_justified_checkpoint,
+            finalized_checkpoint,
+            cache: Cache::default(),
+        })
     }
 }

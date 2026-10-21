@@ -17,6 +17,8 @@ pub mod phase0 {
     pub mod primitives;
     #[cfg(not(target_os = "zkvm"))]
     pub mod storage;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod stored_validators;
     pub mod validator_list;
     #[cfg(not(target_os = "zkvm"))]
     pub mod validator_list_patch;
