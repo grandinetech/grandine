@@ -44,6 +44,9 @@ typenum = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]
+clock = { workspace = true }
+crossbeam-utils = { workspace = true }
+database = { workspace = true }
 factory = { workspace = true }
 
 [features]
