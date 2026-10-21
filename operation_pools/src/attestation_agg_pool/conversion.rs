@@ -279,17 +279,19 @@ mod tests {
         let first = convert_to_electra_attestation(pool.clone())?;
         let mut no_committee = first.clone();
         no_committee.committee_bits = BitVector::default();
-        assert!(compute_on_chain_aggregate([no_committee].into_iter()).is_err());
+        compute_on_chain_aggregate([no_committee].into_iter()).expect_err("missing committee");
         let mut multiple_committees = first.clone();
         multiple_committees.committee_bits.set(1, true);
-        assert!(compute_on_chain_aggregate([multiple_committees].into_iter()).is_err());
-        assert!(compute_on_chain_aggregate([first.clone(), first.clone()].into_iter()).is_err());
+        compute_on_chain_aggregate([multiple_committees].into_iter())
+            .expect_err("multiple committees per input");
+        compute_on_chain_aggregate([first.clone(), first.clone()].into_iter())
+            .expect_err("duplicate committee");
         let mut other = pool;
         other.committee_index = 1;
         other.data.index = 1;
         let other = convert_to_electra_attestation(other)?;
-        assert!(compute_on_chain_aggregate([first, other].into_iter()).is_err());
-        assert!(compute_on_chain_aggregate::<Minimal>(std::iter::empty()).is_err());
+        compute_on_chain_aggregate([first, other].into_iter()).expect_err("mixed attestation data");
+        compute_on_chain_aggregate::<Minimal>(core::iter::empty()).expect_err("empty input");
         Ok(())
     }
 

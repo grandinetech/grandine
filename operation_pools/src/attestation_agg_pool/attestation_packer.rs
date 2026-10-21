@@ -561,7 +561,7 @@ mod gloas_payload_context_tests {
 
     fn signed_state() -> Result<GloasBeaconState<Minimal>> {
         let mut state = skipped_slot_state()?;
-        state.validators = Default::default();
+        state.validators = types::gloas::validator_list::ProgressiveValidatorList::default();
         for index in 0..64 {
             state.validators.push(Validator {
                 pubkey: secret_key(index).to_public_key().into(),
@@ -576,7 +576,12 @@ mod gloas_payload_context_tests {
 
     fn secret_key(index: u64) -> SecretKey {
         let mut bytes = SecretKeyBytes::default();
-        bytes.as_mut()[24..].copy_from_slice(&(index + 1).to_be_bytes());
+        bytes.as_mut()[24..].copy_from_slice(
+            &index
+                .checked_add(1)
+                .expect("small fixture key index")
+                .to_be_bytes(),
+        );
         bytes.try_into().expect("small nonzero secret key")
     }
 
@@ -810,7 +815,9 @@ mod gloas_payload_context_tests {
                         &packer,
                         slot,
                         committee,
-                        H256::repeat_byte(10 + (committee * 4) as u8 + position as u8),
+                        H256::repeat_byte(u8::try_from(
+                            10 + committee * 4 + u64::try_from(position)?,
+                        )?),
                         0,
                         &[position],
                     )?);
@@ -857,7 +864,7 @@ mod gloas_payload_context_tests {
         assert_eq!(result[0].data, high.data);
         let left = signed_candidate(&packer, 101, 0, H256::repeat_byte(4), 0, &[0, 1])?;
         let right = signed_candidate(&packer, 101, 0, H256::repeat_byte(4), 0, &[2, 3])?;
-        let expected = std::cmp::max(&left, &right);
+        let expected = core::cmp::max(&left, &right);
         let candidates = [left.clone(), right.clone()];
         let result = packer
             .pack_gloas_attestations_greedily([], &candidates)
@@ -876,6 +883,10 @@ mod gloas_payload_context_tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the signed block-processing scenario together"
+    )]
     fn packed_attestations_pass_full_and_empty_block_processing() -> Result<()> {
         use types::{
             combined::BeaconBlock,
@@ -975,7 +986,7 @@ mod gloas_payload_context_tests {
                 NullSlotReport,
                 true,
             )?;
-            let processed = processed.post_gloas().unwrap();
+            let processed = processed.post_gloas().expect("Gloas fixture remains Gloas");
             for index in indices {
                 assert_eq!(
                     *processed.current_epoch_participation().get(index)?,
@@ -1036,10 +1047,10 @@ mod gloas_payload_context_tests {
         let parent_slot = packer
             .state
             .post_gloas()
-            .unwrap()
+            .expect("Gloas scoring fixture")
             .latest_execution_payload_bid()
             .slot;
-        let mut weight = 0;
+        let mut weight = 0_u64;
         for aggregate in output {
             let participation =
                 if aggregate.data.target.epoch == accessors::get_current_epoch(&packer.state) {
@@ -1050,19 +1061,29 @@ mod gloas_payload_context_tests {
             let flags = accessors::get_attestation_participation_flags(
                 &packer.state,
                 aggregate.data,
-                packer.state.slot() - aggregate.data.slot,
+                packer
+                    .state
+                    .slot()
+                    .checked_sub(aggregate.data.slot)
+                    .expect("included attestation precedes proposal"),
                 Some(parent_slot),
             )?;
             let indices =
                 helper_functions::gloas::get_indexed_attestation(&packer.state, aggregate)?
                     .attesting_indices;
             for index in indices {
+                let validator_participation = &mut participation[usize::try_from(index)?];
                 for (flag, flag_weight) in PARTICIPATION_FLAG_WEIGHTS {
-                    if flags.get_bit(flag) && !participation[index as usize].get_bit(flag) {
-                        weight += flag_weight * get_base_reward(&packer.state, index, base)?;
+                    if flags.get_bit(flag) && !validator_participation.get_bit(flag) {
+                        let reward = flag_weight
+                            .checked_mul(get_base_reward(&packer.state, index, base)?)
+                            .expect("fixture reward fits u64");
+                        weight = weight
+                            .checked_add(reward)
+                            .expect("fixture total reward fits u64");
                     }
                 }
-                participation[index as usize] |= flags;
+                *validator_participation |= flags;
             }
         }
         Ok(weight)
@@ -1070,6 +1091,7 @@ mod gloas_payload_context_tests {
 
     #[test]
     #[ignore = "manual synthetic timing comparison; not a production latency benchmark"]
+    #[expect(clippy::print_stdout, reason = "Manual benchmark reports measurements")]
     fn compare_gloas_baseline_quality_and_time() -> Result<()> {
         use std::time::Instant;
         let packer = packer(signed_state()?)?;
@@ -1077,7 +1099,7 @@ mod gloas_payload_context_tests {
             let mut candidates = Vec::new();
             for group in 0..count / 2 {
                 let slot = 96 + group % 6;
-                let start = ((group / 6) % 2 * 2) as usize;
+                let start = usize::try_from((group / 6) % 2 * 2)?;
                 for committee in 0..2 {
                     candidates.push(signed_candidate(
                         &packer,
@@ -1121,9 +1143,15 @@ mod gloas_payload_context_tests {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep the scoring-context controls together"
+    )]
     fn compare_parent_contexts(inclusion_delay: u64) -> Result<()> {
         let mut state = skipped_slot_state()?;
-        state.slot = 101 + inclusion_delay;
+        state.slot = 101_u64
+            .checked_add(inclusion_delay)
+            .expect("small fixture delay");
         let requests = ExecutionRequests::<Minimal>::default();
         state.latest_execution_payload_bid.execution_requests_root = requests.hash_tree_root();
         let before = packer(state.clone())?;
@@ -1142,7 +1170,7 @@ mod gloas_payload_context_tests {
                 ..AttestationData::default()
             },
             committee_index: 0,
-            signature: Default::default(),
+            signature: bls::AggregateSignatureBytes::default(),
         };
         assert!(!helper_functions::predicates::is_attestation_same_slot(
             &before.state,
@@ -1151,7 +1179,7 @@ mod gloas_payload_context_tests {
 
         let mut full_state = state.clone();
         // Model the EMPTY branch's early return with an unchanged state. This
-        // unit test does not execute the private process_parent_execution_payload.
+        // unit test does not execute process_parent_execution_payload.
         let empty_state = state.clone();
 
         transition_functions::gloas::apply_parent_execution_payload(
@@ -1165,24 +1193,24 @@ mod gloas_payload_context_tests {
             !state
                 .execution_payload_availability
                 .get(availability_index)
-                .unwrap()
+                .expect("availability index is within the history window")
         );
         assert!(
             full_state
                 .execution_payload_availability
                 .get(availability_index)
-                .unwrap()
+                .expect("availability index is within the history window")
         );
         assert!(
             !empty_state
                 .execution_payload_availability
                 .get(availability_index)
-                .unwrap()
+                .expect("availability index is within the history window")
         );
 
         let full = packer(full_state)?;
         let empty = packer(empty_state)?;
-        let mut availability_only = state.clone();
+        let mut availability_only = state;
         availability_only
             .execution_payload_availability
             .set(availability_index, true);
@@ -1191,8 +1219,11 @@ mod gloas_payload_context_tests {
         let expected_head_weight = committee
             .into_iter()
             .map(|index| {
-                get_base_reward(&before.state, index, base_reward_per_increment)
-                    .map(|reward| reward * TIMELY_HEAD_WEIGHT)
+                get_base_reward(&before.state, index, base_reward_per_increment).map(|reward| {
+                    reward
+                        .checked_mul(TIMELY_HEAD_WEIGHT)
+                        .expect("fixture head reward fits u64")
+                })
             })
             .sum::<Result<u64>>()?;
         assert!(expected_head_weight > 0);
@@ -1233,17 +1264,21 @@ mod gloas_payload_context_tests {
             if !timely {
                 assert_eq!(score(&before)?, score(&full)?);
             } else if payload_vote == 0 {
-                assert_eq!(score(&before)?, score(&full)? + expected_head_weight);
+                assert_eq!(
+                    score(&before)?,
+                    score(&full)?
+                        .checked_add(expected_head_weight)
+                        .expect("fixture score fits u64")
+                );
             } else {
-                assert_eq!(score(&full)?, score(&before)? + expected_head_weight);
+                assert_eq!(
+                    score(&full)?,
+                    score(&before)?
+                        .checked_add(expected_head_weight)
+                        .expect("fixture score fits u64")
+                );
             }
             assert_eq!(candidate.data.index, payload_vote);
-            println!(
-                "delay={inclusion_delay}, vote={payload_vote}: before flags={before_flags:#05b}, full flags={full_flags:#05b}, before weight={}, full weight={}, empty weight={}",
-                score(&before)?,
-                score(&full)?,
-                score(&empty)?,
-            );
         }
 
         Ok(())
