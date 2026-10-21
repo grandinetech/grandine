@@ -2564,23 +2564,28 @@ fn gloas_invalid_payload_spares_block_and_children_on_empty_node() {
 
     let (_, state_0) = context.genesis();
     let (block_1, state_1) = context.empty_block(&state_0, 1, H256::default());
-    let (block_2, _) = context.empty_block(&state_1, 2, H256::default());
+    let (block_2, state_2) = context.empty_block(&state_1, 2, H256::default());
 
     let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
 
     context.on_slot(block_2.message().slot());
 
     context.on_acceptable_block(&block_1);
     context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
     context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
 
     context.assert_head(2, block_2.message().hash_tree_root());
 
+    context.assert_execution_payload_envelope_present(&block_1, true);
     context.on_notified_invalid_payload(&block_1, None);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
     context.assert_payload_status(&block_2, Some(PayloadStatus::Valid));
     context.assert_head(2, block_2.message().hash_tree_root());
+    context.assert_execution_payload_envelope_present(&block_1, false);
+    context.assert_execution_payload_envelope_present(&block_2, true);
 }
 
 // ```text
@@ -2602,16 +2607,20 @@ fn gloas_invalid_payload_kills_children_on_full_node_and_their_descendants() {
     let (block_3, _) = context.empty_block(&state_2, 3, H256::default());
 
     let envelope_1 = context.execution_payload_envelope(&block_1, &state_1);
+    let envelope_2 = context.execution_payload_envelope(&block_2, &state_2);
 
     context.on_slot(block_3.message().slot());
 
     context.on_acceptable_block(&block_1);
     context.on_valid_execution_payload(&envelope_1, BlsSetting::Required);
     context.on_acceptable_block(&block_2);
+    context.on_valid_execution_payload(&envelope_2, BlsSetting::Required);
     context.on_acceptable_block(&block_3);
 
     context.assert_head(3, block_3.message().hash_tree_root());
 
+    context.assert_execution_payload_envelope_present(&block_1, true);
+    context.assert_execution_payload_envelope_present(&block_2, true);
     context.on_notified_invalid_payload(&block_1, None);
 
     context.assert_payload_status(&block_1, Some(PayloadStatus::Invalid));
@@ -2619,6 +2628,8 @@ fn gloas_invalid_payload_kills_children_on_full_node_and_their_descendants() {
     context.assert_payload_status(&block_3, Some(PayloadStatus::Invalid));
     context.assert_head(1, block_1.message().hash_tree_root());
     context.assert_head_payload_status(PAYLOAD_STATUS_EMPTY);
+    context.assert_execution_payload_envelope_present(&block_1, false);
+    context.assert_execution_payload_envelope_present(&block_2, false);
 }
 
 // ```text

@@ -27,7 +27,7 @@ use crate::{
         AggregateAndProofTask, AttestationTask, AttesterSlashingTask, BlobSidecarTask,
         BlockAttestationsTask, BlockPayloadAttestationsTask, BlockTask, BlockVerifyForGossipTask,
         CacheDepositSignaturesTask, CheckpointStateTask, DataColumnSidecarTask,
-        ExecutionPayloadBidTask, ExecutionPayloadEnvelopeTask,
+        DeleteExecutionPayloadEnvelopesTask, ExecutionPayloadBidTask, ExecutionPayloadEnvelopeTask,
         ExecutionPayloadEnvelopeVerifyForGossipTask, PayloadAttestationBatchTask,
         PayloadAttestationTask, PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
         PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
@@ -168,6 +168,7 @@ enum LowPriorityTask<P: Preset, W> {
     StateAtSlotCacheFlush(StateAtSlotCacheFlushTask<P>),
     PersistDataColumnSidecarsTask(PersistDataColumnSidecarsTask<P, W>),
     PersistExecutionPayloadEnvelopesTask(PersistExecutionPayloadEnvelopesTask<P, W>),
+    DeleteExecutionPayloadEnvelopesTask(DeleteExecutionPayloadEnvelopesTask<P, W>),
 }
 
 impl<P: Preset, W> Run for LowPriorityTask<P, W> {
@@ -189,6 +190,7 @@ impl<P: Preset, W> Run for LowPriorityTask<P, W> {
             Self::StateAtSlotCacheFlush(task) => task.run(),
             Self::PersistDataColumnSidecarsTask(task) => task.run(),
             Self::PersistExecutionPayloadEnvelopesTask(task) => task.run(),
+            Self::DeleteExecutionPayloadEnvelopesTask(task) => task.run(),
         }
     }
 }
@@ -342,6 +344,12 @@ impl<P: Preset, E, W> Spawn<P, E, W> for ExecutionPayloadEnvelopeTask<P, E, W> {
 }
 
 impl<P: Preset, E, W> Spawn<P, E, W> for PersistExecutionPayloadEnvelopesTask<P, W> {
+    fn spawn(self, critical: &mut Critical<P, E, W>) {
+        critical.low_priority_tasks.push_back(self.into())
+    }
+}
+
+impl<P: Preset, E, W> Spawn<P, E, W> for DeleteExecutionPayloadEnvelopesTask<P, W> {
     fn spawn(self, critical: &mut Critical<P, E, W>) {
         critical.low_priority_tasks.push_back(self.into())
     }

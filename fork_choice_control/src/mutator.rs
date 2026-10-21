@@ -95,10 +95,10 @@ use crate::{
     tasks::{
         AttestationTask, BlobSidecarTask, BlockAttestationsTask, BlockPayloadAttestationsTask,
         BlockTask, CacheDepositSignaturesTask, CheckpointStateTask, DataColumnSidecarTask,
-        ExecutionPayloadEnvelopeTask, PayloadAttestationTask, PersistBlobSidecarsTask,
-        PersistDataColumnSidecarsTask, PersistExecutionPayloadEnvelopesTask,
-        PersistPubkeyCacheTask, PreprocessStateTask, ProposerPreferencesTask, PruneStateCacheTask,
-        RetryDataColumnSidecarTask,
+        DeleteExecutionPayloadEnvelopesTask, ExecutionPayloadEnvelopeTask, PayloadAttestationTask,
+        PersistBlobSidecarsTask, PersistDataColumnSidecarsTask,
+        PersistExecutionPayloadEnvelopesTask, PersistPubkeyCacheTask, PreprocessStateTask,
+        ProposerPreferencesTask, PruneStateCacheTask, RetryDataColumnSidecarTask,
     },
     thread_pool::{Spawn, ThreadPool},
     unbounded_sink::UnboundedSink,
@@ -2986,6 +2986,19 @@ where
         wait_group: W,
         persisted_block_roots: Vec<H256>,
     ) {
+        // Invalidated envelopes may have been persisted while the task was running.
+        let invalidated_envelopes = persisted_block_roots
+            .iter()
+            .filter_map(|block_root| {
+                let chain_link = self.store.chain_link(*block_root)?;
+                chain_link
+                    .is_invalid()
+                    .then(|| (chain_link.slot(), *block_root))
+            })
+            .collect_vec();
+
+        self.spawn_delete_execution_payload_envelopes_task(&wait_group, invalidated_envelopes);
+
         self.store_mut()
             .mark_persisted_envelopes(persisted_block_roots);
 
@@ -3097,8 +3110,11 @@ where
             // The call to `Store::update_chain_payload_statuses` above will set the payload
             // statuses of the block and its ancestors to `PayloadStatus::Valid`.
         } else if status.is_invalid() {
-            self.store_mut()
+            let invalidated_envelopes = self
+                .store_mut()
                 .invalidate_payload_and_descendant_payloads(beacon_block_root);
+
+            self.spawn_delete_execution_payload_envelopes_task(wait_group, invalidated_envelopes);
         } else {
             return;
         }
@@ -5815,6 +5831,22 @@ where
         }
 
         BlockDataColumnAvailability::Missing(missing_indices)
+    }
+
+    fn spawn_delete_execution_payload_envelopes_task(
+        &self,
+        wait_group: &W,
+        envelopes: Vec<(Slot, H256)>,
+    ) {
+        if envelopes.is_empty() {
+            return;
+        }
+
+        self.spawn(DeleteExecutionPayloadEnvelopesTask {
+            storage: self.storage.clone_arc(),
+            envelopes,
+            wait_group: wait_group.clone(),
+        });
     }
 }
 
