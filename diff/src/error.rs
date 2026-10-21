@@ -3,6 +3,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("cross-phase diffs are not supported")]
+    CrossPhaseDiff,
+
+    #[error("patch phase does not match the base value")]
+    PatchPhaseMismatch,
+
     #[error("patch index is out of bounds")]
     PatchIndexOutOfBounds,
 
