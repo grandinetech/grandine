@@ -31,6 +31,9 @@ const GROWTH_STEP: ByteSize = ByteSize::mib(256);
 #[cfg(not(target_os = "zkvm"))]
 const MAX_NAMED_DATABASES: usize = 10;
 
+#[cfg(not(target_os = "zkvm"))]
+const RECLAIMABLE_PAGE_LIMIT: u64 = 256 * 1024;
+
 pub trait PrefixableKey {
     const PREFIX: &'static str;
 
@@ -116,6 +119,7 @@ impl Database {
         //                      unnecessary if the default database is used.
         let environment = Environment::builder()
             .set_max_dbs(MAX_NAMED_DATABASES)
+            .set_rp_augment_limit(RECLAIMABLE_PAGE_LIMIT)
             .set_geometry(Geometry {
                 size: Some(..usize::try_from(max_size.as_u64())?),
                 growth_step: Some(isize::try_from(GROWTH_STEP.as_u64())?),
