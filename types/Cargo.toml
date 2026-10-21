@@ -48,3 +48,4 @@ serde_json = { workspace = true }
 spec_test_utils = { workspace = true }
 test-case = { workspace = true }
 test-generator = { workspace = true }
+zstd = { workspace = true }
