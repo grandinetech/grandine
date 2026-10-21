@@ -33,7 +33,7 @@ use operation_pools::{
 };
 use prometheus_metrics::Metrics;
 use pubkey_cache::PubkeyCache;
-use ssz::{BitList, BitVector, ContiguousList, Hc, ProgressiveList, SszHash};
+use ssz::{BitVector, ContiguousList, Hc, ProgressiveList, SszHash};
 use std_ext::ArcExt as _;
 use tap::Pipe as _;
 use tokio::task::JoinHandle;
@@ -949,7 +949,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
         info_with_peers!("block producer prepared voluntary exits");
 
-        let attestations = self.prepare_attestations().await?;
+        let attestations = if self.beacon_state.is_post_gloas() {
+            Vec::new()
+        } else {
+            self.prepare_attestations().await?
+        };
 
         info_with_peers!("block producer prepared attestations");
 
@@ -1107,7 +1111,8 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 let attestations = results
                     .into_iter()
                     .filter_map(|(_, _, attestations)| {
-                        match Self::compute_on_chain_aggregate(attestations.into_iter()) {
+                        match operation_pools::compute_on_chain_aggregate(attestations.into_iter())
+                        {
                             Ok(electra_aggregate) => Some(electra_aggregate),
                             Err(error) => {
                                 warn_with_peers!("unable to compute on chain aggregate: {error:?}");
@@ -1165,7 +1170,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         },
                     })),
                     Phase::Gloas => {
-                        let snapshot = self.producer_context.controller.snapshot();
                         let parent_block = self.producer_context.controller.head_block();
 
                         // TODO(gloas): payload attestations are valid only for one slot after block.
@@ -1179,22 +1183,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         };
 
                         info_with_peers!("block producer prepared payload attestations");
-
-                        let parent_execution_requests = if snapshot.should_build_on_full(slot) {
-                            // TODO(gloas): the block root needs to be checked if it is gloas or not.
-                            // the current behavior erronously returns empty execution requests when
-                            // payload envelope is not found, though block may be from gloas phase and
-                            // envelope is missing (so it should error out).
-                            snapshot
-                                .cached_execution_payload_envelope_by_root(parent_root)
-                                .ok_or_else(|| anyhow!("no cached payload envelope"))
-                                .map(|payload| payload.message.execution_requests.clone())
-                                .unwrap_or_default()
-                        } else {
-                            GloasExecutionRequests::default()
-                        };
-
-                        info_with_peers!("block producer prepared parent execution requests");
 
                         BeaconBlock::from(Hc::new(GloasBeaconBlock {
                             slot,
@@ -1214,7 +1202,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                                 bls_to_execution_changes: bls_to_execution_changes.into(),
                                 signed_execution_payload_bid: SignedExecutionPayloadBid::default(),
                                 payload_attestations,
-                                parent_execution_requests,
+                                parent_execution_requests: GloasExecutionRequests::default(),
                             },
                         }))
                     }
@@ -1231,46 +1219,6 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         info_with_peers!("block producer finishing build beacon block without state root task");
 
         result
-    }
-
-    fn compute_on_chain_aggregate(
-        attestations: impl Iterator<Item = ElectraAttestation<P>>,
-    ) -> Result<ElectraAttestation<P>> {
-        let aggregates = attestations
-            .sorted_by_key(|attestation| {
-                misc::get_committee_indices::<P>(attestation.committee_bits).next()
-            })
-            .collect_vec();
-
-        let aggregation_bits = aggregates
-            .iter()
-            .map(|attestation| &attestation.aggregation_bits)
-            .pipe(BitList::concatenate)?;
-
-        let data = if let Some(attestation) = aggregates.first() {
-            attestation.data
-        } else {
-            return Err(AnyhowError::msg("no attestations for block aggregate"));
-        };
-
-        let mut committee_bits = BitVector::default();
-        let mut signature = AggregateSignature::default();
-
-        for aggregate in aggregates {
-            for committee_index in misc::get_committee_indices::<P>(aggregate.committee_bits) {
-                let index = committee_index.try_into()?;
-                committee_bits.set(index, true);
-            }
-
-            signature.aggregate_in_place(aggregate.signature.try_into()?);
-        }
-
-        Ok(ElectraAttestation {
-            aggregation_bits,
-            data,
-            committee_bits,
-            signature: signature.into(),
-        })
     }
 
     fn blinded_block_from_beacon_block(
@@ -1361,6 +1309,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Some((beacon_block, block_rewards))
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn produce_beacon_block(
         &self,
         block_without_state_root: BeaconBlock<P>,
@@ -1433,6 +1382,50 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                 .with_blob_kzg_commitments(commitments)
                 .with_execution_requests(execution_requests)
         };
+
+        if let (BeaconState::Gloas(state), BeaconBlock::Gloas(block)) =
+            (&*self.beacon_state, &mut without_state_root_with_payload)
+        {
+            let started_at = std::time::Instant::now();
+            let parent_bid = &state.latest_execution_payload_bid;
+            let config = &self.producer_context.chain_config;
+            // Both builder and self-build bids use the parent path encoded in the final bid.
+            if block
+                .body
+                .signed_execution_payload_bid
+                .message
+                .parent_block_hash
+                == parent_bid.block_hash
+                && config.phase_at_slot::<P>(parent_bid.slot) >= Phase::Gloas
+            {
+                block.body.parent_execution_requests = self
+                    .producer_context
+                    .controller
+                    .snapshot()
+                    .cached_execution_payload_envelope_by_root(block.parent_root)
+                    .ok_or_else(|| anyhow!("missing FULL parent payload envelope"))?
+                    .message
+                    .execution_requests
+                    .clone();
+            }
+            let mut scoring_state = state.clone();
+            gloas::process_parent_execution_payload(
+                config,
+                &self.producer_context.pubkey_cache,
+                &mut scoring_state,
+                block,
+            )?;
+            block.body.attestations = self
+                .producer_context
+                .attestation_agg_pool
+                .gloas_proposable_attestations(Arc::new(BeaconState::Gloas(scoring_state)))
+                .await?
+                .try_into()?;
+            info_with_peers!(
+                "Gloas proposal parent processing and packing elapsed {} us",
+                started_at.elapsed().as_micros()
+            );
+        }
 
         if !self.options.disable_blockprint_graffiti {
             let graffiti = build_graffiti(self.options.graffiti, client_versions);
