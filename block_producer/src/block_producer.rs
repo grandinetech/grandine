@@ -79,6 +79,7 @@ use types::{
     },
     fulu::containers::{BeaconBlock as FuluBeaconBlock, BeaconBlockBody as FuluBeaconBlockBody},
     gloas::{
+        beacon_state::BeaconState as GloasBeaconState,
         consts::BUILDER_INDEX_SELF_BUILD,
         containers::{
             AttesterSlashing as GloasAttesterSlashing, BeaconBlock as GloasBeaconBlock,
@@ -1387,33 +1388,19 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             (&*self.beacon_state, &mut without_state_root_with_payload)
         {
             let started_at = std::time::Instant::now();
-            let parent_bid = &state.latest_execution_payload_bid;
             let config = &self.producer_context.chain_config;
-            // Both builder and self-build bids use the parent path encoded in the final bid.
-            if block
-                .body
-                .signed_execution_payload_bid
-                .message
-                .parent_block_hash
-                == parent_bid.block_hash
-                && config.phase_at_slot::<P>(parent_bid.slot) >= Phase::Gloas
-            {
-                block.body.parent_execution_requests = self
-                    .producer_context
-                    .controller
-                    .snapshot()
-                    .cached_execution_payload_envelope_by_root(block.parent_root)
-                    .ok_or_else(|| anyhow!("missing FULL parent payload envelope"))?
-                    .message
-                    .execution_requests
-                    .clone();
-            }
-            let mut scoring_state = state.clone();
-            gloas::process_parent_execution_payload(
+            let scoring_state = prepare_gloas_scoring_state(
                 config,
                 &self.producer_context.pubkey_cache,
-                &mut scoring_state,
+                state,
                 block,
+                |root| {
+                    self.producer_context
+                        .controller
+                        .snapshot()
+                        .cached_execution_payload_envelope_by_root(root)
+                        .map(|envelope| envelope.message.execution_requests.clone())
+                },
             )?;
             block.body.attestations = self
                 .producer_context
@@ -2550,6 +2537,34 @@ fn log_with_feature(message: impl Display) {
     features::log!(DebugBlockProducer, "{message}");
 }
 
+// Both builder and self-build bids use the parent path encoded in the final bid.
+// The state must belong to block.parent_root; discard the candidate block on error.
+fn prepare_gloas_scoring_state<P: Preset>(
+    config: &ChainConfig,
+    pubkey_cache: &PubkeyCache,
+    state: &Hc<GloasBeaconState<P>>,
+    block: &mut GloasBeaconBlock<P>,
+    parent_requests: impl FnOnce(H256) -> Option<GloasExecutionRequests<P>>,
+) -> Result<Hc<GloasBeaconState<P>>> {
+    let parent_bid = &state.latest_execution_payload_bid;
+    block.body.parent_execution_requests = if block
+        .body
+        .signed_execution_payload_bid
+        .message
+        .parent_block_hash
+        == parent_bid.block_hash
+        && config.phase_at_slot::<P>(parent_bid.slot) >= Phase::Gloas
+    {
+        parent_requests(block.parent_root)
+            .ok_or_else(|| anyhow!("missing FULL parent payload envelope"))?
+    } else {
+        GloasExecutionRequests::default()
+    };
+    let mut scoring_state = state.clone();
+    gloas::process_parent_execution_payload(config, pubkey_cache, &mut scoring_state, block)?;
+    Ok(scoring_state)
+}
+
 fn post_merge_state<P: Preset>(state: &BeaconState<P>) -> Option<&dyn PostBellatrixBeaconState<P>> {
     state
         .post_bellatrix()
@@ -2560,4 +2575,149 @@ async fn wait_for_result<T: Send>(job: Job<Result<T>>) -> Result<T> {
     job.await
         .map_err(AnyhowError::msg)
         .context("block producer task failed")?
+}
+
+#[cfg(test)]
+mod gloas_scoring_tests {
+    use types::{gloas::containers::BuilderExitRequest, preset::Minimal};
+
+    use super::*;
+
+    fn fixture(full: bool) -> (Hc<GloasBeaconState<Minimal>>, GloasBeaconBlock<Minimal>) {
+        let mut state = GloasBeaconState::<Minimal> {
+            slot: 102,
+            ..Default::default()
+        };
+        state.latest_execution_payload_bid.slot = 100;
+        state.latest_execution_payload_bid.block_hash = H256::repeat_byte(2);
+        state.latest_execution_payload_bid.execution_requests_root =
+            GloasExecutionRequests::<Minimal>::default().hash_tree_root();
+        let mut block = GloasBeaconBlock::<Minimal> {
+            slot: 102,
+            parent_root: H256::repeat_byte(1),
+            ..Default::default()
+        };
+        block
+            .body
+            .signed_execution_payload_bid
+            .message
+            .parent_block_hash = if full {
+            state.latest_execution_payload_bid.block_hash
+        } else {
+            state.latest_block_hash
+        };
+        (Hc::new(state), block)
+    }
+
+    #[test]
+    fn final_bid_parent_path_controls_requests_and_scoring_copy() -> Result<()> {
+        let config = ChainConfig::minimal().start_and_stay_in(Phase::Gloas);
+        for builder_index in [BUILDER_INDEX_SELF_BUILD, 0] {
+            for full in [false, true] {
+                let (mut state, mut block) = fixture(full);
+                block
+                    .body
+                    .signed_execution_payload_bid
+                    .message
+                    .builder_index = builder_index;
+                let mut requests = GloasExecutionRequests::<Minimal>::default();
+                // An unknown builder exit is ignored, but gives the envelope a nonempty commitment.
+                requests.builder_exits = vec![BuilderExitRequest::default()].try_into()?;
+                state.latest_execution_payload_bid.execution_requests_root =
+                    requests.hash_tree_root();
+                let original_root = state.hash_tree_root();
+                let expected_root = block.parent_root;
+                let mut lookups = 0;
+                let scoring = prepare_gloas_scoring_state(
+                    &config,
+                    &PubkeyCache::default(),
+                    &state,
+                    &mut block,
+                    |root| {
+                        lookups += 1;
+                        assert_eq!(root, expected_root);
+                        Some(requests.clone())
+                    },
+                )?;
+                assert_eq!(lookups, usize::from(full));
+                assert_eq!(state.hash_tree_root(), original_root);
+                assert_eq!(
+                    scoring
+                        .execution_payload_availability
+                        .get(100 % types::preset::SlotsPerHistoricalRoot::<Minimal>::USIZE),
+                    Some(full)
+                );
+                assert_eq!(
+                    block.body.parent_execution_requests,
+                    if full {
+                        requests
+                    } else {
+                        GloasExecutionRequests::default()
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn full_parent_requires_envelope_and_matching_commitment() {
+        let config = ChainConfig::minimal().start_and_stay_in(Phase::Gloas);
+        let (mut state, mut block) = fixture(true);
+        let missing = prepare_gloas_scoring_state(
+            &config,
+            &PubkeyCache::default(),
+            &state,
+            &mut block,
+            |_| None,
+        );
+        assert!(
+            missing
+                .unwrap_err()
+                .to_string()
+                .contains("missing FULL parent payload envelope")
+        );
+        state.latest_execution_payload_bid.execution_requests_root = H256::repeat_byte(9);
+        let original_root = state.hash_tree_root();
+        assert!(
+            prepare_gloas_scoring_state(
+                &config,
+                &PubkeyCache::default(),
+                &state,
+                &mut block,
+                |_| Some(GloasExecutionRequests::default())
+            )
+            .is_err()
+        );
+        assert_eq!(state.hash_tree_root(), original_root);
+    }
+
+    #[test]
+    fn pre_gloas_parent_does_not_require_envelope() -> Result<()> {
+        let mut config = ChainConfig::minimal().start_and_stay_in(Phase::Fulu);
+        config.gloas_fork_epoch = 12;
+        let (mut state, mut block) = fixture(true);
+        // Match the upgrade's parent slot and empty requests commitment.
+        state.latest_execution_payload_bid.slot = 95;
+        assert_eq!(config.phase_at_slot::<Minimal>(95), Phase::Fulu);
+        assert_eq!(config.phase_at_slot::<Minimal>(102), Phase::Gloas);
+        let scoring = prepare_gloas_scoring_state(
+            &config,
+            &PubkeyCache::default(),
+            &state,
+            &mut block,
+            |_| panic!("pre-Gloas parent has no envelope"),
+        )?;
+        assert_eq!(
+            scoring
+                .execution_payload_availability
+                .get(95 % types::preset::SlotsPerHistoricalRoot::<Minimal>::USIZE),
+            Some(true)
+        );
+        assert_eq!(
+            block.body.parent_execution_requests,
+            GloasExecutionRequests::default()
+        );
+        Ok(())
+    }
 }

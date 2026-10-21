@@ -593,7 +593,13 @@ mod gloas_payload_context_tests {
             slot,
             index: vote,
             beacon_block_root: root,
-            source: packer.state.current_justified_checkpoint(),
+            source: if misc::compute_epoch_at_slot::<Minimal>(slot)
+                == accessors::get_current_epoch(&packer.state)
+            {
+                packer.state.current_justified_checkpoint()
+            } else {
+                packer.state.previous_justified_checkpoint()
+            },
             target: Checkpoint {
                 epoch: misc::compute_epoch_at_slot::<Minimal>(slot),
                 root: H256::repeat_byte(3),
@@ -630,6 +636,90 @@ mod gloas_payload_context_tests {
             &indexed,
             SingleVerifier,
         )
+    }
+
+    #[test]
+    fn mixed_epochs_keep_participation_separate() -> Result<()> {
+        let mut state = signed_state()?;
+        state.previous_justified_checkpoint = Checkpoint {
+            epoch: 10,
+            root: H256::repeat_byte(9),
+        };
+        *state.block_roots.mod_index_mut(88) = H256::repeat_byte(3);
+        let packer = packer(state)?;
+        let previous = signed_candidate(&packer, 95, 0, H256::repeat_byte(4), 0, &[0, 1, 2, 3])?;
+        let current = signed_candidate(&packer, 101, 0, H256::repeat_byte(4), 0, &[0, 1, 2, 3])?;
+        let expected = [&previous, &current]
+            .into_iter()
+            .map(|candidate| {
+                packer.added_weight(
+                    candidate,
+                    &packer.previous_epoch_participation,
+                    &packer.current_epoch_participation,
+                )
+            })
+            .sum::<Result<u64>>()?;
+        let selected = packer
+            .pack_gloas_attestations_greedily([&previous], [&current])
+            .attestations;
+        assert_eq!(selected.len(), 2);
+        assert_eq!(output_weight(&packer, &selected)?, expected);
+        for aggregate in &selected {
+            verify_aggregate(&packer, aggregate)?;
+        }
+
+        // Mark every current-epoch flag as accounted for without suppressing previous-epoch votes.
+        let mut packer = packer;
+        packer.current_epoch_participation.fill(u8::MAX);
+        let selected = packer
+            .pack_gloas_attestations_greedily([&previous], [&current])
+            .attestations;
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].data, previous.data);
+        Ok(())
+    }
+
+    #[test]
+    fn unequal_committee_lengths_preserve_bits_and_signature() -> Result<()> {
+        let mut state = signed_state()?;
+        state.validators.push(Validator {
+            pubkey: secret_key(64).to_public_key().into(),
+            effective_balance: 32_000_000_000,
+            exit_epoch: FAR_FUTURE_EPOCH,
+            withdrawable_epoch: FAR_FUTURE_EPOCH,
+            ..Validator::default()
+        })?;
+        state.balances.push(32_000_000_000)?;
+        state.previous_epoch_participation.push(0)?;
+        state.current_epoch_participation.push(0)?;
+        let packer = packer(state)?;
+        // The last partition receives the remainder when 65 validators form 16 committees.
+        let first = signed_candidate(&packer, 103, 0, H256::repeat_byte(4), 0, &[0, 2])?;
+        let second = signed_candidate(&packer, 103, 1, H256::repeat_byte(4), 0, &[1, 4])?;
+        assert_ne!(first.aggregation_bits.len(), second.aggregation_bits.len());
+        let expected = first
+            .aggregation_bits
+            .iter()
+            .chain(second.aggregation_bits.iter())
+            .map(|bit| *bit)
+            .collect_vec();
+        let aggregate = compute_on_chain_aggregate(
+            [second, first]
+                .into_iter()
+                .map(convert_to_electra_attestation)
+                .collect::<Result<Vec<_>>>()?
+                .into_iter(),
+        )?;
+        assert_eq!(
+            aggregate
+                .aggregation_bits
+                .iter()
+                .map(|bit| *bit)
+                .collect_vec(),
+            expected
+        );
+        verify_aggregate(&packer, &aggregate.into())?;
+        Ok(())
     }
 
     #[test]
@@ -940,7 +1030,8 @@ mod gloas_payload_context_tests {
         packer: &AttestationPacker<Minimal>,
         output: &[GloasAttestation<Minimal>],
     ) -> Result<u64> {
-        let mut participation = packer.current_epoch_participation.clone();
+        let mut previous_participation = packer.previous_epoch_participation.clone();
+        let mut current_participation = packer.current_epoch_participation.clone();
         let base = get_base_reward_per_increment(&packer.state)?;
         let parent_slot = packer
             .state
@@ -950,6 +1041,12 @@ mod gloas_payload_context_tests {
             .slot;
         let mut weight = 0;
         for aggregate in output {
+            let participation =
+                if aggregate.data.target.epoch == accessors::get_current_epoch(&packer.state) {
+                    &mut current_participation
+                } else {
+                    &mut previous_participation
+                };
             let flags = accessors::get_attestation_participation_flags(
                 &packer.state,
                 aggregate.data,

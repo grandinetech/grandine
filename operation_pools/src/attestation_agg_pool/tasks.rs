@@ -111,6 +111,7 @@ pub struct GloasProposableAttestationsTask<P: Preset, W: Wait> {
     pub pool: Arc<Pool<P>>,
     pub controller: ApiController<P, W>,
     pub scoring_state: Arc<BeaconState<P>>,
+    pub metrics: Option<Arc<Metrics>>,
 }
 
 impl<P: Preset, W: Wait> PoolTask for GloasProposableAttestationsTask<P, W> {
@@ -122,6 +123,11 @@ impl<P: Preset, W: Wait> PoolTask for GloasProposableAttestationsTask<P, W> {
             self.scoring_state.is_post_gloas(),
             "expected Gloas scoring state"
         );
+        let _timer = self.metrics.as_ref().map(|metrics| {
+            metrics
+                .att_pool_best_proposable_attestations_times
+                .start_timer()
+        });
         // shortcut: bypass slot-only prepacking, reconsider caching after latency measurements.
         let candidates =
             candidates_for_packing(&self.controller, &self.pool, &self.scoring_state).await?;
@@ -173,12 +179,6 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
             metrics,
         } = self;
 
-        let _timer = metrics.as_ref().map(|metrics| {
-            metrics
-                .att_pool_pack_proposable_attestations_times
-                .start_timer()
-        });
-
         let started_at = Instant::now();
 
         let beacon_state = controller.preprocessed_state_at_next_slot_blocking()?;
@@ -186,6 +186,11 @@ impl<P: Preset, W: Wait> PoolTask for PackProposableAttestationsTask<P, W> {
         if beacon_state.is_post_gloas() {
             return Ok(());
         }
+        let _timer = metrics.as_ref().map(|metrics| {
+            metrics
+                .att_pool_pack_proposable_attestations_times
+                .start_timer()
+        });
         let slot = controller.slot().saturating_add(1);
 
         // Greedy packing is a single deterministic pass, so — unlike the removed solver path —
