@@ -14,6 +14,8 @@ pub mod phase0 {
     pub mod containers;
     pub mod primitives;
     pub mod validator_list;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod validator_list_patch;
 
     mod container_impls;
 
