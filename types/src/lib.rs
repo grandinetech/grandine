@@ -4,6 +4,8 @@ pub mod config;
 pub mod nonstandard;
 pub mod preset;
 pub mod redacting_url;
+#[cfg(not(target_os = "zkvm"))]
+pub mod storage;
 pub mod traits;
 
 pub mod phase0 {
@@ -13,6 +15,8 @@ pub mod phase0 {
     pub mod consts;
     pub mod containers;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
     pub mod validator_list;
     #[cfg(not(target_os = "zkvm"))]
     pub mod validator_list_patch;
@@ -30,6 +34,8 @@ pub mod altair {
     #[cfg(not(target_os = "zkvm"))]
     pub mod participation_patch;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
 
     mod container_impls;
 
@@ -41,6 +47,8 @@ pub mod bellatrix {
     pub mod beacon_state;
     pub mod containers;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
 
     mod container_impls;
 
@@ -53,6 +61,8 @@ pub mod capella {
     pub mod consts;
     pub mod containers;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
 
     mod container_impls;
 
@@ -65,6 +75,8 @@ pub mod deneb {
     pub mod consts;
     pub mod containers;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
 
     mod container_impls;
 
@@ -77,6 +89,8 @@ pub mod electra {
     pub mod consts;
     pub mod containers;
     pub mod error;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
 
     mod container_impls;
 
@@ -88,6 +102,8 @@ pub mod fulu {
     pub mod beacon_state;
     pub mod containers;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
 
     mod container_impls;
 
@@ -104,6 +120,8 @@ pub mod gloas {
     pub mod primitives;
     #[cfg(not(target_os = "zkvm"))]
     pub mod ptc_patch;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod storage;
     pub mod validator_list;
 
     mod container_impls;
