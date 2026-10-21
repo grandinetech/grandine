@@ -277,6 +277,12 @@ mod tests {
             signature: SignatureBytes::empty(),
         };
         let first = convert_to_electra_attestation(pool.clone())?;
+        let mut no_committee = first.clone();
+        no_committee.committee_bits = BitVector::default();
+        assert!(compute_on_chain_aggregate([no_committee].into_iter()).is_err());
+        let mut multiple_committees = first.clone();
+        multiple_committees.committee_bits.set(1, true);
+        assert!(compute_on_chain_aggregate([multiple_committees].into_iter()).is_err());
         assert!(compute_on_chain_aggregate([first.clone(), first.clone()].into_iter()).is_err());
         let mut other = pool;
         other.committee_index = 1;

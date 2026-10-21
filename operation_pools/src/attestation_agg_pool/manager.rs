@@ -158,6 +158,7 @@ impl<P: Preset, W: Wait> Manager<P, W> {
             controller: self.controller.clone_arc(),
             pool: self.pool.clone_arc(),
             scoring_state,
+            metrics: self.metrics.clone(),
         })
         .await
     }
