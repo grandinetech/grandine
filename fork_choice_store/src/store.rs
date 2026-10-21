@@ -1837,6 +1837,20 @@ impl<P: Preset, S: Storage<P>> Store<P, S> {
     }
 
     #[must_use]
+    pub fn proposer_preferences(
+        &self,
+        parent_block_root: H256,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+    ) -> Option<&Arc<SignedProposerPreferences>> {
+        let epoch = misc::compute_epoch_at_slot::<P>(slot);
+        let dependent_root = self.shuffling_dependent_root(parent_block_root, epoch)?;
+
+        self.accepted_proposer_preferences
+            .get(&(dependent_root, slot, proposer_index))
+    }
+
+    #[must_use]
     pub fn common_ancestor(&self, a_root: H256, b_root: H256) -> Option<&ChainLink<P>> {
         itertools::merge_join_by(
             self.chain_ending_with(a_root),
