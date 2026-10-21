@@ -171,6 +171,15 @@ impl CacheNode {
 }
 
 impl<N: Unsigned> ValidatorList<N> {
+    /// Wraps `buf`, which must hold no more than `N` validators.
+    pub(crate) fn from_raw(buf: RawValidatorList) -> Self {
+        Self {
+            cache: (buf.len_usize() > 0).then(|| CacheNode::build_empty(buf.len_usize())),
+            buf,
+            phantom: PhantomData,
+        }
+    }
+
     fn depth(&self) -> u8 {
         <MinimumBundleSize<Validator> as BundleSize<Validator>>::depth_of_length(self.len_usize())
     }

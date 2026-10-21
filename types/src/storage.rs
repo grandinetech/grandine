@@ -1,19 +1,166 @@
 use std::sync::Arc;
 
 use diff::{Error as PatchError, Patch, PatchConfig};
+use enum_iterator::Sequence as _;
 use ssz::{Hc, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
 
 use crate::{
-    altair::storage::BeaconStatePatch as AltairBeaconStatePatch,
-    bellatrix::storage::BeaconStatePatch as BellatrixBeaconStatePatch, cache::Cache,
-    capella::storage::BeaconStatePatch as CapellaBeaconStatePatch, combined::BeaconState,
-    deneb::storage::BeaconStatePatch as DenebBeaconStatePatch,
-    electra::storage::BeaconStatePatch as ElectraBeaconStatePatch,
-    fulu::storage::BeaconStatePatch as FuluBeaconStatePatch,
-    gloas::storage::BeaconStatePatch as GloasBeaconStatePatch,
-    phase0::storage::BeaconStatePatch as Phase0BeaconStatePatch, preset::Preset,
+    altair::storage::{
+        BeaconStateFrame as AltairBeaconStateFrame, BeaconStatePatch as AltairBeaconStatePatch,
+    },
+    bellatrix::storage::{
+        BeaconStateFrame as BellatrixBeaconStateFrame,
+        BeaconStatePatch as BellatrixBeaconStatePatch,
+    },
+    cache::Cache,
+    capella::storage::{
+        BeaconStateFrame as CapellaBeaconStateFrame, BeaconStatePatch as CapellaBeaconStatePatch,
+    },
+    combined::BeaconState,
+    config::Config,
+    deneb::storage::{
+        BeaconStateFrame as DenebBeaconStateFrame, BeaconStatePatch as DenebBeaconStatePatch,
+    },
+    electra::storage::{
+        BeaconStateFrame as ElectraBeaconStateFrame, BeaconStatePatch as ElectraBeaconStatePatch,
+    },
+    fulu::storage::{
+        BeaconStateFrame as FuluBeaconStateFrame, BeaconStatePatch as FuluBeaconStatePatch,
+    },
+    gloas::storage::{
+        BeaconStateFrame as GloasBeaconStateFrame, BeaconStatePatch as GloasBeaconStatePatch,
+    },
+    nonstandard::{Phase, PubkeyList},
+    phase0::storage::{
+        BeaconStateFrame as Phase0BeaconStateFrame, BeaconStatePatch as Phase0BeaconStatePatch,
+    },
+    preset::Preset,
     traits::BeaconState as BeaconStateTrait,
 };
+
+pub enum BeaconStateFrame<P: Preset> {
+    Phase0(Phase0BeaconStateFrame<P>),
+    Altair(AltairBeaconStateFrame<P>),
+    Bellatrix(BellatrixBeaconStateFrame<P>),
+    Capella(CapellaBeaconStateFrame<P>),
+    Deneb(DenebBeaconStateFrame<P>),
+    Electra(ElectraBeaconStateFrame<P>),
+    Fulu(FuluBeaconStateFrame<P>),
+    Gloas(GloasBeaconStateFrame<P>),
+}
+
+impl<P: Preset> BeaconStateFrame<P> {
+    /// The first `finalized_validators` validators are stored without their public keys, which
+    /// [`Self::into_state`] takes from the finalized registry.
+    #[must_use]
+    pub fn new(state: &BeaconState<P>, finalized_validators: usize, level: i32) -> Self {
+        match state {
+            BeaconState::Phase0(state) => Self::Phase0(Phase0BeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Altair(state) => Self::Altair(AltairBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Bellatrix(state) => Self::Bellatrix(BellatrixBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Capella(state) => Self::Capella(CapellaBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Deneb(state) => Self::Deneb(DenebBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Electra(state) => Self::Electra(ElectraBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Fulu(state) => Self::Fulu(FuluBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+            BeaconState::Gloas(state) => Self::Gloas(GloasBeaconStateFrame::new(
+                state,
+                finalized_validators,
+                level,
+            )),
+        }
+    }
+
+    pub fn into_state(self, finalized_pubkeys: &PubkeyList) -> Result<BeaconState<P>, ReadError> {
+        let state: BeaconState<P> = match self {
+            Self::Phase0(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Altair(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Bellatrix(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Capella(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Deneb(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Electra(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Fulu(frame) => frame.into_state(finalized_pubkeys)?.into(),
+            Self::Gloas(frame) => frame.into_state(finalized_pubkeys)?.into(),
+        };
+
+        Ok(state)
+    }
+}
+
+impl<P: Preset> SszSize for BeaconStateFrame<P> {
+    const SIZE: Size = Size::for_untagged_union::<{ Phase::CARDINALITY }>([
+        Phase0BeaconStateFrame::<P>::SIZE,
+        AltairBeaconStateFrame::<P>::SIZE,
+        BellatrixBeaconStateFrame::<P>::SIZE,
+        CapellaBeaconStateFrame::<P>::SIZE,
+        DenebBeaconStateFrame::<P>::SIZE,
+        ElectraBeaconStateFrame::<P>::SIZE,
+        FuluBeaconStateFrame::<P>::SIZE,
+        GloasBeaconStateFrame::<P>::SIZE,
+    ]);
+}
+
+impl<P: Preset> SszRead<Config> for BeaconStateFrame<P> {
+    fn from_ssz_unchecked(config: &Config, bytes: &[u8]) -> Result<Self, ReadError> {
+        let slot = BeaconState::<P>::slot_from_ssz(bytes)?;
+        let phase = config.phase_at_slot::<P>(slot);
+
+        let frame = match phase {
+            Phase::Phase0 => Self::Phase0(SszRead::from_ssz(config, bytes)?),
+            Phase::Altair => Self::Altair(SszRead::from_ssz(config, bytes)?),
+            Phase::Bellatrix => Self::Bellatrix(SszRead::from_ssz(config, bytes)?),
+            Phase::Capella => Self::Capella(SszRead::from_ssz(config, bytes)?),
+            Phase::Deneb => Self::Deneb(SszRead::from_ssz(config, bytes)?),
+            Phase::Electra => Self::Electra(SszRead::from_ssz(config, bytes)?),
+            Phase::Fulu => Self::Fulu(SszRead::from_ssz(config, bytes)?),
+            Phase::Gloas => Self::Gloas(SszRead::from_ssz(config, bytes)?),
+        };
+
+        Ok(frame)
+    }
+}
+
+impl<P: Preset> SszWrite for BeaconStateFrame<P> {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        match self {
+            Self::Phase0(frame) => frame.write_variable(bytes),
+            Self::Altair(frame) => frame.write_variable(bytes),
+            Self::Bellatrix(frame) => frame.write_variable(bytes),
+            Self::Capella(frame) => frame.write_variable(bytes),
+            Self::Deneb(frame) => frame.write_variable(bytes),
+            Self::Electra(frame) => frame.write_variable(bytes),
+            Self::Fulu(frame) => frame.write_variable(bytes),
+            Self::Gloas(frame) => frame.write_variable(bytes),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Ssz)]
 #[ssz(derive_hash = false, transparent)]

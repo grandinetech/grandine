@@ -834,6 +834,21 @@ impl PubkeyList {
         self.keys.get(index)
     }
 
+    /// The first `length` keys, sharing structure with `self`.
+    ///
+    /// The map is shared whole. Entries past `length` stay in it, which `index_of` already
+    /// tolerates, because it only answers for keys that are still in the list.
+    #[must_use]
+    pub fn prefix(&self, length: usize) -> Self {
+        let mut keys = self.keys.clone();
+        keys.truncate(length);
+
+        Self {
+            keys,
+            index_map: self.index_map.clone(),
+        }
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.keys.len()
@@ -981,7 +996,8 @@ impl<C> SszRead<C> for PubkeyList {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ssz)]
+#[ssz(derive_hash = false)]
 pub struct PartialValidator {
     pub withdrawal_credentials: H256,
     pub slashed: bool,
@@ -1027,6 +1043,23 @@ pub struct RawValidatorList {
 }
 
 impl RawValidatorList {
+    /// Puts a list together out of its columns, which must all be of the same length.
+    #[must_use]
+    pub fn from_columns(
+        pubkeys: PubkeyList,
+        effective_balances: Vector<Gwei>,
+        items: Vector<PartialValidator>,
+    ) -> Self {
+        assert_eq!(pubkeys.len(), effective_balances.len());
+        assert_eq!(pubkeys.len(), items.len());
+
+        Self {
+            pubkeys,
+            effective_balances,
+            items,
+        }
+    }
+
     pub fn get(&self, index: u64) -> Result<Validator, IndexError> {
         let index = self.validate_index(index)?;
 
