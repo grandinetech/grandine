@@ -1,0 +1,119 @@
+/* Introduction page: hero */
+.hero {
+    margin: 1rem 0 2rem 0;
+    padding: 2rem 1.5rem;
+    border-radius: 10px;
+    border: 1px solid var(--quote-border);
+    background: var(--quote-bg);
+    text-align: center;
+}
+
+.hero .tagline {
+    margin: 0;
+    font-size: 2em;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.hero .subline {
+    margin: 0.75rem auto 0 auto;
+    max-width: 38em;
+    font-size: 1.1em;
+    opacity: 0.85;
+}
+
+.hero .actions {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.hero .button {
+    display: inline-block;
+    padding: 0.55rem 1.2rem;
+    border-radius: 6px;
+    border: 2px solid var(--links);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.hero .button.primary {
+    background: var(--links);
+    color: var(--bg);
+}
+
+.hero .button:hover {
+    text-decoration: none;
+    opacity: 0.85;
+}
+
+/* Introduction page: compact feature grid */
+.features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
+    margin: 1.25rem 0 1.5rem 0;
+}
+
+a.feature {
+    display: block;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--quote-border);
+    border-top: 3px solid var(--links);
+    border-radius: 6px;
+    color: var(--fg);
+    text-decoration: none;
+    transition: transform 0.1s ease-in-out, border-color 0.1s ease-in-out;
+}
+
+a.feature:hover {
+    text-decoration: none;
+    transform: translateY(-2px);
+    border-color: var(--links);
+}
+
+a.feature .title {
+    display: block;
+    font-weight: 700;
+    color: var(--links);
+}
+
+a.feature .line {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.92em;
+}
+
+a.feature .badge {
+    display: inline-block;
+    margin-left: 0.35rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    font-size: 0.72em;
+    font-weight: 600;
+    vertical-align: middle;
+    color: var(--bg);
+    background: var(--links);
+}
+
+/* mdBook styles `.content a:link`; override it so card text uses the normal text color */
+.content a.feature:link,
+.content a.feature:visited {
+    color: var(--fg);
+}
+
+.content a.feature .title {
+    color: var(--links);
+}
+
+.content a.feature .line {
+    color: var(--fg);
+    opacity: 0.85;
+}
+
+.content .hero a.button.primary:link,
+.content .hero a.button.primary:visited {
+    color: var(--bg);
+}
