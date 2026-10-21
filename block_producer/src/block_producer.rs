@@ -3686,9 +3686,11 @@ mod gloas_scoring_tests {
                     .signed_execution_payload_bid
                     .message
                     .builder_index = builder_index;
-                let mut requests = GloasExecutionRequests::<Minimal>::default();
                 // An unknown builder exit is ignored, but gives the envelope a nonempty commitment.
-                requests.builder_exits = vec![BuilderExitRequest::default()].try_into()?;
+                let requests = GloasExecutionRequests::<Minimal> {
+                    builder_exits: vec![BuilderExitRequest::default()].try_into()?,
+                    ..GloasExecutionRequests::default()
+                };
                 state.latest_execution_payload_bid.execution_requests_root =
                     requests.hash_tree_root();
                 let original_root = state.hash_tree_root();
@@ -3739,22 +3741,16 @@ mod gloas_scoring_tests {
         );
         assert!(
             missing
-                .unwrap_err()
+                .expect_err("FULL parent requires an envelope")
                 .to_string()
                 .contains("missing FULL parent payload envelope")
         );
         state.latest_execution_payload_bid.execution_requests_root = H256::repeat_byte(9);
         let original_root = state.hash_tree_root();
-        assert!(
-            prepare_gloas_scoring_state(
-                &config,
-                &PubkeyCache::default(),
-                &state,
-                &mut block,
-                |_| Some(GloasExecutionRequests::default())
-            )
-            .is_err()
-        );
+        prepare_gloas_scoring_state(&config, &PubkeyCache::default(), &state, &mut block, |_| {
+            Some(GloasExecutionRequests::default())
+        })
+        .expect_err("parent requests must match the commitment");
         assert_eq!(state.hash_tree_root(), original_root);
     }
 
