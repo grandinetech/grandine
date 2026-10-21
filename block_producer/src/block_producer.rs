@@ -3022,7 +3022,7 @@ fn select_weighted_bid<'bid, P: Preset, S>(
                 weighted_builder_mev,
             ))
         })
-        .max_by_key(|(_, _, _, _, weighted_builder_mev)| *weighted_builder_mev)?;
+        .max_by_key(|(_, _, builder_mev, _, weighted_builder_mev)| (*weighted_builder_mev, *builder_mev))?;
 
     if let Some(local_mev) = local_mev
         && local_mev.saturating_mul(Uint256::from_u64(100)) >= weighted_builder_mev
