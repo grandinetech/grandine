@@ -18,6 +18,7 @@ use std::sync::Arc;
 use eth2_cache_utils::medalla;
 #[cfg(feature = "eth2-cache")]
 use eth2_libp2p::GossipId;
+use fork_choice_store::{AttestationAction, AttestationValidationError, Error as StoreError};
 use helper_functions::misc;
 use spec_test_utils::BlsSetting;
 #[cfg(feature = "eth2-cache")]
@@ -37,6 +38,8 @@ use types::{
 
 use crate::{
     helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch},
+    messages::P2pMessage,
+    misc::MutatorRejectionReason,
     storage::StoredBlock,
 };
 
@@ -2713,4 +2716,75 @@ fn gloas_envelope_from_far_future_is_ignored_before_looking_up_its_block() {
     context.on_slot(block_1.message().slot());
 
     context.on_ignorable_execution_payload(&envelope_10, BlsSetting::Required);
+}
+
+// See <https://github.com/grandinetech/grandine/issues/925>.
+#[test]
+fn rejects_single_attestation_when_attester_not_in_committee() {
+    let mut context = Context::electra_minimal();
+
+    let (_, state_0) = context.genesis();
+    let (block_1, state_1) = context.empty_block(&state_0, 1, H256::repeat_byte(1));
+
+    context.on_slot(start_of_epoch(2));
+    context.on_acceptable_block(&block_1);
+
+    let slot = start_of_epoch(1);
+    let claimed_committee = 0;
+    let other_committee = 1;
+    let member_of_claimed = context.committee_member(&state_1, slot, claimed_committee);
+    let member_of_other = context.committee_member(&state_1, slot, other_committee);
+    assert_ne!(
+        member_of_claimed, member_of_other,
+        "cross-committee case needs distinct attesters"
+    );
+
+    for skip_signatures in [false, true] {
+        let accepted = context
+            .validate_gossip_single_attestation(
+                &state_1,
+                slot,
+                claimed_committee,
+                member_of_claimed,
+                skip_signatures,
+            )
+            .expect("member SingleAttestation should validate");
+        assert!(
+            matches!(accepted, AttestationAction::Accept { .. }),
+            "member should Accept (skip_signatures={skip_signatures})"
+        );
+
+        let rejected = context
+            .validate_gossip_single_attestation(
+                &state_1,
+                slot,
+                claimed_committee,
+                member_of_other,
+                skip_signatures,
+            )
+            .expect_err("cross-committee SingleAttestation should be rejected");
+        let source = match rejected {
+            AttestationValidationError::Other { source, .. } => source,
+            other => panic!("expected AttestationValidationError::Other, got {other:?}"),
+        };
+        assert!(
+            matches!(
+                source.downcast_ref::<StoreError<Minimal>>(),
+                Some(StoreError::AttesterNotInCommittee { .. })
+            ),
+            "expected AttesterNotInCommittee (skip_signatures={skip_signatures}), got {source:?}"
+        );
+    }
+
+    assert!(matches!(
+        context.on_gossip_single_attestation(&state_1, slot, claimed_committee, member_of_claimed,),
+        Some(P2pMessage::Accept(_)),
+    ));
+    assert!(matches!(
+        context.on_gossip_single_attestation(&state_1, slot, claimed_committee, member_of_other,),
+        Some(P2pMessage::Reject(
+            _,
+            MutatorRejectionReason::InvalidAttestation
+        )),
+    ));
 }
