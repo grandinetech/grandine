@@ -155,7 +155,7 @@ impl ProposerConfigs {
     /// Resolve the builder boost factor for `pubkey`: per-validator overrides declared in
     /// `validators.yml` take precedence over the process-wide default.
     ///
-    /// - `prefer_builder_proposals == Some(true)` → `Uint256::MAX` (always prefer the builder)
+    /// - `prefer_builder_proposals == Some(true)` → `u64::MAX` (always prefer the builder)
     /// - `builder_boost_factor == Some(n)`        → `n` (percentage applied to the builder bid)
     /// - `builder_proposals == Some(false)`       → `Uint256::ZERO` (always prefer local)
     /// - otherwise                                → the process-wide default
@@ -176,7 +176,7 @@ impl ProposerConfigs {
         } = definition.builder_options;
 
         if prefer_builder_proposals == Some(true) {
-            Uint256::MAX
+            Uint256::from_u64(u64::MAX)
         } else if let Some(factor) = builder_boost_factor {
             Uint256::from_u64(factor)
         } else if builder_proposals == Some(false) {

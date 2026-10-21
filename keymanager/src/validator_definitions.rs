@@ -16,7 +16,7 @@ use types::{
 };
 use zeroize::Zeroizing;
 
-use crate::builder_config::{BuilderEntryOptions, validate_builders};
+use crate::builder_config::{BuilderConfigError, BuilderEntryOptions, validate_builders};
 
 const VALIDATORS_FILE_NAME: &str = "validators.yml";
 
@@ -242,6 +242,33 @@ impl ValidatorDefinitions {
                 validate_builders(builders).with_context(|| {
                     format!("invalid builders for validator {:?}", definition.pubkey)
                 })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reject builders entries with `max_execution_payment` above 0 unless trusted payments are allowed,
+    /// this function is checked at startup to avoid failure at each proposals.
+    pub fn ensure_trusted_payments_allowed(&self, allow_trusted_payments: bool) -> Result<()> {
+        if allow_trusted_payments {
+            return Ok(());
+        }
+
+        for definition in &self.0 {
+            let builders = definition
+                .builder_options
+                .builders
+                .as_deref()
+                .unwrap_or_default();
+
+            for (index, entry) in builders.iter().enumerate() {
+                if entry.max_execution_payment.unwrap_or_default() > 0 {
+                    return Err(BuilderConfigError::TrustedPaymentsNotAllowed { index })
+                        .with_context(|| {
+                            format!("invalid builders for validator {:?}", definition.pubkey)
+                        });
+                }
             }
         }
 
@@ -822,6 +849,27 @@ mod tests {
 
         ValidatorDefinitions::load(&path)
             .expect_err("a file with duplicate builders must be refused");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_trusted_payments_require_allow_trusted_payments() -> Result<()> {
+        let mut builder =
+            BuilderEntryOptions::from(BuilderUrl::try_from("https://builder.example.com")?);
+        builder.max_execution_payment = Some(1);
+
+        let mut definition = ValidatorDefinition::new(PUBKEY, SigningMethod::KeystoreStorage);
+        definition.builder_options.builders = Some(vec![builder]);
+
+        let mut validator_definitions = ValidatorDefinitions::default();
+        validator_definitions.push(definition);
+
+        validator_definitions
+            .ensure_trusted_payments_allowed(false)
+            .expect_err("trusted payments without --allow-trusted-payments must be refused");
+
+        validator_definitions.ensure_trusted_payments_allowed(true)?;
 
         Ok(())
     }
