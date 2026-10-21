@@ -1,9 +1,25 @@
 [book]
-authors = ["Saulius Grigaitis"]
+authors = ["Grandine contributors"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Grandine"
+title = "Grandine Book"
+description = "Documentation for Grandine, a fast and lightweight Ethereum consensus client"
 
 [output.html]
-default-theme = "ayu"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/grandinetech/grandine"
+additional-css = ["theme/custom.css"]
+edit-url-template = "https://github.com/grandinetech/grandine/edit/develop/book/{path}"
+
+[output.html.search]
+enable = true
+
+[output.html.fold]
+enable = true
+level = 1
+
+[preprocessor.strip-todo-comments]
+# mdBook runs the command from the caller's directory, not the book root, so build from inside the repository.
+command = "sh -c 'exec python3 \"$(git rev-parse --show-toplevel)/scripts/book/strip_todo_comments.py\" \"$@\"' sh"
