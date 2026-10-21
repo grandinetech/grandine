@@ -444,6 +444,7 @@ strum = { version = '0.28', features = ['derive'] }
 syn = { version = '2', features = ['full'] }
 sysinfo = '0.38'
 tap = '1'
+tabled = { version = '0.21', default-features = false, features = ['std'] }
 tempfile = '3'
 test-case = '3'
 test-generator = '0.3'
