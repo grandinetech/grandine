@@ -1388,6 +1388,8 @@ pub fn run(parsed_args: GrandineArgs) -> Result<()> {
         None => ValidatorDefinitions::default(),
     };
 
+    validator_definitions.ensure_trusted_payments_allowed(allow_trusted_payments)?;
+
     if let Some(validators) = validators.as_ref() {
         validators
             .discover(&mut validator_definitions)

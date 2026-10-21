@@ -1487,13 +1487,15 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut without_state_root_with_payload = if let Some(state) =
             self.beacon_state.post_gloas()
         {
-            let builder_bid = self.select_best_builder_bid(
-                state,
-                &block_without_state_root,
-                &builder_api_bids,
-                block_mev,
-                has_local_payload,
-            );
+            let builder_bid = self
+                .select_best_builder_bid(
+                    state,
+                    &block_without_state_root,
+                    &builder_api_bids,
+                    block_mev,
+                    has_local_payload,
+                )
+                .await;
 
             let signed_payload_bid = if let Some((bid, url)) = builder_bid {
                 // Set block_mev value to the in-protocol builder bid value
@@ -2395,7 +2397,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     /// [`None`] means the node should build the payload itself, either because there is no bid
     /// worth taking, the local payload is worth more, or the circuit breaker tripped.
     // TODO: allow to configure bid selection, e.g. builders preference over highest bid
-    fn select_best_builder_bid(
+    async fn select_best_builder_bid(
         &self,
         state: &(impl PostGloasBeaconState<P> + ?Sized),
         block_without_state_root: &BeaconBlock<P>,
@@ -2426,21 +2428,25 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             builder_boost_factor,
         };
 
-        let candidates = snapshot
-            .selectable_payload_bids(state, state.slot(), parent_block_hash, self.head_block_root)
-            .map(|bid| (bid, p2p_weighting, None))
-            .chain(self.valid_builder_api_bids(
+        let builder_api_bids = self
+            .valid_builder_api_bids(
                 block_without_state_root,
                 builder_api_bids,
                 parent_block_hash,
-            ));
+            )
+            .await;
+
+        let candidates = snapshot
+            .selectable_payload_bids(state, state.slot(), parent_block_hash, self.head_block_root)
+            .map(|bid| (bid, p2p_weighting, None))
+            .chain(builder_api_bids);
 
         let (bid, url) = select_weighted_bid(candidates, local_mev)?;
 
         Some((bid.clone(), url.cloned()))
     }
 
-    fn valid_builder_api_bids<'bids>(
+    async fn valid_builder_api_bids<'bids>(
         &self,
         block_without_state_root: &BeaconBlock<P>,
         builder_api_bids: &'bids [BuilderApiBid<P>],
@@ -2450,6 +2456,39 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         BidWeighting,
         Option<&'bids BuilderUrl>,
     )> {
+        if builder_api_bids.is_empty() {
+            return vec![];
+        }
+
+        let fee_recipient = match self.fee_recipient().await {
+            Ok(fee_recipient) => fee_recipient,
+            Err(error) => {
+                warn_with_peers!("unable to validate builder API bids: {error:?}");
+                return vec![];
+            }
+        };
+
+        let target_gas_limit = match self.gas_limit() {
+            Ok(gas_limit) => gas_limit,
+            Err(error) => {
+                warn_with_peers!("unable to validate builder API bids: {error:?}");
+                return vec![];
+            }
+        };
+
+        let Some(parent_gas_limit) = self
+            .producer_context
+            .controller
+            .unfinalized_chain_link_by_execution_block_hash(parent_block_hash)
+            .and_then(|chain_link| chain_link.block.execution_gas_limit())
+        else {
+            warn_with_peers!(
+                "ignoring builder API bids: parent execution payload not found in fork choice \
+                 (parent_block_hash: {parent_block_hash:?})",
+            );
+            return vec![];
+        };
+
         let bids = builder_api_bids
             .iter()
             .filter(|BuilderApiBid { bid, .. }| {
@@ -2464,9 +2503,11 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
                         bid.message.parent_block_hash,
                         bid.message.parent_block_root,
                     );
+
+                    return false;
                 }
 
-                builds_on_parent
+                matches_proposer_preferences(bid, fee_recipient, parent_gas_limit, target_gas_limit)
             })
             .map(
                 |BuilderApiBid {
@@ -2909,6 +2950,42 @@ fn prepare_state_for_execution_payload_bid<P: Preset>(
     )?;
 
     gloas::process_withdrawals(state)
+}
+
+fn matches_proposer_preferences<P: Preset>(
+    bid: &SignedExecutionPayloadBid<P>,
+    fee_recipient: ExecutionAddress,
+    parent_gas_limit: Gas,
+    target_gas_limit: Gas,
+) -> bool {
+    if bid.message.fee_recipient != fee_recipient {
+        warn_with_peers!(
+            "rejected builder API bid from builder {} with wrong fee recipient \
+             (fee_recipient: {:?}, expected: {fee_recipient:?})",
+            bid.message.builder_index,
+            bid.message.fee_recipient,
+        );
+
+        return false;
+    }
+
+    if !predicates::is_gas_limit_target_compatible(
+        parent_gas_limit,
+        bid.message.gas_limit,
+        target_gas_limit,
+    ) {
+        warn_with_peers!(
+            "rejected builder API bid from builder {} with incompatible gas limit \
+             (gas_limit: {}, parent_gas_limit: {parent_gas_limit}, \
+             target_gas_limit: {target_gas_limit})",
+            bid.message.builder_index,
+            bid.message.gas_limit,
+        );
+
+        return false;
+    }
+
+    true
 }
 
 /// Returns the winning bid along with the `source` it came with.
