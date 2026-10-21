@@ -28,13 +28,15 @@ use types::{
     fulu::{containers::DataColumnIdentifier, primitives::ColumnIndex},
     gloas::{
         consts::PAYLOAD_STATUS_FULL,
-        containers::{SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope},
+        containers::{
+            SignedExecutionPayloadBid, SignedExecutionPayloadEnvelope, SignedProposerPreferences,
+        },
         primitives::PayloadStatus as ExecutionPayloadStatus,
     },
     nonstandard::{ExecutionPayloadBody, PayloadStatus, Phase, RelativeEpoch, WithStatus},
     phase0::{
         containers::Checkpoint,
-        primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds},
+        primitives::{Epoch, ExecutionBlockHash, Gwei, H256, Slot, UnixSeconds, ValidatorIndex},
     },
     preset::Preset,
     traits::{self, BeaconState as _, PostGloasBeaconState, SignedBeaconBlock as _},
@@ -1557,6 +1559,17 @@ impl<P: Preset> Snapshot<'_, P> {
     #[must_use]
     pub fn should_build_on_full(&self, slot: Slot) -> bool {
         self.store_snapshot.should_build_on_full(slot)
+    }
+
+    #[must_use]
+    pub fn proposer_preferences(
+        &self,
+        parent_block_root: H256,
+        slot: Slot,
+        proposer_index: ValidatorIndex,
+    ) -> Option<&Arc<SignedProposerPreferences>> {
+        self.store_snapshot
+            .proposer_preferences(parent_block_root, slot, proposer_index)
     }
 
     #[must_use]

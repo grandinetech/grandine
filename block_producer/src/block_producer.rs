@@ -88,7 +88,7 @@ use types::{
         containers::{
             AttesterSlashing as GloasAttesterSlashing, BeaconBlock as GloasBeaconBlock,
             BeaconBlockBody as GloasBeaconBlockBody, ExecutionPayloadBid, ExecutionPayloadEnvelope,
-            ExecutionRequests as GloasExecutionRequests, PayloadAttestation,
+            ExecutionRequests as GloasExecutionRequests, PayloadAttestation, ProposerPreferences,
             SignedExecutionPayloadBid,
         },
     },
@@ -1487,15 +1487,13 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         let mut without_state_root_with_payload = if let Some(state) =
             self.beacon_state.post_gloas()
         {
-            let builder_bid = self
-                .select_best_builder_bid(
-                    state,
-                    &block_without_state_root,
-                    &builder_api_bids,
-                    block_mev,
-                    has_local_payload,
-                )
-                .await;
+            let builder_bid = self.select_best_builder_bid(
+                state,
+                &block_without_state_root,
+                &builder_api_bids,
+                block_mev,
+                has_local_payload,
+            );
 
             let signed_payload_bid = if let Some((bid, url)) = builder_bid {
                 // Set block_mev value to the in-protocol builder bid value
@@ -2397,7 +2395,7 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
     /// [`None`] means the node should build the payload itself, either because there is no bid
     /// worth taking, the local payload is worth more, or the circuit breaker tripped.
     // TODO: allow to configure bid selection, e.g. builders preference over highest bid
-    async fn select_best_builder_bid(
+    fn select_best_builder_bid(
         &self,
         state: &(impl PostGloasBeaconState<P> + ?Sized),
         block_without_state_root: &BeaconBlock<P>,
@@ -2428,13 +2426,12 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             builder_boost_factor,
         };
 
-        let builder_api_bids = self
-            .valid_builder_api_bids(
-                block_without_state_root,
-                builder_api_bids,
-                parent_block_hash,
-            )
-            .await;
+        let builder_api_bids = self.valid_builder_api_bids(
+            &snapshot,
+            block_without_state_root,
+            builder_api_bids,
+            parent_block_hash,
+        );
 
         let candidates = snapshot
             .selectable_payload_bids(state, state.slot(), parent_block_hash, self.head_block_root)
@@ -2446,8 +2443,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
         Some((bid.clone(), url.cloned()))
     }
 
-    async fn valid_builder_api_bids<'bids>(
+    fn valid_builder_api_bids<'bids>(
         &self,
+        snapshot: &Snapshot<P>,
         block_without_state_root: &BeaconBlock<P>,
         builder_api_bids: &'bids [BuilderApiBid<P>],
         parent_block_hash: ExecutionBlockHash,
@@ -2460,21 +2458,24 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
             return vec![];
         }
 
-        let fee_recipient = match self.fee_recipient().await {
-            Ok(fee_recipient) => fee_recipient,
-            Err(error) => {
-                warn_with_peers!("unable to validate builder API bids: {error:?}");
-                return vec![];
-            }
+        let slot = self.beacon_state.slot();
+
+        let Some(proposer_preferences) =
+            snapshot.proposer_preferences(self.head_block_root, slot, self.proposer_index)
+        else {
+            warn_with_peers!(
+                "ignoring builder API bids: no proposer preferences accepted for slot {slot} \
+                 (proposer_index: {})",
+                self.proposer_index,
+            );
+            return vec![];
         };
 
-        let target_gas_limit = match self.gas_limit() {
-            Ok(gas_limit) => gas_limit,
-            Err(error) => {
-                warn_with_peers!("unable to validate builder API bids: {error:?}");
-                return vec![];
-            }
-        };
+        let ProposerPreferences {
+            fee_recipient,
+            target_gas_limit,
+            ..
+        } = proposer_preferences.message;
 
         let Some(parent_gas_limit) = self
             .producer_context
@@ -3022,7 +3023,9 @@ fn select_weighted_bid<'bid, P: Preset, S>(
                 weighted_builder_mev,
             ))
         })
-        .max_by_key(|(_, _, builder_mev, _, weighted_builder_mev)| (*weighted_builder_mev, *builder_mev))?;
+        .max_by_key(|(_, _, builder_mev, _, weighted_builder_mev)| {
+            (*weighted_builder_mev, *builder_mev)
+        })?;
 
     if let Some(local_mev) = local_mev
         && local_mev.saturating_mul(Uint256::from_u64(100)) >= weighted_builder_mev
