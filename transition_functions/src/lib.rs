@@ -239,7 +239,9 @@ pub mod fulu {
 }
 
 pub mod gloas {
-    pub use block_processing::{apply_parent_execution_payload, get_expected_withdrawals};
+    pub use block_processing::{
+        apply_parent_execution_payload, get_expected_withdrawals, process_parent_execution_payload,
+    };
 
     pub(crate) use block_processing::{process_block, process_block_for_gossip};
     pub(crate) use epoch_processing::process_epoch;

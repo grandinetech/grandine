@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use anyhow::{Error as AnyhowError, Result, bail};
+use anyhow::{Error as AnyhowError, Result, bail, ensure};
+use bls::{AggregateSignature, traits::Signature as _};
 use eth1_api::ApiController;
 use fork_choice_control::Wait;
 use helper_functions::{accessors, misc};
+use itertools::Itertools as _;
 use logging::debug_with_peers;
-use ssz::BitVector;
+use ssz::{BitList, BitVector};
 use typenum::Unsigned as _;
 use types::{
     combined::{Attestation, BeaconState},
@@ -141,6 +143,49 @@ pub fn convert_to_electra_attestation<P: Preset>(
     })
 }
 
+/// Assemble single-committee aggregates; signatures must already have been validated.
+pub fn compute_on_chain_aggregate<P: Preset>(
+    attestations: impl Iterator<Item = ElectraAttestation<P>>,
+) -> Result<ElectraAttestation<P>> {
+    let aggregates = attestations
+        .sorted_by_key(|attestation| {
+            misc::get_committee_indices::<P>(attestation.committee_bits).next()
+        })
+        .collect_vec();
+    let data = aggregates
+        .first()
+        .ok_or_else(|| AnyhowError::msg("no attestations for block aggregate"))?
+        .data;
+    let mut committee_bits = BitVector::default();
+    let mut signature = AggregateSignature::default();
+    for aggregate in &aggregates {
+        ensure!(
+            aggregate.data == data,
+            "different attestation data in aggregate"
+        );
+        let indices = misc::get_committee_indices::<P>(aggregate.committee_bits).collect_vec();
+        ensure!(indices.len() == 1, "expected one committee per input");
+        let index = usize::try_from(indices[0])?;
+        ensure!(
+            !committee_bits.get(index).unwrap_or(true),
+            "duplicate committee"
+        );
+        committee_bits.set(index, true);
+        signature.aggregate_in_place(aggregate.signature.try_into()?);
+    }
+    let aggregation_bits = BitList::concatenate(
+        aggregates
+            .iter()
+            .map(|aggregate| &aggregate.aggregation_bits),
+    )?;
+    Ok(ElectraAttestation {
+        aggregation_bits,
+        data,
+        committee_bits,
+        signature: signature.into(),
+    })
+}
+
 // TODO(feature/electra): properly refactor attestations
 pub fn try_convert_to_single_attestation<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
@@ -220,6 +265,35 @@ mod tests {
         },
         preset::Minimal,
     };
+
+    #[test]
+    fn on_chain_assembly_rejects_mixed_data_and_duplicate_committees() -> anyhow::Result<()> {
+        use super::*;
+        use bls::traits::SignatureBytes as _;
+        let pool = PoolAttestation::<Minimal> {
+            data: AttestationData::default(),
+            committee_index: 0,
+            aggregation_bits: BitList::new(true, 4),
+            signature: SignatureBytes::empty(),
+        };
+        let first = convert_to_electra_attestation(pool.clone())?;
+        let mut no_committee = first.clone();
+        no_committee.committee_bits = BitVector::default();
+        compute_on_chain_aggregate([no_committee].into_iter()).expect_err("missing committee");
+        let mut multiple_committees = first.clone();
+        multiple_committees.committee_bits.set(1, true);
+        compute_on_chain_aggregate([multiple_committees].into_iter())
+            .expect_err("multiple committees per input");
+        compute_on_chain_aggregate([first.clone(), first.clone()].into_iter())
+            .expect_err("duplicate committee");
+        let mut other = pool;
+        other.committee_index = 1;
+        other.data.index = 1;
+        let other = convert_to_electra_attestation(other)?;
+        compute_on_chain_aggregate([first, other].into_iter()).expect_err("mixed attestation data");
+        compute_on_chain_aggregate::<Minimal>(core::iter::empty()).expect_err("empty input");
+        Ok(())
+    }
 
     // A Gloas single attestation: `data.index` is the payload-presence vote (0 or 1), and the
     // committee index is carried in its own field.
