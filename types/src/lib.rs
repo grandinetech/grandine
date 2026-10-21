@@ -97,9 +97,13 @@ pub mod fulu {
 
 pub mod gloas {
     pub mod beacon_state;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod builder_list_patch;
     pub mod consts;
     pub mod containers;
     pub mod primitives;
+    #[cfg(not(target_os = "zkvm"))]
+    pub mod ptc_patch;
     pub mod validator_list;
 
     mod container_impls;
