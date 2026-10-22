@@ -535,16 +535,16 @@ impl Phase0EpochDeltas for EpochDeltasForTransition {
 
 #[derive(Clone, Copy, Default, Debug, Serialize)]
 pub struct EpochDeltasForReport {
-    source_reward: Gwei,
-    source_penalty: Gwei,
-    target_reward: Gwei,
-    target_penalty: Gwei,
-    head_reward: Gwei,
-    head_penalty: Gwei,
-    proposer_reward: Gwei,
-    inclusion_delay_reward: Gwei,
-    canceling_penalty: Gwei,
-    inactivity_penalty: Gwei,
+    pub source_reward: Gwei,
+    pub source_penalty: Gwei,
+    pub target_reward: Gwei,
+    pub target_penalty: Gwei,
+    pub head_reward: Gwei,
+    pub head_penalty: Gwei,
+    pub proposer_reward: Gwei,
+    pub inclusion_delay_reward: Gwei,
+    pub canceling_penalty: Gwei,
+    pub inactivity_penalty: Gwei,
 }
 
 impl EpochDeltas for EpochDeltasForReport {

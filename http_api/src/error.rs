@@ -24,7 +24,7 @@ use types::{
     deneb::primitives::{BlobIndex, VersionedHash},
     fulu::primitives::ColumnIndex,
     nonstandard::Phase,
-    phase0::primitives::{Slot, ValidatorIndex},
+    phase0::primitives::{Epoch, Slot, ValidatorIndex},
 };
 
 #[derive(Debug, Error)]
@@ -64,6 +64,11 @@ pub enum Error {
     EpochNotInSyncCommitteePeriod,
     #[error("epoch is out of range for the randao_mixes of the state")]
     EpochOutOfRangeForStateRandao,
+    #[error("rewards for epoch {epoch} are not final until the end of epoch {rewarding_epoch}")]
+    EpochRewardsNotFinal {
+        epoch: Epoch,
+        rewarding_epoch: Epoch,
+    },
     #[error("eth-blob-data-included header expected")]
     BlobDataIncludedHeaderMissing,
     #[error("execution payload envelope not found")]
@@ -295,6 +300,7 @@ impl Error {
             | Self::EpochBeforePrevious { .. }
             | Self::EpochNotInSyncCommitteePeriod
             | Self::EpochOutOfRangeForStateRandao
+            | Self::EpochRewardsNotFinal { .. }
             | Self::BlobDataIncludedHeaderMissing
             | Self::EventTopicsEmpty
             | Self::InvalidAggregatesAndProofs(_)

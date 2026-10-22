@@ -33,10 +33,11 @@ use crate::{
     global, gui, middleware,
     misc::SyncedStatus,
     standard::{
-        beacon_events, beacon_heads, beacon_state, blinded_block, blob_sidecars, blobs, block,
-        block_attestations, block_attestations_v2, block_headers, block_id_headers, block_rewards,
-        block_root, config_spec, debug_beacon_data_column_sidecars, debug_fork_choice,
-        deposit_contract, execution_payload_envelope, expected_withdrawals, fork_schedule, genesis,
+        attestation_rewards, beacon_events, beacon_heads, beacon_state, blinded_block,
+        blob_sidecars, blobs, block, block_attestations, block_attestations_v2, block_headers,
+        block_id_headers, block_rewards, block_root, config_spec,
+        debug_beacon_data_column_sidecars, debug_fork_choice, deposit_contract,
+        execution_payload_envelope, expected_withdrawals, fork_schedule, genesis,
         get_state_validator_balances, get_state_validators, node_health, node_identity, node_peer,
         node_peer_count, node_peers, node_syncing_status, node_version, node_version_v2,
         pool_attestations, pool_attestations_v2, pool_attester_slashings,
@@ -497,6 +498,10 @@ fn eth_v1_beacon_routes<P: Preset, W: Wait>() -> Router<NormalState<P, W>> {
         );
 
     let reward_routes = Router::new()
+        .route(
+            "/eth/v1/beacon/rewards/attestations/{epoch}",
+            post(attestation_rewards),
+        )
         .route(
             "/eth/v1/beacon/rewards/blocks/{block_id}",
             get(block_rewards),
