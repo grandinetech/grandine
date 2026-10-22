@@ -49,6 +49,13 @@ impl<P: Preset> FrameCache<P> {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub fn clear(&self) {
+        for layer in self.layers.iter().flatten() {
+            layer.lock().cache_clear();
+        }
+    }
+
     pub fn get(&self, layer: usize, block_root: &H256) -> Result<Option<Arc<BeaconState<P>>>> {
         let layer = self
             .layers

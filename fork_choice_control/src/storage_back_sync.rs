@@ -4,7 +4,6 @@ use std::sync::Arc;
 use anyhow::{Error as AnyhowError, Result, bail};
 use database::Database;
 use genesis::AnchorCheckpointProvider;
-use helper_functions::misc;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use ssz::SszHash as _;
 use std_ext::ArcExt as _;
@@ -22,17 +21,12 @@ use types::{
 use crate::{
     Storage,
     storage::{
-        BlockRootBySlot, Error, SlotByStateRoot, StateByBlockRoot, StoredBlock, get, serialize,
+        ARCHIVED_STATES_BEFORE_FLUSH, BlockRootBySlot, Error, SlotByStateRoot, StoredBlock, get,
+        serialize,
     },
 };
 
 const ARCHIVER_CHECKPOINT_KEY: &str = "carchiver";
-
-// Retain archival data in memory until the number of ready beacon states
-// reaches `ARCHIVED_STATES_BEFORE_FLUSH`. This approach minimizes unnecessary
-// transactions and significantly reduces memory usage during the archiving
-// of back-synced data.
-const ARCHIVED_STATES_BEFORE_FLUSH: u64 = 5;
 
 impl<P: Preset> Storage<P> {
     pub(crate) fn archive_back_sync_states(
@@ -78,12 +72,19 @@ impl<P: Preset> Storage<P> {
                 })?
         };
 
+        let anchor_slot = self.anchor_slot.load(Ordering::SeqCst);
+
         let mut previous_block = None;
         let mut batch = vec![];
         let mut states_in_batch: u64 = 0;
 
+        self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
+
         if start_slot == anchor_block_slot {
-            batch.push(serialize(StateByBlockRoot(anchor_block_root), &state)?);
+            let (key, frame) =
+                self.serialize_frame(anchor_block_root, &state, finalized_validators)?;
+
+            batch.push((key.to_string(), frame));
         }
 
         for slot in start_slot.saturating_add(1)..=end_slot {
@@ -114,18 +115,19 @@ impl<P: Preset> Storage<P> {
 
             batch.push(serialize(SlotByStateRoot(state.hash_tree_root()), slot)?);
 
-            let state_epoch = Self::epoch_at_slot(slot);
-            let append_state = misc::is_epoch_start::<P>(slot)
-                && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
-
             if let Some(block) = previous_block.as_ref()
-                && append_state
+                && block.message().slot() == slot
+                && self
+                    .hierarchy
+                    .contains::<P>(self.config(), anchor_slot, slot)
             {
                 debug_with_peers!("back-synced state in {slot} is ready for storage");
 
                 let block_root = block.message().hash_tree_root();
+                let (key, frame) =
+                    self.serialize_frame(block_root, &state, finalized_validators)?;
 
-                batch.push(serialize(StateByBlockRoot(block_root), &state)?);
+                batch.push((key.to_string(), frame));
                 batch.push(serialize(ARCHIVER_CHECKPOINT_KEY, slot)?);
 
                 states_in_batch = states_in_batch.saturating_add(1);
@@ -199,8 +201,6 @@ fn get_latest_archived_slot(database: &Database) -> Result<Option<Slot>> {
 #[cfg(test)]
 #[cfg(feature = "eth2-cache")]
 mod tests {
-    use core::num::NonZeroU64;
-
     use anyhow::anyhow;
     use database::Database;
     use eth2_cache_utils::mainnet;
@@ -209,7 +209,9 @@ mod tests {
     use types::traits::BeaconState as _;
     use types::{nonstandard::StorageMode, phase0::consts::GENESIS_SLOT};
 
-    use crate::storage::DEFAULT_ZSTD_COMPRESSION_LEVEL;
+    use crate::{
+        state_storage_config::StateStorageConfig, storage::DEFAULT_ZSTD_COMPRESSION_LEVEL,
+    };
 
     use super::*;
 
@@ -302,10 +304,11 @@ mod tests {
             Arc::new(P::default_config()),
             Arc::new(PubkeyCache::default()),
             Database::in_memory(),
-            NonZeroU64::MIN,
             StorageMode::default(),
             true,
             DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
         )
+        .expect("the default state cache sizes are valid")
     }
 }

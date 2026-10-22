@@ -1,4 +1,4 @@
-use core::{fmt, iter, marker::PhantomData};
+use core::{fmt, iter, marker::PhantomData, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
 use std::sync::Arc;
@@ -246,6 +246,15 @@ impl<N: Unsigned> SszValidatorList for ValidatorList<N> {
 
     fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
         self.buf.restore_pubkeys(pubkeys)?;
+
+        let length = self.len_usize();
+        self.cache = (length > 0).then(|| CacheNode::build_empty(length));
+
+        Ok(())
+    }
+
+    fn restore_pubkeys_in(&mut self, pubkeys: &PubkeyList, range: Range<usize>) -> Result<()> {
+        self.buf.restore_pubkeys_in(pubkeys, range)?;
 
         let length = self.len_usize();
         self.cache = (length > 0).then(|| CacheNode::build_empty(length));

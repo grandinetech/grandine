@@ -9,7 +9,7 @@
 //                      Update the comment at the top of `ssz::traits` if needed.
 // TODO(Grandine Team): GC unused impls for pointers.
 
-use core::fmt::Debug;
+use core::{fmt::Debug, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
 use std::sync::Arc;
@@ -2236,6 +2236,14 @@ pub trait SszValidatorList: SszHash<PackingFactor = U1> {
 
     /// Restores the public keys that were removed by [`Self::clear_pubkeys`].
     fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<(), anyhow::Error>;
+
+    /// Fills in the public keys in `range` from `pubkeys`, leaving the keys outside it as they
+    /// are.
+    fn restore_pubkeys_in(
+        &mut self,
+        pubkeys: &PubkeyList,
+        range: Range<usize>,
+    ) -> Result<(), anyhow::Error>;
 
     fn clear_pubkeys(&mut self, count: usize);
 

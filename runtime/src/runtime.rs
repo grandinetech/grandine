@@ -34,7 +34,7 @@ use eth1_api::{
 use eth2_libp2p::NetworkGlobals;
 use features::Feature;
 use fork_choice_control::{
-    Controller, EventChannels, StateLoadStrategy, Storage, ValidatorMessage,
+    Controller, EventChannels, StateLoadStrategy, Storage, StorageError, ValidatorMessage,
 };
 use futures::{
     FutureExt as _,
@@ -289,10 +289,10 @@ async fn build_local_node<P: Preset>(
     let StorageConfig {
         in_memory,
         ref directories,
-        archival_epoch_interval,
         storage_mode,
         store_execution_payloads,
         zstd_compression_level,
+        ref state_storage_config,
         ..
     } = storage_config;
 
@@ -374,11 +374,11 @@ async fn build_local_node<P: Preset>(
         chain_config.clone_arc(),
         pubkey_cache.clone_arc(),
         storage_database,
-        archival_epoch_interval,
         storage_mode,
         store_execution_payloads,
         zstd_compression_level,
-    ));
+        state_storage_config.clone(),
+    )?);
 
     let ((anchor_state, anchor_block, unfinalized_blocks), loaded_from_remote) =
         storage.load(&client, state_load_strategy).await?;
@@ -1253,6 +1253,15 @@ impl Context {
                     {
                         break Err(error);
                     }
+
+                    // Retrying cannot resolve a configuration error, and every
+                    // attempt reopens the databases and re-runs Eth1 startup.
+                    if matches!(
+                        error.downcast_ref::<StorageError>(),
+                        Some(&StorageError::StateHierarchyMismatch { .. })
+                    ) {
+                        break Err(error);
+                    }
                 }
                 Err(error) => error_with_peers!("application runtime panicked: {error:?}"),
             }
@@ -2057,10 +2066,10 @@ where
     Feature::InhibitApplicationRestart.enable();
 
     let StorageConfig {
-        archival_epoch_interval,
         storage_mode,
         store_execution_payloads,
         zstd_compression_level,
+        state_storage_config,
         ..
     } = storage_config;
 
@@ -2081,11 +2090,11 @@ where
                 chain_config,
                 pubkey_cache.clone_arc(),
                 storage_database,
-                *archival_epoch_interval,
                 *storage_mode,
                 *store_execution_payloads,
                 *zstd_compression_level,
-            );
+                state_storage_config.clone(),
+            )?;
 
             let output_dir = output_dir.unwrap_or(std::env::current_dir()?);
             let anchor_checkpoint_provider = load_anchor_checkpoint_provider().await?;
