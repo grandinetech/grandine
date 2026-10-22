@@ -4468,11 +4468,11 @@ mod test_chain {
                 config.clone_arc(),
                 pubkey_cache.clone_arc(),
                 database::Database::in_memory(),
-                fork_choice_control::DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
                 StorageMode::default(),
                 true,
                 fork_choice_control::DEFAULT_ZSTD_COMPRESSION_LEVEL,
-            ));
+                fork_choice_control::StateStorageConfig::default_for_mode(StorageMode::default()),
+            )?);
 
             let (controller, mutator_handle) = Controller::new(
                 config.clone_arc(),

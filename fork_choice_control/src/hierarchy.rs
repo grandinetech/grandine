@@ -171,6 +171,21 @@ impl Hierarchy {
         spine
     }
 
+    pub fn retained_by_pruning<P: Preset>(
+        &self,
+        config: &Config,
+        checkpoint: Slot,
+        pruned_up_to_slot: Slot,
+    ) -> Vec<Slot> {
+        let mut retained = self.spine::<P>(config, checkpoint, pruned_up_to_slot);
+
+        if self.contains::<P>(config, checkpoint, pruned_up_to_slot) {
+            retained.push(pruned_up_to_slot);
+        }
+
+        retained
+    }
+
     #[must_use]
     pub fn depth(&self) -> usize {
         self.exponents.len()
@@ -488,6 +503,25 @@ mod tests {
         assert_eq!(
             hierarchy.spine::<Mainnet>(&config, 0, 10770),
             hierarchy.spine::<Mainnet>(&config, 0, 10784),
+        );
+    }
+
+    #[test]
+    fn retained_by_pruning_adds_the_boundary_only_when_it_is_a_node() {
+        let config = Config::mainnet();
+        let hierarchy = hierarchy([11, 9, 5]);
+
+        assert_eq!(
+            hierarchy.retained_by_pruning::<Mainnet>(&config, 0, 520),
+            vec![512, 0],
+        );
+        assert_eq!(
+            hierarchy.retained_by_pruning::<Mainnet>(&config, 0, 1024),
+            vec![0, 1024],
+        );
+        assert_eq!(
+            hierarchy.retained_by_pruning::<Mainnet>(&config, 0, 0),
+            vec![0],
         );
     }
 
