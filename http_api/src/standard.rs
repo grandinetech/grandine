@@ -77,6 +77,9 @@ use tap::Pipe as _;
 use tokio::time::{interval, timeout};
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::instrument;
+use transition_functions::attestation_rewards::{
+    AttestationReward, AttestationRewards, ValidatorAttestationReward,
+};
 use try_from_iterator::TryFromIterator as _;
 use typenum::Unsigned as _;
 use types::{
@@ -361,6 +364,53 @@ pub struct SyncCommitteeRewardsResponse {
     validator_index: ValidatorIndex,
     #[serde(with = "serde_utils::string_or_native")]
     reward: i64,
+}
+
+#[derive(Serialize)]
+pub struct AttestationRewardsResponse {
+    ideal_rewards: Vec<IdealAttestationRewardsResponse>,
+    total_rewards: Vec<TotalAttestationRewardsResponse>,
+}
+
+// Fields are spelled out instead of using `#[serde(flatten)]`.
+// Flattening serializes through a map instead of a struct, which is slower.
+// Responses can contain every validator.
+#[derive(Serialize)]
+pub struct IdealAttestationRewardsResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    effective_balance: Gwei,
+    #[serde(with = "serde_utils::string_or_native")]
+    head: i64,
+    #[serde(with = "serde_utils::string_or_native")]
+    target: i64,
+    #[serde(with = "serde_utils::string_or_native")]
+    source: i64,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "serde_utils::string_or_native_option"
+    )]
+    inclusion_delay: Option<Gwei>,
+    #[serde(with = "serde_utils::string_or_native")]
+    inactivity: i64,
+}
+
+#[derive(Serialize)]
+pub struct TotalAttestationRewardsResponse {
+    #[serde(with = "serde_utils::string_or_native")]
+    validator_index: ValidatorIndex,
+    #[serde(with = "serde_utils::string_or_native")]
+    head: i64,
+    #[serde(with = "serde_utils::string_or_native")]
+    target: i64,
+    #[serde(with = "serde_utils::string_or_native")]
+    source: i64,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "serde_utils::string_or_native_option"
+    )]
+    inclusion_delay: Option<Gwei>,
+    #[serde(with = "serde_utils::string_or_native")]
+    inactivity: i64,
 }
 
 #[derive(Serialize)]
@@ -2191,6 +2241,165 @@ pub async fn block_rewards<P: Preset, W: Wait>(
     Ok(EthResponse::json(rewards_response)
         .execution_optimistic(status.is_optimistic())
         .finalized(finalized))
+}
+
+/// `POST /eth/v1/beacon/rewards/attestations/{epoch}`
+#[instrument(skip_all, level = "debug", name = "http_api::attestation_rewards")]
+pub async fn attestation_rewards<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
+    State(controller): State<ApiController<P, W>>,
+    EthPath(epoch): EthPath<Epoch>,
+    EthJson(validator_ids): EthJson<Vec<ValidatorId>>,
+) -> Result<EthResponse<AttestationRewardsResponse>, Error> {
+    // Rewards for `epoch` are applied at the end of the next epoch.
+    // Until that epoch is over, blocks can still include attestations from `epoch`.
+    let rewarding_epoch = epoch.saturating_add(1);
+
+    if rewarding_epoch >= misc::compute_epoch_at_slot::<P>(controller.slot()) {
+        return Err(Error::EpochRewardsNotFinal {
+            epoch,
+            rewarding_epoch,
+        });
+    }
+
+    let last_slot = misc::compute_start_slot_at_epoch::<P>(rewarding_epoch)
+        .saturating_add(P::SlotsPerEpoch::U64)
+        .saturating_sub(1);
+
+    // The clock alone is not enough. A head behind `last_slot` is missing blocks.
+    // `state_at_slot_cached_blocking` would fill the gap with empty slots,
+    // dropping the attestations those blocks include.
+    if controller.head_slot() < last_slot {
+        return Err(Error::NodeIsSyncing);
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let WithStatus {
+            value: state,
+            status,
+            finalized,
+        } = controller
+            .state_at_slot_cached_blocking(last_slot)?
+            .ok_or(Error::StateNotFound)?;
+
+        // The cached state is left intact. Its persistent parts are shared with the copy.
+        let mut post_state = state.clone_arc();
+
+        let rewards = transition_functions::attestation_rewards::attestation_rewards(
+            &chain_config,
+            controller.pubkey_cache(),
+            post_state.make_mut(),
+            epoch,
+        )?;
+
+        let response = attestation_rewards_response(&state, &rewards, validator_ids)?;
+
+        Ok::<_, Error>(
+            EthResponse::json(response)
+                .execution_optimistic(status.is_optimistic())
+                .finalized(finalized),
+        )
+    })
+    .await?
+}
+
+fn attestation_rewards_response<P: Preset>(
+    state: &BeaconState<P>,
+    rewards: &AttestationRewards<P>,
+    validator_ids: Vec<ValidatorId>,
+) -> Result<AttestationRewardsResponse> {
+    let validators = rewards.validators();
+
+    // With no validators requested, respond with all that could have been rewarded or penalized.
+    let validator_indices = if validator_ids.is_empty() {
+        izip!(0.., validators)
+            .filter(|(_, validator)| validator.eligible)
+            .map(|(validator_index, _)| validator_index)
+            .collect_vec()
+    } else {
+        validator_ids
+            .into_iter()
+            .filter_map(|validator_id| validator_id.validator_index(state))
+            .filter(|validator_index| {
+                usize::try_from(*validator_index).is_ok_and(|index| index < validators.len())
+            })
+            .collect_vec()
+    };
+
+    // Effective balances are multiples of `EFFECTIVE_BALANCE_INCREMENT`,
+    // so a flag per increment count is enough to find the distinct ones.
+    // That is far cheaper than a set when every validator is requested.
+    let mut seen_increments = vec![];
+
+    let total_rewards = validator_indices
+        .into_iter()
+        .map(|validator_index| {
+            let ValidatorAttestationReward {
+                effective_balance,
+                eligible,
+                reward,
+            } = validators[usize::try_from(validator_index)?];
+
+            if eligible {
+                let increments =
+                    usize::try_from(effective_balance / P::EFFECTIVE_BALANCE_INCREMENT)?;
+
+                if seen_increments.len() <= increments {
+                    seen_increments.resize(increments.saturating_add(1), false);
+                }
+
+                seen_increments[increments] = true;
+            }
+
+            let AttestationReward {
+                head,
+                target,
+                source,
+                inclusion_delay,
+                inactivity,
+            } = reward;
+
+            Ok(TotalAttestationRewardsResponse {
+                validator_index,
+                head,
+                target,
+                source,
+                inclusion_delay,
+                inactivity,
+            })
+        })
+        .collect::<Result<_>>()?;
+
+    let ideal_rewards = izip!(0.., seen_increments)
+        .filter(|(_, seen)| *seen)
+        .map(|(increments, _): (u64, _)| {
+            let effective_balance = P::EFFECTIVE_BALANCE_INCREMENT
+                .get()
+                .saturating_mul(increments);
+
+            let AttestationReward {
+                head,
+                target,
+                source,
+                inclusion_delay,
+                inactivity,
+            } = rewards.ideal_reward(effective_balance)?;
+
+            Ok(IdealAttestationRewardsResponse {
+                effective_balance,
+                head,
+                target,
+                source,
+                inclusion_delay,
+                inactivity,
+            })
+        })
+        .collect::<Result<_>>()?;
+
+    Ok(AttestationRewardsResponse {
+        ideal_rewards,
+        total_rewards,
+    })
 }
 
 /// `POST /eth/v1/beacon/rewards/sync_committee/{block_id}`
