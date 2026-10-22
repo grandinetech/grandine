@@ -10,6 +10,7 @@ workspace = true
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
 bls = { workspace = true }
+bytesize = { workspace = true }
 cached = { workspace = true }
 clock = { workspace = true }
 crossbeam-utils = { workspace = true }
@@ -47,6 +48,7 @@ ssz = { workspace = true }
 state_cache = { workspace = true }
 std_ext = { workspace = true }
 strum = { workspace = true }
+sysinfo = { workspace = true }
 tap = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -58,7 +60,6 @@ types = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
-bytesize = { workspace = true }
 duplicate = { workspace = true }
 eth2_cache_utils = { workspace = true }
 factory = { workspace = true }
