@@ -1,4 +1,4 @@
-use core::fmt::Debug;
+use core::{fmt::Debug, marker::PhantomData};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -6,7 +6,7 @@ use bls::{PublicKeyBytes, SignatureBytes};
 use futures::lock::Mutex;
 use helper_functions::{
     accessors, misc, predicates,
-    signing::{SignForSingleFork, SignForSingleForkAtSlot as _},
+    signing::{SignForSingleFork, SignForSingleForkAtSlot},
 };
 use itertools::Itertools as _;
 use logging::warn_with_peers;
@@ -17,97 +17,97 @@ use types::{
         containers::{SyncAggregatorSelectionData, SyncCommitteeMessage},
         primitives::SubcommitteeIndex,
     },
-    cache::IndexSlice,
     combined::BeaconState,
     config::Config,
-    nonstandard::{Phase, RelativeEpoch},
-    phase0::primitives::{CommitteeIndex, Epoch, H256, Slot, SubnetId, ValidatorIndex},
+    nonstandard::{ForkInfo, Phase},
+    phase0::primitives::{Epoch, H256, Slot, ValidatorIndex},
     preset::Preset,
-    traits::BeaconState as _,
 };
 
+#[derive(Clone)]
 pub struct SlotHead<P: Preset> {
     pub config: Arc<Config>,
+    pub slot: Slot,
     pub beacon_block_root: H256,
-    pub beacon_state: Arc<BeaconState<P>>,
+    /// All of a state that signing needs, so that it does not depend on holding one.
+    pub fork_info: ForkInfo,
+    /// The preset the slot's epoch and phase are computed with; no field depends on it.
+    pub phantom: PhantomData<P>,
 }
 
 impl<P: Preset> SlotHead<P> {
     #[must_use]
-    pub fn slot(&self) -> Slot {
-        self.beacon_state.slot()
+    pub fn from_state(
+        config: Arc<Config>,
+        slot: Slot,
+        beacon_block_root: H256,
+        state: &BeaconState<P>,
+    ) -> Self {
+        Self {
+            config,
+            slot,
+            beacon_block_root,
+            fork_info: ForkInfo::from_state(state),
+            phantom: PhantomData,
+        }
+    }
+
+    #[must_use]
+    pub const fn slot(&self) -> Slot {
+        self.slot
     }
 
     #[must_use]
     pub fn phase(&self) -> Phase {
-        self.beacon_state.phase()
+        self.config.phase_at_slot::<P>(self.slot)
     }
 
     #[must_use]
     pub fn current_epoch(&self) -> Epoch {
-        accessors::get_current_epoch(&self.beacon_state)
+        misc::compute_epoch_at_slot::<P>(self.slot)
     }
 
-    #[must_use]
-    pub fn public_key(&self, validator_index: ValidatorIndex) -> &PublicKeyBytes {
-        self.beacon_state
-            .validators()
-            .pubkey(validator_index)
-            .expect(
-                "SlotHead::public_key should only be called with \
-                 indices of validators in SlotHead.beacon_state",
-            )
+    pub fn proposer_index(&self, beacon_state: &BeaconState<P>) -> Result<ValidatorIndex> {
+        accessors::get_beacon_proposer_index(&self.config, beacon_state)
     }
 
-    pub fn proposer_index(&self) -> Result<ValidatorIndex> {
-        accessors::get_beacon_proposer_index(&self.config, &self.beacon_state)
-    }
-
-    pub fn next_proposer_index(&self) -> Result<ValidatorIndex> {
+    pub fn next_proposer_index(&self, beacon_state: &BeaconState<P>) -> Result<ValidatorIndex> {
         accessors::get_beacon_proposer_index_at_slot(
             &self.config,
-            &self.beacon_state,
+            beacon_state,
             self.slot().saturating_add(1),
         )
     }
 
-    pub fn beacon_committee(&self, committee_index: CommitteeIndex) -> Result<IndexSlice<'_>> {
-        accessors::beacon_committee(&self.beacon_state, self.slot(), committee_index)
-    }
-
     #[must_use]
     pub fn has_sync_committee(&self) -> bool {
-        self.beacon_state.phase() >= Phase::Altair
-    }
-
-    pub fn subnet_id(&self, slot: Slot, committee_index: CommitteeIndex) -> Result<SubnetId> {
-        let committees_per_slot =
-            accessors::get_committee_count_per_slot(&self.beacon_state, RelativeEpoch::Current)?;
-
-        misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
+        self.phase() >= Phase::Altair
     }
 
     /// <https://github.com/ethereum/consensus-specs/blob/dc14b79a521fb621f0d2b9da9410f6e7ffaa7df5/specs/altair/validator.md#prepare-sync-committee-message>
     pub async fn sync_committee_messages<I>(
         &self,
         slot: Slot,
+        beacon_block_root: H256,
         validator_indices_with_pubkeys: I,
         signer: &Signer,
     ) -> Result<Vec<SyncCommitteeMessage>>
     where
         I: IntoIterator<Item = (ValidatorIndex, PublicKeyBytes)> + Send,
     {
+        // The head of the node the duty is performed against, not necessarily `self`'s.
         let (triples, validator_indices): (Vec<_>, Vec<_>) = validator_indices_with_pubkeys
             .into_iter()
             .map(|(validator_index, public_key)| {
-                let triple = SigningTriple {
+                let triple = SigningTriple::<P> {
                     message: SigningMessage::SyncCommitteeMessage {
-                        beacon_block_root: self.beacon_block_root,
+                        beacon_block_root,
                         slot,
                     },
-                    signing_root: self.beacon_block_root.signing_root(
+                    signing_root: SignForSingleForkAtSlot::<P>::signing_root_from_fork_info(
+                        &beacon_block_root,
                         &self.config,
-                        &self.beacon_state,
+                        self.fork_info,
                         self.slot(),
                     ),
                     public_key,
@@ -120,15 +120,12 @@ impl<P: Preset> SlotHead<P> {
         let signer_snapshot = signer.load();
 
         let messages = signer_snapshot
-            .sign_triples_without_slashing_protection(
-                triples,
-                Some(self.beacon_state.as_ref().into()),
-            )
+            .sign_triples_without_slashing_protection(triples, Some(self.fork_info))
             .await?
             .zip(validator_indices)
             .map(move |(signature, validator_index)| SyncCommitteeMessage {
                 slot,
-                beacon_block_root: self.beacon_block_root,
+                beacon_block_root,
                 validator_index,
                 signature: signature.into(),
             })
@@ -150,19 +147,20 @@ impl<P: Preset> SlotHead<P> {
                 subcommittee_index,
             };
 
-            SigningTriple {
+            SigningTriple::<P> {
                 message: SigningMessage::SyncAggregatorSelectionData(selection_data),
-                signing_root: selection_data.signing_root(&self.config, &self.beacon_state),
+                signing_root: SignForSingleFork::<P>::signing_root_from_fork_info(
+                    &selection_data,
+                    &self.config,
+                    self.fork_info,
+                ),
                 public_key,
             }
         });
 
         signer
             .load()
-            .sign_triples_without_slashing_protection(
-                triples,
-                Some(self.beacon_state.as_ref().into()),
-            )
+            .sign_triples_without_slashing_protection(triples, Some(self.fork_info))
             .await?
             .map(|signature| {
                 let selection_proof = signature.into();
@@ -185,10 +183,11 @@ impl<P: Preset> SlotHead<P> {
             .sign_triples(
                 core::iter::once(SigningTriple {
                     message,
-                    signing_root: block.signing_root(&self.config, &self.beacon_state),
+                    signing_root: block.signing_root_from_fork_info(&self.config, self.fork_info),
                     public_key,
                 }),
-                self.beacon_state.as_ref(),
+                self.fork_info,
+                self.current_epoch(),
                 slashing_protector,
             )
             .await

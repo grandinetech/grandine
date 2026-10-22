@@ -9,7 +9,8 @@ pub use crate::{
         BuilderSettings, ResolvedBuilderConfig, ResolvedBuilderEntry, resolve_builder_config,
     },
     proposer_configs::{
-        LegacyMigration, ProposerConfigs, migrate_legacy_database, prune_legacy_database,
+        GRANDINE_DONATION_ADDRESS, LegacyMigration, ProposerConfigs, migrate_legacy_database,
+        prune_legacy_database,
     },
     validator_definitions::{
         BuilderOptions, DefinitionsStorage, KeystorePassword, SigningMethod, ValidatorDefinition,
@@ -27,7 +28,7 @@ use futures::lock::Mutex;
 use signer::Signer;
 use slashing_protection::SlashingProtector;
 use std_ext::ArcExt as _;
-use types::phase0::primitives::{ExecutionAddress, H256};
+use types::phase0::primitives::H256;
 
 use crate::{keystores::KeystoreManager, remote_keys::RemoteKeyManager};
 
@@ -45,25 +46,13 @@ pub struct KeyManager {
 }
 
 impl KeyManager {
-    #[expect(clippy::too_many_arguments)]
     pub fn new_in_memory(
         signer: Arc<Signer>,
         slashing_protector: Arc<Mutex<SlashingProtector>>,
         genesis_validators_root: H256,
-        default_fee_recipient: ExecutionAddress,
-        default_gas_limit: Option<Gas>,
-        default_graffiti: H256,
-        builder_settings: BuilderSettings,
+        proposer_configs: Arc<ProposerConfigs>,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Self {
-        let proposer_configs = Arc::new(ProposerConfigs::new(
-            default_fee_recipient,
-            default_gas_limit,
-            default_graffiti,
-            builder_settings,
-            validator_definitions.clone_arc(),
-        ));
-
         let keystore_manager = KeystoreManager::new_in_memory(
             signer.clone_arc(),
             slashing_protector.clone_arc(),
@@ -89,20 +78,9 @@ impl KeyManager {
         validator_directory: PathBuf,
         secrets_directory: PathBuf,
         keystore_storage_password_path: Option<&Path>,
-        default_fee_recipient: ExecutionAddress,
-        default_gas_limit: Option<Gas>,
-        default_graffiti: H256,
-        builder_settings: BuilderSettings,
+        proposer_configs: Arc<ProposerConfigs>,
         validator_definitions: Arc<ValidatorDefinitionsWithStorage>,
     ) -> Result<Self> {
-        let proposer_configs = Arc::new(ProposerConfigs::new(
-            default_fee_recipient,
-            default_gas_limit,
-            default_graffiti,
-            builder_settings,
-            validator_definitions.clone_arc(),
-        ));
-
         let keystore_manager = KeystoreManager::new_persistent(
             signer.clone_arc(),
             slashing_protector.clone_arc(),

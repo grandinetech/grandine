@@ -6,6 +6,7 @@ use core::time::Duration;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     sync::Arc,
+    time::SystemTime,
 };
 
 use anyhow::{Error as AnyhowError, Result, anyhow, ensure};
@@ -19,8 +20,9 @@ use axum::{
         sse::{Event as ServerSentEvent, KeepAlive},
     },
 };
-use binary_utils::TracingHandle;
-use block_producer::{BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock};
+use block_producer::{
+    BlindedBlockPublication, BlockBuildOptions, BlockProducer, ProposerData, ValidatorBlindedBlock,
+};
 use bls::{PublicKeyBytes, SignatureBytes, traits::SignatureBytes as _};
 use builder_api::{
     PayloadBuilderApi,
@@ -28,6 +30,7 @@ use builder_api::{
     gloas::containers::{BuilderConfig as GloasBuilderConfig, BuilderPreferencesEntry, BuilderUrl},
     unphased::containers::SignedValidatorRegistrationV1,
 };
+use clock::Tick;
 use dedicated_executor::DedicatedExecutor;
 use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
@@ -44,7 +47,11 @@ use futures::{
 };
 use genesis::AnchorCheckpointProvider;
 use helper_functions::{accessors, error::Error as AccessorError, misc};
-use http_api_utils::{BlockId, StateId};
+use http_api_utils::{
+    BlockHeadersResponse, BlockId, ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, EthResponse, JsonOrSsz,
+    StateId, ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
+};
 use itertools::{Either, Itertools as _, izip};
 use kzg_utils::eip_4844::compute_blob_kzg_proof;
 use liveness_tracker::ApiToLiveness;
@@ -85,7 +92,7 @@ use types::{
     capella::containers::{SignedBlsToExecutionChange, Withdrawal},
     combined::{
         Attestation, AttesterSlashing, BeaconBlock, BeaconState, DataColumnSidecar,
-        SignedAggregateAndProof, SignedBeaconBlock, SignedBlindedBeaconBlock,
+        SignedBeaconBlock, SignedBlindedBeaconBlock,
     },
     config::Config as ChainConfig,
     deneb::{
@@ -110,10 +117,10 @@ use types::{
         ValidationOutcomeWithReason, WEI_IN_GWEI, WithBlobsAndMev, WithStatus,
     },
     phase0::{
-        consts::{GENESIS_SLOT, TargetAggregatorsPerCommittee},
+        consts::GENESIS_SLOT,
         containers::{
             AttestationData, AttesterSlashing as Phase0AttesterSlashing, Checkpoint, Fork,
-            ProposerSlashing, SignedBeaconBlockHeader, SignedVoluntaryExit, Validator,
+            ProposerSlashing, SignedVoluntaryExit, Validator,
         },
         primitives::{
             ChainId, CommitteeIndex, Epoch, ExecutionAddress, Gwei, H256, Slot, SubnetId, Uint256,
@@ -126,7 +133,10 @@ use types::{
         BlockBodyWithPayloadBid, PostFuluBeaconState, PostGloasBeaconState, SignedBeaconBlock as _,
     },
 };
-use validator::{ApiToValidator, ValidatorConfig};
+use validator::{
+    ApiToValidator, ValidatorConfig, attester_duties_at_slot, proposer_duties_at_epoch,
+    proposer_lookahead_applies, ptc_duties_at_epoch,
+};
 
 use crate::{
     block_id,
@@ -139,11 +149,11 @@ use crate::{
         BuilderPreferencesEntryListPhaseDeserializer,
         PayloadAttestationMessageListPhaseDeserializer, SignedAPIBlock,
         SignedAPIBlockPhaseDeserializer, SignedAggregateAndProofListFromPhaseDeserializer,
-        SignedBlindedBeaconPhaseDeserializer, SignedExecutionPayloadBidPhaseDeserializer,
+        SignedAggregateAndProofs, SignedBlindedBeaconPhaseDeserializer,
+        SignedExecutionPayloadBidPhaseDeserializer,
         SignedProposerPreferencesListFromPhaseDeserializer, SingleApiAttestation,
         SingleApiAttestationListPhaseDeserializer, SyncedStatus,
     },
-    response::{ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, EthResponse, JsonOrSsz},
     state_id,
     validator_status::{
         ValidatorId, ValidatorIdQuery, ValidatorIdsAndStatuses, ValidatorIdsAndStatusesBody,
@@ -315,18 +325,6 @@ pub struct PublishBlockQuery {
     broadcast_validation: Option<BroadcastValidation>,
 }
 
-#[derive(Deserialize)]
-pub struct LogLevelRequest {
-    target: String,
-    level: String,
-}
-
-#[derive(Deserialize)]
-pub struct TraceLevelRequest {
-    target: Option<String>,
-    level: String,
-}
-
 #[expect(clippy::struct_field_names)]
 #[derive(Serialize)]
 pub struct GetGenesisResponse {
@@ -439,13 +437,6 @@ pub struct StateValidatorBalanceResponse {
 }
 
 #[derive(Serialize)]
-pub struct BlockHeadersResponse {
-    root: H256,
-    canonical: bool,
-    header: SignedBeaconBlockHeader,
-}
-
-#[derive(Serialize)]
 pub struct DepositContractResponse {
     address: ExecutionAddress,
     #[serde(with = "serde_utils::string_or_native")]
@@ -510,57 +501,6 @@ pub struct NodeSyncingResponse {
     is_syncing: bool,
     is_optimistic: bool,
     el_offline: bool,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorAttesterDutyResponse {
-    #[serde(with = "serde_utils::string_or_native")]
-    committee_index: CommitteeIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    committee_length: usize,
-    #[serde(with = "serde_utils::string_or_native")]
-    committees_at_slot: u64,
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_committee_index: usize,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorPTCDutyResponse {
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorProposerDutyResponse {
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    #[serde(with = "serde_utils::string_or_native")]
-    slot: Slot,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorSyncDutyResponse {
-    pubkey: PublicKeyBytes,
-    #[serde(with = "serde_utils::string_or_native")]
-    validator_index: ValidatorIndex,
-    #[serde(with = "As::<Vec<DisplayFromStr>>")]
-    validator_sync_committee_indices: Vec<usize>,
-}
-
-#[derive(Serialize)]
-pub struct ValidatorLivenessResponse {
-    #[serde(with = "serde_utils::string_or_native")]
-    index: ValidatorIndex,
-    is_live: bool,
 }
 
 /// `GET /eth/v1/beacon/genesis`
@@ -1846,18 +1786,22 @@ pub async fn publish_blinded_block<P: Preset, W: Wait>(
         SignedBlindedBeaconPhaseDeserializer<P>,
     >,
 ) -> Result<StatusCode, Error> {
-    let execution_payload = block_producer
+    let publication = block_producer
         .publish_signed_blinded_block(&signed_blinded_block)
-        .await;
+        .await
+        .ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+    let execution_payload = match publication {
+        BlindedBlockPublication::Payload(execution_payload) => *execution_payload,
+        BlindedBlockPublication::PublishedByBuilder => return Ok(StatusCode::OK),
+    };
 
     let WithBlobsAndMev {
         value: execution_payload,
         proofs,
         blobs,
         ..
-    } = execution_payload
-        .ok_or(Error::ExecutionPayloadNotAvailable)?
-        .result;
+    } = execution_payload.result;
 
     let (message, signature) = signed_blinded_block.split();
     let signed_beacon_block = message
@@ -1933,6 +1877,7 @@ fn builder_url_from_headers(headers: &HeaderMap) -> Option<BuilderUrl> {
 }
 
 /// `POST /eth/v2/beacon/blinded_blocks`
+#[expect(clippy::too_many_arguments)]
 #[instrument(
     skip_all,
     level = "debug",
@@ -1943,25 +1888,31 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
     State(block_producer): State<Arc<BlockProducer<P, W>>>,
     State(controller): State<ApiController<P, W>>,
     State(event_channels): State<Arc<EventChannels<P>>>,
+    State(metrics): State<Option<Arc<Metrics>>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
+    State(dedicated_executor): State<Arc<DedicatedExecutor>>,
     EthQuery(query): EthQuery<PublishBlockQuery>,
     EthJsonOrSsz(signed_blinded_block, _): EthJsonOrSsz<
         Box<SignedBlindedBeaconBlock<P>>,
         SignedBlindedBeaconPhaseDeserializer<P>,
     >,
 ) -> Result<StatusCode, Error> {
-    let execution_payload = block_producer
+    let publication = block_producer
         .publish_signed_blinded_block(&signed_blinded_block)
-        .await;
+        .await
+        .ok_or(Error::ExecutionPayloadNotAvailable)?;
+
+    let execution_payload = match publication {
+        BlindedBlockPublication::Payload(execution_payload) => *execution_payload,
+        BlindedBlockPublication::PublishedByBuilder => return Ok(StatusCode::OK),
+    };
 
     let WithBlobsAndMev {
         value: execution_payload,
         proofs,
         blobs,
         ..
-    } = execution_payload
-        .ok_or(Error::ExecutionPayloadNotAvailable)?
-        .result;
+    } = execution_payload.result;
 
     let (message, signature) = signed_blinded_block.split();
 
@@ -1971,21 +1922,45 @@ pub async fn publish_blinded_block_v2<P: Preset, W: Wait>(
         .with_signature(signature)
         .pipe(Arc::new);
 
-    let blob_sidecars = misc::construct_blob_sidecars(
-        &signed_beacon_block,
-        blobs.unwrap_or_default().into_iter(),
-        proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
-    )?;
+    let broadcast_validation = query.broadcast_validation.unwrap_or_default();
 
-    publish_signed_block_v2(
-        signed_beacon_block,
-        blob_sidecars,
-        query.broadcast_validation.unwrap_or_default(),
-        controller,
-        event_channels,
-        api_to_p2p_tx,
-    )
-    .await
+    if signed_beacon_block.phase() == Phase::Fulu {
+        let data_column_sidecars = construct_data_column_sidecars_from_blobs(
+            controller.clone_arc(),
+            signed_beacon_block.clone_arc(),
+            blobs,
+            proofs,
+            metrics,
+            dedicated_executor,
+        )
+        .await?;
+
+        publish_signed_block_v2_with_data_column_sidecar(
+            signed_beacon_block,
+            data_column_sidecars,
+            broadcast_validation,
+            controller,
+            event_channels,
+            api_to_p2p_tx,
+        )
+        .await
+    } else {
+        let blob_sidecars = misc::construct_blob_sidecars(
+            &signed_beacon_block,
+            blobs.unwrap_or_default().into_iter(),
+            proofs.unwrap_or_else(KzgProofs::empty_deneb).into_iter(),
+        )?;
+
+        publish_signed_block_v2(
+            signed_beacon_block,
+            blob_sidecars,
+            broadcast_validation,
+            controller,
+            event_channels,
+            api_to_p2p_tx,
+        )
+        .await
+    }
 }
 
 /// `POST /eth/v2/beacon/blocks`
@@ -3101,24 +3076,34 @@ pub async fn node_health(State(is_synced): State<Arc<SyncedStatus>>) -> StatusCo
     name = "http_api::validator_attester_duties"
 )]
 pub async fn validator_attester_duties<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorAttesterDutyResponse>>, Error> {
+    let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
+
+    if epoch > current_epoch.saturating_add(1) {
+        return Err(Error::InvalidEpoch(anyhow!(
+            "epoch {epoch} is after the next epoch"
+        )));
+    }
+
     let head_state = controller.head_state();
 
-    let (state, relative_epoch) = match accessors::relative_epoch(&head_state.value, epoch) {
-        Ok(relative_epoch) => (head_state, relative_epoch),
+    let state = match accessors::relative_epoch(&head_state.value, epoch) {
+        Ok(_) => head_state,
         Err(_) => {
-            let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
-            let state_with_status = state_id::state(
+            // Committees are known an epoch ahead, so the state at the start of the previous
+            // epoch serves them without advancing through that whole epoch.
+            let start_slot = misc::compute_start_slot_at_epoch::<P>(misc::previous_epoch(epoch));
+
+            state_id::state(
                 &StateId::Slot(start_slot),
                 &controller,
                 &anchor_checkpoint_provider,
-            )?;
-
-            (state_with_status, RelativeEpoch::Current)
+            )?
         }
     };
 
@@ -3138,35 +3123,8 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
         .into_iter()
         .collect::<HashSet<ValidatorIndex>>();
 
-    let committees_at_slot = accessors::get_committee_count_per_slot(&state, relative_epoch)?;
-
     let response = misc::slots_in_epoch::<P>(epoch)?
-        .map(|slot| {
-            accessors::beacon_committees(&state, slot)?
-                .zip(0..)
-                .flat_map(|(committee, committee_index)| {
-                    let state = &state;
-
-                    committee
-                        .into_iter()
-                        .enumerate()
-                        .filter(|(_, validator_index)| indices.contains(validator_index))
-                        .map(move |(validator_committee_index, validator_index)| {
-                            let pubkey = *accessors::public_key(state, validator_index)?;
-
-                            Ok(ValidatorAttesterDutyResponse {
-                                committee_index,
-                                committee_length: committee.len(),
-                                committees_at_slot,
-                                pubkey,
-                                slot,
-                                validator_committee_index,
-                                validator_index,
-                            })
-                        })
-                })
-                .collect::<Result<Vec<_>>>()
-        })
+        .map(|slot| attester_duties_at_slot(&state, slot, &indices))
         .flatten_ok()
         .try_collect()
         .map_err(Error::Internal)?;
@@ -3176,14 +3134,34 @@ pub async fn validator_attester_duties<P: Preset, W: Wait>(
         .execution_optimistic(status.is_optimistic()))
 }
 
+fn current_epoch_with_clock_disparity<P: Preset, W: Wait>(
+    controller: &ApiController<P, W>,
+    chain_config: &ChainConfig,
+) -> Result<Epoch> {
+    // Fork choice enters a slot only once it handles the slot's tick, which a request sent at
+    // the epoch boundary can beat by a few milliseconds.
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+    let time = now.saturating_add(chain_config.maximum_gossip_clock_disparity);
+    let tick = Tick::at_time_in_ms::<P>(
+        chain_config,
+        u64::try_from(time.as_millis())?,
+        controller.genesis_time(),
+    )?;
+
+    Ok(tick
+        .epoch::<P>()
+        .max(misc::compute_epoch_at_slot::<P>(controller.slot())))
+}
+
 /// `POST /eth/v1/validator/duties/ptc/{epoch}`
 pub async fn validator_ptc_duties<P: Preset, W: Wait>(
+    State(chain_config): State<Arc<ChainConfig>>,
     State(controller): State<ApiController<P, W>>,
     State(anchor_checkpoint_provider): State<AnchorCheckpointProvider<P>>,
     EthPath(epoch): EthPath<Epoch>,
     EthJson(validator_indices): EthJson<Vec<ValidatorIndex>>,
 ) -> Result<EthResponse<Vec<ValidatorPTCDutyResponse>>, Error> {
-    let current_epoch = misc::compute_epoch_at_slot::<P>(controller.slot());
+    let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
 
     if epoch > current_epoch.saturating_add(1) {
         return Err(Error::InvalidEpoch(anyhow!(
@@ -3241,24 +3219,7 @@ pub async fn validator_ptc_duties<P: Preset, W: Wait>(
         .into_iter()
         .collect::<HashSet<ValidatorIndex>>();
 
-    let response = misc::slots_in_epoch::<P>(epoch)?
-        .map(|slot| {
-            accessors::get_ptc(controller.chain_config(), &state, slot)?
-                .into_iter()
-                .filter(|validator_index| indices.contains(validator_index))
-                .map(|validator_index| {
-                    let pubkey = *accessors::public_key(&state, validator_index)?;
-
-                    Ok(ValidatorPTCDutyResponse {
-                        pubkey,
-                        validator_index,
-                        slot,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()
-        })
-        .flatten_ok()
-        .try_collect()
+    let response = ptc_duties_at_epoch(controller.chain_config(), &state, epoch, &indices)
         .map_err(Error::Internal)?;
 
     Ok(EthResponse::json(response)
@@ -3340,7 +3301,7 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
         (state, status)
     };
 
-    let dependent_root = if post_fulu_check && chain_config.phase_at_epoch(epoch) >= Phase::Fulu {
+    let dependent_root = if post_fulu_check && proposer_lookahead_applies(&chain_config, epoch) {
         // Post-Fulu get dependent root for the previous epoch because proposer suffling is done at
         // the last slot of epoch N - 2 with proposer lookahead. We should note that `dependent_root`
         // itself will return block root of the last slot in epoch `epoch` - 1.
@@ -3351,21 +3312,8 @@ async fn get_proposer_duties<P: Preset, W: Wait>(
         controller.dependent_root(&state, epoch)?
     };
 
-    let response = misc::slots_in_epoch::<P>(epoch)?
-        .map(|slot| {
-            let validator_index =
-                accessors::get_beacon_proposer_index_at_slot(&chain_config, &state, slot)?;
-
-            let pubkey = *accessors::public_key(&state, validator_index)?;
-
-            Ok(ValidatorProposerDutyResponse {
-                pubkey,
-                validator_index,
-                slot,
-            })
-        })
-        .try_collect()
-        .map_err(Error::Internal)?;
+    let response =
+        proposer_duties_at_epoch(&chain_config, &state, epoch).map_err(Error::Internal)?;
 
     Ok(EthResponse::json(response)
         .dependent_root(dependent_root)
@@ -3409,7 +3357,10 @@ pub async fn validator_sync_committee_duties<P: Preset, W: Wait>(
     ) = if let Some(committee) = state_sync_committee(&head_state.value, requested_period) {
         (head_state, committee)
     } else {
-        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch);
+        // A committee is known a period ahead, so the state at the current epoch serves the next
+        // period even while fork choice is still finishing the previous one.
+        let current_epoch = current_epoch_with_clock_disparity(&controller, &chain_config)?;
+        let start_slot = misc::compute_start_slot_at_epoch::<P>(epoch.min(current_epoch));
 
         let state = state_id::state(
             &StateId::Slot(start_slot),
@@ -4169,7 +4120,7 @@ pub async fn validator_attestation_data<P: Preset, W: Wait>(
         target,
     };
 
-    EthResponse::json_or_ssz(attestation_data, &headers)
+    EthResponse::json_or_ssz(attestation_data, &headers).map_err(Into::into)
 }
 
 /// `POST /eth/v1/validator/beacon_committee_subscriptions`
@@ -4355,6 +4306,11 @@ pub async fn validator_payload_attestation_data<P: Preset, W: Wait>(
         });
     }
 
+    // No block for the slot has been seen; the validator must not attest.
+    if head_slot < slot {
+        return Err(Error::BlockNotSeen);
+    }
+
     let requested_epoch = misc::compute_epoch_at_slot::<P>(slot);
     let previous_epoch = misc::previous_epoch(misc::compute_epoch_at_slot::<P>(head_slot));
 
@@ -4430,7 +4386,7 @@ pub async fn validator_publish_aggregate_and_proofs_v1<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSszWithOptionalPhase(aggregate_and_proofs, _): EthJsonOrSszWithOptionalPhase<
-        ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>,
+        SignedAggregateAndProofs<P>,
         SignedAggregateAndProofListFromPhaseDeserializer<P>,
     >,
 ) -> Result<(), Error> {
@@ -4454,7 +4410,7 @@ pub async fn validator_publish_aggregate_and_proofs_v2<P: Preset, W: Wait>(
     State(controller): State<ApiController<P, W>>,
     State(api_to_p2p_tx): State<UnboundedSender<ApiToP2p<P>>>,
     EthJsonOrSsz(aggregate_and_proofs, _): EthJsonOrSsz<
-        ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>,
+        SignedAggregateAndProofs<P>,
         SignedAggregateAndProofListFromPhaseDeserializer<P>,
     >,
 ) -> Result<(), Error> {
@@ -4464,10 +4420,7 @@ pub async fn validator_publish_aggregate_and_proofs_v2<P: Preset, W: Wait>(
 async fn validator_publish_aggregate_and_proofs<P: Preset, W: Wait>(
     controller: &ApiController<P, W>,
     api_to_p2p_tx: &UnboundedSender<ApiToP2p<P>>,
-    aggregate_and_proofs: ContiguousList<
-        Arc<SignedAggregateAndProof<P>>,
-        TargetAggregatorsPerCommittee,
-    >,
+    aggregate_and_proofs: SignedAggregateAndProofs<P>,
 ) -> Result<(), Error> {
     let (successes, failures): (Vec<_>, Vec<_>) = aggregate_and_proofs
         .into_iter()
@@ -4735,78 +4688,6 @@ pub async fn validator_beacon_committee_selections() -> Error {
 /// `POST /eth/v1/validator/sync_committee_selections`
 pub async fn validator_sync_committee_selections() -> Error {
     Error::EndpointNotImplemented
-}
-
-/// `POST /eth/v2/debug/tracing/log_level`
-#[instrument(skip_all, level = "debug", name = "http_api::post_log_level")]
-pub async fn post_log_level(
-    State(handle): State<Option<TracingHandle>>,
-    Json(req): Json<LogLevelRequest>,
-) -> impl IntoResponse {
-    let directive_str = format!("{}={}", req.target, req.level);
-
-    match directive_str.parse() {
-        Ok(directive) => {
-            if let Some(handle) = handle {
-                if let Err(e) = handle.modify_log(|filter| {
-                    let old = core::mem::take(filter);
-                    *filter = old.add_directive(directive);
-                }) {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("failed to reload filter: {e}"),
-                    );
-                }
-                (StatusCode::OK, "log level updated".to_owned())
-            } else {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "tracing not available".to_owned(),
-                )
-            }
-        }
-        Err(e) => (StatusCode::BAD_REQUEST, format!("invalid directive: {e}")),
-    }
-}
-
-/// `POST /eth/v2/debug/tracing/trace_level`
-#[instrument(skip_all, level = "debug", name = "http_api::post_trace_level")]
-pub async fn post_trace_level(
-    State(handle): State<Option<TracingHandle>>,
-    Json(req): Json<TraceLevelRequest>,
-) -> impl IntoResponse {
-    let TraceLevelRequest { target, level } = req;
-
-    let directive_str = target
-        .map(|target| format!("{target}={level}"))
-        .unwrap_or(level);
-
-    match directive_str.parse() {
-        Ok(directive) => {
-            if let Some(handle) = handle {
-                match handle.modify_trace(|filter| {
-                    let old = core::mem::take(filter);
-                    *filter = old.add_directive(directive);
-                }) {
-                    Ok(Some(())) => (StatusCode::OK, "trace level updated".to_owned()),
-                    Ok(None) => (
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "telemetry not available".to_owned(),
-                    ),
-                    Err(e) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("failed to reload filter: {e}"),
-                    ),
-                }
-            } else {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "tracing not available".to_owned(),
-                )
-            }
-        }
-        Err(e) => (StatusCode::BAD_REQUEST, format!("invalid directive: {e}")),
-    }
 }
 
 fn state_validators<P: Preset, W: Wait>(
@@ -6064,18 +5945,42 @@ async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
     signed_envelope: Arc<SignedExecutionPayloadEnvelope<P>>,
     broadcast_validation: BroadcastValidation,
 ) -> Result<StatusCode, Error> {
-    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
-
     if broadcast_validation == BroadcastValidation::Gossip {
+        let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
         controller
             .on_api_execution_payload_envelope_for_gossip(signed_envelope.clone_arc(), sender);
-    } else {
-        controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
+
+        // The gossip checks only answer; publishing and importing are still to be done.
+        match receiver.next().await.transpose() {
+            Ok(Some(ValidationOutcome::Accept)) => {
+                ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+                    .send(api_to_p2p_tx);
+            }
+            Ok(Some(ValidationOutcome::Ignore(publishable))) => {
+                if publishable {
+                    ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+                        .send(api_to_p2p_tx);
+                }
+
+                return Ok(StatusCode::ACCEPTED);
+            }
+            Ok(None) => {
+                return Err(Error::InvalidPayloadEnvelope(anyhow!(
+                    "received no envelope validation response",
+                )));
+            }
+            Err(error) => return Err(Error::InvalidPayloadEnvelope(error)),
+        }
     }
+
+    let (sender, mut receiver) = futures::channel::mpsc::channel(1);
+
+    controller.on_api_execution_payload_envelope(signed_envelope.clone_arc(), sender);
 
     let status_code = match receiver.next().await.transpose() {
         Ok(Some(ValidationOutcome::Accept)) => match broadcast_validation {
-            // The envelope was already published by the gossip-checks path above.
+            // Published above once the gossip checks passed.
             BroadcastValidation::Gossip => StatusCode::OK,
             BroadcastValidation::Consensus => {
                 ApiToP2p::PublishExecutionPayloadEnvelope(signed_envelope).send(api_to_p2p_tx);
@@ -6101,7 +6006,13 @@ async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
             StatusCode::ACCEPTED
         }
         Ok(None) => {
+            // Under gossip validation the envelope is already on the wire.
             if broadcast_validation == BroadcastValidation::Gossip {
+                warn_with_peers!(
+                    "received no envelope validation response for HTTP API \
+                     (envelope: {signed_envelope:?})"
+                );
+
                 StatusCode::ACCEPTED
             } else {
                 return Err(Error::InvalidPayloadEnvelope(anyhow!(
@@ -6111,6 +6022,11 @@ async fn publish_signed_execution_payload_envelope<P: Preset, W: Wait>(
         }
         Err(error) => {
             if broadcast_validation == BroadcastValidation::Gossip {
+                warn_with_peers!(
+                    "received invalid envelope through HTTP API \
+                     (envelope: {signed_envelope:?}, error: {error})"
+                );
+
                 StatusCode::ACCEPTED
             } else {
                 return Err(Error::InvalidPayloadEnvelope(error));
@@ -6200,6 +6116,21 @@ mod tests {
     use types::{phase0::containers::Attestation as Phase0Attestation, preset::Mainnet};
 
     use super::*;
+
+    // `produceBlockV4` takes the boost factor in the body, not the query.
+    #[tokio::test]
+    async fn parses_produce_block_v4_query_without_a_boost_factor() -> Result<()> {
+        let query = extract_query::<ValidatorBlockQueryV4>(format!(
+            "randao_reveal={:?}&include_payload=true",
+            SignatureBytes::default(),
+        ))
+        .await?;
+
+        assert!(query.include_payload);
+        assert!(query.graffiti.is_none());
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_deserialize_for_attestation() -> Result<()> {

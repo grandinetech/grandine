@@ -22,7 +22,7 @@ use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     lock::Mutex,
 };
-use keymanager::KeyManager;
+use keymanager::{KeyManager, ProposerConfigs};
 use operation_pools::{
     AttestationAggPool, BlsToExecutionChangePool, PayloadAttestationAggPool, SyncCommitteeAggPool,
 };
@@ -163,7 +163,6 @@ impl<P: Preset> Context<P> {
 
         let signer = Arc::new(Signer::new(
             core::iter::empty(),
-            client.clone(),
             client,
             Web3SignerConfig::default(),
             None,
@@ -179,14 +178,19 @@ impl<P: Preset> Context<P> {
             ..Default::default()
         });
 
-        let keymanager = Arc::new(KeyManager::new_in_memory(
-            signer.clone_arc(),
-            slashing_protector.clone_arc(),
-            genesis_validators_root,
+        let proposer_configs = Arc::new(ProposerConfigs::new(
             validator_config.suggested_fee_recipient,
             validator_config.default_gas_limit,
             H256::default(),
             validator_config.builder_settings.clone(),
+            validator_config.validator_definitions.clone_arc(),
+        ));
+
+        let keymanager = Arc::new(KeyManager::new_in_memory(
+            signer.clone_arc(),
+            slashing_protector.clone_arc(),
+            genesis_validators_root,
+            proposer_configs,
             validator_config.validator_definitions.clone_arc(),
         ));
 

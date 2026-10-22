@@ -57,7 +57,6 @@ use types::{
     },
     nonstandard::{KzgProofs, Phase, WithBlobsAndMev},
     phase0::{
-        consts::TargetAggregatorsPerCommittee,
         containers::{
             Attestation as Phase0Attestation,
             SignedAggregateAndProof as Phase0SignedAggregateAndProof,
@@ -260,6 +259,9 @@ impl<P: Preset> From<WithBlobsAndMev<ValidatorBlindedBlock<P>, P>>
     }
 }
 
+pub type SignedAggregateAndProofs<P> =
+    ContiguousList<Arc<SignedAggregateAndProof<P>>, <P as Preset>::MaxAggregatesPerSlot>;
+
 pub struct SignedAggregateAndProofListFromPhaseDeserializer<P: Preset> {
     phase: Phase,
     phantom: PhantomData<P>,
@@ -275,7 +277,7 @@ impl<P: Preset> From<Phase> for SignedAggregateAndProofListFromPhaseDeserializer
 }
 
 impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPhaseDeserializer<P> {
-    type Value = ContiguousList<Arc<SignedAggregateAndProof<P>>, TargetAggregatorsPerCommittee>;
+    type Value = SignedAggregateAndProofs<P>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -289,19 +291,19 @@ impl<'de, P: Preset> DeserializeSeed<'de> for SignedAggregateAndProofListFromPha
                 | Phase::Capella
                 | Phase::Deneb => ContiguousList::<
                     Phase0SignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
+                    P::MaxAggregatesPerSlot,
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
                 Phase::Electra | Phase::Fulu => ContiguousList::<
                     ElectraSignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
+                    P::MaxAggregatesPerSlot,
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
                 Phase::Gloas => ContiguousList::<
                     GloasSignedAggregateAndProof<P>,
-                    TargetAggregatorsPerCommittee,
+                    P::MaxAggregatesPerSlot,
                 >::deserialize(deserializer)?
                 .map(Into::into)
                 .map(Arc::new),
@@ -731,4 +733,47 @@ pub enum BroadcastValidation {
     Gossip,
     Consensus,
     ConsensusAndEquivocation,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+    use types::preset::Minimal;
+
+    use super::*;
+
+    #[test]
+    fn aggregate_request_may_hold_more_than_one_committee_of_aggregators()
+    -> Result<(), serde_json::Error> {
+        let root = format!("0x{}", "00".repeat(32));
+        let signature = format!("0x{}", "00".repeat(96));
+        let checkpoint = json!({ "epoch": "0", "root": root });
+
+        let aggregate_and_proof = json!({
+            "message": {
+                "aggregator_index": "0",
+                "aggregate": {
+                    "aggregation_bits": "0x01",
+                    "data": {
+                        "slot": "0",
+                        "index": "0",
+                        "beacon_block_root": root,
+                        "source": checkpoint,
+                        "target": checkpoint,
+                    },
+                    "signature": signature,
+                },
+                "selection_proof": signature,
+            },
+            "signature": signature,
+        });
+
+        let aggregates =
+            SignedAggregateAndProofListFromPhaseDeserializer::<Minimal>::from(Phase::Phase0)
+                .deserialize(Value::Array(vec![aggregate_and_proof; 17]))?;
+
+        assert_eq!(aggregates.len(), 17);
+
+        Ok(())
+    }
 }

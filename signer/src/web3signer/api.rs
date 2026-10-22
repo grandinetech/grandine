@@ -179,7 +179,7 @@ impl Web3Signer {
         api_url: &RedactingUrl,
         message: SigningMessage<'_, P>,
         signing_root: H256,
-        fork_info: Option<ForkInfo<P>>,
+        fork_info: Option<ForkInfo>,
         public_key: PublicKeyBytes,
     ) -> Result<SignatureBytes> {
         let _timer = self
@@ -447,7 +447,7 @@ mod tests {
         let altair_block = Hc::new(AltairBeaconBlock::default());
         let message = SigningMessage::from(&altair_block);
         let signing_root = altair_block.signing_root(&Config::minimal(), &beacon_state);
-        let fork_info = ForkInfo::from(&beacon_state);
+        let fork_info = ForkInfo::from_state(&beacon_state);
 
         let response = web3signer
             .sign(&url, message, signing_root, Some(fork_info), SAMPLE_PUBKEY)

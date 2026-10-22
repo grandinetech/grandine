@@ -6,14 +6,12 @@ use bls::PublicKeyBytes;
 use helper_functions::{accessors, misc};
 use itertools::Itertools as _;
 use p2p::SyncCommitteeSubscription;
-use rand::Rng as _;
-use typenum::Unsigned as _;
 use types::{
-    altair::{consts::SyncCommitteeSubnetCount, containers::SyncCommittee},
-    phase0::primitives::Epoch,
-    preset::Preset,
+    altair::containers::SyncCommittee, phase0::primitives::Epoch, preset::Preset,
     traits::PostAltairBeaconState,
 };
+
+use crate::misc::sync_subnet_subscription_epoch;
 
 #[derive(Default)]
 pub struct OwnSyncCommitteeSubscriptions<P: Preset> {
@@ -56,20 +54,10 @@ impl<P: Preset> OwnSyncCommitteeSubscriptions<P> {
                 next_period_expiration,
             )
             .map(|subscription| {
-                // From the [Altair Honest Validator specification]:
-                // > To join a sync committee subnet, select a random number of epochs before the
-                // > end of the current sync committee period between 1 and
-                // > `SYNC_COMMITTEE_SUBNET_COUNT`, inclusive. Validators should join their member
-                // > subnet at the beginning of the epoch they have randomly selected. For example,
-                // > if the next sync committee period starts at epoch `853,248` and the validator
-                // > randomly selects an offset of `3`, they should join the subnet at the beginning
-                // > of epoch `853,245`.
-                //
-                // [Altair Honest Validator specification]: https://github.com/ethereum/consensus-specs/blob/0b76c8367ed19014d104e3fbd4718e73f459a748/specs/altair/validator.md#sync-committee-subnet-stability
-                let epoch_to_subscribe_at = next_period_start
-                    .saturating_sub(rng.gen_range(1..=SyncCommitteeSubnetCount::U64));
-
-                (epoch_to_subscribe_at, subscription)
+                (
+                    sync_subnet_subscription_epoch(next_period_start, &mut rng),
+                    subscription,
+                )
             })
             .into_group_map()
         });

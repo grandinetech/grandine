@@ -1,37 +1,40 @@
+use core::fmt::Display;
+
 use anyhow::Result;
 use axum::{
     Json,
     http::{HeaderMap, HeaderValue, header::ACCEPT},
     response::{IntoResponse, Response},
 };
-use builder_api::gloas::containers::BuilderUrl;
-use http_api_utils::ETH_CONSENSUS_VERSION;
 use logging::warn_with_peers;
 use mediatype::{MediaType, MediaTypeList};
 use mime::APPLICATION_OCTET_STREAM;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use ssz::SszWrite;
 use tap::Pipe as _;
 use tracing::instrument;
 use types::{bellatrix::primitives::Wei, nonstandard::Phase, phase0::primitives::H256};
 
-use crate::error::Error;
+use crate::{error::Error, misc::ETH_CONSENSUS_VERSION};
 
 const ETH_CONSENSUS_BLOCK_VALUE: &str = "eth-consensus-block-value";
 pub const ETH_BLOB_DATA_INCLUDED: &str = "eth-blob-data-included";
-const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
+pub const ETH_EXECUTION_PAYLOAD_BLINDED: &str = "eth-execution-payload-blinded";
 const ETH_EXECUTION_PAYLOAD_VALUE: &str = "eth-execution-payload-value";
-const ETH_EXECUTION_PAYLOAD_INCLUDED: &str = "eth-execution-payload-included";
+pub const ETH_EXECUTION_PAYLOAD_INCLUDED: &str = "eth-execution-payload-included";
 pub const ETH_BUILDER_URL: &str = "eth-builder-url";
 
+#[derive(Default)]
 pub struct AlwaysJson;
 
+#[derive(Default)]
 pub enum JsonOrSsz {
+    #[default]
     Json,
     Ssz,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct EthResponse<T, M = (), F = AlwaysJson> {
     data: T,
 
@@ -59,7 +62,7 @@ pub struct EthResponse<T, M = (), F = AlwaysJson> {
 
     // These are returned only in headers.
     #[serde(skip)]
-    builder_url: Option<BuilderUrl>,
+    builder_url: Option<HeaderValue>,
 
     #[serde(skip)]
     format: F,
@@ -114,48 +117,81 @@ impl<T, M, F> EthResponse<T, M, F> {
         }
     }
 
+    #[must_use]
+    pub fn into_data(self) -> T {
+        self.data
+    }
+
+    #[must_use]
+    pub fn into_data_and_dependent_root(self) -> (T, Option<H256>) {
+        (self.data, self.dependent_root)
+    }
+
+    #[must_use]
+    pub fn into_data_and_execution_optimistic(self) -> (T, Option<bool>) {
+        (self.data, self.execution_optimistic)
+    }
+
+    #[must_use]
     pub const fn version(mut self, phase: Phase) -> Self {
         self.version = Some(phase);
         self
     }
 
+    #[must_use]
     pub const fn consensus_block_value(mut self, consensus_block_value: Option<Wei>) -> Self {
         self.consensus_block_value = consensus_block_value;
         self
     }
 
+    #[must_use]
     pub const fn execution_payload_blinded(mut self, execution_payload_blinded: bool) -> Self {
         self.execution_payload_blinded = Some(execution_payload_blinded);
         self
     }
 
+    #[must_use]
     pub const fn execution_payload_value(mut self, execution_payload_value: Wei) -> Self {
         self.execution_payload_value = Some(execution_payload_value);
         self
     }
 
+    #[must_use]
     pub const fn execution_payload_included(mut self, execution_payload_included: bool) -> Self {
         self.execution_payload_included = Some(execution_payload_included);
         self
     }
 
+    #[must_use]
     pub const fn dependent_root(mut self, dependent_root: H256) -> Self {
         self.dependent_root = Some(dependent_root);
         self
     }
 
+    #[must_use]
     pub const fn execution_optimistic(mut self, execution_optimistic: bool) -> Self {
         self.execution_optimistic = Some(execution_optimistic);
         self
     }
 
+    #[must_use]
     pub const fn finalized(mut self, finalized: bool) -> Self {
         self.finalized = Some(finalized);
         self
     }
 
-    pub fn builder_url(mut self, builder_url: Option<BuilderUrl>) -> Self {
-        self.builder_url = builder_url;
+    // `Display` is only used for logging, so a URL can be redacted there.
+    #[must_use]
+    pub fn builder_url(mut self, builder_url: Option<impl AsRef<str> + Display>) -> Self {
+        // The block is more important than the header, so an unencodable URL is left out.
+        self.builder_url = builder_url.and_then(|builder_url| {
+            HeaderValue::from_str(builder_url.as_ref())
+                .inspect_err(|error| {
+                    warn_with_peers!("builder URL {builder_url} is not a valid header: {error}");
+                })
+                .ok()
+        });
+
         self
     }
 
@@ -187,16 +223,8 @@ impl<T, M, F> EthResponse<T, M, F> {
             response_headers.insert(ETH_EXECUTION_PAYLOAD_INCLUDED, header_value);
         }
 
-        // The block is more important than the header, so an unencodable URL is left out.
-        if let Some(builder_url) = &self.builder_url {
-            match HeaderValue::from_str(builder_url.as_str()) {
-                Ok(header_value) => {
-                    response_headers.insert(ETH_BUILDER_URL, header_value);
-                }
-                Err(error) => {
-                    warn_with_peers!("builder URL {builder_url} is not a valid header: {error}");
-                }
-            }
+        if let Some(header_value) = self.builder_url.clone() {
+            response_headers.insert(ETH_BUILDER_URL, header_value);
         }
 
         Ok(response_headers)
@@ -238,6 +266,7 @@ impl<T, M, F> EthResponse<T, M, F> {
 }
 
 impl<T, F> EthResponse<T, (), F> {
+    #[must_use]
     pub fn meta<M>(self, meta: M) -> EthResponse<T, M, F> {
         let Self {
             data,
@@ -281,14 +310,9 @@ impl<T> EthResponse<T, (), JsonOrSsz> {
     // `axum` recommends using `axum::TypedHeader` instead of extracting all headers,
     // but the `headers` crate does not provide a type for the `Accept` header.
     // See <https://github.com/hyperium/headers/issues/53>.
-    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self, Error> {
+    pub fn json_or_ssz(data: T, request_headers: &HeaderMap) -> Result<Self> {
         if let Some(accept_header) = request_headers.get(ACCEPT) {
-            let accepted_types = accept_content_type_list(
-                accept_header
-                    .to_str()
-                    .map_err(Into::into)
-                    .map_err(Error::Internal)?,
-            )?;
+            let accepted_types = accept_content_type_list(accept_header.to_str()?)?;
 
             for accept in &accepted_types {
                 if accept == APPLICATION_OCTET_STREAM.as_ref() {

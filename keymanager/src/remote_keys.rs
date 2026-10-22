@@ -195,7 +195,6 @@ mod tests {
                 KeyOrigin::External,
             )],
             Client::new(),
-            Client::new(),
             Web3SignerConfig::default(),
             None,
         ))
@@ -364,7 +363,6 @@ mod tests {
     async fn test_remote_keys_import_records_url_loaded_key() -> Result<()> {
         let signer = Arc::new(Signer::new(
             core::iter::empty(),
-            Client::new(),
             Client::new(),
             Web3SignerConfig::default(),
             None,
