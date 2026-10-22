@@ -13,7 +13,6 @@ mod gui;
 mod http_api_config;
 mod middleware;
 mod misc;
-mod response;
 mod routing;
 mod standard;
 mod state_id;

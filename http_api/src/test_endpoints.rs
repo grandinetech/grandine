@@ -66,11 +66,17 @@ pub async fn post_take_messages<P: Preset>(
         validator_to_p2p_rx,
     } = test_state;
 
+    let mut validator_to_p2p = take(validator_to_p2p_rx).await;
+
+    // Sort proposer preferences to the end, as their own task races the block proposal.
+    validator_to_p2p
+        .sort_by_key(|message| matches!(message, ValidatorToP2p::PublishProposerPreferences(_)));
+
     Json(TakeMessagesResponse {
         api_to_p2p: take(api_to_p2p_rx).await,
         fc_to_p2p: take(fc_to_p2p_rx).await,
         fc_to_sync: take(fc_to_sync_rx).await,
         pool_to_p2p: take(pool_to_p2p_rx).await,
-        validator_to_p2p: take(validator_to_p2p_rx).await,
+        validator_to_p2p,
     })
 }

@@ -17,13 +17,13 @@ use std::sync::Arc;
 use eth2_cache_utils::medalla;
 #[cfg(feature = "eth2-cache")]
 use eth2_libp2p::GossipId;
-use helper_functions::misc;
+use helper_functions::{accessors, misc};
+use itertools::Itertools as _;
 use spec_test_utils::BlsSetting;
 #[cfg(feature = "eth2-cache")]
 use std_ext::ArcExt as _;
-#[cfg(feature = "eth2-cache")]
-use types::{config::Config, preset::Medalla};
 use types::{
+    combined::Attestation,
     gloas::consts::{PAYLOAD_STATUS_EMPTY, PAYLOAD_STATUS_FULL},
     nonstandard::{PayloadStatus, Phase},
     phase0::{
@@ -35,13 +35,16 @@ use types::{
         primitives::H256,
     },
     preset::Minimal,
-    traits::SignedBeaconBlock as _,
+    traits::{BeaconState as _, SignedBeaconBlock as _},
 };
+#[cfg(feature = "eth2-cache")]
+use types::{config::Config, preset::Medalla};
 
 use fork_choice_store::PayloadPresence;
 
 use crate::{
     helpers::{Context, Status, epoch_at_slot, is_at_start_of_epoch, start_of_epoch},
+    messages::P2pMessage,
     storage::StoredBlock,
 };
 
@@ -3674,4 +3677,47 @@ fn gloas_block_events_are_optimistic_if_the_payload_they_rest_on_is() {
     context.on_acceptable_block(&block_3);
 
     context.assert_block_events(&[(root_3, false)]);
+}
+
+// A single attestation correctly signed by a validator outside the committee it names is rejected
+// at validation, before it would be forwarded, published or handed to the attestation pool.
+#[test]
+fn rejects_single_attestation_from_validator_outside_committee() {
+    let mut context = Context::electra_minimal();
+
+    let (_, state_0) = context.genesis();
+
+    context.on_slot(1);
+
+    let member = 0;
+    let (attestation, subnet_id) =
+        context.single_attestation_signed_by(&state_0, GENESIS_EPOCH, member, member);
+
+    let Attestation::Single(single_attestation) = &attestation else {
+        unreachable!("single_attestation_signed_by builds a single attestation");
+    };
+
+    let committee = accessors::beacon_committee(
+        &state_0,
+        single_attestation.data.slot,
+        single_attestation.committee_index,
+    )
+    .expect("the committee the attestation names exists in the genesis state");
+
+    let outsider = (0..state_0.validators().len_u64())
+        .find(|index| !committee.into_iter().contains(index))
+        .expect("the minimal genesis has more validators than one committee");
+
+    assert!(matches!(
+        context.on_gossip_attestation(attestation, subnet_id),
+        Some(P2pMessage::Accept(_)),
+    ));
+
+    let (forged, subnet_id) =
+        context.single_attestation_signed_by(&state_0, GENESIS_EPOCH, member, outsider);
+
+    assert!(matches!(
+        context.on_gossip_attestation(forged, subnet_id),
+        Some(P2pMessage::Reject(_, _)),
+    ));
 }

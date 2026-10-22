@@ -1,6 +1,6 @@
 pub use crate::{
     server::{MetricsServerConfig, run_metrics_server},
-    service::{MetricsChannels, MetricsService, MetricsServiceConfig},
+    service::{MetricsChannels, MetricsService, MetricsServiceConfig, NodeMetrics},
 };
 
 mod beaconchain;

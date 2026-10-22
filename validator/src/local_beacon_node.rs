@@ -1,0 +1,1159 @@
+use core::ops::Range;
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
+
+use anyhow::{Error as AnyhowError, Result, anyhow, bail, ensure};
+use block_producer::{
+    BlindedBlockPublication, BlockBuildOptions, ProposerData, ValidatorBlindedBlock,
+};
+use bls::{PublicKeyBytes, SignatureBytes};
+use builder_api::{
+    consts::MaxBuilderEntries,
+    gloas::containers::{BuilderEntry, BuilderPreferencesEntry, BuilderUrl},
+    unphased::containers::SignedValidatorRegistrationV1,
+};
+use dedicated_executor::DedicatedExecutor;
+use fork_choice_control::Wait;
+use fork_choice_store::{
+    AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
+};
+use futures::{
+    channel::{mpsc::UnboundedSender, oneshot},
+    future::join_all,
+};
+use helper_functions::{accessors, misc};
+use http_api_utils::{
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
+};
+use itertools::Itertools as _;
+use liveness_tracker::ApiToLiveness;
+use logging::{debug_with_peers, warn_with_peers};
+use operation_pools::{AttestationKey, convert_to_electra_attestation};
+use p2p::{
+    BeaconCommitteeSubscription, SyncCommitteeSubscription, ToSubnetService, ValidatorToP2p,
+};
+use prometheus_metrics::Metrics;
+use signer::Signer;
+use ssz::{ContiguousList, SszHash as _};
+use std_ext::ArcExt as _;
+use tap::Pipe as _;
+use thiserror::Error;
+use try_from_iterator::TryFromIterator as _;
+use types::{
+    altair::{
+        containers::{SignedContributionAndProof, SyncCommitteeContribution, SyncCommitteeMessage},
+        primitives::SubcommitteeIndex,
+    },
+    combined::{
+        Attestation, BeaconState, DataColumnSidecar, SignedAggregateAndProof, SignedBeaconBlock,
+        SignedBlindedBeaconBlock,
+    },
+    config::Config,
+    deneb::primitives::{Blob, KzgProof},
+    gloas::{
+        consts::BUILDER_INDEX_SELF_BUILD,
+        containers::{
+            PayloadAttestationData, PayloadAttestationMessage, SignedExecutionPayloadEnvelope,
+            SignedProposerPreferences,
+        },
+    },
+    nonstandard::{
+        KzgProofs, OwnAttestation, PayloadStatus, Phase, RelativeEpoch, WithBlobsAndMev, WithStatus,
+    },
+    phase0::{
+        containers::{AttestationData, Checkpoint},
+        primitives::{CommitteeIndex, Epoch, Gwei, H256, Slot, SubnetId, Uint256, ValidatorIndex},
+    },
+    preset::Preset,
+    traits::{BeaconBlock as _, BeaconState as _, PostAltairBeaconState},
+};
+
+use crate::{
+    beacon_node_api::{
+        AttesterDuties, BeaconNodeApi, EnvelopeContents, ProducedBlock, ProposerDuties, PtcDuties,
+    },
+    misc::LocalChain,
+    slot_head::SlotHead,
+    validator_config::ValidatorConfig,
+};
+
+#[derive(Debug, Error)]
+#[error("the builder did not publish the blinded block")]
+pub struct BlindedBlockNotPublished;
+
+/// What duties against the built-in beacon node are performed with, the same in every slot.
+pub struct LocalContext<P: Preset, W: Wait> {
+    pub chain: Arc<LocalChain<P, W>>,
+    pub validator_config: Arc<ValidatorConfig>,
+    pub signer: Arc<Signer>,
+    pub p2p_tx: UnboundedSender<ValidatorToP2p<P>>,
+    pub subnet_service_tx: UnboundedSender<ToSubnetService>,
+    pub liveness_tx: Option<UnboundedSender<ApiToLiveness>>,
+    pub metrics: Option<Arc<Metrics>>,
+    pub dedicated_executor: Arc<DedicatedExecutor>,
+}
+
+#[derive(Clone)]
+pub struct LocalBeaconNode<P: Preset, W: Wait> {
+    context: Arc<LocalContext<P, W>>,
+    slot_head: SlotHead<P>,
+    beacon_state: Arc<BeaconState<P>>,
+    wait_group: W,
+    // Whether attestations vote for the full node of the head.
+    // It must be the node the payload status was checked on.
+    full: bool,
+}
+
+impl<P: Preset, W: Wait + Sync> LocalBeaconNode<P, W> {
+    #[must_use]
+    pub const fn head(&self) -> &SlotHead<P> {
+        &self.slot_head
+    }
+
+    #[must_use]
+    pub const fn state(&self) -> &Arc<BeaconState<P>> {
+        &self.beacon_state
+    }
+
+    pub const fn new(
+        context: Arc<LocalContext<P, W>>,
+        slot_head: SlotHead<P>,
+        beacon_state: Arc<BeaconState<P>>,
+        wait_group: W,
+    ) -> Self {
+        Self {
+            context,
+            slot_head,
+            beacon_state,
+            wait_group,
+            full: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_full(mut self, full: bool) -> Self {
+        self.full = full;
+        self
+    }
+
+    pub fn attester_duties_at_slots(
+        &self,
+        slots: Range<Slot>,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<AttesterDuties> {
+        let state = self.beacon_state.as_ref();
+        // `slots` must lie within one epoch, as the duties carry a single dependent root.
+        let epoch = misc::compute_epoch_at_slot::<P>(slots.start);
+        let dependent_root = self.dependent_root_at(epoch)?;
+        let indices = validator_indices.iter().copied().collect::<HashSet<_>>();
+
+        let duties = slots
+            .map(|slot| attester_duties_at_slot(state, slot, &indices))
+            .flatten_ok()
+            .try_collect()?;
+
+        Ok(AttesterDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    pub const fn head_block_root(&self) -> H256 {
+        self.slot_head.beacon_block_root
+    }
+
+    async fn publish_blob_data(
+        &self,
+        block: &Arc<SignedBeaconBlock<P>>,
+        blobs: ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+        kzg_proofs: Option<KzgProofs<P>>,
+    ) -> Result<()> {
+        if self.slot_head.phase().is_peerdas_activated() {
+            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+                block.clone_arc().into(),
+                blobs.into_iter(),
+                kzg_proofs
+                    .unwrap_or_else(KzgProofs::empty_fulu)
+                    .into_iter()
+                    .collect_vec(),
+                self.context.chain.controller.store_config().kzg_backend,
+                self.context.metrics.clone(),
+                self.context.dedicated_executor.clone_arc(),
+            )
+            .await?;
+
+            self.publish_data_column_sidecars(data_column_sidecars)
+                .await;
+        } else {
+            for blob_sidecar in misc::construct_blob_sidecars(
+                block,
+                blobs,
+                kzg_proofs.unwrap_or_else(KzgProofs::empty_deneb),
+            )? {
+                let blob_sidecar = Arc::new(blob_sidecar);
+
+                self.context
+                    .chain
+                    .controller
+                    .on_own_blob_sidecar(self.wait_group.clone(), blob_sidecar.clone_arc());
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn publish_data_column_sidecars(
+        &self,
+        data_column_sidecars: Vec<Arc<DataColumnSidecar<P>>>,
+    ) {
+        for data_column_sidecar in data_column_sidecars {
+            if self
+                .context
+                .chain
+                .controller
+                .sampling_columns()
+                .into_iter()
+                .contains(&data_column_sidecar.index())
+            {
+                self.context
+                    .chain
+                    .controller
+                    .on_own_data_column_sidecar(
+                        self.wait_group.clone(),
+                        data_column_sidecar.clone_arc(),
+                    )
+                    .await;
+            }
+
+            ValidatorToP2p::PublishDataColumnSidecar(data_column_sidecar)
+                .send(&self.context.p2p_tx);
+        }
+    }
+
+    fn dependent_root_at(&self, epoch: Epoch) -> Result<H256> {
+        self.context
+            .chain
+            .controller
+            .dependent_root(&self.beacon_state, misc::previous_epoch(epoch))
+    }
+}
+
+impl<P: Preset, W: Wait + Sync> BeaconNodeApi<P> for LocalBeaconNode<P, W> {
+    async fn liveness(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorLivenessResponse>> {
+        let liveness_tx = self.context.liveness_tx.as_ref().ok_or_else(|| {
+            anyhow!("liveness tracking is disabled; enable it with --track-liveness")
+        })?;
+
+        let (sender, receiver) = oneshot::channel();
+
+        ApiToLiveness::CheckLiveness(sender, epoch, validator_indices.to_vec()).send(liveness_tx);
+
+        let liveness = receiver.await??;
+
+        Ok(liveness
+            .into_iter()
+            .map(|(index, is_live)| ValidatorLivenessResponse { index, is_live })
+            .collect())
+    }
+
+    async fn dependent_root(&self, epoch: Epoch, _validator_index: ValidatorIndex) -> Result<H256> {
+        self.dependent_root_at(epoch)
+    }
+
+    async fn attestation_data(
+        &self,
+        slot: Slot,
+        committee_index: CommitteeIndex,
+    ) -> Result<AttestationData> {
+        let slot_head = &self.slot_head;
+        let phase = slot_head.phase();
+
+        let index = if phase >= Phase::Gloas {
+            // `full` is the node the payload status was checked on.
+            // Choosing it again here could vote for a payload nobody checked.
+            // See <https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.5/specs/gloas/validator.md#attestation>
+            u64::from(self.full)
+        } else if phase >= Phase::Electra {
+            0
+        } else {
+            committee_index
+        };
+
+        let target = tokio::task::block_in_place(|| Checkpoint {
+            epoch: slot_head.current_epoch(),
+            root: accessors::epoch_boundary_block_root(
+                &self.beacon_state,
+                slot_head.beacon_block_root,
+            ),
+        });
+
+        Ok(AttestationData {
+            slot,
+            index,
+            beacon_block_root: slot_head.beacon_block_root,
+            source: self.beacon_state.current_justified_checkpoint(),
+            target,
+        })
+    }
+
+    async fn aggregate_attestation(
+        &self,
+        data: AttestationData,
+        committee_index: CommitteeIndex,
+    ) -> Result<Attestation<P>> {
+        let aggregate = self
+            .context
+            .chain
+            .attestation_agg_pool
+            .best_aggregate_attestation(AttestationKey {
+                data,
+                committee_index,
+            })
+            .await
+            .ok_or_else(|| {
+                anyhow!(
+                    "no aggregate attestation for committee {committee_index} in slot {}",
+                    data.slot,
+                )
+            })?;
+
+        let phase = self.slot_head.config.phase_at_slot::<P>(data.slot);
+
+        if phase < Phase::Electra {
+            Ok(Attestation::Phase0(aggregate.into_phase0_attestation()))
+        } else if phase < Phase::Gloas {
+            convert_to_electra_attestation(aggregate).map(Attestation::Electra)
+        } else {
+            convert_to_electra_attestation(aggregate)
+                .map(|aggregate| Attestation::Gloas(aggregate.into()))
+        }
+    }
+
+    async fn publish_singular_attestations(
+        &self,
+        attestations: &[OwnAttestation<P>],
+    ) -> Result<()> {
+        for own_attestation in attestations {
+            let OwnAttestation {
+                validator_index,
+                attestation,
+                ..
+            } = own_attestation;
+
+            let committee_index = misc::committee_index(attestation);
+            let attestation = Arc::new(attestation.clone());
+            let subnet_id =
+                subnet_id::<P>(&self.beacon_state, attestation.data().slot, committee_index)?;
+
+            self.context.chain.controller.on_singular_attestation(
+                self.wait_group.clone(),
+                AttestationItem::unverified(
+                    attestation.clone_arc(),
+                    AttestationOrigin::Own(subnet_id),
+                ),
+            );
+
+            ValidatorToP2p::PublishSingularAttestation(attestation.clone_arc(), subnet_id)
+                .send(&self.context.p2p_tx);
+
+            self.context.chain.attestation_agg_pool.insert_attestation(
+                self.wait_group.clone(),
+                attestation,
+                Some(*validator_index),
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn publish_aggregates_and_proofs(
+        &self,
+        aggregates_and_proofs: &[Arc<SignedAggregateAndProof<P>>],
+    ) -> Result<()> {
+        for aggregate_and_proof in aggregates_and_proofs {
+            let attestation = Arc::new(aggregate_and_proof.aggregate());
+
+            self.context.chain.attestation_agg_pool.insert_attestation(
+                self.wait_group.clone(),
+                attestation,
+                None,
+            );
+
+            ValidatorToP2p::PublishAggregateAndProof(aggregate_and_proof.clone_arc())
+                .send(&self.context.p2p_tx);
+        }
+
+        Ok(())
+    }
+
+    async fn subscribe_to_beacon_committees(
+        &self,
+        current_slot: Slot,
+        subscriptions: &[BeaconCommitteeSubscription],
+    ) -> Result<()> {
+        let (sender, receiver) = oneshot::channel();
+
+        ToSubnetService::UpdateBeaconCommitteeSubscriptions(
+            current_slot,
+            subscriptions.to_vec(),
+            sender,
+        )
+        .send(&self.context.subnet_service_tx);
+
+        receiver.await?
+    }
+
+    async fn sync_committee_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<Vec<ValidatorSyncDutyResponse>> {
+        let Some(state) = self.beacon_state.post_altair() else {
+            // Erring rather than answering with no duties keeps the answer out of the cache.
+            ensure!(
+                epoch
+                    < self
+                        .context
+                        .chain
+                        .controller
+                        .chain_config()
+                        .altair_fork_epoch,
+                "sync committee duties for epoch {epoch} are not known to a pre-Altair state",
+            );
+
+            return Ok(vec![]);
+        };
+
+        let indices = validator_indices.iter().copied().collect::<HashSet<_>>();
+
+        sync_duties_at_epoch(state, epoch, &indices)
+    }
+
+    async fn publish_sync_committee_messages(
+        &self,
+        messages: &BTreeMap<SubcommitteeIndex, Vec<SyncCommitteeMessage>>,
+    ) -> Result<()> {
+        for (subcommittee_index, messages) in messages {
+            for message in messages {
+                ValidatorToP2p::PublishSyncCommitteeMessage(Box::new((
+                    *subcommittee_index,
+                    *message,
+                )))
+                .send(&self.context.p2p_tx);
+            }
+
+            self.context
+                .chain
+                .sync_committee_agg_pool
+                .aggregate_own_messages(
+                    self.wait_group.clone(),
+                    messages.clone(),
+                    *subcommittee_index,
+                    self.beacon_state.clone_arc(),
+                );
+        }
+
+        Ok(())
+    }
+
+    async fn subscribe_to_sync_committees(
+        &self,
+        current_epoch: Epoch,
+        subscriptions: &[SyncCommitteeSubscription],
+    ) -> Result<()> {
+        ToSubnetService::UpdateSyncCommitteeSubscriptions(current_epoch, subscriptions.to_vec())
+            .send(&self.context.subnet_service_tx);
+
+        Ok(())
+    }
+
+    async fn sync_committee_contribution(
+        &self,
+        slot: Slot,
+        subcommittee_index: SubcommitteeIndex,
+        beacon_block_root: H256,
+    ) -> Result<SyncCommitteeContribution<P>> {
+        Ok(self
+            .context
+            .chain
+            .sync_committee_agg_pool
+            .best_subcommittee_contribution(slot, beacon_block_root, subcommittee_index)
+            .await)
+    }
+
+    async fn publish_contributions_and_proofs(
+        &self,
+        contributions_and_proofs: &[SignedContributionAndProof<P>],
+    ) -> Result<()> {
+        for contribution_and_proof in contributions_and_proofs {
+            ValidatorToP2p::PublishContributionAndProof(Box::new(*contribution_and_proof))
+                .send(&self.context.p2p_tx);
+
+            self.context
+                .chain
+                .sync_committee_agg_pool
+                .add_own_contribution(
+                    contribution_and_proof.message.aggregator_index,
+                    contribution_and_proof.message.contribution,
+                    self.beacon_state.clone_arc(),
+                );
+        }
+
+        Ok(())
+    }
+
+    async fn ptc_duties(
+        &self,
+        epoch: Epoch,
+        validator_indices: &[ValidatorIndex],
+    ) -> Result<PtcDuties> {
+        let dependent_root = self.dependent_root_at(epoch)?;
+        let indices = validator_indices.iter().copied().collect::<HashSet<_>>();
+
+        let duties = tokio::task::block_in_place(|| {
+            ptc_duties_at_epoch(
+                &self.slot_head.config,
+                self.beacon_state.as_ref(),
+                epoch,
+                &indices,
+            )
+        })?;
+
+        Ok(PtcDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    async fn proposer_duties(&self, epoch: Epoch) -> Result<ProposerDuties> {
+        let state = self.beacon_state.as_ref();
+
+        let dependent_root =
+            self.dependent_root_at(proposer_dependent_epoch(&self.slot_head.config, epoch))?;
+
+        let duties = proposer_duties_at_epoch(&self.slot_head.config, state, epoch)?;
+
+        Ok(ProposerDuties {
+            dependent_root,
+            duties,
+        })
+    }
+
+    async fn payload_attestation_data(&self, slot: Slot) -> Result<Option<PayloadAttestationData>> {
+        let Some(block_with_root) = self
+            .context
+            .chain
+            .controller
+            .stored_block_by_slot(slot)?
+            .map(WithStatus::value)
+        else {
+            return Ok(None);
+        };
+
+        let beacon_block_root = block_with_root.root;
+
+        let blob_data_available = self
+            .context
+            .chain
+            .controller
+            .indices_of_missing_data_columns(&block_with_root.block)
+            .is_empty();
+
+        Ok(Some(PayloadAttestationData {
+            beacon_block_root,
+            slot,
+            payload_present: self
+                .context
+                .chain
+                .controller
+                .is_payload_present_timely(beacon_block_root),
+            blob_data_available,
+        }))
+    }
+
+    async fn publish_payload_attestations(
+        &self,
+        messages: &[Arc<PayloadAttestationMessage>],
+    ) -> Result<()> {
+        for message in messages {
+            self.context.chain.controller.on_payload_attestation(
+                self.wait_group.clone(),
+                PayloadAttestationItem::unverified(
+                    Arc::new(message.clone_arc().into()),
+                    PayloadAttestationOrigin::Own,
+                ),
+            );
+
+            ValidatorToP2p::PublishPayloadAttestation(message.clone_arc())
+                .send(&self.context.p2p_tx);
+        }
+
+        let beacon_state = &self.beacon_state;
+
+        let next_proposer_index =
+            tokio::task::block_in_place(|| self.slot_head.next_proposer_index(beacon_state))?;
+
+        let public_key = accessors::public_key(beacon_state.as_ref(), next_proposer_index)?;
+
+        // The messages are only aggregated when an own validator proposes next.
+        if self.context.signer.load().has_key(*public_key) {
+            self.context
+                .chain
+                .payload_attestation_agg_pool
+                .aggregate_own_messages(
+                    self.wait_group.clone(),
+                    messages.iter().map(|message| **message).collect(),
+                    beacon_state.clone_arc(),
+                );
+        }
+
+        Ok(())
+    }
+
+    #[expect(clippy::too_many_lines)]
+    async fn produce_block(
+        &self,
+        slot: Slot,
+        randao_reveal: SignatureBytes,
+        graffiti: Option<H256>,
+        builder_boost_factor: Uint256,
+        min_bid: Gwei,
+        builders: &ContiguousList<BuilderEntry, MaxBuilderEntries>,
+    ) -> Result<ProducedBlock<P>> {
+        ensure!(
+            slot == self.slot_head.slot(),
+            "the built-in beacon node produces blocks for slot {} only, not slot {slot}",
+            self.slot_head.slot(),
+        );
+
+        let beacon_state = &self.beacon_state;
+        let proposer_index =
+            tokio::task::block_in_place(|| self.slot_head.proposer_index(beacon_state))?;
+        let public_key = *accessors::public_key(beacon_state.as_ref(), proposer_index)?;
+
+        let block_build_context = self.context.chain.block_producer.new_build_context(
+            beacon_state.clone_arc(),
+            self.slot_head.beacon_block_root,
+            proposer_index,
+            BlockBuildOptions {
+                graffiti,
+                disable_blockprint_graffiti: self
+                    .context
+                    .validator_config
+                    .disable_blockprint_graffiti,
+                builder_boost_factor,
+                min_bid,
+                ..BlockBuildOptions::default()
+            },
+        );
+
+        let execution_payload_header_handle =
+            block_build_context.get_execution_payload_header(public_key);
+
+        let local_execution_payload_handle = block_build_context.get_local_execution_payload();
+
+        let builder_api_bids_handle = if self.slot_head.phase() >= Phase::Gloas {
+            block_build_context.get_builder_api_bids(builders.clone())
+        } else {
+            None
+        };
+
+        let Some((
+            WithBlobsAndMev {
+                value: block,
+                proofs,
+                blobs,
+                ..
+            },
+            _block_rewards,
+            builder_url,
+        )) = block_build_context
+            .build_blinded_beacon_block(
+                randao_reveal,
+                execution_payload_header_handle,
+                local_execution_payload_handle,
+                builder_api_bids_handle,
+            )
+            .await?
+        else {
+            bail!("no block could be built for slot {slot}");
+        };
+
+        // The wait checked the payload the proposal was going to extend.
+        // Production picks the parent's node again, so it can extend a different payload.
+        // Its envelope may have arrived in between, or the PTC vote may have flipped the node.
+        // Never sign a block that extends a payload the execution engine has not validated.
+        let controller = &self.context.chain.controller;
+
+        let extended_payload_status = match &block {
+            ValidatorBlindedBlock::BlindedBeaconBlock(block) => {
+                controller.wait_for_valid_extended_payload(block).await
+            }
+            ValidatorBlindedBlock::BeaconBlock(block) => {
+                controller.wait_for_valid_extended_payload(block).await
+            }
+        };
+
+        ensure!(
+            extended_payload_status.is_some_and(PayloadStatus::is_valid),
+            "the block extends a payload that is not fully validated \
+             (status: {extended_payload_status:?})",
+        );
+
+        let envelope_contents = match &block {
+            ValidatorBlindedBlock::BeaconBlock(block)
+                if block
+                    .payload_bid()
+                    .is_some_and(|bid| bid.builder_index == BUILDER_INDEX_SELF_BUILD) =>
+            {
+                match self
+                    .context
+                    .chain
+                    .block_producer
+                    .build_local_execution_payload_envelope_contents(
+                        block.hash_tree_root(),
+                        block.parent_root(),
+                    )
+                    .await
+                {
+                    Some((envelope, blobs, kzg_proofs)) => Some(EnvelopeContents {
+                        envelope,
+                        kzg_proofs: ContiguousList::try_from_iter(kzg_proofs)?,
+                        blobs,
+                    }),
+                    None => {
+                        warn_with_peers!(
+                            "the payload of the self-built block for slot {slot} is missing, \
+                             so the block is published without it",
+                        );
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // The blobs of a self-built payload travel with its envelope rather than the block.
+        Ok(match envelope_contents {
+            Some(_) => ProducedBlock {
+                block,
+                kzg_proofs: None,
+                blobs: None,
+                envelope_contents,
+                builder_url,
+            },
+            // From Gloas on a block without its own payload commits to a builder's blobs.
+            None if self.slot_head.phase() >= Phase::Gloas => ProducedBlock {
+                builder_url,
+                ..ProducedBlock::without_blobs(block)
+            },
+            None => ProducedBlock {
+                block,
+                kzg_proofs: proofs,
+                blobs,
+                envelope_contents: None,
+                builder_url,
+            },
+        })
+    }
+
+    async fn publish_block(
+        &self,
+        signed_block: &Arc<SignedBeaconBlock<P>>,
+        kzg_proofs: Option<&KzgProofs<P>>,
+        blobs: Option<&ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>>,
+        builder_url: Option<&BuilderUrl>,
+    ) -> Result<()> {
+        let import_and_publish_block = || {
+            self.context
+                .chain
+                .controller
+                .on_own_block(self.wait_group.clone(), signed_block.clone_arc());
+
+            if let Some(builder_url) = builder_url.cloned() {
+                let payload_builder_api = self.context.chain.block_producer.payload_builder_api();
+                let payload_builder_api = payload_builder_api.clone_arc();
+                let block = signed_block.clone_arc();
+
+                tokio::spawn(async move {
+                    if let Err(error) = payload_builder_api
+                        .submit_signed_beacon_block(&builder_url, &block)
+                        .await
+                    {
+                        warn_with_peers!(
+                            "failed to forward block to builder {builder_url}: {error:?}"
+                        );
+                    }
+                });
+            }
+
+            ValidatorToP2p::PublishBeaconBlock(signed_block.clone_arc()).send(&self.context.p2p_tx);
+        };
+
+        // From Gloas on the block goes out before its data column sidecars.
+        let post_gloas = signed_block.phase() >= Phase::Gloas;
+
+        if post_gloas {
+            import_and_publish_block();
+        }
+
+        if let Some(blobs) = blobs
+            && !blobs.is_empty()
+        {
+            self.publish_blob_data(signed_block, blobs.clone(), kzg_proofs.cloned())
+                .await?;
+        }
+
+        if !post_gloas {
+            import_and_publish_block();
+        }
+
+        Ok(())
+    }
+
+    async fn publish_blinded_block(
+        &self,
+        signed_block: &SignedBlindedBeaconBlock<P>,
+    ) -> Result<()> {
+        let Some(publication) = self
+            .context
+            .chain
+            .block_producer
+            .publish_signed_blinded_block(signed_block)
+            .await
+        else {
+            bail!(BlindedBlockNotPublished);
+        };
+
+        let WithBlobsAndMev {
+            value: execution_payload,
+            proofs,
+            blobs,
+            ..
+        } = match publication {
+            BlindedBlockPublication::Payload(execution_payload) => execution_payload.result,
+            BlindedBlockPublication::PublishedByBuilder => return Ok(()),
+        };
+
+        let (message, signature) = signed_block.clone().split();
+
+        let signed_block = message
+            .with_execution_payload(execution_payload)?
+            .with_signature(signature)
+            .pipe(Arc::new);
+
+        // Only a Gloas bid names a builder to forward the block to.
+        self.publish_block(&signed_block, proofs.as_ref(), blobs.as_ref(), None)
+            .await
+    }
+
+    async fn publish_execution_payload_envelope(
+        &self,
+        signed_envelope: &Arc<SignedExecutionPayloadEnvelope<P>>,
+        kzg_proofs: &ContiguousList<KzgProof, P::MaxCellProofsPerBlock>,
+        blobs: &ContiguousList<Blob<P>, P::MaxBlobCommitmentsPerBlock>,
+    ) -> Result<()> {
+        let envelope = &signed_envelope.message;
+
+        if !blobs.is_empty() {
+            let data_column_sidecars = eip_7594::construct_data_column_sidecars_from_blobs(
+                (envelope.beacon_block_root, envelope.payload.slot_number).into(),
+                blobs.clone().into_iter(),
+                kzg_proofs.iter().copied().collect_vec(),
+                self.context.chain.controller.store_config().kzg_backend,
+                self.context.metrics.clone(),
+                self.context.dedicated_executor.clone_arc(),
+            )
+            .await?;
+
+            self.publish_data_column_sidecars(data_column_sidecars)
+                .await;
+        }
+
+        self.context
+            .chain
+            .controller
+            .on_own_execution_payload_envelope(signed_envelope.clone_arc());
+
+        ValidatorToP2p::PublishExecutionPayloadEnvelope(signed_envelope.clone_arc())
+            .send(&self.context.p2p_tx);
+
+        Ok(())
+    }
+
+    async fn prepare_beacon_proposer(
+        &self,
+        _current_slot: Slot,
+        _proposers: &[ProposerData],
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn register_validators(
+        &self,
+        _registrations: &[SignedValidatorRegistrationV1],
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn publish_proposer_preferences(
+        &self,
+        preferences: &[Arc<SignedProposerPreferences>],
+    ) -> Result<()> {
+        for signed_preferences in preferences {
+            // Pass into own fork-choice store so bids for this slot pass the
+            // `accepted_proposer_preferences` gate in validate_execution_payload_bid.
+            self.context
+                .chain
+                .controller
+                .on_own_proposer_preferences(signed_preferences.clone_arc());
+
+            ValidatorToP2p::PublishProposerPreferences(signed_preferences.clone_arc())
+                .send(&self.context.p2p_tx);
+        }
+
+        Ok(())
+    }
+
+    async fn submit_builder_preferences(&self, entries: &[BuilderPreferencesEntry]) -> Result<()> {
+        let payload_builder_api = self.context.chain.block_producer.payload_builder_api();
+
+        let submissions = entries.iter().map(|entry| async move {
+            let BuilderPreferencesEntry {
+                proposer_pubkey,
+                url,
+                auth,
+                max_execution_payment,
+            } = entry;
+
+            let result = payload_builder_api
+                .submit_builder_preferences::<P>(
+                    url,
+                    auth.clone(),
+                    *proposer_pubkey,
+                    *max_execution_payment,
+                )
+                .await;
+
+            (url, proposer_pubkey, result)
+        });
+
+        let mut failures = Vec::<(&BuilderUrl, usize, AnyhowError)>::new();
+
+        for (url, pubkey, result) in join_all(submissions).await {
+            let Err(error) = result else {
+                continue;
+            };
+
+            debug_with_peers!(
+                "failed to submit builder preferences to {url} for validator {pubkey:?}: \
+                 {error:?}",
+            );
+
+            match failures
+                .iter_mut()
+                .find(|(failed_url, _, _)| *failed_url == url)
+            {
+                Some((_, count, _)) => *count = count.saturating_add(1),
+                None => failures.push((url, 1, error)),
+            }
+        }
+
+        ensure!(
+            failures.is_empty(),
+            "failed to submit builder preferences: {}",
+            failures
+                .iter()
+                .map(|(url, count, error)| format!("to {url} for {count} proposals ({error:#})"))
+                .join(", "),
+        );
+
+        Ok(())
+    }
+}
+
+pub fn ptc_duties_at_epoch<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    epoch: Epoch,
+    indices: &HashSet<ValidatorIndex>,
+) -> Result<Vec<ValidatorPTCDutyResponse>> {
+    // The state carries the committees an epoch ahead through the seed lookahead.
+    misc::slots_in_epoch::<P>(epoch)?
+        .map(|slot| {
+            accessors::get_ptc(config, state, slot)?
+                .into_iter()
+                .filter(|validator_index| indices.contains(validator_index))
+                // A validator drawn into several positions has a single duty.
+                .unique()
+                .map(|validator_index| {
+                    let pubkey = *accessors::public_key(state, validator_index)?;
+
+                    Ok(ValidatorPTCDutyResponse {
+                        pubkey,
+                        validator_index,
+                        slot,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })
+        .flatten_ok()
+        .try_collect()
+}
+
+/// The Fulu lookahead fixes proposers an epoch earlier, but it is first filled as the fork epoch
+/// begins, so the fork epoch itself keeps the old dependency.
+#[must_use]
+pub fn proposer_lookahead_applies(config: &Config, epoch: Epoch) -> bool {
+    config.phase_at_epoch(epoch.saturating_sub(1)) >= Phase::Fulu
+}
+
+#[must_use]
+pub fn proposer_dependent_epoch(config: &Config, epoch: Epoch) -> Epoch {
+    if proposer_lookahead_applies(config, epoch) {
+        epoch
+    } else {
+        epoch.saturating_add(1)
+    }
+}
+
+pub fn proposer_duties_at_epoch<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    epoch: Epoch,
+) -> Result<Vec<ValidatorProposerDutyResponse>> {
+    misc::slots_in_epoch::<P>(epoch)?
+        .map(|slot| {
+            let validator_index =
+                accessors::get_beacon_proposer_index_at_slot(config, state, slot)?;
+
+            Ok(ValidatorProposerDutyResponse {
+                pubkey: *accessors::public_key(state, validator_index)?,
+                validator_index,
+                slot,
+            })
+        })
+        .collect()
+}
+
+fn sync_duties_at_epoch<P: Preset>(
+    state: &(impl PostAltairBeaconState<P> + ?Sized),
+    epoch: Epoch,
+    indices: &HashSet<ValidatorIndex>,
+) -> Result<Vec<ValidatorSyncDutyResponse>> {
+    let period = misc::sync_committee_period::<P>(epoch);
+    let current_period = misc::sync_committee_period::<P>(accessors::get_current_epoch(state));
+
+    // The state carries only the current period's committee and the next.
+    let committee = if period == current_period {
+        state.current_sync_committee()
+    } else if period == current_period.saturating_add(1) {
+        state.next_sync_committee()
+    } else {
+        return Err(anyhow!(
+            "sync committee of period {period} is not known to a state in period {current_period}",
+        ));
+    };
+
+    let mut duties = BTreeMap::<ValidatorIndex, (PublicKeyBytes, Vec<usize>)>::new();
+
+    for (position, public_key) in committee.pubkeys.iter().enumerate() {
+        let Some(validator_index) = accessors::index_of_public_key(state, public_key) else {
+            continue;
+        };
+
+        if !indices.contains(&validator_index) {
+            continue;
+        }
+
+        duties
+            .entry(validator_index)
+            .or_insert_with(|| (*public_key, vec![]))
+            .1
+            .push(position);
+    }
+
+    Ok(duties
+        .into_iter()
+        .map(
+            |(validator_index, (pubkey, validator_sync_committee_indices))| {
+                ValidatorSyncDutyResponse {
+                    pubkey,
+                    validator_index,
+                    validator_sync_committee_indices,
+                }
+            },
+        )
+        .collect())
+}
+
+fn subnet_id<P: Preset>(
+    beacon_state: &BeaconState<P>,
+    slot: Slot,
+    committee_index: CommitteeIndex,
+) -> Result<SubnetId> {
+    let committees_per_slot =
+        accessors::get_committee_count_per_slot(beacon_state, RelativeEpoch::Current)?;
+
+    misc::compute_subnet_for_attestation::<P>(committees_per_slot, slot, committee_index)
+}
+
+pub fn attester_duties_at_slot<P: Preset>(
+    state: &BeaconState<P>,
+    slot: Slot,
+    indices: &HashSet<ValidatorIndex>,
+) -> Result<Vec<ValidatorAttesterDutyResponse>> {
+    let epoch = misc::compute_epoch_at_slot::<P>(slot);
+    let relative_epoch = accessors::relative_epoch(state, epoch)?;
+    let committees_at_slot = accessors::get_committee_count_per_slot(state, relative_epoch)?;
+
+    accessors::beacon_committees(state, slot)?
+        .zip(0..)
+        .flat_map(|(committee, committee_index)| {
+            let committee_length = committee.len();
+
+            committee
+                .into_iter()
+                .enumerate()
+                .filter(|(_, validator_index)| indices.contains(validator_index))
+                .map(move |(validator_committee_index, validator_index)| {
+                    let pubkey = *accessors::public_key(state, validator_index)?;
+
+                    Ok(ValidatorAttesterDutyResponse {
+                        committee_index,
+                        committee_length,
+                        committees_at_slot,
+                        pubkey,
+                        slot,
+                        validator_committee_index,
+                        validator_index,
+                    })
+                })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The Fulu fork epoch's proposers are computed as it begins, so they depend on the previous
+    // epoch's last block like before Fulu; the lookahead moves the root back only after it.
+    #[test]
+    fn proposer_duties_share_the_attester_root_of_the_same_epoch_after_the_fulu_fork_epoch() {
+        let config = Config::mainnet();
+        let fulu = config.fulu_fork_epoch;
+
+        assert_eq!(proposer_dependent_epoch(&config, fulu - 1), fulu);
+        assert_eq!(proposer_dependent_epoch(&config, fulu), fulu + 1);
+        assert_eq!(proposer_dependent_epoch(&config, fulu + 1), fulu + 1);
+        assert_eq!(proposer_dependent_epoch(&config, fulu + 2), fulu + 2);
+    }
+}

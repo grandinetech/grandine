@@ -19,7 +19,7 @@ use serde::Serialize;
 use sysinfo::{Disks, System};
 use types::{preset::Preset, traits::BeaconState};
 
-use crate::{MetricsService, helpers};
+use crate::{MetricsService, NodeMetrics, helpers};
 
 #[cfg(target_os = "linux")]
 use psutil::{cpu::os::linux::CpuTimesExt, memory::os::linux::VirtualMemoryExt};
@@ -134,15 +134,16 @@ pub struct BeaconNodeMetrics {
 }
 
 impl BeaconNodeMetrics {
-    pub fn get<P: Preset>(service: &MetricsService<P>) -> Self {
+    pub fn get<P: Preset>(service: &MetricsService<P>, node: &NodeMetrics<P>) -> Self {
         let MetricsService {
+            config, is_synced, ..
+        } = service;
+
+        let NodeMetrics {
             controller,
-            config,
-            is_synced,
             eth1_metrics,
             slasher_active,
-            ..
-        } = service;
+        } = node;
 
         let Eth1Metrics {
             eth1_connection_data,
@@ -195,26 +196,32 @@ pub struct ValidatorMetrics {
 impl ValidatorMetrics {
     pub fn get<P: Preset>(service: &MetricsService<P>) -> Self {
         let MetricsService {
-            controller,
+            node,
             validator_keys,
             ..
         } = service;
 
-        let state = controller.head_state().value;
-        let current_epoch = accessors::get_current_epoch(&state);
+        // Without a state to check, the loaded keys are the closest thing to active validators.
+        let validator_active = match node {
+            Some(NodeMetrics { controller, .. }) => {
+                let state = controller.head_state().value;
+                let current_epoch = accessors::get_current_epoch(&state);
 
-        let validator_active = validator_keys
-            .iter()
-            .filter(|pubkey| {
-                accessors::index_of_public_key(&state, pubkey)
-                    .and_then(|validator_index| {
-                        state.validators().partial_validator(validator_index).ok()
+                validator_keys
+                    .iter()
+                    .filter(|pubkey| {
+                        accessors::index_of_public_key(&state, pubkey)
+                            .and_then(|validator_index| {
+                                state.validators().partial_validator(validator_index).ok()
+                            })
+                            .is_some_and(|validator| {
+                                predicates::is_active_validator(validator, current_epoch)
+                            })
                     })
-                    .is_some_and(|validator| {
-                        predicates::is_active_validator(validator, current_epoch)
-                    })
-            })
-            .count();
+                    .count()
+            }
+            None => validator_keys.len(),
+        };
 
         Self {
             validator_active,

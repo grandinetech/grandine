@@ -14,6 +14,7 @@
 // tasks as well, but that would complicate code and would most likely not improve performance much
 // (in fact, the opposite may be true because `p2p_tx` would have to be cloned for each task).
 
+use core::panic::AssertUnwindSafe;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{
@@ -108,6 +109,8 @@ use crate::{
 const DATA_COLUMN_RETAIN_DURATION_IN_SLOTS: Slot = 2;
 const MAX_DELAYED_FUTURE_BLOCKS_PER_SLOT: usize = 16;
 const MAX_DELAYED_BLOCKS_UNTIL_PARENT: usize = 64;
+// Failed archives keep their blocks in memory, so a persistent failure must not keep them forever.
+const MAX_CONSECUTIVE_FAILED_ARCHIVES: u8 = 2;
 // Room for requested envelopes waiting for their blocks.
 // Forward sync runs many 32-slot batches ahead of the head.
 // 64 was too small: envelopes near the head got dropped and sync stalled.
@@ -150,6 +153,8 @@ pub struct Mutator<P: Preset, E, W, TS, PS, LS, NS, SS, VS> {
     metrics: Option<Arc<Metrics>>,
     finished_loading_from_storage: bool,
     has_pending_archive_tasks: bool,
+    is_archiving_finalized: bool,
+    consecutive_failed_archives: u8,
     pending_state_cache_prune: Option<bool>,
     mutator_tx: Sender<MutatorMessage<P, W>>,
     mutator_rx: Receiver<MutatorMessage<P, W>>,
@@ -218,6 +223,8 @@ where
             metrics,
             finished_loading_from_storage: false,
             has_pending_archive_tasks: false,
+            is_archiving_finalized: false,
+            consecutive_failed_archives: 0,
             pending_state_cache_prune: None,
             mutator_tx,
             mutator_rx,
@@ -346,6 +353,13 @@ where
                         wait_group,
                         persisted_block_roots,
                     );
+                }
+                MutatorMessage::FinishedArchivingFinalized {
+                    wait_group,
+                    new_anchor_index,
+                    saved,
+                } => {
+                    self.handle_finish_archiving_finalized(&wait_group, new_anchor_index, saved)?
                 }
                 MutatorMessage::ExecutionPayloadEnvelope {
                     wait_group,
@@ -3018,6 +3032,35 @@ where
         self.update_store_snapshot();
     }
 
+    fn handle_finish_archiving_finalized(
+        &mut self,
+        wait_group: &W,
+        new_anchor_index: usize,
+        saved: bool,
+    ) -> Result<()> {
+        self.is_archiving_finalized = false;
+
+        if !saved {
+            self.consecutive_failed_archives = self.consecutive_failed_archives.saturating_add(1);
+
+            // The blocks stay for the next finalization to retry.
+            if self.consecutive_failed_archives < MAX_CONSECUTIVE_FAILED_ARCHIVES {
+                return Ok(());
+            }
+
+            error_with_peers!(
+                "dropping finalized blocks that failed to be archived \
+                 {MAX_CONSECUTIVE_FAILED_ARCHIVES} times in a row",
+            );
+        }
+
+        self.consecutive_failed_archives = 0;
+
+        self.store_mut().archive_finalized(new_anchor_index);
+        self.update_store_snapshot();
+        self.archive_finalized(wait_group)
+    }
+
     fn handle_finish_persisting_execution_payload_envelopes(
         &mut self,
         wait_group: W,
@@ -3505,25 +3548,6 @@ where
             }
         }
 
-        // Pre-Gloas, do not send API events about optimistic blocks.
-        // Vouch treats all head events as non-optimistic.
-        // Post-Gloas they go out regardless, flagged like head events.
-        // A new block has no payload of its own yet.
-        // It is optimistic if the payload it rests on is.
-        if is_valid || is_post_gloas {
-            let execution_optimistic = self
-                .store
-                .node_payload_status(block_root, false)
-                .is_some_and(PayloadStatus::is_optimistic);
-
-            self.event_channels.send_block_event(
-                block_slot,
-                block_root,
-                execution_optimistic,
-                block.message().payload_bid(),
-            );
-        }
-
         let from_test_block = matches!(origin, BlockOrigin::Test(_));
 
         // TODO(Grandine Team): Performing the validation here results in the block being added to the
@@ -3622,8 +3646,6 @@ where
             }
         }
 
-        // Call `Store::apply_attester_slashing` after `Store::archive_finalized` to reduce the
-        // amount of work needed to update balances.
         let slashable_indices = attester_slashing_results
             .into_iter()
             .flat_map(|result| {
@@ -3644,11 +3666,29 @@ where
                 .apply_attester_slashing(slashable_indices)?;
         }
 
-        // The snapshot should be updated:
-        // - After calling `Mutator::archive_finalized` because it mutates the store.
-        // - Before spawning tasks to retry delayed objects or notifying other components to ensure
-        //   that they cannot observe the store in an inconsistent state.
+        // The snapshot should be updated before spawning tasks to retry delayed objects or
+        // notifying other components to ensure that they cannot observe the store in an
+        // inconsistent state.
         self.update_store_snapshot();
+
+        // Pre-Gloas, do not send API events about optimistic blocks.
+        // Clients treat all head events as non-optimistic.
+        // Post-Gloas they go out regardless, flagged like head events.
+        // A new block has no payload of its own yet.
+        // It is optimistic if the payload it rests on is.
+        if is_valid || is_post_gloas {
+            let execution_optimistic = self
+                .store
+                .node_payload_status(block_root, false)
+                .is_some_and(PayloadStatus::is_optimistic);
+
+            self.event_channels.send_block_event(
+                block_slot,
+                block_root,
+                execution_optimistic,
+                block.message().payload_bid(),
+            );
+        }
 
         if let Some(objects) = self.take_delayed_until_block(block_root) {
             debug_with_peers!("retrying objects delayed until block {block_root:?}");
@@ -3934,6 +3974,7 @@ where
         );
 
         self.send_to_p2p(P2pMessage::FinalizedCheckpoint(finalized_checkpoint));
+        self.send_to_validator(ValidatorMessage::FinalizedCheckpoint(finalized_checkpoint));
 
         if let Some(metrics) = self.metrics.as_ref() {
             let state = head.state(&self.store);
@@ -5343,6 +5384,10 @@ where
     }
 
     fn archive_finalized(&mut self, wait_group: &W) -> Result<()> {
+        if self.is_archiving_finalized {
+            return Ok(());
+        }
+
         if let Some(latest_archivable_index) = self.store.latest_archivable_index() {
             debug_with_peers!("archiving finalized blocks and anchor state…");
 
@@ -5350,85 +5395,109 @@ where
             let store = self.owned_store();
             let storage = self.storage.clone_arc();
             let sync_tx = self.sync_tx.clone();
+            let mutator_tx = self.owned_mutator_tx();
             let wait_group = wait_group.clone();
             let finished_loading_from_storage = self.finished_loading_from_storage;
 
-            let mut archived = self.store_mut().archive_finalized(latest_archivable_index);
-            archived.push_back(self.store.anchor().clone());
+            // The blocks stay in the store until they are in storage, so queries never miss them.
+            let archived = self.store.archivable_finalized(latest_archivable_index);
 
             let last_finalized_slot = self.store.last_finalized().slot();
 
             Builder::new()
                 .name("store-archiver".to_owned())
                 .spawn(move || {
-                    debug_with_peers!("saving finalized blocks and anchor state…");
+                    // Storage writes are transactional and a panic counts as a failed save, so the
+                    // blocks stay in the store and the next archive writes them again.
+                    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                        debug_with_peers!("saving finalized blocks and anchor state…");
 
-                    match storage.append(core::iter::empty(), archived.iter(), &store) {
-                        Ok(slots) => {
-                            if let Some(chain_link) = archived.back() {
-                                let finalized_block = chain_link.block.clone_arc();
-                                let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
+                        let saved = match storage.append(core::iter::empty(), archived.iter(), &store) {
+                            Ok(slots) => {
+                                if let Some(chain_link) = archived.back() {
+                                    let finalized_block = chain_link.block.clone_arc();
+                                    let anchor_epoch = misc::compute_epoch_at_slot::<P>(chain_link.slot());
 
-                                for candidate in &archived {
-                                    let candidate_slot = candidate.slot();
-                                    let candidate_epoch = misc::compute_epoch_at_slot::<P>(candidate_slot);
+                                    for candidate in &archived {
+                                        let candidate_slot = candidate.slot();
+                                        let candidate_epoch = misc::compute_epoch_at_slot::<P>(candidate_slot);
 
-                                    let is_last_block = candidate_slot.saturating_add(1) == chain_link.slot();
-                                    let is_first_block = candidate_epoch == anchor_epoch.saturating_sub(1)
-                                        && misc::is_epoch_start::<P>(candidate_slot);
+                                        let is_last_block = candidate_slot.saturating_add(1) == chain_link.slot();
+                                        let is_first_block = candidate_epoch == anchor_epoch.saturating_sub(1)
+                                            && misc::is_epoch_start::<P>(candidate_slot);
 
-                                    // preload first and the last block of previous epoch into state_at_slot_cache
-                                    // to handle some of the beacon API use cases
-                                    if is_first_block || is_last_block {
-                                        debug_with_peers!(
-                                            "preloading state_at_slot_cache with chain_link: \
-                                            slot: {candidate_slot}, epoch: {candidate_epoch}, \
-                                            is_first_block: {is_first_block}, is_last_block: {is_last_block}",
-                                        );
-
-                                        if let Err(error) = state_at_slot_cache
-                                            .get_or_try_init(candidate.slot(), || {
-                                                Ok(Some(candidate.state(&store)))
-                                            })
-                                        {
+                                        // preload first and the last block of previous epoch into state_at_slot_cache
+                                        // to handle some of the beacon API use cases
+                                        if is_first_block || is_last_block {
                                             debug_with_peers!(
-                                                "failed to preload state_at_slot_cache with \
-                                                a chainlink: {error:?}",
+                                                "preloading state_at_slot_cache with chain_link: \
+                                                slot: {candidate_slot}, epoch: {candidate_epoch}, \
+                                                is_first_block: {is_first_block}, is_last_block: {is_last_block}",
                                             );
+
+                                            if let Err(error) = state_at_slot_cache
+                                                .get_or_try_init(candidate.slot(), || {
+                                                    Ok(Some(candidate.state(&store)))
+                                                })
+                                            {
+                                                debug_with_peers!(
+                                                    "failed to preload state_at_slot_cache with \
+                                                    a chainlink: {error:?}",
+                                                );
+                                            }
                                         }
+                                    }
+
+                                    if finished_loading_from_storage {
+                                        SyncMessage::Finalized(finalized_block).send(&sync_tx);
                                     }
                                 }
 
-                                if finished_loading_from_storage {
-                                    SyncMessage::Finalized(finalized_block).send(&sync_tx);
-                                }
-                            }
-
-                            debug_with_peers!(
-                                "finalized blocks and anchor state saved \
-                                 (appended block slots: {slots:?})",
-                            )
-                        }
-                        Err(error) => error_with_peers!("saving to storage failed: {error:?}"),
-                    }
-
-                    debug_with_peers!("removing unfinalized blocks");
-
-                    if !storage.archive_storage_enabled() {
-                        match storage.prune_unfinalized_blocks(last_finalized_slot) {
-                            Ok(slots) => {
                                 debug_with_peers!(
-                                    "unfinalized block pruning complete: pruned slots: {slots:?}"
+                                    "finalized blocks and anchor state saved \
+                                     (appended block slots: {slots:?})",
                                 );
+
+                                true
                             }
                             Err(error) => {
-                                error_with_peers!("unfinalized block pruning failed: {error:?}")
+                                error_with_peers!("saving to storage failed: {error:?}");
+                                false
+                            }
+                        };
+
+                        debug_with_peers!("removing unfinalized blocks");
+
+                        if !storage.archive_storage_enabled() {
+                            match storage.prune_unfinalized_blocks(last_finalized_slot) {
+                                Ok(slots) => {
+                                    debug_with_peers!(
+                                        "unfinalized block pruning complete: pruned slots: {slots:?}"
+                                    );
+                                }
+                                Err(error) => {
+                                    error_with_peers!("unfinalized block pruning failed: {error:?}")
+                                }
                             }
                         }
-                    }
 
-                    drop(wait_group);
+                        saved
+                    }));
+
+                    let saved = result.unwrap_or_else(|payload| {
+                        panics::log(payload);
+                        false
+                    });
+
+                    MutatorMessage::FinishedArchivingFinalized {
+                        wait_group,
+                        new_anchor_index: latest_archivable_index,
+                        saved,
+                    }
+                    .send(&mutator_tx);
                 })?;
+
+            self.is_archiving_finalized = true;
         }
 
         Ok(())

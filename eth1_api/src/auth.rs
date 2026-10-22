@@ -22,7 +22,7 @@ use derive_more::Debug;
 
 const JWT_SECRET_SIZE_MIN_BYTES: usize = 32;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct Options {
     pub secrets_path: Option<PathBuf>,

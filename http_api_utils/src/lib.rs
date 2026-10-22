@@ -1,9 +1,18 @@
 pub use block_id::BlockId;
+pub use debug_tracing::{post_log_level, post_trace_level};
 pub use helpers::{
     PhaseHeaderError, extend_router_with_middleware, extract_phase_from_headers,
     try_extract_phase_from_headers,
 };
-pub use misc::{ApiMetrics, Direction, ETH_CONSENSUS_VERSION};
+pub use misc::{
+    ApiMetrics, BlockHeadersResponse, Direction, ETH_CONSENSUS_VERSION,
+    ValidatorAttesterDutyResponse, ValidatorLivenessResponse, ValidatorPTCDutyResponse,
+    ValidatorProposerDutyResponse, ValidatorSyncDutyResponse,
+};
+pub use response::{
+    AlwaysJson, ETH_BLOB_DATA_INCLUDED, ETH_BUILDER_URL, ETH_EXECUTION_PAYLOAD_BLINDED,
+    ETH_EXECUTION_PAYLOAD_INCLUDED, EthResponse, JsonOrSsz,
+};
 pub use state_id::StateId;
 pub use traits::ApiError;
 
@@ -11,8 +20,10 @@ pub mod logging;
 pub mod middleware;
 
 mod block_id;
+mod debug_tracing;
 mod error;
 mod helpers;
 mod misc;
+mod response;
 mod state_id;
 mod traits;

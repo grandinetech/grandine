@@ -109,7 +109,9 @@ use types::{
     traits::{BeaconState as _, PostBellatrixBeaconState, PostGloasBeaconState},
 };
 
-use crate::misc::{PayloadIdEntry, ProposerData, ValidatorBlindedBlock, build_graffiti};
+use crate::misc::{
+    BlindedBlockPublication, PayloadIdEntry, ProposerData, ValidatorBlindedBlock, build_graffiti,
+};
 
 const PAYLOAD_CACHE_SIZE: usize = 20;
 const PAYLOAD_ID_CACHE_SIZE: usize = 10;
@@ -587,24 +589,21 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
     pub async fn publish_signed_blinded_block(
         &self,
         block: &SignedBlindedBeaconBlock<P>,
-    ) -> Option<WithClientVersions<WithBlobsAndMev<ExecutionPayload<P>, P>>> {
+    ) -> Option<BlindedBlockPublication<P>> {
         let header_root = block.execution_payload_header().hash_tree_root();
         let mut payload_cache = self.producer_context.payload_cache.lock().await;
         let local_payload = payload_cache.cache_get(&header_root);
 
         match local_payload {
-            Some(payload) => Some(payload.clone()),
-            None => self
-                .publish_signed_blinded_block_using_builder(block)
-                .await
-                .map(WithClientVersions::none),
+            Some(payload) => Some(BlindedBlockPublication::Payload(Box::new(payload.clone()))),
+            None => self.publish_signed_blinded_block_using_builder(block).await,
         }
     }
 
     async fn publish_signed_blinded_block_using_builder(
         &self,
         block: &SignedBlindedBeaconBlock<P>,
-    ) -> Option<WithBlobsAndMev<ExecutionPayload<P>, P>> {
+    ) -> Option<BlindedBlockPublication<P>> {
         let controller = &self.producer_context.controller;
         let builder_api = self.producer_context.builder_api.as_deref()?;
         let current_slot = controller.slot();
@@ -618,6 +617,35 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             return None;
         }
 
+        if block.phase() >= Phase::Fulu {
+            match builder_api
+                .post_blinded_block_post_fulu(
+                    &self.producer_context.chain_config,
+                    controller.genesis_time(),
+                    block,
+                )
+                .await
+            {
+                Ok(()) => return Some(BlindedBlockPublication::PublishedByBuilder),
+                // The builder may still publish the block, and a v1 retry would wait another interval.
+                Err(error)
+                    if error
+                        .downcast_ref::<reqwest::Error>()
+                        .is_some_and(reqwest::Error::is_timeout) =>
+                {
+                    debug_with_peers!(
+                        "failed to post blinded block to the builder node: {error:?}"
+                    );
+
+                    return None;
+                }
+                Err(error) => warn_with_peers!(
+                    "builder did not accept the blinded block for publishing, \
+                     requesting its payload instead: {error:?}"
+                ),
+            }
+        }
+
         let execution_payload = match builder_api
             .post_blinded_block(
                 &self.producer_context.chain_config,
@@ -628,16 +656,17 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
         {
             Ok(execution_payload) => execution_payload,
             Err(error) => {
-                if let Some(reqwest_error) = error.downcast_ref::<reqwest::Error>() {
-                    if reqwest_error.is_timeout() {
-                        // If posting signed blinded beacon block to builder fails, don't print a warning,
-                        // because builder should publish the block anyway, just cannot respond in a timely
-                        // manner. We cannot do anything else here either, but exit early from propose, due
-                        // to the risk of slashing.
-                        log_with_feature(format_args!(
-                            "failed to post blinded block to the builder node: {error:?}",
-                        ));
-                    }
+                if error
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_timeout)
+                {
+                    // If posting signed blinded beacon block to builder fails, don't print a warning,
+                    // because builder should publish the block anyway, just cannot respond in a timely
+                    // manner. We cannot do anything else here either, but exit early from propose, due
+                    // to the risk of slashing.
+                    debug_with_peers!(
+                        "failed to post blinded block to the builder node: {error:?}"
+                    );
 
                     return None;
                 }
@@ -652,7 +681,9 @@ impl<P: Preset, W: Wait> BlockProducer<P, W> {
             execution_payload.value
         ));
 
-        Some(execution_payload)
+        Some(BlindedBlockPublication::Payload(Box::new(
+            WithClientVersions::none(execution_payload),
+        )))
     }
 
     pub async fn cache_self_built_block_parent(
@@ -1245,9 +1276,9 @@ impl<P: Preset, W: Wait> BlockBuildContext<P, W> {
 
                         let parent_execution_requests = if snapshot.should_build_on_full(slot) {
                             // TODO(gloas): the block root needs to be checked if it is gloas or not.
-                            // the current behavior erronously returns empty execution requests when
-                            // payload envelope is not found, though block may be from gloas phase and
-                            // envelope is missing (so it should error out).
+                            // the current behavior erroneously returns empty execution requests
+                            // when payload envelope is not found, though block may be from gloas
+                            // phase and envelope is missing (so it should error out).
                             snapshot
                                 .cached_execution_payload_envelope_by_root(parent_root)
                                 .ok_or_else(|| anyhow!("no cached payload envelope"))

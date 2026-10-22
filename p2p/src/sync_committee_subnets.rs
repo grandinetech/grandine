@@ -116,8 +116,8 @@ impl<P: Preset> SyncCommitteeSubnets<P> {
         izip!(0.., old.states, new.states)
             .filter_map(|(subnet_id, old_state, new_state)| {
                 let action = match (old_state, new_state) {
-                    (Subscribed { .. }, Subscribed { .. }) => DiscoverPeers,
-                    (_, Subscribed { .. }) => Subscribe,
+                    (Subscribed { .. }, Subscribed { expiration }) => DiscoverPeers { expiration },
+                    (_, Subscribed { expiration }) => Subscribe { expiration },
                     (Subscribed { .. }, _) => Unsubscribe,
                     _ => return None,
                 };
@@ -137,5 +137,48 @@ impl<P: Preset> SyncCommitteeSubnets<P> {
         self.states = [Subscribed { expiration }; SyncCommitteeSubnetCount::USIZE];
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use types::preset::Mainnet;
+
+    use super::*;
+
+    fn subscription(sync_committee_index: usize, until_epoch: Epoch) -> SyncCommitteeSubscription {
+        SyncCommitteeSubscription {
+            validator_index: 0,
+            sync_committee_indices: vec![sync_committee_index],
+            until_epoch,
+        }
+    }
+
+    // The peer manager keeps and replenishes peers on a subnet only for as long as the action
+    // says, so the actions carry the subscription's expiration.
+    #[test]
+    fn actions_carry_the_expiration_of_the_subscription() {
+        let mut subnets = SyncCommitteeSubnets::<Mainnet>::default();
+
+        // Sync committee index 0 lies in subnet 0 under the mainnet subcommittee size of 128.
+        let actions = subnets.update(1, [subscription(0, 8)]);
+
+        assert!(matches!(actions.get(&0), Some(Subscribe { expiration: 8 })));
+
+        // A later subscription to the same subnet extends it and only asks for more peers.
+        let actions = subnets.update(1, [subscription(0, 16)]);
+
+        assert!(matches!(
+            actions.get(&0),
+            Some(DiscoverPeers { expiration: 16 })
+        ));
+
+        // An earlier one does not shorten it.
+        let actions = subnets.update(1, [subscription(0, 4)]);
+
+        assert!(matches!(
+            actions.get(&0),
+            Some(DiscoverPeers { expiration: 16 })
+        ));
     }
 }

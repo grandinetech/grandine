@@ -59,15 +59,20 @@ impl Directories {
         self
     }
 
-    // TODO: This does not include validator_dir and other files outside store and network directories
+    // TODO: This does not include files outside the store, network and validator directories
     pub fn disk_usage(&self) -> Result<u64> {
-        let dir_usage =
-            |dir: Option<&PathBuf>| dir.as_ref().map(fs_extra::dir::get_size).transpose();
+        // The validator client never creates the store and network directories.
+        let dir_usage = |dir: Option<&PathBuf>| {
+            dir.filter(|dir| dir.exists())
+                .map(fs_extra::dir::get_size)
+                .transpose()
+        };
 
         let store_usage = dir_usage(self.store_directory.as_ref())?.unwrap_or_default();
         let network_usage = dir_usage(self.network_dir.as_ref())?.unwrap_or_default();
+        let validator_usage = dir_usage(self.validator_dir.as_ref())?.unwrap_or_default();
 
-        Ok(store_usage + network_usage)
+        Ok(store_usage + network_usage + validator_usage)
     }
 }
 

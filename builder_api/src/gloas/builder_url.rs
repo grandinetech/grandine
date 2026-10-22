@@ -106,6 +106,13 @@ impl Debug for BuilderUrl {
     }
 }
 
+// `Display` redacts the URL, so code that needs all of it can borrow it without naming the type.
+impl AsRef<str> for BuilderUrl {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 impl Display for BuilderUrl {
     fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
         match self.origin() {
