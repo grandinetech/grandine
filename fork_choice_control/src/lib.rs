@@ -15,6 +15,7 @@
 pub use crate::{
     controller::Controller,
     events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
+    hierarchy::Hierarchy,
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
         ValidatorMessage,
@@ -43,6 +44,7 @@ pub mod controller;
 mod archival_pool;
 mod block_processor;
 mod events;
+mod hierarchy;
 mod messages;
 mod misc;
 mod mutator;
