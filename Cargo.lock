@@ -3314,6 +3314,7 @@ dependencies = [
  "state_cache",
  "std_ext",
  "strum",
+ "sysinfo",
  "tap",
  "tempfile",
  "test-generator",
@@ -9819,7 +9820,7 @@ dependencies = [
  "typenum",
  "url",
  "variant_count",
- "zstd 0.13.3",
+ "zstd",
 ]
 
 [[package]]

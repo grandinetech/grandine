@@ -15,6 +15,7 @@
 pub use crate::{
     controller::Controller,
     events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
+    frame_cache::FrameCache,
     hierarchy::Hierarchy,
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
@@ -26,6 +27,7 @@ pub use crate::{
     },
     queries::{BlockError, BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
+    state_storage_config::StateStorageConfig,
     storage::{
         BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
         DEFAULT_ZSTD_COMPRESSION_LEVEL, DataColumnSidecarByColumnId, EnvelopeByBlockRoot,
@@ -44,6 +46,7 @@ pub mod controller;
 mod archival_pool;
 mod block_processor;
 mod events;
+mod frame_cache;
 mod hierarchy;
 mod messages;
 mod misc;
@@ -51,6 +54,7 @@ mod mutator;
 mod queries;
 mod specialized;
 mod state_at_slot_cache;
+mod state_storage_config;
 mod storage;
 mod storage_back_sync;
 mod storage_tool;
