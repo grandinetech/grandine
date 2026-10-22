@@ -20,7 +20,7 @@ client, and you still receive the priority fees through your
    fee recipient, the gas limit and a timestamp. It sends the registrations to the builder, so
    relays know where to pay you.
 2. **Bidding.** When one of your validators proposes, Grandine asks the builder for a payload header
-   (`/eth/v1/builder/header/...`), with a 1 second timeout. At the same time, it asks your
+   (`/eth/v1/builder/header/...`), with a 1 second timeout (`--builder-header-timeout`). At the same time, it asks your
    execution client for a local payload.
 3. **Selection.** Grandine compares the builder's bid with the value of the local payload, adjusted
    by the [builder boost factor](#builder-boost-factor). The more profitable one wins.
@@ -215,6 +215,8 @@ Beacon node options (not accepted by `grandine vc`):
 - `--builder-url` (default: none): URL of the external block builder or relay multiplexer.
 - `--builder-api-url` (deprecated): old name of `--builder-url`.
 - `--builder-format` (default: `ssz`): data format for the Builder API, `ssz` or `json`.
+- `--builder-header-timeout` (default: `1000`): timeout in milliseconds for fetching a payload
+  header from the builder. Must be greater than `0`. Relevant only until Gloas.
 - `--builder-disable-checks` (default: disabled): always use the builder, without circuit breaker
   checks.
 - `--builder-max-skipped-slots` (default: `3`): consecutive missing blocks (withheld payloads from

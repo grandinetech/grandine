@@ -1,3 +1,5 @@
+use core::time::Duration;
+
 use derive_more::{Debug, Display, FromStr};
 use types::redacting_url::RedactingUrl;
 
@@ -14,6 +16,7 @@ pub struct Config {
     pub builder_api_format: BuilderApiFormat,
     pub builder_api_url: RedactingUrl,
     pub builder_disable_checks: bool,
+    pub builder_header_timeout: Duration,
     pub builder_max_skipped_slots_per_epoch: u64,
     pub builder_max_skipped_slots: u64,
 }

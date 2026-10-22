@@ -1,4 +1,3 @@
-use core::time::Duration;
 use std::{sync::Arc, time::SystemTime};
 
 use anyhow::{Result, bail, ensure};
@@ -35,11 +34,9 @@ use types::{
 use crate::{
     BuilderApiFormat, BuilderConfig,
     combined::{ExecutionPayloadAndBlobsBundle, SignedBuilderBid},
-    consts::{BUILDER_PROPOSAL_DELAY_TOLERANCE, DATE_MS_HEADER},
+    consts::DATE_MS_HEADER,
     unphased::containers::SignedValidatorRegistrationV1,
 };
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE);
 
 #[derive(Debug, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
@@ -246,7 +243,10 @@ impl Api {
 
         debug_with_peers!("getting execution payload header from {url}, use_json: {use_json}");
 
-        let request = self.client.get(url.into_url()).timeout(REQUEST_TIMEOUT);
+        let request = self
+            .client
+            .get(url.into_url())
+            .timeout(self.config.builder_header_timeout);
 
         // See <https://github.com/ethereum/builder-specs/pull/104>
         let request = if use_json {
@@ -526,6 +526,8 @@ pub fn validate_phase(computed: Phase, in_response: Phase) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use core::time::Duration;
+
     use reqwest::Client;
     use test_case::test_case;
     use types::{
@@ -535,7 +537,7 @@ mod tests {
         preset::Mainnet,
     };
 
-    use crate::{BuilderApi, BuilderConfig};
+    use crate::{BuilderApi, BuilderConfig, consts::BUILDER_PROPOSAL_DELAY_TOLERANCE};
 
     use super::*;
 
@@ -579,6 +581,7 @@ mod tests {
                     .parse()
                     .expect("http://localhost should be a valid URL"),
                 builder_disable_checks: false,
+                builder_header_timeout: Duration::from_secs(BUILDER_PROPOSAL_DELAY_TOLERANCE),
                 builder_max_skipped_slots_per_epoch: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH,
                 builder_max_skipped_slots: DEFAULT_BUILDER_MAX_SKIPPED_SLOTS,
             },
