@@ -24,7 +24,8 @@ use crate::{
     controller::{Controller, MutatorHandle},
     events::EventChannels,
     messages::{AttestationVerifierMessage, P2pMessage, ValidatorMessage},
-    storage::{DEFAULT_ARCHIVAL_EPOCH_INTERVAL, DEFAULT_ZSTD_COMPRESSION_LEVEL, Storage},
+    state_storage_config::StateStorageConfig,
+    storage::{DEFAULT_ZSTD_COMPRESSION_LEVEL, Storage},
     unbounded_sink::UnboundedSink,
 };
 
@@ -113,17 +114,20 @@ where
         event_channels: Arc<EventChannels<P>>,
         thread_pool_size: Option<usize>,
     ) -> (Arc<Self>, MutatorHandle<P, WaitGroup>) {
-        let storage = Arc::new(Storage::new(
-            chain_config.clone_arc(),
-            pubkey_cache.clone_arc(),
-            database,
-            DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-            StorageMode::Standard {
-                custom_data_availability_window: None,
-            },
-            true,
-            DEFAULT_ZSTD_COMPRESSION_LEVEL,
-        ));
+        let storage = Arc::new(
+            Storage::new(
+                chain_config.clone_arc(),
+                pubkey_cache.clone_arc(),
+                database,
+                StorageMode::Standard {
+                    custom_data_availability_window: None,
+                },
+                true,
+                DEFAULT_ZSTD_COMPRESSION_LEVEL,
+                StateStorageConfig::default_for_mode(StorageMode::default()),
+            )
+            .expect("the default state cache sizes are valid"),
+        );
 
         Self::new(
             chain_config,

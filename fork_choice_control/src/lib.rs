@@ -15,7 +15,6 @@
 pub use crate::{
     controller::Controller,
     events::{DEFAULT_MAX_EVENTS, Event, EventChannels, Topic},
-    frame_cache::FrameCache,
     hierarchy::Hierarchy,
     messages::{
         AttestationVerifierMessage, P2pMessage, PoolMessage, SubnetMessage, SyncMessage,
@@ -29,12 +28,13 @@ pub use crate::{
     specialized::{AdHocBenchController, BenchController},
     state_storage_config::StateStorageConfig,
     storage::{
-        BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ARCHIVAL_EPOCH_INTERVAL,
-        DEFAULT_ZSTD_COMPRESSION_LEVEL, DataColumnSidecarByColumnId, EnvelopeByBlockRoot,
-        EnvelopeRootBySlot, ExecutionPayloadBySlotAndRoot, FastConfirmedRoot, FinalizedBlockByRoot,
-        FinalizedValidatorCount, FinalizedValidators, SlotBlobId, SlotByStateRoot, SlotColumnId,
-        StateByBlockRoot, StateCheckpoint, StateLoadStrategy, Storage, StoredBlock, StoredEnvelope,
-        UnfinalizedBlockByRoot, get, print_beacon_database_info, save,
+        BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        DataColumnSidecarByColumnId, EnvelopeByBlockRoot, EnvelopeRootBySlot,
+        Error as StorageError, ExecutionPayloadBySlotAndRoot, FastConfirmedRoot,
+        FinalizedBlockByRoot, FinalizedValidatorCount, FinalizedValidators, SlotBlobId,
+        SlotByStateRoot, SlotColumnId, StateByBlockRoot, StateCheckpoint, StateLoadStrategy,
+        Storage, StoredBlock, StoredEnvelope, UnfinalizedBlockByRoot, get,
+        print_beacon_database_info, save,
     },
     storage_tool::{export_state_and_blocks, replay_blocks},
     wait::Wait,
@@ -53,6 +53,7 @@ mod misc;
 mod mutator;
 mod queries;
 mod specialized;
+mod spine;
 mod state_at_slot_cache;
 mod state_storage_config;
 mod storage;

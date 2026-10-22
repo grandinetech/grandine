@@ -1,4 +1,4 @@
-use core::{convert::Infallible, fmt, iter};
+use core::{convert::Infallible, fmt, iter, ops::Range};
 #[cfg(target_os = "zkvm")]
 use std::slice::Iter as VectorIter;
 use std::sync::Arc;
@@ -222,6 +222,15 @@ impl SszValidatorList for ProgressiveValidatorList {
 
     fn restore_pubkeys(&mut self, pubkeys: &PubkeyList) -> Result<()> {
         self.buf.restore_pubkeys(pubkeys)?;
+
+        let length = self.len_usize();
+        self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
+
+        Ok(())
+    }
+
+    fn restore_pubkeys_in(&mut self, pubkeys: &PubkeyList, range: Range<usize>) -> Result<()> {
+        self.buf.restore_pubkeys_in(pubkeys, range)?;
 
         let length = self.len_usize();
         self.cache = (length > 0).then(|| CacheNode::build_empty(length, 0));
