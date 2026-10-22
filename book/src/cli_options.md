@@ -220,6 +220,7 @@ beacon node. See [Fee recipient, graffiti and gas limit](./fee_recipient.md) and
 | `--max-empty-slots <MAX_EMPTY_SLOTS>` | `32` | Maximum number of empty slots that a state may be advanced through to process a block or attestation, and that a validator client tolerates behind the head. | grandine, bn, vc |
 | `--builder-url <BUILDER_URL>` | none | External block builder (for example MEV-Boost) URL. | grandine, bn |
 | `--builder-format <BUILDER_API_FORMAT>` | `ssz` | Data format used with the builder API. Possible values: `json`, `ssz`. | grandine, bn |
+| `--builder-header-timeout <BUILDER_HEADER_TIMEOUT>` | `1000` | Timeout in milliseconds for fetching an execution payload header from the builder. Must be greater than `0`. Relevant only until Gloas. | grandine, bn |
 | `--builder-disable-checks` | disabled | Always use the builder, without checking circuit breaker conditions. | grandine, bn |
 | `--builder-max-skipped-slots <BUILDER_MAX_SKIPPED_SLOTS>` | `3` | Consecutive missing blocks (missing payloads after Gloas) that trip the circuit breaker and switch to local payloads. | grandine, bn |
 | `--builder-max-skipped-slots-per-epoch <BUILDER_MAX_SKIPPED_SLOTS_PER_EPOCH>` | `8` | Missing blocks (missing payloads after Gloas) in the last rolling epoch that trip the circuit breaker. | grandine, bn |

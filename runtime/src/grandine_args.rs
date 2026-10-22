@@ -20,7 +20,10 @@ use std::{
 use anyhow::{Context as _, Result, anyhow, bail, ensure};
 use binary_utils::TelemetryConfig;
 use bls::PublicKeyBytes;
-use builder_api::{BuilderApiFormat, BuilderConfig, gloas::containers::BuilderUrl};
+use builder_api::{
+    BuilderApiFormat, BuilderConfig, consts::BUILDER_PROPOSAL_DELAY_TOLERANCE,
+    gloas::containers::BuilderUrl,
+};
 use bytesize::ByteSize;
 use clap::{
     Arg, ArgMatches, Args, Command as ClapCommand, CommandFactory as _, Error as ClapError,
@@ -281,6 +284,15 @@ pub struct BeaconNodeOptions {
     #[clap(help_heading = "Block production", long)]
     builder_disable_checks: bool,
 
+    /// Timeout in milliseconds for fetching an execution payload header from the builder. Only effective before Gloas
+    #[clap(
+        help_heading = "Block production",
+        long,
+        default_value_t = BUILDER_PROPOSAL_DELAY_TOLERANCE * 1000,
+        value_parser = clap::value_parser!(u64).range(1..),
+    )]
+    builder_header_timeout: u64,
+
     /// Max allowed consecutive missing blocks (missing payloads post-Gloas) to trigger circuit breaker condition and switch to local execution engine for payload construction
     #[clap(help_heading = "Block production", long, default_value_t = DEFAULT_BUILDER_MAX_SKIPPED_SLOTS)]
     builder_max_skipped_slots: u64,
@@ -401,6 +413,7 @@ impl BeaconNodeOptions {
             builder_api_format: self.builder_api_format,
             builder_api_url: url,
             builder_disable_checks: circuit_breaker.disabled,
+            builder_header_timeout: Duration::from_millis(self.builder_header_timeout),
             builder_max_skipped_slots: circuit_breaker.max_skipped_slots,
             builder_max_skipped_slots_per_epoch: circuit_breaker.max_skipped_slots_per_epoch,
         })
@@ -459,6 +472,7 @@ impl BeaconNodeOptions {
             builder_api_url: _,
             builder_url: _,
             builder_disable_checks: _,
+            builder_header_timeout: _,
             builder_max_skipped_slots: _,
             builder_max_skipped_slots_per_epoch: _,
             store_directory: _,
@@ -2781,6 +2795,47 @@ mod tests {
                 .max_skipped_slots_per_epoch,
             9,
         );
+    }
+
+    #[test]
+    fn default_builder_header_timeout() {
+        let config = config_from_args(["--builder-url", "http://localhost:18550"]);
+
+        let builder_config = beacon_node(&config)
+            .builder_config
+            .as_ref()
+            .expect("--builder-url should produce a builder config");
+
+        assert_eq!(
+            builder_config.builder_header_timeout,
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn custom_builder_header_timeout() {
+        let config = config_from_args([
+            "--builder-url",
+            "http://localhost:18550",
+            "--builder-header-timeout",
+            "2500",
+        ]);
+
+        let builder_config = beacon_node(&config)
+            .builder_config
+            .as_ref()
+            .expect("--builder-url should produce a builder config");
+
+        assert_eq!(
+            builder_config.builder_header_timeout,
+            Duration::from_millis(2500),
+        );
+    }
+
+    #[test]
+    fn zero_builder_header_timeout_is_rejected() {
+        try_config_from_args(["--builder-header-timeout", "0"])
+            .expect_err("--builder-header-timeout must be greater than 0");
     }
 
     #[test]
