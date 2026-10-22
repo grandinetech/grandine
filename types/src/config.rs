@@ -786,7 +786,7 @@ impl Config {
         }
     }
 
-    /// [Hoodi configuration](https://github.com/eth-clients/hoodi/blob/ef8998901c1350f41a0bcc0a2a8d4baad973abcf/metadata/config.yaml)
+    /// [Hoodi configuration](https://github.com/eth-clients/hoodi/blob/21a110a60e6558a2ba7c819fa4b80029d49ab205/metadata/config.yaml)
     #[must_use]
     pub fn hoodi() -> Self {
         Self {
@@ -811,8 +811,6 @@ impl Config {
             electra_fork_version: H32(hex!("60000910")),
             fulu_fork_epoch: 50_688,
             fulu_fork_version: H32(hex!("70000910")),
-            gloas_fork_epoch: 132_352,
-            gloas_fork_version: H32(hex!("80000910")),
 
             // Time parameters
             seconds_per_eth1_block: 12,
@@ -837,10 +835,6 @@ impl Config {
                     max_blobs_per_block: 21,
                 },
             ],
-            gas_limit_schedule: vec![GasLimitScheduleEntry {
-                epoch: 132_352,
-                gas_limit: 200_000_000,
-            }],
 
             // Transition
             terminal_total_difficulty: Difficulty::ZERO,
