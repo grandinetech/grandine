@@ -25,6 +25,7 @@ fork_choice_store = { workspace = true }
 fs-err = { workspace = true }
 futures = { workspace = true }
 genesis = { workspace = true }
+hashing = { workspace = true }
 helper_functions = { workspace = true }
 http_api_utils = { workspace = true }
 itertools = { workspace = true }

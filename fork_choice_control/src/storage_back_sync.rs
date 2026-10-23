@@ -21,8 +21,8 @@ use types::{
 use crate::{
     Storage,
     storage::{
-        ARCHIVED_STATES_BEFORE_FLUSH, BlockRootBySlot, Error, SlotByStateRoot, StoredBlock, get,
-        serialize,
+        ARCHIVED_STATES_BEFORE_FLUSH, BlockRootBySlot, BlockRootBySlotValue, Error,
+        SlotByStateRoot, StoredBlock, get, serialize,
     },
 };
 
@@ -136,13 +136,25 @@ impl<P: Preset> Storage<P> {
                 }
             };
 
-            batch.push(serialize(SlotByStateRoot(state.hash_tree_root()), slot)?);
+            let state_root = state.hash_tree_root();
 
-            if let Some(block_root) = block_root
-                && self
-                    .hierarchy
-                    .contains::<P>(self.config(), anchor_slot, slot)
+            batch.push(serialize(SlotByStateRoot(state_root), slot)?);
+
+            if self
+                .hierarchy
+                .contains::<P>(self.config(), anchor_slot, slot)
             {
+                let block_root = match block_root {
+                    Some(block_root) => block_root,
+                    None => {
+                        let value = BlockRootBySlotValue::blockless(state_root);
+
+                        batch.push(serialize(BlockRootBySlot(slot), value)?);
+
+                        value.state_key_root()
+                    }
+                };
+
                 debug_with_peers!("back-synced state in {slot} is ready for storage");
 
                 if let Some(to_delete) = self.append_finalized_state(
@@ -217,7 +229,10 @@ impl<P: Preset> Storage<P> {
             let slot = block.message().slot();
             let block_root = block.message().hash_tree_root();
 
-            batch.push(serialize(BlockRootBySlot(slot), block_root)?);
+            batch.push(serialize(
+                BlockRootBySlot(slot),
+                BlockRootBySlotValue::Block(block_root),
+            )?);
             self.append_finalized_block_to_batch(&mut batch, block_root, &block, false)?;
         }
 
@@ -264,6 +279,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(clippy::too_many_lines)]
     fn test_archive_back_sync_states() -> Result<()> {
         let genesis_state = mainnet::GENESIS_BEACON_STATE.force().clone_arc();
         let blocks = mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force();
@@ -387,6 +403,34 @@ mod tests {
             assert_eq!(recomputed_root(state)?, state_root);
         }
 
+        let empty_hierarchy_slots = empty_slots
+            .iter()
+            .copied()
+            .filter(|slot| {
+                storage
+                    .hierarchy
+                    .contains::<Mainnet>(storage.config(), 0, *slot)
+            })
+            .collect_vec();
+
+        assert_eq!(empty_hierarchy_slots, [32, 64]);
+
+        for slot in empty_hierarchy_slots {
+            let state = storage
+                .stored_state(slot, Some(&*finalized_validators))?
+                .expect("state should be stored");
+
+            let state_root = recomputed_root(state)?;
+            let blockless = BlockRootBySlotValue::blockless(state_root);
+
+            assert_eq!(
+                storage.stored_block_root_by_slot_value(slot)?,
+                Some(blockless)
+            );
+            assert_eq!(storage.slot_by_state_root(state_root)?, Some(slot));
+            assert!(storage.contains_state_for_root(blockless.state_key_root())?);
+        }
+
         // Slots without a block are served by transitioning the nearest stored state forward.
         for empty_slot in empty_slots {
             assert_eq!(
@@ -503,6 +547,64 @@ mod tests {
             .expect("state should be stored");
 
         assert_eq!(storage.slot_by_state_root(state_128_root)?, Some(128));
+        assert_eq!(
+            BeaconState::<Mainnet>::from_ssz(&Mainnet::default_config(), state.to_ssz()?)?
+                .hash_tree_root(),
+            state_128_root,
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn back_sync_resumes_from_the_state_of_a_slot_without_a_block() -> Result<()> {
+        let genesis_state = mainnet::GENESIS_BEACON_STATE.force().clone_arc();
+        let finalized_validators = genesis_state.validators().clone_boxed();
+        let blocks = mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force();
+        let storage = build_test_storage::<Mainnet>();
+
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state);
+
+        let archive = |end_slot| {
+            storage.archive_back_sync_states(
+                0,
+                end_slot,
+                &anchor_checkpoint_provider,
+                &Arc::new(AtomicBool::new(false)),
+                &*finalized_validators,
+            )
+        };
+
+        let block_at = |slot| {
+            blocks
+                .iter()
+                .find(|block| block.message().slot() == slot)
+                .expect("the block is in the test data")
+        };
+
+        storage.store_back_sync_blocks(blocks.iter().cloned())?;
+
+        archive(32)?;
+
+        assert_eq!(storage.block_root_by_slot(32)?, None);
+        assert_eq!(get_latest_archived_slot(&storage.database)?, Some(32));
+
+        storage
+            .database
+            .delete_batch([
+                FinalizedBlockByRoot::full(block_at(1).message().hash_tree_root()).to_string(),
+            ])?;
+
+        archive(128)?;
+
+        storage.clear_caches();
+
+        let state_128_root = block_at(128).message().state_root();
+        let state = storage
+            .stored_state(128, Some(&*finalized_validators))?
+            .expect("state should be stored");
+
         assert_eq!(
             BeaconState::<Mainnet>::from_ssz(&Mainnet::default_config(), state.to_ssz()?)?
                 .hash_tree_root(),
