@@ -12,8 +12,9 @@ use typenum::{NonZero, U1};
 
 use crate::{
     contiguous_vector::ContiguousVector,
+    cursor::SszCursor,
     error::ReadError,
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
     type_level::{ContiguousVectorElements, MerkleElements},
 };
@@ -98,6 +99,18 @@ impl<N: ContiguousVectorElements<u8> + MerkleElements<u8>> SszHash for ByteVecto
     fn hash_tree_root(&self) -> H256 {
         self.bytes.hash_tree_root()
     }
+}
+
+impl<N: ContiguousVectorElements<u8> + NonZero> TryFrom<SszCursor<'_>> for ByteVector<N> {
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<N: ContiguousVectorElements<u8> + NonZero> SszNavigable for ByteVector<N> {
+    type View<'cursor> = Self;
 }
 
 impl<N: ArrayLength<u8>> ByteVector<N> {

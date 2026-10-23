@@ -2,8 +2,9 @@ use typenum::U4294967296;
 
 use crate::{
     byte_list::ByteList,
+    cursor::SszCursor,
     error::{ReadError, WriteError},
-    porcelain::{SszRead, SszSize, SszWrite},
+    porcelain::{SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
 };
 
@@ -83,6 +84,24 @@ impl<C, T: SszRead<C>> SszRead<C> for Compressed<T> {
             level: i32::MIN,
         })
     }
+}
+
+impl<T> TryFrom<SszCursor<'_>> for Compressed<T>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T> SszNavigable for Compressed<T>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 #[cfg(test)]

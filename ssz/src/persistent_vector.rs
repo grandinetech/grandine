@@ -25,10 +25,11 @@ use typenum::{NonZero, U1, U2, U4, Unsigned};
 use crate::{
     bundle_size::BundleSize,
     contiguous_vector::ContiguousVector,
+    cursor::SszCursor,
     error::{IndexError, ReadError, WriteError},
     hc::Hc,
     iter::{ExactSize, UpTo3},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
     type_level::{MerkleElements, MinimumBundleSize, PersistentVectorElements},
@@ -260,6 +261,24 @@ where
         let results = shared::read_vector::<_, _, N>(context, bytes)?;
         itertools::process_results(results, |elements| Self::try_from_iter(elements))?
     }
+}
+
+impl<T, N, B: BundleSize<T>> TryFrom<SszCursor<'_>> for PersistentVector<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T, N, B: BundleSize<T>> SszNavigable for PersistentVector<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 impl<T: SszWrite, N: Unsigned + NonZero, B: BundleSize<T>> SszWrite for PersistentVector<T, N, B> {
