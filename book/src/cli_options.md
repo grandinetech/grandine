@@ -73,6 +73,7 @@ Options shared by every mode.
 | `--features <FEATURES>` | none | Comma-separated list of optional runtime features to enable. See [Runtime features](./runtime_features.md). | grandine, bn, vc |
 | `--data-dir <DATA_DIR>` | `$HOME/.grandine` | Parent directory for application data. Grandine always appends the network name, so the effective directory is `DATA_DIR/NETWORK` (for example `$HOME/.grandine/mainnet`). | grandine, bn, vc |
 | `--request-timeout <REQUEST_TIMEOUT>` | `30000` | Default timeout in milliseconds for outgoing HTTP requests (execution client, checkpoint sync, Web3Signer, remote beacon nodes) and for the metrics server. | grandine, bn, vc |
+| `--force-application-restart` | disabled | Restart the application runtime in-process after a runtime error instead of exiting. Without it, `InhibitApplicationRestart` is enabled. | grandine, bn, vc |
 | `--in-memory` | disabled | Keep all data in memory. Nothing is written to the data directory, and everything is lost on exit. Intended for testing. | grandine, bn, vc |
 | `-h`, `--help` | | Print help. | grandine, bn, vc |
 | `-V`, `--version` | | Print the version. | grandine |

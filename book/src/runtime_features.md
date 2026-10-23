@@ -115,7 +115,7 @@ investigations. Do not use them on a node that matters.
 | `PatchHttpContentType` | Treats HTTP API requests without a `Content-Type` header as `application/json`. Read at startup. Meant for clients that leave the header out. |
 | `DisableFinalizedRootCheck` | Keeps peers whose finalized block differs from ours at the same epoch, instead of disconnecting them. |
 | `CacheTargetStates` | Uses cached checkpoint states, instead of computing target states, when validating aggregates and in the slasher. |
-| `InhibitApplicationRestart` | Exits on a runtime error instead of restarting the runtime in-process. Tools such as `interchange` enable it themselves. |
+| `InhibitApplicationRestart` | Exits on a runtime error instead of restarting the runtime in-process. Enabled by default; pass `--force-application-restart` to disable it. |
 
 By default Grandine fully validates even the objects it produces itself, which costs some CPU but
 catches bugs. The `TrustOwn*` features turn that off.

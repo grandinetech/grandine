@@ -820,6 +820,12 @@ struct CommonOptions {
     #[clap(long, value_delimiter = ',')]
     features: Vec<Feature>,
 
+    /// Restart the application runtime in-process after a runtime error instead of exiting.
+    /// Without it, `InhibitApplicationRestart` is enabled.
+    /// [default: disabled]
+    #[clap(long)]
+    force_application_restart: bool,
+
     /// Parent directory for application data files
     /// [default: $HOME/.grandine/{network}]
     #[clap(long)]
@@ -1627,6 +1633,7 @@ impl GrandineArgs {
 
         let CommonOptions {
             mut features,
+            force_application_restart,
             data_dir,
             request_timeout,
             in_memory,
@@ -1819,6 +1826,10 @@ impl GrandineArgs {
             }
             .set_defaults(&chain_config),
         );
+
+        if !force_application_restart {
+            features.push(Feature::InhibitApplicationRestart);
+        }
 
         // enable global feature for easier checking
         if metrics_enabled {
