@@ -483,7 +483,7 @@ impl<P: Preset> BeaconState<P> {
         }
     }
 
-    pub(crate) fn slot_from_ssz(bytes: &[u8]) -> Result<Slot, ReadError> {
+    pub fn slot_from_ssz(bytes: &[u8]) -> Result<Slot, ReadError> {
         // There are 2 fixed parts before `state.slot`:
         // - The contents of `state.genesis_time`.
         // - The contents of `state.genesis_validators_root`.
