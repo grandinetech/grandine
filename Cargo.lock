@@ -3289,6 +3289,7 @@ dependencies = [
  "fs-err",
  "futures",
  "genesis",
+ "hashing",
  "helper_functions",
  "http_api_utils",
  "interop",

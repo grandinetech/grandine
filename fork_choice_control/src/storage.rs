@@ -18,7 +18,9 @@ use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use parking_lot::Mutex;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
-use ssz::{Ssz, SszRead, SszReadDefault, SszSize, SszWrite};
+use ssz::{
+    ReadError, Size, Ssz, SszHash as _, SszRead, SszReadDefault, SszSize, SszWrite, WriteError,
+};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::info;
@@ -287,6 +289,9 @@ impl<P: Preset> Storage<P> {
                     OptionalStateStorage::Full(state_storage) => {
                         (anchor_state, anchor_block, unfinalized_blocks) = state_storage;
                     }
+                    OptionalStateStorage::Blockless(state, _) => {
+                        bail!(Error::PersistedSlotCannotContainAnchor { slot: state.slot() });
+                    }
                     // State might not be found but unfinalized blocks could be present.
                     OptionalStateStorage::UnfinalizedOnly(local_unfinalized_blocks) => {
                         let FinalizedCheckpoint { block, state } =
@@ -357,7 +362,10 @@ impl<P: Preset> Storage<P> {
         let anchor_validators = anchor_state.validators();
 
         let mut batch = vec![
-            serialize(BlockRootBySlot(anchor_slot), anchor_block_root)?,
+            serialize(
+                BlockRootBySlot(anchor_slot),
+                BlockRootBySlotValue::Block(anchor_block_root),
+            )?,
             serialize(SlotByStateRoot(anchor_state_root), anchor_slot)?,
         ];
 
@@ -495,11 +503,14 @@ impl<P: Preset> Storage<P> {
         while let Some(candidate_slot) = ancestor_slot {
             let candidate = if let Some(value) = spine.get(candidate_slot) {
                 Some(value)
-            } else if let Some(candidate_root) = self.block_root_by_slot(candidate_slot)? {
-                self.state_with_key_by_block_root(candidate_root, Some(finalized_validators))?
-                    .inspect(|(key, ancestor_state)| {
-                        spine.insert(candidate_slot, key.clone(), ancestor_state.clone_arc())
-                    })
+            } else if let Some(candidate_value) = self.block_root_by_slot_value(candidate_slot)? {
+                self.state_with_key_by_block_root(
+                    candidate_value.state_key_root(),
+                    Some(finalized_validators),
+                )?
+                .inspect(|(key, ancestor_state)| {
+                    spine.insert(candidate_slot, key.clone(), ancestor_state.clone_arc())
+                })
             } else {
                 None
             };
@@ -600,6 +611,7 @@ impl<P: Preset> Storage<P> {
         let anchor_slot = self.anchor_slot.load(Ordering::SeqCst);
         let mut update_finalized_validators = false;
         let mut states_to_save = Vec::new();
+        let mut newer_finalized_slot = None;
 
         for (chain_link, finalized) in chain {
             let block_root = chain_link.block_root;
@@ -620,7 +632,10 @@ impl<P: Preset> Storage<P> {
                     batch.push(serialize(UnfinalizedBlockByRoot(block_root), block)?);
                 }
 
-                batch.push(serialize(BlockRootBySlot(state_slot), block_root)?);
+                batch.push(serialize(
+                    BlockRootBySlot(state_slot),
+                    BlockRootBySlotValue::Block(block_root),
+                )?);
             }
 
             if finalized {
@@ -650,10 +665,27 @@ impl<P: Preset> Storage<P> {
                     update_finalized_validators = true;
                 }
 
-                if !self.prune_storage_enabled() && is_hierarchy_slot {
-                    info_with_peers!("saving state in slot {state_slot}");
+                let empty_hierarchy_slots = newer_finalized_slot
+                    .replace(state_slot)
+                    .filter(|_| !self.prune_storage_enabled())
+                    .map(|newer_slot| {
+                        (state_slot.saturating_add(1)..newer_slot)
+                            .filter(|slot| {
+                                self.hierarchy
+                                    .contains::<P>(&self.config, anchor_slot, *slot)
+                            })
+                            .collect_vec()
+                    })
+                    .unwrap_or_default();
 
-                    states_to_save.push(chain_link);
+                let save_link_state = !self.prune_storage_enabled() && is_hierarchy_slot;
+
+                if save_link_state {
+                    info_with_peers!("saving state in slot {state_slot}");
+                }
+
+                if save_link_state || !empty_hierarchy_slots.is_empty() {
+                    states_to_save.push((chain_link, save_link_state, empty_hierarchy_slots));
 
                     update_finalized_validators = true;
                 }
@@ -707,15 +739,11 @@ impl<P: Preset> Storage<P> {
 
         drop(stored_checkpoint_slot);
 
-        let states = states_to_save.into_iter().rev().map(|chain_link| {
-            (
-                chain_link.slot(),
-                chain_link.block_root,
-                chain_link.state(store),
-            )
-        });
+        let states = self.materialize_finalized_states(states_to_save.into_iter().rev(), store);
 
-        self.append_finalized_states(states, anchor_slot, &*finalized_validators)?;
+        itertools::process_results(states, |states| {
+            self.append_finalized_states(states, anchor_slot, &*finalized_validators)
+        })??;
 
         if let Some(checkpoint_slot) = checkpoint_slot
             && !self.store_execution_payloads
@@ -726,9 +754,45 @@ impl<P: Preset> Storage<P> {
         Ok(slots)
     }
 
+    fn materialize_finalized_states<'cl>(
+        &'cl self,
+        queued: impl Iterator<Item = (&'cl ChainLink<P>, bool, Vec<Slot>)> + 'cl,
+        store: &'cl Store<P, Self>,
+    ) -> impl Iterator<Item = Result<(Slot, Option<H256>, Arc<BeaconState<P>>)>> + 'cl {
+        queued.flat_map(
+            move |(chain_link, save_link_state, empty_hierarchy_slots)| {
+                let state = chain_link.state(store);
+
+                let link_state = save_link_state.then(|| {
+                    Ok((
+                        chain_link.slot(),
+                        Some(chain_link.block_root),
+                        state.clone_arc(),
+                    ))
+                });
+
+                let empty_slot_states =
+                    empty_hierarchy_slots
+                        .into_iter()
+                        .scan(state, |state, slot| {
+                            let result = combined::process_slots(
+                                &self.config,
+                                &self.pubkey_cache,
+                                state.make_mut(),
+                                slot,
+                            );
+
+                            Some(result.map(|()| (slot, None, state.clone_arc())))
+                        });
+
+                link_state.into_iter().chain(empty_slot_states)
+            },
+        )
+    }
+
     fn append_finalized_states(
         &self,
-        states: impl IntoIterator<Item = (Slot, H256, Arc<BeaconState<P>>)>,
+        states: impl IntoIterator<Item = (Slot, Option<H256>, Arc<BeaconState<P>>)>,
         anchor_slot: Slot,
         finalized_validators: &dyn SszValidatorList,
     ) -> Result<()> {
@@ -746,6 +810,19 @@ impl<P: Preset> Storage<P> {
         let mut states_in_batch: u64 = 0;
 
         for (slot, block_root, state) in states {
+            let block_root = match block_root {
+                Some(block_root) => block_root,
+                None => {
+                    let state_root = state.hash_tree_root();
+                    let value = BlockRootBySlotValue::blockless(state_root);
+
+                    batch.push(serialize(BlockRootBySlot(slot), value)?);
+                    batch.push(serialize(SlotByStateRoot(state_root), slot)?);
+
+                    value.state_key_root()
+                }
+            };
+
             let to_delete = self.append_finalized_state(
                 state,
                 slot,
@@ -930,10 +1007,12 @@ impl<P: Preset> Storage<P> {
 
         for (key_bytes, value_bytes) in entries {
             let BlockRootBySlot(slot) = Cow::from(key_bytes.as_slice()).try_into()?;
-            let block_root = H256::from_ssz_default(decompress(&value_bytes)?)?;
+            let value = BlockRootBySlotValue::from_ssz_default(decompress(&value_bytes)?)?;
 
-            keys_to_remove.push(FinalizedBlockByRoot::full(block_root).to_string().into());
-            keys_to_remove.push(FinalizedBlockByRoot::blinded(block_root).to_string().into());
+            if let Some(block_root) = value.block_root() {
+                keys_to_remove.push(FinalizedBlockByRoot::full(block_root).to_string().into());
+                keys_to_remove.push(FinalizedBlockByRoot::blinded(block_root).to_string().into());
+            }
 
             if retained_slots.contains(&slot) {
                 continue;
@@ -941,7 +1020,7 @@ impl<P: Preset> Storage<P> {
 
             keys_to_remove.push(key_bytes);
 
-            let state_prefix = StateByBlockRoot::prefix(block_root);
+            let state_prefix = StateByBlockRoot::prefix(value.state_key_root());
             let state_keys = self.database.keys_ascending(state_prefix.as_bytes()..)?;
 
             keys_to_remove.extend(itertools::process_results(state_keys, |keys| {
@@ -1285,6 +1364,12 @@ impl<P: Preset> Storage<P> {
     }
 
     pub(crate) fn block_root_by_slot(&self, slot: Slot) -> Result<Option<H256>> {
+        Ok(self
+            .block_root_by_slot_value(slot)?
+            .and_then(BlockRootBySlotValue::block_root))
+    }
+
+    fn block_root_by_slot_value(&self, slot: Slot) -> Result<Option<BlockRootBySlotValue>> {
         self.get(BlockRootBySlot(slot))
     }
 
@@ -1498,9 +1583,12 @@ impl<P: Preset> Storage<P> {
         itertools::process_results(results, |pairs| {
             pairs
                 .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                .map(|(_, value_bytes)| -> Result<H256> {
-                    Ok(H256::from_ssz_default(decompress(&value_bytes)?)?)
+                .map(|(_, value_bytes)| -> Result<BlockRootBySlotValue> {
+                    Ok(BlockRootBySlotValue::from_ssz_default(decompress(
+                        &value_bytes,
+                    )?)?)
                 })
+                .filter_map_ok(BlockRootBySlotValue::block_root)
                 .next()
                 .transpose()
         })?
@@ -1514,9 +1602,12 @@ impl<P: Preset> Storage<P> {
         itertools::process_results(results, |pairs| {
             pairs
                 .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                .map(|(_, value_bytes)| -> Result<H256> {
-                    Ok(H256::from_ssz_default(decompress(&value_bytes)?)?)
+                .map(|(_, value_bytes)| -> Result<BlockRootBySlotValue> {
+                    Ok(BlockRootBySlotValue::from_ssz_default(decompress(
+                        &value_bytes,
+                    )?)?)
                 })
+                .filter_map_ok(BlockRootBySlotValue::block_root)
                 .next()
                 .transpose()
         })?
@@ -1558,15 +1649,17 @@ impl<P: Preset> Storage<P> {
         slot: Slot,
         finalized_validators: Option<&dyn SszValidatorList>,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
-        let (mut state, state_block, blocks) =
+        let (mut state, blocks) =
             match self.load_state_by_iteration(slot, finalized_validators, false)? {
                 OptionalStateStorage::None | OptionalStateStorage::UnfinalizedOnly(_) => {
                     return Ok(None);
                 }
-                OptionalStateStorage::Full(state_storage) => state_storage,
+                OptionalStateStorage::Full((state, state_block, blocks)) => {
+                    state.set_cached_root(state_block.message().state_root());
+                    (state, blocks)
+                }
+                OptionalStateStorage::Blockless(state, blocks) => (state, blocks),
             };
-
-        state.set_cached_root(state_block.message().state_root());
 
         // State may be persisted only once in several epochs.
         // `blocks` here are needed to transition state closer to `slot`.
@@ -1708,9 +1801,12 @@ impl<P: Preset> Storage<P> {
             let block_roots = itertools::process_results(results, |pairs| {
                 pairs
                     .take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                    .map(|(_, value_bytes)| -> Result<H256> {
-                        Ok(H256::from_ssz_default(decompress(&value_bytes)?)?)
+                    .map(|(_, value_bytes)| -> Result<BlockRootBySlotValue> {
+                        Ok(BlockRootBySlotValue::from_ssz_default(decompress(
+                            &value_bytes,
+                        )?)?)
                     })
+                    .filter_map_ok(BlockRootBySlotValue::block_root)
                     .try_collect()
             })??;
 
@@ -1749,26 +1845,41 @@ impl<P: Preset> Storage<P> {
                 break;
             }
 
-            let block_root = H256::from_ssz_default(decompress(&value_bytes)?)?;
+            let value = BlockRootBySlotValue::from_ssz_default(decompress(&value_bytes)?)?;
+            let state_key_root = value.state_key_root();
 
-            if self.contains_prefixed_key(StateByBlockRoot::prefix(block_root))? {
-                let Some(block) = self.finalized_block_by_root(block_root)? else {
-                    // States are also persisted from unfinalized chain
-                    continue;
+            if self.contains_prefixed_key(StateByBlockRoot::prefix(state_key_root))? {
+                let block = match value {
+                    BlockRootBySlotValue::Block(block_root) => {
+                        let Some(block) = self.finalized_block_by_root(block_root)? else {
+                            // States are also persisted from unfinalized chain
+                            continue;
+                        };
+
+                        Some(block)
+                    }
+                    BlockRootBySlotValue::Blockless(_) if epoch_start_only => continue,
+                    BlockRootBySlotValue::Blockless(_) => None,
                 };
 
-                if let Some(state) = self.state_by_block_root(block_root, finalized_validators)?
+                if let Some(state) =
+                    self.state_by_block_root(state_key_root, finalized_validators)?
                     && (!epoch_start_only || misc::is_epoch_start::<P>(state.slot()))
                 {
                     block_roots.reverse();
 
                     let blocks = self.blocks_by_roots(block_roots);
 
-                    return Ok(OptionalStateStorage::Full((state, block, blocks)));
+                    return Ok(match block {
+                        Some(block) => OptionalStateStorage::Full((state, block, blocks)),
+                        None => OptionalStateStorage::Blockless(state, blocks),
+                    });
                 }
             }
 
-            block_roots.push(block_root);
+            if let Some(block_root) = value.block_root() {
+                block_roots.push(block_root);
+            }
         }
 
         if block_roots.is_empty() {
@@ -1983,6 +2094,13 @@ impl<P: Preset> Storage<P> {
 
 #[cfg(test)]
 impl<P: Preset> Storage<P> {
+    pub fn stored_block_root_by_slot_value(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<BlockRootBySlotValue>> {
+        self.block_root_by_slot_value(slot)
+    }
+
     pub fn contains_state_for_root(&self, block_root: H256) -> Result<bool> {
         Ok(self.state_key_by_block_root(block_root)?.is_some())
     }
@@ -2147,6 +2265,7 @@ enum OptionalStateStorage<'storage, P: Preset> {
     None,
     UnfinalizedOnly(UnfinalizedBlocks<'storage, P>),
     Full(StateStorage<'storage, P>),
+    Blockless(Arc<BeaconState<P>>, UnfinalizedBlocks<'storage, P>),
 }
 
 impl<P: Preset> OptionalStateStorage<'_, P> {
@@ -2229,6 +2348,71 @@ impl TryFrom<Cow<'_, [u8]>> for BlockRootBySlot {
 
 impl PrefixableKey for BlockRootBySlot {
     const PREFIX: &'static str = "r";
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BlockRootBySlotValue {
+    Block(H256),
+    Blockless(H256),
+}
+
+impl BlockRootBySlotValue {
+    const BLOCKLESS_PREFIX: u8 = b'f';
+
+    #[must_use]
+    pub fn blockless(state_root: H256) -> Self {
+        Self::Blockless(hashing::hash_256_8(state_root, Self::BLOCKLESS_PREFIX))
+    }
+
+    #[must_use]
+    pub const fn block_root(self) -> Option<H256> {
+        match self {
+            Self::Block(block_root) => Some(block_root),
+            Self::Blockless(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn state_key_root(self) -> H256 {
+        match self {
+            Self::Block(root) | Self::Blockless(root) => root,
+        }
+    }
+}
+
+impl SszSize for BlockRootBySlotValue {
+    const SIZE: Size = Size::Variable {
+        minimum_size: <H256 as SszSize>::SIZE.fixed_part(),
+    };
+}
+
+impl<C> SszRead<C> for BlockRootBySlotValue {
+    fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
+        match bytes {
+            [Self::BLOCKLESS_PREFIX, root @ ..] if root.len() == H256::len_bytes() => {
+                H256::from_ssz(context, root).map(Self::Blockless)
+            }
+            _ if bytes.len() == H256::len_bytes() => {
+                H256::from_ssz(context, bytes).map(Self::Block)
+            }
+            _ => Err(ReadError::Custom {
+                message: "block root by slot value must be a block root \
+                          or a blockless marker followed by a root",
+            }),
+        }
+    }
+}
+
+impl SszWrite for BlockRootBySlotValue {
+    fn write_variable(&self, bytes: &mut Vec<u8>) -> Result<(), WriteError> {
+        if let Self::Blockless(_) = self {
+            bytes.push(Self::BLOCKLESS_PREFIX);
+        }
+
+        bytes.extend_from_slice(self.state_key_root().as_bytes());
+
+        Ok(())
+    }
 }
 
 pub struct FinalizedBlockByRoot {
@@ -2723,7 +2907,6 @@ mod tests {
     use bls::PublicKeyBytes;
     use bytesize::ByteSize;
     use database::DatabaseMode;
-    use ssz::SszHash as _;
     use tempfile::TempDir;
     use try_from_iterator::TryFromIterator as _;
     use types::{
@@ -3168,7 +3351,7 @@ mod tests {
         ])?;
 
         storage.append_finalized_states(
-            [(0, anchor_root, state_with_slot(0))],
+            [(0, Some(anchor_root), state_with_slot(0))],
             0,
             finalized_validators,
         )?;
@@ -3234,8 +3417,8 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, epoch_start_root, state_with_slot(0)),
-                (8, mid_epoch_root, state_with_slot(8)),
+                (0, Some(epoch_start_root), state_with_slot(0)),
+                (8, Some(mid_epoch_root), state_with_slot(8)),
             ],
             0,
             finalized_validators,
@@ -3689,7 +3872,11 @@ mod tests {
 
             let slot = index * 32;
 
-            (slot, H256::from_low_u64_be(index), state_with_slot(slot))
+            (
+                slot,
+                Some(H256::from_low_u64_be(index)),
+                state_with_slot(slot),
+            )
         });
 
         storage.append_finalized_states(states, 0, finalized_validators)?;
@@ -3770,8 +3957,8 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (512, snapshot_root, state_with_slot(512)),
-                (544, delta_root, state_with_slot(544)),
+                (512, Some(snapshot_root), state_with_slot(512)),
+                (544, Some(delta_root), state_with_slot(544)),
             ],
             0,
             finalized_validators,
@@ -3813,8 +4000,8 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (512, snapshot_root, state_with_slot(512)),
-                (544, delta_root, state_with_slot(544)),
+                (512, Some(snapshot_root), state_with_slot(512)),
+                (544, Some(delta_root), state_with_slot(544)),
             ],
             0,
             finalized_validators,
@@ -3921,9 +4108,9 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, anchor_state.clone_arc()),
-                (512, parent_root, parent_state.clone_arc()),
-                (544, child_root, child_state.clone_arc()),
+                (0, Some(anchor_root), anchor_state.clone_arc()),
+                (512, Some(parent_root), parent_state.clone_arc()),
+                (544, Some(child_root), child_state.clone_arc()),
             ],
             0,
             finalized_validators,
@@ -3978,9 +4165,9 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, anchor_state.clone_arc()),
-                (512, parent_root, parent_state.clone_arc()),
-                (544, child_root, child_state.clone_arc()),
+                (0, Some(anchor_root), anchor_state.clone_arc()),
+                (512, Some(parent_root), parent_state.clone_arc()),
+                (544, Some(child_root), child_state.clone_arc()),
             ],
             0,
             finalized_validators,
@@ -4031,9 +4218,9 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, anchor_state.clone_arc()),
-                (512, parent_root, parent_state.clone_arc()),
-                (544, child_root, child_state.clone_arc()),
+                (0, Some(anchor_root), anchor_state.clone_arc()),
+                (512, Some(parent_root), parent_state.clone_arc()),
+                (544, Some(child_root), child_state.clone_arc()),
             ],
             0,
             finalized_validators,
@@ -4231,8 +4418,8 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, child_root, state_with_slot(512)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(child_root), state_with_slot(512)),
             ],
             0,
             finalized_validators,
@@ -4269,8 +4456,8 @@ mod tests {
         // 544 delta-encodes against it.
         storage.append_finalized_states(
             [
-                (512, parent_root, state_with_slot(512)),
-                (544, child_root, state_with_slot(544)),
+                (512, Some(parent_root), state_with_slot(512)),
+                (544, Some(child_root), state_with_slot(544)),
             ],
             0,
             finalized_validators,
@@ -4291,8 +4478,8 @@ mod tests {
         // 544's key naming a row that is no longer a frame.
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, parent_root, state_with_slot(512)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(parent_root), state_with_slot(512)),
             ],
             0,
             finalized_validators,
@@ -4333,9 +4520,9 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, parent_root, state_with_slot(512)),
-                (544, child_root, state_with_slot(544)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(parent_root), state_with_slot(512)),
+                (544, Some(child_root), state_with_slot(544)),
             ],
             0,
             finalized_validators,
@@ -4385,8 +4572,8 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, parent_root, state_with_slot(512)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(parent_root), state_with_slot(512)),
             ],
             0,
             finalized_validators,
@@ -4465,8 +4652,8 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, parent_root, state_with_slot(512)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(parent_root), state_with_slot(512)),
             ],
             0,
             finalized_validators,
@@ -4501,9 +4688,9 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, parent_root, state_with_slot(512)),
-                (544, child_root, state_with_slot(544)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(parent_root), state_with_slot(512)),
+                (544, Some(child_root), state_with_slot(544)),
             ],
             0,
             finalized_validators,
@@ -4544,9 +4731,9 @@ mod tests {
 
         storage.append_finalized_states(
             [
-                (0, anchor_root, state_with_slot(0)),
-                (512, parent_root, state_with_slot(512)),
-                (544, child_root, state_with_slot(544)),
+                (0, Some(anchor_root), state_with_slot(0)),
+                (512, Some(parent_root), state_with_slot(512)),
+                (544, Some(child_root), state_with_slot(544)),
             ],
             0,
             finalized_validators,
@@ -4639,6 +4826,384 @@ mod tests {
             storage.block_root_before_or_at_slot(9)?,
             Some(H256::repeat_byte(6)),
         );
+
+        Ok(())
+    }
+
+    fn state_with_slot_and_marker(
+        slot: Slot,
+        eth1_deposit_index: u64,
+    ) -> Arc<BeaconState<Mainnet>> {
+        Arc::new(BeaconState::Phase0(
+            Phase0BeaconState {
+                slot,
+                eth1_deposit_index,
+                ..Phase0BeaconState::default()
+            }
+            .into(),
+        ))
+    }
+
+    #[test]
+    fn block_root_by_slot_values_round_trip_through_their_byte_form() -> Result<()> {
+        for root in [H256::repeat_byte(0x11), H256::repeat_byte(b'f')] {
+            let block = BlockRootBySlotValue::Block(root);
+            let blockless = BlockRootBySlotValue::Blockless(root);
+
+            assert_eq!(block.to_ssz()?, root.to_ssz()?);
+            assert_eq!(
+                serialize(BlockRootBySlot(7), block)?,
+                serialize(BlockRootBySlot(7), root)?,
+            );
+
+            let mut blockless_bytes = vec![b'f'];
+            blockless_bytes.extend_from_slice(root.as_bytes());
+
+            assert_eq!(blockless.to_ssz()?, blockless_bytes);
+
+            assert_eq!(
+                BlockRootBySlotValue::from_ssz_default(root.as_bytes())?,
+                block,
+            );
+            assert_eq!(
+                BlockRootBySlotValue::from_ssz_default(&blockless_bytes)?,
+                blockless,
+            );
+
+            assert_eq!(block.block_root(), Some(root));
+            assert_eq!(block.state_key_root(), root);
+            assert_eq!(blockless.block_root(), None);
+            assert_eq!(blockless.state_key_root(), root);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_blockless_root_hashes_the_state_root_followed_by_the_marker() -> Result<()> {
+        let expected =
+            "8bfb11946ec2ecd2554260c4d4c97b92e99ccd28ae15af271d7060dd6c6f3b83".parse::<H256>()?;
+
+        assert_eq!(
+            BlockRootBySlotValue::blockless(H256::repeat_byte(0x11)),
+            BlockRootBySlotValue::Blockless(expected),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_block_root_by_slot_values_are_rejected() {
+        let root = H256::repeat_byte(0x11);
+
+        let mut wrong_marker = vec![b'g'];
+        wrong_marker.extend_from_slice(root.as_bytes());
+
+        let mut too_long = vec![b'f'];
+        too_long.extend_from_slice(root.as_bytes());
+        too_long.push(0);
+
+        for bytes in [
+            vec![],
+            vec![b'f'],
+            root.as_bytes()[..31].to_vec(),
+            wrong_marker,
+            too_long,
+        ] {
+            assert!(
+                BlockRootBySlotValue::from_ssz_default(&bytes).is_err(),
+                "{bytes:?} must be rejected",
+            );
+        }
+    }
+
+    #[test]
+    fn slot_lookups_see_blockless_rows_only_where_a_state_is_wanted() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        let block_root = H256::repeat_byte(2);
+        let blockless_root = H256::repeat_byte(0xaa);
+
+        storage.database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(2), block_root)?,
+            serialize(
+                BlockRootBySlot(4),
+                BlockRootBySlotValue::Blockless(blockless_root),
+            )?,
+        ])?;
+
+        assert_eq!(storage.block_root_by_slot(2)?, Some(block_root));
+        assert_eq!(
+            storage.block_root_by_slot_value(2)?,
+            Some(BlockRootBySlotValue::Block(block_root)),
+        );
+
+        assert_eq!(storage.block_root_by_slot(4)?, None);
+        assert_eq!(
+            storage.block_root_by_slot_value(4)?,
+            Some(BlockRootBySlotValue::Blockless(blockless_root)),
+        );
+
+        assert_eq!(storage.block_root_before_or_at_slot(4)?, Some(block_root));
+        assert_eq!(storage.block_root_before_or_at_slot(5)?, Some(block_root));
+        assert_eq!(storage.block_root_after_slot(2)?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn the_checkpoint_replay_scan_skips_blockless_rows() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        let validator_source = state_with_slot(0);
+        let finalized_validators = validator_source.validators();
+
+        let anchor_block = Arc::new(block_with_slot(0));
+        let root_1 = H256::repeat_byte(1);
+        let root_3 = H256::repeat_byte(3);
+
+        storage.database.put_batch_raw(vec![
+            serialize(
+                StateCheckpoint::<Mainnet>::KEY,
+                StateCheckpoint {
+                    block_root: anchor_block.message().hash_tree_root(),
+                    head_slot: 3,
+                    state: state_with_slot(0),
+                },
+            )?,
+            serialize(
+                BlockCheckpoint::<Mainnet>::KEY,
+                BlockCheckpoint {
+                    block: anchor_block,
+                },
+            )?,
+            serialize(BlockRootBySlot(1), BlockRootBySlotValue::Block(root_1))?,
+            serialize(FinalizedBlockByRoot::full(root_1), block_with_slot(1))?,
+            serialize(
+                BlockRootBySlot(2),
+                BlockRootBySlotValue::Blockless(H256::repeat_byte(0xaa)),
+            )?,
+            serialize(BlockRootBySlot(3), BlockRootBySlotValue::Block(root_3))?,
+            serialize(FinalizedBlockByRoot::full(root_3), block_with_slot(3))?,
+        ])?;
+
+        let (state, _, blocks) = storage
+            .load_state_and_blocks_from_checkpoint(Some(finalized_validators))?
+            .expect("the checkpoint was written above");
+
+        assert_eq!(state.slot(), 0);
+
+        let slots = blocks
+            .map(|block| block.map(|block| block.message().slot()))
+            .collect::<Result<Vec<_>>>()?;
+
+        assert_eq!(slots, [1, 3]);
+
+        Ok(())
+    }
+
+    fn storage_with_a_blockless_state(
+        directory: &TempDir,
+    ) -> Result<(Storage<Mainnet>, Arc<BeaconState<Mainnet>>, H256)> {
+        let storage = storage_with_hierarchy(directory, [9, 5, 3])?;
+
+        let validator_source = state_with_slot(0);
+
+        let anchor_root = H256::repeat_byte(1);
+        let child_root = H256::repeat_byte(40);
+
+        let blockless_state = state_with_slot_and_marker(32, 2);
+        let blockless_root =
+            BlockRootBySlotValue::blockless(blockless_state.hash_tree_root()).state_key_root();
+
+        storage.database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(0), BlockRootBySlotValue::Block(anchor_root))?,
+            serialize(FinalizedBlockByRoot::full(anchor_root), block_with_slot(0))?,
+            serialize(BlockRootBySlot(40), BlockRootBySlotValue::Block(child_root))?,
+            serialize(FinalizedBlockByRoot::full(child_root), block_with_slot(40))?,
+        ])?;
+
+        storage.append_finalized_states(
+            [
+                (0, Some(anchor_root), state_with_slot_and_marker(0, 1)),
+                (32, None, blockless_state),
+            ],
+            0,
+            validator_source.validators(),
+        )?;
+
+        Ok((storage, validator_source, blockless_root))
+    }
+
+    #[test]
+    fn a_hierarchy_ancestor_is_found_through_a_blockless_row() -> Result<()> {
+        let directory = TempDir::new()?;
+        let (storage, validator_source, blockless_root) =
+            storage_with_a_blockless_state(&directory)?;
+        let finalized_validators = validator_source.validators();
+
+        storage.clear_caches();
+
+        let child_root = H256::repeat_byte(40);
+        storage.append_finalized_states(
+            [(40, Some(child_root), state_with_slot_and_marker(40, 3))],
+            0,
+            finalized_validators,
+        )?;
+
+        let key = storage
+            .state_key_by_block_root(child_root)?
+            .expect("the state at slot 40 was appended above");
+
+        assert_eq!(key.parents.first(), Some(&blockless_root));
+
+        storage.clear_caches();
+
+        let state = storage
+            .state_by_block_root(child_root, Some(finalized_validators))?
+            .expect("the state at slot 40 must be readable");
+
+        assert_eq!(state.slot(), 40);
+        assert_eq!(state.eth1_deposit_index(), 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_blockless_state_is_a_replay_base_but_never_an_anchor() -> Result<()> {
+        let directory = TempDir::new()?;
+        let (storage, validator_source, _) = storage_with_a_blockless_state(&directory)?;
+        let finalized_validators = validator_source.validators();
+
+        let OptionalStateStorage::Blockless(state, blocks) =
+            storage.load_state_by_iteration(40, Some(finalized_validators), false)?
+        else {
+            panic!("the blockless state at slot 32 must be found");
+        };
+
+        assert_eq!(state.slot(), 32);
+        assert_eq!(state.eth1_deposit_index(), 2);
+        assert_eq!(blocks.count(), 1);
+
+        let stored = storage
+            .stored_state(32, Some(finalized_validators))?
+            .expect("the blockless state at slot 32 must be readable by slot");
+
+        assert_eq!(stored.eth1_deposit_index(), 2);
+
+        let advanced = storage
+            .stored_state(33, Some(finalized_validators))?
+            .expect("the blockless state at slot 32 must be replayable to slot 33");
+
+        assert_eq!(advanced.slot(), 33);
+        assert_eq!(advanced.eth1_deposit_index(), 2);
+        assert_eq!(
+            *advanced.state_roots().mod_index(32),
+            state_with_slot_and_marker(32, 2).hash_tree_root(),
+        );
+
+        let OptionalStateStorage::Full((anchor_state, anchor_block, anchor_blocks)) =
+            storage.load_state_by_iteration(40, Some(finalized_validators), true)?
+        else {
+            panic!("the state at slot 0 must be found");
+        };
+
+        assert_eq!(anchor_state.slot(), 0);
+        assert_eq!(anchor_block.message().slot(), 0);
+        assert_eq!(anchor_blocks.count(), 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_blockless_row_without_a_state_is_scanned_past() -> Result<()> {
+        let directory = TempDir::new()?;
+        let storage = storage_with_hierarchy(&directory, [9, 3])?;
+
+        let validator_source = state_with_slot(0);
+        let finalized_validators = validator_source.validators();
+
+        let anchor_root = H256::repeat_byte(1);
+        let child_root = H256::repeat_byte(16);
+
+        storage.database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(0), BlockRootBySlotValue::Block(anchor_root))?,
+            serialize(FinalizedBlockByRoot::full(anchor_root), block_with_slot(0))?,
+            serialize(
+                BlockRootBySlot(8),
+                BlockRootBySlotValue::Blockless(H256::repeat_byte(0xaa)),
+            )?,
+            serialize(BlockRootBySlot(16), BlockRootBySlotValue::Block(child_root))?,
+            serialize(FinalizedBlockByRoot::full(child_root), block_with_slot(16))?,
+        ])?;
+
+        storage.append_finalized_states(
+            [(0, Some(anchor_root), state_with_slot(0))],
+            0,
+            finalized_validators,
+        )?;
+
+        let OptionalStateStorage::Full((state, block, blocks)) =
+            storage.load_state_by_iteration(16, Some(finalized_validators), false)?
+        else {
+            panic!("the state at slot 0 must be found");
+        };
+
+        assert_eq!(state.slot(), 0);
+        assert_eq!(block.message().slot(), 0);
+
+        let slots = blocks
+            .map(|block| block.map(|block| block.message().slot()))
+            .collect::<Result<Vec<_>>>()?;
+
+        assert_eq!(slots, [16]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn pruning_deletes_a_blockless_row_with_its_state_and_keeps_a_retained_one() -> Result<()> {
+        let directory = TempDir::new()?;
+        let (storage, validator_source, blockless_root) =
+            storage_with_a_blockless_state(&directory)?;
+        let finalized_validators = validator_source.validators();
+
+        storage.prune_old_blocks_and_states(41)?;
+
+        assert_eq!(
+            storage.block_root_by_slot_value(32)?,
+            Some(BlockRootBySlotValue::Blockless(blockless_root)),
+        );
+        assert!(storage.state_key_by_block_root(blockless_root)?.is_some());
+
+        storage.prune_old_blocks_and_states(65)?;
+
+        assert_eq!(storage.block_root_by_slot_value(32)?, None);
+        assert!(storage.state_key_by_block_root(blockless_root)?.is_none());
+        assert_eq!(storage.block_root_by_slot_value(40)?, None);
+        assert!(
+            storage
+                .state_by_block_root(H256::repeat_byte(1), Some(finalized_validators))?
+                .is_some()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn pruning_unfinalized_blocks_leaves_a_blockless_row_alone() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        let unfinalized_root = H256::repeat_byte(8);
+        let blockless = BlockRootBySlotValue::Blockless(H256::repeat_byte(0xaa));
+
+        storage.database.put_batch_raw(vec![
+            serialize(UnfinalizedBlockByRoot(unfinalized_root), block_with_slot(8))?,
+            serialize(BlockRootBySlot(8), blockless)?,
+        ])?;
+
+        assert_eq!(storage.prune_unfinalized_blocks(8)?, [8]);
+        assert_eq!(storage.block_root_by_slot_value(8)?, Some(blockless));
 
         Ok(())
     }
