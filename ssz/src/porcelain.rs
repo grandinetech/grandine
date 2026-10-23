@@ -95,6 +95,8 @@ pub trait SszContainer {
 /// The value that navigating to a field of a container yields.
 ///
 /// Leaf types view as themselves, because there is nothing inside them worth navigating to.
+/// Containers derived with `#[ssz(derive_cursor)]` view as their generated cursor, which keeps
+/// navigating without deserializing anything.
 pub trait SszNavigable {
     type View<'cursor>: TryFrom<SszCursor<'cursor>, Error = ReadError>;
 }
