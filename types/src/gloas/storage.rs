@@ -42,7 +42,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_cursor = true)]
 pub struct BeaconStatePatch<P: Preset> {
     // > Versioning
     // TODO(new-db-layout): with new DB layout, this field probably can be
@@ -391,7 +391,7 @@ impl<P: Preset> Patch<BeaconState<P>> for BeaconStatePatch<P> {
 }
 
 #[derive(Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_cursor = true)]
 pub struct BeaconStateFrame<P: Preset> {
     // > Versioning
     pub genesis_time: UnixSeconds,
