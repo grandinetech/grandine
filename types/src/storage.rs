@@ -2,37 +2,60 @@ use std::sync::Arc;
 
 use diff::{Error as PatchError, Patch, PatchConfig};
 use enum_iterator::Sequence as _;
-use ssz::{Hc, ReadError, Size, Ssz, SszRead, SszSize, SszWrite, WriteError};
+use ssz::{Hc, ReadError, Size, Ssz, SszCursor, SszRead, SszSize, SszWrite, WriteError};
 
 use crate::{
     altair::storage::{
-        BeaconStateFrame as AltairBeaconStateFrame, BeaconStatePatch as AltairBeaconStatePatch,
+        BeaconStateFrame as AltairBeaconStateFrame,
+        BeaconStateFrameCursor as AltairBeaconStateFrameCursor,
+        BeaconStatePatch as AltairBeaconStatePatch,
+        BeaconStatePatchCursor as AltairBeaconStatePatchCursor,
     },
     bellatrix::storage::{
         BeaconStateFrame as BellatrixBeaconStateFrame,
+        BeaconStateFrameCursor as BellatrixBeaconStateFrameCursor,
         BeaconStatePatch as BellatrixBeaconStatePatch,
+        BeaconStatePatchCursor as BellatrixBeaconStatePatchCursor,
     },
     cache::Cache,
     capella::storage::{
-        BeaconStateFrame as CapellaBeaconStateFrame, BeaconStatePatch as CapellaBeaconStatePatch,
+        BeaconStateFrame as CapellaBeaconStateFrame,
+        BeaconStateFrameCursor as CapellaBeaconStateFrameCursor,
+        BeaconStatePatch as CapellaBeaconStatePatch,
+        BeaconStatePatchCursor as CapellaBeaconStatePatchCursor,
     },
     combined::BeaconState,
     config::Config,
     deneb::storage::{
-        BeaconStateFrame as DenebBeaconStateFrame, BeaconStatePatch as DenebBeaconStatePatch,
+        BeaconStateFrame as DenebBeaconStateFrame,
+        BeaconStateFrameCursor as DenebBeaconStateFrameCursor,
+        BeaconStatePatch as DenebBeaconStatePatch,
+        BeaconStatePatchCursor as DenebBeaconStatePatchCursor,
     },
     electra::storage::{
-        BeaconStateFrame as ElectraBeaconStateFrame, BeaconStatePatch as ElectraBeaconStatePatch,
+        BeaconStateFrame as ElectraBeaconStateFrame,
+        BeaconStateFrameCursor as ElectraBeaconStateFrameCursor,
+        BeaconStatePatch as ElectraBeaconStatePatch,
+        BeaconStatePatchCursor as ElectraBeaconStatePatchCursor,
     },
     fulu::storage::{
-        BeaconStateFrame as FuluBeaconStateFrame, BeaconStatePatch as FuluBeaconStatePatch,
+        BeaconStateFrame as FuluBeaconStateFrame,
+        BeaconStateFrameCursor as FuluBeaconStateFrameCursor,
+        BeaconStatePatch as FuluBeaconStatePatch,
+        BeaconStatePatchCursor as FuluBeaconStatePatchCursor,
     },
     gloas::storage::{
-        BeaconStateFrame as GloasBeaconStateFrame, BeaconStatePatch as GloasBeaconStatePatch,
+        BeaconStateFrame as GloasBeaconStateFrame,
+        BeaconStateFrameCursor as GloasBeaconStateFrameCursor,
+        BeaconStatePatch as GloasBeaconStatePatch,
+        BeaconStatePatchCursor as GloasBeaconStatePatchCursor,
     },
     nonstandard::{Phase, PubkeyList},
     phase0::storage::{
-        BeaconStateFrame as Phase0BeaconStateFrame, BeaconStatePatch as Phase0BeaconStatePatch,
+        BeaconStateFrame as Phase0BeaconStateFrame,
+        BeaconStateFrameCursor as Phase0BeaconStateFrameCursor,
+        BeaconStatePatch as Phase0BeaconStatePatch,
+        BeaconStatePatchCursor as Phase0BeaconStatePatchCursor,
     },
     preset::Preset,
     traits::BeaconState as BeaconStateTrait,
@@ -159,6 +182,36 @@ impl<P: Preset> SszWrite for BeaconStateFrame<P> {
             Self::Fulu(frame) => frame.write_variable(bytes),
             Self::Gloas(frame) => frame.write_variable(bytes),
         }
+    }
+}
+
+pub enum BeaconStateFrameCursor<'cursor, P: Preset> {
+    Phase0(Phase0BeaconStateFrameCursor<'cursor, P>),
+    Altair(AltairBeaconStateFrameCursor<'cursor, P>),
+    Bellatrix(BellatrixBeaconStateFrameCursor<'cursor, P>),
+    Capella(CapellaBeaconStateFrameCursor<'cursor, P>),
+    Deneb(DenebBeaconStateFrameCursor<'cursor, P>),
+    Electra(ElectraBeaconStateFrameCursor<'cursor, P>),
+    Fulu(FuluBeaconStateFrameCursor<'cursor, P>),
+    Gloas(GloasBeaconStateFrameCursor<'cursor, P>),
+}
+
+impl<'cursor, P: Preset> BeaconStateFrameCursor<'cursor, P> {
+    pub fn new(config: &Config, bytes: &'cursor [u8]) -> Result<Self, ReadError> {
+        let slot = BeaconState::<P>::slot_from_ssz(bytes)?;
+
+        let cursor = match config.phase_at_slot::<P>(slot) {
+            Phase::Phase0 => Self::Phase0(Phase0BeaconStateFrame::cursor(bytes)),
+            Phase::Altair => Self::Altair(AltairBeaconStateFrame::cursor(bytes)),
+            Phase::Bellatrix => Self::Bellatrix(BellatrixBeaconStateFrame::cursor(bytes)),
+            Phase::Capella => Self::Capella(CapellaBeaconStateFrame::cursor(bytes)),
+            Phase::Deneb => Self::Deneb(DenebBeaconStateFrame::cursor(bytes)),
+            Phase::Electra => Self::Electra(ElectraBeaconStateFrame::cursor(bytes)),
+            Phase::Fulu => Self::Fulu(FuluBeaconStateFrame::cursor(bytes)),
+            Phase::Gloas => Self::Gloas(GloasBeaconStateFrame::cursor(bytes)),
+        };
+
+        Ok(cursor)
     }
 }
 
@@ -363,8 +416,48 @@ fn reset_cache<P: Preset, S: BeaconStateTrait<P>>(state: &mut Hc<S>) -> &mut S {
     state
 }
 
+pub enum BeaconStatePatchCursor<'cursor, P: Preset> {
+    Phase0(Phase0BeaconStatePatchCursor<'cursor, P>),
+    Altair(AltairBeaconStatePatchCursor<'cursor, P>),
+    Bellatrix(BellatrixBeaconStatePatchCursor<'cursor, P>),
+    Capella(CapellaBeaconStatePatchCursor<'cursor, P>),
+    Deneb(DenebBeaconStatePatchCursor<'cursor, P>),
+    Electra(ElectraBeaconStatePatchCursor<'cursor, P>),
+    Fulu(FuluBeaconStatePatchCursor<'cursor, P>),
+    Gloas(GloasBeaconStatePatchCursor<'cursor, P>),
+}
+
+impl<'cursor, P: Preset> BeaconStatePatchCursor<'cursor, P> {
+    pub fn new(bytes: &'cursor [u8]) -> Result<Self, ReadError> {
+        let (version, patch) = SszCursor::new(bytes).union()?;
+
+        if version != 1 {
+            return Err(ReadError::Custom {
+                message: "unsupported beacon state patch version",
+            });
+        }
+
+        let (selector, patch) = patch.union()?;
+
+        match selector {
+            1 => patch.try_into().map(Self::Phase0),
+            2 => patch.try_into().map(Self::Altair),
+            3 => patch.try_into().map(Self::Bellatrix),
+            4 => patch.try_into().map(Self::Capella),
+            5 => patch.try_into().map(Self::Deneb),
+            6 => patch.try_into().map(Self::Electra),
+            7 => patch.try_into().map(Self::Fulu),
+            8 => patch.try_into().map(Self::Gloas),
+            _ => Err(ReadError::Custom {
+                message: "unsupported beacon state patch selector",
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
     use ssz::{H256, SszHash as _, SszListMut as _};
     use std_ext::ArcExt as _;
 
@@ -601,5 +694,149 @@ mod tests {
 
         BeaconStatePatch::<Minimal>::from_ssz(&config, [1, 9])
             .expect_err("9 is not a known phase selector");
+    }
+
+    #[test]
+    fn every_phase_frame_cursor_navigates_the_stored_frame() -> Result<()> {
+        for (name, _, changed) in state_pairs() {
+            let config = Config::minimal().start_and_stay_in(changed.phase());
+
+            let encoded =
+                BeaconStateFrame::new(&changed, 0, zstd::DEFAULT_COMPRESSION_LEVEL).to_ssz()?;
+
+            let (phase, slot, body_root) =
+                match BeaconStateFrameCursor::<Minimal>::new(&config, &encoded)? {
+                    BeaconStateFrameCursor::Phase0(frame) => (
+                        Phase::Phase0,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Altair(frame) => (
+                        Phase::Altair,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Bellatrix(frame) => (
+                        Phase::Bellatrix,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Capella(frame) => (
+                        Phase::Capella,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Deneb(frame) => (
+                        Phase::Deneb,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Electra(frame) => (
+                        Phase::Electra,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Fulu(frame) => (
+                        Phase::Fulu,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                    BeaconStateFrameCursor::Gloas(frame) => (
+                        Phase::Gloas,
+                        frame.get_slot()?,
+                        frame.get_latest_block_header()?.get_body_root()?,
+                    ),
+                };
+
+            assert_eq!(
+                phase,
+                changed.phase(),
+                "{name} frame should be read as its phase"
+            );
+            assert_eq!(slot, 42, "{name} slot should be navigated to");
+            assert_eq!(
+                body_root,
+                H256::repeat_byte(2),
+                "{name} nested field should be navigated to",
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn every_phase_patch_cursor_navigates_the_stored_patch() -> Result<()> {
+        for (name, base, changed) in state_pairs() {
+            let encoded =
+                BeaconStatePatch::diff(PatchConfig::default(), &base, &changed)?.to_ssz()?;
+
+            let (phase, slot, header) = match BeaconStatePatchCursor::<Minimal>::new(&encoded)? {
+                BeaconStatePatchCursor::Phase0(patch) => (
+                    Phase::Phase0,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Altair(patch) => (
+                    Phase::Altair,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Bellatrix(patch) => (
+                    Phase::Bellatrix,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Capella(patch) => (
+                    Phase::Capella,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Deneb(patch) => (
+                    Phase::Deneb,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Electra(patch) => (
+                    Phase::Electra,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Fulu(patch) => (
+                    Phase::Fulu,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+                BeaconStatePatchCursor::Gloas(patch) => (
+                    Phase::Gloas,
+                    patch.get_slot()?.to_ssz()?,
+                    patch.get_latest_block_header()?.to_ssz()?,
+                ),
+            };
+
+            assert_eq!(
+                phase,
+                changed.phase(),
+                "{name} patch should be read as its phase"
+            );
+            assert_eq!(
+                slot,
+                Some(42_u64).to_ssz()?,
+                "{name} slot should be navigated to",
+            );
+            assert_eq!(
+                header,
+                Some(changed.latest_block_header()).to_ssz()?,
+                "{name} latest block header should be navigated to",
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn a_patch_cursor_rejects_an_empty_patch_and_an_unknown_selector() {
+        for bytes in [&[][..], &[2, 1], &[1], &[1, 0], &[1, 9]] {
+            assert!(BeaconStatePatchCursor::<Minimal>::new(bytes).is_err());
+        }
     }
 }
