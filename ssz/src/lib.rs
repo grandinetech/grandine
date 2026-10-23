@@ -13,6 +13,7 @@ pub use crate::{
     consts::{BYTES_PER_LENGTH_OFFSET, Endianness, Offset},
     contiguous_list::ContiguousList,
     contiguous_vector::ContiguousVector,
+    cursor::{SszContainerCursor, SszCursor},
     dynamic_list::DynamicList,
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
@@ -24,7 +25,7 @@ pub use crate::{
     persistent_list::PersistentList,
     persistent_progressive_list::PersistentProgressiveList,
     persistent_vector::PersistentVector,
-    porcelain::{SszHash, SszRead, SszReadDefault, SszSize, SszWrite},
+    porcelain::{SszContainer, SszHash, SszNavigable, SszRead, SszReadDefault, SszSize, SszWrite},
     progressive_bit_list::ProgressiveBitList,
     progressive_byte_list::ProgressiveByteList,
     progressive_list::ProgressiveList,
@@ -57,6 +58,7 @@ mod compressed;
 mod consts;
 mod contiguous_list;
 mod contiguous_vector;
+mod cursor;
 mod dynamic_list;
 mod error;
 mod hc;

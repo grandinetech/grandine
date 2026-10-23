@@ -10,10 +10,11 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
 use crate::{
+    cursor::SszCursor,
     error::{IndexError, ReadError, WriteError},
     list::SszList,
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
     type_level::MerkleElements,
@@ -107,6 +108,24 @@ impl<C, T: SszRead<C>, N: Unsigned> SszRead<C> for ContiguousList<T, N> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         shared::read_list(N::USIZE, context, bytes)
     }
+}
+
+impl<T, N> TryFrom<SszCursor<'_>> for ContiguousList<T, N>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T, N> SszNavigable for ContiguousList<T, N>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 impl<T: SszWrite, N> SszWrite for ContiguousList<T, N> {
