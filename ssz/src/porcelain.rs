@@ -13,6 +13,7 @@ use ethereum_types::H256;
 use typenum::{Logarithm2, NonZero, Unsigned};
 
 use crate::{
+    cursor::SszCursor,
     error::{ReadError, WriteError},
     size::Size,
 };
@@ -85,4 +86,15 @@ pub trait SszHash {
     type PackingFactor: Unsigned + NonZero + Logarithm2;
 
     fn hash_tree_root(&self) -> H256;
+}
+
+pub trait SszContainer {
+    const FIELDS: &'static [Size];
+}
+
+/// The value that navigating to a field of a container yields.
+///
+/// Leaf types view as themselves, because there is nothing inside them worth navigating to.
+pub trait SszNavigable {
+    type View<'cursor>: TryFrom<SszCursor<'cursor>, Error = ReadError>;
 }

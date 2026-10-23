@@ -13,7 +13,7 @@ use triomphe::Arc;
 
 use crate::{
     error::{ReadError, WriteError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
 };
 
@@ -92,6 +92,10 @@ impl<C, T: SszRead<C>> SszRead<C> for Hc<T> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         T::from_ssz_unchecked(context, bytes).map(Self::from)
     }
+}
+
+impl<T: SszNavigable> SszNavigable for Hc<T> {
+    type View<'cursor> = T::View<'cursor>;
 }
 
 impl<T: SszWrite> SszWrite for Hc<T> {

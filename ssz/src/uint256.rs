@@ -22,8 +22,9 @@ use typenum::U1;
 
 use crate::{
     consts::Endianness,
+    cursor::SszCursor,
     error::{ConversionError, ReadError},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
 };
 
@@ -216,6 +217,19 @@ impl SszHash for Uint256 {
         self.write_fixed(hash.as_bytes_mut());
         hash
     }
+}
+
+impl TryFrom<SszCursor<'_>> for Uint256 {
+    type Error = ReadError;
+
+    #[inline]
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl SszNavigable for Uint256 {
+    type View<'cursor> = Self;
 }
 
 impl Uint256 {

@@ -17,10 +17,11 @@ use typenum::{U1, U2048, Unsigned};
 
 use crate::{
     consts::BITS_PER_BYTE,
+    cursor::SszCursor,
     error::{ReadError, WriteError},
     list::SszBitList,
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     size::Size,
     type_level::MerkleBits,
 };
@@ -175,6 +176,18 @@ impl<N: MerkleBits> SszHash for BitList<N> {
         let root = MerkleTree::<N::MerkleTreeDepth>::merkleize_bytes(self.as_raw_slice());
         merkle_tree::mix_in_length(root, self.len())
     }
+}
+
+impl<N: Unsigned> TryFrom<SszCursor<'_>> for BitList<N> {
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<N: Unsigned> SszNavigable for BitList<N> {
+    type View<'cursor> = Self;
 }
 
 impl<N: MerkleBits + Send + Sync> SszBitList for BitList<N> {

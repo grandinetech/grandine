@@ -8,7 +8,8 @@ use try_from_iterator::TryFromIterator;
 use typenum::{U1, Unsigned};
 
 use crate::{
-    ContiguousList, ReadError, Size, SszHash, SszList, SszRead, SszSize, SszWrite, WriteError,
+    ContiguousList, ReadError, Size, SszCursor, SszHash, SszList, SszNavigable, SszRead, SszSize,
+    SszWrite, WriteError,
     merkle_tree::{self, ProgressiveMerkleTree},
 };
 
@@ -128,6 +129,24 @@ impl<C, T: SszRead<C>> SszRead<C> for ProgressiveList<T> {
     fn from_ssz_unchecked(context: &C, bytes: &[u8]) -> Result<Self, ReadError> {
         ContiguousList::from_ssz_unchecked(context, bytes).map(Self)
     }
+}
+
+impl<T> TryFrom<SszCursor<'_>> for ProgressiveList<T>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T> SszNavigable for ProgressiveList<T>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 impl<T: SszWrite> SszWrite for ProgressiveList<T> {

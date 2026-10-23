@@ -30,12 +30,13 @@ use typenum::{U1, U2, U4, Unsigned};
 
 use crate::{
     bundle_size::BundleSize,
+    cursor::SszCursor,
     error::{IndexError, PushError, ReadError, WriteError},
     hc::Hc,
     iter::ExactSize,
     list::{SszList, SszListMut},
     merkle_tree::{self, MerkleTree},
-    porcelain::{SszHash, SszRead, SszSize, SszWrite},
+    porcelain::{SszHash, SszNavigable, SszRead, SszSize, SszWrite},
     shared,
     size::Size,
     type_level::{MerkleElements, MinimumBundleSize},
@@ -209,6 +210,24 @@ impl<C, T: SszRead<C>, N: Unsigned, B: BundleSize<T>> SszRead<C> for PersistentL
         // `validators` field, which upper limit is set to 1099511627776 (2^40).
         shared::read_list(shared::saturating_usize::<N>(), context, bytes)
     }
+}
+
+impl<T, N, B> TryFrom<SszCursor<'_>> for PersistentList<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T, N, B> SszNavigable for PersistentList<T, N, B>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 impl<T: SszWrite, N, B: BundleSize<T>> SszWrite for PersistentList<T, N, B> {

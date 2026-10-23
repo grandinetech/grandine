@@ -172,6 +172,16 @@ impl SszType {
             });
         }
 
+        if !self.transparent {
+            let fields_expr = self.fields_expr(&ssz)?;
+
+            impls.append_all(quote! {
+                impl #impl_generics #ssz::SszContainer for #ident #ty_generics #where_clause {
+                    const FIELDS: &'static [#ssz::Size] = #fields_expr;
+                }
+            });
+        }
+
         if self.derive_hash {
             let packing_factor_type_impl = self.packing_factor_type_impl(&ssz)?;
             let hash_tree_root_fn_impl = self.hash_tree_root_fn_impl(&ssz)?;
@@ -306,6 +316,15 @@ impl SszType {
         }
 
         Ok(parse_quote! { #tokens })
+    }
+
+    fn fields_expr(&self, ssz: &Path) -> Result<Expr, Error> {
+        let size_exprs = self
+            .unskipped_fields()?
+            .map(|(_, ssz_field)| ssz_field.size_expr(ssz))
+            .collect_vec();
+
+        Ok(parse_quote! { &[#(#size_exprs),*] })
     }
 
     #[expect(
