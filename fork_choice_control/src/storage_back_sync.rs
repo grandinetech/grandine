@@ -29,6 +29,7 @@ use crate::{
 const ARCHIVER_CHECKPOINT_KEY: &str = "carchiver";
 
 impl<P: Preset> Storage<P> {
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn archive_back_sync_states(
         &self,
         mut start_slot: Slot,
@@ -74,17 +75,27 @@ impl<P: Preset> Storage<P> {
 
         let anchor_slot = self.anchor_slot.load(Ordering::SeqCst);
 
-        let mut previous_block = None;
+        let spine = self.temporary_spine(anchor_slot);
         let mut batch = vec![];
+        let mut deleted_keys = vec![];
+        let mut update_finalized_validators = false;
         let mut states_in_batch: u64 = 0;
 
-        self.append_finalized_validator_pubkeys_to_batch(&mut batch, finalized_validators)?;
-
         if start_slot == anchor_block_slot {
-            let (key, frame) =
-                self.serialize_frame(anchor_block_root, &state, finalized_validators)?;
+            let to_delete = self.append_finalized_state(
+                state.clone_arc(),
+                start_slot,
+                anchor_block_root,
+                anchor_slot,
+                finalized_validators,
+                &spine,
+                &mut batch,
+                &mut update_finalized_validators,
+            )?;
 
-            batch.push((key.to_string(), frame));
+            if let Some(to_delete) = to_delete {
+                deleted_keys.push(to_delete);
+            }
         }
 
         for slot in start_slot.saturating_add(1)..=end_slot {
@@ -92,42 +103,61 @@ impl<P: Preset> Storage<P> {
                 bail!(AnyhowError::msg("received a termination signal"));
             }
 
-            if let Some((block, _)) = self.finalized_block_by_slot(slot)? {
-                match &block {
-                    StoredBlock::Full(block) => combined::untrusted_state_transition(
+            let block_root = match self.finalized_block_by_slot(slot)? {
+                Some((StoredBlock::Full(block), root)) => {
+                    combined::untrusted_state_transition(
                         self.config(),
                         &self.pubkey_cache,
                         state.make_mut(),
-                        block,
-                    )?,
-                    StoredBlock::Blinded(block) => combined::untrusted_blinded_state_transition(
-                        self.config(),
-                        &self.pubkey_cache,
-                        state.make_mut(),
-                        block,
-                    )?,
-                }
+                        &block,
+                    )?;
 
-                previous_block = Some(block);
-            } else {
-                combined::process_slots(self.config(), &self.pubkey_cache, state.make_mut(), slot)?;
-            }
+                    Some(root)
+                }
+                Some((StoredBlock::Blinded(block), root)) => {
+                    combined::untrusted_blinded_state_transition(
+                        self.config(),
+                        &self.pubkey_cache,
+                        state.make_mut(),
+                        &block,
+                    )?;
+
+                    Some(root)
+                }
+                None => {
+                    combined::process_slots(
+                        self.config(),
+                        &self.pubkey_cache,
+                        state.make_mut(),
+                        slot,
+                    )?;
+
+                    None
+                }
+            };
 
             batch.push(serialize(SlotByStateRoot(state.hash_tree_root()), slot)?);
 
-            if let Some(block) = previous_block.as_ref()
-                && block.message().slot() == slot
+            if let Some(block_root) = block_root
                 && self
                     .hierarchy
                     .contains::<P>(self.config(), anchor_slot, slot)
             {
                 debug_with_peers!("back-synced state in {slot} is ready for storage");
 
-                let block_root = block.message().hash_tree_root();
-                let (key, frame) =
-                    self.serialize_frame(block_root, &state, finalized_validators)?;
+                if let Some(to_delete) = self.append_finalized_state(
+                    state.clone_arc(),
+                    slot,
+                    block_root,
+                    anchor_slot,
+                    finalized_validators,
+                    &spine,
+                    &mut batch,
+                    &mut update_finalized_validators,
+                )? {
+                    deleted_keys.push(to_delete);
+                }
 
-                batch.push((key.to_string(), frame));
                 batch.push(serialize(ARCHIVER_CHECKPOINT_KEY, slot)?);
 
                 states_in_batch = states_in_batch.saturating_add(1);
@@ -135,15 +165,24 @@ impl<P: Preset> Storage<P> {
                 if states_in_batch == ARCHIVED_STATES_BEFORE_FLUSH {
                     info_with_peers!("archiving back-sync data up to {slot} slot");
 
-                    self.database.put_batch_raw(batch)?;
+                    self.flush(
+                        &mut batch,
+                        &mut deleted_keys,
+                        &mut update_finalized_validators,
+                        finalized_validators,
+                    )?;
 
-                    batch = vec![];
                     states_in_batch = 0;
                 }
             }
         }
 
-        self.database.put_batch_raw(batch)?;
+        self.flush(
+            &mut batch,
+            &mut deleted_keys,
+            &mut update_finalized_validators,
+            finalized_validators,
+        )?;
 
         info_with_peers!(
             "back-synced state archival completed (start_slot: {start_slot}, end_slot: {end_slot})",
@@ -206,11 +245,20 @@ mod tests {
     use eth2_cache_utils::mainnet;
     use itertools::{EitherOrBoth, Itertools as _};
     use pubkey_cache::PubkeyCache;
-    use types::traits::BeaconState as _;
-    use types::{nonstandard::StorageMode, phase0::consts::GENESIS_SLOT};
+    use reqwest::Client;
+    use ssz::{H256, SszRead as _, SszWrite as _};
+    use types::{
+        combined::BeaconState, nonstandard::StorageMode, phase0::consts::GENESIS_SLOT,
+        preset::Mainnet, traits::BeaconState as _,
+    };
 
     use crate::{
-        state_storage_config::StateStorageConfig, storage::DEFAULT_ZSTD_COMPRESSION_LEVEL,
+        hierarchy::Hierarchy,
+        state_storage_config::StateStorageConfig,
+        storage::{
+            DEFAULT_ZSTD_COMPRESSION_LEVEL, FinalizedBlockByRoot, StateHierarchyKey,
+            StateLoadStrategy,
+        },
     };
 
     use super::*;
@@ -251,8 +299,8 @@ mod tests {
 
         assert_eq!(empty_slots.len(), 23);
 
-        for empty_slot in empty_slots {
-            assert_eq!(storage.block_root_by_slot(empty_slot)?, None);
+        for empty_slot in &empty_slots {
+            assert_eq!(storage.block_root_by_slot(*empty_slot)?, None);
         }
 
         // Assert that blocks are stored.
@@ -286,15 +334,180 @@ mod tests {
         assert_eq!(storage.slot_by_state_root(state_96_root)?, Some(96));
         assert_eq!(storage.slot_by_state_root(state_128_root)?, Some(128));
 
+        // `stored_state` caches the block's state root on the state it returns, so hashing that
+        // state would just echo the expected value back. Re-encoding it drops the cached root, so
+        // the root is recomputed from the contents the delta chain actually produced.
+        let recomputed_root = |state: Arc<BeaconState<Mainnet>>| -> Result<H256> {
+            Ok(
+                BeaconState::<Mainnet>::from_ssz(&Mainnet::default_config(), state.to_ssz()?)?
+                    .hash_tree_root(),
+            )
+        };
+
         // Assert that the stored state is accessible by state root.
         for state_root in [state_1_root, state_22_root, state_96_root, state_128_root] {
+            let state = storage
+                .stored_state_by_state_root(state_root, &*finalized_validators)?
+                .expect("state should be stored");
+
+            assert_eq!(recomputed_root(state)?, state_root);
+        }
+
+        // Assert that the stored state is accessible by slot. This is the path the beacon API takes
+        // for slots below finalization.
+        for (slot, state_root) in [
+            (1, state_1_root),
+            (22, state_22_root),
+            (96, state_96_root),
+            (128, state_128_root),
+        ] {
+            let state = storage
+                .stored_state(slot, Some(&*finalized_validators))?
+                .expect("state should be stored");
+
+            assert_eq!(state.slot(), slot);
+            assert_eq!(recomputed_root(state)?, state_root);
+        }
+
+        // The same states, read again with nothing warm: the spine and the frame cache are what
+        // the assertions above may have been served from, so clearing them forces the whole delta
+        // chain to be walked and applied off disk.
+        storage.clear_caches();
+
+        for (slot, state_root) in [
+            (1, state_1_root),
+            (22, state_22_root),
+            (96, state_96_root),
+            (128, state_128_root),
+        ] {
+            let state = storage
+                .stored_state(slot, Some(&*finalized_validators))?
+                .expect("state should be stored");
+
+            assert_eq!(recomputed_root(state)?, state_root);
+        }
+
+        // Slots without a block are served by transitioning the nearest stored state forward.
+        for empty_slot in empty_slots {
             assert_eq!(
                 storage
-                    .stored_state_by_state_root(state_root, &*finalized_validators)?
-                    .map(|state| state.hash_tree_root()),
-                Some(state_root),
+                    .stored_state(empty_slot, Some(&*finalized_validators))?
+                    .map(|state| state.slot()),
+                Some(empty_slot),
             );
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn archive_back_sync_states_runs_on_a_store_initialized_through_load() -> Result<()> {
+        let genesis_state = mainnet::GENESIS_BEACON_STATE.force().clone_arc();
+        let finalized_validators = genesis_state.validators().clone_boxed();
+        let blocks = mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force();
+        let storage = build_test_storage::<Mainnet>();
+
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state);
+
+        let FinalizedCheckpoint {
+            state: anchor_state,
+            block: anchor_block,
+        } = anchor_checkpoint_provider.checkpoint().value;
+
+        futures::executor::block_on(storage.load(
+            &Client::new(),
+            StateLoadStrategy::Anchor {
+                block: anchor_block,
+                state: anchor_state,
+            },
+        ))
+        .map(drop)?;
+
+        storage.store_back_sync_blocks(blocks.iter().cloned())?;
+
+        storage.archive_back_sync_states(
+            0,
+            128,
+            &anchor_checkpoint_provider,
+            &Arc::new(AtomicBool::new(false)),
+            &*finalized_validators,
+        )?;
+
+        assert_eq!(
+            get::<Hierarchy>(&storage.database, StateHierarchyKey)?
+                .expect("`load` records the configured hierarchy")
+                .exponents(),
+            Hierarchy::default().exponents(),
+        );
+
+        assert_eq!(
+            storage
+                .stored_state(128, Some(&*finalized_validators))?
+                .map(|state| state.slot()),
+            Some(128),
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn back_sync_persists_and_resumes_from_the_last_archived_state() -> Result<()> {
+        let genesis_state = mainnet::GENESIS_BEACON_STATE.force().clone_arc();
+        let finalized_validators = genesis_state.validators().clone_boxed();
+        let blocks = mainnet::BEACON_BLOCKS_UP_TO_SLOT_128.force();
+        let storage = build_test_storage::<Mainnet>();
+
+        let anchor_checkpoint_provider =
+            AnchorCheckpointProvider::custom_from_genesis(genesis_state);
+
+        let archive = |end_slot| {
+            storage.archive_back_sync_states(
+                0,
+                end_slot,
+                &anchor_checkpoint_provider,
+                &Arc::new(AtomicBool::new(false)),
+                &*finalized_validators,
+            )
+        };
+
+        let block_at = |slot| {
+            blocks
+                .iter()
+                .find(|block| block.message().slot() == slot)
+                .expect("the block is in the test data")
+        };
+
+        storage.store_back_sync_blocks(blocks.iter().cloned())?;
+
+        archive(96)?;
+
+        assert_eq!(get_latest_archived_slot(&storage.database)?, Some(96));
+        assert!(storage.contains_state_for_root(block_at(96).message().hash_tree_root())?);
+
+        // Only a run that resumes from the state at slot 96 can get past this: one starting
+        // over from genesis fails on the missing block at slot 1.
+        storage
+            .database
+            .delete_batch([
+                FinalizedBlockByRoot::full(block_at(1).message().hash_tree_root()).to_string(),
+            ])?;
+
+        archive(128)?;
+
+        storage.clear_caches();
+
+        let state_128_root = block_at(128).message().state_root();
+        let state = storage
+            .stored_state(128, Some(&*finalized_validators))?
+            .expect("state should be stored");
+
+        assert_eq!(storage.slot_by_state_root(state_128_root)?, Some(128));
+        assert_eq!(
+            BeaconState::<Mainnet>::from_ssz(&Mainnet::default_config(), state.to_ssz()?)?
+                .hash_tree_root(),
+            state_128_root,
+        );
 
         Ok(())
     }

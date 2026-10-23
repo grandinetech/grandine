@@ -789,7 +789,7 @@ impl<P: Preset> Storage<P> {
         Ok(())
     }
 
-    fn flush(
+    pub(crate) fn flush(
         &self,
         batch: &mut Vec<(String, Vec<u8>)>,
         deleted_keys: &mut Vec<StateByBlockRoot>,
@@ -1944,6 +1944,10 @@ impl<P: Preset> Storage<P> {
 
 #[cfg(test)]
 impl<P: Preset> Storage<P> {
+    pub fn contains_state_for_root(&self, block_root: H256) -> Result<bool> {
+        Ok(self.state_key_by_block_root(block_root)?.is_some())
+    }
+
     pub fn block_root_by_slot_count(&self) -> Result<usize> {
         let results = self
             .database
