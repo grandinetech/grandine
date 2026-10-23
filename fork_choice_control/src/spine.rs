@@ -80,15 +80,21 @@ impl<P: Preset> Spine<P> {
     }
 
     /// Forget the states that pruning deleted - those at or below
-    /// `pruned_up_to_slot`. Everything else is still on disk and stays usable
-    /// as a delta parent.
+    /// `pruned_up_to_slot` that it did not retain. Everything else is still on
+    /// disk and stays usable as a delta parent.
     pub fn remove_pruned(&self, pruned_up_to_slot: Slot) {
+        let retained_slots = self.hierarchy.retained_by_pruning::<P>(
+            &self.config,
+            self.anchor_slot.load(Ordering::SeqCst),
+            pruned_up_to_slot,
+        );
+
         for layer in &self.layers {
             let Some(entry) = layer.load_full() else {
                 continue;
             };
 
-            if entry.slot <= pruned_up_to_slot {
+            if entry.slot <= pruned_up_to_slot && !retained_slots.contains(&entry.slot) {
                 layer.store(None);
             }
         }
@@ -257,11 +263,11 @@ mod tests {
 
         insert(&spine, 0);
         insert(&spine, 512);
-        insert(&spine, 544);
+        insert(&spine, 1056);
 
-        spine.remove_pruned(520);
+        spine.remove_pruned(1024);
 
-        assert_eq!(tracked(&spine), vec![None, None, Some(544)]);
+        assert_eq!(tracked(&spine), vec![Some(0), None, Some(1056)]);
     }
 
     #[test]

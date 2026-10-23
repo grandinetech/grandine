@@ -898,26 +898,48 @@ impl<P: Preset> Storage<P> {
         self.database.delete_batch(keys_to_remove)
     }
 
+    fn retained_prune_slots(&self, up_to_slot: Slot) -> Vec<Slot> {
+        let Some(pruned_up_to_slot) = up_to_slot.checked_sub(1) else {
+            return vec![];
+        };
+
+        self.hierarchy.retained_by_pruning::<P>(
+            &self.config,
+            self.anchor_slot.load(Ordering::SeqCst),
+            pruned_up_to_slot,
+        )
+    }
+
     pub(crate) fn prune_old_blocks_and_states(&self, up_to_slot: Slot) -> Result<()> {
         let Some(pruned_up_to_slot) = up_to_slot.checked_sub(1) else {
             return Ok(());
         };
 
+        let retained_slots = self.retained_prune_slots(up_to_slot);
+
         let results = self
             .database
             .iterator_descending_raw(..=BlockRootBySlot(pruned_up_to_slot).to_string())?;
 
-        let (mut keys_to_remove, block_roots_to_remove): (Vec<_>, Vec<_>) =
-            itertools::process_results(results, |iter| {
-                iter.take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
-                    .unzip()
-            })?;
+        let entries = itertools::process_results(results, |iter| {
+            iter.take_while(|(key_bytes, _)| BlockRootBySlot::has_prefix(key_bytes))
+                .collect::<Vec<_>>()
+        })?;
 
-        for block_root_bytes in block_roots_to_remove {
-            let block_root = H256::from_ssz_default(decompress(&block_root_bytes)?)?;
+        let mut keys_to_remove = Vec::new();
+
+        for (key_bytes, value_bytes) in entries {
+            let BlockRootBySlot(slot) = Cow::from(key_bytes.as_slice()).try_into()?;
+            let block_root = H256::from_ssz_default(decompress(&value_bytes)?)?;
 
             keys_to_remove.push(FinalizedBlockByRoot::full(block_root).to_string().into());
             keys_to_remove.push(FinalizedBlockByRoot::blinded(block_root).to_string().into());
+
+            if retained_slots.contains(&slot) {
+                continue;
+            }
+
+            keys_to_remove.push(key_bytes);
 
             let state_prefix = StateByBlockRoot::prefix(block_root);
             let state_keys = self.database.keys_ascending(state_prefix.as_bytes()..)?;
@@ -929,6 +951,10 @@ impl<P: Preset> Storage<P> {
         }
 
         self.forward_spine.remove_pruned(pruned_up_to_slot);
+
+        if self.pruned_up_to_slot()? < up_to_slot {
+            save(&self.database, PrunedUpToKey, up_to_slot)?;
+        }
 
         self.database.delete_batch(keys_to_remove)?;
 
@@ -942,7 +968,12 @@ impl<P: Preset> Storage<P> {
         )
     }
 
+    fn pruned_up_to_slot(&self) -> Result<Slot> {
+        Ok(self.get::<Slot>(PrunedUpToKey)?.unwrap_or(GENESIS_SLOT))
+    }
+
     pub(crate) fn prune_old_state_roots(&self, up_to_slot: Slot) -> Result<()> {
+        let retained_slots = self.retained_prune_slots(up_to_slot);
         let mut keys_to_remove = vec![];
 
         let results = self
@@ -957,7 +988,7 @@ impl<P: Preset> Storage<P> {
         for (key_bytes, value_bytes) in results {
             let slot = Slot::from_ssz_default(decompress(&value_bytes)?)?;
 
-            if slot < up_to_slot {
+            if slot < up_to_slot && !retained_slots.contains(&slot) {
                 keys_to_remove.push(key_bytes);
             }
         }
@@ -1701,12 +1732,20 @@ impl<P: Preset> Storage<P> {
             .database
             .iterator_descending_raw(..=BlockRootBySlot(start_from_slot).to_string())?;
 
+        let pruned_up_to_slot = self.pruned_up_to_slot()?;
+
         let mut block_roots = vec![];
 
         for result in results {
             let (key_bytes, value_bytes) = result?;
 
             if !BlockRootBySlot::has_prefix(&key_bytes) {
+                break;
+            }
+
+            let BlockRootBySlot(slot) = Cow::from(key_bytes.as_slice()).try_into()?;
+
+            if slot < pruned_up_to_slot {
                 break;
             }
 
@@ -2408,6 +2447,14 @@ impl PrefixableKey for StateHierarchyKey {
 }
 
 #[derive(Display)]
+#[display("{}", Self::PREFIX)]
+pub struct PrunedUpToKey;
+
+impl PrefixableKey for PrunedUpToKey {
+    const PREFIX: &'static str = "pruned";
+}
+
+#[derive(Display)]
 #[display("{}{_0:x}", Self::PREFIX)]
 pub struct SlotByStateRoot(pub H256);
 
@@ -3022,6 +3069,142 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_prune_keeps_the_boundary_state() -> Result<()> {
+        let database = Database::persistent(
+            "test_db",
+            TempDir::new()?,
+            ByteSize::mib(10),
+            DatabaseMode::ReadWrite,
+            None,
+        )?;
+
+        let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
+
+        database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(0), H256::repeat_byte(0))?,
+            serialize(FinalizedBlockByRoot::full(H256::repeat_byte(0)), &block)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(0)), 0_u64)?,
+            serialize(
+                StateByBlockRoot::legacy_snapshot(H256::repeat_byte(0)),
+                0_u64,
+            )?,
+            serialize(BlockRootBySlot(8), H256::repeat_byte(8))?,
+            serialize(FinalizedBlockByRoot::full(H256::repeat_byte(8)), &block)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(8)), 8_u64)?,
+            serialize(
+                StateByBlockRoot::legacy_snapshot(H256::repeat_byte(8)),
+                8_u64,
+            )?,
+            serialize(BlockRootBySlot(32), H256::repeat_byte(32))?,
+            serialize(FinalizedBlockByRoot::full(H256::repeat_byte(32)), &block)?,
+            serialize(SlotByStateRoot(H256::repeat_byte(32)), 32_u64)?,
+            serialize(
+                StateByBlockRoot::legacy_snapshot(H256::repeat_byte(32)),
+                32_u64,
+            )?,
+        ])?;
+
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            database,
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
+        )
+        .expect("state cache sizes in tests are valid");
+
+        let retained_slots = storage.retained_prune_slots(33);
+
+        assert!(retained_slots.contains(&0));
+        assert!(retained_slots.contains(&32));
+
+        storage.prune_old_blocks_and_states(33)?;
+        storage.prune_old_state_roots(33)?;
+
+        assert_eq!(storage.block_root_by_slot(32)?, Some(H256::repeat_byte(32)),);
+        assert_eq!(storage.slot_by_state_root(H256::repeat_byte(32))?, Some(32));
+        assert_eq!(storage.block_root_by_slot(0)?, Some(H256::zero()));
+        assert_eq!(storage.slot_by_state_root(H256::repeat_byte(0))?, Some(0));
+
+        assert_eq!(storage.block_root_by_slot(8)?, None);
+        assert_eq!(storage.slot_by_state_root(H256::repeat_byte(8))?, None);
+
+        assert_eq!(storage.finalized_block_count()?, 0);
+        assert_eq!(storage.block_root_by_slot_count()?, 2);
+        assert_eq!(storage.slot_by_state_root_count()?, 2);
+        assert_eq!(storage.state_count()?, 2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn stored_state_refuses_a_retained_state_below_the_prune_boundary() -> Result<()> {
+        let storage = Storage::<Mainnet>::new(
+            Arc::new(Config::mainnet()),
+            Arc::new(PubkeyCache::default()),
+            Database::in_memory(),
+            StorageMode::default(),
+            true,
+            DEFAULT_ZSTD_COMPRESSION_LEVEL,
+            StateStorageConfig::default_for_mode(StorageMode::default()),
+        )
+        .expect("state cache sizes in tests are valid");
+
+        let validator_source = state_with_slot(0);
+        let finalized_validators = validator_source.validators();
+
+        let anchor_root = H256::repeat_byte(1);
+        let pruned_root = H256::repeat_byte(4);
+        let block = SignedBeaconBlock::<Mainnet>::Phase0(Phase0SignedBeaconBlock::default());
+
+        storage.database.put_batch_raw(vec![
+            serialize(BlockRootBySlot(0), anchor_root)?,
+            serialize(FinalizedBlockByRoot::full(anchor_root), &block)?,
+            serialize(BlockRootBySlot(4), pruned_root)?,
+            serialize(FinalizedBlockByRoot::full(pruned_root), &block)?,
+        ])?;
+
+        storage.append_finalized_states(
+            [(0, anchor_root, state_with_slot(0))],
+            0,
+            finalized_validators,
+        )?;
+
+        assert!(
+            matches!(
+                storage.load_state_by_iteration(8, Some(finalized_validators), false)?,
+                OptionalStateStorage::Full(_),
+            ),
+            "before pruning the whole chain up to slot 8 is on disk",
+        );
+
+        let retained_slots = storage.retained_prune_slots(33);
+
+        assert!(retained_slots.contains(&0));
+
+        storage.prune_old_blocks_and_states(33)?;
+
+        assert_eq!(storage.block_root_by_slot(4)?, None);
+        assert!(
+            storage
+                .state_by_block_root(anchor_root, Some(finalized_validators))?
+                .is_some()
+        );
+
+        assert!(
+            storage
+                .stored_state(8, Some(finalized_validators))?
+                .is_none(),
+            "the block at slot 4 is gone, so the retained state at slot 0 \
+             cannot be replayed to slot 8",
+        );
+
+        Ok(())
+    }
+
     /// A sub-epoch deepest layer persists states in the middle of an epoch. Those are readable
     /// like any other, but the fork choice anchor still has to sit at an epoch start, so the
     /// anchor search walks past them.
@@ -3547,16 +3730,16 @@ mod tests {
         );
 
         spine.insert(
-            544,
+            1056,
             StateByBlockRoot::snapshot(H256::repeat_byte(3)),
-            state_with_slot(544),
+            state_with_slot(1056),
         );
 
-        storage.prune_old_blocks_and_states(521)?;
+        storage.prune_old_blocks_and_states(1025)?;
 
-        assert!(spine.get(0).is_none());
+        assert!(spine.get(0).is_some());
         assert!(spine.get(512).is_none());
-        assert!(spine.get(544).is_some());
+        assert!(spine.get(1056).is_some());
 
         Ok(())
     }
