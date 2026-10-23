@@ -459,12 +459,10 @@ where
             return Ok(());
         };
 
-        let head_slot = self
-            .storage
-            .checkpoint_state_slot(&*self.store.finalized_validators())?
-            .unwrap_or_else(|| last_block.message().slot());
-
-        self.handle_tick(&wait_group, Tick::start_of_slot(head_slot))?;
+        self.handle_tick(
+            &wait_group,
+            Tick::start_of_slot(last_block.message().slot()),
+        )?;
 
         for result in blocks.chain(core::iter::once(Ok(last_block))) {
             let block = result?;

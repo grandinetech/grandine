@@ -11,9 +11,10 @@ use helper_functions::{accessors, deposit_signatures, misc};
 use itertools::Itertools as _;
 use logging::{debug_with_peers, info_with_peers, warn_with_peers};
 use nonzero_ext::nonzero;
+use parking_lot::Mutex;
 use pubkey_cache::PubkeyCache;
 use reqwest::Client;
-use ssz::{Ssz, SszRead, SszReadDefault, SszWrite};
+use ssz::{Ssz, SszRead, SszReadDefault, SszSize, SszWrite};
 use std_ext::ArcExt as _;
 use thiserror::Error;
 use tracing::info;
@@ -73,6 +74,7 @@ pub struct Storage<P> {
     store_execution_payloads: bool,
     zstd_compression_level: i32,
     pub(crate) pubkey_cache: Arc<PubkeyCache>,
+    checkpoint_slot: Arc<Mutex<Option<Slot>>>,
     phantom: PhantomData<P>,
 }
 
@@ -126,6 +128,7 @@ impl<P: Preset> Storage<P> {
             storage_mode,
             store_execution_payloads,
             zstd_compression_level,
+            checkpoint_slot: Arc::new(Mutex::new(None)),
             phantom: PhantomData,
         }
     }
@@ -335,7 +338,7 @@ impl<P: Preset> Storage<P> {
     ) -> Result<AppendedBlockSlots> {
         let mut slots = AppendedBlockSlots::default();
         let mut store_head_slot = 0;
-        let mut checkpoint_state_appended = false;
+        let mut checkpoint = None;
         let mut checkpoint_slot = None;
         let mut archival_state_appended = false;
         let mut batch = vec![];
@@ -350,14 +353,8 @@ impl<P: Preset> Storage<P> {
             .filter(|(chain_link, is_finalized)| *is_finalized || chain_link.is_valid())
             .peekable();
 
-        if let Some(StateCheckpoint { head_slot, .. }) =
-            self.load_state_checkpoint(Some(&*finalized_validators))?
-        {
-            store_head_slot = head_slot;
-        }
-
         if let Some((chain_link, _)) = chain.peek() {
-            store_head_slot = chain_link.slot().max(store_head_slot);
+            store_head_slot = chain_link.slot();
         }
 
         debug_with_peers!("saving store head slot: {store_head_slot}");
@@ -376,7 +373,7 @@ impl<P: Preset> Storage<P> {
                         &mut batch,
                         block_root,
                         block,
-                        !checkpoint_state_appended,
+                        checkpoint.is_none(),
                     )?;
                 } else if !self.contains_unfinalized_block(block_root)? {
                     slots.unfinalized.push(state_slot);
@@ -400,31 +397,17 @@ impl<P: Preset> Storage<P> {
                 let is_archival_epoch_start = is_epoch_start
                     && state_epoch.is_multiple_of(self.archival_epoch_interval.into());
 
-                if !checkpoint_state_appended
+                if checkpoint.is_none()
                     && ((store.is_forward_synced() && is_epoch_start) || is_archival_epoch_start)
                 {
                     info_with_peers!("saving checkpoint block & state in slot {state_slot}");
 
-                    batch.push(serialize(
-                        BlockCheckpoint::<P>::KEY,
-                        BlockCheckpoint {
-                            block: block.clone_arc(),
-                        },
-                    )?);
+                    checkpoint = Some((
+                        block_root,
+                        block.clone_arc(),
+                        state.get_or_init(|| chain_link.state(store)).clone_arc(),
+                    ));
 
-                    batch.push(serialize(
-                        StateCheckpoint::<P>::KEY,
-                        StateCheckpoint {
-                            block_root,
-                            head_slot: store_head_slot,
-                            state: prepare_state(
-                                state.get_or_init(|| chain_link.state(store)).clone_arc(),
-                                finalized_validators.len_usize(),
-                            ),
-                        },
-                    )?);
-
-                    checkpoint_state_appended = true;
                     checkpoint_slot = Some(state_slot);
                     update_finalized_validators = true;
                 }
@@ -453,7 +436,48 @@ impl<P: Preset> Storage<P> {
             self.append_finalized_validator_pubkeys_to_batch(&mut batch, &*finalized_validators)?;
         }
 
+        let mut stored_checkpoint_slot = self.checkpoint_slot.lock();
+
+        if stored_checkpoint_slot.is_none()
+            && let Some(value_bytes) = self.database.get(StateCheckpoint::<P>::KEY)?
+        {
+            let state_bytes = ssz::subslice(
+                &value_bytes,
+                StateCheckpoint::<P>::STATE_START..value_bytes.len(),
+            )?;
+
+            *stored_checkpoint_slot = Some(BeaconState::<P>::slot_from_ssz(state_bytes)?);
+        }
+
+        let checkpoint_appended = if let Some((block_root, block, state)) = checkpoint
+            && stored_checkpoint_slot.is_none_or(|stored| stored < state.slot())
+        {
+            batch.push(serialize(
+                BlockCheckpoint::<P>::KEY,
+                BlockCheckpoint { block },
+            )?);
+
+            batch.push(serialize(
+                StateCheckpoint::<P>::KEY,
+                StateCheckpoint {
+                    block_root,
+                    head_slot: store_head_slot,
+                    state: prepare_state(state, finalized_validators.len_usize()),
+                },
+            )?);
+
+            true
+        } else {
+            false
+        };
+
         self.database.put_batch_raw(batch)?;
+
+        if checkpoint_appended {
+            *stored_checkpoint_slot = checkpoint_slot;
+        }
+
+        drop(stored_checkpoint_slot);
 
         if let Some(checkpoint_slot) = checkpoint_slot
             && !self.store_execution_payloads
@@ -801,19 +825,6 @@ impl<P: Preset> Storage<P> {
         self.database.delete_batch(keys_to_remove)
     }
 
-    pub(crate) fn checkpoint_state_slot(
-        &self,
-        finalized_validators: &dyn SszValidatorList,
-    ) -> Result<Option<Slot>> {
-        if let Some(StateCheckpoint { head_slot, .. }) =
-            self.load_state_checkpoint(Some(finalized_validators))?
-        {
-            return Ok(Some(head_slot));
-        }
-
-        Ok(None)
-    }
-
     pub(crate) fn prune_old_execution_payload_envelopes(&self, up_to_slot: Slot) -> Result<()> {
         let results = self
             .database
@@ -1030,7 +1041,7 @@ impl<P: Preset> Storage<P> {
 
         // State may be persisted only once in several epochs.
         // `blocks` here are needed to transition state closer to `slot`.
-        for result in blocks.rev() {
+        for result in blocks {
             match result? {
                 StoredBlock::Full(block) => combined::trusted_state_transition(
                     &self.config,
@@ -1223,6 +1234,8 @@ impl<P: Preset> Storage<P> {
                         Error::PersistedSlotCannotContainAnchor { slot },
                     );
 
+                    block_roots.reverse();
+
                     let blocks = self.blocks_by_roots(block_roots);
 
                     return Ok(OptionalStateStorage::Full((state, block, blocks)));
@@ -1235,6 +1248,8 @@ impl<P: Preset> Storage<P> {
         if block_roots.is_empty() {
             return Ok(OptionalStateStorage::None);
         }
+
+        block_roots.reverse();
 
         Ok(OptionalStateStorage::UnfinalizedOnly(
             self.blocks_by_roots(block_roots),
@@ -1576,6 +1591,11 @@ impl<P: Preset> PrefixableKey for StateCheckpoint<P> {
 impl<P: Preset> StateCheckpoint<P> {
     // This was renamed from `cstate` for compatibility with old schema versions.
     const KEY: &'static str = "cstate2";
+
+    const STATE_START: usize = <H256 as SszSize>::SIZE
+        .fixed_part()
+        .saturating_add(<Slot as SszSize>::SIZE.fixed_part())
+        .saturating_add(<BeaconState<P> as SszSize>::SIZE.fixed_part());
 }
 
 #[derive(Ssz)]
@@ -1981,8 +2001,11 @@ mod tests {
     use database::DatabaseMode;
     use tempfile::TempDir;
     use types::{
-        phase0::containers::{
-            BeaconBlock as Phase0BeaconBlock, SignedBeaconBlock as Phase0SignedBeaconBlock,
+        phase0::{
+            beacon_state::BeaconState as Phase0BeaconState,
+            containers::{
+                BeaconBlock as Phase0BeaconBlock, SignedBeaconBlock as Phase0SignedBeaconBlock,
+            },
         },
         preset::Mainnet,
     };
@@ -2316,6 +2339,39 @@ mod tests {
             storage.block_root_before_or_at_slot(9)?,
             Some(H256::repeat_byte(6)),
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn the_checkpoint_state_slot_is_read_without_decoding_the_state() -> Result<()> {
+        let database = Database::in_memory();
+
+        database.put_batch_raw(vec![serialize(
+            StateCheckpoint::<Mainnet>::KEY,
+            StateCheckpoint {
+                block_root: H256::repeat_byte(1),
+                head_slot: 4096,
+                state: Arc::new(BeaconState::<Mainnet>::Phase0(
+                    Phase0BeaconState {
+                        slot: 4064,
+                        ..Phase0BeaconState::default()
+                    }
+                    .into(),
+                )),
+            },
+        )?])?;
+
+        let value_bytes = database
+            .get(StateCheckpoint::<Mainnet>::KEY)?
+            .expect("the checkpoint was just written");
+
+        let state_bytes = ssz::subslice(
+            &value_bytes,
+            StateCheckpoint::<Mainnet>::STATE_START..value_bytes.len(),
+        )?;
+
+        assert_eq!(BeaconState::<Mainnet>::slot_from_ssz(state_bytes)?, 4064);
 
         Ok(())
     }
