@@ -1,6 +1,9 @@
 use core::{borrow::Borrow, fmt::Debug};
 
-use ssz::{ContiguousList, Size, Ssz, SszListMut, SszRead, SszSize, SszWrite};
+use ssz::{
+    ContiguousList, ReadError, Size, Ssz, SszCursor, SszListMut, SszNavigable, SszRead, SszSize,
+    SszWrite,
+};
 use try_from_iterator::TryFromIterator as _;
 
 use crate::{
@@ -216,6 +219,24 @@ where
 
         Ok(())
     }
+}
+
+impl<T> TryFrom<SszCursor<'_>> for PositionalPatch<T>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T> SszNavigable for PositionalPatch<T>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
 
 #[cfg(test)]

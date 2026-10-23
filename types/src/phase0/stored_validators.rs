@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[derive(Ssz)]
-#[ssz(derive_hash = false)]
+#[ssz(derive_hash = false, derive_cursor = true)]
 pub struct StoredValidators<N: Unsigned> {
     effective_balances: Compressed<ContiguousList<Gwei, N>>,
     partial_validators: Compressed<ContiguousList<PartialValidator, N>>,

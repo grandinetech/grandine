@@ -93,10 +93,11 @@ impl<'a, T: SszContainer> SszContainerCursor<'a, T> {
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
+    use ethereum_types::H256;
     use ssz_derive::Ssz;
-    use typenum::U8;
+    use typenum::{U8, Unsigned};
 
-    use crate::{contiguous_list::ContiguousList, porcelain::SszWrite as _};
+    use crate::{byte_list::ByteList, contiguous_list::ContiguousList, porcelain::SszWrite as _};
 
     use super::*;
 
@@ -126,6 +127,30 @@ mod tests {
         middle: u16,
         inner: Inner,
         last: Bytes,
+    }
+
+    #[derive(Ssz)]
+    #[ssz(internal, derive_cursor = true)]
+    struct Navigable {
+        leading: u32,
+        nested: NestedNavigable,
+        trailing: ByteList<U8>,
+    }
+
+    #[derive(PartialEq, Eq, Debug, Ssz)]
+    #[ssz(internal, derive_cursor = true)]
+    struct NestedNavigable {
+        head: u64,
+        tail: H256,
+    }
+
+    #[derive(Ssz)]
+    #[ssz(internal, derive_cursor = true, derive_hash = false)]
+    struct GenericNavigable<N: Unsigned> {
+        head: u64,
+        #[ssz(skip)]
+        _ignored: u64,
+        tail: ByteList<N>,
     }
 
     #[test]
@@ -185,6 +210,49 @@ mod tests {
         assert!(payload.buf.is_empty());
 
         assert!(SszCursor::new(&[]).union().is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_cursor_reads_fields_without_deserializing_container() -> Result<()> {
+        let navigable = Navigable {
+            leading: 0x0102_0304,
+            nested: NestedNavigable {
+                head: 0x0506_0708_090A_0B0C,
+                tail: H256::repeat_byte(0xDD),
+            },
+            trailing: ByteList::from(ContiguousList::try_from([0xAA, 0xBB])?),
+        };
+
+        let bytes = navigable.to_ssz()?;
+        let cursor = Navigable::cursor(&bytes);
+
+        assert_eq!(cursor.get_leading()?, navigable.leading);
+        assert_eq!(cursor.get_trailing()?, navigable.trailing);
+
+        let nested = cursor.get_nested()?;
+
+        assert_eq!(nested.get_head()?, navigable.nested.head);
+        assert_eq!(nested.get_tail()?, navigable.nested.tail);
+        assert_eq!(nested.read(&())?, navigable.nested);
+
+        Ok(())
+    }
+
+    #[test]
+    fn derived_cursor_is_generic_and_skips_skipped_fields() -> Result<()> {
+        let navigable = GenericNavigable::<U8> {
+            head: 0x0102_0304_0506_0708,
+            _ignored: 0x0900_0000_0000_0000,
+            tail: ByteList::from(ContiguousList::try_from([0xAA, 0xBB])?),
+        };
+
+        let bytes = navigable.to_ssz()?;
+        let cursor = GenericNavigable::<U8>::cursor(&bytes);
+
+        assert_eq!(cursor.get_head()?, navigable.head);
+        assert_eq!(cursor.get_tail()?, navigable.tail);
 
         Ok(())
     }

@@ -1,4 +1,4 @@
-use ssz::{Compressed, Ssz, SszRead, SszWrite};
+use ssz::{Compressed, ReadError, Ssz, SszCursor, SszNavigable, SszRead, SszWrite};
 
 use crate::{
     error::Error,
@@ -47,4 +47,22 @@ impl<T: Clone + PartialEq> Patch<T> for ReplacePatch<Compressed<T>> {
 
         Ok(())
     }
+}
+
+impl<T> TryFrom<SszCursor<'_>> for ReplacePatch<T>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T> SszNavigable for ReplacePatch<T>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }

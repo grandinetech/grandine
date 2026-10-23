@@ -60,6 +60,19 @@ macro_rules! impl_public_key_bytes {
             }
         }
 
+        impl TryFrom<ssz::SszCursor<'_>> for $name {
+            type Error = ssz::ReadError;
+
+            #[inline]
+            fn try_from(cursor: ssz::SszCursor<'_>) -> Result<Self, ssz::ReadError> {
+                cursor.read(&())
+            }
+        }
+
+        impl ssz::SszNavigable for $name {
+            type View<'cursor> = Self;
+        }
+
         impl ssz::SszWrite for $name {
             #[inline]
             fn write_fixed(&self, bytes: &mut [u8]) {
