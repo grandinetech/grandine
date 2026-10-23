@@ -83,6 +83,7 @@ pub struct BeaconBlockBody<P: Preset> {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_cursor = true)]
 pub struct BeaconBlockHeader {
     #[serde(with = "serde_utils::string_or_native")]
     pub slot: Slot,
@@ -97,6 +98,7 @@ pub struct BeaconBlockHeader {
     Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug, Deserialize, Serialize, Ssz,
 )]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_cursor = true)]
 pub struct Checkpoint {
     #[serde(with = "serde_utils::string_or_native")]
     pub epoch: Epoch,
@@ -131,6 +133,7 @@ pub struct DepositMessage {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_cursor = true)]
 pub struct Eth1Data {
     pub deposit_root: H256,
     #[serde(with = "serde_utils::string_or_native")]
@@ -140,6 +143,7 @@ pub struct Eth1Data {
 
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Deserialize, Serialize, Ssz)]
 #[serde(deny_unknown_fields)]
+#[ssz(derive_cursor = true)]
 pub struct Fork {
     pub previous_version: Version,
     pub current_version: Version,

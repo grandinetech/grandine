@@ -1,6 +1,7 @@
 use ssz::{
     BundleSize, ContiguousList, IncompletePersistentVector, IncompletePersistentVectorElements,
-    PersistentVector, PersistentVectorElements, Ssz, SszRead, SszSize, SszWrite,
+    PersistentVector, PersistentVectorElements, ReadError, Ssz, SszCursor, SszNavigable, SszRead,
+    SszSize, SszWrite,
 };
 
 use crate::{
@@ -67,4 +68,22 @@ where
                 .map_err(|_| Error::PatchIndexOutOfBounds)
         })
     }
+}
+
+impl<T> TryFrom<SszCursor<'_>> for VectorPatch<T>
+where
+    Self: SszRead<()>,
+{
+    type Error = ReadError;
+
+    fn try_from(cursor: SszCursor<'_>) -> Result<Self, ReadError> {
+        cursor.read(&())
+    }
+}
+
+impl<T> SszNavigable for VectorPatch<T>
+where
+    Self: SszRead<()>,
+{
+    type View<'cursor> = Self;
 }
