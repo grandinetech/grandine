@@ -50,7 +50,7 @@ pub fn state_at_slot<P: Preset, W: Wait>(
     slot: Slot,
     controller: &ApiController<P, W>,
 ) -> Result<WithStatus<Arc<BeaconState<P>>>, Error> {
-    tokio::task::block_in_place(|| controller.state_at_slot_cached_blocking(slot))?
+    tokio::task::block_in_place(|| controller.state_at_slot_checked_blocking(slot))?
         .ok_or(Error::StateNotFound)
 }
 

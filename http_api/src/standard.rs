@@ -2352,7 +2352,7 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
         .saturating_sub(1);
 
     // The clock alone is not enough. A head behind `last_slot` is missing blocks.
-    // `state_at_slot_cached_blocking` would fill the gap with empty slots,
+    // `state_at_slot_checked_blocking` would fill the gap with empty slots,
     // dropping the attestations those blocks include.
     if controller.head_slot() < last_slot {
         return Err(Error::NodeIsSyncing);
@@ -2364,7 +2364,7 @@ pub async fn attestation_rewards<P: Preset, W: Wait>(
             status,
             finalized,
         } = controller
-            .state_at_slot_cached_blocking(last_slot)?
+            .state_at_slot_checked_blocking(last_slot)?
             .ok_or(Error::StateNotFound)?;
 
         // Reject unknown validators before computing rewards for the whole epoch.
