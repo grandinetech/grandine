@@ -16,12 +16,11 @@ use types::{config::Config, phase0::primitives::ExecutionBlockHash, preset::Main
 
 const DEPOSIT_COUNT: u64 = 1024;
 
-// Criterion macros only add confusion.
-fn main() {
-    Criterion::default()
-        .configure_from_args()
-        .benchmark_quick_start_beacon_state()
-        .final_summary();
+criterion::criterion_group!(benches, run_benchmarks);
+criterion::criterion_main!(benches);
+
+fn run_benchmarks(criterion: &mut Criterion) {
+    criterion.benchmark_quick_start_beacon_state();
 }
 
 #[ext]
