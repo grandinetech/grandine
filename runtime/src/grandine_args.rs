@@ -1460,9 +1460,22 @@ struct RemoteValidatorOptions {
     #[clap(long, num_args = 1.., required = true, value_delimiter = ',')]
     beacon_node_urls: Vec<RedactingUrl>,
 
-    /// List of duties to publish to every beacon node rather than the first one; `all` covers
-    /// every duty, and the flag given without a value publishes everything to the first node only
+    /// Duties to publish to every beacon node at once
+    ///
+    /// Applies to: aggregates, attestations, blocks, payload-attestations, proposer-preferences,
+    /// sync-committee-contributions and sync-committee-messages.
+    /// - Selected (`all` selects every one): sent to every node at once
+    /// - Not selected (the flag given without a value selects none): sent to one node at a time
+    ///   until one accepts; blocks start with the node that produced them
+    ///
+    /// Not affected by this flag:
+    /// - Subscriptions, proposer preparations and validator registrations: every node
+    /// - Builder preferences: one node at a time until one accepts
+    /// - Payload envelopes: one node at a time until one accepts, starting with the node that
+    ///   produced the block
+    /// - Blinded blocks: only the node that produced them
     #[clap(
+        verbatim_doc_comment,
         long,
         num_args = 0..,
         value_delimiter = ',',

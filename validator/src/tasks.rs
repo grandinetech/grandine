@@ -197,13 +197,7 @@ async fn prefetch_ptc_duties<P: Preset, W: Wait + Sync>(
     };
 
     if let Err(error) = own_ptc_members
-        .init_at_epoch(
-            chain_config,
-            beacon_nodes,
-            epoch,
-            dependent_root,
-            validator_indices,
-        )
+        .init_at_epoch(beacon_nodes, epoch, dependent_root, validator_indices)
         .await
     {
         warn_with_peers!("failed to obtain PTC duties for epoch {epoch}: {error:?}");
