@@ -1,4 +1,4 @@
-EXCLUDES = --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
+EXCLUDES = --workspace --exclude c_grandine --exclude csharp_grandine
 FEATURES = --features default-networks
 TARGET ?=
 

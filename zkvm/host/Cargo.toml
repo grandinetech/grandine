@@ -4,13 +4,10 @@ edition = '2024'
 version = "0.1.0"
 authors = ["Grandine <info@grandine.io>"]
 
-[lints]
-workspace = true
-
 [dependencies]
 anyhow = { workspace = true }
 bls = { workspace = true, features = ['zkcrypto'] }
-bls-zkcrypto = { workspace = true, optional = true }
+bls12_381 = { workspace = true, optional = true }
 boundless-market = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 clap = { workspace = true, features = ['derive'] }
@@ -47,7 +44,7 @@ risc0 = [
     "dep:risc0-zkvm",
     "dep:tracing-subscriber",
     "dep:zkvm_guest_risc0",
-    "bls-zkcrypto/zkvm-risc0",
+    "bls12_381/zkvm-risc0",
 ]
 sp1 = [
     "dep:sp1-helper",
@@ -57,7 +54,7 @@ pico = [
     "dep:serde_json",
     "dep:pico-sdk",
     "dep:pico-vm",
-    "bls-zkcrypto/zkvm-pico",
+    "bls12_381/zkvm-pico",
 ]
 ziren = [
     "dep:zkm-build",

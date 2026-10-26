@@ -3,9 +3,6 @@ name = 'zkvm_guest_risc0'
 edition = '2024'
 authors = ["Grandine <info@grandine.io>"]
 
-[lints]
-workspace = true
-
 [build-dependencies]
 risc0-build = { workspace = true, features = ['unstable'] }
 

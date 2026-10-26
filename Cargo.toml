@@ -68,8 +68,6 @@ members = [
     'validator',
     'validator_key_cache',
     'validator_statistics',
-    'zkvm/guest/risc0',
-    'zkvm/host',
 ]
 
 # Feature resolver version 3 is the default starting with Rust 2024, but that does not apply in
@@ -290,12 +288,10 @@ base64 = '0.22'
 bindgen = '0.72'
 bit_field = '0.10'
 bitvec = '1'
-bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }
+bls12_381 = { git = 'https://github.com/zkcrypto/bls12_381.git', rev = '6bb96951d5c2035caf4989b6e4a018435379590f' }
 blst = { version = '0.3', features = ['portable'] }
-boundless-market = '1.4'
 bstr = '1'
 build-time = '0.1'
-bytemuck = '1.25'
 byteorder = '1'
 bytes = '1'
 bytesize = { version = '2', features = ['serde'] }
@@ -401,8 +397,6 @@ refinery = { version = '0.9',  features = ['rusqlite'] }
 regex = '1'
 replace_with = '0.1'
 reqwest = { version = '0.13', features = ['json', 'native-tls-vendored'] }
-risc0-build = { version = '3.0.5', features = ['unstable'] }
-risc0-zkvm = { version = '3.0.5', features = ['unstable', 'heap-embedded-alloc'] }
 rusqlite = { version = '0.38', features = ['bundled', 'fallible_uint'] }
 rust-kzg-arkworks5 = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
 rust-kzg-blst = { git = 'https://github.com/grandinetech/rust-kzg.git', rev = 'bf57df7cdb2e38ecc92332fa2e16b121de2f625e' }
@@ -424,16 +418,13 @@ serde_with = '3'
 serde_yaml = '0.9'
 # The `asm` feature in `sha2` doesn't do anything on recent `x86_64` CPUs
 # because `sha2` defaults to using CPU intrinsics.
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2', features = ['compress'] }
+sha2 = { version = '0.10.9', features = ['compress'] }
 slog = { version = '2', features = ['max_level_trace'] }
 slog-async = '2'
 slog-stdlog = '4'
 slog-term = '2'
 smallvec = { version = '1', features = ['serde', 'union'] }
 snap = '1'
-sp1-helper = '6.1.0'
-sp1-sdk = '6.1.0'
-sp1-zkvm = { version = '6.1.0' }
 sse-stream = '0.2'
 static_assertions = '1'
 strum = { version = '0.28', features = ['derive'] }
@@ -471,10 +462,7 @@ variant_count = '1'
 web3 = { git = 'https://github.com/grandinetech/rust-web3.git', default-features = false, features = ['http-native-tls-vendored'] }
 wincode = { version = '0', features = ['derive'] }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
-xz2 = { version = '0.1' }
 zeroize = { version = '1', features = ['derive', 'serde'] }
-zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
-zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
 zstd = '0.13'
 
 allocator = { path = 'allocator' }
@@ -545,8 +533,6 @@ types = { path = 'types' }
 validator = { path = 'validator' }
 validator_key_cache = { path = 'validator_key_cache' }
 validator_statistics = { path = 'validator_statistics' }
-zkvm_guest_risc0 = { path = 'zkvm/guest/risc0' }
-zkvm_host = { path = 'zkvm/host' }
 
 # Banned crates
 #
@@ -606,12 +592,8 @@ lto = false
 # `geth` responds to invalid payloads with objects containing `method` and `params`.
 # We had to fork `jsonrpc` because it does not allow nonstandard members.
 jsonrpc-core = { git = 'https://github.com/grandinetech/jsonrpc.git' }
-sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
 
 [patch.'https://github.com/libp2p/rust-libp2p.git']
 libp2p = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
 libp2p-mplex = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
 libp2p-quic = { git = "https://github.com/sigp/rust-libp2p.git", rev = "accba72bb4eafc692ac518339ef2c4080b6f8461" }
-
-[patch.'https://github.com/zkcrypto/bls12_381.git']
-bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }
