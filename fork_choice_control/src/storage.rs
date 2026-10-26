@@ -46,7 +46,7 @@ use types::{
     },
     preset::Preset,
     redacting_url::RedactingUrl,
-    storage::{BeaconStateFrame, BeaconStatePatch},
+    storage::{BeaconStateFrame, BeaconStateFrameCursor, BeaconStatePatch, BeaconStatePatchCursor},
     traits::{self, BeaconBlock, BeaconState as _, SignedBeaconBlock as _, SszValidatorList},
 };
 
@@ -1687,6 +1687,30 @@ impl<P: Preset> Storage<P> {
         Ok(Some(state))
     }
 
+    pub(crate) fn state_rows_before_or_at(&self, slot: Slot) -> Result<Option<StateRows<'_, P>>> {
+        let state_slot = self.hierarchy.node_before_or_at::<P>(
+            &self.config,
+            self.anchor_slot.load(Ordering::SeqCst),
+            slot,
+        );
+
+        if state_slot < self.pruned_up_to_slot()? {
+            return Ok(None);
+        }
+
+        let Some(value) = self.block_root_by_slot_value(state_slot)? else {
+            return Ok(None);
+        };
+
+        Ok(Some(StateRows {
+            storage: self,
+            state_slot,
+            next_block_root: Some(value.state_key_root()),
+            visited: HashSet::new(),
+            row: vec![],
+        }))
+    }
+
     pub(crate) fn state_post_block(
         &self,
         mut block_root: H256,
@@ -2202,6 +2226,78 @@ impl<P: Preset> fork_choice_store::Storage<P> for Storage<P> {
         finalized_validators: Option<&dyn SszValidatorList>,
     ) -> Result<Option<Arc<BeaconState<P>>>> {
         self.state_by_block_root(block_root, finalized_validators)
+    }
+}
+
+pub enum StateRow<'row, P: Preset> {
+    Delta(BeaconStatePatchCursor<'row, P>),
+    Frame(BeaconStateFrameCursor<'row, P>),
+    State(Arc<BeaconState<P>>),
+}
+
+pub struct StateRows<'storage, P: Preset> {
+    storage: &'storage Storage<P>,
+    state_slot: Slot,
+    next_block_root: Option<H256>,
+    visited: HashSet<H256>,
+    row: Vec<u8>,
+}
+
+impl<P: Preset> StateRows<'_, P> {
+    #[must_use]
+    pub const fn state_slot(&self) -> Slot {
+        self.state_slot
+    }
+
+    pub fn next(&mut self) -> Result<Option<StateRow<'_, P>>> {
+        let Some(block_root) = self.next_block_root.take() else {
+            return Ok(None);
+        };
+
+        let Some(key) = self.storage.state_key_by_block_root(block_root)? else {
+            return Ok(None);
+        };
+
+        ensure!(
+            self.visited.insert(block_root),
+            "unable to read state rows: delta chain revisits block root {block_root:?}",
+        );
+
+        if let Some(state) = self.storage.forward_spine.get_by_block_root(block_root) {
+            return Ok(Some(StateRow::State(state)));
+        }
+
+        let layer = key.parents.len();
+
+        if layer < self.storage.hierarchy.depth()
+            && let Some(state) = self.storage.frame_cache.get(layer, &block_root)?
+        {
+            return Ok(Some(StateRow::State(state)));
+        }
+
+        let is_frame = match key.encoding {
+            StateEncoding::Frame => true,
+            StateEncoding::Delta => false,
+            StateEncoding::LegacySnappy => return Ok(None),
+        };
+
+        let Some(row) = self.storage.database.get_raw(key.to_string())? else {
+            return Ok(None);
+        };
+
+        self.row = row;
+        self.next_block_root = key.parents.first().copied();
+
+        if is_frame {
+            return Ok(Some(StateRow::Frame(BeaconStateFrameCursor::new(
+                &self.storage.config,
+                &self.row,
+            )?)));
+        }
+
+        Ok(Some(StateRow::Delta(BeaconStatePatchCursor::new(
+            &self.row,
+        )?)))
     }
 }
 
@@ -2920,6 +3016,8 @@ mod tests {
         },
         preset::Mainnet,
     };
+
+    use crate::state_field::{FinalityCheckpoints, StateField as _};
 
     use super::*;
 
@@ -4195,6 +4293,93 @@ mod tests {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    fn state_with_finalized_epoch(slot: Slot, epoch: Epoch) -> Arc<BeaconState<Mainnet>> {
+        let mut state = state_with_validators(slot, 6, 0);
+
+        state.make_mut().finalized_checkpoint_mut().epoch = epoch;
+
+        state
+    }
+
+    #[test]
+    fn finality_checkpoints_are_read_through_a_delta_chain() -> Result<()> {
+        let storage = storage_for_chain_reads();
+
+        let validator_source = state_with_validators(0, 6, 0);
+        let finalized_validators = validator_source.validators();
+
+        let anchor_root = H256::repeat_byte(1);
+        let parent_root = H256::repeat_byte(2);
+        let child_root = H256::repeat_byte(3);
+
+        storage.database.put_batch_raw(
+            [(0, anchor_root), (512, parent_root), (544, child_root)]
+                .into_iter()
+                .map(|(slot, root)| {
+                    serialize(BlockRootBySlot(slot), BlockRootBySlotValue::Block(root))
+                })
+                .collect::<Result<_>>()?,
+        )?;
+
+        let justified = |mut state: Arc<BeaconState<Mainnet>>| {
+            state.make_mut().previous_justified_checkpoint_mut().epoch = 14;
+            state.make_mut().current_justified_checkpoint_mut().epoch = 15;
+            state
+        };
+
+        let anchor_state = justified(state_with_finalized_epoch(0, 0));
+        let parent_state = justified(state_with_finalized_epoch(512, 15));
+        let child_state = justified(state_with_finalized_epoch(544, 16));
+
+        storage.append_finalized_states(
+            [
+                (0, Some(anchor_root), anchor_state.clone_arc()),
+                (512, Some(parent_root), parent_state.clone_arc()),
+                (544, Some(child_root), child_state.clone_arc()),
+            ],
+            0,
+            finalized_validators,
+        )?;
+
+        let read = |slot| -> Result<Option<FinalityCheckpoints>> {
+            let Some(rows) = storage.state_rows_before_or_at(slot)? else {
+                return Ok(None);
+            };
+
+            FinalityCheckpoints::reconstruct(slot, rows)
+        };
+
+        for clear_caches in [false, true] {
+            if clear_caches {
+                storage.clear_caches();
+            }
+
+            assert_eq!(
+                read(547)?,
+                Some(FinalityCheckpoints::from_state(&child_state)),
+            );
+            assert_eq!(
+                read(543)?,
+                Some(FinalityCheckpoints::from_state(&parent_state)),
+            );
+            assert_eq!(
+                read(31)?,
+                Some(FinalityCheckpoints::from_state(&anchor_state)),
+            );
+            assert_eq!(read(576)?, None);
+        }
+
+        save(&storage.database, PrunedUpToKey, 520_u64)?;
+
+        assert_eq!(read(543)?, None);
+        assert_eq!(
+            read(547)?,
+            Some(FinalityCheckpoints::from_state(&child_state)),
+        );
 
         Ok(())
     }

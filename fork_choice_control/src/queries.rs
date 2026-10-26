@@ -46,6 +46,7 @@ use crate::{
     controller::Controller,
     messages::AttestationVerifierMessage,
     misc::{VerifyAggregateAndProofResult, VerifyAttestationResult},
+    state_field::StateField,
     storage::{Storage, StoredBlock, StoredEnvelope},
     unbounded_sink::UnboundedSink,
     wait::Wait,
@@ -185,6 +186,54 @@ where
             .storage()
             .block_root_before_or_at_slot(slot)?
             .map(|_| WithStatus::valid_and_finalized(())))
+    }
+
+    pub fn field_at_slot_checked_blocking<F: StateField<P>>(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<WithStatus<F>>> {
+        self.ensure_slot_reachable(slot)?;
+
+        let store = self.store_snapshot();
+        let state_cache = self.state_cache();
+
+        let chain_link = store.chain_link_before_or_at(slot);
+
+        if let Some(chain_link) = chain_link
+            && let Some(state) = state_cache
+                .before_or_at_slot_in_cache_only(chain_link.block_root, slot)
+                .or_else(|| chain_link.state.clone())
+        {
+            let state = state_cache.process_slots(
+                self.pubkey_cache(),
+                &store,
+                state,
+                chain_link.block_root,
+                slot,
+            )?;
+
+            return Ok(Some(WithStatus {
+                value: F::from_state(&state),
+                status: chain_link.payload_status,
+                finalized: store.is_slot_finalized(slot),
+            }));
+        }
+
+        if store.is_slot_finalized(slot)
+            && let Some(rows) = self.storage().state_rows_before_or_at(slot)?
+            && let Some(field) = F::reconstruct(slot, rows)?
+        {
+            return Ok(Some(WithStatus {
+                value: field,
+                status: chain_link
+                    .map_or(PayloadStatus::Valid, |chain_link| chain_link.payload_status),
+                finalized: true,
+            }));
+        }
+
+        Ok(self
+            .state_at_slot_blocking(slot)?
+            .map(|state| state.map(|state| F::from_state(&state))))
     }
 
     pub fn slot_by_state_root(&self, state_root: H256) -> Result<Option<WithStatus<Slot>>> {
@@ -1987,7 +2036,7 @@ pub enum BlockError {
 mod tests {
     use types::{config::Config, preset::Minimal};
 
-    use crate::specialized::TestController;
+    use crate::{specialized::TestController, state_field::FinalityCheckpoints};
 
     use super::*;
 
@@ -2061,6 +2110,35 @@ mod tests {
 
         assert!(controller.status_at_slot(15)?.is_some());
         assert!(controller.status_at_slot(16).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn field_at_slot_reads_the_store_and_rejects_unreachable_slots() -> Result<()> {
+        let config = Arc::new(Config::minimal());
+        let genesis_state = factory::min_genesis_state::<Minimal>(&config, &PubkeyCache::default())
+            .expect("should build beacon state")
+            .0;
+        let genesis_block = Arc::new(genesis::beacon_block(&genesis_state));
+        let genesis_checkpoints = FinalityCheckpoints::from_state(&genesis_state);
+        let (controller, _mutator_handle) =
+            TestController::quiet(config, genesis_block, genesis_state);
+
+        controller.on_slot(6);
+        controller.wait_for_tasks();
+
+        assert_eq!(
+            controller
+                .field_at_slot_checked_blocking::<FinalityCheckpoints>(15)?
+                .map(|with_status| with_status.value),
+            Some(genesis_checkpoints),
+        );
+        assert!(
+            controller
+                .field_at_slot_checked_blocking::<FinalityCheckpoints>(16)
+                .is_err()
+        );
 
         Ok(())
     }

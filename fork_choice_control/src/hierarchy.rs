@@ -117,6 +117,18 @@ impl Hierarchy {
         self.contains_relative(relative_slot)
     }
 
+    #[inline]
+    pub fn node_before_or_at<P: Preset>(
+        &self,
+        config: &Config,
+        checkpoint: Slot,
+        slot: Slot,
+    ) -> Slot {
+        let (relative_slot, _) = Self::relative_slot::<P>(config, checkpoint, slot);
+
+        slot.saturating_sub(relative_slot & self.deepest_interval().saturating_sub(1))
+    }
+
     /// Get the parent, that this state depends on.
     #[inline]
     pub fn parent_of<P: Preset>(
@@ -356,6 +368,31 @@ mod tests {
 
         for slot in [1, 31, 33, 500] {
             assert!(!hierarchy.contains::<Mainnet>(&config, 0, slot));
+        }
+    }
+
+    #[test]
+    fn node_before_or_at_is_the_nearest_slot_the_hierarchy_contains() {
+        let config = Config::mainnet();
+        let hierarchy = hierarchy([9, 5]);
+        let checkpoint = 100;
+
+        for (slot, node) in [
+            (0, 0),
+            (31, 0),
+            (32, 32),
+            (99, 96),
+            (100, 100),
+            (131, 100),
+            (132, 132),
+            (150, 132),
+        ] {
+            assert_eq!(
+                hierarchy.node_before_or_at::<Mainnet>(&config, checkpoint, slot),
+                node,
+            );
+
+            assert!(hierarchy.contains::<Mainnet>(&config, checkpoint, node));
         }
     }
 

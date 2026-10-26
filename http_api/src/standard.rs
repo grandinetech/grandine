@@ -36,7 +36,7 @@ use enum_iterator::Sequence as _;
 use eth1_api::{ApiController, ClientVersionV1, Eth1Api};
 use eth2_libp2p::{GossipId, PeerId};
 use fork_choice_control::{
-    Event, EventChannels, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
+    Event, EventChannels, FinalityCheckpoints, ForkChoiceContext, ForkTip, StoredBlock, Topic, Wait,
 };
 use fork_choice_store::{
     AttestationItem, AttestationOrigin, PayloadAttestationItem, PayloadAttestationOrigin,
@@ -710,15 +710,16 @@ pub async fn state_finality_checkpoints<P: Preset, W: Wait>(
     EthPath(state_id): EthPath<StateId>,
 ) -> Result<EthResponse<StateFinalityCheckpointsResponse>, Error> {
     let WithStatus {
-        value: state,
+        value: checkpoints,
         status,
         finalized,
-    } = state_id::state(&state_id, &controller, &anchor_checkpoint_provider)?;
+    }: WithStatus<FinalityCheckpoints> =
+        state_id::field(&state_id, &controller, &anchor_checkpoint_provider)?;
 
     let response = StateFinalityCheckpointsResponse {
-        previous_justified: state.previous_justified_checkpoint(),
-        current_justified: state.current_justified_checkpoint(),
-        finalized: state.finalized_checkpoint(),
+        previous_justified: checkpoints.previous_justified,
+        current_justified: checkpoints.current_justified,
+        finalized: checkpoints.finalized,
     };
 
     Ok(EthResponse::json(response)

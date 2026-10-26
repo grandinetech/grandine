@@ -14,6 +14,13 @@ use crate::{
 )]
 pub struct ReplacePatch<T>(Option<T>);
 
+impl<T> ReplacePatch<T> {
+    #[must_use]
+    pub fn into_changed(self) -> Option<T> {
+        self.0
+    }
+}
+
 impl<T: Clone + PartialEq> Patch<T> for ReplacePatch<T> {
     fn diff(_config: PatchConfig, base: &T, changed: &T) -> Result<Self, Error> {
         Ok(Self((base != changed).then(|| changed.clone())))

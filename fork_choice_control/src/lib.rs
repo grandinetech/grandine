@@ -26,6 +26,7 @@ pub use crate::{
     },
     queries::{BlockError, BlockWithRoot, ForkChoiceContext, ForkTip, Snapshot},
     specialized::{AdHocBenchController, BenchController},
+    state_field::{FinalityCheckpoints, StateField},
     state_storage_config::StateStorageConfig,
     storage::{
         BlobSidecarByBlobId, BlockCheckpoint, BlockRootBySlot, DEFAULT_ZSTD_COMPRESSION_LEVEL,
@@ -53,6 +54,7 @@ mod mutator;
 mod queries;
 mod specialized;
 mod spine;
+mod state_field;
 mod state_storage_config;
 mod storage;
 mod storage_back_sync;
