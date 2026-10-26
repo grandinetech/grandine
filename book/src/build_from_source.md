@@ -67,7 +67,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ```bash
 cargo build --profile compact --bin grandine --features default-networks --features tracing \
-  --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
+  --workspace --exclude c_grandine --exclude csharp_grandine
 ```
 
 Use `make release` rather than typing this command. If you do run `cargo` yourself, keep the
@@ -104,7 +104,7 @@ features, so run the command that `make release` runs, with the feature added:
 
 ```bash
 cargo build --profile compact --bin grandine --features default-networks,arkworks \
-  --workspace --exclude zkvm_host --exclude zkvm_guest_risc0 --exclude c_grandine --exclude csharp_grandine
+  --workspace --exclude c_grandine --exclude csharp_grandine
 ```
 
 This keeps the default `blst` backend and adds `arkworks`. CI builds the workspace the same way with

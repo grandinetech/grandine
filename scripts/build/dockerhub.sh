@@ -6,9 +6,7 @@ cross build \
     --features default-networks \
     --features tracing          \
     --profile compact           \
-    --workspace                 \
-    --exclude zkvm_host         \
-    --exclude zkvm_guest_risc0
+    --workspace
 
 docker buildx build \
     --file Dockerfile.cross \
@@ -23,9 +21,7 @@ cross build \
     --features default-networks \
     --features tracing          \
     --profile compact           \
-    --workspace                 \
-    --exclude zkvm_host         \
-    --exclude zkvm_guest_risc0
+    --workspace
 
 docker buildx build \
     --file Dockerfile.cross \

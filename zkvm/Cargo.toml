@@ -1,0 +1,49 @@
+[workspace]
+members = [
+    'guest/risc0',
+    'host',
+]
+
+resolver = '3'
+
+[workspace.package]
+edition = '2024'
+
+[workspace.dependencies]
+anyhow = { version = '1', features = ['backtrace'] }
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }
+boundless-market = '1.4'
+bytemuck = '1.25'
+clap = { version = '4', features = ['derive'] }
+enum-iterator = '2'
+reqwest = { version = '0.13', features = ['json', 'native-tls-vendored'] }
+risc0-build = { version = '3.0.5', features = ['unstable'] }
+risc0-zkvm = { version = '3.0.5', features = ['unstable', 'heap-embedded-alloc'] }
+serde_json = { version = '1', features = ['preserve_order'] }
+snap = '1'
+sp1-helper = '6.1.0'
+sp1-sdk = '6.1.0'
+tempfile = '3'
+tokio = { version = '1', features = ['fs', 'macros', 'rt-multi-thread', 'signal', 'sync', 'time'] }
+tracing-subscriber = { version = '0.3', features = ['env-filter', 'fmt', 'registry', 'chrono'] }
+xz2 = { version = '0.1' }
+zkm-build = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
+zkm-sdk = { git = 'https://github.com/ProjectZKM/Ziren.git', tag = 'v1.2.5' }
+
+bls = { path = '../bls' }
+database = { path = '../database' }
+pubkey_cache = { path = '../pubkey_cache' }
+ssz = { path = '../ssz' }
+transition_functions = { path = '../transition_functions' }
+types = { path = '../types' }
+zkvm_guest_risc0 = { path = 'guest/risc0' }
+
+[profile.release]
+debug = 'full'
+overflow-checks = true
+
+[patch.crates-io]
+sha2 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'sha2-v0.10.9-up.2' }
+
+[patch.'https://github.com/zkcrypto/bls12_381.git']
+bls12_381 = { git = 'https://github.com/grandinetech/universal-precompiles.git', tag = 'bls12_381-6bb9695-up.2' }

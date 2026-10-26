@@ -1,5 +1,7 @@
 # zkvm STF
 
+The zkvm crates are a separate Cargo workspace, so run the commands below from the `zkvm` directory.
+
 ## risc0 implementation
 
 1. **Execute without proving:**
@@ -75,9 +77,9 @@
 
 1. **Load ZKM env vars to current shell and build the guest program**
     ```sh
-    cd zkvm/guest/ziren && source ~/.zkm-toolchain/env && $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
+    cd guest/ziren && source ~/.zkm-toolchain/env && $HOME/.cargo/bin/cargo +nightly-2025-06-30 build --release --target mipsel-zkm-zkvm-elf
     ```
-    Return back to the root directory after successful build
+    Return back to the `zkvm` directory after successful build
 
 2. **Execute without proving:**
 
@@ -122,8 +124,8 @@
 
 To add new zkvm, you need to:
 
-* Update `zkvm/host/Cargo.toml` and add new feature flag with new zkvm name, just like `risc0` or `sp1`.
-* Implement needed structs & traits for new zkvm host code in `zkvm/host/src/backend.rs`.
-* Create zkvm guest crate in `zkvm/guest/<zkvm_name>` folder. Don't forget to add new crate to workspace `Cargo.toml` if possible.
-* Add necessary patches/precompiles. Currently root `Cargo.toml` file contains patches for `sha2` and `bls12_381` crates, so don't forget to comment out these. They're defined in three places: in `[workspace.dependencies]` section, `[patch.crates-io]` and `[patch.'https://github.com/zkcrypto/bls12_381.git']`.
+* Update `host/Cargo.toml` and add new feature flag with new zkvm name, just like `risc0` or `sp1`.
+* Implement needed structs & traits for new zkvm host code in `host/src/backend.rs`.
+* Create zkvm guest crate in `guest/<zkvm_name>` folder. Don't forget to add new crate to `zkvm/Cargo.toml` workspace if possible.
+* Add necessary patches/precompiles. Currently `zkvm/Cargo.toml` file contains patches for `sha2` and `bls12_381` crates, so don't forget to comment out these. They're defined in three places: in `[workspace.dependencies]` section, `[patch.crates-io]` and `[patch.'https://github.com/zkcrypto/bls12_381.git']`.
 * Update Github workflow `.github/workflows/ci.yaml` to add your zkvm build and test inside.
