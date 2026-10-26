@@ -11,8 +11,9 @@ MEV-Boost and key management together, and keeps them updated with one command. 
 only when you need a setup that Eth Docker does not cover.
 
 > **Note:** Support for the separate `grandine vc` (`grandine.yml`, `grandine-vc-only.yml`,
-> `grandine-plugin-cl-only.yml`, and the separate validator client in `grandine-plugin.yml`) comes
-> from [eth-docker#2832](https://github.com/ethstaker/eth-docker/pull/2832), which is not merged yet.
+> `grandine-plugin-cl-only.yml`, the separate validator client in `grandine-plugin.yml`, and every
+> combination that includes `grandine-vc-only.yml` or `grandine-plugin-cl-only.yml`) comes from
+> [eth-docker#2832](https://github.com/ethstaker/eth-docker/pull/2832), which is not merged yet.
 > Released Eth Docker versions offer `grandine-allin1.yml`, `grandine-cl-only.yml`,
 > `grandine-plugin-allin1.yml`, and `grandine-plugin.yml` as a beacon node without a validator client.
 
@@ -20,23 +21,32 @@ only when you need a setup that Eth Docker does not cover.
 
 ## Choose a mode
 
-Eth Docker picks the clients from the Compose files listed in `COMPOSE_FILE` in its `.env` file. Each
-Grandine mode has its own file. In the table, EL is the execution client, BN the beacon node and VC
-the validator client:
+Eth Docker picks the clients from the Compose files listed in `COMPOSE_FILE` in its `.env` file,
+separated by `:`. Each Grandine mode has its own file, and you combine it with the files of the other
+clients. In the table, `<el>.yml` stands for the Compose file of any execution client, for example
+`nethermind.yml`, `geth.yml` or `reth.yml`, and `<cl>-cl-only.yml` and `<vc>-vc-only.yml` for the
+files of another consensus or validator client, for example `lighthouse-cl-only.yml` or
+`teku-vc-only.yml`:
 
-| Compose file | Beacon node | Validator client | Processes |
-| --- | --- | --- | --- |
-| `grandine-allin1.yml` | Standalone | Integrated | Two: the EL, and `grandine` with the BN and VC |
-| `grandine.yml` | Standalone | Separate | Three: the EL, `grandine bn` and `grandine vc` |
-| `grandine-cl-only.yml` | Standalone | None | Two: the EL and `grandine bn` |
-| `grandine-vc-only.yml` | None, uses a remote beacon node | Separate | One: `grandine vc`. The BN and EL run elsewhere |
-| `grandine-plugin-allin1.yml` | Embedded in Nethermind | Integrated | One: Nethermind with the EL, BN and VC all in one process |
-| `grandine-plugin.yml` | Embedded in Nethermind | Separate | Two: Nethermind with the EL and BN, and `grandine vc` |
-| `grandine-plugin-cl-only.yml` | Embedded in Nethermind | None | One: Nethermind with the EL and BN |
+| `COMPOSE_FILE` | Setup |
+| --- | --- |
+| `nethermind.yml:grandine-plugin-allin1.yml` | Grandine beacon node and validator client integrated in Nethermind. One process runs the execution client, the beacon node and the validator client, which gives the best performance and the fewest moving parts. The validator keys live in the same process as the node. |
+| `nethermind.yml:grandine-plugin.yml` (the same as `nethermind.yml:grandine-plugin-cl-only.yml:grandine-vc-only.yml`) | Grandine beacon node integrated in Nethermind for the best performance, and a separate `grandine vc` process for stronger protection of the keys. Two processes. |
+| `nethermind.yml:grandine-plugin-cl-only.yml` | Grandine beacon node integrated in Nethermind, without validators. For a node that serves your own applications, or validator clients on other machines. One process. |
+| `nethermind.yml:grandine-plugin-cl-only.yml:<vc>-vc-only.yml` | Grandine beacon node integrated in Nethermind, with another client's validator client. |
+| `<el>.yml:grandine-allin1.yml` | Standalone Grandine with the integrated validator client, with any execution client. The simplest setup with a free choice of the execution client. Two processes: the execution client, and `grandine` with the beacon node and validator client. |
+| `<el>.yml:grandine.yml` (the same as `<el>.yml:grandine-cl-only.yml:grandine-vc-only.yml`) | Standalone Grandine beacon node and a separate `grandine vc`, with any execution client. The keys are kept apart from the node. Three processes: the execution client, `grandine bn` and `grandine vc`. |
+| `<el>.yml:grandine-cl-only.yml` | Standalone Grandine beacon node without validators, with any execution client. For a node that serves your own applications, or validator clients on other machines. Two processes: the execution client and `grandine bn`. |
+| `<el>.yml:grandine-cl-only.yml:<vc>-vc-only.yml` | Standalone Grandine beacon node with another client's validator client. |
+| `<el>.yml:<cl>-cl-only.yml:grandine-vc-only.yml` | `grandine vc` with another client's beacon node. |
+| `grandine-vc-only.yml` | `grandine vc` alone, against beacon nodes on other machines given in `CL_NODE`. Keeps the keys on a machine that runs no node, or uses several beacon nodes for [redundancy](./redundancy.md). One process. |
 
-The standalone files go together with the Compose file of any execution client, for example
-`nethermind.yml` or `geth.yml`. The plugin files run Grandine inside Nethermind, so they go only with
-`nethermind.yml`, and there is no separate consensus container. See
+`grandine-plugin*.yml` files run Grandine inside Nethermind, so they go only with `nethermind.yml`,
+and there is no separate consensus container. With them, a separate validator client finds the Beacon
+Node API in the Nethermind container: set `CL_NODE=http://execution:5052`.
+
+Add other Eth Docker files as usual, for example `mev-boost.yml` for MEV-Boost or `web3signer.yml`
+for [Web3Signer](./web3signer.md). See
 [How Grandine works](./architecture.md#integrated-or-separate-validator-client) for the differences
 between the integrated and the separate validator client, and
 [Grandine embedded in Nethermind](./nethermind_integration.md) for the embedded setup.
@@ -61,9 +71,6 @@ in `.env` yourself, for example:
 ```bash
 COMPOSE_FILE=nethermind.yml:grandine-plugin.yml
 ```
-
-With `grandine-plugin.yml`, Grandine serves the Beacon Node API from the Nethermind container, so
-point the validator client at it with `CL_NODE=http://execution:5052`.
 
 Start the node and follow the logs:
 
