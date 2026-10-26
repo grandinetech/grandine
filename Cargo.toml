@@ -362,7 +362,7 @@ libp2p-identity = { version = '0.3', features = ['peerid'] }
 libp2p-mplex = { git = 'https://github.com/libp2p/rust-libp2p.git' }
 log = '0.4'
 logroller = '0.1'
-lru = '0.17'
+lru = '0.19'
 mediatype = '0.21'
 memoffset = '0.9'
 mime = '0.3'
@@ -463,7 +463,7 @@ web3 = { git = 'https://github.com/grandinetech/rust-web3.git', default-features
 wincode = { version = '0', features = ['derive'] }
 winsafe = { version = '0', features = ['kernel', 'psapi'] }
 zeroize = { version = '1', features = ['derive', 'serde'] }
-zstd = '0.13'
+zstd = '0.14.3'
 
 allocator = { path = 'allocator' }
 arithmetic = { path = 'arithmetic' }
