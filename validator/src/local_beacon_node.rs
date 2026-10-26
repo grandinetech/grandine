@@ -987,25 +987,30 @@ pub fn ptc_duties_at_epoch<P: Preset>(
 ) -> Result<Vec<ValidatorPTCDutyResponse>> {
     // The state carries the committees an epoch ahead through the seed lookahead.
     misc::slots_in_epoch::<P>(epoch)?
-        .map(|slot| {
-            accessors::get_ptc(config, state, slot)?
-                .into_iter()
-                .filter(|validator_index| indices.contains(validator_index))
-                // A validator drawn into several positions has a single duty.
-                .unique()
-                .map(|validator_index| {
-                    let pubkey = *accessors::public_key(state, validator_index)?;
-
-                    Ok(ValidatorPTCDutyResponse {
-                        pubkey,
-                        validator_index,
-                        slot,
-                    })
-                })
-                .collect::<Result<Vec<_>>>()
-        })
+        .map(|slot| ptc_duties_at_slot(config, state, slot, indices))
         .flatten_ok()
         .try_collect()
+}
+
+pub fn ptc_duties_at_slot<P: Preset>(
+    config: &Config,
+    state: &BeaconState<P>,
+    slot: Slot,
+    indices: &HashSet<ValidatorIndex>,
+) -> Result<Vec<ValidatorPTCDutyResponse>> {
+    accessors::get_ptc(config, state, slot)?
+        .into_iter()
+        .filter(|validator_index| indices.contains(validator_index))
+        // A validator drawn into several positions has a single duty.
+        .unique()
+        .map(|validator_index| {
+            Ok(ValidatorPTCDutyResponse {
+                pubkey: *accessors::public_key(state, validator_index)?,
+                validator_index,
+                slot,
+            })
+        })
+        .collect()
 }
 
 /// The Fulu lookahead fixes proposers an epoch earlier, but it is first filled as the fork epoch

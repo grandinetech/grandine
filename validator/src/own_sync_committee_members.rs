@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use fork_choice_control::Wait;
 use helper_functions::misc;
+use http_api_utils::ValidatorSyncDutyResponse;
 use itertools::Itertools as _;
 use p2p::SyncCommitteeSubscription;
 use scc::HashMap as SccHashMap;
@@ -100,6 +101,21 @@ impl OwnSyncCommitteeMembers {
         let duties = beacon_nodes
             .sync_committee_duties(epoch, validator_indices)
             .await?;
+
+        self.record::<P>(period, validator_indices, duties).await
+    }
+
+    async fn record<P: Preset>(
+        &self,
+        period: u64,
+        validator_indices: &[ValidatorIndex],
+        duties: Vec<ValidatorSyncDutyResponse>,
+    ) -> Result<()> {
+        // A validator has one duty per period, so a repeated one would be signed twice.
+        let duties = duties
+            .into_iter()
+            .unique_by(|duty| duty.validator_index)
+            .collect_vec();
 
         let period_start = misc::start_of_sync_committee_period::<P>(period)?;
         let until_epoch = misc::start_of_sync_committee_period::<P>(period.saturating_add(1))?;
@@ -233,6 +249,7 @@ fn period_at_slot<P: Preset>(slot: Slot) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use bls::PublicKeyBytes;
     use types::preset::Minimal;
 
     use super::*;
@@ -327,5 +344,30 @@ mod tests {
 
         assert_eq!(indices(5).await, [0]);
         assert_eq!(indices(6).await, [0, 1]);
+    }
+
+    // A node repeating a duty must not get it signed twice.
+    #[tokio::test]
+    async fn a_repeated_duty_is_kept_once() -> Result<()> {
+        let members = OwnSyncCommitteeMembers::new();
+
+        let duty = ValidatorSyncDutyResponse {
+            pubkey: PublicKeyBytes::default(),
+            validator_index: 41,
+            validator_sync_committee_indices: vec![0],
+        };
+
+        members
+            .record::<Minimal>(0, &[41], vec![duty.clone(), duty])
+            .await?;
+
+        let members_at_slot_0 = members
+            .get_at_slot::<Minimal>(0)
+            .await
+            .expect("the duty should be kept");
+
+        assert_eq!(members_at_slot_0.len(), 1);
+
+        Ok(())
     }
 }

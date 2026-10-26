@@ -91,7 +91,9 @@ use types::{
             ProposerSlashing, SignedAggregateAndProof as Phase0SignedAggregateAndProof,
             SignedVoluntaryExit,
         },
-        primitives::{Epoch, ExecutionBlockHash, H256, Slot, Uint256, ValidatorIndex},
+        primitives::{
+            Epoch, ExecutionAddress, ExecutionBlockHash, H256, Slot, Uint256, ValidatorIndex,
+        },
     },
     preset::Preset,
     traits::{BeaconBlock as _, BeaconState as _},
@@ -1629,23 +1631,21 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         if let Some(proposer) = self
             .own_duties
             .proposer_duties
-            .get_at_slot(dependent_root, slot)
+            .get_at_slot::<P>(dependent_root, slot)
             .await
         {
             return Ok(Some(proposer));
         }
 
-        // A no-op once the epoch is fetched under this root; a reorg at the slot boundary is not.
-        self.own_duties
+        // Fetches unless held under this root, as after a reorg or from a node reporting another.
+        let mut fetched = self
+            .own_duties
             .proposer_duties
             .init_at_epoch(beacon_nodes, epoch, dependent_root, &validator_indices)
             .await?;
 
-        Ok(self
-            .own_duties
-            .proposer_duties
-            .get_at_slot(dependent_root, slot)
-            .await)
+        // Duties a node reports under another root still serve this slot while the nodes disagree.
+        Ok(fetched.remove(&slot))
     }
 
     async fn sign_execution_payload_envelope(
@@ -2330,16 +2330,16 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             return Ok(None);
         }
 
-        self.own_duties
+        let mut fetched = self
+            .own_duties
             .ptc_members
-            .init_at_epoch(
-                &self.chain_source.chain_config,
-                beacon_nodes,
-                epoch,
-                dependent_root,
-                &validator_indices,
-            )
+            .init_at_epoch(beacon_nodes, epoch, dependent_root, &validator_indices)
             .await?;
+
+        // A node may report another root for the same shuffling, as some do for the fork epoch.
+        if let Some(members) = fetched.remove(&slot) {
+            return Ok(Some(members));
+        }
 
         Ok(self
             .own_duties
@@ -3267,6 +3267,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             _ => None,
         };
         let proposer_configs = self.proposer_configs.clone_arc();
+        let integrated = self.chain_source.remote_beacon_nodes().is_none();
         let signer = self.signer.clone_arc();
         let prepared_proposer_indices = match self.chain_source.block_producer() {
             Some(block_producer) => block_producer.get_prepared_proposer_indices().await,
@@ -3304,9 +3305,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             let registrations = pubkeys
                 .into_iter()
                 .filter_map(|pubkey| {
-                    // A remote node pays its own recipient for a local payload, so one made up
-                    // here would only ever be paid by a builder.
-                    let Some(fee_recipient) = proposer_configs.configured_fee_recipient(pubkey)
+                    let Some(fee_recipient) =
+                        reported_fee_recipient(&proposer_configs, pubkey, integrated)
                     else {
                         debug_with_peers!(
                             "validator {pubkey:?} has no fee recipient configured; \
@@ -3617,6 +3617,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         }
 
         let chain_config = self.chain_source.chain_config.clone_arc();
+        let integrated = self.chain_source.remote_beacon_nodes().is_none();
 
         let slot_head = beacon_nodes.head();
 
@@ -3635,7 +3636,8 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
             .filter_map(|(dependent_root, proposal_slot, validator_index, pubkey)| {
                 let proposal_epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
 
-                let Some(fee_recipient) = self.proposer_configs.configured_fee_recipient(pubkey)
+                let Some(fee_recipient) =
+                    reported_fee_recipient(&self.proposer_configs, pubkey, integrated)
                 else {
                     debug_with_peers!(
                         "validator {validator_index} has no fee recipient configured; \
@@ -3734,43 +3736,20 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
         });
     }
 
-    // Own proposals ahead, each with the dependent root its duty was looked up under.
+    // Own proposals ahead, each with the dependent root of the shuffling that assigned it.
     async fn upcoming_proposals(
         &self,
         beacon_nodes: &BeaconNodes<P, W>,
     ) -> Vec<(H256, Slot, ValidatorIndex, PublicKeyBytes)> {
-        let chain_config = &self.chain_source.chain_config;
         let slot_head = beacon_nodes.head();
 
         match beacon_nodes.state() {
             Some(beacon_state) => self.upcoming_proposals_from_state(slot_head, beacon_state),
             None => {
-                let upcoming = self
-                    .own_duties
+                self.own_duties
                     .proposer_duties
                     .upcoming(slot_head.slot())
-                    .await;
-
-                let mut proposals = Vec::with_capacity(upcoming.len());
-
-                // Only the root the duties are now fetched under is worth signing for; another
-                // one is left from before a reorg, and the nodes would not take it.
-                for (dependent_root, proposal_slot, validator_index, pubkey) in upcoming {
-                    let epoch = misc::compute_epoch_at_slot::<P>(proposal_slot);
-                    let dependent_epoch = proposer_dependent_epoch(chain_config, epoch);
-
-                    let current = self
-                        .own_duties
-                        .beacon_committee_members
-                        .cached_dependent_root(dependent_epoch)
-                        .await;
-
-                    if current == Some(dependent_root) {
-                        proposals.push((dependent_root, proposal_slot, validator_index, pubkey));
-                    }
-                }
-
-                proposals
+                    .await
             }
         }
     }
@@ -3850,7 +3829,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 module_path!(),
                 &type_name,
                 "own_beacon_committee_members",
-                self.own_duties.beacon_committee_members.len(),
+                self.own_duties.beacon_committee_members.len().await,
             );
 
             metrics.set_collection_length(
@@ -3867,7 +3846,7 @@ impl<P: Preset, W: Wait + Sync> Validator<P, W> {
                 module_path!(),
                 &type_name,
                 "own_proposer_duties",
-                self.own_duties.proposer_duties.len(),
+                self.own_duties.proposer_duties.len().await,
             );
 
             metrics.set_collection_length(
@@ -4080,6 +4059,21 @@ fn duty_uses_full_node<P: Preset, W: Wait>(
             HeadDuty::Propose => controller.snapshot().should_build_on_full(slot),
             HeadDuty::Attest => block_slot < slot && head_payload_status == PAYLOAD_STATUS_FULL,
         }
+}
+
+// The integrated client falls back to the donation address, as it does for its own blocks.
+// A remote node pays its own recipient for a local payload, so `vc` reports only a configured
+// one; a made-up one would only ever be paid by a builder.
+fn reported_fee_recipient(
+    proposer_configs: &ProposerConfigs,
+    pubkey: PublicKeyBytes,
+    integrated: bool,
+) -> Option<ExecutionAddress> {
+    if integrated {
+        Some(proposer_configs.fee_recipient(pubkey))
+    } else {
+        proposer_configs.configured_fee_recipient(pubkey)
+    }
 }
 
 fn doppelganger_protection_permits<P: Preset>(
