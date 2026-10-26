@@ -52,8 +52,10 @@ pub fn shuffle_slice<P: Preset, T: Send>(slice: &mut [T], seed: H256) -> Result<
         return Ok(());
     };
 
+    // A Rayon worker blocked in `install` runs other jobs from its own pool.
+    // Those jobs can wait on the lazy value this shuffle is computing, deadlocking the worker.
     #[cfg(not(target_os = "zkvm"))]
-    if slice.len() >= MIN_PARALLEL_LEN {
+    if slice.len() >= MIN_PARALLEL_LEN && rayon::current_thread_index().is_none() {
         POOL.install(|| shuffle_rounds::<P, T>(slice, seed, length, shuffle_threadpool_size()));
 
         return Ok(());
