@@ -7,7 +7,7 @@ use std::{borrow::Cow, collections::HashSet, sync::Arc, thread::Builder};
 
 use anyhow::{Context as _, Error as AnyhowError, Result, bail, ensure};
 use bls::SignatureBytes;
-use database::{Database, PrefixableKey, decompress};
+use database::{Database, PrefixableKey, View, decompress};
 use derive_more::Display;
 use diff::{Patch as _, PatchConfig};
 use fork_choice_store::{ChainLink, Store};
@@ -1704,10 +1704,10 @@ impl<P: Preset> Storage<P> {
 
         Ok(Some(StateRows {
             storage: self,
+            view: self.database.view()?,
             state_slot,
             next_block_root: Some(value.state_key_root()),
             visited: HashSet::new(),
-            row: vec![],
         }))
     }
 
@@ -2237,10 +2237,10 @@ pub enum StateRow<'row, P: Preset> {
 
 pub struct StateRows<'storage, P: Preset> {
     storage: &'storage Storage<P>,
+    view: View,
     state_slot: Slot,
     next_block_root: Option<H256>,
     visited: HashSet<H256>,
-    row: Vec<u8>,
 }
 
 impl<P: Preset> StateRows<'_, P> {
@@ -2254,9 +2254,17 @@ impl<P: Preset> StateRows<'_, P> {
             return Ok(None);
         };
 
-        let Some(key) = self.storage.state_key_by_block_root(block_root)? else {
+        let prefix = StateByBlockRoot::prefix(block_root);
+
+        let Some((full_key, row)) = self.view.next_raw(&prefix)? else {
             return Ok(None);
         };
+
+        if !full_key.starts_with(prefix.as_bytes()) {
+            return Ok(None);
+        }
+
+        let key = StateByBlockRoot::try_from(full_key)?;
 
         ensure!(
             self.visited.insert(block_root),
@@ -2281,23 +2289,16 @@ impl<P: Preset> StateRows<'_, P> {
             StateEncoding::LegacySnappy => return Ok(None),
         };
 
-        let Some(row) = self.storage.database.get_raw(key.to_string())? else {
-            return Ok(None);
-        };
-
-        self.row = row;
         self.next_block_root = key.parents.first().copied();
 
         if is_frame {
             return Ok(Some(StateRow::Frame(BeaconStateFrameCursor::new(
                 &self.storage.config,
-                &self.row,
+                row,
             )?)));
         }
 
-        Ok(Some(StateRow::Delta(BeaconStatePatchCursor::new(
-            &self.row,
-        )?)))
+        Ok(Some(StateRow::Delta(BeaconStatePatchCursor::new(row)?)))
     }
 }
 
