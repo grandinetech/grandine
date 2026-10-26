@@ -112,7 +112,6 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
         });
 
         let started_at = Instant::now();
-        let block_slot = block.item.message().slot();
         let block_root = block.item.message().hash_tree_root();
 
         let result = match origin {
@@ -181,8 +180,11 @@ impl<P: Preset, E: ExecutionEngine<P> + Send, W> Run for BlockTask<P, E, W> {
             started_at.elapsed().as_millis(),
         );
 
-        if block_slot == store_snapshot.slot() {
-            store_snapshot.dec_current_slot_blocks_in_processing();
+        // A block delayed until blobs stays marked.
+        // Its blobs often arrive within milliseconds, and the retry imports it.
+        // Unmarking it here lets duties in that gap skip waiting and vote for its parent.
+        if !matches!(result, Ok(BlockAction::DelayUntilBlobs(_, _))) {
+            store_snapshot.unmark_current_slot_block_in_processing(block_root);
         }
 
         MutatorMessage::Block {
